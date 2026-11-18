@@ -10,7 +10,6 @@ pub use crate::capabilities::workspace::detail::grant_job::ensure_in_background;
 pub use crate::capabilities::workspace::domain::asset::{
     FileVersion, MAX_ASSET_BYTES, VERSION_TEXT_LIMIT, media_hint,
 };
-pub use crate::capabilities::workspace::domain::base::CommitRefusal;
 pub use crate::capabilities::workspace::domain::hash::content_hash;
 pub use crate::capabilities::workspace::domain::readfact::ReadFact;
 /// 目的：`work_*` 工具的名字、取参与回执拼装——`tools` 与 `turn` 只从这里取，不碰 domain。
@@ -189,16 +188,16 @@ pub trait Workspace: Send + Sync {
         session: &str,
         req: &CommitRequest,
     ) -> Result<CommitReport, String>;
-    /// **自动提交**：工具写完之后提交，只接受快进——待提交路径的基线必须等于主线当前头。
-    /// 约束：不 pull、不合并、不降级；基线过期即 `CommitRefusal::Stale`，调用方只能上报或让模型先 pull。
-    /// `Ok(None)` = 内容与主线一致、没有可发布的改动（不算失败）。
+    /// **存档**：工具写完之后把沙箱改动记进该 agent 的存档线（`refs/agents/<agent>/saves`）。
+    /// 约束：这不是发布——共享区与 `refs/main` 一个字都不动，改动要进主线必须再 work_commit；
+    ///   存档无准入门槛（不进主线就不会覆盖别人的内容）。`Ok(None)` = 与上次存档一致（不算失败）。
     fn work_commit_auto(
         &self,
         work: &str,
         agent: &str,
         session: &str,
         req: &CommitRequest,
-    ) -> Result<Option<CommitReport>, CommitRefusal>;
+    ) -> Result<Option<CommitReport>, String>;
     /// **外部同步**：读工作区磁盘，把与 head 不同的路径采纳成一条 `author=external` 的提交。
     /// 约束：不改任何沙箱与工作区内容；同路径沙箱里有未提交改动时留给后续提交判冲突。
     fn work_sync(&self, work: &str, paths: &[String], time: i64) -> Result<SyncReport, String>;

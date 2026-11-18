@@ -236,6 +236,23 @@ impl WorkspaceService {
             ));
         }
         self.pin_head(&store)?;
+        // 沙箱跟着各自的存档线回到这条转录行之前的快照：主线树不描述沙箱草稿，不能拿它铺。
+        let prefix = format!("rewind-{}", Self::delete_prefix(target));
+        let base = match target {
+            Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
+            None => Tree::new(),
+        };
+        for (agent, line) in keep_by_agent {
+            let save = self.save_point_at(&store, agent, *line)?;
+            // 有存档快照就铺它（沙箱草稿属于各自 agent）；没有存档历史时退回主线树，保持旧观感。
+            let sandbox_tree = match save {
+                Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
+                None => base.clone(),
+            };
+            let (_, _, sandbox) = self.agent_roots(work, agent)?;
+            self.lay_down_tree(&store, &sandbox, &sandbox_tree, agent, Some(&prefix))?;
+            self.reset_agent_point(&store, agent, target, save, &base)?;
+        }
         let pending = Pending::Restore { target };
         self.store.write_pending(&store, &pending)?;
         let result = WorkspaceService::materialize(self.store.as_ref(), &shared, &store, target);
@@ -282,10 +299,12 @@ impl WorkspaceService {
                 uniq.insert(agent.clone());
             }
         }
-        // 引用先落：它记着留档前的主线；此时文件还没动，失败可以整次撤销。
+        // 引用先落：它记着留档前的主线与各 agent 的存档头；此时文件还没动，失败可以整次撤销。
         let mut heads: BTreeMap<String, Option<u64>> = BTreeMap::new();
+        let mut saves: BTreeMap<String, Option<u64>> = BTreeMap::new();
         for agent in &uniq {
             heads.insert(agent.clone(), head);
+            saves.insert(agent.clone(), self.save_head(&store, agent)?);
         }
         self.store.write_ref(
             &store,
@@ -294,6 +313,7 @@ impl WorkspaceService {
                 kind: RefKind::Archive,
                 target: head,
                 heads: heads.clone(),
+                saves: saves.clone(),
             },
         )?;
         let mut backed_up: BTreeMap<String, usize> = BTreeMap::new();
@@ -301,8 +321,20 @@ impl WorkspaceService {
             for agent in &uniq {
                 let (_, _, sandbox) = self.agent_roots(work, agent)?;
                 let prefix = format!("archive-{}", mark);
-                let n = self.lay_down_tree(&store, &sandbox, &tree, agent, Some(&prefix))?;
-                self.reset_agent_point(&store, agent, target, &tree)?;
+                let (save, sandbox_tree) = match keep_by_agent.get(agent).copied() {
+                    Some(line) => {
+                        let save = self.save_point_at(&store, agent, line)?;
+                        let sandbox_tree = match save {
+                            Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
+                            None => tree.clone(),
+                        };
+                        (save, sandbox_tree)
+                    }
+                    None => (saves.get(agent).copied().flatten(), tree.clone()),
+                };
+                let n =
+                    self.lay_down_tree(&store, &sandbox, &sandbox_tree, agent, Some(&prefix))?;
+                self.reset_agent_point(&store, agent, target, save, &tree)?;
                 backed_up.insert(agent.clone(), n);
             }
             let pending = Pending::Restore { target };
@@ -355,10 +387,26 @@ impl WorkspaceService {
                 uniq.insert(agent.clone());
             }
         }
+        // 每个 agent 的沙箱回到「它自己存档线上这条转录行之前的快照」，主线树不描述沙箱草稿。
+        let mut saves: BTreeMap<String, Option<u64>> = BTreeMap::new();
+        let mut sandbox_trees: BTreeMap<String, Tree> = BTreeMap::new();
+        for agent in &uniq {
+            let save = match keep_by_agent.get(agent).copied() {
+                Some(line) => self.save_point_at(&store, agent, line)?,
+                None => self.save_head(&store, agent)?,
+            };
+            let sandbox_tree = match save {
+                Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
+                None => tree.clone(),
+            };
+            saves.insert(agent.clone(), save);
+            sandbox_trees.insert(agent.clone(), sandbox_tree);
+        }
         // 先落恢复日志：中途崩了，下一次操作会按同一份名单把沙箱与主副本一起补完。
         let pending = Pending::Discard {
             keep: target,
             agents: uniq.iter().cloned().collect(),
+            saves: saves.clone(),
         };
         self.store.write_pending(&store, &pending)?;
         let mut backed_up: BTreeMap<String, usize> = BTreeMap::new();
@@ -366,12 +414,15 @@ impl WorkspaceService {
             let prefix = Self::delete_prefix(target);
             for agent in &uniq {
                 let (_, _, sandbox) = self.agent_roots(work, agent)?;
-                let n = self.lay_down_tree(&store, &sandbox, &tree, agent, Some(&prefix))?;
-                self.reset_agent_point(&store, agent, target, &tree)?;
+                let save = saves.get(agent).copied().flatten();
+                let sandbox_tree = sandbox_trees.get(agent).cloned().unwrap_or_default();
+                let n =
+                    self.lay_down_tree(&store, &sandbox, &sandbox_tree, agent, Some(&prefix))?;
+                self.reset_agent_point(&store, agent, target, save, &tree)?;
                 backed_up.insert(agent.clone(), n);
             }
             WorkspaceService::materialize(self.store.as_ref(), &shared, &store, target)?;
-            self.discard_commits_locked(&store, target)
+            self.discard_commits_locked(&store, target, &saves)
         })();
         self.settle(work, &shared, &store, result)?;
         // 提交已丢：不在保留转录里的留档引用一并作废（它们的标记已随转录被截掉）。
@@ -426,10 +477,6 @@ impl WorkspaceService {
         {
             return Err(format!("档案 {} 指向的提交 {} 不在了", mark, id));
         }
-        let tree = match target {
-            Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
-            None => Tree::new(),
-        };
         let conflicts = self.external_materialize_conflicts(work, &shared, &store, target)?;
         if !conflicts.is_empty() {
             return Err(format!(
@@ -439,11 +486,20 @@ impl WorkspaceService {
         }
         // 先把当前线钉住，再动文件：剪叉不靠"删提交"保证可恢复。
         self.pin_head(&store)?;
+        let base = match target {
+            Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
+            None => Tree::new(),
+        };
         for agent in reference.heads.keys() {
             let (_, _, sandbox) = self.agent_roots(work, agent)?;
             let prefix = format!("restore-{}", mark);
-            self.lay_down_tree(&store, &sandbox, &tree, agent, Some(&prefix))?;
-            self.reset_agent_point(&store, agent, target, &tree)?;
+            let save = reference.saves.get(agent).copied().flatten();
+            let sandbox_tree = match save {
+                Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
+                None => base.clone(),
+            };
+            self.lay_down_tree(&store, &sandbox, &sandbox_tree, agent, Some(&prefix))?;
+            self.reset_agent_point(&store, agent, target, save, &base)?;
         }
         let pending = Pending::Restore { target };
         self.store.write_pending(&store, &pending)?;
@@ -504,11 +560,12 @@ impl WorkspaceService {
         let pending = Pending::Discard {
             keep,
             agents: Vec::new(),
+            saves: BTreeMap::new(),
         };
         self.store.write_pending(&store, &pending)?;
         let result = (|| {
             WorkspaceService::materialize(self.store.as_ref(), &shared, &store, keep)?;
-            self.discard_commits_locked(&store, keep)
+            self.discard_commits_locked(&store, keep, &BTreeMap::new())
         })();
         self.settle(work, &shared, &store, result)
     }

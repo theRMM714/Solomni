@@ -55,7 +55,7 @@ impl Workspace for WorkspaceService {
         agent: &str,
         session: &str,
         req: &CommitRequest,
-    ) -> Result<Option<CommitReport>, CommitRefusal> {
+    ) -> Result<Option<CommitReport>, String> {
         WorkspaceService::work_commit_auto(self, work, agent, session, req)
     }
     fn work_commit_user(

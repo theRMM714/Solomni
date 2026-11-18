@@ -433,6 +433,7 @@ impl WorkStore for FsWorkStore {
                         kind: RefKind::Main,
                         target: Some(id),
                         heads: BTreeMap::new(),
+                        saves: BTreeMap::new(),
                     },
                 )?;
                 let _ = std::fs::remove_file(&legacy);
@@ -448,6 +449,7 @@ impl WorkStore for FsWorkStore {
             kind: RefKind::Main,
             target: None,
             heads: BTreeMap::new(),
+            saves: BTreeMap::new(),
         });
         r.target = Some(id);
         self.write_ref(store, "main", &r)

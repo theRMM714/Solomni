@@ -6,7 +6,7 @@
 
 ## 管什么 / 不管什么
 
-- 管：工作区与沙箱寻址（含越界判定）、建工作与上传、文件视图、根会话的外部工作区绑定投影，以及**共享区版本化工作区**（内容寻址的提交记录、各 agent 的拉取基线、文件级三方比较、三方视图与显式冲突解决、按提交点还原）。
+- 管：工作区与沙箱寻址（含越界判定）、建工作与上传、文件视图、根会话的外部工作区绑定投影，以及**共享区版本化工作区**（内容寻址的提交记录、各 agent 的两条线（存档线自动快照 + 发布线）、文件级三方比较、三方视图与显式冲突解决、按提交点还原）。
 - 管：**成员侧工作工具处理器**——`work_pull` / `work_commit` / `work_sync` / `work_status` / `work_versions` / `work_resolve` / `work_lost` 七个工具名由 `src/capabilities/workspace/service/work_tools.rs` 的 `WorkHandler` 认领，回执文本由 `src/capabilities/workspace/domain/work_tools.rs` 渲染；`work_handlers` 按角色面发放的名单现取执行者。
 - 不管：模块清单与 `module.yaml`（在 `modules`，本能力只消费它给的模块事实）、不执行工具（`tools`）、不写会话流水（`session`）、不决定谁能用哪些工具（`tools` 的角色表）。
 
@@ -17,7 +17,8 @@
   - 共享区版本化：`work_pull` / `work_commit` / `work_sync` / `work_commit_user` / `work_status` / `work_versions` / `work_resolve` / `work_lost` / `work_restore_lost` / `work_recover` / `work_gc` / `work_restore` / `work_head` / `work_archive` / `work_restore_archive` / `work_delete` / `work_archives`。
   - **提交历史视图**：`work_log(work, limit, before?)` 给当前 head、新→旧的分页提交与每条 `on_head`（是否在当前 head 祖先链）；`work_commit_view` 给提交详情与改动清单（对象大小 / 媒体提示）；`work_commit_file` 给该提交里某个文件的受限预览（路径必须真在这条提交的树里，`src/capabilities/workspace/domain/workspace.rs`）。这些是只读视图，不进动作表。
   - **提交点还原**：`work_restore(work, commit)` 只把主副本物化到目标提交并更新 head，**非破坏性**——目标之后的提交仍保留在历史里，可再次回滚。
-  - **删除是硬回退**：`work_delete(work, keep, agents, keep_marks)` 沿当前 head 的祖先链按行锚选点，把主副本、每个受影响沙箱与逐路径基线一起落到该点；沙箱里不一致的文件先进 `lost/<agent>/delete-<点>/`，未在 `keep_marks` 里的档案引用（`refs/archive/*`）一并作废并返回 `pruned`。`work_archives` 供编排层在确认前报出会作废的数量。
+  - **两条线**：写工具之后的自动提交只进 `refs/agents/<agent>/saves`（存档线，整棵沙箱快照），不碰共享区；`work_commit` 落主线提交（`refs/main`），并把该 agent 的发布线 `refs/agents/<agent>` 快进到它。所以「共享区当前内容」只由 `work_commit` 决定，自动快照只服务于回档 / 删除 / 留档 / 恢复（`src/capabilities/workspace/service/commit.rs`）。
+  - **删除是硬回退**：`work_delete(work, keep, agents, keep_marks)` 沿当前 head 的祖先链按行锚选点，把主副本落到该点的主线树、每个受影响沙箱落到它自己存档线上 `anchor.line ≤ 点` 的最后一个快照（该 agent 没有存档则清空到主线树）；发布线与存档线各自截断；沙箱里不一致的文件先进 `lost/<agent>/delete-<点>/`，未在 `keep_marks` 里的档案引用（`refs/archive/*`）一并作废并返回 `pruned`。`work_archives` 供编排层在确认前报出会作废的数量。
   - **三方视图与冲突解决**：`work_versions` 只看（文本预览有上限；图片 / 视频 / 二进制只给指纹、大小与类型提示；带主副本提交 id），`work_resolve` 显式选边——`take=upstream` 用主副本覆盖沙箱，`take=local` 保留本地并把基线推进到主副本；不做自动合并。
   - **冲突解决的安全边界**：
     - `take=local` 必须带 `expect_head`（调用方看到的主副本提交 id，`src/capabilities/workspace/api.rs`）；与当前 head 不符就整次拒绝，不把旧合并结果登记到新版本。
@@ -37,7 +38,7 @@
   - **拉取进度**：`work_pull` 逐条写入沙箱与内存基线，最后原子写回 index；中途失败会先落盘已完成部分的基线，并在错误里点名失败路径与已更新数量。进程在 copy 与 index 写之间被杀仍有窗口，重拉会收敛；严格崩溃一致性走后续 pending 日志。
   - **备份与恢复**：`work_lost(work, agent, path?)` 只列该 agent 的 `lost/`；`work_restore_lost(work, agent, path, expect_current)` 按当前沙箱 hash 做 compare-and-swap 后把备份复制回同路径。两者都只读写本 agent 的沙箱与版本库，不碰共享主副本。
   - **对象回收**：`work_gc(work, apply)` 以「所有提交树 + 所有 agent 基线」为可达集合；`apply=false` 只报数量和字节，`apply=true` 才删不可达对象并清对象目录里的临时文件。入口是隐藏维护命令 `solomni --work-gc <工作名>`（默认 dry-run，`--yes` 才删）；不做后台静默清理。
-  - 提交记录带 `CommitAnchor(agent, line)`，回档据此按行精确定位。
+  - 提交记录带 `CommitAnchor(agent, session, line)`（会话不可省：同名 agent 在不同会话里行号都从 1 数，缺会话会串），回档据此按行精确定位。留档引用 `refs/archive/<id>` 除各 agent 的主线头外还记 `saves`（各 agent 存档线头），恢复才展得回留档前的沙箱。
   - 出站端口 `Workdirs` / **`WorkStore`**（版本库落盘：流式资产原语 + 跨根复制（备份 / 恢复）+ 内容寻址对象 + 提交记录 + 拉取基线 + 待恢复事务 + 提交号 + 跨进程锁 + 对象回收）**只由 `service.rs` 持有**（R12）。
 - 模块事实（含 `has_userdata`）由 `modules` 提供：沙箱把它收成 `modules_with_userdata` 一起注入，围栏派生据此决定派不派这条落点——domain 层不读盘。
 - 沙箱还带**会话 id**（`Sandbox.session`）：围栏把它当容器身份里的会话租约，配合 agent 与受保护根集合派生 SID（见 [docs/kernel/README.md](../kernel/README.md) 的「身份按 reach、生命周期按会话」）；授权按会话持有，会话结束统一回收。

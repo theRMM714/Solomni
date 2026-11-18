@@ -6,13 +6,12 @@
 use crate::capabilities::workspace::api::{
     Change, ChangeKind, FileVersion, MAX_ASSET_BYTES, VERSION_TEXT_LIMIT, media_hint,
 };
-use crate::capabilities::workspace::domain::base::{BaseRef, CommitRefusal, stale_paths};
 use crate::capabilities::workspace::domain::freshness::lines_changed;
 use crate::capabilities::workspace::domain::hash::{content_hash, is_content_hash};
 use crate::capabilities::workspace::domain::workstore::{
-    Commit, CommitAnchor, Conflict, ConflictAt, Index, LocalTakeVerdict, Pending, PendingIndex,
-    PullVerdict, Ref, RefKind, Source, StatusState, Tree, Unchanged, clean_rel, expand_paths,
-    local_take_verdict, lost_rel, needs_backup, plan_commit, pull_verdict, status_of,
+    Commit, CommitAnchor, CommitLine, Conflict, ConflictAt, Index, LocalTakeVerdict, Pending,
+    PendingIndex, PullVerdict, Ref, RefKind, Source, StatusState, Tree, Unchanged, clean_rel,
+    expand_paths, local_take_verdict, lost_rel, needs_backup, plan_commit, pull_verdict, status_of,
     validate_paths,
 };
 use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
@@ -212,6 +211,7 @@ impl WorkspaceService {
                 kind: RefKind::Live,
                 target: Some(id),
                 heads: BTreeMap::new(),
+                saves: BTreeMap::new(),
             },
         )
     }
@@ -358,8 +358,9 @@ impl WorkspaceService {
         Ok(next)
     }
 
-    /// 目的：把一条待恢复提交幂等地应用到主副本、提交记录、head 与基线。
+    /// 目的：把一条待恢复提交幂等地应用到它该去的地方——主线写共享区并推进 head，存档线只写提交与存档线头。
     /// 约束：调用方已持有工作锁与跨进程锁；不删除 pending（由恢复方或收尾方删）。
+    ///   存档线是沙箱快照，**绝不碰共享区、`refs/main` 与「从主副本拉过什么」的基线**。
     fn apply_commit_pending(
         &self,
         work: &str,
@@ -367,49 +368,71 @@ impl WorkspaceService {
         store: &Path,
         commit: &Commit,
         index: Option<&PendingIndex>,
+        line: CommitLine,
     ) -> Result<(), String> {
-        if let Some(head) = self.store.head(store)?
-            && head > commit.id
-        {
-            return Err(format!(
-                "待恢复提交 {} 小于当前 head {}，拒绝倒推共享区",
-                commit.id, head
-            ));
-        }
-        for ch in &commit.changes {
-            match ch.kind {
-                ChangeKind::Add | ChangeKind::Modify => {
-                    if commit.author == "user" {
-                        let bytes = self.store.read_object(store, &ch.hash)?;
-                        self.dirs.write_work(work, &ch.path, &bytes)?;
-                    } else {
-                        self.store
-                            .copy_object_to_under(store, &ch.hash, shared, &ch.path)?;
+        match line {
+            CommitLine::Main => {
+                if let Some(head) = self.store.head(store)?
+                    && head > commit.id
+                {
+                    return Err(format!(
+                        "待恢复提交 {} 小于当前 head {}，拒绝倒推共享区",
+                        commit.id, head
+                    ));
+                }
+                for ch in &commit.changes {
+                    match ch.kind {
+                        ChangeKind::Add | ChangeKind::Modify => {
+                            if commit.author == "user" {
+                                let bytes = self.store.read_object(store, &ch.hash)?;
+                                self.dirs.write_work(work, &ch.path, &bytes)?;
+                            } else {
+                                self.store
+                                    .copy_object_to_under(store, &ch.hash, shared, &ch.path)?;
+                            }
+                        }
+                        ChangeKind::Delete => {
+                            self.store.remove_under(shared, &ch.path)?;
+                        }
                     }
                 }
-                ChangeKind::Delete => {
-                    self.store.remove_under(shared, &ch.path)?;
+                self.store.write_commit(store, commit)?;
+                self.store.set_head(store, commit.id)?;
+                if let Some(index) = index {
+                    self.store.write_index(store, &index.agent, &index.index)?;
+                }
+                // 发布成功：发布者的发布线快进到这条提交，它从这里开始与主线一致。
+                if !commit.author.is_empty() && commit.author != "user" {
+                    self.fast_forward_work(store, &commit.author, Some(commit.id))?;
                 }
             }
-        }
-        self.store.write_commit(store, commit)?;
-        self.store.set_head(store, commit.id)?;
-        if let Some(index) = index {
-            self.store.write_index(store, &index.agent, &index.index)?;
+            CommitLine::Save => {
+                self.store.write_commit(store, commit)?;
+                self.advance_save_line(store, &commit.author, commit.id)?;
+            }
         }
         Ok(())
     }
 
-    /// 目的：删除 keep 祖先链之外的提交记录（keep=None 时全部删）。
-    /// 约束：调用方已先物化到 keep，head 不再指向被删的提交。
-    fn discard_commits_locked(&self, store: &Path, keep: Option<u64>) -> Result<(), String> {
+    /// 目的：删除主线 keep 祖先链与各 agent 存档点祖先链之外的提交记录（都为空时全部删）。
+    /// 约束：调用方已先物化到 keep，head 不再指向被删的提交；存档点是沙箱快照，必须一起留住。
+    fn discard_commits_locked(
+        &self,
+        store: &Path,
+        keep: Option<u64>,
+        saves: &BTreeMap<String, Option<u64>>,
+    ) -> Result<(), String> {
         let mut keep_set: BTreeSet<u64> = BTreeSet::new();
-        let mut cur = keep;
-        while let Some(id) = cur {
-            if !keep_set.insert(id) {
-                break;
+        let mut roots: Vec<Option<u64>> = vec![keep];
+        roots.extend(saves.values().copied());
+        for root in roots {
+            let mut cur = root;
+            while let Some(id) = cur {
+                if !keep_set.insert(id) {
+                    break;
+                }
+                cur = self.store.read_commit(store, id)?.and_then(|c| c.parent);
             }
-            cur = self.store.read_commit(store, id)?.and_then(|c| c.parent);
         }
         for id in self.store.list_commits(store)? {
             if !keep_set.contains(&id) {
@@ -434,27 +457,45 @@ impl WorkspaceService {
             return Ok(());
         };
         match &pending {
-            Pending::Commit { commit, index } => {
-                self.apply_commit_pending(work, shared, store, commit.as_ref(), index.as_ref())?
-            }
+            Pending::Commit {
+                commit,
+                index,
+                line,
+            } => self.apply_commit_pending(
+                work,
+                shared,
+                store,
+                commit.as_ref(),
+                index.as_ref(),
+                *line,
+            )?,
             Pending::Restore { target } => {
                 WorkspaceService::materialize(self.store.as_ref(), shared, store, *target)?
             }
-            Pending::Discard { keep, agents } => {
+            Pending::Discard {
+                keep,
+                agents,
+                saves,
+            } => {
                 if !agents.is_empty() {
-                    let tree = match keep {
+                    let prefix = Self::delete_prefix(*keep);
+                    let base = match keep {
                         Some(id) => Self::tree_of(self.store.as_ref(), store, *id)?,
                         None => Tree::new(),
                     };
-                    let prefix = Self::delete_prefix(*keep);
                     for agent in agents {
+                        let save = saves.get(agent).copied().flatten();
+                        let sandbox_tree = match save {
+                            Some(id) => Self::tree_of(self.store.as_ref(), store, id)?,
+                            None => base.clone(),
+                        };
                         let (_, _, sandbox) = self.agent_roots(work, agent)?;
-                        self.lay_down_tree(store, &sandbox, &tree, agent, Some(&prefix))?;
-                        self.reset_agent_point(store, agent, *keep, &tree)?;
+                        self.lay_down_tree(store, &sandbox, &sandbox_tree, agent, Some(&prefix))?;
+                        self.reset_agent_point(store, agent, *keep, save, &base)?;
                     }
                 }
                 WorkspaceService::materialize(self.store.as_ref(), shared, store, *keep)?;
-                self.discard_commits_locked(store, *keep)?;
+                self.discard_commits_locked(store, *keep, saves)?;
             }
         }
         self.store.clear_pending(store)

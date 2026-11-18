@@ -12,7 +12,7 @@
 | `src/capabilities/workspace/api.rs` | 入站能力面：寻址 / 文件视图 / 共享区版本化 / 备份恢复的契约与共享类型，以及外部工作区根策略（`product_root` / `policy` / `resolve` / `recheck`）的导出（其它能力只准用这里） |
 | `src/capabilities/workspace/service.rs` | 门面与底座：`Workdirs` / `WorkStore` 只在这里（R12）；`WorkspaceService` 的构造、实例级 gate、树回溯、恢复事务、提交号预留、待恢复事务与外部工作区冲突核校 |
 | `src/capabilities/workspace/service/roots.rs` | 外部工作区根的策略：按档位判网络路径 / 共享根 / 文件系统根 / UTF-8 与产品根的互包含（文本 + 落点身份），并做目录与可写探测；创建走 `resolve`，加载复检走 `recheck`，两种用法共用同一份 `policy` |
-| `src/capabilities/workspace/service/commit.rs` | 提交族：`commit_locked` 的三方核校与对象落盘、agent 基线记录、归档点、树铺设、归档清理、自动提交与用户提交 |
+| `src/capabilities/workspace/service/commit.rs` | 提交族：`commit_locked` 的两条线分派与对象落盘、`refs/agents/<agent>`（发布线）与 `refs/agents/<agent>/saves`（存档线）的读写、归档点、树铺设、归档清理、存档提交与用户提交 |
 | `src/capabilities/workspace/service/sync.rs` | 同步族：pull、沙箱采纳、过期读取、双向同步、导入根、跟踪同步 |
 | `src/capabilities/workspace/service/history.rs` | 历史族：状态盘点、日志、单次提交视图、单文件差异、版本列表 |
 | `src/capabilities/workspace/service/resolve.rs` | 冲突解决族：`ResolvePlan`、拒绝对话渲染、`work_resolve` 的选边、备份与未合并守卫 |
@@ -22,7 +22,6 @@
 | `src/capabilities/workspace/service/work_tools.rs` | 成员侧工作工具执行者：`WorkHandler` 认领 `work_pull` / `work_commit` / `work_sync` / `work_status` / `work_versions` / `work_resolve` / `work_lost`，参数解析与路径权限在这里收口；`work_handlers` 按角色面发放的 `allowed` 现取执行者 |
 | `src/capabilities/workspace/domain/workspace.rs` | 工作区与沙箱的纯数据与寻址（含越界判定） |
 | `src/capabilities/workspace/domain/asset.rs` | 通用资产纯逻辑：分块扫描（指纹 / 大小 / NUL 与 UTF-8 判定 / 受限预览）、`FileVersion`、扩展名媒体类型提示与单文件上限 |
-| `src/capabilities/workspace/domain/base.rs` | 基线纯逻辑：`BaseRef` 精确提交号、`CommitRefusal` 拒绝原因、按路径核校（新鲜 / 从未拉取 / 新文件） |
 | `src/capabilities/workspace/domain/freshness.rs` | 读取过期纯逻辑：读过的行在新版本里是否原样还在（按内容找连续行窗口，不看行号与时间） |
 | `src/capabilities/workspace/domain/hash.rs` | 内容指纹 SHA-256：增量实现，共享区内容寻址的唯一键（纯逻辑） |
 | `src/capabilities/workspace/domain/readfact.rs` | 读取事实 `ReadFact`：哪个工作树、哪个路径、读到哪几行、当时的整份指纹（随工具行落盘，过期由它派生） |

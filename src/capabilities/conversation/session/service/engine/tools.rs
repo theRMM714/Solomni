@@ -155,7 +155,7 @@ pub(crate) fn commit_writes(
         &req,
     ) {
         outcome.output.push_str(&format!(
-            "\n\n[自动提交未完成] 这次写入只落在你的沙箱，共享区没有更新：{}",
+            "\n\n[存档未完成] 这次改动没有记进存档：{}。文件已在你的沙箱里，但回档/删除时可能对不上",
             e
         ));
     }
@@ -559,7 +559,7 @@ fn adopt_sandbox(
         line,
     ) {
         Ok(report) => adopt_note(&report),
-        Err(e) => format!("\n\n[沙箱改动未提交] 共享区没有更新：{}", e),
+        Err(e) => format!("\n\n[沙箱改动未存档] 这些文件没有记进存档：{}", e),
     };
     if let Some((_, outcome, _, _)) = &mut done[i] {
         outcome.output.push_str(&note);
@@ -571,7 +571,7 @@ fn adopt_note(report: &crate::capabilities::workspace::api::AdoptReport) -> Stri
     let mut out = String::new();
     if let Some(id) = report.commit {
         out.push_str(&format!(
-            "\n\n[沙箱改动已提交 {}] 这些文件不是 write / edit 改的（shell 或模块工具），已写进共享区：{}",
+            "\n\n[沙箱改动已存档 {}] 这些文件不是 write / edit 改的（shell 或模块工具），已记进你的存档线：{}",
             id,
             report.changed.join("、")
         ));
