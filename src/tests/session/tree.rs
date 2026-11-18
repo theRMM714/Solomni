@@ -154,7 +154,6 @@ pub(crate) fn continue_hint_is_derived_from_the_session_state() {
     let hint = view.continue_action.expect("末条是用户：要有继续上一轮");
     assert_eq!(hint.kind, "turn");
     assert!(hint.label.contains("继续"));
-
 }
 
 /// 目的：已停止的会话仍然给「继续」——停止不是终态，继续是它的逆操作（解冻整棵子树再接着走）。
@@ -344,7 +343,11 @@ pub(crate) fn cut_lines_stay_out_of_the_model_dialogue() {
         replay_dialogue(&events(false), ToolMode::Envelope);
     let (shown, marks, line_reply, _, _, _) = replay_dialogue(&events(true), ToolMode::Envelope);
     assert_eq!(shown.len(), plain.len(), "半句不进对话");
-    assert_eq!(plain_reply.len() + 1, line_reply.len(), "半句那一行仍然占位");
+    assert_eq!(
+        plain_reply.len() + 1,
+        line_reply.len(),
+        "半句那一行仍然占位"
+    );
     assert_eq!(marks.len(), 3, "三条行各占一份 marks");
     assert_eq!(line_reply, vec![0, 1, 2], "半句行自己成一条回复");
     assert_eq!(plain_marks.len(), 2);
