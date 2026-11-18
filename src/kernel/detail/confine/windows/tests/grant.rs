@@ -575,16 +575,33 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
         net: false,
     };
     let home = base.join(".home");
+    // 父目录已从祖先（产品根）继承到同主体的只读属性授权时，prepare_fence 按「已有 ACE 就跳过」
+    // 不写自己那条：这一段验证的就变成「不重复写」——显式 ACE 与台账条目都不该出现。
+    let inherited = inherits_machine_stat(&base);
     expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     // 诊断输出用 [诊断] 前缀：门禁只把 [探针] 当 env-skip，别让这两行把"跳过数"充大。
     eprintln!("[诊断] 授权后父目录 {}", dump_aces(&base));
     eprintln!("[诊断] 授权后叶子 {}", dump_aces(&leaf));
     let baseline = product_sid().expect("派生本产品能力 SID");
-    assert!(
-        has_explicit_ace_for(baseline, &base, RIGHTS_STAT),
-        "授权后父目录上应有授给本产品能力 SID 的只读属性 ACE（祖先链是机器级授权）"
-    );
+    if inherited {
+        assert!(
+            !has_explicit_ace_for(baseline, &base, RIGHTS_STAT),
+            "祖先已覆盖时不该再写一条自己的只读属性 ACE"
+        );
+        assert!(
+            !load_record(&home)
+                .grants
+                .iter()
+                .any(|g| g.scope == GrantScope::Machine && Path::new(&g.path) == base.as_path()),
+            "祖先已覆盖时台账不该出现机器级条目"
+        );
+    } else {
+        assert!(
+            has_explicit_ace_for(baseline, &base, RIGHTS_STAT),
+            "授权后父目录上应有授给本产品能力 SID 的只读属性 ACE（祖先链是机器级授权）"
+        );
+    }
     free_sid(baseline);
     assert!(
         !has_any_ace_for(sid, &base),
@@ -605,9 +622,9 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
         "撤权后父目录不得残留该容器 SID 的任何 ACE（残留会把父目录对受限进程藏住）"
     );
     assert!(!on_leaf, "撤权后叶子不得残留该容器 SID 的任何 ACE");
-    // 机器级授权按设计不随会话撤：别的会话还要靠它零写启动。
+    // 机器级授权按设计不随会话撤：别的会话还要靠它零写启动；覆盖也可能来自祖先继承（见上）。
     let baseline = product_sid().expect("派生本产品能力 SID");
-    let machine_kept = has_explicit_ace_for(baseline, &base, RIGHTS_STAT);
+    let machine_kept = has_ace_for(baseline, &base, RIGHTS_STAT);
     free_sid(baseline);
     assert!(
         machine_kept,
@@ -1065,15 +1082,18 @@ fn clean_keeps_machine_scope_unless_full_cleanup_is_requested() {
         net: false,
     };
     let home = base.join(".home");
+    // 覆盖来自祖先继承时 prepare_fence 不重复写，也就没有自己的机器级条目可保留（保留数因此是 0）。
+    let inherited = inherits_machine_stat(&base);
     expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
     let cap = product_sid().expect("派生本产品能力 SID");
     assert!(
         has_ace_for(cap, &base, RIGHTS_STAT),
         "前置：祖先目录上有一条机器级只读属性 ACE"
     );
+    let machine_expected = if inherited { 0 } else { 1 };
     let msg = clean(&home).expect("默认回收应当成功");
     assert!(
-        msg.contains("保留 1 条机器级授权"),
+        msg.contains(&format!("保留 {machine_expected} 条机器级授权")),
         "默认收尾要如实报保留数：{}",
         msg
     );
@@ -1082,11 +1102,13 @@ fn clean_keeps_machine_scope_unless_full_cleanup_is_requested() {
         "默认收尾不得撤机器级 ACE"
     );
     let rec = load_record(&home);
-    assert!(
-        rec.grants
-            .iter()
-            .any(|g| g.scope == GrantScope::Machine && Path::new(&g.path) == base),
-        "台账要保留机器级条目（下次会话复用）"
+    let machine_recorded = rec
+        .grants
+        .iter()
+        .any(|g| g.scope == GrantScope::Machine && Path::new(&g.path) == base.as_path());
+    assert_eq!(
+        machine_recorded, !inherited,
+        "台账的机器级条目要跟「写过没有」一致（读过祖先覆盖就不该有；会话复用靠 ACE 本身）"
     );
     assert!(
         !rec.grants
@@ -1096,8 +1118,8 @@ fn clean_keeps_machine_scope_unless_full_cleanup_is_requested() {
     );
     clean_all(&home).expect("全量回收应当成功");
     assert!(
-        !has_ace_for(cap, &base, RIGHTS_STAT),
-        "全量收尾要撤机器级 ACE"
+        !has_explicit_ace_for(cap, &base, RIGHTS_STAT),
+        "全量收尾要撤掉自己写的机器级 ACE（祖先继承来的那条是别人的授权，不动）"
     );
     assert!(load_record(&home).is_empty(), "全量收尾后台账应当清空");
     free_sid(cap);
