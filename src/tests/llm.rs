@@ -676,7 +676,11 @@ pub(crate) fn an_interrupted_generation_keeps_the_half_sentence_as_a_cut_line() 
             _ => None,
         })
         .expect("被中断的半句要留档：没有 cut 行");
-    assert!(cut.line.contains("我先写第一段"), "半句原样留下：{}", cut.line);
+    assert!(
+        cut.line.contains("我先写第一段"),
+        "半句原样留下：{}",
+        cut.line
+    );
     assert!(
         cut.line.contains("（已中断）"),
         "要标出它没写完：{}",
