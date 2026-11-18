@@ -5,7 +5,7 @@
 
 import { actionsCopy } from './copy.js';
 
-let api, ui, app;
+let api, ui, app, state;
 
 /* 本地名 → 动作 id 的映射：动作目录与校验都在核心（systools/tools.yaml），这里只做转写。 */
 const ACT_IDS = { say: 'send_message', task: 'set_task' };
@@ -184,7 +184,55 @@ async function continueContext() {
   }
 }
 
+/* 会话级恢复动作：与「发送」走同一个控制入口，只是不新增用户发言、也不假装在对话。
+ * 三个动作各自对应一种运行态：已停止 → 继续（解冻并接着走）；已归档 → 恢复归档；归档 → 从主列表收起。 */
+
+/// 继续一条已停止的会话：解冻运行态并接着走（不新增用户发言）。
+/// 只读视图里点「继续」时顺手启用它——不启用就接不上事件流，转录看着像没动。
+async function continueSession(sid) {
+  try {
+    await api('POST', actionUrl('control_session'), {
+      session_id: sid,
+      action: 'continue',
+      reason: '会话已停止：继续会解冻并接着走',
+    });
+    app.markNeedState();
+    await app.refreshState();
+    const s = app.activeSession();
+    if (s && s.sid === sid && s.readonly) { await activateFlow(); return; }
+    app.renderAll();
+    ui.toast('ok', '已继续会话：' + sid);
+  } catch (err) { ui.notice('操作失败', err.message, 'err'); }
+}
+
+/// 归档：整棵子树从主列表收起，记录都还在；不删数据，随时可以恢复归档。
+async function archiveSession(sid) {
+  try {
+    await api('POST', actionUrl('control_session'), { session_id: sid, action: 'archive' });
+    const s = state.sessions.get(sid);
+    // 归档后不能再对话：当场收成只读视图（等下一次快照太晚，用户还能对着输入框敲字）。
+    if (s) { s.run = 'archived'; s.readonly = true; s.continue_action = null; }
+    await app.refreshState();
+    app.renderAll();
+    ui.toast('ok', '已归档：「' + sid + '」（在侧栏「已归档」里可恢复）');
+  } catch (err) { ui.notice('操作失败', err.message, 'err'); }
+}
+
+/// 恢复归档：翻回 active，不唤醒、不产生模型调用；当前这条顺手启用回可对话。
+async function restoreArchive(sid) {
+  try {
+    await api('POST', actionUrl('control_session'), { session_id: sid, action: 'restore' });
+    const s = state.sessions.get(sid);
+    if (s) s.run = 'active';
+    await app.refreshState();
+    const cur = app.activeSession();
+    if (cur && cur.sid === sid && cur.readonly) { await activateFlow(); return; }
+    app.renderAll();
+    ui.toast('ok', '已恢复归档：' + sid);
+  } catch (err) { ui.notice('操作失败', err.message, 'err'); }
+}
+
 export function mount(root, deps) {
-  ({ api, ui, app } = deps);
-  Object.assign(root, { ACT_IDS, actionUrl, act, rewindTo, restoreMark, applyRewind, withdrawAgree, activateFlow, applyActivation, continueContext });
+  ({ api, ui, app, state } = deps);
+  Object.assign(root, { ACT_IDS, actionUrl, act, rewindTo, restoreMark, applyRewind, withdrawAgree, activateFlow, applyActivation, continueContext, continueSession, archiveSession, restoreArchive });
 }

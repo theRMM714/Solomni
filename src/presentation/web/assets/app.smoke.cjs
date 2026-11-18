@@ -752,26 +752,27 @@ setTimeout(async () => {
       }
     } catch (e) { loadErrors.push("向导代理形态检查失败：" + e.message); }
   }
-  // **会话级说明**：代理身份与"已停止 / 已关闭"都要说清（转录最上方一行，不冒充任何一方的发言）。
+  // **会话级说明**：代理身份与"已停止 / 已归档"都要说清（转录最上方一行，不冒充任何一方的发言）。
   let sessionNoteRule = false;
   if (!loadErrors.length) {
     try {
       const r = vm.runInNewContext(
         "(function () { const a = sessionNote({ mode: 'proxy', run: 'active' });" +
           " const b = sessionNote({ mode: 'single', run: 'stopped' });" +
-          " const c = sessionNote({ mode: 'single', run: 'closed' });" +
+          " const c = sessionNote({ mode: 'single', run: 'archived' });" +
           " const d = sessionNote({ mode: 'single', run: 'active' });" +
           " return { a: !!a, aCls: a && a.className, aText: a && a.textContent," +
           "          bText: b && b.textContent, cText: c && c.textContent, d: d }; })()",
         sandbox
       );
       sessionNoteRule = r.a && r.aCls === "agent-note" && String(r.aText).indexOf("代理模式") >= 0
-        && String(r.bText).indexOf("已停止") >= 0 && String(r.cText).indexOf("已关闭") >= 0
+        && String(r.bText).indexOf("已停止") >= 0 && String(r.cText).indexOf("已归档") >= 0
         && r.d === null;
       if (!sessionNoteRule) loadErrors.push("会话级说明检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("会话级说明检查失败：" + e.message); }
   }
-  // **侧栏的运行态**：停止 / 关闭要一眼可辨（持久事实，不是"这一刻在不在跑"）。
+  // **侧栏的运行态**：停止 / 归档要一眼可辨（持久事实，不是"这一刻在不在跑"）；
+  // 归档会话从主树收起，单独一段、按主会话名归类。
   let historyRunTag = false;
   if (!loadErrors.length) {
     try {
@@ -780,19 +781,23 @@ setTimeout(async () => {
           " state.sessions.set('a', { sid: 'a', running: true, running_known: true });" +
           " state.history = [" +
           "   { name: 'p', mode: 'proxy', ts: 1, done: false, run: 'stopped', tier: 'host', parent: null }," +
-          "   { name: 'c', mode: 'single', ts: 2, done: false, run: 'closed', tier: 'host', parent: 'p' }," +
+          "   { name: 'c', mode: 'single', ts: 2, done: false, run: 'archived', tier: 'host', parent: 'p' }," +
           "   { name: 'a', mode: 'single', ts: 3, done: false, run: 'active', tier: 'host', parent: null }];" +
           " const box = document.querySelector('#history-list'); box.children.length = 0;" +
           " state.treeOpen.add('p'); renderHistory();" +
           " const all = []; (function walk(n) { for (const c of (n.children || [])) { all.push(c); walk(c); } })(box);" +
           " const tags = all.map(function (el) {" +
           "   return (el.children || []).map(function (x) { return String(x.textContent); }).join('|'); });" +
-          " return { tags: tags }; })()",
+          " const archBox = []; (function walk(n) { for (const c of (n.children || [])) { archBox.push(String(c.textContent)); walk(c); } })(box);" +
+          " return { tags: tags, arch: archBox }; })()",
         sandbox
       );
       const j = JSON.stringify(r.tags);
-      historyRunTag = j.indexOf("已停止") >= 0 && j.indexOf("已关闭") >= 0 && j.indexOf("进行中") >= 0;
-      if (!historyRunTag) loadErrors.push("侧栏运行态检查：" + j);
+      const arch = JSON.stringify(r.arch);
+      historyRunTag = j.indexOf("已停止") >= 0 && j.indexOf("进行中") >= 0
+        && j.indexOf("已归档") >= 0 && j.indexOf("已关闭") < 0
+        && arch.indexOf("主会话：p") >= 0 && arch.indexOf("c") >= 0;
+      if (!historyRunTag) loadErrors.push("侧栏运行态检查：" + j + " / 归档段：" + arch);
     } catch (e) { loadErrors.push("侧栏运行态检查失败：" + e.message); }
   }
   // 围栏横幅：正常 / best_effort 隐藏；降级 / 要求未满足显示（并区分文案）。

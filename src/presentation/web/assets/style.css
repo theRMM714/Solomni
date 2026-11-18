@@ -535,6 +535,16 @@ body {
 .history-item .hname { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-item .hmode { flex: none; color: var(--color-text-dim); font-size: var(--fs-s); }
 .history-kids { display: flex; flex-direction: column; gap: 4px; margin-left: 14px; padding-left: 6px; border-left: 1px solid var(--color-border); }
+/* 「已归档」段：默认收起在主树下面，点标题折叠；归档行整体弱化，但仍可点开只读查看。 */
+.history-archived-head {
+  margin-top: 6px; min-height: 32px; padding: 4px 8px; text-align: left;
+  background: none; border: 1px dashed var(--color-border); border-radius: 6px;
+  color: var(--color-text-dim); font-size: var(--fs-s); cursor: pointer;
+}
+.history-archived-head:hover { border-color: var(--color-accent); color: var(--color-text); }
+.history-archived-group { margin: 6px 0 2px 8px; color: var(--color-text-dim); font-size: var(--fs-s); }
+.history-item.archived { opacity: .72; }
+.history-item.archived .hname { font-weight: 500; }
 /* 行内动作：图标按钮（回档 / 恢复 / 撤回），hover 或键盘聚焦时浮现。 */
 .line-act {
   margin-left: 6px; width: 24px; height: 24px; vertical-align: middle;

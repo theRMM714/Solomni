@@ -1,12 +1,12 @@
 /* 目的：整页重画的编排——renderAll 一次刷标签 / 转录 / 裁决门 / 输入区，只读条单独一段。
  * 管：renderAll / renderReadonly 的调用顺序；不改任何会话内容。
  * 不管：各块的内部渲染（标签、转录、裁决门、输入区、工作卡各在自己模块）。
- * 联动：app.activeSession 给当前会话；工作卡经 app.loadWork 晚绑定拉取。 */
+ * 联动：app.activeSession 给当前会话；工作卡经 app.loadWork 晚绑定拉取；恢复动作走 app 上的入口。 */
 
 import { renderStream } from './stream.js';
 import { renderGate } from './cards.js';
 
-let doc, app;
+let doc, app, state;
 
 /// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
 const $ = (sel) => doc.querySelector(sel);
@@ -17,13 +17,17 @@ function renderAll() {
   if (s && s.workDirty) { s.workDirty = false; app.loadWork(s.sid, true); }
 }
 
-/* 只读历史视图：不渲染输入区；只留「启用会话」。启用是后端动作，前端只渲染结果。 */
+/* 只读历史视图：不渲染输入区；按会话状态给唯一的恢复动作——
+ * 已停止 → 「继续」（解冻并接着走），已归档 → 「恢复归档」（翻回 active，不唤醒），其余 → 「启用会话」。
+ * 归档不是终态：这里不给删除，删除仍走侧栏菜单。 */
 function renderReadonly(s) {
   const bar = $('#readonly-bar');
   if (!bar) return;
   bar.innerHTML = '';
   if (!s || !s.readonly) { bar.classList.add('hidden'); return; }
   bar.classList.remove('hidden');
+  const hist = ((state && state.history) || []).find((x) => x.name === s.sid);
+  const run = (hist && hist.run) || s.run || 'active';
   const note = doc.createElement('span');
   note.className = 'readonly-note';
   if (s.workspace_missing) {
@@ -31,21 +35,36 @@ function renderReadonly(s) {
     bar.appendChild(note);
     return;
   }
-  note.textContent = s.run === 'closed' ? '历史回放（只读）· 已关闭' : '历史回放（只读）：启用后才能发送消息';
+  const button = (label, primary, onClick, disabled) => {
+    const b = doc.createElement('button');
+    b.className = 'btn ' + (primary ? 'btn-primary' : 'btn-ghost');
+    b.textContent = label;
+    b.disabled = !!disabled;
+    b.onclick = onClick;
+    bar.appendChild(b);
+    return b;
+  };
+  if (run === 'archived') {
+    note.textContent = '已归档：从会话列表收起，不再被派发或唤醒（记录都还在）';
+    bar.appendChild(note);
+    button('恢复归档', true, () => app.restoreArchive(s.sid));
+    return;
+  }
+  if (run === 'stopped') {
+    note.textContent = '已停止：不再被派发或唤醒；点「继续」解冻并接着走';
+    bar.appendChild(note);
+    button('继续', true, () => app.continueSession(s.sid));
+    return;
+  }
+  note.textContent = '历史回放（只读）：启用后才能发送消息';
   bar.appendChild(note);
-  if (s.run === 'closed') return;
-  const b = doc.createElement('button');
-  b.className = 'btn btn-primary';
-  b.textContent = s.activating ? '正在启用…' : '启用会话';
-  b.disabled = !!s.activating;
-  b.onclick = app.activateFlow;
-  bar.appendChild(b);
+  button(s.activating ? '正在启用…' : '启用会话', true, app.activateFlow, s.activating);
 }
 
 export { renderAll, renderReadonly };
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
-  ({ doc, app } = deps);
+  ({ doc, app, state } = deps);
   Object.assign(root, { renderAll, renderReadonly });
 }

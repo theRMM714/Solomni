@@ -200,7 +200,7 @@ function lineBlock(p, s, key, live) {
 }
 
 /// 定稿行渲染到容器里（每次全量重建这个容器；折叠与 <pre> 滚动状态由 store 恢复）。
-/// 会话级说明（代理身份 / 已停止 / 已关闭）：放转录最上方，**不冒充任何一方的发言**。
+/// 会话级说明（代理身份 / 已停止 / 已归档）：放转录最上方，**不冒充任何一方的发言**。
 /// 它只说这条会话是什么、还该不该被驱动——正文一律来自转录本身。
 function sessionNote(s) {
   if (!s) return null;
@@ -209,8 +209,8 @@ function sessionNote(s) {
     bits.push('代理模式：核心代你挑人、建子工作并回答它们的关卡——这就是全权；' +
       '按「停止」会让相关会话一起停下。');
   }
-  if (s.run === 'stopped') bits.push('这条会话已停止：不会再被派发或唤醒；启用后按会话状态继续。');
-  if (s.run === 'closed') bits.push('这条会话已关闭：终态，不会再被派发或唤醒。');
+  if (s.run === 'stopped') bits.push('这条会话已停止：不会再被派发或唤醒；点「继续」解冻并接着走。');
+  if (s.run === 'archived') bits.push('这条会话已归档：从会话列表收起，不再被派发或唤醒；记录都还在，可「恢复归档」。');
   if (!bits.length) return null;
   const d = doc.createElement('div');
   d.className = 'agent-note';
