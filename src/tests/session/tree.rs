@@ -136,10 +136,7 @@ pub(crate) fn continue_hint_is_derived_from_the_session_state() {
         "w",
         &[serde_json::json!({
             "type": "transcript",
-            "lines": [
-                { "id": 0, "kind": "user", "speaker": "用户", "line": "做一下" },
-                { "id": 1, "kind": "msg", "speaker": "a", "line": "做完了，还剩一点" },
-            ],
+            "lines": [{ "id": 0, "kind": "user", "speaker": "用户", "line": "做一下" }],
         })],
     )
     .expect("写入用户行");
@@ -211,6 +208,64 @@ pub(crate) fn stopped_session_still_offers_continue() {
         "要说清继续会解冻：{}",
         hint.reason
     );
+}
+
+/// 目的：归档把整棵子树从主列表收起：派发与唤醒都被拒，界面也不再给「继续」。
+/// 约束：归档不是终态——「恢复归档」翻回 active，但**不唤醒**（不产生模型调用）。
+#[test]
+pub(crate) fn archive_hides_dispatch_and_restore_brings_it_back() {
+    use crate::capabilities::conversation::proxy::api::ControlAction;
+    let hist = Arc::new(InMemoryHistory::new());
+    seed_session(
+        &hist,
+        "w",
+        Mode::Single,
+        vec![agent_meta("a", &["a"], None)],
+        Default::default(),
+    );
+    hist.append(
+        "w",
+        &[serde_json::json!({
+            "type": "transcript",
+            "lines": [{ "id": 0, "kind": "user", "speaker": "用户", "line": "做一下" }],
+        })],
+    )
+    .expect("写入用户行");
+    let mut core = core_with_pkgs(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), Vec::new()),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+        Arc::new(InMemoryPackages::empty()),
+    );
+    let prepared = core.prepare_activation("w").expect("准备启用");
+    core.commit_activation(prepared).expect("提交启用");
+
+    let st = core
+        .proxy_control("w", ControlAction::Archive)
+        .expect("归档");
+    assert_eq!(st.state, "archived");
+    let meta = hist.meta("w").expect("读回 meta");
+    assert_eq!(meta.run, RunState::Archived);
+    let refusal = meta.dispatch_refusal().expect("归档后要拒绝派发");
+    assert!(refusal.contains("恢复归档"), "要指路：{}", refusal);
+    let history = core.lifecycle.history_list();
+    let view = core
+        .session_views(&history)
+        .into_iter()
+        .find(|v| v.sid == "w")
+        .expect("会话还在列表里");
+    assert_eq!(view.run, "archived");
+    assert!(view.continue_action.is_none(), "归档的会话不给继续");
+
+    let st = core
+        .proxy_control("w", ControlAction::Restore)
+        .expect("恢复归档");
+    assert_eq!(st.state, "active");
+    assert_eq!(hist.meta("w").expect("读回 meta").run, RunState::Active);
+    assert!(!core.turn.is_running("w"), "恢复归档不唤醒");
 }
 
 /// 目的：内容类系统提示（notice）占一行、自己成一条回复，但**不进模型上下文**。

@@ -187,7 +187,10 @@ pub enum ControlAction {
     Interrupt,
     Stop,
     Continue,
-    Close,
+    /// 归档：整棵子树从主列表收起，不再被派发或唤醒（不是终态——删除才是）。
+    Archive,
+    /// 恢复归档：把归档的整棵子树翻回 Active，**不唤醒**。
+    Restore,
 }
 
 impl ControlAction {
@@ -196,9 +199,10 @@ impl ControlAction {
             "interrupt" => Ok(Self::Interrupt),
             "stop" => Ok(Self::Stop),
             "continue" => Ok(Self::Continue),
-            "close" => Ok(Self::Close),
+            "archive" => Ok(Self::Archive),
+            "restore" => Ok(Self::Restore),
             other => Err(format!(
-                "action 只能是 interrupt / stop / continue / close：{}",
+                "action 只能是 interrupt / stop / continue / archive / restore：{}",
                 other
             )),
         }
@@ -208,7 +212,8 @@ impl ControlAction {
             Self::Interrupt => "interrupt",
             Self::Stop => "stop",
             Self::Continue => "continue",
-            Self::Close => "close",
+            Self::Archive => "archive",
+            Self::Restore => "restore",
         }
     }
 }

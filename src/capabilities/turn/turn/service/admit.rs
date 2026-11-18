@@ -59,14 +59,14 @@ impl Turn {
     /// 目的：把一棵子树里「用户停过」的会话拉回运行态（继续 = 重新授权派发）。
     /// 参数：`name` = 子树根的会话名。
     /// 返回：是否真的改过谁的状态（没有停掉的 = `false`）。
-    /// 错误：子树里有已关闭的会话时原样报错（终态不能继续）。
+    /// 错误：子树里有已归档的会话时原样报错（要先「恢复归档」）。
     pub fn resume_subtree(&self, name: &str) -> Result<bool, String> {
         let mut any = false;
         for sid in subtree_of(self.history.as_ref(), name) {
             let mut meta = self.history.meta(&sid)?;
             match meta.run {
-                RunState::Closed => {
-                    return Err(format!("会话 {} 已关闭：终态，不能再继续", sid));
+                RunState::Archived => {
+                    return Err(format!("会话 {} 已归档：先「恢复归档」再继续", sid));
                 }
                 RunState::Stopped => {
                     meta.run = RunState::Active;

@@ -393,14 +393,14 @@ pub(crate) fn control_is_idempotent_and_reports_the_actual_state() {
     assert_eq!(again, out, "重放回同一结果");
     assert_eq!(host.calls().len(), calls, "重放不再动宿主");
 
-    host.fail_control("close");
+    host.fail_control("archive");
     let bad = tools.call(
         &c,
         d::CONTROL,
-        r#"{"session_id":"s1","action":"close","reason":"收尾","request_id":"r2"}"#,
+        r#"{"session_id":"s1","action":"archive","reason":"收尾","request_id":"r2"}"#,
     );
     assert!(
-        !bad.ok && bad.output.contains("不能 close"),
+        !bad.ok && bad.output.contains("不能 archive"),
         "{}",
         bad.output
     );

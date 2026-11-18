@@ -48,21 +48,21 @@ fn request_validators_reject_before_any_host_contact() {
     };
     assert_eq!(
         d::control_request(&base("pause", "为什么", "req-1")).unwrap_err(),
-        "action 只能是 interrupt / stop / continue / close：pause"
+        "action 只能是 interrupt / stop / continue / archive / restore：pause"
     );
     assert_eq!(
-        d::control_request(&base("close", "   ", "req-1")).unwrap_err(),
+        d::control_request(&base("archive", "   ", "req-1")).unwrap_err(),
         "reason 不能为空（它会进可回放记录）"
     );
     assert_eq!(
-        d::control_request(&base("close", "收工", "  ")).unwrap_err(),
+        d::control_request(&base("archive", "收工", "  ")).unwrap_err(),
         "request_id 不能为空（幂等标识）"
     );
     assert_eq!(
-        d::control_request(&base(" close ", " 收工 ", " req-1 ")).unwrap(),
+        d::control_request(&base(" archive ", " 收工 ", " req-1 ")).unwrap(),
         (
             "s1".to_string(),
-            d::ControlAction::Close,
+            d::ControlAction::Archive,
             "收工".to_string(),
             "req-1".to_string()
         )

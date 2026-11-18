@@ -90,8 +90,9 @@ pub enum RunState {
     Active,
     /// 已停止：一切派发与唤醒都不再启动（在跑的那次已被停下）。用户「继续」回到 Active。
     Stopped,
-    /// 关闭：终态，不能再被派发、唤醒或 resume。
-    Closed,
+    /// 已归档：从主列表收起，不再被派发或唤醒（「恢复归档」回到 Active）。
+    ///   归档不是终态：删除才是终局。
+    Archived,
 }
 
 impl RunState {
@@ -99,7 +100,7 @@ impl RunState {
         match self {
             RunState::Active => "active",
             RunState::Stopped => "stopped",
-            RunState::Closed => "closed",
+            RunState::Archived => "archived",
         }
     }
     /// 目的：serde 的 `skip_serializing_if` 用：缺省态不写进 meta.yaml。
@@ -118,7 +119,7 @@ pub struct Delegation {
 }
 
 impl SessionMeta {
-    /// 目的：允许被派发 / 唤醒吗？停止与关闭都拒绝——**运行态的唯一判据只有这一处**
+    /// 目的：允许被派发 / 唤醒吗？停止与归档都拒绝——**运行态的唯一判据只有这一处**
     ///   （派发入口、代理转达、叫醒都问它，不各写一份）。None = 放行。
     pub fn dispatch_refusal(&self) -> Option<String> {
         match self.run {
@@ -127,8 +128,8 @@ impl SessionMeta {
                 "会话 {} 已停止：先「继续」再派发（停止期间不接受任何派发或唤醒）",
                 self.name
             )),
-            RunState::Closed => Some(format!(
-                "会话 {} 已关闭：终态，不能再派发、唤醒或继续",
+            RunState::Archived => Some(format!(
+                "会话 {} 已归档：先「恢复归档」再派发（归档期间不接受任何派发或唤醒）",
                 self.name
             )),
         }
@@ -155,7 +156,7 @@ pub struct HistoryView {
     /// 目的：绑定外部工作区但根已不可达（侧栏标红、禁止打开）。
     #[serde(default)]
     pub workspace_missing: bool,
-    /// 目的：运行态（`active` / `stopped` / `closed`）：侧栏据此标出已停止 / 已关闭的会话
+    /// 目的：运行态（`active` / `stopped` / `archived`）：侧栏据此标出已停止 / 已归档的会话
     ///   （"这一刻在不在跑"是另一回事，见 `SessionView.running`）。
     pub run: RunState,
 }
