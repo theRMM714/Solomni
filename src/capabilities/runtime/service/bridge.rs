@@ -187,11 +187,12 @@ impl Core {
         self.lifecycle.history_open(sid).ok().map(|(m, _)| m.mode)
     }
 
-    /// 目的：代理工具：控制里的**终态关闭**（只做运行态的状态转移，不启动也不停止生成——
+    /// 目的：代理工具：控制里的**归档与恢复**（只做运行态的状态转移，不启动也不停止生成——
     ///  停止 / 继续要 JobRegistry 与唤醒，只有句柄拿得到，见 `ProxyBridge::control`）。
     ///  可回放记录也由句柄那一侧写（它才推得到事件台）。
-    ///  - close：终态。整棵子树里还有在生成的就拒绝（先 stop），不留半个状态；
-    ///  - stop / continue：级联停与解冻唤醒由句柄承担，不进这条。
+    ///  - archive：整棵子树收起。子树里还有在生成的就拒绝（先 stop / interrupt），不留半个状态；
+    ///  - restore：整棵子树里归档的翻回 Active，**不唤醒**（恢复归档只是让它重新可用）；
+    ///  - interrupt / stop / continue：级联停与解冻唤醒由句柄承担，不进这条。
     pub fn proxy_control(
         &self,
         sid: &str,
@@ -199,7 +200,7 @@ impl Core {
     ) -> Result<d::ControlState, String> {
         let meta = self.history.meta(sid)?;
         let target = meta.name.clone();
-        match action {
+        let state = match action {
             d::ControlAction::Interrupt
             | d::ControlAction::Stop
             | d::ControlAction::Continue => {
@@ -208,24 +209,38 @@ impl Core {
                     action.as_str()
                 ));
             }
-            d::ControlAction::Close => {
-                // 「关闭已完成或已停止的会话」：子树里还有在生成的就整条拒绝。
+            d::ControlAction::Archive => {
+                // 「归档」：子树里还有在生成的就整条拒绝（先中断 / 停止）。
                 for s in subtree_of(self.history.as_ref(), sid) {
                     if self.turn.is_running(&s) {
                         return Err(Turn::running_refusal(&s));
                     }
                 }
-                if meta.run != RunState::Closed {
-                    let mut m = meta.clone();
-                    m.run = RunState::Closed;
-                    self.history.save_meta(&m)?;
+                for s in subtree_of(self.history.as_ref(), sid) {
+                    let mut m = self.history.meta(&s)?;
+                    if m.run != RunState::Archived {
+                        m.run = RunState::Archived;
+                        self.history.save_meta(&m)?;
+                    }
                 }
+                "archived".to_string()
+            }
+            d::ControlAction::Restore => {
+                // 恢复归档：只翻回 Active，不唤醒——恢复本身不产生模型调用。
+                for s in subtree_of(self.history.as_ref(), sid) {
+                    let mut m = self.history.meta(&s)?;
+                    if m.run != RunState::Active {
+                        m.run = RunState::Active;
+                        self.history.save_meta(&m)?;
+                    }
+                }
+                "active".to_string()
             }
         };
         Ok(d::ControlState {
             session: target,
             action,
-            state: "closed".to_string(),
+            state,
         })
     }
 

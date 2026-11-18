@@ -235,7 +235,8 @@ impl ProxyHost for FakeProxyHost {
                 dproxy::ControlAction::Interrupt => "active",
                 dproxy::ControlAction::Stop => "stopped",
                 dproxy::ControlAction::Continue => "active",
-                dproxy::ControlAction::Close => "closed",
+                dproxy::ControlAction::Archive => "archived",
+                dproxy::ControlAction::Restore => "active",
             }
             .to_string(),
         })

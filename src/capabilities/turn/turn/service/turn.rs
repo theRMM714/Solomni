@@ -315,7 +315,7 @@ impl Turn {
     pub(crate) fn void_gates_of(&mut self, sid: &str) -> Vec<SessionEvent> {
         let reason = match self.history.meta(sid).map(|m| m.run) {
             Ok(RunState::Stopped) => "用户按了停止：这一队裁决一律作废（停止 = 拒绝）",
-            Ok(RunState::Closed) => "会话已关闭：这一队裁决一律作废",
+            Ok(RunState::Archived) => "会话已归档：这一队裁决一律作废",
             _ => return Vec::new(),
         };
         // 判据是**队本身**（核心各关卡与工具级确认排在同一条队上）；没有队 = 本来就没挂着卡。

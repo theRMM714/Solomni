@@ -19,7 +19,7 @@ impl Work {
         run: &str,
         has_pending: bool,
     ) -> Option<ContinueView> {
-        if running || run == "closed" || mode == WorkMode::Proxy {
+        if running || run == "archived" || mode == WorkMode::Proxy {
             return None;
         }
         match mode {

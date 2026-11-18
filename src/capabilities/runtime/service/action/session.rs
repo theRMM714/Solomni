@@ -72,8 +72,10 @@ impl Handle {
         Ok(created)
     }
 
-    /// 目的：控制会话的**唯一实现**——stop / continue / close，人经呈现层与核心代理都走这条。
-    /// 返回：这一下的实际状态（如 `stopped:2` / `active` / `closed`），不假装"停止了一个没在跑的会话"。
+    /// 目的：控制会话的**唯一实现**——interrupt / stop / continue / archive / restore，
+    ///   人经呈现层与核心代理都走这条。
+    /// 返回：这一下的实际状态（如 `stopped:2` / `active` / `archived`），
+    ///   不假装"停止了一个没在跑的会话"。
     pub(crate) fn control_session_call(
         &self,
         caller: &Caller,
@@ -139,7 +141,7 @@ impl Handle {
                     "active".to_string()
                 }
             },
-            d::ControlAction::Close => {
+            d::ControlAction::Archive | d::ControlAction::Restore => {
                 let st = self.call({
                     let s = sid.to_string();
                     move |core| core.proxy_control(&s, action)

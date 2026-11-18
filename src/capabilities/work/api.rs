@@ -288,7 +288,7 @@ pub struct SessionView {
     /// 目的：**这条工作有「本次需求」吗**：前端据此决定要不要渲染「改需求」按钮——
     ///   没有就**根本不渲染**（不是灰着）。这是领域事实（有没有需求行），不是"模式"。
     pub can_update_task: bool,
-    /// 目的：运行态（`active` / `stopped` / `closed`）：**持久事实**，与短暂的 `running` 分开。
+    /// 目的：运行态（`active` / `stopped` / `archived`）：**持久事实**，与短暂的 `running` 分开。
     ///   界面据此标出"已暂停 / 已关闭"（这类会话不会再被派发或唤醒）。
     pub run: String,
     /// 目的：当前等用户裁决的**队首那张**（None = 没有）：**快照形态**，与推的 `decision_card` 同源。

@@ -650,8 +650,8 @@ impl Work {
         sid: &str,
     ) -> Result<Option<GuestBoot>, String> {
         let meta = self.history.meta(sid)?;
-        if meta.run == RunState::Closed {
-            return Err(format!("会话 {} 已关闭：终态，不能再启用", sid));
+        if meta.run == RunState::Archived {
+            return Err(format!("会话 {} 已归档：先「恢复归档」再启用", sid));
         }
         let Some((lease, scope_meta)) = guest_scope(self.history.as_ref(), &meta)? else {
             return Ok(None);

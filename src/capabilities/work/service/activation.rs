@@ -20,7 +20,7 @@ impl Work {
         ))
     }
 
-    /// 目的：启用会话的第一段（核心，毫秒级）——closed 拒绝；正在生成则附着；
+    /// 目的：启用会话的第一段（核心，毫秒级）——已归档拒绝；正在生成则附着；
     ///   否则准备可选的一段 guest 启动，等调用方线程跑完后提交。
     pub(crate) fn prepare_activation(
         &self,
@@ -30,8 +30,8 @@ impl Work {
         sid: &str,
     ) -> Result<PreparedActivation, String> {
         let meta = self.history.meta(sid)?;
-        if meta.run == RunState::Closed {
-            return Err(format!("会话 {} 已关闭：终态，不能再启用", sid));
+        if meta.run == RunState::Archived {
+            return Err(format!("会话 {} 已归档：先「恢复归档」再启用", sid));
         }
         if turn.is_running(sid) {
             return Ok(PreparedActivation::Running(Box::new(self.session_view(
