@@ -224,7 +224,7 @@ impl Discussion {
             if round.tool.is_none() {
                 return;
             }
-            lines.extend(build_round_lines(speaker, round, false, &next_line, None));
+            lines.extend(build_round_lines(speaker, round, &next_line, None));
         };
         // **逐片外送**：讨论席的发言也要能看到"正在生成"（信封不能当正文流上屏，见 crate::capabilities::conversation::session::api::stream_piece）。
         let mut acc = String::new();

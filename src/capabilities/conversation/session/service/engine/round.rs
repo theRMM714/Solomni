@@ -112,6 +112,10 @@ pub struct Round {
     pub verb: Option<Verb>,
     /// 目的：这一轮的回复**没写成信封**（散文 / 信封写坏）：如实传给上层，不假装它是一次规范回复。
     pub degraded: bool,
+    /// 目的：这一轮是**被中断的半句**：用户中途打断了生成，已经流到界面上的那部分留成一条转录行。
+    ///   约束：它**不进对话**（text_msgs 为空，行上带 cut）——点「继续」是从断点**重开一轮**，
+    ///   不是把这半句当发言续写（见 docs/session/session-model.md）。
+    pub cut: bool,
 }
 
 impl Round {
@@ -267,6 +271,33 @@ pub fn converse_with(
         if user_stopped {
             // 这一轮只记录"未执行"的失败行；循环顶部据此退出，不再发起下一次调用。
             aborted = true;
+            // 已经流到界面上的那半句**留档**：它是用户亲眼看到的东西，凭空消失等于篡改记录。
+            // 但**不进对话**（text_msgs 留空 + 行上带 cut）：中断后点「继续」是重开一轮，
+            // 不是把半句当发言续写（供应商的 prefill 面并不统一，见 docs/session/session-model.md）。
+            let visible = match done.raw.find('{') {
+                Some(i) => done.raw[..i].to_string(),
+                None => done.raw.clone(),
+            };
+            let think = if reasoning.is_empty() {
+                done.reasoning.clone()
+            } else {
+                reasoning.clone()
+            };
+            if !visible.trim().is_empty() || !think.trim().is_empty() {
+                push_round!(Round {
+                    reply: reply_id,
+                    text: visible,
+                    reasoning: think,
+                    text_msgs: Vec::new(),
+                    raw: String::new(),
+                    tool: None,
+                    finish: done.finish.clone(),
+                    error: None,
+                    verb: None,
+                    degraded: false,
+                    cut: true,
+                });
+            }
         }
         // 调用失败（超时 / 网络）：**不是模型的回复**——这一轮不解析信封、不执行工具、不落转录，只把原因带回。
         // 为什么必须短路：错误文本若被当成发言吸收，核心按转录派生的"下一步该谁说话"就歪了。
@@ -282,6 +313,7 @@ pub fn converse_with(
                 error: Some(err),
                 verb: None,
                 degraded: false,
+                cut: false,
             });
             return rounds;
         }
@@ -306,6 +338,13 @@ pub fn converse_with(
             );
         }
         let mut reply = envelope::parse(&raw);
+        // 被中断的那一轮：已经流到界面上的半句只作为 cut 行留档，**不当发言进对话**
+        // （「继续」是重开一轮，不是续写半句）。流到一半的 tool_call 仍要落「未执行」行，所以下面照走。
+        let dialog_raw = if user_stopped {
+            String::new()
+        } else {
+            raw.clone()
+        };
         // 手写信封不合法时**先**问修复端口：只做无歧义的修补（默认实现只转义字符串里的裸控制字符）；修好并重新解析成
         // 合法工具信封 = 本轮照常执行工具，修不了走"失败工具行"；封顶后、用户中止、自由格式工具（patch）都不修。
         let freeform_tool = reply
@@ -329,7 +368,7 @@ pub fn converse_with(
         }
         // ── 讨论席的**表态**：这一轮就是它的发言——不执行任何调用，本回合到此收尾（与单 agent 末轮同一形态）──
         // 两条通道各认各的：native 从结构化槽位认动词，信封从信封自己的动词字段认（散文不算表态）。
-        if verbs {
+        if verbs && !user_stopped {
             let from_envelope = |r: &envelope::Reply| -> Option<(Verb, String, bool)> {
                 if r.degraded || r.verb == Verb::Tool {
                     None
@@ -364,6 +403,7 @@ pub fn converse_with(
                     error: None,
                     verb: Some(verb),
                     degraded,
+                    cut: false,
                 });
                 return rounds;
             }
@@ -399,17 +439,21 @@ pub fn converse_with(
                 read: None,
                 shell: None,
             };
-            let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view));
+            let msgs_of = reply_msgs(mode, &dialog_raw, std::slice::from_ref(&view));
             for m in &msgs_of {
                 msgs.push(m.clone());
             }
             on_tool(&view);
             push_round!(Round {
                 reply: reply_id,
-                text: reply.text.clone(),
+                text: if user_stopped {
+                    String::new()
+                } else {
+                    reply.text.clone()
+                },
                 reasoning: std::mem::take(&mut reasoning),
                 text_msgs: vec![msgs_of[0].clone()],
-                raw: raw.clone(),
+                raw: dialog_raw.clone(),
                 tool: Some(ToolRun {
                     view,
                     msgs: vec![msgs_of[1].clone()],
@@ -418,6 +462,7 @@ pub fn converse_with(
                 error: None,
                 verb: None,
                 degraded: false,
+                cut: false,
             });
             return rounds;
         }
@@ -463,7 +508,13 @@ pub fn converse_with(
                 };
                 // 先按原序把工具行建好（执行已经做完），再让**唯一那处**构造函数产出这一回复的消息：
                 // 实时与重建走同一个函数，"重建上下文与实时一致"因此是结构保证的。
-                let reply_text = reply.text.clone();
+                // 被中断的那一轮：正文已作为 cut 行留档，这里只留「未执行」的工具行（正文置空），
+                // 免得半句被当成发言记进对话（也免得它挂到下一轮的上下文里）。
+                let reply_text = if user_stopped {
+                    String::new()
+                } else {
+                    reply.text.clone()
+                };
                 let views: Vec<ToolCallView> = calls
                     .iter()
                     .enumerate()
@@ -520,6 +571,7 @@ pub fn converse_with(
                         error: None,
                         verb: None,
                         degraded: false,
+                        cut: false,
                     });
                 }
                 continue;
@@ -541,16 +593,20 @@ pub fn converse_with(
                         };
                     on_tool(&view);
                     // 这条没有合法原生 id（模型是手写的信封）：走文本形状，不能发 role=tool。
-                    let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view));
+                    let msgs_of = reply_msgs(mode, &dialog_raw, std::slice::from_ref(&view));
                     for m in &msgs_of {
                         msgs.push(m.clone());
                     }
                     push_round!(Round {
                         reply: reply_id,
-                        text: reply.text.clone(),
+                        text: if user_stopped {
+                            String::new()
+                        } else {
+                            reply.text.clone()
+                        },
                         reasoning,
                         text_msgs: vec![msgs_of[0].clone()],
-                        raw: raw.clone(),
+                        raw: dialog_raw.clone(),
                         tool: Some(ToolRun {
                             view,
                             msgs: vec![msgs_of[1].clone()],
@@ -559,6 +615,7 @@ pub fn converse_with(
                         error: None,
                         verb: None,
                         degraded: false,
+                        cut: false,
                     });
                     continue;
                 }
@@ -593,16 +650,20 @@ pub fn converse_with(
                     shell: None,
                 };
                 on_tool(&view);
-                let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view));
+                let msgs_of = reply_msgs(mode, &dialog_raw, std::slice::from_ref(&view));
                 for m in &msgs_of {
                     msgs.push(m.clone());
                 }
                 push_round!(Round {
                     reply: reply_id,
-                    text: reply.text.clone(),
+                    text: if user_stopped {
+                        String::new()
+                    } else {
+                        reply.text.clone()
+                    },
                     reasoning,
                     text_msgs: vec![msgs_of[0].clone()],
-                    raw: raw.clone(),
+                    raw: dialog_raw.clone(),
                     tool: Some(ToolRun {
                         view,
                         msgs: vec![msgs_of[1].clone()],
@@ -611,6 +672,7 @@ pub fn converse_with(
                     error: None,
                     verb: None,
                     degraded: true,
+                    cut: false,
                 });
             }
             // 合法信封：**一次回复里的多个调用一起执行**（同一套声明并发调度），各成一条工具行。
@@ -681,7 +743,7 @@ pub fn converse_with(
                         }
                     })
                     .collect();
-                let msgs_of = reply_msgs(mode, &raw, &views);
+                let msgs_of = reply_msgs(mode, &dialog_raw, &views);
                 for m in &msgs_of {
                     msgs.push(m.clone());
                 }
@@ -691,7 +753,7 @@ pub fn converse_with(
                     on_tool(&view);
                     push_round!(Round {
                         reply: reply_id,
-                        text: if i == 0 {
+                        text: if i == 0 && !user_stopped {
                             reply.text.clone()
                         } else {
                             String::new()
@@ -702,7 +764,11 @@ pub fn converse_with(
                         } else {
                             Vec::new()
                         },
-                        raw: if i == 0 { raw.clone() } else { String::new() },
+                        raw: if i == 0 {
+                            dialog_raw.clone()
+                        } else {
+                            String::new()
+                        },
                         tool: Some(ToolRun {
                             view,
                             msgs: vec![msgs_of[i + 1].clone()],
@@ -711,11 +777,17 @@ pub fn converse_with(
                         error: None,
                         verb: None,
                         degraded: false,
+                        cut: false,
                     });
                 }
             }
             // 无工具环境 / 模型不再发起调用：按原文口径如实收录（信封已被剥掉，显示文本里不会有 JSON），循环终止。
             _ => {
+                // 被中断的那一轮：可见的半句已经作为 cut 行留档，这里不再收一条 assistant
+                // （否则「继续」会把半句当发言接着写）。
+                if user_stopped {
+                    return rounds;
+                }
                 // 只有会出文本行（有正文或思维链）时才往历史里放这条 assistant，
                 // 否则实时历史会比重建历史多一条空消息。
                 let text = reply.text;
@@ -736,6 +808,7 @@ pub fn converse_with(
                     error: None,
                     verb: None,
                     degraded: reply.degraded || reply.verb == Verb::Tool,
+                    cut: false,
                 });
                 return rounds;
             }
@@ -751,7 +824,6 @@ pub fn converse_with(
 pub fn build_round_lines(
     id: &str,
     round: &Round,
-    stopped: bool,
     next_line: &std::cell::Cell<u64>,
     turn: Option<u64>,
 ) -> Vec<LineView> {
@@ -786,6 +858,7 @@ pub fn build_round_lines(
             raw: String::new(),
             tool,
             degraded: false,
+            cut: false,
             system: false,
             task: false,
             turn,
@@ -798,15 +871,18 @@ pub fn build_round_lines(
         if !has_line || (text.is_empty() && round.tool.is_some()) {
             return;
         }
-        // 正文 = 内容本身（说话人/动词在字段里）；被停/被截断的说明照样跟在正文后。
+        // 正文 = 内容本身（说话人/动词在字段里）；被中断/被截断的说明照样跟在正文后。
         let mut line = text.clone();
-        if stopped {
-            line.push_str("（已停止）");
+        if round.cut {
+            line.push_str("（已中断）");
         }
         if truncated {
             line.push_str("（本段被输出长度截断）");
         }
-        out.push(make(line, verb, "msg", reasoning.take(), None));
+        let mut v = make(line, verb, "msg", reasoning.take(), None);
+        // 半句只给人看：行上带结构化标记，重建与回放据此把它挡在对话之外。
+        v.cut = round.cut;
+        out.push(v);
     };
     match &round.tool {
         Some(run) => {

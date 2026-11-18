@@ -199,6 +199,46 @@ pub(crate) fn notice_lines_stay_out_of_the_model_dialogue() {
     assert_eq!(plain_reply, vec![0, 1]);
 }
 
+/// 目的：被中断的半句（`cut` 行）留档但**不进模型上下文**：重建出的对话与「没有这一行」时完全一致。
+/// 约束：「继续」是重开一轮，不是把半句当发言续写（见 docs/session/session-model.md）。
+#[test]
+pub(crate) fn cut_lines_stay_out_of_the_model_dialogue() {
+    use crate::capabilities::llm::api::ToolMode;
+    use crate::capabilities::turn::turn::api::replay_dialogue;
+    let events = |with_cut: bool| {
+        let mut lines =
+            vec![serde_json::json!({"id": 0, "kind": "user", "speaker": "用户", "line": "问一"})];
+        if with_cut {
+            lines.push(serde_json::json!({
+                "id": 1,
+                "kind": "msg",
+                "speaker": "a",
+                "line": "半句（已中断）",
+                "cut": true,
+            }));
+        }
+        let reply = if with_cut { 2 } else { 1 };
+        lines.push(serde_json::json!({
+            "id": reply,
+            "kind": "msg",
+            "speaker": "a",
+            "verb": "say",
+            "line": "答一",
+            "reply": reply,
+        }));
+        vec![serde_json::json!({"type": "transcript", "lines": lines})]
+    };
+    let (plain, plain_marks, plain_reply, _, _, _) =
+        replay_dialogue(&events(false), ToolMode::Envelope);
+    let (shown, marks, line_reply, _, _, _) = replay_dialogue(&events(true), ToolMode::Envelope);
+    assert_eq!(shown.len(), plain.len(), "半句不进对话");
+    assert_eq!(plain_reply.len() + 1, line_reply.len(), "半句那一行仍然占位");
+    assert_eq!(marks.len(), 3, "三条行各占一份 marks");
+    assert_eq!(line_reply, vec![0, 1, 2], "半句行自己成一条回复");
+    assert_eq!(plain_marks.len(), 2);
+    assert_eq!(plain_reply, vec![0, 1]);
+}
+
 /// 目的：根编辑不覆盖子收窄；子只能再收窄，不能换更高档。
 #[test]
 pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {

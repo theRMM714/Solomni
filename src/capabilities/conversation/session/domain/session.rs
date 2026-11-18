@@ -624,6 +624,7 @@ impl AgentSession {
             raw: String::new(),
             tool,
             degraded: false,
+            cut: false,
             system: kind == "system",
             task: false,
             turn: self.cur_turn,

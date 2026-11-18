@@ -366,6 +366,12 @@ pub fn replay_dialogue(
             line_ids.push(id);
             marks.push(history.len());
             i += 1;
+        // **被中断的半句**：留档给人看，但**不进对话**——「继续」是重开一轮，不是把这半句当发言续写。
+        } else if l.get("cut").and_then(|x| x.as_bool()).unwrap_or(false) {
+            line_reply.push(id);
+            line_ids.push(id);
+            marks.push(history.len());
+            i += 1;
         // 系统注入的行按它该有的角色还原：提醒/边界是 system，
         // **派发行**（`task`）是 user——否则重建出来的请求又变成一条 user 都没有，供应商照样拒收。
         } else if kind == "system" || l.get("system").and_then(|x| x.as_bool()).unwrap_or(false) {
