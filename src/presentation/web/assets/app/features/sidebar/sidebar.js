@@ -3,7 +3,7 @@
  * 不管：不拉历史、不改会话内容；打开会话与改配置都走 app 上的入口。
  * 联动：会话读法来自 app/stores/sessions.js；弹层来自 app/ui；刷新走 app.refreshState。 */
 
-import { activePath, generating, historyByParent } from '../../stores/sessions.js';
+import { activePath, generating } from '../../stores/sessions.js';
 import { sidebarCopy } from './copy.js';
 
 let g, doc, state, api, ui, app;
@@ -21,26 +21,33 @@ const setActive = (...a) => app.setActive(...a);
 /// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
 const $ = (sel) => doc.querySelector(sel);
 
-/// 行尾铅笔菜单：打开 / 编辑配置 / 停止会话（或对已停止的「继续」）/ 删除
-/// （子会话多一项「打开父会话」，不给删除）。
+/// 行尾铅笔菜单：打开 / 编辑配置 / 停止会话（或对已停止的「继续」）/ 归档 / 删除
+/// （子会话多一项「打开父会话」，不给删除；已归档的只给「恢复归档」与删除）。
 function historyMenu(h) {
   const busy = generating(h.name);
   const stopped = h.run === 'stopped';
+  const archived = h.run === 'archived';
   /** @type {Array<{label?: string, icon?: string, disabled?: boolean, reason?: string, sep?: boolean, danger?: boolean, onClick?: () => void}>} */
   const items = [
     { label: '打开', icon: 'folder', onClick: () => openHistory(h.name) },
     {
       label: '编辑配置',
       icon: 'pencil',
-      disabled: busy,
-      reason: busy ? '该会话正在生成中：先「中断」或等它结束，再改配置' : '',
+      disabled: busy || archived,
+      reason: archived ? '这条会话已归档：先「恢复归档」再改配置'
+        : busy ? '该会话正在生成中：先「中断」或等它结束，再改配置' : '',
       onClick: () => openConfig(h.name),
     },
   ];
   if (h.parent) items.splice(1, 0, { label: '打开父会话', icon: 'chevron', onClick: () => openHistory(h.parent) });
-  // 停止会话 = 冻结整棵子树（派发与唤醒都拒），与输入键的「中断」不是一回事。
-  if (stopped) items.push({ label: '继续', icon: 'play', onClick: () => continueHistory(h.name) });
-  else items.push({ label: '停止会话', icon: 'pause', onClick: () => stopHistory(h.name) });
+  if (archived) {
+    items.push({ label: '恢复归档', icon: 'restore', onClick: () => restoreHistory(h.name) });
+  } else {
+    // 停止会话 = 冻结整棵子树（派发与唤醒都拒），与输入键的「中断」不是一回事。
+    if (stopped) items.push({ label: '继续', icon: 'play', onClick: () => continueHistory(h.name) });
+    else items.push({ label: '停止会话', icon: 'pause', onClick: () => stopHistory(h.name) });
+    items.push({ label: '归档', icon: 'archive', onClick: () => archiveHistory(h.name) });
+  }
   if (!h.parent) {
     items.push({ sep: true });
     items.push({ label: '删除', icon: 'close', danger: true, onClick: () => deleteHistory(h.name) });
@@ -62,7 +69,14 @@ function renderHistory() {
       if (h && h.parent) state.treeOpen.add(h.parent);
     }
   }
-  const by = historyByParent();
+  // 归档会话从主树收起（统一放到下面的「已归档」段），主树只走还活着的会话。
+  const by = new Map();
+  for (const h of items) {
+    if (h.run === 'archived') continue;
+    const p = h.parent || '';
+    if (!by.has(p)) by.set(p, []);
+    by.get(p).push(h);
+  }
   const branch = (parent, into) => {
     for (const h of (by.get(parent) || [])) {
       const row = doc.createElement('div');
@@ -97,13 +111,11 @@ function renderHistory() {
       const name = doc.createElement('span');
       name.className = 'hname'; name.textContent = h.name; name.title = h.name;
       const mode = doc.createElement('span'); mode.className = 'hmode';
-      // 持久事实（停止 / 关闭）与"这一刻在不在跑"分开：只有确实在跑才标「进行中」，
+      // 持久事实（停止）与"这一刻在不在跑"分开：只有确实在跑才标「进行中」，
       // 否则重启前没结束的旧会话会一直冒充在跑。
       const live = state.sessions.get(h.name);
       const running = !!(live && live.running) || !!(state.running && state.running.has(h.name));
-      const stateTag = h.run === 'stopped' ? '·已停止'
-        : h.run === 'closed' ? '·已关闭'
-          : (running && !h.done ? '·进行中 ' : '');
+      const stateTag = h.run === 'stopped' ? '·已停止' : (running && !h.done ? '·进行中 ' : '');
       mode.textContent = stateTag + h.mode +
         (h.tier === 'vm' && h.tier_ready === false ? '·虚拟机档不可用' : '') +
         (h.workspace_missing ? '·工作区不存在' : '');
@@ -119,6 +131,62 @@ function renderHistory() {
     }
   };
   branch('', box);
+  renderArchivedSection(box, items.filter((h) => h.run === 'archived'));
+}
+
+/* 「已归档」段：默认展开，点标题折叠。**按主会话名归类**——归档的子会话要让人一眼看出
+ * 它属于哪个主会话，而不是散成一堆同名子会话（用户明确要求）。 */
+function renderArchivedSection(box, items) {
+  if (!items.length) return;
+  const open = state.archiveOpen !== false;
+  const head = doc.createElement('button');
+  head.type = 'button';
+  head.className = 'history-archived-head';
+  head.textContent = (open ? '▾ ' : '▸ ') + '已归档（' + items.length + '）';
+  head.setAttribute('aria-expanded', open ? 'true' : 'false');
+  head.onclick = () => { state.archiveOpen = !open; renderHistory(); };
+  box.appendChild(head);
+  if (!open) return;
+  const groups = new Map();
+  for (const it of items) {
+    const root = it.parent || it.name;
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(it);
+  }
+  for (const [root, rows] of groups) {
+    if (rows.some((r) => r.parent)) {
+      const gt = doc.createElement('div');
+      gt.className = 'history-archived-group';
+      gt.textContent = '主会话：' + root;
+      gt.title = '这些子会话归档自「' + root + '」';
+      box.appendChild(gt);
+    }
+    for (const it of rows) box.appendChild(archivedRow(it));
+  }
+}
+
+/// 归档行的最小版式：名字 + ·已归档 + 铅笔菜单；点开是只读视图，恢复从菜单或只读条走。
+function archivedRow(it) {
+  const row = doc.createElement('div');
+  row.className = 'history-item archived';
+  row.title = '已归档：点开只读查看，可「恢复归档」';
+  row.setAttribute('role', 'button');
+  row.tabIndex = 0;
+  row.onclick = () => openHistory(it.name);
+  row.onkeydown = (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    openHistory(it.name);
+  };
+  const sp = doc.createElement('span'); sp.className = 'history-toggle'; row.appendChild(sp);
+  const name = doc.createElement('span');
+  name.className = 'hname'; name.textContent = it.name; name.title = it.name;
+  const mode = doc.createElement('span'); mode.className = 'hmode';
+  mode.textContent = '·已归档 ' + it.mode;
+  const pencil = ui.iconButton({ icon: 'pencil', label: '会话操作', tip: '', cls: 'hpen' });
+  pencil.onclick = (e) => { e.stopPropagation(); ui.menu(pencil, historyMenu(it)); };
+  row.appendChild(name); row.appendChild(mode); row.appendChild(pencil);
+  return row;
 }
 
 /* 记的是虚拟机档、但本机现在承载不了：**不拦打开**（记录是用户的），只主动把原因与出路说清。
@@ -192,6 +260,7 @@ async function openHistory(name) {
     const hist = (state.history || []).find((x) => x.name === name);
     s.workspace = (hist && hist.workspace) || null;
     s.workspace_missing = !!(hist && hist.workspace_missing);
+    s.run = (hist && hist.run) || 'active';
     s.hydrated = true;
     // 合流：盘上转录 + 事件台尾巴一次给全；水位 = 合流时的头部（之后的实时批次照收）。
     if (typeof r.head === 'number') s.floor = r.head;
@@ -221,16 +290,14 @@ async function stopHistory(name) {
     ui.toast('ok', '已停止会话：' + name);
   } catch (err) { ui.notice('操作失败', err.message, 'err'); }
 }
-
 /// 继续：解冻运行态并接着走（已停止的会话回到工作；不新增用户发言）。
-async function continueHistory(name) {
-  try {
-    await api('POST', actionUrl('control_session'), { session_id: name, action: 'continue' });
-    await refreshState();
-    renderAll();
-    ui.toast('ok', '已继续会话：' + name);
-  } catch (err) { ui.notice('操作失败', err.message, 'err'); }
-}
+async function continueHistory(name) { await app.continueSession(name); }
+
+/// 归档：整棵子树从主列表收起，记录都在；不删数据，随时可「恢复归档」。
+async function archiveHistory(name) { await app.archiveSession(name); }
+
+/// 恢复归档：翻回 active，不唤醒；要能对话再点「启用会话」。
+async function restoreHistory(name) { await app.restoreArchive(name); }
 
 async function deleteHistory(name) {
   // 外部工作区不归本产品所有：删除只删会话目录，必须先说清“工作区文件保留”。
