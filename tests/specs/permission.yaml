@@ -4,6 +4,11 @@
 
 unit: permission
 title: 权限合成与围栏
+
+mutation:
+  schedule: weekly
+  files:
+    - src/capabilities/permission/domain/permission.rs
 cases:
   - id: cargo/tests::fence_reach
     tier: T1

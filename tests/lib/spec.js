@@ -3,7 +3,8 @@
  * 为什么要有它：用例散在 Rust 文件与 e2e 里时，"某单元有哪些用例、某个用例属于谁"只能靠文件名猜；
  * 重构搬目录就全量失真。声明与实现分开后，搬实现只动适配层，声明仍指向行为。
  *
- * 语法是**受限子集**（不是通用 YAML）：只认 unit / title / cases，以及每个 case 的 id / tier / note。
+ * 语法是**受限子集**（不是通用 YAML）：只认 unit / title / cases / mutation，
+ * 以及每个 case 的 id / tier / note、mutation 的 schedule / files。
  * 认不出的语法一律报错（带行号）——静默忽略会让"声明了但没生效"看起来全绿。
  */
 "use strict";
@@ -24,11 +25,12 @@ function valueOf(raw) {
   return s;
 }
 
-/** 解析一份 spec 文本；返回 { unit, title, cases } 或抛出带行号的错误。 */
+/** 解析一份 spec 文本；返回 { unit, title, cases, mutation } 或抛出带行号的错误。 */
 function parseSpec(text, file) {
-  const out = { unit: null, title: null, cases: [] };
+  const out = { unit: null, title: null, cases: [], mutation: null };
   const lines = String(text).split(/\r?\n/);
-  let inCases = false;
+  let mode = "";
+  let inFiles = false;
   let cur = null;
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
@@ -37,38 +39,81 @@ function parseSpec(text, file) {
     const at = () => (file ? file + ":" + (i + 1) : "第 " + (i + 1) + " 行");
     const indent = raw.length - raw.replace(/^\s+/, "").length;
     if (indent === 0) {
-      const m = t.match(/^(unit|title|cases):\s*(.*)$/);
-      if (!m) throw new Error(at() + " 无法解析：" + t + "（只认 unit / title / cases）");
+      const m = t.match(/^(unit|title|cases|mutation):\s*(.*)$/);
+      if (!m) throw new Error(at() + " 无法解析：" + t + "（只认 unit / title / cases / mutation）");
       if (m[1] === "cases") {
         if (m[2]) throw new Error(at() + " cases 只能换行写列表");
-        inCases = true;
+        mode = "cases";
         continue;
       }
+      if (m[1] === "mutation") {
+        if (m[2]) throw new Error(at() + " mutation 只能换行写 schedule / files");
+        out.mutation = { schedule: null, files: [] };
+        mode = "mutation";
+        inFiles = false;
+        continue;
+      }
+      mode = "";
       if (m[1] === "unit") out.unit = valueOf(m[2]);
       else out.title = valueOf(m[2]);
       if (!valueOf(m[2])) throw new Error(at() + " " + m[1] + " 不能为空");
       continue;
     }
-    if (!inCases) throw new Error(at() + " 缩进行只能出现在 cases: 之后：" + t);
-    if (indent === 2 && t.startsWith("- ")) {
-      cur = { id: null, tier: null, note: "" };
-      out.cases.push(cur);
-      const kv = t.slice(2).match(/^([a-z]+):\s*(.*)$/);
-      if (!kv || kv[1] !== "id") throw new Error(at() + " 列表项的第一行必须是 - id: …：" + t);
-      cur.id = valueOf(kv[2]);
-      continue;
+    if (mode === "cases") {
+      if (indent === 2 && t.startsWith("- ")) {
+        cur = { id: null, tier: null, note: "" };
+        out.cases.push(cur);
+        const kv = t.slice(2).match(/^([a-z]+):\s*(.*)$/);
+        if (!kv || kv[1] !== "id") throw new Error(at() + " 列表项的第一行必须是 - id: …：" + t);
+        cur.id = valueOf(kv[2]);
+        continue;
+      }
+      if (indent === 4 && cur) {
+        const kv = t.match(/^([a-z]+):\s*(.*)$/);
+        if (!kv) throw new Error(at() + " 无法解析：" + t);
+        if (kv[1] === "tier") cur.tier = valueOf(kv[2]);
+        else if (kv[1] === "note") cur.note = valueOf(kv[2]);
+        else throw new Error(at() + " 未知字段：" + kv[1] + "（只认 tier / note）");
+        continue;
+      }
+      throw new Error(at() + " 缩进不对（列表项 2 格、字段 4 格）：" + t);
     }
-    if (indent === 4 && cur) {
-      const kv = t.match(/^([a-z]+):\s*(.*)$/);
-      if (!kv) throw new Error(at() + " 无法解析：" + t);
-      if (kv[1] === "tier") cur.tier = valueOf(kv[2]);
-      else if (kv[1] === "note") cur.note = valueOf(kv[2]);
-      else throw new Error(at() + " 未知字段：" + kv[1] + "（只认 tier / note）");
-      continue;
+    if (mode === "mutation") {
+      if (indent === 2) {
+        const kv = t.match(/^(schedule|files):\s*(.*)$/);
+        if (!kv) throw new Error(at() + " mutation 只认 schedule / files：" + t);
+        if (kv[1] === "schedule") {
+          out.mutation.schedule = valueOf(kv[2]);
+          inFiles = false;
+        } else {
+          if (kv[2]) throw new Error(at() + " files 只能换行写列表");
+          inFiles = true;
+        }
+        continue;
+      }
+      if (indent === 4 && inFiles && t.startsWith("- ")) {
+        const f = valueOf(t.slice(2));
+        if (!f) throw new Error(at() + " 空的突变文件路径");
+        out.mutation.files.push(f);
+        continue;
+      }
+      throw new Error(at() + " mutation 的缩进不对（schedule/files 2 格、文件 4 格）：" + t);
     }
-    throw new Error(at() + " 缩进不对（列表项 2 格、字段 4 格）：" + t);
+    throw new Error(at() + " 缩进行只能出现在 cases: 或 mutation: 之后：" + t);
   }
   if (!out.unit) throw new Error((file || "spec") + " 缺 unit:");
+  if (out.mutation) {
+    const name = file || "spec";
+    const m = out.mutation;
+    if (!m.schedule) throw new Error(name + " 的 mutation 缺 schedule（weekly / none）");
+    if (m.schedule !== "weekly" && m.schedule !== "none") {
+      throw new Error(name + " 的 mutation.schedule 只认 weekly / none，收到：" + m.schedule);
+    }
+    if (!m.files.length) throw new Error(name + " 的 mutation.files 不能为空（不登记就整块删掉）");
+    for (const [i, f] of m.files.entries()) {
+      if (m.files.indexOf(f) !== i) throw new Error(name + " 的 mutation.files 重复：" + f);
+    }
+  }
   for (const [i, c] of out.cases.entries()) {
     if (!c.id) throw new Error((file || "spec") + " 第 " + (i + 1) + " 个用例缺 id");
     if (!c.tier) throw new Error((file || "spec") + " 用例 " + c.id + " 缺 tier");

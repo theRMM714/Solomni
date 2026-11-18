@@ -15,7 +15,7 @@
 
 - 测试只钉**可观察行为**：能力面（`capabilities/<单元>/<子业务>/api.rs` 的入站对象）、端口契约、内核真实实例与 E2E 旅程。`service` / `domain` / `detail` 的自由函数、内部结构与状态机**不单独写用例**——实现会频繁搬迁，钉住它的用例最先腐烂；这些行为改由驱动能力面或旅程的用例覆盖。
 - **不做内部实现测试**：`src/tests/**` 只能经 `capabilities/<单元>/<子业务>::api`、`::ports` 或组合根 `crate::entry::assembly` 取实现，出现 `::service` / `::domain` / `::detail` 即失败（门禁 `structure/tests-api`，豁免只有替身层 `doubles` / `fakes` / `prelude` / `builders` / `detail` / `helpers`）。这条用机器判，不靠评审记忆。
-- 测试清单只有一处声明：`tests/specs/<单元>.yaml`（一条用例一行：`id` / `tier` / `note`）。`src/tests` 下每个带 `#[test]` 的模块、`tests/journeys/index.js` 的每段旅程都必须被声明，反向声明也必须落到实现——任一处对不上即失败（门禁 `structure/specs`）。`node run-tests.js --plan` 看会跑什么，`--unit` / `--tier` / `--journey` 选子集。
+- 测试清单只有一处声明：`tests/specs/<单元>.yaml`（一条用例一行：`id` / `tier` / `note`；突变范围也用同一个文件的 `mutation` 块声明 `schedule` 与 `files`，由门禁 `structure/mutation` 判路径存在与归属）。`src/tests` 下每个带 `#[test]` 的模块、`tests/journeys/index.js` 的每段旅程都必须被声明，反向声明也必须落到实现——任一处对不上即失败（门禁 `structure/specs`）。`node run-tests.js --plan` 看会跑什么，`--unit` / `--tier` / `--journey` 选子集。
 
 - 内核（`src/kernel/**`）的内联测试用**真实实例**（临时目录、真实进程、真文件系统），不引用 `crate::tests` 的业务替身（门禁 `structure/kernel-tests`）：底层稳定，替身只会把"替身的行为"当成内核的事实。
 - 测试替身优先 **fake**（端口的内存实现，内部协作用它，不写 Mock）。**Mock 只写在边界**：模拟网络、第三方 API、不可控的外部服务（例如 `src/tests/detail/http.rs` 的本地假供应商）——那里的协议形状是必须钉死的外部契约。内部调用次数、调用顺序、私有方法都不许断言：耦合实现的断言在重构时只会制造假失败。
