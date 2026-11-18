@@ -23,6 +23,20 @@ pub(super) fn product_sid() -> Result<PSID, String> {
     sid_from_string(&sid_to_string(owned.as_ptr() as PSID))
 }
 
+/// 目的：探针父目录是不是**已经**从祖先继承到本产品能力 SID 的只读属性授权。
+/// 参数：path——探针要塞只读属性授权的那个目录（调用前应已建好）。
+/// 返回：true 表示 `prepare_fence` 会按「已有 ACE 就跳过」不再写自己那条，验证「写下去」的断言要换成分支。
+/// 约束：只看标准允许 ACE 且权限位覆盖得住；对象自己带的显式 ACE 不算（那正是探针要验证的产物）。
+pub(super) fn inherits_machine_stat(path: &Path) -> bool {
+    let Ok(cap) = product_sid() else {
+        return false;
+    };
+    let inherited =
+        has_ace_for(cap, path, RIGHTS_STAT) && !has_explicit_ace_for(cap, path, RIGHTS_STAT);
+    free_sid(cap);
+    inherited
+}
+
 /// 把对象 DACL 里的 ACE 逐条转储成可读文本（残留调查用：原始权限位 + 继承标志 + SID + 对象 GUID）。
 /// 走 acl_scan：**偏移与认不出的条数都由它一处给出**，诊断不会另抄一套读法而看不出对象 ACE。
 fn dump_aces(path: &Path) -> String {
