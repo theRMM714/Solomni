@@ -80,7 +80,10 @@ mod tests {
     fn long_output_is_handed_over_whole_with_the_status_line_last() {
         let long = "x".repeat(40_000);
         let out = shell_receipt(&texts(), &long, "", ShellEnd::Exit(Some(0)));
-        assert_eq!(out.chars().count(), 40_000 + 1 + "[shell] 退出码 0".chars().count());
+        assert_eq!(
+            out.chars().count(),
+            40_000 + 1 + "[shell] 退出码 0".chars().count()
+        );
         assert!(out.ends_with("[shell] 退出码 0"), "状态行必须最后");
         assert!(!out.contains("[截断]"), "装配层不做预算");
     }

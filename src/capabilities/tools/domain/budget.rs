@@ -78,9 +78,9 @@ pub fn cap_result(text: String, hint: Continuation) -> String {
 /// 目的：这条回执是不是已经收过预算（标记是行首标记；上限附近才认，避免把正文里恰好同形的行当标记）。
 fn already_capped(text: &str, total: usize) -> bool {
     total <= MAX_RESULT_CHARS + 600
-        && text.lines().any(|line| {
-            line.starts_with("[结果截断] ") || line.starts_with("[截断] 输出共 ")
-        })
+        && text
+            .lines()
+            .any(|line| line.starts_with("[结果截断] ") || line.starts_with("[截断] 输出共 "))
 }
 
 /// 目的：开头窗口——取 budgets 个字符内的最后一个换行之前；第一行就超预算时按字符切（返回 false）。
@@ -137,7 +137,10 @@ mod tests {
         assert_eq!(out.matches("[结果截断]").count(), 1, "只许一条标记");
         assert!(out.contains("按完整行取整"), "要说明切分口径");
         assert!(out.contains("offset/limit"), "文件类要给续读办法");
-        assert!(out.chars().count() <= MAX_RESULT_CHARS + 200, "预算要真的生效");
+        assert!(
+            out.chars().count() <= MAX_RESULT_CHARS + 200,
+            "预算要真的生效"
+        );
         assert!(out.ends_with("line-2999\n"), "结尾保留最后一行");
         assert!(out.starts_with("line-0000\n"), "开头保留第一行");
         for line in out.lines().filter(|l| l.starts_with("line-")) {

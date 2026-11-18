@@ -114,26 +114,32 @@ impl ToolExec for ToolsService {
         let lease = self.module_lease(module);
         if parallel {
             let _shared = lease.read().unwrap_or_else(|e| e.into_inner());
-            within_budget(host_outcome(self.runner.run(
-                fence,
-                command,
-                args_json,
-                env,
-                path,
-                ask,
-                Some(self.gate.as_ref()),
-            )), Continuation::Command)
+            within_budget(
+                host_outcome(self.runner.run(
+                    fence,
+                    command,
+                    args_json,
+                    env,
+                    path,
+                    ask,
+                    Some(self.gate.as_ref()),
+                )),
+                Continuation::Command,
+            )
         } else {
             let _exclusive = lease.write().unwrap_or_else(|e| e.into_inner());
-            within_budget(host_outcome(self.runner.run(
-                fence,
-                command,
-                args_json,
-                env,
-                path,
-                ask,
-                Some(self.gate.as_ref()),
-            )), Continuation::Command)
+            within_budget(
+                host_outcome(self.runner.run(
+                    fence,
+                    command,
+                    args_json,
+                    env,
+                    path,
+                    ask,
+                    Some(self.gate.as_ref()),
+                )),
+                Continuation::Command,
+            )
         }
     }
 
@@ -148,7 +154,10 @@ impl ToolExec for ToolsService {
             ask: run.ask,
             gate: Some(self.gate.as_ref()),
         };
-        within_budget(host_outcome(self.runner.run_shell(&run)), Continuation::Command)
+        within_budget(
+            host_outcome(self.runner.run_shell(&run)),
+            Continuation::Command,
+        )
     }
 
     fn run_builtin(
@@ -160,14 +169,17 @@ impl ToolExec for ToolsService {
         args_json: &str,
     ) -> Recorded {
         let mut observations = observations;
-        let outcome = within_budget(crate::capabilities::tools::service::systool::execute(
-            sb,
-            builtin_tools,
-            self.io.as_ref(),
-            &mut observations,
-            name,
-            args_json,
-        ), budget::continuation_for("", name));
+        let outcome = within_budget(
+            crate::capabilities::tools::service::systool::execute(
+                sb,
+                builtin_tools,
+                self.io.as_ref(),
+                &mut observations,
+                name,
+                args_json,
+            ),
+            budget::continuation_for("", name),
+        );
         Recorded {
             outcome,
             observations,

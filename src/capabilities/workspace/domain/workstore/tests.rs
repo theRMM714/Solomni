@@ -132,12 +132,7 @@ fn commit_rules_cover_add_modify_delete_and_noop() {
         vec![("f1".to_string(), Unchanged::AlreadyDeleted)]
     );
     // 没基线、主线里也没有这条路径（例如沙箱里删掉一个已自动提交过的文件）→ 已经没有了，不是冲突。
-    let plan = plan_commit(
-        &index(&[]),
-        &tree(&[]),
-        &locals(&[("f1", None)]),
-    )
-    .unwrap();
+    let plan = plan_commit(&index(&[]), &tree(&[]), &locals(&[("f1", None)])).unwrap();
     assert!(plan.changes.is_empty());
     assert_eq!(
         plan.unchanged,
