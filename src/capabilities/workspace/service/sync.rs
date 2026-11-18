@@ -246,9 +246,12 @@ impl WorkspaceService {
         })
     }
 
+    /// 目的：逐条判定「读过的行现在还在不在」——主副本的读对照 head 树，沙箱的读对照沙箱当前内容。
+    /// 约束：判定失败一律按过期处理（宁可供模型重读，也不供奉可能错的旧内容）。
     pub(super) fn work_stale_reads(
         &self,
         work: &str,
+        agent: &str,
         queries: &[ReadQuery],
     ) -> Result<Vec<bool>, String> {
         if queries.is_empty() {
@@ -260,8 +263,42 @@ impl WorkspaceService {
         let _ = shared;
         let _lock = self.store.lock(&store)?;
         let (_head, tree) = self.head_tree(&store)?;
+        // 沙箱根只在真有沙箱读时才取（没有沙箱的会话不该因为这条判定失败）。
+        let mut sandbox: Option<PathBuf> = None;
         let mut out = Vec::with_capacity(queries.len());
         for q in queries {
+            if q.sandbox {
+                let root = match &sandbox {
+                    Some(p) => p.clone(),
+                    None => {
+                        let p = self.agent_roots(work, agent)?.2;
+                        sandbox = Some(p.clone());
+                        p
+                    }
+                };
+                let Some(now) =
+                    self.store
+                        .scan_under(&root, &q.path, Some(self.max_asset_bytes as usize))?
+                else {
+                    out.push(true);
+                    continue;
+                };
+                if now.hash == q.blob {
+                    out.push(false);
+                    continue;
+                }
+                let old = self.store.read_object(&store, &q.blob).ok();
+                match (old, now.text) {
+                    (Some(old), Some(new)) => match String::from_utf8(old) {
+                        Ok(old) => out.push(lines_changed(&old, &new, q.from, q.to)),
+                        // 读的时候是文本、现在读不出正文（二进制 / 太大）：按过期处理。
+                        Err(_) => out.push(true),
+                    },
+                    // 旧对象缺失或现在不是文本：没法按行比，按过期处理。
+                    _ => out.push(true),
+                }
+                continue;
+            }
             // 路径在主副本里没了 = 读过的东西已经不在了。
             let Some(now) = tree.get(&q.path) else {
                 out.push(true);

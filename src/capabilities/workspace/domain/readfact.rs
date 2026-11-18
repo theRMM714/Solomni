@@ -10,7 +10,8 @@
 ///   半份内容无法与后续版本做块对齐，冒然判定只会误导模型。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ReadFact {
-    /// 目的：读的是哪个工作树（agent 沙箱名）；空 = 主副本。
+    /// 目的：读的是哪个工作树（沙箱路径里的 agent 段）；空 = 主副本。
+    /// 约束：只用来区分「这次读发生在沙箱还是主副本」，过期的对照物随之不同。
     pub worktree: String,
     /// 目的：工作树内的相对路径（斜杠分隔）。
     pub path: String,

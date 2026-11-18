@@ -401,8 +401,9 @@ impl WorkspaceService {
                 if let Some(index) = index {
                     self.store.write_index(store, &index.agent, &index.index)?;
                 }
-                // 发布成功：发布者的发布线快进到这条提交，它从这里开始与主线一致。
-                if !commit.author.is_empty() && commit.author != "user" {
+                // 发布成功：发布者的工作线快进到这条提交，它从这里开始与主线一致。
+                // 约束：只有工具侧发布（`work_push`）才有发布者；外部同步与用户投喂不是 agent，不给它们建工作线。
+                if commit.source == Source::Tool {
                     self.fast_forward_work(store, &commit.author, Some(commit.id))?;
                 }
             }
