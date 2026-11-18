@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::kernel::ports::{FenceCase, FenceVerdict, ShellRun};
+use std::os::windows::fs::MetadataExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -204,16 +205,60 @@ impl ProcTools {
     }
 }
 
-/// 目的：这次 shell 用哪个 PowerShell：显式覆盖优先，否则 pwsh 7 优先、powershell 5.1 回退。
-fn resolve_powershell(tools: &ProcTools) -> &'static str {
-    if let Some(program) = tools.platform.shell_ps {
+/// 目的：一个候选解释器在 PATH 上是什么（判据在 `exe_fact`，决策在 `pick_powershell`——两者都便于三态覆盖）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ExeFact {
+    /// 目的：PATH 里找不到这个程序。
+    Missing,
+    /// 目的：真实可执行文件（本机安装的 pwsh 7）。
+    Real,
+    /// 目的：应用执行别名（Microsoft Store 的 0 字节重解析点）——cmd 起不来它，进不了围栏。
+    AppAlias,
+}
+
+/// 目的：选这次 shell 的解释器：显式覆盖优先；pwsh 只有是真身才用，别名与缺失都回退 5.1。
+/// 约束：纯函数——事实由 `exe_fact` 给出，这里不碰文件系统；显式覆盖不做判据（只给真机验 5.1 回退）。
+fn pick_powershell(override_program: Option<&'static str>, pwsh: ExeFact) -> &'static str {
+    if let Some(program) = override_program {
         return program;
     }
-    if crate::kernel::detail::host_probe::find_exe("pwsh").is_some() {
-        "pwsh"
-    } else {
-        "powershell"
+    match pwsh {
+        ExeFact::Real => "pwsh",
+        ExeFact::Missing | ExeFact::AppAlias => "powershell",
     }
+}
+
+/// 目的：把 `find_exe` 的结果按「能不能真起进程」分类：应用执行别名不算解释器。
+fn exe_fact(path: Option<&std::path::Path>) -> ExeFact {
+    let Some(path) = path else {
+        return ExeFact::Missing;
+    };
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return ExeFact::Missing;
+    };
+    if looks_like_app_exec_alias(
+        meta.file_attributes(),
+        meta.file_type().is_symlink(),
+        meta.len(),
+    ) {
+        ExeFact::AppAlias
+    } else {
+        ExeFact::Real
+    }
+}
+
+/// 目的：应用执行别名的判据本体（纯函数）：带重解析点、不是符号链接、0 字节。
+/// 约束：符号链接（同样是重解析点，但指向真身）按真身用；目录不会走到这里（`find_exe` 只认文件）。
+fn looks_like_app_exec_alias(attributes: u32, is_symlink: bool, len: u64) -> bool {
+    /// 目的：`FILE_ATTRIBUTE_REPARSE_POINT`——重解析点（应用执行别名与符号链接都有）。
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 && !is_symlink && len == 0
+}
+
+/// 目的：这次 shell 用哪个 PowerShell：显式覆盖优先，否则 pwsh 7 优先、powershell 5.1 回退（别名不算 pwsh 7）。
+fn resolve_powershell(tools: &ProcTools) -> &'static str {
+    let found = crate::kernel::detail::host_probe::find_exe("pwsh");
+    pick_powershell(tools.platform.shell_ps, exe_fact(found.as_deref()))
 }
 
 /// 目的：Windows PowerShell 5.1 在容器里自动加载内核模块会带非终止错误；先按 Continue 载入常用模块，
@@ -276,3 +321,6 @@ fn write_shell_script(run: &ShellRun<'_>) -> Result<(String, PathBuf), String> {
     }
     Err("建 shell 临时脚本失败：名字用完了".to_string())
 }
+
+#[cfg(test)]
+mod tests;
