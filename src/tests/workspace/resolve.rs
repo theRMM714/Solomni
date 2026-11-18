@@ -210,11 +210,11 @@ pub(crate) fn work_resolve_upstream_backs_up_and_work_lost_restores() {
         .unwrap();
     assert_eq!(rep.entries[0].action, ResolveAction::WroteUpstream);
     let backup = rep.entries[0].backup.as_deref().expect("要有备份路径");
-    assert_eq!(backup, "lost/b/note.md");
+    assert_eq!(backup, "@resolve/note.md");
     let backup_root = ws.roots("w", &[]).unwrap().store.join("lost").join("b");
     assert_eq!(
         store
-            .read_under(&backup_root, "note.md")
+            .read_under(&backup_root, "@resolve/note.md")
             .unwrap()
             .as_deref(),
         Some(&b"b-change"[..])
@@ -288,11 +288,11 @@ pub(crate) fn work_resolve_upstream_backs_up_before_removing_local() {
         .unwrap();
     assert_eq!(rep.entries[0].action, ResolveAction::RemovedLocal);
     let backup = rep.entries[0].backup.as_deref().expect("删除前也要备份");
-    assert_eq!(backup, "lost/a/gone.txt");
+    assert_eq!(backup, "@resolve/gone.txt");
     let backup_root = ws.roots("w", &[]).unwrap().store.join("lost").join("a");
     assert_eq!(
         store
-            .read_under(&backup_root, "gone.txt")
+            .read_under(&backup_root, "@resolve/gone.txt")
             .unwrap()
             .as_deref(),
         Some(&b"local"[..])

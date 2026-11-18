@@ -200,8 +200,9 @@ pub trait Workspace: Send + Sync {
         session: &str,
         req: &CommitRequest,
     ) -> Result<CommitReport, String>;
-    /// **推送**：把工作线上已提交的改动三方合并进主线（`base` = 我的拉取基线，`mine` = 我的工作线头，
-    ///   `theirs` = 主线头），干净就把结果 squash 成主线一条提交、物化共享区、把工作线快进过去。
+    /// **推送**：把工作线上已提交的改动三方合并进主线（`base` = 我这条线与主线的**分叉点**提交树，
+    ///   分叉点之后我拉过却没在工作线提交过的路径按拉取基线补录；`mine` = 我的工作线头，`theirs` = 主线头），
+    ///   干净就把结果 squash 成主线一条提交、物化共享区、把工作线快进过去。
     /// 约束：不重写工作线历史；冲突整次拒绝并逐条点名（先 work_pull 再合并重推）。
     fn work_push(
         &self,

@@ -21,6 +21,7 @@ impl WorkspaceService {
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &_shared, &store)?;
         let lost = lost_root(&store, agent)?;
+        // 备份目录里存的是 `@<来源>/<原路径>`：过滤与当前指纹都按原路径判，回执里把两边都报出来。
         let filter = match path {
             Some(p) => Some(clean_rel(p)?),
             None => None,
@@ -28,8 +29,17 @@ impl WorkspaceService {
         let mut rels = self.store.list(&lost)?;
         rels.retain(|r| !is_lost_temp(r));
         if let Some(f) = &filter {
-            rels.retain(|r| r == f || r.starts_with(&format!("{}/", f)));
+            rels.retain(|r| {
+                let (_, original) = split_backup(r);
+                r == f || original == f || original.starts_with(&format!("{}/", f))
+            });
         }
+        // 同一路径的多份备份挨在一起（按原路径排，再按备份位置排）。
+        rels.sort_by(|a, b| {
+            let (_, pa) = split_backup(a);
+            let (_, pb) = split_backup(b);
+            pa.cmp(pb).then_with(|| a.cmp(b))
+        });
         let total = rels.len();
         let truncated = total > MAX_LOST;
         rels.truncate(MAX_LOST);
@@ -38,9 +48,12 @@ impl WorkspaceService {
             let Some(v) = self.store.scan_under(&lost, &rel, None)? else {
                 continue;
             };
-            let current = self.store.scan_under(&sandbox, &rel, None)?;
+            let (origin, path) = split_backup(&rel);
+            let current = self.store.scan_under(&sandbox, path, None)?;
             entries.push(LostEntry {
-                path: rel,
+                path: path.to_string(),
+                backup: rel.clone(),
+                origin: origin.map(str::to_string),
                 hash: v.hash,
                 size: v.size,
                 current_hash: current.map(|c| c.hash),
@@ -61,22 +74,44 @@ impl WorkspaceService {
         path: &str,
         expect_current: &str,
     ) -> Result<RestoreLostReport, String> {
-        let rel = clean_rel(path)?;
+        let raw = clean_rel(path)?;
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (_shared, store, sandbox) = self.agent_roots(work, agent)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &_shared, &store)?;
         let lost = lost_root(&store, agent)?;
-        let backups = self.store.list(&lost)?;
-        if !backups.iter().any(|p| p == &rel) {
-            return Err(format!(
-                "没有这个被覆盖的本地版本：{}（先用 work_lost 看可恢复清单）",
-                rel
-            ));
+        // path 认两种写法：原路径（唯一一份时直取）、备份位置 `@<来源>/<原路径>`（同一路径有多份备份时点名）。
+        let mut hits: Vec<String> = Vec::new();
+        for stored in self.store.list(&lost)? {
+            if is_lost_temp(&stored) {
+                continue;
+            }
+            let (_, original) = split_backup(&stored);
+            if stored == raw || original == raw {
+                hits.push(stored);
+            }
         }
-        let Some(backup) = self.store.scan_under(&lost, &rel, None)? else {
-            return Err(format!("备份文件不存在：{}", rel));
+        let stored = match hits.len() {
+            0 => {
+                return Err(format!(
+                    "没有这个被覆盖的本地版本：{}（先用 work_lost 看可恢复清单）",
+                    raw
+                ));
+            }
+            1 => hits.remove(0),
+            _ => {
+                return Err(format!(
+                    "{} 有 {} 份备份：{}。恢复要指明一份：把 path 传成备份位置（`@<来源>/<路径>`，work_lost 的清单里有）",
+                    raw,
+                    hits.len(),
+                    hits.join("、")
+                ));
+            }
+        };
+        let rel = split_backup(&stored).1.to_string();
+        let Some(backup) = self.store.scan_under(&lost, &stored, None)? else {
+            return Err(format!("备份文件不存在：{}", stored));
         };
         let current = self.store.scan_under(&sandbox, &rel, None)?;
         let current_hash = current.as_ref().map(|v| v.hash.clone());
@@ -92,9 +127,10 @@ impl WorkspaceService {
         }
         let size = self
             .store
-            .copy_under_to_under(&lost, &rel, &sandbox, &rel, &backup.hash)?;
+            .copy_under_to_under(&lost, &stored, &sandbox, &rel, &backup.hash)?;
         Ok(RestoreLostReport {
             path: rel,
+            backup: stored,
             hash: backup.hash,
             size,
             previous: current_hash,

@@ -1,5 +1,5 @@
 //! 目的：共享区相对路径的校验与拼接——所有 `work_*` 入口的第一道关。
-//! 管：`clean_rel` / `validate_paths` / `join_rel` / `expand_paths` / `lost_rel`。
+//! 管：`clean_rel` / `validate_paths` / `join_rel` / `expand_paths` / `backup_rel` / `split_backup`。
 //! 不管：路径落在哪个根之内的校验由调用方在 `join_rel` 之后再判；备份内容的写入在 `workspace::detail`。
 //! 联动：被 `merge.rs` 的提交计划与 `workspace/service` 消费（docs/workspace/README.md）。
 
@@ -80,17 +80,37 @@ pub fn expand_paths(paths: &[String], available: &BTreeSet<String>) -> (Vec<Stri
     (out.into_iter().collect(), missing)
 }
 
-/// 目的：把一个 agent 的一条路径映射到版本库里的备份相对路径：`lost/<agent>/<rel>`。
-/// 约束：agent 必须能作为单个路径组件；rel 必须是干净的共享区相对路径。
-pub fn lost_rel(agent: &str, rel: &str) -> Result<String, String> {
-    let rel = clean_rel(rel)?;
-    if agent.is_empty()
-        || agent == "."
-        || agent == ".."
-        || agent.contains('/')
-        || agent.contains('\\')
+/// 目的：一份备份在 `lost/<agent>/` 下的存储相对路径：`@<来源>/<原路径>`。
+/// 约束：来源是人读的产点（`resolve` / `reset-paths` / `reset-3` / `delete-7` / `archive-2` / `rewind-4` / `restore-2`），
+///   只占一个目录段；原路径必须已经过 `clean_rel`。
+pub fn backup_rel(origin: &str, rel: &str) -> String {
+    format!("@{}/{}", origin.trim_start_matches('@'), rel)
+}
+
+/// 目的：把一份备份的存储相对路径拆回（来源，原路径）。
+/// 约束：新备份首段以 `@` 开头；旧备份没有标记，按已知产点前缀识别（`reset-paths` / `reset-<id>` / `delete-<id>` /
+///   `delete-empty` / `archive-<id>` / `rewind-*` / `restore-<id>`），都不匹配则整条当原路径（旧 resolve 备份）。
+pub fn split_backup(stored: &str) -> (Option<&str>, &str) {
+    if let Some((first, rest)) = stored.split_once('/')
+        && !rest.is_empty()
     {
-        return Err(format!("agent 名不能用作备份目录：{}", agent));
+        if let Some(origin) = first.strip_prefix('@')
+            && !origin.is_empty()
+        {
+            return (Some(origin), rest);
+        }
+        if is_legacy_origin(first) {
+            return (Some(first), rest);
+        }
     }
-    Ok(format!("lost/{}/{}", agent, rel))
+    (None, stored)
+}
+
+fn is_legacy_origin(seg: &str) -> bool {
+    if matches!(seg, "reset-paths" | "delete-empty") {
+        return true;
+    }
+    ["reset-", "delete-", "archive-", "restore-", "rewind-"]
+        .iter()
+        .any(|p| seg.strip_prefix(p).is_some_and(|rest| !rest.is_empty()))
 }

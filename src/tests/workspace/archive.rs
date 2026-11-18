@@ -55,32 +55,28 @@ pub(crate) fn work_archive_moves_every_sandbox_to_one_point_and_keeps_uncommitte
         Some(&b"v1"[..])
     );
 
-    // 未提交内容没被丢：按 lost 里的 archive-<mark>/<路径> 读得回。
+    // 未提交内容没被丢：按 lost 里的 @archive-<mark>/<路径> 读得回，恢复时放回原路径。
     let lost_b = ws.work_lost("w", "b", None).unwrap();
     assert!(
         lost_b
             .entries
             .iter()
-            .any(|e| e.path == "archive-1/b-draft.md"),
+            .any(|e| e.path == "b-draft.md" && e.backup == "@archive-1/b-draft.md"),
         "{:?}",
         lost_b
     );
     let back = ws
-        .work_restore_lost("w", "b", "archive-1/b-draft.md", "")
+        .work_restore_lost("w", "b", "@archive-1/b-draft.md", "")
         .unwrap();
     assert_eq!(back.size, "b-draft".len() as u64);
     assert_eq!(
-        store
-            .read_under(&sb, "archive-1/b-draft.md")
-            .unwrap()
-            .as_deref(),
+        store.read_under(&sb, "b-draft.md").unwrap().as_deref(),
         Some(&b"b-draft"[..]),
-        "备份按 lost 里的相对路径放回沙箱"
+        "恢复要落回原路径，不能落到带备份前缀的字面路径"
     );
-    assert!(store.read_under(&sb, "b-draft.md").unwrap().is_none());
     let lost_a = ws.work_lost("w", "a", None).unwrap();
     assert!(
-        lost_a.entries.iter().any(|e| e.path == "archive-1/note.md"),
+        lost_a.entries.iter().any(|e| e.path == "note.md"),
         "{:?}",
         lost_a
     );
@@ -135,7 +131,7 @@ pub(crate) fn work_restore_archive_rewinds_every_sandbox_and_pins_the_line_it_le
             .unwrap()
             .entries
             .iter()
-            .any(|e| e.path == "restore-1/note.md"),
+            .any(|e| e.path == "note.md" && e.backup == "@restore-1/note.md"),
         "恢复前的沙箱内容要进 lost"
     );
 
@@ -215,7 +211,7 @@ pub(crate) fn work_delete_rolls_every_sandbox_back_and_prunes_archives() {
             .unwrap()
             .entries
             .iter()
-            .any(|e| e.path == format!("delete-{}/note.md", id1)),
+            .any(|e| e.path == "note.md" && e.backup == format!("@delete-{}/note.md", id1)),
         "删除前的沙箱内容要进 lost"
     );
     assert!(
@@ -223,7 +219,7 @@ pub(crate) fn work_delete_rolls_every_sandbox_back_and_prunes_archives() {
             .unwrap()
             .entries
             .iter()
-            .any(|e| e.path == format!("delete-{}/b-draft.md", id1)),
+            .any(|e| e.path == "b-draft.md" && e.backup == format!("@delete-{}/b-draft.md", id1)),
         "删除前的草稿要进 lost"
     );
 
@@ -279,7 +275,7 @@ pub(crate) fn work_archive_puts_each_sandbox_on_its_own_save_snapshot() {
             .unwrap()
             .entries
             .iter()
-            .any(|e| e.path == "archive-1/later.md"),
+            .any(|e| e.path == "later.md" && e.backup == "@archive-1/later.md"),
         "留档前的未存档内容进 lost"
     );
 

@@ -146,8 +146,12 @@ pub struct PullReport {
     pub updated: Vec<String>,
     /// 目的：沙箱里已经是主副本这一版：只更新基线。
     pub already: Vec<String>,
-    /// 目的：什么都没变（上游没动）。
+    /// 目的：什么都没变（上游没动、本地也没动）。
     pub no_change: Vec<String>,
+    /// 目的：上游没动、本地改了：沙箱原样保留，未进基线（要发布得 work_commit + work_push）。
+    pub local_modified: Vec<String>,
+    /// 目的：上游没动、本地删了：保持删除，未进基线。
+    pub local_deleted: Vec<String>,
     /// 目的：沙箱里已有未跟踪 / 无关的同名文件，未覆盖。
     pub occupied: Vec<String>,
     /// 目的：本地已改、上游也改了，未覆盖；逐条带冲突类型。

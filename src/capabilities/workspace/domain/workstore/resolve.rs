@@ -170,11 +170,15 @@ pub fn needs_backup(head: Option<&str>, local: Option<&str>) -> bool {
     local.is_some() && local != head
 }
 
-/// 目的：一份被 work_resolve take=upstream 覆盖/删除的本地版本。
+/// 目的：一份被覆盖/删除的本地版本（`work_lost` 的一条）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LostEntry {
-    /// 目的：共享区相对路径。
+    /// 目的：共享区相对路径（原路径；恢复也用它）。
     pub path: String,
+    /// 目的：备份在 `lost/` 下的存储位置（`@<来源>/<原路径>`；同名多份备份时用它点名）。
+    pub backup: String,
+    /// 目的：备份的产点（`resolve` / `reset-paths` / `delete-3` / `archive-2` …）；旧备份没标记 = None。
+    pub origin: Option<String>,
     /// 目的：备份内容的指纹。
     pub hash: String,
     /// 目的：备份内容的字节数。
@@ -199,8 +203,10 @@ pub struct LostReport {
 /// 目的：work_restore_lost 的结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RestoreLostReport {
-    /// 目的：恢复到的共享区相对路径。
+    /// 目的：恢复到的共享区相对路径（原路径）。
     pub path: String,
+    /// 目的：用的是哪一份备份（`@<来源>/<原路径>`）。
+    pub backup: String,
     /// 目的：恢复的备份内容指纹。
     pub hash: String,
     /// 目的：恢复的备份内容字节数。

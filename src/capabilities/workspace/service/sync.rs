@@ -97,6 +97,8 @@ impl WorkspaceService {
                         index_dirty = true;
                     }
                     PullVerdict::NoChange => report.no_change.push(rel.clone()),
+                    PullVerdict::LocalModified => report.local_modified.push(rel.clone()),
+                    PullVerdict::LocalDeleted => report.local_deleted.push(rel.clone()),
                     PullVerdict::Occupied => report.occupied.push(rel.clone()),
                     PullVerdict::Conflict => {
                         // pull 侧能落到 Conflict 的形态：本地删了/上游改了，或两边都改了。
