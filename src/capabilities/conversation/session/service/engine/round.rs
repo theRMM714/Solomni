@@ -271,9 +271,8 @@ pub fn converse_with(
         if user_stopped {
             // 这一轮只记录"未执行"的失败行；循环顶部据此退出，不再发起下一次调用。
             aborted = true;
-            // 已经流到界面上的那半句**留档**：它是用户亲眼看到的东西，凭空消失等于篡改记录。
-            // 但**不进对话**（text_msgs 留空 + 行上带 cut）：中断后点「继续」是重开一轮，
-            // 不是把半句当发言续写（供应商的 prefill 面并不统一，见 docs/session/session-model.md）。
+            // 已经流到界面上的那半句**留档**（用户亲眼看到的东西），但**不进对话**：
+            // text_msgs 留空 + 行上带 cut——点「继续」是重开一轮，不是把它当发言续写。
             let visible = match done.raw.find('{') {
                 Some(i) => done.raw[..i].to_string(),
                 None => done.raw.clone(),
@@ -507,9 +506,7 @@ pub fn converse_with(
                     run_batch(ctx, &plan, confirms.as_mut(), ask, cancel, sink)
                 };
                 // 先按原序把工具行建好（执行已经做完），再让**唯一那处**构造函数产出这一回复的消息：
-                // 实时与重建走同一个函数，"重建上下文与实时一致"因此是结构保证的。
-                // 被中断的那一轮：正文已作为 cut 行留档，这里只留「未执行」的工具行（正文置空），
-                // 免得半句被当成发言记进对话（也免得它挂到下一轮的上下文里）。
+                // 被中断的那一轮正文已作为 cut 行留档，这里只留「未执行」工具行、正文置空、不进对话。
                 let reply_text = if user_stopped {
                     String::new()
                 } else {
