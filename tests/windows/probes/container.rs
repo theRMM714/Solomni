@@ -118,7 +118,7 @@ fn container_cannot_write_outside_its_roots() {
 }
 
 /// **共享区产品契约**：容器的 rw 只有 agent 沙箱（共享主副本不在其中），
-/// 所以模块工具进程绕不过 work_pull / work_commit 直接读写共享区（工具层那一半由 workspace 的用例钉住）。
+/// 所以模块工具进程绕不过 work_pull / work_push 直接读写共享区（工具层那一半由 workspace 的用例钉住）。
 #[test]
 fn container_keeps_the_shared_area_out_of_reach() {
     if skip_unless_live("container_keeps_the_shared_area_out_of_reach") {

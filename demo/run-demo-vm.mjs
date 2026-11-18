@@ -159,12 +159,12 @@ async function main() {
     ok(up.status === 200, "投喂 " + name, up.text);
   }
 
-  // ④ 一句需求：拉进沙箱、抽成语料、提交回共享区。缺产物就如实点名再问一轮（最多两轮），不替它编结果。
+  // ④ 一句需求：拉进沙箱、抽成语料、提交工作线再推送进共享区。缺产物就如实点名再问一轮（最多两轮），不替它编结果。
   console.log("（一轮问询要等模型跑完，可能要几分钟）");
   const ask = await api("POST", actUrl("send_message"), {
     session_id: sid,
     text: "共享区对你只读：先用 work_pull 把资料拉进你的沙箱，再用 harvest 的 scan 把语料抽成 corpus.jsonl，"
-      + "最后用 work_commit 把 corpus.jsonl 提交回共享区；做完把它的路径念给我。",
+      + "最后用 work_commit 把 corpus.jsonl 记进工作线、再用 work_push 推送进共享区；做完把它的路径念给我。",
   });
   ok(ask.status === 200, "发出需求", ask.text);
   for (let round = 0; round < 2 && !artifacts(sid).has("corpus.jsonl"); round++) {
@@ -180,7 +180,7 @@ async function main() {
     console.log("   工具 " + (r.label || r.name) + (r.ok ? " 成功" : " 失败") + " → " + String(r.output || "").split("\n")[0].slice(0, 120));
   }
   ok(rows.some((r) => /scan/.test(r.name) && r.ok), "harvest 在 guest 里真跑了（scan 成功）", rows.map((r) => r.name).join("、"));
-  ok(rows.some((r) => r.name === "work_commit" && r.ok), "产物经 work_commit 提交回共享区", rows.map((r) => r.name).join("、"));
+  ok(rows.some((r) => r.name === "work_push" && r.ok), "产物经 work_push 推送进共享区（推送前必须先 work_commit 记进工作线）", rows.map((r) => r.name).join("、"));
 
   // ⑤ 复核产物：不靠模型自述——盘上真的多了 corpus.jsonl（agent 沙箱是宿主目录，guest 的直接写落在这上面）。
   const made = artifacts(sid);

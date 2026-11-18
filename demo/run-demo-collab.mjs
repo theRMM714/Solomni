@@ -18,7 +18,7 @@
  * 为什么这个脚本**不进 CI**：它要真实供应商（CI 上没有 .home/，会回落到内置假模型，
  * 那样验的就不是协作能力而是假脚本）。协作状态机的机器判据在 tests/cross-platform/e2e/。
  * 只走产品自己的 HTTP 能力面（与前端同一条路）。共享区对 agent 只读：节点先把资料 work_pull 进沙箱，
- * 产物在沙箱里产出、再 work_commit 提交回共享区。
+ * 产物在沙箱里产出、经 work_commit 记进工作线、再由 work_push 推送进共享区。
  */
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -150,7 +150,7 @@ async function main() {
   const task = "把共享区里的资料变成一份能给同事看的报告，再做一个能离线检索的索引包。"
     + "共享区对你们只读：各自先用 work_pull 把要用的资料拉进自己的沙箱，产物在沙箱里做；"
     + "分工：先把资料抽成语料，再出 HTML 报告，最后建索引并当场检索一次证明可用；"
-    + "做完用 work_commit 把产物提交回共享区，并把三件产物（语料、报告、索引）的真实绝对路径念给我。";
+    + "做完用 work_commit 把产物记进工作线、再用 work_push 推送进共享区，并把三件产物（语料、报告、索引）的真实绝对路径念给我。";
   const agents = [
     { name: "资料手", modules: ["harvest"] },
     { name: "呈现手", modules: ["render"] },
@@ -272,8 +272,12 @@ async function main() {
   console.log("   工具调用：" + (rows.map((r) => (r.label || r.name) + (r.ok ? "✓" : "✗")).join("、") || "（没有）"));
   const q = rows.filter((r) => /query/.test(r.name) && r.ok).pop();
   ok(!!q, "索引建好后当场检索过", JSON.stringify(rows.map((r) => [r.name, r.ok])));
-  // 共享区对 agent 只读：产物必须先落沙箱、再 work_commit 才进主副本。
-  ok(rows.some((r) => r.name === "work_commit" && r.ok), "产物经 work_commit 提交回共享区", JSON.stringify(rows.map((r) => [r.name, r.ok])));
+  // 共享区对 agent 只读：产物必须先落沙箱、再 work_commit + work_push 才进主副本。
+  ok(
+    rows.some((r) => r.name === "work_push" && r.ok),
+    "产物经 work_push 推送进共享区（推送前必须先 work_commit 记进工作线）",
+    JSON.stringify(rows.map((r) => [r.name, r.ok])),
+  );
 
   console.log(failed ? "DEMO-FAILED failed=" + failed : "DEMO-OK（工作 " + WORK + "，三 agent 协作）");
   return failed ? 1 : 0;

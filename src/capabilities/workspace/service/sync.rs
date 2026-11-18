@@ -168,7 +168,7 @@ impl WorkspaceService {
         all.extend(tree.keys().cloned());
         all.extend(self.store.list(&sandbox)?);
         // AppContainer 私有存量不是用户内容：不进候选，也就不进 held / paths / deletes 回执；
-        // 已提交进共享区的历史条目不会被自动删，要清用 work_commit。
+        // 已发布进共享区的历史条目不会被自动删，要清用 work_commit 记删除再 work_push。
         all.retain(|rel| !appcontainer_ignored(rel));
         let mut paths: Vec<String> = Vec::new();
         let mut deletes: Vec<String> = Vec::new();
