@@ -458,7 +458,7 @@ impl WorkspaceService {
     }
 
     /// 目的：丢掉 since 及之后产生的全部提交（恢复留档时用：留档之后长出的那条分叉一并作废）。
-    /// 约束：调用方已物化到留档目标并写回 head/工作线头；指向被删提交的引用（含后来那些档案）一起清掉。
+    /// 约束：调用方已物化到留档目标并写回 head/工作线头；指向被删提交的引用（含更晚的档案）一起清掉。
     fn discard_since_locked(&self, store: &Path, since: u64) -> Result<(), String> {
         for id in self.store.list_commits(store)? {
             if id >= since {

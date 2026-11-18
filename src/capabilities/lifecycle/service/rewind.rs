@@ -209,7 +209,7 @@ impl Lifecycle {
                             && ev.get("mark").and_then(|m| m.as_u64()) == Some(mark)
                     })
                     .ok_or_else(|| format!("没有回档标记 {}（可能已被恢复）", mark))?;
-                // 先恢复文件（失败则转录原封不动），再展开转录；提交一条不删。
+                // 先恢复文件（失败则转录原封不动），再展开转录；版本库同时退回留档点、留档后的分叉作废。
                 self.workspace.work_restore_archive(&work, mark)?;
                 let kept: Vec<serde_json::Value> = raw[..idx].to_vec();
                 self.history
