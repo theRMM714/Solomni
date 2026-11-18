@@ -314,13 +314,9 @@ fn run_rounds(
             *error.borrow_mut() = Some(err);
             return;
         }
-        let views = build_round_lines(
-            &label,
-            round,
-            cancel.load(std::sync::atomic::Ordering::Relaxed),
-            &next_line,
-            spec.turn_id,
-        );
+        // 中断标记由轮自己带（round.cut）：取消位是**这次生成**的状态，不是"构造这一行时"的状态——
+        // 用它判标记会把恰好收完的那一轮也打成半句。
+        let views = build_round_lines(&label, round, &next_line, spec.turn_id);
         if !views.is_empty() {
             s(SessionEvent::Transcript(views.clone()));
         }

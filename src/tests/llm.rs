@@ -632,6 +632,69 @@ pub(crate) fn a_cancelled_generation_never_executes_a_valid_tool_envelope() {
     );
 }
 
+/// 目的：用户按「中断」时已经流到界面上的那半句**不能凭空消失**：它留成一条转录行、标「（已中断）」，
+///   但**不进对话**——点「继续」是从断点重开一轮，不是把这半句当发言续写。
+#[test]
+pub(crate) fn an_interrupted_generation_keeps_the_half_sentence_as_a_cut_line() {
+    use crate::capabilities::conversation::session::api::SessionEvent;
+    let io = Arc::new(InMemorySysIo::new());
+    let mut core = core_with_io_gateway(
+        vec![module_of("a")],
+        AbortGateway {
+            raw: "我先写第一段".to_string(),
+        },
+        Arc::clone(&io),
+    );
+    let sid = core
+        .create_work(work("w", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    let events = {
+        let io = crate::capabilities::conversation::session::api::TurnIo {
+            llm: Default::default(),
+            decisions: None,
+            ask: None,
+        };
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let mut noop = |_e: SessionEvent| {};
+        core.turn
+            .single_say(
+                &sid,
+                "写",
+                &io,
+                &cancel,
+                &mut noop,
+                core.registry.as_ref(),
+                core.probe.as_ref(),
+            )
+            .unwrap()
+    };
+    let cut = events
+        .iter()
+        .find_map(|e| match e {
+            SessionEvent::Transcript(lines) => lines.iter().find(|l| l.cut).cloned(),
+            _ => None,
+        })
+        .expect("被中断的半句要留档：没有 cut 行");
+    assert!(cut.line.contains("我先写第一段"), "半句原样留下：{}", cut.line);
+    assert!(
+        cut.line.contains("（已中断）"),
+        "要标出它没写完：{}",
+        cut.line
+    );
+    assert_eq!(
+        cut.kind, "msg",
+        "它还是模型发言那一行，不伪装成提示：{}",
+        cut.kind
+    );
+    let history = core.single_history(&sid).expect("会话还在");
+    assert!(
+        history.iter().all(|m| !m.content.contains("我先写第一段")),
+        "半句不进对话（否则「继续」会把半句当发言接着写）：{:?}",
+        history
+    );
+}
+
 #[test]
 pub(crate) fn a_truncated_output_is_reported_as_truncation_not_as_a_bad_envelope() {
     // 供应商说 finish_reason=length：回执要指出"是被按长度截断"，而不是让模型去查括号；
