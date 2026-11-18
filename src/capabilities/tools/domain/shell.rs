@@ -259,7 +259,7 @@ pub fn facts(
 }
 
 /// 目的：这条回执是否被截断——截断器的标记行独占一行且写在被保留的开头之后。
-/// 约束：只认本仓两个截断器的标记（工具预算的「[结果截断]」与 guest 截断的「[截断] 输出共」）。
+/// 约束：只认本仓两个截断器的标记（工具预算的「[结果截断] 输出共」与 guest 传输护栏的「[截断] 输出共」）。
 pub fn truncated(output: &str) -> bool {
     output.lines().any(|line| {
         let line = line.trim_start();
@@ -441,7 +441,7 @@ params:
 
     #[test]
     fn truncated_recognises_both_truncation_markers() {
-        assert!(truncated("[结果截断] 本次回执共 16048 字符"));
+        assert!(truncated("[结果截断] 输出共 20000 字符；保留开头 3964 与结尾 11990 字符"));
         assert!(truncated(
             "  [截断] 输出共 20000 字符；保留开头 4000 与结尾 12000 字符"
         ));

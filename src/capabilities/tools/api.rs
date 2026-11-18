@@ -3,6 +3,7 @@
 //! 不管：实现与机制（在 `service/` / `detail/`）；端口定义（在 `ports.rs`）。
 //! 联动：实现见 `service.rs`；`runtime` 等消费方只持 `Arc<dyn Tools>` / `Arc<dyn ToolExec>`。
 
+pub use crate::capabilities::tools::domain::budget::{Continuation, cap_result, continuation_for};
 pub use crate::capabilities::tools::domain::commands::{Command, CommandBook, Phase};
 pub use crate::capabilities::tools::domain::patch::{EditFault, Fault};
 pub use crate::capabilities::tools::domain::roles::{RoleTable, SystemTools, action_audit};

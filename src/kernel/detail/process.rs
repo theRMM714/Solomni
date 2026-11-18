@@ -65,8 +65,6 @@ pub struct ProcTools {
     pub texts: std::sync::Arc<dyn ProcessTexts>,
     /// 目的：单次工具执行的超时（到时连根杀掉整棵树，ok = false）。
     pub timeout: Duration,
-    /// 目的：回传给模型/轨迹的输出上限（字符数）。
-    pub max_output_chars: usize,
     /// 目的：全局沙箱要求与本进程是否已同意降级。
     pub mode: std::sync::Arc<crate::kernel::api::SandboxMode>,
     /// 目的：平台侧状态——Windows 持有私有区、写权限开关与 PowerShell 覆盖；其余平台为空。
@@ -85,15 +83,6 @@ impl ProcessTexts for CodeProcessTexts {
     }
     fn fence_failed(&self) -> String {
         "[围栏] 工具进程没有进入围栏：命令未执行（当前能力等级见启动报告）".to_string()
-    }
-    fn truncated(&self, chars: &str, limit: &str) -> String {
-        format!("[截断] 输出共 {} 字符，仅保留前 {}", chars, limit)
-    }
-    fn truncated_middle(&self, chars: &str, head: &str, tail: &str) -> String {
-        format!(
-            "[截断] 输出共 {} 字符；保留开头 {} 与结尾 {} 字符（按完整行取整）",
-            chars, head, tail
-        )
     }
     fn shell_exit(&self, code: Option<i32>) -> String {
         match code {
@@ -124,7 +113,6 @@ impl ProcTools {
             exe,
             texts,
             timeout: Duration::from_secs(30),
-            max_output_chars: 16_000,
             mode: std::sync::Arc::new(crate::kernel::api::SandboxMode::permissive()),
             platform: platform::State::new(home, write_allowed),
         }
@@ -351,8 +339,9 @@ impl ProcTools {
         platform::run_shell(self, run)
     }
 
-    /// 目的：拼 shell 回执：正文分区 + 截断 + 退出码 / 超时 / 用户停止 / 围栏失败。
-    /// 约束：形状与本机/guest 共用（见 kernel::domain::receipt）；cwd 与耗时由工具层追加。
+    /// 目的：拼 shell 回执：正文分区 + 退出码 / 超时 / 用户停止 / 围栏失败。
+    /// 约束：形状与本机/guest 共用（见 kernel::domain::receipt）；cwd 与耗时由工具层追加；
+    ///   这里不截断——超限由送回模型前的唯一预算（capabilities::tools::domain::budget）收口。
     fn assemble_shell(
         &self,
         out: String,
@@ -376,7 +365,6 @@ impl ProcTools {
             &out,
             &err,
             end,
-            self.max_output_chars,
         );
         if code == Some(confine::FENCE_FAILED) {
             output.push('\n');
@@ -402,7 +390,8 @@ fn read_to_string(r: &mut impl std::io::Read) -> String {
 
 impl ProcTools {
     /// 把工具进程的原始输出与事实拼成回执：成功与否看退出码；
-    /// stderr 段头、超时、围栏没装上、截断这些**标记文案全部来自提示词册**——它们随工具结果进模型上下文。
+    /// stderr 段头、超时、围栏没装上这些**标记文案全部来自提示词册**——它们随工具结果进模型上下文；
+    /// 输出原样交出，超限由工具预算统一收口。
     fn assemble(&self, out: String, err: String, timed_out: bool, code: Option<i32>) -> RunOutcome {
         let mut ok = !timed_out && code == Some(0);
         let mut output = out;
@@ -424,23 +413,7 @@ impl ProcTools {
             output.push('\n');
             output.push_str(&self.texts.fence_failed());
         }
-        RunOutcome {
-            ok,
-            output: self.truncate(&output),
-        }
-    }
-
-    /// 按字符截断（不劈开 UTF-8），尾部如实注明（文案来自提示词册）。
-    fn truncate(&self, s: &str) -> String {
-        let count = s.chars().count();
-        if count <= self.max_output_chars {
-            return s.to_string();
-        }
-        let head: String = s.chars().take(self.max_output_chars).collect();
-        let tail = self
-            .texts
-            .truncated(&count.to_string(), &self.max_output_chars.to_string());
-        format!("{}\n{}", head, tail)
+        RunOutcome { ok, output }
     }
 }
 

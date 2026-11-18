@@ -367,7 +367,6 @@ impl QemuHandle {
                             ShellEnd::TimedOut {
                                 secs: run.timeout_secs,
                             },
-                            GUEST_SHELL_MAX_CHARS,
                         ),
                     };
                 }
@@ -377,9 +376,6 @@ impl QemuHandle {
         }
     }
 }
-
-/// 目的：shell 回执的正文上限（与本机守门进程同一口径）。
-pub(super) const GUEST_SHELL_MAX_CHARS: usize = 16_000;
 
 /// 目的：guest shell 回执的收尾判定——只看 helper 的机器标记与宿主取消旗，不猜自然语言。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -428,7 +424,7 @@ pub(super) fn shell_outcome(
     };
     ToolOutcome {
         ok,
-        output: shell_receipt(texts, out, &cleaned, end, GUEST_SHELL_MAX_CHARS),
+        output: shell_receipt(texts, out, &cleaned, end),
     }
 }
 
@@ -593,9 +589,11 @@ impl Drop for QemuHandle {
     }
 }
 
-/// 目的：guest 输出与本机守门进程同一份上限；截断时如实报原字符数。
+/// 目的：guest 输出的**传输/内存护栏**——不是模型可见的预算。
+/// 约束：模型可见的 16k 由宿主 `capabilities::tools::domain::budget` 在送回模型前统一收口；
+///   这里只挡住把 VM 通道撑爆的巨量输出（例如误把大文件贴到 stdout），阈值远高于 16k。
 fn cap_output(text: String, limit: OutputLimit) -> String {
-    const MAX: usize = 16_000;
+    const MAX: usize = 1_000_000;
     let count = text.chars().count();
     if count <= MAX {
         return text;

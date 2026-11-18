@@ -11,6 +11,7 @@ use self::fence::ToolFenceGate;
 use crate::capabilities::tools::api::{
     Observations, Recorded, ToolBook, ToolExec, ToolOutcome, ToolSchema, Tools,
 };
+use crate::capabilities::tools::domain::budget::{self, Continuation};
 use crate::capabilities::tools::domain::roles::SystemTools;
 use crate::capabilities::tools::ports::{SysIo, SystoolsSource};
 use crate::kernel::ports::{FenceGate, FenceHost, ProcessRunner};
@@ -92,9 +93,9 @@ fn host_outcome(out: crate::kernel::api::RunOutcome) -> ToolOutcome {
     }
 }
 
-/// 所有工具回执送回模型前都过同一个预算（head+tail + 续读提示）。
-fn within_budget(mut out: ToolOutcome) -> ToolOutcome {
-    out.output = crate::capabilities::tools::domain::budget::cap_result(out.output);
+/// 所有工具回执送回模型前都过同一个预算（head+tail + 按工具给的续读提示）。
+fn within_budget(mut out: ToolOutcome, hint: Continuation) -> ToolOutcome {
+    out.output = budget::cap_result(out.output, hint);
     out
 }
 
@@ -121,7 +122,7 @@ impl ToolExec for ToolsService {
                 path,
                 ask,
                 Some(self.gate.as_ref()),
-            )))
+            )), Continuation::Command)
         } else {
             let _exclusive = lease.write().unwrap_or_else(|e| e.into_inner());
             within_budget(host_outcome(self.runner.run(
@@ -132,7 +133,7 @@ impl ToolExec for ToolsService {
                 path,
                 ask,
                 Some(self.gate.as_ref()),
-            )))
+            )), Continuation::Command)
         }
     }
 
@@ -147,7 +148,7 @@ impl ToolExec for ToolsService {
             ask: run.ask,
             gate: Some(self.gate.as_ref()),
         };
-        within_budget(host_outcome(self.runner.run_shell(&run)))
+        within_budget(host_outcome(self.runner.run_shell(&run)), Continuation::Command)
     }
 
     fn run_builtin(
@@ -166,7 +167,7 @@ impl ToolExec for ToolsService {
             &mut observations,
             name,
             args_json,
-        ));
+        ), budget::continuation_for("", name));
         Recorded {
             outcome,
             observations,
