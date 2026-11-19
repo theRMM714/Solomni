@@ -32,7 +32,7 @@ function create(opts) {
     return e;
   }
 
-  function sh(cmd, args, timeoutMs) {
+  function sh(cmd, args, timeoutMs, extraEnv) {
     fs.mkdirSync(logDir, { recursive: true });
     const slug = (s) => String(s).replace(/[^\w.-]+/g, "_");
     const logFile = path.join(logDir, slug(path.basename(cmd)) + "-" + args.map(slug).join("_") + ".log");
@@ -40,7 +40,8 @@ function create(opts) {
     // 跑之前先报出这一步的实时日志落点：门禁卡住时直接读这个文件就知道停在哪（子进程边走边写）。
     process.stdout.write("    实时日志：" + path.relative(root, logFile) + "\n");
     const budget = timeoutMs || DEFAULT_TIMEOUT_MS;
-    const r = spawnSync(cmd, args, { cwd: root, env: buildEnv(), stdio: ["ignore", fd, fd], timeout: budget, killSignal: "SIGKILL" });
+    const env = Object.assign(buildEnv(), extraEnv || {});
+    const r = spawnSync(cmd, args, { cwd: root, env, stdio: ["ignore", fd, fd], timeout: budget, killSignal: "SIGKILL" });
     fs.closeSync(fd);
     const out = fs.readFileSync(logFile, "utf8");
     const timedOut = !!(r.error && (r.error.code === "ETIMEDOUT" || /timed?\s*out/i.test(String(r.error.message))));

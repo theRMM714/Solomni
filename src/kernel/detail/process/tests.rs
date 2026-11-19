@@ -193,7 +193,13 @@ fn broken_mechanism_refuses_execution_instead_of_degrading() {
 
 // ---------- 真实工具进程（T2 真实适配器边界；见 docs/testing/doubles.md 的 ProcessRunner 行） ----------
 /// 已构建的产品可执行文件（守门进程就是它自己）：`cargo build` 之后才存在；没有就如实跳过。
+/// 门禁用 SOLOMNI_TEST_BIN 直接给路径（cargo check/clippy 可能移走 uplift 的副本）；单跑 cargo test 时按 target 布局找。
 fn built_exe() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("SOLOMNI_TEST_BIN").map(PathBuf::from)
+        && p.is_file()
+    {
+        return Some(p);
+    }
     let me = std::env::current_exe().ok()?;
     let profile_dir = me.parent()?.parent()?; // target/<profile>/deps → target/<profile>
     let name = if cfg!(windows) {
@@ -848,8 +854,9 @@ fn real_shell_fence_denies_outside_paths_without_claiming_a_reason() {
     assert!(!out.ok, "{}", out.output);
     assert!(!out.output.contains("SHELL-SECRET"), "{}", out.output);
     // 拒绝发生在工具进程内部：回执只如实交出退出码，不声称"被围栏拒绝"（那是猜的）。
+    // 守门进程自己的 `[围栏] …` 日志仍在 stderr 里（日志文案目录化见 tests/gaps.yaml 的 receipt.business-text）。
     assert_eq!(codes_of(&out), vec![codes::SHELL_EXIT], "{}", out.output);
-    assert!(!out.output.contains("围栏"), "{}", out.output);
+    assert!(!out.output.contains("被围栏拒绝"), "{}", out.output);
     let _ = std::fs::remove_dir_all(&inside);
     let _ = std::fs::remove_dir_all(&outside);
 }
