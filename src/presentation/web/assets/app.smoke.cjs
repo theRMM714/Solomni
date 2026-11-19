@@ -332,8 +332,10 @@ setTimeout(async () => {
       if (!readonlyRule) loadErrors.push("只读会话检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("只读会话检查失败：" + e.message); }
   }
-  // **只读条的恢复入口 = f(本视图 run, 在跑)**：正在跑不给按钮；已停止给「继续」；历史快照里过期的 run 不算数。
-  //  翻车现场：停止后点「继续」，history 里那条 run 还停在 stopped，条子先显示「继续」、再变成「启用会话」。
+  // **只读条 / 冻结条的恢复入口 = f(本视图 readonly, run, 在跑)**：正在跑不给按钮；已归档给「恢复归档」；
+  //  已停止与只读历史给「启用会话」，输入区收起。历史快照里过期的 run 不算数。
+  //  翻车现场：停止后点「继续」，history 里那条 run 还停在 stopped，条子先显示「继续」、再变成「启用会话」；
+  //  现在「继续」不承担解冻——解冻只有「启用会话」这一个入口。
   let continueBarRules = false;
   if (!loadErrors.length) {
     try {
@@ -352,18 +354,29 @@ setTimeout(async () => {
           " const stopped = read({ run: 'stopped' });" +
           " const archived = read({ run: 'archived' });" +
           " const busy = read({ run: 'active', sending: true });" +
-          " return { live: live, stopped: stopped, archived: archived, busy: busy }; })()",
+          // 输入区显隐只能从 classList 的调用上看：桩 DOM 的 classList 不打进 className。
+          " const composer = document.querySelector('#composer'); const calls = [];" +
+          " composer.classList = { add: function (c) { calls.push('+' + c); }," +
+          "   remove: function (c) { calls.push('-' + c); } };" +
+          " const frozen = read({ run: 'stopped', readonly: false }); const frozenCls = calls.join(',');" +
+          " calls.length = 0; read({ run: 'active', readonly: false }); const liveCls = calls.join(',');" +
+          " return { live: live, stopped: stopped, archived: archived, busy: busy, frozen: frozen," +
+          "   frozenCls: frozenCls, liveCls: liveCls }; })()",
         sandbox
       );
       // 历史快照说 stopped、本视图已经 active：只信本视图 → 只有「启用会话」。
       const liveOk = r.live.text.indexOf('启用会话') >= 0 && r.live.text.indexOf('继续') < 0 && r.live.buttons === 1;
-      // 已停止：给「继续」，不给「启用会话」。
-      const stoppedOk = r.stopped.text.indexOf('继续') >= 0 && r.stopped.text.indexOf('启用会话') < 0 && r.stopped.buttons === 1;
+      // 已停止：和只读历史同一条路——给「启用会话」，不给「继续」。
+      const stoppedOk = r.stopped.text.indexOf('启用会话') >= 0 && r.stopped.text.indexOf('已停止') >= 0
+        && r.stopped.text.indexOf('继续') < 0 && r.stopped.buttons === 1;
+      // 活动视图被停止后（readonly 还是 false）：只读条照样出现，输入区收起；活跃视图把输入区放回来。
+      const frozenOk = r.frozen.text.indexOf('启用会话') >= 0 && r.frozen.buttons === 1
+        && r.frozenCls.indexOf('+hidden') >= 0 && r.liveCls.indexOf('-hidden') >= 0;
       // 已归档：给「恢复归档」。
       const archivedOk = r.archived.text.indexOf('恢复归档') >= 0 && r.archived.buttons === 1;
       // 正在跑：一个按钮都不给。
       const busyOk = r.busy.buttons === 0 && r.busy.text.indexOf('正在跑') >= 0;
-      continueBarRules = liveOk && stoppedOk && archivedOk && busyOk;
+      continueBarRules = liveOk && stoppedOk && archivedOk && busyOk && frozenOk;
       if (!continueBarRules) loadErrors.push("只读条恢复入口检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("只读条恢复入口检查失败：" + e.message); }
   }

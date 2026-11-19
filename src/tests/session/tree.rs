@@ -151,15 +151,23 @@ pub(crate) fn continue_hint_is_derived_from_the_session_state() {
     );
     let prepared = core.prepare_activation("w").expect("准备启用");
     let view = core.commit_activation(prepared).expect("提交启用");
-    let hint = view.continue_action.expect("末条是用户：要有继续上一轮");
+    let hint = view.continue_action.expect("末条是用户：要有继续");
     assert_eq!(hint.kind, "turn");
-    assert!(hint.label.contains("继续"));
+    assert_eq!(
+        hint.label, "继续",
+        "只有一个名字：继续（不叫「继续上一轮」）"
+    );
+    assert!(
+        hint.reason.contains("重答"),
+        "要说清继续是重开一轮：{}",
+        hint.reason
+    );
 }
 
-/// 目的：已停止的会话仍然给「继续」——停止不是终态，继续是它的逆操作（解冻整棵子树再接着走）。
-/// 约束：判据不能依赖「会话还在内存里」：停过的会话常已被收走，否则界面就没有恢复入口。
+/// 目的：已停止的会话不给「继续」——停止是历史态，恢复入口只有「启用会话」（解冻整棵子树）。
+/// 约束：判据先于「末条是不是用户」：停着的会话即使停在用户发言上，派发也会被闸拒，给按钮就是假入口。
 #[test]
-pub(crate) fn stopped_session_still_offers_continue() {
+pub(crate) fn stopped_session_offers_enable_instead_of_continue() {
     let hist = Arc::new(InMemoryHistory::new());
     seed_session(
         &hist,
@@ -175,6 +183,7 @@ pub(crate) fn stopped_session_still_offers_continue() {
             "lines": [
                 { "id": 0, "kind": "user", "speaker": "用户", "line": "做一下" },
                 { "id": 1, "kind": "msg", "speaker": "a", "line": "做完了，还剩一点" },
+                { "id": 2, "kind": "user", "speaker": "用户", "line": "接着做" },
             ],
         })],
     )
@@ -200,12 +209,9 @@ pub(crate) fn stopped_session_still_offers_continue() {
         .find(|v| v.sid == "w")
         .expect("会话还在列表里");
     assert_eq!(view.run, "stopped", "停的是会话本身");
-    let hint = view.continue_action.expect("已停止也要给继续");
-    assert_eq!(hint.kind, "turn");
     assert!(
-        hint.reason.contains("解冻"),
-        "要说清继续会解冻：{}",
-        hint.reason
+        view.continue_action.is_none(),
+        "已停止的会话不给继续：恢复入口是只读条上的「启用会话」"
     );
 }
 

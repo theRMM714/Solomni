@@ -9,7 +9,8 @@ use crate::capabilities::conversation::session::api::{subtree_of, work_root};
 
 impl Work {
     /// 目的：上下文「继续」是否该出现——判据只在后端（前端不按末条/模式猜）。
-    /// 约束：正在跑、已关闭、代理、或没有真实断点时不出现；协作有挂起卡时由卡承担，不给继续。
+    /// 约束：正在跑、已归档、已停止、代理、或没有真实断点时不出现；协作有挂起卡时由卡承担，不给继续。
+    ///   已停止 / 已归档都是历史态，恢复入口是「启用会话」/「恢复归档」；这时的「继续」会被派发闸拒掉。
     fn continue_action(
         &self,
         turn: &Turn,
@@ -19,26 +20,23 @@ impl Work {
         run: &str,
         has_pending: bool,
     ) -> Option<ContinueView> {
-        if running || run == "archived" || mode == WorkMode::Proxy {
+        if running
+            || run == "archived"
+            || run == RunState::Stopped.as_str()
+            || mode == WorkMode::Proxy
+        {
             return None;
         }
         match mode {
             WorkMode::Single => {
+                // 只有「上一轮还没答完」才算断点：末条是 AI 发言时继续会撞上「请先发言再继续」。
                 let user_last =
                     matches!(turn.session(sid), Some(Session::Single(s)) if s.last_is_user());
                 if user_last {
                     Some(ContinueView {
                         kind: "turn".to_string(),
-                        label: "继续上一轮".to_string(),
-                        reason: "上一轮还没有回答".to_string(),
-                    })
-                } else if run == RunState::Stopped.as_str() {
-                    // 停止不是终态：「继续」就是它的逆操作（先解冻整棵子树，再接着走）。
-                    // 判据**不能**依赖"会话还在内存里"：停过的会话常常已被收走，否则界面就没有入口。
-                    Some(ContinueView {
-                        kind: "turn".to_string(),
                         label: "继续".to_string(),
-                        reason: "会话已停止：继续会解冻并接着走".to_string(),
+                        reason: "上一轮被打断：继续会把这轮重答一遍".to_string(),
                     })
                 } else {
                     None

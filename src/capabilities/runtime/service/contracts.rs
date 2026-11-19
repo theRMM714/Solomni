@@ -146,31 +146,23 @@ impl TurnOps for Handle {
     }
 
     fn continue_flow(&self, sid: &str, out: Output) -> Result<Advance, String> {
-        // 「继续」= 「停止」的逆操作：先把整棵子树解冻，再按形态接着走。
-        // 单 agent / 代理补一条「继续」用户行作为这一轮的起因；协作不需要用户发言，从断点推进。
-        let resumed = self.call({
+        // 「继续」= 把这轮重答一遍，**不替用户发言**：末条已是用户发言，直接拿现有对话问模型；
+        // 要新增一条用户发言的只有 `say`。先解冻整棵子树（停止过的会话在这里翻回活跃），再按形态接着走。
+        let _resumed = self.call({
             let s = sid.to_string();
             move |core| core.turn.resume_subtree(&s)
         })?;
-        if resumed {
-            let mode = self
-                .call({
-                    let s = sid.to_string();
-                    move |core| Ok(core.session_mode(&s))
-                })
-                .unwrap_or_default();
-            if mode == Some(crate::capabilities::conversation::session::api::Mode::Collab) {
-                return crate::capabilities::turn::turn::api::collab_generation(
-                    self,
-                    sid,
-                    CollabWork::Resume,
-                );
-            }
-            return crate::capabilities::turn::turn::api::single_generation(
+        let mode = self
+            .call({
+                let s = sid.to_string();
+                move |core| Ok(core.session_mode(&s))
+            })
+            .unwrap_or_default();
+        if mode == Some(crate::capabilities::conversation::session::api::Mode::Collab) {
+            return crate::capabilities::turn::turn::api::collab_generation(
                 self,
                 sid,
-                Some("继续。".to_string()),
-                out,
+                CollabWork::Resume,
             );
         }
         crate::capabilities::turn::turn::api::single_generation(self, sid, None, out)

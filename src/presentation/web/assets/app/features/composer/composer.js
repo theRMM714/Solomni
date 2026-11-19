@@ -18,11 +18,12 @@ const takeInput = (...a) => app.takeInput(...a);
 /// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
 const $ = (sel) => doc.querySelector(sel);
 
-/* 输入区与上下文继续的显隐：只按后端给的视图（readonly / continue_action / running）渲染。 */
+/* 输入区与上下文继续的显隐：只按后端给的视图（readonly / run / continue_action / running）渲染。
+ * 已停止 = 历史态：输入区收起，恢复入口在只读条上（「启用会话」）；中断不停会话，输入区照常可写。 */
 function syncComposer(s) {
   const composer = $('#composer');
   if (composer) {
-    if (!s || s.readonly) composer.classList.add('hidden');
+    if (!s || s.readonly || s.run === 'stopped') composer.classList.add('hidden');
     else composer.classList.remove('hidden');
   }
   renderReadonly(s);
