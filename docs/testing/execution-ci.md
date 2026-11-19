@@ -163,7 +163,7 @@ node run-tests.js --fence-live
 - **处置，按优先级：**
 
 1. 以「完全权限」启动会话：没有文件写授权就不会打标签，也不留残留（首选）；受限会话里可仅为单次执行申请放宽，批准范围仅限该次，且不替代真机围栏验收。
-2. 提权还原级别（清残留）：`icacls "<根>" /setintegritylevel "(OI)(CI)Medium" /T /C`（需要 `SeRelabelPrivilege`，只能在管理员窗口做）；之后用同一条命令复查，不应再有 `Mandatory` 行。
+2. 提权还原级别（清残留）：`icacls "<根>" /setintegritylevel "(OI)(CI)Medium" /T /C`（需要 `SeRelabelPrivilege`，只能在管理员窗口做）。复查时 `Mandatory` 行**仍在**：这条命令给每个对象写上显式 `Medium` 标签（目录形如 `Mandatory Label\Medium Mandatory Level:(OI)(CI)(NW)`，文件形如 `(I)(NW)`），这是正常终态而不是残留——`Medium` 只挡 Low 进程写 Medium 对象，对 Medium 会话没有影响。合格标准是**不再有 `Low Mandatory Level`**。它也只清已有对象：被写沙箱再次授写的根会重新打上 Low，其下新建的子项（例如 `cargo clean` 后重编的 `solomni.exe`）继续继承——要从源头避免见第 1 条。
 3. 把二进制复制到未打标记的目录再跑（临时绕过）：`TEMP` 不要指进被标记的树，探针落在系统临时目录。
 4. 换一台不受限的机器或交给 CI：跨平台与真机结论以 CI 为准。
 
