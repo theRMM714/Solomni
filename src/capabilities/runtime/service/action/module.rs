@@ -143,8 +143,11 @@ impl Handle {
                 &format!("围栏按次收尾未完成：{}", e),
             );
         }
-        Ok(Acted::Done(
-            serde_json::json!({ "ok": outcome.ok, "output": outcome.output }),
-        ))
+        Ok(Acted::Done(serde_json::json!({
+            "ok": outcome.ok,
+            "severity": outcome.severity,
+            "output": outcome.output,
+            "notes": outcome.notes,
+        })))
     }
 }

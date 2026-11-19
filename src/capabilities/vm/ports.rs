@@ -96,10 +96,10 @@ pub trait GuestChannel: Send {
     fn exec(&mut self, run: &GuestRun) -> ToolOutcome;
     /// 目的：按 per-agent 允许集在 guest 里执行；通道不实现就 fail-closed（绝不静默按无围栏跑）。
     fn exec_fenced(&mut self, _run: &GuestRun, _access: &GuestAccess) -> ToolOutcome {
-        ToolOutcome {
-            ok: false,
-            output: "这条 guest 命令通道没有实现 per-agent 围栏".to_string(),
-        }
+        ToolOutcome::new(
+            false,
+            "这条 guest 命令通道没有实现 per-agent 围栏".to_string(),
+        )
     }
 
     /// 目的：同 `exec_fenced`，但带上 host 取消旗；通道不实现就退回普通围栏执行。

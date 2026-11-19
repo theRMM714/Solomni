@@ -500,8 +500,9 @@ if (process.env.E2E_FENCE_LIVE !== '1') {
     'sandbox shell 成功且中文原样回执',
     JSON.stringify(shells[0] || {}).slice(0, 300)
   );
+  const exitNote = ((shells[1] || {}).notes || []).find((n) => n && n.code === 'shell.exit');
   assert(
-    shells[1] && shells[1].ok === false && String(shells[1].output).includes('退出码 7'),
+    shells[1] && shells[1].ok === false && exitNote && String(exitNote.args && exitNote.args.code) === '7',
     '非零退出如实回执退出码',
     JSON.stringify(shells[1] || {}).slice(0, 300)
   );

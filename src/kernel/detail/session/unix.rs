@@ -4,7 +4,6 @@
 //! 联动：由 `src/kernel/detail/session.rs` 在非 Windows 目标选中。
 
 use super::*;
-use crate::kernel::ports::ProcessTexts;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -13,12 +12,8 @@ use std::sync::atomic::AtomicBool;
 pub(super) struct State;
 
 impl State {
-    /// 目的：非 Windows 不保存文案 / 私有区 / 写权限开关。
-    pub(super) fn new(
-        _texts: Arc<dyn ProcessTexts>,
-        _home: PathBuf,
-        _write_allowed: Arc<AtomicBool>,
-    ) -> State {
+    /// 目的：非 Windows 不保存私有区 / 写权限开关。
+    pub(super) fn new(_home: PathBuf, _write_allowed: Arc<AtomicBool>) -> State {
         State
     }
 }

@@ -75,10 +75,7 @@ impl ProcessRunner for EnvRecordingRunner {
             .lock()
             .expect("锁")
             .push(path.map(|p| p.to_os_string()));
-        RunOutcome {
-            ok: true,
-            output: format!("跑完了 {}", args_json),
-        }
+        RunOutcome::new(true, format!("跑完了 {}", args_json))
     }
 
     fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> RunOutcome {
@@ -86,10 +83,7 @@ impl ProcessRunner for EnvRecordingRunner {
             .lock()
             .expect("锁")
             .push(run.path.map(|p| p.to_os_string()));
-        RunOutcome {
-            ok: true,
-            output: format!("shell {}", run.script),
-        }
+        RunOutcome::new(true, format!("shell {}", run.script))
     }
 }
 
@@ -110,10 +104,7 @@ impl ProcessRunner for RecordingRunner {
             command.to_string(),
             args_json.to_string(),
         ));
-        RunOutcome {
-            ok: self.ok,
-            output: self.out.clone(),
-        }
+        RunOutcome::new(self.ok, self.out.clone())
     }
 
     fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> RunOutcome {
@@ -123,10 +114,7 @@ impl ProcessRunner for RecordingRunner {
             "shell".to_string(),
             run.script.to_string(),
         ));
-        RunOutcome {
-            ok: self.ok,
-            output: self.out.clone(),
-        }
+        RunOutcome::new(self.ok, self.out.clone())
     }
 }
 
@@ -191,10 +179,7 @@ impl ProcessRunner for ShellRunner {
                 .unwrap_or(false),
             path: run.path.map(|p| p.to_os_string()),
         });
-        RunOutcome {
-            ok: self.ok,
-            output: self.out.clone(),
-        }
+        RunOutcome::new(self.ok, self.out.clone())
     }
 }
 
@@ -237,17 +222,11 @@ impl ProcessRunner for ParallelRunner {
             std::thread::sleep(Duration::from_millis(self.delay_ms));
         }
         self.active.fetch_sub(1, Ordering::SeqCst);
-        RunOutcome {
-            ok: true,
-            output: format!("{} 跑完了 {}", command, args_json),
-        }
+        RunOutcome::new(true, format!("{} 跑完了 {}", command, args_json))
     }
 
     fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> RunOutcome {
-        RunOutcome {
-            ok: true,
-            output: format!("shell 跑完了 {}", run.script),
-        }
+        RunOutcome::new(true, format!("shell 跑完了 {}", run.script))
     }
 }
 
@@ -283,10 +262,10 @@ impl ProcessRunner for AskingRunner {
     ) -> RunOutcome {
         let Some(ask) = ask else {
             // 没有可回答的前端：没有可点的选项 = 不执行（fail-closed）。
-            return RunOutcome {
-                ok: false,
-                output: "这一趟没有可回答的前端：这次调用没有执行".to_string(),
-            };
+            return RunOutcome::new(
+                false,
+                "这一趟没有可回答的前端：这次调用没有执行".to_string(),
+            );
         };
         let request = crate::kernel::api::Ask {
             role: "tools".to_string(),
@@ -311,26 +290,17 @@ impl ProcessRunner for AskingRunner {
             .expect("锁")
             .push(request.options.iter().map(|(id, _)| id.clone()).collect());
         if ask.ask(&request).decided() != Some(self.allow.as_str()) {
-            return RunOutcome {
-                ok: false,
-                output: "用户没有放行这次调用：它没有执行".to_string(),
-            };
+            return RunOutcome::new(false, "用户没有放行这次调用：它没有执行".to_string());
         }
         self.calls.lock().expect("锁").push((
             fence.cwd.clone(),
             command.to_string(),
             args_json.to_string(),
         ));
-        RunOutcome {
-            ok: true,
-            output: "按你的裁决无围栏跑了一次".to_string(),
-        }
+        RunOutcome::new(true, "按你的裁决无围栏跑了一次".to_string())
     }
 
     fn run_shell(&self, _run: &crate::kernel::ports::ShellRun<'_>) -> RunOutcome {
-        RunOutcome {
-            ok: true,
-            output: "shell 按你的裁决跑了一次".to_string(),
-        }
+        RunOutcome::new(true, "shell 按你的裁决跑了一次".to_string())
     }
 }

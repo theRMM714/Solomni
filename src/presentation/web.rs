@@ -760,6 +760,8 @@ fn state_json(faces: &Faces, fence: &FenceInfo) -> Result<serde_json::Value, Str
         .into_iter()
         .map(|v| serde_json::to_value(&v).unwrap_or_else(|_| json!({})))
         .collect();
+    let settings = faces.registry.settings()?;
+    let lang = crate::capabilities::runtime::api::i18n::pick(&settings.lang);
     Ok(json!({
         "modules": roster.modules.iter().map(|m| json!({
             "id": m.manifest.id,
@@ -790,7 +792,15 @@ fn state_json(faces: &Faces, fence: &FenceInfo) -> Result<serde_json::Value, Str
         "models": faces.registry.models()?,
         "core": faces.registry.core_model()?,
         "agents": faces.registry.agents()?,
-        "settings": faces.registry.settings()?,
+        "settings": settings,
+        // 回执说明的界面词表：语言按设置协商，模板源文本由后端给（前端只做参数替换）。
+        "i18n": {
+            "lang": lang.tag(),
+            "available": crate::capabilities::runtime::api::i18n::available(),
+            "messages": crate::capabilities::runtime::api::i18n::messages(lang)
+                .into_iter()
+                .collect::<std::collections::BTreeMap<_, _>>(),
+        },
         "sessions": sessions,
         "history": history,
     }))

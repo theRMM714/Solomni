@@ -288,10 +288,7 @@ impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
             .push(format!("run:{}:{}", self.lease, run.command));
         self.exec_result
             .clone()
-            .unwrap_or_else(|| crate::kernel::api::ToolOutcome {
-                ok: true,
-                output: "fake-guest".to_string(),
-            })
+            .unwrap_or_else(|| crate::kernel::api::ToolOutcome::new(true, "fake-guest".to_string()))
     }
 
     fn exec_fenced(
@@ -317,7 +314,7 @@ impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
             .fenced_output
             .clone()
             .unwrap_or_else(|| "fake-guest".to_string());
-        crate::kernel::api::ToolOutcome { ok: true, output }
+        crate::kernel::api::ToolOutcome::new(true, output)
     }
 }
 
@@ -369,10 +366,7 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
         run: &crate::capabilities::vm::domain::guest::GuestRun,
     ) -> crate::kernel::api::ToolOutcome {
         self.runs.lock().expect("锁").push(run.command.clone());
-        crate::kernel::api::ToolOutcome {
-            ok: true,
-            output: "guest".to_string(),
-        }
+        crate::kernel::api::ToolOutcome::new(true, "guest".to_string())
     }
 
     fn guest_run_fenced(
@@ -390,14 +384,9 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
             run.timeout_secs,
             run.output_limit,
         ));
-        self.fenced_result
-            .lock()
-            .expect("锁")
-            .clone()
-            .unwrap_or(crate::kernel::api::ToolOutcome {
-                ok: true,
-                output: "guest".to_string(),
-            })
+        self.fenced_result.lock().expect("锁").clone().unwrap_or(
+            crate::kernel::api::ToolOutcome::new(true, "guest".to_string()),
+        )
     }
 
     fn stage_exec(

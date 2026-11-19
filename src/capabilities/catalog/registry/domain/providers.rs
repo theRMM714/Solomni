@@ -391,6 +391,15 @@ pub struct AppSettings {
     ///    到顶就放它过去：主会话如实记一行"未回应"，整轮继续（不阻塞）。
     #[serde(default = "default_discuss_remind_cap")]
     pub discuss_remind_cap: u32,
+    /// 目的：界面语言（回执说明用哪种语言渲染给**人**看）——模型通道固定源语言，不受它影响。
+    /// 约束：必须是 `locales/` 里登记过的标签；默认 zh-CN，改它不必迁移已有数据。
+    #[serde(default = "default_lang")]
+    pub lang: String,
+}
+
+/// 目的：界面语言的缺省值（源语言）。
+fn default_lang() -> String {
+    crate::kernel::api::i18n::SOURCE_LANG.to_string()
 }
 
 fn default_discuss_remind_cap() -> u32 {
@@ -436,6 +445,7 @@ impl Default for AppSettings {
             compact_keep_percent: 15,
             compact_model: String::new(),
             discuss_remind_cap: 3,
+            lang: default_lang(),
         }
     }
 }

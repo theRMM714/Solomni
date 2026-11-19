@@ -156,14 +156,14 @@ impl ProxyTools {
                 Err(e) => failed.push(serde_json::json!({ "target": t, "why": e })),
             }
         }
-        let out = ToolOutcome {
-            ok: failed.is_empty(),
-            output: serde_json::json!({
+        let out = ToolOutcome::new(
+            failed.is_empty(),
+            serde_json::json!({
                 "sent": sent,
                 "failed": failed,
             })
             .to_string(),
-        };
+        );
         self.done.insert(key, out.clone());
         out
     }
@@ -244,17 +244,11 @@ fn idem_key(tool: &str, request_id: &str) -> String {
 }
 
 fn ok(text: String) -> ToolOutcome {
-    ToolOutcome {
-        ok: true,
-        output: text,
-    }
+    ToolOutcome::new(true, text)
 }
 
 fn deny(text: String) -> ToolOutcome {
-    ToolOutcome {
-        ok: false,
-        output: text,
-    }
+    ToolOutcome::new(false, text)
 }
 
 fn json_ok<T: serde::Serialize>(v: &T) -> ToolOutcome {

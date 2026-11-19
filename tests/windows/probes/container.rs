@@ -91,11 +91,8 @@ fn container_cannot_read_outside_its_roots() {
         err
     );
     assert_ne!(code, Some(0), "越界读应以非零退出：{} / {}", out, err);
-    assert!(
-        err.contains("范围外的访问被围栏拒绝"),
-        "围栏内失败要带一条不分语言的边界说明：{}",
-        err
-    );
+    // 判据只有「拿不到 + 非零退出」：回执不声称失败原因（守门进程看不见子进程里的拒绝，
+    // 见 tests/gaps.yaml 的 tools.fence-boundary-note-trigger）。
 }
 
 #[test]

@@ -1,14 +1,11 @@
 //! 目的：一次外部进程执行的**围栏描述符**（纯数据）与平台无关的落点事实。
-//! 管：`FenceSpec`（可达范围 / 网络 / 租约）、`FenceRunPolicy`、`FencePart` / `FenceBlocked` 与边界标记。
+//! 管：`FenceSpec`（可达范围 / 网络 / 租约）、`FenceRunPolicy`、`FencePart` / `FenceBlocked`。
 //! 不管：从 `Sandbox` / 模块权限**派生**围栏（在 `capabilities/tools/domain/fence.rs`）；
 //!   按次租约与全局沙箱要求（在 `src/kernel/domain/fence.rs`）；平台机制（在 `detail/confine`）。
 //! 联动：由 `src/kernel/api.rs` 重导出；守门进程协议与工具执行层消费它。
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-
-/// 目的：围栏边界说明的稳定标记（shell 回执据此判断“这次失败是不是被围栏拒绝”）。
-pub const FENCE_BOUNDARY_MARK: &str = "范围外的访问被围栏拒绝";
 
 /// 目的：守门进程执行时的全局沙箱要求——机制装不上时是降级还是拒绝。
 /// 约束：`allow_degraded` 只来自本进程的启动问答；不落盘。

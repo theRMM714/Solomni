@@ -194,6 +194,7 @@ body {
 @media (hover: none) { .turn-foot { opacity: 1; } }
 .line.plan { border-left: 3px solid var(--color-accent); }
 .line.ok { border-left: 3px solid var(--color-ok); }
+.line.warn { border-left: 3px solid var(--color-warn); }
 .line.bad { border-left: 3px solid var(--color-err); }
 .typing { align-self: center; width: 100%; max-width: var(--w-read); color: var(--color-text-dim); font-size: var(--fs-s); padding: 0 0 0 var(--sp-4); }
 .typing::after { content: "▍"; animation: blink var(--dur-pulse) infinite; }
@@ -587,11 +588,13 @@ body {
 .tool-card { border: none; background: transparent; border-radius: 0; padding: 0 0 0 var(--sp-3); }
 .tool-head { display: flex; align-items: center; gap: var(--sp-2); font-family: var(--font-mono); font-size: var(--fs-xs); }
 .tool-card.ok .tool-head { color: var(--color-ok); }
+.tool-card.warn .tool-head { color: var(--color-warn); }
 .tool-card.bad .tool-head { color: var(--color-err); }
 .tool-name { font-weight: 600; color: var(--color-text); }
 .tool-mark { display: inline-flex; }
 .tool-mark .ui-icon { width: 14px; height: 14px; }
 .tool-card.ok .tool-mark { color: var(--color-ok); }
+.tool-card.warn .tool-mark { color: var(--color-warn); }
 .tool-card.bad .tool-mark { color: var(--color-err); }
 .tool-raw { margin: var(--sp-1) 0 0; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--color-text-dim); }
 .tool-raw summary { cursor: pointer; color: var(--color-text-dim); }
@@ -609,6 +612,7 @@ body {
   animation: rail-pulse var(--dur-pulse) ease-in-out infinite;
 }
 .line.bad::before { background: var(--color-err); }
+.line.warn::before { background: var(--color-warn); }
 .line.ok::before { background: var(--color-ok); }
 @keyframes rail-pulse { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
 /* 流式块尚无可见内容（例如那一轮只发了信封、正文不外泄）：整块藏起来，

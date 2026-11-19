@@ -2,9 +2,19 @@
  * 管：mdNode / appendBody / fold* / flushScroll / toolDetail / toolCard / buildRootList / shortPath /
  *   reasoningBlock / rewindButton / lineBlock / sessionNote。
  * 不管：不决定渲染哪些行、不管整帧与增量策略（见 ./stream.js 与 ./page.js）。
- * 联动：折叠与滚动位置存在会话上（fold / scroll）；长路径根来自 state.pathRoots（由向导写入）。 */
+ * 联动：折叠与滚动位置存在会话上（fold / scroll）；长路径根来自 state.pathRoots（由向导写入）；
+ *   回执说明按码从 `../../core/i18n.js` 取文本。 */
+
+import { notesText } from '../../core/i18n.js';
 
 let g, doc, state, ui, app;
+
+/// 回执轻重 → 卡片配色与图标（三档与后端的 Severity 一一对应）。
+const SEVERITY = {
+  info: { cls: 'ok', icon: 'check' },
+  warning: { cls: 'warn', icon: 'alert' },
+  error: { cls: 'bad', icon: 'close' },
+};
 
 /// 思维链块：永远默认折叠，点击（原生 details）才展开。
 /// Markdown 容器：有渲染器就渲染，没有就退回纯文本（安全）。
@@ -84,8 +94,9 @@ function toolDetail(label, text, sess, key, literal) {
 /// 流式 tool_call 与权威 transcript 的 tool 行共用这一个渲染函数，也共用同一个折叠键。
 function toolCard(t, sess, key, who) {
   const info = t || {};
+  const sev = SEVERITY[info.severity] || (info.ok ? SEVERITY.info : SEVERITY.error);
   const el = doc.createElement('div');
-  el.className = 'line tool-card ' + (info.ok ? 'ok' : 'bad');
+  el.className = 'line tool-card ' + sev.cls;
   el.title = info.speaker ? info.speaker + ' 调用工具' : '工具调用';
   // 左上角先标出**是谁**在调工具：与其它行同一条规则（每个 kind 都带身份）。
   const speaker = who || info.speaker || '';
@@ -96,12 +107,21 @@ function toolCard(t, sess, key, who) {
   const name = doc.createElement('span'); name.className = 'tool-name';
   name.textContent = (info.module ? info.module + '.' : '') + (info.name || '工具');
   const mark = doc.createElement('span'); mark.className = 'tool-mark';
-  mark.appendChild(ui.icon(info.ok ? 'check' : 'close'));
+  mark.appendChild(ui.icon(sev.icon));
   head.appendChild(name); head.appendChild(mark);
   el.appendChild(head);
   el.appendChild(toolDetail('参数', info.args, sess, key + ':args'));
-  el.appendChild(toolDetail('结果', info.output, sess, key + ':output'));
+  el.appendChild(toolDetail('结果', resultText(info), sess, key + ':output'));
   return el;
+}
+
+/// 结果正文 + 回执说明（说明按语言渲染后单独成段；两段都空时留空，由 toolDetail 显示「（空）」）。
+function resultText(info) {
+  const notes = notesText(info.notes);
+  const out = info.output == null ? '' : String(info.output);
+  if (!notes) return out;
+  if (!out) return notes;
+  return out.replace(/\n+$/, '') + '\n\n' + notes;
 }
 
 /* 长路径缩写：转录里是真实绝对路径（如 D:/…/session/总结/work/README.md），显示时缩成短式胶囊：

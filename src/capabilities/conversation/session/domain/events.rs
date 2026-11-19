@@ -250,10 +250,16 @@ pub struct ToolCallView {
     pub module: String,
     pub name: String,
     pub ok: bool,
+    /// 目的：回执的轻重（info / warning / error）——界面按它上色，不看正文猜。
+    #[serde(default)]
+    pub severity: crate::kernel::api::Severity,
     /// 目的：模型给的参数 JSON 原文。
     pub args: String,
-    /// 目的：回注给模型的结果原文（转录即内容）。
+    /// 目的：进程/工具给的原始输出（不含按语言渲染的句子）。
     pub output: String,
+    /// 目的：回执说明——稳定码 + 参数 + 轻重；呈现层按语言渲染，模型通道由核心渲染。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<crate::kernel::api::Note>,
     /// 目的：供应商给的调用 id：重建时靠它把结果消息与助手消息里的调用对上（手写信封通道为空）。
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub call_id: String,
@@ -265,7 +271,7 @@ pub struct ToolCallView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read: Option<crate::capabilities::workspace::api::ReadFact>,
     /// 目的：这次调用若是一次 shell，执行层当场算好的结构化事实（耗时 / 围栏准备 / 落点 / 退出码 / 状态 / 截断）；
-    ///   实况卡片与会话回放都读它。旧转录没有这段（缺省 = None），回放回落解析回执。
+    ///   实况卡片与会话回放都读它，不解析回执文本。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shell: Option<crate::capabilities::tools::api::ShellFacts>,
 }

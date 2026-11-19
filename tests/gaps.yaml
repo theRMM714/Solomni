@@ -123,22 +123,97 @@
   scope: global
   level: T3
   why: |
-    shell 回执末尾那段围栏边界说明（「工具进程只可达 …；范围外的访问被围栏拒绝」，
-    `src/kernel/detail/confine/texts.rs` 的 `fence_boundary_note`）按「子进程非零退出」出现，
-    而不是按「这次确有越界拒绝」：`Get-Content` 读一个不存在的文件也会在 stderr 末尾粘一段
-    与本命令无关的说明，读起来像这次的报错。
-    要改成「只在确有拒绝时追加」，就得在守门进程或回执里认「Access is denied」「拒绝访问」
-    这类**人读文案**——宿主语言一变判据就失效；本轮按「文案相关的先不动」的范围决定不修。
+    回执不再声称失败原因：围栏拒绝发生在工具子进程内部（ACL / Landlock / seatbelt / 容器 SID），
+    守门进程只看得到退出码与被本地化的 OS 文案，任何平台都没有「本次确被围栏拒绝」的机器可读事实，
+    因此回执只交退出码与信号（`shell.exit` / `shell.signal` 等稳定码），可达范围与网络状态只进
+    工具行的结构化事实（`ShellFacts`，`src/capabilities/tools/domain/shell.rs`），界面可见、模型不可见。
+    代价是**模型侧没有可靠信号**：沙箱 scope 下的越界失败与普通失败在模型眼里一样，
+    模型不会知道「可达哪里、该不该改档」；按 scope 直接补固定提示会退回「任何非零退出都像越界」的老问题。
   how: |
-    1) 让守门进程把「越界拒绝」表达成机器标记（与 `FENCE_FAILED` 同一族：固定退出码或 stderr
-       上的固定 ASCII 前缀），不靠匹配人读句子；
-    2) 外层装配回执时按标记追加说明，`src/kernel/contracts/fence.rs` 的 `FENCE_BOUNDARY_MARK` 与
-       `src/capabilities/tools/domain/shell.rs` 的 `with_scope_hint` 触发条件同步改成认标记；
-    3) 补两条用例：普通非零退出不带说明、真越界拒绝带说明；
-    4) 同步 `docs/tools/tools-and-roles.md` 与 `docs/kernel/README.md` 的围栏说明口径。
+    1) 找平台侧的带外信号：Linux 的 seccomp user notification / fanotify / audit，Windows 的 ETW ACL 拒绝事件，
+       macOS 的 seatbelt 拒绝日志（`log stream` 的 sandbox 子系统）；只取「本次 pid 的拒绝」这一事实；
+    2) 守门进程把它表达成回执说明的稳定码（例如 `fence.denied`，参数只放路径类别，不放人读句子）；
+    3) 只有拿到该码时才在生产回执里附「可达范围 + 改档建议」说明，普通非零退出保持现状；
+    4) 补用例：普通非零退出不带该说明、真越界带该说明；平台证据记在 `tests/<平台>/gaps.yaml`。
   accept: |
-    `Get-Content <不存在的文件>` 的回执里没有围栏边界说明；一次真实的范围外读写被拒时仍带说明；
-    `cargo test --bin solomni` 全绿。
-  blocked_by: 本轮范围决定（文案相关的先不做，见 PR #95 的「明确不做」）
+    沙箱 scope 下一次真实的范围外读写被拒时，模型回执带 `fence.denied` 说明（含可达范围与改档建议）；
+    普通非零退出不带该说明；`cargo test --bin solomni` 与 `node run-tests.js` 全绿。
+  blocked_by: |
+    需要平台带外信号（seccomp notif / ETW / seatbelt 日志）；当前机制层只有退出码与输出
+
+- id: tools.unix-fence-degrade-text-only
+  scope: global
+  level: T3
+  why: |
+    Windows 的「本轮无围栏跑」由外层 `platform::prepare` 判定，外层看得到，回执能把轻重提成 warning
+    并带上裁决文案（`src/kernel/detail/process.rs` 的 `unfenced_note`）。Linux / macOS 的如实降级发生在
+    守门进程内部（`src/kernel/detail/confine/linux.rs` 的 `run_fenced` 只往 stderr 打一行
+    「[围栏] …：按如实降级继续执行」），外层拿不到结构化事实：退出码为 0 时回执是 `shell.exit` 的 info，
+    界面上看不出这次是降级跑的，那行中文也只混在正文里。
+  how: |
+    1) 守门进程在降级执行时输出机器标记（与 `FENCE_FAILED` 同族的固定退出码或固定 ASCII 前缀），标明缺哪一项；
+    2) 外层装配回执时把它翻成稳定码（例如 `fence.degraded`），轻重提成 warning，正文不再混入守门进程的散文；
+    3) 用例：强制策略且机制可装时不带该码；允许降级且机制不可用时带该码（平台用例进 `tests/<平台>/`）。
+  accept: |
+    unix 上降级执行的回执带 `fence.degraded` 说明且轻重为 warning；未降级时不带；
+    守门进程不再往正文里写散文；`node run-tests.js` 全绿。
+  blocked_by: 缺少守门进程侧的信号（当前只回退出码与输出）
+
+- id: receipt.business-text
+  scope: global
+  level: T3
+  why: |
+    只有 shell 与围栏的结束说明迁成了稳定码（`src/kernel/contracts/note.rs` 的 `codes` + `locales/zh-CN.ftl`）。
+    其余会进模型上下文或界面的文案仍是硬编码中文：能力层的业务句（`core_rows` 的「工具 X → 成功/失败」、
+    信封修复的 `[信封修复] …`、VM 传输护栏的「[截断] 输出共 N 字符」、共享区拒绝与各工具的错误句）、
+    内核的机制句（`SandboxMode::check` 的错误、`FenceVerdict` 的裁决文案、PowerShell 包装脚本的定位失败提示）
+    与守卫进程的 `eprintln!` 日志。换语言时这些不会变。
+  how: |
+    1) 按域补码：能力层用 `tools.*` / `work.*` / `collab.*`，机制用 `sandbox.unavailable` / `fence.refused`；
+    2) 文案进 `locales/<lang>.ftl`，代码只留码与类型化参数（内核受 R6 约束，本就不该构造业务文案）；
+    3) 日志走开发者通道：固定源语言或只留码与结构化字段，不进语言目录；
+    4) 逐域补用例：码有目录、参数类型化、渲染形状稳定（沿用 `src/kernel/detail/i18n.rs` 的 `catalog_covers_every_code` 判据）。
+  accept: |
+    上述位置不再有硬编码中文；模型通道按源语言、界面按当前语言渲染同一组码；日志只有码与字段；
+    `node run-tests.js` 全绿。
+  blocked_by: |
+    本轮范围决定（先收口回执分级与 shell/fence 说明；业务与内核文案按域分批）
+
+- id: ui.text-catalog
+  scope: global
+  level: T2
+  why: |
+    回执说明已按稳定码走 `locales/<lang>.ftl`（`src/kernel/detail/i18n.rs`），Web 只按 `/api/state` 的
+    `i18n.messages` 做参数替换。但界面文案仍写死在各自的 `copy.js` 与组件里
+    （`src/presentation/web/assets/app/features/*/copy.js`），CLI 的提示句也仍是中文——换语言时只有工具卡的说明会变。
+  how: |
+    1) 定词表键：按功能域给稳定码（`ui.<域>.<键>`），与 `locales/<lang>.ftl` 同源，构建期生成前端映射；
+    2) `copy.js` 改为按键取值（保留 lead / detail / safety 三段结构），组件不内联中文；
+    3) 加门禁：扫 `src/presentation/web/assets/app/**/*.js` 与 `src/presentation/cli/` 的中文字面量，白名单只留注释与调试输出；
+    4) 语言切换入口接到设置项 `settings.lang`（形状已就位）。
+  accept: |
+    切换 `settings.lang` 后界面与 CLI 文案随之变化；目录缺键时按 `[code]` 如实显示；
+    源码里没有未登记的中文字面量（门禁可判）；`node run-tests.js` 全绿。
+  blocked_by: |
+    本轮范围决定（用户明确 P1 只在本次留好形状，不做全站迁移）
+
+- id: i18n.second-language
+  scope: global
+  level: T2
+  why: |
+    协商形状已就位（`settings.lang` → `SOLOMNI_LANG` → `zh-CN`，`src/kernel/detail/i18n.rs` 的 `pick`），
+    但可用语言只有一项（`AVAILABLE = ["zh-CN"]`，`locales/` 只有 `zh-CN.ftl`）。
+    没有第二种语言的目录，"可切换"这条契约就没有真实验证过：前缀协商、缺键回退、界面词表导出都只有一条路径可走。
+  how: |
+    1) 加 `locales/en-US.ftl`，按 `codes::ALL` 全部补齐；`AVAILABLE` 加 `en-US`；
+    2) `catalog_for(lang)` 按语言选目录，`messages(lang)` 导出对应语言；
+    3) 用例：`catalog_covers_every_code` 对每个可用语言各跑一遍（缺键即失败），并按 `en-US` 断言一次渲染；
+    4) 设置校验（`settings.lang` 必须在可用语言内）随 `AVAILABLE` 自动成立。
+  accept: |
+    `settings.lang: en-US` 时界面词表与 CLI 标签为英文（模型通道仍按源语言渲染）；任一可用语言缺码则测试失败；
+    `node run-tests.js` 全绿。
+  blocked_by: |
+    用户范围决定（英文放到之后统一做；本次只交付可切换形状与中文目录）
+
 
 

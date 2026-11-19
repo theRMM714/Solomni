@@ -21,15 +21,15 @@ pub struct ShellLive {
     pub started_at: u64,
     /// 目的：结束时间；None = 仍在跑。
     pub finished_at: Option<u64>,
-    /// 目的：本次执行耗时（秒）；运行中为 None。实况取自结构化事实，回放的新转录也读事实（旧转录回落回执里的「耗时」行）。
+    /// 目的：本次执行耗时（秒）；运行中为 None。实况取自结构化事实，回放也读同一份事实。
     #[serde(default)]
     pub elapsed_secs: Option<u64>,
-    /// 目的：本次耗时里围栏准备占的秒数（本机档首调用写 ACL 常常是大头）；不足一秒 / 虚拟机档 / 旧转录为 None。
+    /// 目的：本次耗时里围栏准备占的秒数（本机档首调用写 ACL 常常是大头）；不足一秒 / 虚拟机档为 None。
     #[serde(default)]
     pub fence_prep_secs: Option<u64>,
     /// 目的：退出码（超时 / 停止 / 拿不到时为 None）。
     pub exit_code: Option<i32>,
-    /// 目的：回执状态（exit / timeout / stopped / signal）；None = 运行中、没执行或旧数据。
+    /// 目的：结束状态（exit / timeout / stopped / signal）；None = 运行中、没执行或没跑成。
     #[serde(default)]
     pub status: Option<String>,
     /// 目的：成败；None = 仍在跑。
@@ -37,7 +37,7 @@ pub struct ShellLive {
     /// 目的：回执预览（最多 4000 字符；完整回执在转录的 shell 工具行）。
     pub output: String,
     /// 目的：true = 从转录派生（回放 / 重建），不是本次进程的运行槽：此时没有起止墙钟时间，
-    ///   耗时与 cwd 取自工具行的结构化事实（旧转录没有事实，才回落回执末尾的「[shell] cwd … · 耗时 … 秒」行）。
+    ///   耗时与 cwd 取自工具行的结构化事实，不解析回执正文。
     #[serde(default)]
     pub historical: bool,
 }
@@ -113,9 +113,8 @@ fn now_secs() -> u64 {
 }
 
 /// 目的：从转录派生最近一次 shell 的状态（回放 / 重建用）：命令、scope、cwd、耗时、成败、退出码与回执预览。
-/// 约束：优先读工具行的结构化事实（tool.shell），缺失才回落解析回执文本；只读结构化字段
-///   （tool.name / tool.args / tool.output），不匹配正文；跳过回档折叠的行；
-///   参数里没有命令（调用没解析出来）的行跳过；有命令但没真正执行（如围栏拒绝）仍算「最近一次尝试」。
+/// 约束：只读工具行的结构化字段（tool.name / tool.args / tool.shell / tool.output），不解析正文；
+///   跳过回档折叠的行；参数里没有命令（调用没解析出来）或没有结构化事实的行跳过。
 pub fn last_shell(events: &[serde_json::Value]) -> Option<ShellLive> {
     let marks = super::rewind::rewind_marks(events);
     let mut found = None;
@@ -155,31 +154,12 @@ pub fn last_shell(events: &[serde_json::Value]) -> Option<ShellLive> {
             if command.is_empty() {
                 continue;
             }
-            // 新转录带结构化事实：直接用，不再解析回执；旧转录缺这段才回落解析（两态同值）。
-            let facts = tool
+            // 结构化事实是唯一来源：没有它的行不算「最近一次 shell」。
+            let Some(facts) = tool
                 .get("shell")
-                .and_then(|f| serde_json::from_value::<ShellFacts>(f.clone()).ok());
-            let (cwd, elapsed_secs, fence_prep_secs, exit_code, status) = match facts {
-                Some(facts) => (
-                    facts.cwd.clone(),
-                    Some(facts.elapsed_secs()),
-                    facts.fence_prep_secs(),
-                    facts.exit_code,
-                    facts.status.clone(),
-                ),
-                None => {
-                    let (cwd, elapsed_secs) = crate::capabilities::tools::api::cwd_elapsed(output)
-                        .map(|(cwd, secs)| (cwd, Some(secs)))
-                        .unwrap_or_default();
-                    (
-                        cwd,
-                        elapsed_secs,
-                        None,
-                        crate::capabilities::tools::api::exit_code(output),
-                        crate::capabilities::tools::api::shell_status(output)
-                            .map(|s| s.as_str().to_string()),
-                    )
-                }
+                .and_then(|f| serde_json::from_value::<ShellFacts>(f.clone()).ok())
+            else {
+                continue;
             };
             found = Some(ShellLive {
                 command,
@@ -188,13 +168,13 @@ pub fn last_shell(events: &[serde_json::Value]) -> Option<ShellLive> {
                     .and_then(|s| s.as_str())
                     .unwrap_or("sandbox")
                     .to_string(),
-                cwd,
+                cwd: facts.cwd.clone(),
                 started_at: 0,
                 finished_at: None,
-                elapsed_secs,
-                fence_prep_secs,
-                exit_code,
-                status,
+                elapsed_secs: Some(facts.elapsed_secs()),
+                fence_prep_secs: facts.fence_prep_secs(),
+                exit_code: facts.exit_code,
+                status: facts.status.clone(),
                 ok: Some(tool.get("ok").and_then(|o| o.as_bool()).unwrap_or(false)),
                 output: output.chars().take(4000).collect(),
                 historical: true,
@@ -468,11 +448,12 @@ mod tests {
     #[test]
     fn last_shell_reads_command_scope_cwd_and_elapsed_from_the_tool_row() {
         let events = vec![transcript(json!([
-            {"id": 0, "tool": {"name": "shell", "module": "", "ok": false,
-             "args": r#"{"command":"first"}"#, "output": "x\n[shell] 退出码 1"}},
+            {"id": 0, "tool": {"name": "shell", "module": "", "ok": true,
+             "args": r#"{"command":"first"}"#, "output": "x"}},
             {"id": 1, "tool": {"name": "shell", "module": "", "ok": true,
              "args": r#"{"command":"npm test","scope":"external"}"#,
-             "output": "ok\n[shell] 退出码 0\n[shell] cwd /w/a · 耗时 7 秒"}}
+             "output": "ok",
+             "shell": {"cwd": "/w/a", "elapsed_ms": 7_000, "exit_code": 0, "status": "exit"}}}
         ]))];
         let live = last_shell(&events).expect("要派生最后一条");
         assert_eq!(live.command, "npm test");
@@ -492,12 +473,14 @@ mod tests {
             transcript(json!([
                 {"id": 0, "tool": {"name": "read", "module": "", "ok": true, "args": "{}", "output": "x"}},
                 {"id": 1, "tool": {"name": "shell", "module": "", "ok": true,
-                 "args": r#"{"command":"gone"}"#, "output": "[shell] 退出码 0"}}
+                 "args": r#"{"command":"gone"}"#, "output": "",
+                 "shell": {"cwd": "/w", "elapsed_ms": 1_000, "exit_code": 0, "status": "exit"}}}
             ])),
             json!({"type": "rewind", "mark": 1, "mode": "archive", "before": 0, "from": 2}),
             transcript(json!([
                 {"id": 2, "tool": {"name": "shell", "module": "m", "ok": true,
-                 "args": r#"{"command":"module"}"#, "output": "[shell] 退出码 0"}}
+                 "args": r#"{"command":"module"}"#, "output": "",
+                 "shell": {"cwd": "/w", "elapsed_ms": 1_000, "exit_code": 0, "status": "exit"}}}
             ])),
         ];
         assert!(
@@ -507,32 +490,33 @@ mod tests {
     }
 
     #[test]
-    fn last_shell_keeps_a_refused_attempt_without_inventing_cwd() {
+    fn last_shell_keeps_a_refused_attempt_as_an_attempt() {
         let events = vec![transcript(json!([
             {"id": 0, "tool": {"name": "shell", "module": "", "ok": false,
              "args": r#"{"command":"cat ../x","scope":"external"}"#,
-             "output": "[围栏] 这次调用没有执行"}}
+             "output": "",
+             "shell": {"cwd": "/w", "elapsed_ms": 0}}}
         ]))];
         let live = last_shell(&events).expect("最近一次尝试");
         assert_eq!(live.ok, Some(false));
-        assert_eq!(live.cwd, "");
-        assert_eq!(live.elapsed_secs, None);
+        assert_eq!(live.cwd, "/w", "落点是尝试的落点，不是结果");
+        assert_eq!(live.elapsed_secs, Some(0));
         assert_eq!(live.exit_code, None);
-        assert_eq!(live.status, None, "没执行的调用没有状态行");
+        assert_eq!(live.status, None, "没执行的调用没有结束状态");
     }
 
     #[test]
-    fn last_shell_prefers_the_structured_facts_over_the_receipt_text() {
+    fn last_shell_reads_only_the_structured_facts() {
         let events = vec![transcript(json!([
             {"id": 0, "tool": {"name": "shell", "module": "", "ok": true,
              "args": r#"{"command":"npm test","scope":"sandbox"}"#,
-             "output": "ok（回执被截断，没有尾行）",
+             "output": "ok",
              "shell": {"cwd": "/w/b", "elapsed_ms": 331_400,
                        "fence_prep_ms": 327_000, "exit_code": 0,
                        "status": "exit", "truncated": true}}}
         ]))];
         let live = last_shell(&events).expect("要派生");
-        assert_eq!(live.cwd, "/w/b", "事实优先，不回落到解析");
+        assert_eq!(live.cwd, "/w/b");
         assert_eq!(live.elapsed_secs, Some(331));
         assert_eq!(live.fence_prep_secs, Some(327));
         assert_eq!(live.exit_code, Some(0));
@@ -541,24 +525,13 @@ mod tests {
     }
 
     #[test]
-    fn last_shell_reads_the_same_values_from_old_and_new_rows() {
-        let old = transcript(json!([
+    fn last_shell_ignores_rows_without_structured_facts() {
+        let events = vec![transcript(json!([
             {"id": 0, "tool": {"name": "shell", "module": "", "ok": true,
              "args": r#"{"command":"npm test"}"#,
              "output": "ok\n[shell] 退出码 0\n[shell] cwd /w/a · 耗时 7 秒"}}
-        ]));
-        let new = transcript(json!([
-            {"id": 0, "tool": {"name": "shell", "module": "", "ok": true,
-             "args": r#"{"command":"npm test"}"#,
-             "output": "ok\n[shell] 退出码 0\n[shell] cwd /w/a · 耗时 7 秒",
-             "shell": {"cwd": "/w/a", "elapsed_ms": 7_000, "exit_code": 0, "status": "exit"}}}
-        ]));
-        let a = last_shell(&[old]).expect("旧行");
-        let b = last_shell(&[new]).expect("新行");
-        assert_eq!(a.cwd, b.cwd);
-        assert_eq!(a.elapsed_secs, b.elapsed_secs);
-        assert_eq!(a.exit_code, b.exit_code);
-        assert_eq!(a.status, b.status);
+        ]))];
+        assert!(last_shell(&events).is_none(), "正文里的旧式尾行不再被解析");
     }
 
     #[test]
@@ -572,25 +545,5 @@ mod tests {
         };
         assert_eq!(last_shell(&[row(400)]).unwrap().fence_prep_secs, None);
         assert_eq!(last_shell(&[row(1_000)]).unwrap().fence_prep_secs, Some(1));
-    }
-
-    #[test]
-    fn last_shell_falls_back_per_row_when_new_and_old_rows_are_mixed() {
-        let events = vec![
-            transcript(json!([
-                {"id": 0, "tool": {"name": "shell", "module": "", "ok": true,
-                 "args": r#"{"command":"first"}"#,
-                 "output": "[shell] 退出码 0\n[shell] cwd /old · 耗时 3 秒"}}
-            ])),
-            transcript(json!([
-                {"id": 1, "tool": {"name": "shell", "module": "", "ok": true,
-                 "args": r#"{"command":"second"}"#, "output": "[shell] 退出码 0",
-                 "shell": {"cwd": "/new", "elapsed_ms": 9_000, "exit_code": 0, "status": "exit"}}}
-            ])),
-        ];
-        let live = last_shell(&events).expect("最近一次");
-        assert_eq!(live.command, "second");
-        assert_eq!(live.cwd, "/new");
-        assert_eq!(live.elapsed_secs, Some(9));
     }
 }

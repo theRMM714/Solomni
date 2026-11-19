@@ -4,5 +4,6 @@
 //! 联动：由 `src/kernel/api.rs` 重导出；判据见 ARCHITECTURE.md 的「硬要求清单」R6。
 
 pub mod fence;
+pub mod note;
 pub mod run;
 pub mod types;

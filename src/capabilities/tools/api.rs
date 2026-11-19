@@ -11,8 +11,8 @@ pub use crate::capabilities::tools::domain::schema::{
     ArgFault, ToolBook, ToolSchema, json_schema_lines,
 };
 pub use crate::capabilities::tools::domain::shell::{
-    ShellFacts, cwd_elapsed, cwd_elapsed_line, did_run, exit_code, facts as shell_facts,
-    parse as parse_shell, shared_exec_hint, status as shell_status, with_scope_hint,
+    ShellFacts, did_run, facts as shell_facts, parse as parse_shell, place_notes, shared_exec_note,
+    truncated,
 };
 pub use crate::capabilities::tools::domain::systool::{
     Observations, PATCH, REPORT, ToolNotes, ToolOutcome, arg_fault_text, is_builtin, is_exec,

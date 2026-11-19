@@ -29,7 +29,6 @@ mod job;
 mod ledger;
 mod paths;
 mod prep;
-mod texts;
 
 #[cfg(test)]
 mod tests;

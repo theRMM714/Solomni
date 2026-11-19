@@ -114,31 +114,24 @@ pub fn run_fenced(
     command: &str,
     policy: &crate::kernel::api::FenceRunPolicy,
 ) -> i32 {
-    let enforced = match install(spec, command) {
-        Ok(()) => true,
-        Err(e) => {
-            let required = policy.require_fs || (policy.require_net && !spec.net);
-            if required && !policy.allow_degraded {
-                eprintln!(
-                    "[围栏] 文件系统/网络围栏未生效（{}）：按全局策略拒绝执行",
-                    e
-                );
-                return FENCE_FAILED;
-            }
-            eprintln!("[围栏] 文件系统围栏未生效（{}）：按如实降级继续执行", e);
-            false
+    if let Err(e) = install(spec, command) {
+        let required = policy.require_fs || (policy.require_net && !spec.net);
+        if required && !policy.allow_degraded {
+            eprintln!(
+                "[围栏] 文件系统/网络围栏未生效（{}）：按全局策略拒绝执行",
+                e
+            );
+            return FENCE_FAILED;
         }
-    };
+        eprintln!("[围栏] 文件系统围栏未生效（{}）：按如实降级继续执行", e);
+    }
     let mut cmd = shell_command(command);
     cmd.current_dir(&spec.cwd);
     // 孤儿防护：**不要**给工具另起进程组——守门进程自成一组（由拉起它的一侧设置），
     // 杀那一组 = 连根杀整棵工具树（与 Windows 的 Job Object 同一套语义）；另起组会让工具逃出去变成孤儿。
     match cmd.status() {
         Ok(s) => match s.code() {
-            Some(c) => {
-                super::texts::note_fence_boundary(spec, enforced, enforced, c);
-                c
-            }
+            Some(c) => c,
             None => {
                 // 被信号结束（例如内核按围栏规则直接杀）：如实说出信号，便于定位，
                 // 否则外层只看到"命令未执行"，看不出是围栏干的还是程序自己崩的。

@@ -4,8 +4,9 @@
 //! 联动：围栏机制在 confine；ProcessRunner 端口形状见 src/kernel/ports.rs。
 
 use crate::kernel::api::{FenceSpec, RunOutcome};
+use crate::kernel::contracts::note::{Note, Severity, codes, severity_of};
 use crate::kernel::detail::confine;
-use crate::kernel::ports::{FenceGate, ProcessRunner, ProcessTexts};
+use crate::kernel::ports::{FenceGate, ProcessRunner};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::thread;
@@ -60,9 +61,6 @@ fn reset_fence_prep() {
 pub struct ProcTools {
     /// 目的：守门进程用的可执行文件（组合根注入当前程序路径）。
     pub exe: PathBuf,
-    /// 目的：工具回执里那些收尾标记的文案（生产用本文件的 `CodeProcessTexts`；它们随 [工具结果] 进模型上下文）。
-    ///   **共享一份**（调用方给出的 `Arc`）：这里不再各存一份深拷贝。
-    pub texts: std::sync::Arc<dyn ProcessTexts>,
     /// 目的：单次工具执行的超时（到时连根杀掉整棵树，ok = false）。
     pub timeout: Duration,
     /// 目的：全局沙箱要求与本进程是否已同意降级。
@@ -71,47 +69,15 @@ pub struct ProcTools {
     platform: platform::State,
 }
 
-/// 目的：进程机制自己的收尾文案（不再经提示词册；它们随 [工具结果] 进模型上下文）。
-pub struct CodeProcessTexts;
-
-impl ProcessTexts for CodeProcessTexts {
-    fn stderr_header(&self) -> String {
-        "[stderr]".to_string()
-    }
-    fn timeout(&self) -> String {
-        "[超时] 工具进程与它拉起的整棵进程树已被终止".to_string()
-    }
-    fn fence_failed(&self) -> String {
-        "[围栏] 工具进程没有进入围栏：命令未执行（当前能力等级见启动报告）".to_string()
-    }
-    fn shell_exit(&self, code: Option<i32>) -> String {
-        match code {
-            Some(c) => format!("[shell] 退出码 {}", c),
-            None => "[shell] 退出码未知（被信号结束）".to_string(),
-        }
-    }
-    fn shell_timeout(&self, secs: u64) -> String {
-        format!(
-            "[shell] 超时（{} 秒）：工具进程与它拉起的整棵进程树已被终止",
-            secs
-        )
-    }
-    fn shell_cancelled(&self) -> String {
-        "[shell] 用户停止：工具进程与它拉起的整棵进程树已被终止".to_string()
-    }
-}
-
 impl ProcTools {
-    /// 目的：组合根注入：当前可执行文件（守门进程就是它自己）、进程收尾文案、产品私有区与写权限开关。
+    /// 目的：组合根注入：当前可执行文件（守门进程就是它自己）、产品私有区与写权限开关。
     pub fn new(
         exe: PathBuf,
-        texts: std::sync::Arc<dyn ProcessTexts>,
         home: PathBuf,
         write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> ProcTools {
         ProcTools {
             exe,
-            texts,
             timeout: Duration::from_secs(30),
             mode: std::sync::Arc::new(crate::kernel::api::SandboxMode::permissive()),
             platform: platform::State::new(home, write_allowed),
@@ -225,10 +191,7 @@ impl ProcTools {
             && unfenced_note.is_none()
             && let Err(why) = self.mode.check(fence, prepared)
         {
-            return RunOutcome {
-                ok: false,
-                output: why,
-            };
+            return RunOutcome::failed(why);
         }
         let policy = if plan.strict {
             crate::kernel::api::FenceRunPolicy {
@@ -274,7 +237,9 @@ impl ProcTools {
             Err(e) => {
                 return RunOutcome {
                     ok: false,
-                    output: format!("工具进程启动失败：{}", e),
+                    severity: Severity::Error,
+                    output: String::new(),
+                    notes: vec![Note::error(codes::RUN_SPAWN_FAILED).arg("error", e)],
                 };
             }
         };
@@ -326,9 +291,13 @@ impl ProcTools {
             self.assemble(out, err, timed_out, code)
         };
         // 用户裁决"本轮无围栏跑一次"：这次执行在回执里**如实标为无围栏**（模型与用户都看得到）。
+        // 说明文本来自裁决端口（业务文案，见 tests/gaps.yaml 的 P1 缺口）；轻重是机制事实：围栏收窄 = 需留意。
         if let Some(note) = unfenced_note {
-            outcome.output.push('\n');
+            if !outcome.output.is_empty() {
+                outcome.output.push('\n');
+            }
             outcome.output.push_str(&note);
+            outcome.severity = outcome.severity.max(Severity::Warning);
         }
         outcome
     }
@@ -360,15 +329,16 @@ impl ProcTools {
         } else {
             crate::kernel::domain::receipt::ShellEnd::Exit(code)
         };
-        let mut output =
-            crate::kernel::domain::receipt::shell_receipt(self.texts.as_ref(), &out, &err, end);
+        let receipt = crate::kernel::domain::receipt::shell_receipt(&out, &err, end);
+        let mut notes = receipt.notes;
         if code == Some(confine::FENCE_FAILED) {
-            output.push('\n');
-            output.push_str(&self.texts.fence_failed());
+            notes.push(Note::error(codes::FENCE_FAILED));
         }
         RunOutcome {
             ok: !timed_out && !cancelled && code == Some(0),
-            output,
+            severity: severity_of(&notes),
+            output: receipt.payload,
+            notes,
         }
     }
 }
@@ -386,30 +356,29 @@ fn read_to_string(r: &mut impl std::io::Read) -> String {
 
 impl ProcTools {
     /// 把工具进程的原始输出与事实拼成回执：成功与否看退出码；
-    /// stderr 段头、超时、围栏没装上这些**标记文案全部来自提示词册**——它们随工具结果进模型上下文；
+    /// 超时与「围栏没装上」只产出结构化说明（码 + 参数），文案在边缘按语言渲染；
     /// 输出原样交出，超限由工具预算统一收口。
     fn assemble(&self, out: String, err: String, timed_out: bool, code: Option<i32>) -> RunOutcome {
-        let mut ok = !timed_out && code == Some(0);
-        let mut output = out;
-        if !err.is_empty() {
-            if !output.is_empty() {
-                output.push('\n');
-            }
-            output.push_str(&self.texts.stderr_header());
-            output.push('\n');
-            output.push_str(&err);
-        }
+        let ok = !timed_out && code == Some(0);
+        let mut notes = Vec::new();
         if timed_out {
-            output.push('\n');
-            output.push_str(&self.texts.timeout());
+            notes.push(Note::error(codes::RUN_TIMEOUT));
         }
         // 围栏没装上：守门进程用固定退出码报明（命令没被执行），这里如实告诉模型。
         if code == Some(confine::FENCE_FAILED) {
-            ok = false;
-            output.push('\n');
-            output.push_str(&self.texts.fence_failed());
+            notes.push(Note::error(codes::FENCE_FAILED));
         }
-        RunOutcome { ok, output }
+        let severity = if notes.is_empty() {
+            if ok { Severity::Info } else { Severity::Error }
+        } else {
+            severity_of(&notes)
+        };
+        RunOutcome {
+            ok,
+            severity,
+            output: crate::kernel::domain::receipt::shell_payload(&out, &err),
+            notes,
+        }
     }
 }
 

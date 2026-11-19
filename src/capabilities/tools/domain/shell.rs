@@ -1,12 +1,13 @@
-//! 目的：执行类系统工具 `shell` 的纯规则：参数契约、命令长度、scope / timeout 解析与失败回执的 scope 提示。
-//! 管：一次 shell 调用的入参到 `ShellCall` 的解析；命令过长 / scope 非法 / timeout 越界的事实与文案。
+//! 目的：执行类系统工具 `shell` 的纯规则：参数契约、命令长度、scope / timeout 解析与回执说明的派生。
+//! 管：一次 shell 调用的入参到 `ShellCall` 的解析；命令过长 / scope 非法 / timeout 越界的事实与文案；
+//!   从回执说明（稳定码）与测量值派生结构化事实 `ShellFacts`。
 //! 不管：进程拉起、围栏安装、guest 执行与输出截断（在 kernel 的 ProcessRunner / vm 的 guest）；围栏派生在 domain/fence.rs。
 //! 联动：由 collab 的成员循环在派发 `shell` 前调用；声明在 systools/tools.yaml，经 tools::api 导出。
 
-use crate::capabilities::permission::api::{CallScope, Decision};
+use crate::capabilities::permission::api::CallScope;
 use crate::capabilities::tools::domain::schema::ToolSchema;
 use crate::capabilities::tools::domain::systool::{SHELL, arg_fault_text};
-use crate::kernel::api::ToolOutcome;
+use crate::kernel::api::{Note, codes};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -59,35 +60,6 @@ pub fn parse(schema: &ToolSchema, args_json: &str) -> Result<ShellCall, String> 
     })
 }
 
-/// 目的：给一次失败的 sandbox shell 回执补 scope 提示——只在围栏边界说明出现时补，不猜别的失败原因。
-/// 参数：`external` = 当前档位对 external scope 的处置（据此说“会先问 / 直接执行 / 需先切档”）。
-/// 约束：不自动重试、不自动升级 scope；回执仍是失败。
-pub fn with_scope_hint(outcome: ToolOutcome, scope: CallScope, external: Decision) -> ToolOutcome {
-    if outcome.ok
-        || scope != CallScope::Sandbox
-        || !outcome
-            .output
-            .contains(crate::kernel::api::FENCE_BOUNDARY_MARK)
-    {
-        return outcome;
-    }
-    let hint = match external {
-        Decision::Deny => {
-            "本次 scope=sandbox 只能访问你的私有沙箱；要访问沙箱外，请让用户把会话档位调到「外部可达（逐次确认）」或更高。"
-        }
-        Decision::Ask => {
-            "本次 scope=sandbox 只能访问你的私有沙箱；需要访问沙箱外，请用 scope=external 重试（档位会先问你）。"
-        }
-        Decision::Allow => {
-            "本次 scope=sandbox 只能访问你的私有沙箱；需要访问沙箱外，请用 scope=external 重试（全可达档会直接执行，仍受全局上限）。"
-        }
-    };
-    let mut output = outcome.output;
-    output.push_str("\n[scope] ");
-    output.push_str(hint);
-    ToolOutcome { ok: false, output }
-}
-
 /// 目的：shell 回执的状态行分类——退出码之外的三种收尾（超时 / 用户停止 / 被信号结束）。
 /// 约束：与退出码互补；状态行是「上一行是状态、末行是 cwd·耗时」契约的一半。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,69 +86,53 @@ impl ShellStatus {
     }
 }
 
-/// 目的：从 shell 回执里取状态（取最后一行的 `[shell] ` 收尾行）；没有收尾行（没执行过）给 None。
-/// 约束：只认本模块与 ProcessTexts 产出的形状；命令自己的输出伪造同形行时，更靠后的真行会取代它。
-pub fn status(output: &str) -> Option<ShellStatus> {
-    output.lines().rev().find_map(|line| {
-        let rest = line.trim().strip_prefix("[shell] ")?;
-        if rest.starts_with("退出码未知") {
-            return Some(ShellStatus::Signal);
-        }
-        if rest.starts_with("退出码 ") {
-            return Some(ShellStatus::Exit);
-        }
-        if rest.starts_with("超时（") {
-            return Some(ShellStatus::Timeout);
-        }
-        if rest.starts_with("用户停止") {
-            return Some(ShellStatus::Stopped);
-        }
-        None
+/// 目的：从回执说明里认状态——壳执行真的收场了才会有 `shell.exit` / `shell.signal` / `shell.timeout` / `shell.cancelled`。
+pub fn status(notes: &[Note]) -> Option<ShellStatus> {
+    notes.iter().find_map(|note| match note.code.as_str() {
+        codes::SHELL_EXIT => Some(ShellStatus::Exit),
+        codes::SHELL_SIGNAL => Some(ShellStatus::Signal),
+        codes::SHELL_TIMEOUT => Some(ShellStatus::Timeout),
+        codes::SHELL_CANCELLED => Some(ShellStatus::Stopped),
+        _ => None,
     })
 }
 
-/// 目的：从 shell 回执里取退出码（host 与 guest 的统一标记）；超时 / 停止 / 拿不到时为 None。
-pub fn exit_code(output: &str) -> Option<i32> {
-    output.lines().rev().find_map(|l| {
-        l.trim()
-            .strip_prefix("[shell] 退出码 ")
-            .and_then(|s| s.trim().parse().ok())
-    })
-}
-
-/// 目的：shell 回执末尾的「落点 + 本次耗时」行：模型与回放读同一行。
-/// 约束：形状是稳定的（`[shell] cwd <路径> · 耗时 <秒> 秒`），前缀与既有字段一字不动；
-///   本机档围栏准备（逐条写 ACL）到一秒时只在行尾追加「（其中围栏准备 <秒> 秒）」，不足一秒不追加；
-///   追加段不参与解析（见 `cwd_elapsed`）。
-pub fn cwd_elapsed_line(cwd: &str, secs: u64, fence_prep_secs: Option<u64>) -> String {
-    let mut line = format!("[shell] cwd {} · 耗时 {} 秒", cwd, secs);
-    // 围栏准备是「耗时」里的一段：首调用写 ACL 常常就是大头，到一秒才值得单独交代。
-    if let Some(prep) = fence_prep_secs.filter(|secs| *secs >= 1) {
-        line.push_str(&format!("（其中围栏准备 {} 秒）", prep));
-    }
-    line
-}
-
-/// 目的：从 shell 回执里取（cwd, 耗时秒数）；没有这一行 = None（本次之前的转录）。
-/// 约束：只认本模块产出的形状；命令自己的输出伪造同形行时，更靠后的真行会取代它。
-pub fn cwd_elapsed(output: &str) -> Option<(String, u64)> {
-    output.lines().rev().find_map(|line| {
-        let rest = line.trim().strip_prefix("[shell] cwd ")?;
-        let (cwd, tail) = rest.rsplit_once(" · 耗时 ")?;
-        // 尾段可能带「（其中围栏准备 M 秒）」：只取「秒」前的数字，追加段不参与解析。
-        let secs = tail.split(" 秒").next()?.parse().ok()?;
-        if cwd.is_empty() {
+/// 目的：从回执说明里取退出码；超时 / 停止 / 拿不到时为 None。
+pub fn exit_code(notes: &[Note]) -> Option<i32> {
+    notes.iter().find_map(|note| {
+        if note.code != codes::SHELL_EXIT {
             return None;
         }
-        Some((cwd.to_string(), secs))
+        note.args.get("code").and_then(|code| code.parse().ok())
     })
 }
 
-/// 目的：共享区里的相对路径脚本被直接执行（EACCES）时，给一句"用解释器跑"的提示。
-/// 参数：`script` = 本次 shell 脚本；`output` = 执行回执。
-/// 返回：要追加的一行；不该提示时给 None。
-/// 约束：只在"非零 + Permission denied + 首 token 是相对路径"时提示——共享盘（cifs 合成权限位）不承载执行位。
-pub fn shared_exec_hint(script: &str, output: &str) -> Option<String> {
+/// 目的：这条回执带执行层的收尾说明（说明守门进程已经走到跑命令这一步）。
+/// 约束：参数拒绝、严格模式拒绝与起进程失败都没有收尾说明；围栏没装上也只剩 `fence.failed`。
+pub fn did_run(notes: &[Note]) -> bool {
+    status(notes).is_some()
+}
+
+/// 目的：落点与耗时的说明（模型与回放读同一份；回执渲染时排在正文与收尾说明之后）。
+/// 约束：围栏准备（逐条写 ACL）到一秒才单独交代，不足一秒不追加——它是「耗时」里的一段。
+pub fn place_notes(cwd: &str, secs: u64, fence_prep_secs: Option<u64>) -> Vec<Note> {
+    let mut notes = vec![
+        Note::info(codes::SHELL_PLACE)
+            .arg("cwd", cwd)
+            .arg("secs", secs),
+    ];
+    if let Some(prep) = fence_prep_secs.filter(|secs| *secs >= 1) {
+        notes.push(Note::info(codes::SHELL_PLACE_PREP).arg("prep", prep));
+    }
+    notes
+}
+
+/// 目的：共享区里的相对路径脚本被直接执行（EACCES）时，给一条"用解释器跑"的说明。
+/// 参数：`script` = 本次 shell 脚本；`output` = 进程原始输出。
+/// 返回：要追加的说明；不该提示时给 None。
+/// 约束：只在"输出里有 Permission denied + 首 token 是相对路径"时提示——共享盘（cifs 合成权限位）不承载执行位；
+///   这只是建议，不声称失败原因，所以判据读进程原始输出不会造成误报定性。
+pub fn shared_exec_note(script: &str, output: &str) -> Option<Note> {
     if !output.contains("Permission denied") {
         return None;
     }
@@ -187,22 +143,11 @@ pub fn shared_exec_hint(script: &str, output: &str) -> Option<String> {
     if !path_like || absolute {
         return None;
     }
-    Some(format!(
-        "\n[shell] 共享区不承载执行位：{} 不能直接执行，用解释器跑（例如 bash {} 或 sh {}）",
-        token, token, token
-    ))
-}
-
-/// 目的：这条回执带执行层的 `[shell]` 收尾行（说明守门进程已经走到跑命令这一步）。
-/// 约束：参数拒绝、严格模式拒绝与起进程失败都没有这一行；经过守门进程的围栏失败会带 111 的收尾行。
-pub fn did_run(output: &str) -> bool {
-    output
-        .lines()
-        .any(|l| l.trim_start().starts_with("[shell] "))
+    Some(Note::info(codes::SHELL_SHARED_EXEC).arg("script", token))
 }
 /// 目的：一次 shell 调用的结构化事实——落点 / 耗时 / 围栏准备 / 退出码 / 状态 / 是否截断；
-///   实况卡片、会话回放与测试读同一份，不再各自解析回执文本。旧转录没有这份字段，回放才回落解析。
-/// 约束：六个字段都能缺省（旧转录反序列化不失败）；时间单位统一毫秒；status 词表同 ShellStatus。
+///   实况卡片、会话回放与测试读同一份，不各自解析回执文本。
+/// 约束：六个字段都能缺省（形状稳定）；时间单位统一毫秒；status 词表同 ShellStatus。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShellFacts {
     /// 目的：本次执行的落点（呈现写法，不是机器路径）。
@@ -239,32 +184,30 @@ impl ShellFacts {
     }
 }
 
-/// 目的：把执行层已经算好的计时与回执整理成一份结构化事实（耗时不在文本里再解析一遍）。
+/// 目的：把执行层已经算好的计时与回执说明整理成一份结构化事实（不在文本里再解析一遍）。
 /// 参数：cwd = 呈现落点；elapsed = 本次墙钟耗时；fence_prep = 同线程交棒来的围栏准备耗时（虚拟机档为 None）；
-///   output = 执行层回执（退出码 / 状态 / 截断从这个回执的标记行取）。
+///   notes = 回执说明（退出码 / 状态 / 截断都从稳定码取）。
 pub fn facts(
     cwd: &str,
     elapsed: Duration,
     fence_prep: Option<Duration>,
-    output: &str,
+    notes: &[Note],
 ) -> ShellFacts {
     ShellFacts {
         cwd: cwd.to_string(),
         elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
         fence_prep_ms: fence_prep.map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
-        exit_code: exit_code(output),
-        status: status(output).map(|s| s.as_str().to_string()),
-        truncated: truncated(output),
+        exit_code: exit_code(notes),
+        status: status(notes).map(|s| s.as_str().to_string()),
+        truncated: truncated(notes),
     }
 }
 
-/// 目的：这条回执是否被截断——截断器的标记行独占一行且写在被保留的开头之后。
-/// 约束：只认本仓两个截断器的标记（工具预算的「[结果截断] 输出共」与 guest 传输护栏的「[截断] 输出共」）。
-pub fn truncated(output: &str) -> bool {
-    output.lines().any(|line| {
-        let line = line.trim_start();
-        line.starts_with("[结果截断]") || line.starts_with("[截断] 输出共 ")
-    })
+/// 目的：这条回执是否被截断——只看预算写下的稳定码，不认文案。
+pub fn truncated(notes: &[Note]) -> bool {
+    notes
+        .iter()
+        .any(|note| note.code == codes::RESULT_TRUNCATED)
 }
 
 #[cfg(test)]
@@ -314,109 +257,78 @@ params:
     }
 
     #[test]
-    fn scope_hint_only_on_a_fenced_sandbox_failure() {
-        let failed = ToolOutcome {
-            ok: false,
-            output: format!(
-                "[围栏] 工具进程只可达 x；{}。",
-                crate::kernel::api::FENCE_BOUNDARY_MARK
-            ),
-        };
-        let hinted = with_scope_hint(failed.clone(), CallScope::Sandbox, Decision::Ask);
-        assert!(hinted.output.contains("[scope]") && hinted.output.contains("scope=external"));
-        let untouched = with_scope_hint(failed.clone(), CallScope::External, Decision::Ask);
-        assert_eq!(untouched, failed);
-        let ordinary = ToolOutcome {
-            ok: false,
-            output: "编译失败".to_string(),
-        };
-        assert_eq!(
-            with_scope_hint(ordinary.clone(), CallScope::Sandbox, Decision::Ask),
-            ordinary
-        );
-    }
-
-    #[test]
-    fn shared_exec_hint_only_for_relative_entries_denied_by_permissions() {
+    fn shared_exec_note_only_for_relative_entries_denied_by_permissions() {
         let denied = "[stderr]\n/bin/sh: 1: ./deploy.sh: Permission denied\n";
-        assert!(
-            shared_exec_hint("./deploy.sh --yes", denied)
-                .expect("相对路径脚本被拒要提示")
-                .contains("bash ./deploy.sh")
-        );
-        assert!(shared_exec_hint("tools/build deploy", denied).is_some());
+        let note = shared_exec_note("./deploy.sh --yes", denied).expect("相对路径脚本被拒要提示");
+        assert_eq!(note.code, codes::SHELL_SHARED_EXEC);
         assert_eq!(
-            shared_exec_hint("/usr/bin/foo", denied),
+            note.args.get("script").map(String::as_str),
+            Some("./deploy.sh")
+        );
+        assert_eq!(
+            note.severity,
+            crate::kernel::api::Severity::Info,
+            "这只是建议，不是失败定性"
+        );
+        assert!(shared_exec_note("tools/build deploy", denied).is_some());
+        assert_eq!(
+            shared_exec_note("/usr/bin/foo", denied),
             None,
             "绝对路径不是共享区入口"
         );
         assert_eq!(
-            shared_exec_hint("python tools/x.py", denied),
+            shared_exec_note("python tools/x.py", denied),
             None,
             "裸名（解释器）不是这条提示的对象"
         );
         assert_eq!(
-            shared_exec_hint("./deploy.sh", "[stderr]\nboom\n"),
+            shared_exec_note("./deploy.sh", "[stderr]\nboom\n"),
             None,
             "不是权限拒绝就不提示"
         );
     }
 
     #[test]
-    fn cwd_and_elapsed_line_round_trips_and_is_stable() {
-        let line = cwd_elapsed_line("C:\\work\\a b", 12, None);
-        assert_eq!(line, "[shell] cwd C:\\work\\a b · 耗时 12 秒");
+    fn place_notes_carry_the_location_and_only_name_fence_prep_from_one_second() {
+        let notes = place_notes("C:\\work\\a b", 12, None);
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].code, codes::SHELL_PLACE);
         assert_eq!(
-            cwd_elapsed(&format!("[shell] 退出码 0\n{}", line)),
-            Some(("C:\\work\\a b".to_string(), 12))
+            notes[0].args.get("cwd").map(String::as_str),
+            Some("C:\\work\\a b")
         );
-        assert_eq!(cwd_elapsed("没有这一行"), None);
-        assert_eq!(
-            cwd_elapsed("[shell] cwd C:\\a · 耗时 3 秒 · 耗时 4 秒"),
-            Some(("C:\\a · 耗时 3 秒".to_string(), 4)),
-            "路径里出现同样的分隔符时取最后一个"
-        );
+        assert_eq!(notes[0].args.get("secs").map(String::as_str), Some("12"));
+        // 围栏准备不足一秒不交代（与回执行「不足一秒不追加」同一口径），到一秒才追加一条。
+        assert_eq!(place_notes("C:\\work", 3, Some(0)).len(), 1);
+        let notes = place_notes("C:\\work", 239, Some(238));
+        assert_eq!(notes.len(), 2);
+        assert_eq!(notes[1].code, codes::SHELL_PLACE_PREP);
+        assert_eq!(notes[1].args.get("prep").map(String::as_str), Some("238"));
     }
 
     #[test]
-    fn fence_prep_is_only_named_in_the_tail_line_from_one_second() {
-        // 冻结契约：前缀与既有字段不变；围栏准备不足一秒不追加，到一秒才追加一段。
-        assert_eq!(
-            cwd_elapsed_line("C:\\work", 3, Some(0)),
-            "[shell] cwd C:\\work · 耗时 3 秒",
-            "不足一秒不追加"
-        );
-        let line = cwd_elapsed_line("C:\\work", 239, Some(238));
-        assert_eq!(
-            line,
-            "[shell] cwd C:\\work · 耗时 239 秒（其中围栏准备 238 秒）"
-        );
-        assert_eq!(
-            cwd_elapsed(&format!("[shell] 退出码 0\n{}", line)),
-            Some(("C:\\work".to_string(), 239)),
-            "追加段不参与解析"
-        );
+    fn did_run_only_when_the_execution_layer_wrote_a_closing_note() {
+        assert!(did_run(&[Note::info(codes::SHELL_EXIT).arg("code", 0)]));
+        assert!(did_run(&[Note::error(codes::SHELL_TIMEOUT).arg("secs", 5)]));
+        assert!(!did_run(&[Note::error(codes::FENCE_FAILED)]));
+        assert!(!did_run(&[Note::error(codes::RUN_SPAWN_FAILED)]));
+        assert!(!did_run(&[Note::info(codes::SHELL_PLACE).arg("cwd", "/w")]));
     }
 
     #[test]
-    fn did_run_only_when_the_execution_layer_wrote_a_shell_tail() {
-        assert!(did_run("[shell] 退出码 0"));
-        assert!(did_run("[shell] 超时（5 秒）"));
-        assert!(!did_run("[围栏] 这次调用没有执行"));
-        assert!(!did_run("工具进程启动失败：找不到"));
-    }
-
-    #[test]
-    fn facts_carries_the_measured_timing_and_the_receipt_markers() {
-        let output = format!(
-            "[shell] 退出码 0\n{}",
-            cwd_elapsed_line("C:\\work", 331, Some(327))
-        );
+    fn facts_carries_the_measured_timing_and_the_closing_notes() {
+        let notes = vec![
+            Note::info(codes::SHELL_EXIT).arg("code", 0),
+            Note::info(codes::SHELL_PLACE)
+                .arg("cwd", "C:\\work")
+                .arg("secs", 331),
+            Note::info(codes::SHELL_PLACE_PREP).arg("prep", 327),
+        ];
         let f = facts(
             "C:\\work",
             Duration::from_millis(331_400),
             Some(Duration::from_millis(327_000)),
-            &output,
+            &notes,
         );
         assert_eq!(f.cwd, "C:\\work");
         assert_eq!(f.elapsed_ms, 331_400);
@@ -426,72 +338,70 @@ params:
         assert_eq!(f.exit_code, Some(0));
         assert_eq!(f.status.as_deref(), Some("exit"));
         assert!(!f.truncated);
-        // 围栏准备不足一秒不给回放看（与回执行同一口径）。
+        // 围栏准备不足一秒不给回放看（与回执说明同一口径）。
         let quick = facts(
             "C:\\work",
             Duration::from_millis(400),
             Some(Duration::from_millis(400)),
-            "ok",
+            &[],
         );
         assert_eq!(quick.elapsed_secs(), 0);
         assert_eq!(quick.fence_prep_secs(), None);
-        assert_eq!(quick.exit_code, None, "没有收尾行就没有退出码");
+        assert_eq!(quick.exit_code, None, "没有收尾说明就没有退出码");
         assert_eq!(quick.status, None);
     }
 
     #[test]
-    fn truncated_recognises_both_truncation_markers() {
-        assert!(truncated(
-            "[结果截断] 输出共 20000 字符；保留开头 3964 与结尾 11990 字符"
-        ));
-        assert!(truncated(
-            "  [截断] 输出共 20000 字符；保留开头 4000 与结尾 12000 字符"
-        ));
-        assert!(!truncated("[shell] 退出码 0"));
-        assert!(!truncated("结果截断但不是行首标记"));
+    fn truncated_reads_the_budget_note() {
+        assert!(truncated(&[Note::warning(codes::RESULT_TRUNCATED)]));
+        assert!(!truncated(&[Note::info(codes::SHELL_EXIT).arg("code", 0)]));
+        assert!(!truncated(&[Note::info(codes::RESULT_TRUNCATED_READ)]));
     }
 
     #[test]
-    fn facts_round_trips_through_json_and_tolerates_old_rows() {
+    fn facts_round_trips_through_json_and_tolerates_missing_fields() {
         let f = facts(
             "/w/a",
             Duration::from_millis(7_900),
             None,
-            "[shell] 退出码 0\n[shell] cwd /w/a · 耗时 7 秒",
+            &[Note::info(codes::SHELL_EXIT).arg("code", 0)],
         );
         let json = serde_json::to_value(&f).expect("可序列化");
         assert_eq!(
             serde_json::from_value::<ShellFacts>(json).expect("可反序列化"),
             f
         );
-        // 旧转录没有这份字段：缺省反序列化不失败，字段全是零值。
-        let old: ShellFacts = serde_json::from_value(serde_json::json!({})).expect("旧行要能读");
-        assert_eq!(old, ShellFacts::default());
-        assert_eq!(old.elapsed_secs(), 0);
-        assert_eq!(old.fence_prep_secs(), None);
+        // 六个字段都能缺省：形状稳定，缺字段的行不失败。
+        let empty: ShellFacts = serde_json::from_value(serde_json::json!({})).expect("缺省要能读");
+        assert_eq!(empty, ShellFacts::default());
+        assert_eq!(empty.elapsed_secs(), 0);
+        assert_eq!(empty.fence_prep_secs(), None);
     }
 
     #[test]
-    fn status_reads_the_tail_line_and_ignores_unexecuted_receipts() {
-        assert_eq!(status("[shell] 退出码 7"), Some(ShellStatus::Exit));
+    fn status_and_exit_code_read_the_closing_notes() {
         assert_eq!(
-            status("[shell] 退出码未知（被信号结束）"),
+            status(&[Note::info(codes::SHELL_EXIT).arg("code", 7)]),
+            Some(ShellStatus::Exit)
+        );
+        assert_eq!(
+            status(&[Note::error(codes::SHELL_SIGNAL)]),
             Some(ShellStatus::Signal)
         );
         assert_eq!(
-            status("[shell] 超时（2 秒）：工具进程与它拉起的整棵进程树已被终止"),
+            status(&[Note::error(codes::SHELL_TIMEOUT).arg("secs", 2)]),
             Some(ShellStatus::Timeout)
         );
         assert_eq!(
-            status("[shell] 用户停止：工具进程与它拉起的整棵进程树已被终止"),
+            status(&[Note::warning(codes::SHELL_CANCELLED)]),
             Some(ShellStatus::Stopped)
         );
-        assert_eq!(status("没有收尾行"), None);
-        assert_eq!(status("[围栏] 这次调用没有执行"), None);
+        assert_eq!(status(&[]), None);
+        assert_eq!(status(&[Note::error(codes::FENCE_FAILED)]), None);
         assert_eq!(
-            status("[shell] cwd C:\\a · 耗时 3 秒"),
+            exit_code(&[Note::info(codes::SHELL_PLACE).arg("cwd", "C:\\a")]),
             None,
-            "只有 cwd 行不算状态行"
+            "只有落点说明不算状态"
         );
         assert_eq!(
             [

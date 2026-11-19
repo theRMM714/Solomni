@@ -68,6 +68,11 @@
 - **一次命令 panic 不带垮核心**：接住并继续服务（回包通道断开，调用方得到「无回应」）。
 - **传输的线格式归呈现层**：请求形状、路由、错误码在 `src/presentation/web/routes.rs`；**事实**的线格式（`SessionEvent`、`*View`）
   仍在协调业务。两者不混——混在一起就是「到处内联 JSON 拼装」的成因。
+- **工具卡按结构化轻重上色，说明书由词表渲染**：工具行带 `severity`（`info` / `warning` / `error`）与 `notes`（稳定码 + 类型化参数），
+  卡片据此三色（绿勾 / 黄叹号 / 红叉）并把 `notes` 逐行接在正文后（`src/presentation/web/assets/app/features/transcript/parts.js`）；
+  **呈现层不解析回执正文**——结束状态、退出码、落点、耗时都是工具行里的结构化字段。
+  词表来自 `/api/state` 的 `i18n.messages`（后端给模板源文本，前端只做 `{ $arg }` 替换；
+  目录缺失的码按 `[code]` 原样显示，不编造文案）（`src/presentation/web/assets/app/core/i18n.js`）。
 
 ### 传输选择：长轮询
 
@@ -118,7 +123,7 @@
 | GET | `/` | 静态资源 | — | `index.html` | 200 |
 | GET | `/assets/{*path}` | 静态资源 | — | 编译期嵌入表里的文件 | 200, 404 |
 | GET | `/api/events` | 事件台（`EventBus`） | 查询 `sid` / `since` | `{lines:[{seq,sid,events}],head,oldest}` | 200 |
-| GET | `/api/state` | `ModulesOps::roster / module_enabled / service_enabled` + `WorkOps::session_views` + `RegistryOps` + `HistoryOps::list` | — | `{modules,services,rejected,fence,providers,models,core,agents,settings,sessions,history}`（`modules[].runtimes` 是模块声明的运行能力，创建向导据此预判虚拟根够不够；`modules[].enabled` 与 `modules[].services[].enabled` 是**有效启停**；`services` 是常驻服务的**运行态** `{module,name,adapter,state,reason,operations}`；`sessions[].pending` 是**当前那张裁决卡**的快照，与推的 `decision_card` 同一份；`sessions[].context` 是最近一次模型调用的上下文用量，只对 `Session::Single`（single / proxy / agent 子会话）存在；`sessions[].shell` 是最近一次 shell 的运行状态（新转录读工具行的结构化事实，旧转录回落解析回执），没跑过就是 null） | 200, 400 |
+| GET | `/api/state` | `ModulesOps::roster / module_enabled / service_enabled` + `WorkOps::session_views` + `RegistryOps` + `HistoryOps::list` | — | `{modules,services,rejected,fence,providers,models,core,agents,settings,sessions,history}`（`modules[].runtimes` 是模块声明的运行能力，创建向导据此预判虚拟根够不够；`modules[].enabled` 与 `modules[].services[].enabled` 是**有效启停**；`services` 是常驻服务的**运行态** `{module,name,adapter,state,reason,operations}`；`sessions[].pending` 是**当前那张裁决卡**的快照，与推的 `decision_card` 同一份；`sessions[].context` 是最近一次模型调用的上下文用量，只对 `Session::Single`（single / proxy / agent 子会话）存在；`sessions[].shell` 是最近一次 shell 的运行状态（读工具行的结构化事实 `tool.shell`，不解析回执正文），没跑过就是 null；`i18n` 是回执说明的界面词表 `{lang,available,messages}`——语言按设置协商，`messages` 是稳定码到模板源文本的映射，前端只做 `{ $arg }` 替换） | 200, 400 |
 | GET | `/api/actions` | `ActionOps::catalog` | 查询 `sid` | `{actions:[{id,desc,params,available,reason}]}` | 200, 400 |
 | POST | `/api/actions/{id}` | `ActionOps::act` | `{…按动作声明}` | `{head}` / `{events}`（重放快照） / `{ok,…}` | 200, 400 |
 | GET | `/api/sessions/{sid}/config` | `WorkOps::config` | — | `{config}` | 200, 400 |
@@ -129,7 +134,7 @@
 | GET | `/api/workspace-cost` | 工作区成本预估（有界计数 + 本卷速率） | 查询 `path`（外部工作区的绝对路径） | `{path,files,dirs,objects,bytes,truncated,volume,ms_per_object,estimated_ms,estimated_ms_min,estimated_ms_max,sample}`（`truncated` 时计数与耗时都是下界） | 200, 400 |
 | GET | `/api/settings` | `RegistryOps::settings` | — | `{settings}` | 200, 400 |
 | GET | `/api/history` | `HistoryOps::list` | — | `{sessions}` | 200, 400 |
-| GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events,live,head,shell}`（`shell` 从转录派生：回放/重建后的状态栏快照；优先读工具行的结构化事实，旧转录回落解析回执） | 200, 404 |
+| GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events,live,head,shell}`（`shell` 从转录派生：回放/重建后的状态栏快照；读工具行的结构化事实 `tool.shell`，不解析回执正文） | 200, 404 |
 | POST | `/api/history/{name}/delete` | `HistoryOps::delete` | — | `{ok}` | 200, 400 |
 | GET | `/api/tiers` | `WorkOps::tier_choices` | — | `{tiers:{default,vm_available,vm_unavailable_reason,vm_requirements,guests,available}}` | 200, 400 |
 | GET | `/api/processes` | `Provision::processes` | — | `{procs:[{pid,alive,purpose,owner,since,orphanRisk,guardNote}]}` | 200, 400 |

@@ -294,11 +294,6 @@ pub(crate) fn member_with_service_tools(
     }
 }
 
-/// 目的：给进程机制用的测试文案（代码实现，与生产同一份）。
-pub(crate) fn test_process_texts() -> Arc<dyn crate::kernel::ports::ProcessTexts> {
-    Arc::new(crate::kernel::detail::process::CodeProcessTexts)
-}
-
 // ---------- 常驻服务（MCP）的脚本化长驻会话替身 ----------
 /// 目的：脚本化的长驻会话替身——按脚本逐行应答，并记录收到的每一行与关闭调用。
 pub(crate) struct ScriptedHost {

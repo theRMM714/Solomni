@@ -420,10 +420,7 @@ pub fn refuse(name: &str) -> ToolOutcome {
 }
 
 pub(crate) fn fail(msg: String) -> ToolOutcome {
-    ToolOutcome {
-        ok: false,
-        output: msg,
-    }
+    ToolOutcome::new(false, msg)
 }
 
 /// 目的：按字符截断（不劈开 UTF-8）；返回（文本, 是否截断）。

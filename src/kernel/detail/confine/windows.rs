@@ -594,10 +594,7 @@ pub fn run_fenced(
     let outcome = run_in_container(sid, spec, command);
     free_sid(sid);
     match outcome {
-        Ok(code) => {
-            super::texts::note_fence_boundary(spec, true, true, code);
-            code
-        }
+        Ok(code) => code,
         Err(e) => {
             // 容器起不来要如实说清；net=true 时不能退回无围栏（那样会连文件系统围栏一起丢掉），直接拒绝。
             eprintln!("[围栏] 容器围栏未生效（{}）", e);

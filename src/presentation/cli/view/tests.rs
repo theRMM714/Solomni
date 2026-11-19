@@ -53,8 +53,14 @@ fn tool(module: &str, ok: bool, args: &str) -> ToolCallView {
         module: module.into(),
         name: "ls".into(),
         ok,
+        severity: if ok {
+            crate::kernel::api::Severity::Info
+        } else {
+            crate::kernel::api::Severity::Error
+        },
         args: args.into(),
         output: String::new(),
+        notes: Vec::new(),
         call_id: "c1".into(),
         reply: 1,
         read: None,
