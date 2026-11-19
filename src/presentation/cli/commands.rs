@@ -82,13 +82,7 @@ pub(super) fn module_cmd(faces: &Faces, arg: &str) {
         caller: Caller::User,
         out: Output::Final,
     }) {
-        Ok(Acted::Done(v)) => {
-            let ok = v.get("ok").and_then(|b| b.as_bool()).unwrap_or(true);
-            println!("{}", v.get("output").and_then(|s| s.as_str()).unwrap_or(""));
-            if !ok {
-                println!("[失败] 模块工具返回 ok=false（回执见上）");
-            }
-        }
+        Ok(Acted::Done(v)) => print_receipt(faces, &v),
         Ok(_) => println!("[完成]"),
         Err(e) => println!("[错误] {}", e),
     }
@@ -224,6 +218,38 @@ pub(super) fn resident_list(faces: &Faces) {
     }
 }
 
+/// 目的：按界面语言渲染一条工具回执（正文原文 + 说明），并按严重度给出成功 / 警告 / 失败标签。
+/// 约束：正文由工具进程写出、原样打印；说明按稳定码从目录渲染，不在这里拼句子。
+fn print_receipt(faces: &Faces, v: &serde_json::Value) {
+    let lang = match faces.registry.settings() {
+        Ok(s) => crate::capabilities::runtime::api::i18n::pick(&s.lang),
+        Err(_) => crate::capabilities::runtime::api::i18n::Lang::source(),
+    };
+    let body = v.get("output").and_then(|s| s.as_str()).unwrap_or("");
+    let notes: Vec<crate::capabilities::runtime::api::Note> = v
+        .get("notes")
+        .and_then(|n| serde_json::from_value(n.clone()).ok())
+        .unwrap_or_default();
+    let severity = v
+        .get("severity")
+        .and_then(|s| {
+            serde_json::from_value::<crate::capabilities::runtime::api::Severity>(s.clone()).ok()
+        })
+        .unwrap_or(if v.get("ok").and_then(|b| b.as_bool()).unwrap_or(true) {
+            crate::capabilities::runtime::api::Severity::Info
+        } else {
+            crate::capabilities::runtime::api::Severity::Error
+        });
+    let text = crate::capabilities::runtime::api::i18n::render_receipt(lang, body, &notes);
+    if !text.trim().is_empty() {
+        println!("{}", text);
+    }
+    println!(
+        "[{}]",
+        crate::capabilities::runtime::api::i18n::label(lang, severity)
+    );
+}
+
 /// 目的：把一次动作的结果按 CLI 习惯打出来（发现的操作 / 回执 / 完成 / 错误）。
 pub(super) fn act_and_print(faces: &Faces, call: ActionCall) {
     match faces.actions.act(call) {
@@ -233,11 +259,8 @@ pub(super) fn act_and_print(faces: &Faces, call: ActionCall) {
                 println!("[完成] 发现操作：{}", names.join("、"));
                 return;
             }
-            if let Some(out) = v.get("output").and_then(|s| s.as_str()) {
-                println!("{}", out);
-                if !v.get("ok").and_then(|b| b.as_bool()).unwrap_or(true) {
-                    println!("[失败] 服务返回 ok=false（回执见上）");
-                }
+            if v.get("output").is_some() || v.get("notes").is_some() {
+                print_receipt(faces, &v);
                 return;
             }
             println!("[完成]");

@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::kernel::api::FenceSpec;
+use crate::kernel::domain::receipt::STDERR_HEADER;
 // 测试夹具按 &Path 收参（clippy 的 ptr_arg）：Path 显式写在测试模块里，
 // 顶层只按需导入 PathBuf——否则顶层会多出一次"只被 glob 用到"的导入。
 use std::path::{Path, PathBuf};
@@ -71,27 +72,39 @@ fn env_whitelist_drops_foreign_vars_and_moves_home_into_the_sandbox() {
     }
 }
 
-/// 回执里的标记文案由进程机制自己的代码返回（它们随 [工具结果] 进模型上下文）。
+/// 目的：把回执的说明压成码序列——断言只看稳定码，不看任何文案。
+fn codes_of(out: &crate::kernel::contracts::run::RunOutcome) -> Vec<&str> {
+    out.notes.iter().map(|n| n.code.as_str()).collect()
+}
+
+/// 回执的收尾说明只给稳定码（它们随 [工具结果] 渲染进模型上下文）；正文只放进程自己的输出。
 #[test]
-fn receipt_markers_are_code_owned() {
-    let texts = CodeProcessTexts;
+fn receipt_markers_are_structured_codes() {
     let tools = ProcTools::new(
         PathBuf::from("solomni"),
-        std::sync::Arc::new(CodeProcessTexts),
         PathBuf::from("target").join("test-scratch"),
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     );
 
     let ok = tools.assemble("正常输出".to_string(), String::new(), false, Some(0));
     assert!(ok.ok);
+    assert_eq!(ok.severity, Severity::Info);
     assert_eq!(ok.output, "正常输出", "没有异常就不加任何标记");
+    assert!(ok.notes.is_empty());
 
     let with_err = tools.assemble("正文".to_string(), "警告".to_string(), false, Some(0));
-    assert!(with_err.output.contains(&texts.stderr_header()) && with_err.output.contains("警告"));
+    assert!(with_err.output.contains(STDERR_HEADER) && with_err.output.contains("警告"));
+    assert!(with_err.notes.is_empty(), "stderr 只是正文分区，不是说明");
+
+    let failed = tools.assemble(String::new(), String::new(), false, Some(3));
+    assert!(!failed.ok);
+    assert_eq!(failed.severity, Severity::Error);
+    assert!(failed.notes.is_empty(), "非 shell 执行的退出码不进说明");
 
     let timed = tools.assemble(String::new(), String::new(), true, None);
     assert!(!timed.ok);
-    assert!(timed.output.contains(&texts.timeout()), "{}", timed.output);
+    assert_eq!(codes_of(&timed), vec![codes::RUN_TIMEOUT]);
+    assert!(timed.output.is_empty(), "文案不进正文");
 
     let fenced = tools.assemble(
         String::new(),
@@ -100,11 +113,8 @@ fn receipt_markers_are_code_owned() {
         Some(confine::FENCE_FAILED),
     );
     assert!(!fenced.ok);
-    assert!(
-        fenced.output.contains(&texts.fence_failed()),
-        "{}",
-        fenced.output
-    );
+    assert_eq!(codes_of(&fenced), vec![codes::FENCE_FAILED]);
+    assert!(fenced.output.is_empty(), "文案不进正文");
 
     // 装配层不做截断：超限只由送回模型前的工具预算统一收口（capabilities::tools::domain::budget）。
     let long = "字".repeat(20_000);
@@ -158,31 +168,24 @@ fn sandbox_mode_refuses_missing_requirements_until_degraded() {
 
 /// 未授权时段的放行规矩：**只有本机装不上能降级**。
 /// 自检已确认机制有效却仍装不上 = 我们写错了，那一路必须拒绝执行——
-/// 按无围栏跑等于用户以为有围栏、实际什么都没有（回执文案由进程机制代码返回）。
+/// 按无围栏跑等于用户以为有围栏、实际什么都没有（回执只给稳定码，文案在目录里）。
 #[cfg(windows)]
 #[test]
 fn broken_mechanism_refuses_execution_instead_of_degrading() {
-    let texts = code_texts();
-    let broken = refuse_when_broken(
-        &*texts,
-        confine::FenceVerdict::Broken("profile 写错".to_string()),
-    )
-    .expect("我们写错了必须拒绝执行");
+    let broken = refuse_when_broken(confine::FenceVerdict::Broken("profile 写错".to_string()))
+        .expect("我们写错了必须拒绝执行");
     assert!(!broken.ok, "拒绝执行时 ok 必须为假");
-    assert_eq!(
-        broken.output,
-        texts.fence_failed(),
-        "回执用册子里的固定说法"
-    );
+    assert_eq!(broken.severity, Severity::Error);
+    assert_eq!(codes_of(&broken), vec![codes::FENCE_FAILED]);
+    assert!(broken.output.is_empty(), "文案不进正文");
     assert!(
-        refuse_when_broken(&*texts, confine::FenceVerdict::Enforced).is_none(),
+        refuse_when_broken(confine::FenceVerdict::Enforced).is_none(),
         "机制装上了就没有拒绝的理由"
     );
     assert!(
-        refuse_when_broken(
-            &*texts,
-            confine::FenceVerdict::EnvUnavailable("内核不支持".to_string())
-        )
+        refuse_when_broken(confine::FenceVerdict::EnvUnavailable(
+            "内核不支持".to_string()
+        ))
         .is_none(),
         "本机不允许是环境结论：如实降级照跑，不拒绝"
     );
@@ -228,15 +231,10 @@ fn node() -> Option<&'static str> {
     if ok { Some("node") } else { None }
 }
 
-fn code_texts() -> std::sync::Arc<dyn crate::kernel::ports::ProcessTexts> {
-    std::sync::Arc::new(CodeProcessTexts)
-}
-
 /// 造一个按「cwd = 隔离根」跑真工具的 runner（命令用裸文件名，避免命令行里出现引号）。
 fn real_runner(exe: PathBuf, home: &std::path::Path, timeout_secs: u64) -> ProcTools {
     let mut t = ProcTools::new(
         exe,
-        code_texts(),
         home.to_path_buf(),
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     );
@@ -480,10 +478,10 @@ fn real_tool_process_is_killed_on_timeout_and_reported() {
         None,
     );
     assert!(!out.ok, "超时必须如实回执失败：{}", out.output);
-    assert!(
-        out.output.contains(&tools.texts.timeout()),
-        "回执要带上超时标记：{}",
-        out.output
+    assert_eq!(
+        codes_of(&out),
+        vec![codes::RUN_TIMEOUT],
+        "回执要带上超时说明"
     );
     assert!(
         started.elapsed() < Duration::from_secs(30),
@@ -499,7 +497,6 @@ fn real_tool_process_is_killed_on_timeout_and_reported() {
 fn real_runner_with_write(exe: PathBuf, home: &std::path::Path) -> ProcTools {
     let mut t = ProcTools::new(
         exe,
-        code_texts(),
         home.to_path_buf(),
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
     );
@@ -705,10 +702,21 @@ fn real_shell_reports_chinese_and_exit_code() {
     });
     assert!(!out.ok, "退出码 3 应如实失败：{}", out.output);
     assert!(out.output.contains("中文"), "{}", out.output);
-    assert!(
-        out.output.contains("[shell] 退出码 3"),
-        "回执要带退出码：{}",
+    assert_eq!(codes_of(&out), vec![codes::SHELL_EXIT], "{}", out.output);
+    assert_eq!(
+        out.notes[0].args.get("code").map(String::as_str),
+        Some("3"),
+        "说明要带退出码：{}",
         out.output
+    );
+    let body = crate::kernel::detail::i18n::render_receipt(
+        crate::kernel::detail::i18n::Lang::source(),
+        &out.output,
+        &out.notes,
+    );
+    assert!(
+        body.contains("[shell] 退出码 3"),
+        "模型通道要看到状态：{body}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -775,7 +783,7 @@ fn real_shell_timeout_and_cancel_kill_the_tree() {
         gate: None,
     });
     assert!(!out.ok, "{}", out.output);
-    assert!(out.output.contains("超时"), "{}", out.output);
+    assert_eq!(codes_of(&out), vec![codes::SHELL_TIMEOUT], "{}", out.output);
     assert!(
         started.elapsed() < Duration::from_secs(4),
         "超时后不得继续等"
@@ -800,14 +808,19 @@ fn real_shell_timeout_and_cancel_kill_the_tree() {
     flag.store(true, std::sync::atomic::Ordering::Relaxed);
     let out = h.join().expect("shell 线程");
     assert!(!out.ok, "{}", out.output);
-    assert!(out.output.contains("用户停止"), "{}", out.output);
+    assert_eq!(
+        codes_of(&out),
+        vec![codes::SHELL_CANCELLED],
+        "{}",
+        out.output
+    );
     assert!(started.elapsed() < Duration::from_secs(5), "停止要立刻收树");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[cfg(unix)]
 #[test]
-fn real_shell_fence_denies_outside_paths_and_marks_the_boundary() {
+fn real_shell_fence_denies_outside_paths_without_claiming_a_reason() {
     let Some(exe) = built_exe() else {
         eprintln!("[探针] 未找到已构建的产品可执行文件，跳过 shell 围栏契约");
         return;
@@ -834,11 +847,9 @@ fn real_shell_fence_denies_outside_paths_and_marks_the_boundary() {
     });
     assert!(!out.ok, "{}", out.output);
     assert!(!out.output.contains("SHELL-SECRET"), "{}", out.output);
-    assert!(
-        out.output.contains(crate::kernel::api::FENCE_BOUNDARY_MARK),
-        "{}",
-        out.output
-    );
+    // 拒绝发生在工具进程内部：回执只如实交出退出码，不声称"被围栏拒绝"（那是猜的）。
+    assert_eq!(codes_of(&out), vec![codes::SHELL_EXIT], "{}", out.output);
+    assert!(!out.output.contains("围栏"), "{}", out.output);
     let _ = std::fs::remove_dir_all(&inside);
     let _ = std::fs::remove_dir_all(&outside);
 }
@@ -851,7 +862,6 @@ fn generated_shell_script_fails_on_unhandled_powershell_errors() {
     let dir = crate::tests::scratch("proc-shell-script-stop");
     let tools = ProcTools::new(
         PathBuf::from("not-used"),
-        code_texts(),
         dir.clone(),
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     );
@@ -951,8 +961,16 @@ fn real_shell_uses_powershell_utf8_exit_code_and_cleans_its_script() {
         });
         assert!(!out.ok, "{}（{}）", out.output, program);
         assert!(out.output.contains("中文"), "{}（{}）", out.output, program);
-        assert!(
-            out.output.contains("[shell] 退出码 3"),
+        assert_eq!(
+            codes_of(&out),
+            vec![codes::SHELL_EXIT],
+            "{}（{}）",
+            out.output,
+            program
+        );
+        assert_eq!(
+            out.notes[0].args.get("code").map(String::as_str),
+            Some("3"),
             "{}（{}）",
             out.output,
             program
@@ -969,8 +987,9 @@ fn real_shell_uses_powershell_utf8_exit_code_and_cleans_its_script() {
             gate: None,
         });
         assert!(!out.ok, "未处理错误要失败（{}）：{}", program, out.output);
-        assert!(
-            out.output.contains("[shell] 退出码 1"),
+        assert_eq!(
+            out.notes[0].args.get("code").map(String::as_str),
+            Some("1"),
             "{}（{}）",
             out.output,
             program
@@ -1087,6 +1106,11 @@ fn missing_launcher_binary_is_reported_honestly() {
     let tools = real_runner(PathBuf::from("definitely-not-here-solomni"), &dir, 5);
     let out = tools.run(&spec_for(&dir), "echo hi", "{}", &[], None, None, None);
     assert!(!out.ok);
-    assert!(out.output.contains("工具进程启动失败"), "{}", out.output);
+    assert_eq!(codes_of(&out), vec![codes::RUN_SPAWN_FAILED]);
+    assert!(
+        out.output.is_empty(),
+        "启动失败没有进程输出：{}",
+        out.output
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

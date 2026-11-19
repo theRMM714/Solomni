@@ -24,19 +24,18 @@ pub struct ProcessSessions {
     exe: PathBuf,
     /// 目的：长驻子进程的账——守门进程起时登记、收时注销，核心被强杀留下的孤儿由启动对账按它回收。
     book: std::sync::Arc<procs::ProcessBook>,
-    /// 目的：平台侧状态——Windows 持有文案、产品私有区与写权限开关；其余平台为空。
+    /// 目的：平台侧状态——Windows 持有产品私有区与写权限开关；其余平台为空。
     platform: platform::State,
     /// 目的：全局沙箱要求与本进程是否已同意降级。
     mode: std::sync::Arc<crate::kernel::api::SandboxMode>,
 }
 
 impl ProcessSessions {
-    /// 目的：组合根注入：当前可执行文件（守门进程就是它自己）、提示词册文案、产品私有区、写权限开关与进程账。
-    /// 约束：与一次执行（`ProcTools::new`）同一份装配事实；非 Windows 平台忽略文案 / 私有区 / 写权限（显式忽略以免被误读成漏用）；
+    /// 目的：组合根注入：当前可执行文件（守门进程就是它自己）、产品私有区、写权限开关与进程账。
+    /// 约束：与一次执行（`ProcTools::new`）同一份装配事实；非 Windows 平台忽略私有区 / 写权限（显式忽略以免被误读成漏用）；
     ///   账必须与组合根用**同一个**实例（账本是整份文件写回，两份会互相覆盖）。
     pub fn new(
         exe: PathBuf,
-        texts: std::sync::Arc<dyn crate::kernel::ports::ProcessTexts>,
         home: PathBuf,
         write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
         book: std::sync::Arc<procs::ProcessBook>,
@@ -44,7 +43,7 @@ impl ProcessSessions {
         ProcessSessions {
             exe,
             book,
-            platform: platform::State::new(texts, home, write_allowed),
+            platform: platform::State::new(home, write_allowed),
             mode: std::sync::Arc::new(crate::kernel::api::SandboxMode::permissive()),
         }
     }

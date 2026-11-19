@@ -85,7 +85,7 @@ pub const DIAGNOSE_TIMEOUT_SECS: u64 = 15;
 /// 约束：字面量只此一处——安装侧（detail/guest_helper.rs）与通道侧都从这里取。
 pub const HELPER_PATH: &str = "/usr/local/sbin/solomni-guest-fence";
 
-/// 目的：超时的机器标记——通道据此产出 `[shell] 超时（N 秒）` 并把标记剥掉（人读文案在 ProcessTexts）。
+/// 目的：超时的机器标记——通道据此产出 `shell.timeout` 说明（参数带秒数）并把标记剥掉。
 pub const HELPER_TIMEOUT_MARKER: &str = "solomni-guest-fence: timeout";
 
 /// 目的：诊断出错时 helper 写到 stderr 的前缀（与围栏的 `solomni-guest-fence: ` 分开，便于宿主分流）。

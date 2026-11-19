@@ -11,6 +11,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
+/// 目的：围栏没装上时的收场——命令没有执行（正文为空，只有一条 `fence.failed` 说明）。
+fn fence_not_entered() -> RunOutcome {
+    RunOutcome {
+        ok: false,
+        severity: Severity::Error,
+        output: String::new(),
+        notes: vec![Note::error(codes::FENCE_FAILED)],
+    }
+}
+
 /// 目的：Windows 侧需要随工具执行器一起持有的状态。
 pub(super) struct State {
     home: PathBuf,
@@ -58,10 +68,7 @@ pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
         } else if let Some(blocked) = &prep.blocked {
             let Some(gate) = ctx.gate else {
                 return Prepared {
-                    stop: Some(RunOutcome {
-                        ok: false,
-                        output: tools.texts.fence_failed(),
-                    }),
+                    stop: Some(fence_not_entered()),
                     prepared: false,
                     unfenced_note: None,
                     home: None,
@@ -78,7 +85,7 @@ pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
                 FenceVerdict::Unfenced { note: n } => note = Some(n),
                 FenceVerdict::Refused { output } => {
                     return Prepared {
-                        stop: Some(RunOutcome { ok: false, output }),
+                        stop: Some(RunOutcome::failed(output)),
                         prepared: false,
                         unfenced_note: None,
                         home: None,
@@ -93,8 +100,7 @@ pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
     }
     if !prepared
         && note.is_none()
-        && let Some(outcome) =
-            refuse_when_broken(&*tools.texts, confine::verify(fence, ctx.command))
+        && let Some(outcome) = refuse_when_broken(confine::verify(fence, ctx.command))
     {
         return Prepared {
             stop: Some(outcome),
@@ -133,12 +139,7 @@ pub(super) fn kill_tree(child: &mut std::process::Child) {
 pub(super) fn run_shell(tools: &ProcTools, run: &ShellRun<'_>) -> RunOutcome {
     let (name, file) = match tools.shell_script_file(run) {
         Ok(v) => v,
-        Err(e) => {
-            return RunOutcome {
-                ok: false,
-                output: e,
-            };
-        }
+        Err(e) => return RunOutcome::failed(e),
     };
     let command = format!(
         "{} -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {}",
@@ -171,20 +172,14 @@ pub(super) fn run_shell(tools: &ProcTools, run: &ShellRun<'_>) -> RunOutcome {
 
 /// 目的：未授权时段遇到机制自检结论时的放行规矩——**只有本机装不上能降级**；
 ///   自检已确认机制有效却仍装不上 = 我们写错了，所以拒绝执行（命令不落进程）。
-pub(crate) fn refuse_when_broken(
-    texts: &dyn ProcessTexts,
-    verdict: confine::FenceVerdict,
-) -> Option<RunOutcome> {
+pub(crate) fn refuse_when_broken(verdict: confine::FenceVerdict) -> Option<RunOutcome> {
     match verdict {
         confine::FenceVerdict::Broken(why) => {
             eprintln!(
                 "[围栏] 容器围栏机制装不上（{}）：本次拒绝执行，不按无围栏跑",
                 why
             );
-            Some(RunOutcome {
-                ok: false,
-                output: texts.fence_failed(),
-            })
+            Some(fence_not_entered())
         }
         confine::FenceVerdict::Enforced | confine::FenceVerdict::EnvUnavailable(_) => None,
     }

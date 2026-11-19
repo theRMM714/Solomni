@@ -57,9 +57,9 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/state",
         capability: "ModulesOps::roster + WorkOps::session_views + RegistryOps + HistoryOps::list",
         request: "—",
-        response: "{modules,services,rejected,fence,providers,models,core,agents,settings,sessions,history}",
+        response: "{modules,services,rejected,fence,providers,models,core,agents,settings,i18n,sessions,history}",
         statuses: &[200, 400],
-        note: "概览状态；一律不含密钥（`modules[].runtimes` 给创建向导预判虚拟根够不够）",
+        note: "概览状态；一律不含密钥（`modules[].runtimes` 给创建向导预判虚拟根够不够；`i18n` 是回执说明的词表）",
     },
     Route {
         id: "actions",

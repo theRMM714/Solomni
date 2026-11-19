@@ -28,6 +28,10 @@ pub use crate::capabilities::turn::turn::api::{Advance, Events, Output};
 pub use crate::capabilities::work::api::SessionView;
 /// 目的：运行档（本机档 / 虚拟机档）的词汇。
 pub use crate::kernel::api::Tier;
+/// 目的：文案目录与语言协商：呈现层按设置里的语言取词表，按稳定码取文本（不在界面复制词表）。
+pub use crate::kernel::api::i18n;
+/// 目的：回执说明的稳定码、类型化参数与轻重：呈现层按它上色与渲染，不解析回执正文。
+pub use crate::kernel::api::{Note, Severity};
 
 /// 目的：运行时自己的用例：启用、改需求、回档、停止——它们要同时碰会话中心、历史生命周期与宿主的作业表，
 ///   只有 runtime 拿得到，所以归这里；身体只有编排，不含任何下层用例的实现。

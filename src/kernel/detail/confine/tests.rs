@@ -8,7 +8,6 @@ use std::ffi::OsString;
 
 use super::ledger::ReconcileReport;
 use super::paths::*;
-use super::texts::*;
 use super::*;
 
 #[test]
@@ -612,81 +611,9 @@ fn non_node_commands_carry_no_interpreter_switch() {
     );
 }
 
-/// 围栏边界说明只在围栏内**失败**时给：成功不打扰、没强制生效不谈边界。
+/// 平台 shell 启动要有确定行为：不把命令拼进一个字符串再造壳。
 #[test]
-fn fence_boundary_note_only_on_enforced_failure() {
-    let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
-        agent: "a".to_string(),
-        lease: String::new(),
-        rw: vec![PathBuf::from("demo").join("sandbox")],
-        ro: Vec::new(),
-        ro_tree: vec![PathBuf::from("mods").join("m0")],
-        private: PathBuf::from("demo").join("sandbox"),
-        cwd: PathBuf::from("mods").join("m0"),
-        net: false,
-    };
-    assert!(
-        fence_boundary_note(&spec, true, true, 0).is_none(),
-        "成功不打扰"
-    );
-    assert!(
-        fence_boundary_note(&spec, false, true, 1).is_none(),
-        "没强制生效就不谈边界"
-    );
-    let note = fence_boundary_note(&spec, true, true, 1).expect("围栏内失败要有边界说明");
-    assert!(note.contains("范围外的访问被围栏拒绝"), "{}", note);
-    assert!(note.contains("（网：关）"), "{}", note);
-    assert!(note.contains("mods"), "要报出可达范围：{}", note);
-    // 网络没装上时不能说“关”：那会让用户以为断网生效了。
-    let degraded = fence_boundary_note(&spec, true, false, 1).expect("文件系统围栏失败也要说明");
-    assert!(degraded.contains("（网：未生效）"), "{}", degraded);
-    // 放行网络的失败仍报“开”，不把允许说成阻断。
-    let mut allowed = spec;
-    allowed.net = true;
-    let note = fence_boundary_note(&allowed, true, true, 1).expect("失败说明");
-    assert!(note.contains("（网：开）"), "{}", note);
-}
-
-/// 可达范围摘要：重复的根只报一次；根多时折叠，失败说明不因根多而失控。
-#[test]
-fn reachable_roots_dedupes_and_collapses() {
-    let mut spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
-        agent: "a".to_string(),
-        lease: String::new(),
-        rw: vec![PathBuf::from("r1")],
-        ro: Vec::new(),
-        ro_tree: vec![PathBuf::from("r1")],
-        private: PathBuf::from("r1"),
-        cwd: PathBuf::from("r1"),
-        net: false,
-    };
-    assert_eq!(reachable_roots(&spec), "r1", "重复的根只报一次");
-    spec.rw = (1..=6).map(|i| PathBuf::from(format!("r{}", i))).collect();
-    let many = reachable_roots(&spec);
-    assert!(many.starts_with("r1"), "{}", many);
-    assert!(many.ends_with("等 6 处"), "{}", many);
-}
-
-/// 空范围/空根与平台 shell 启动都要有确定行为：说明不能凭空编路径，shell 不能拼字符串。
-#[test]
-fn boundary_helpers_cover_empty_scope_and_platform_shell() {
-    let empty = FenceSpec {
-        machine_ro_tree: Vec::new(),
-        agent: "a".to_string(),
-        lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: Vec::new(),
-        cwd: PathBuf::new(),
-        ro: Vec::new(),
-        net: false,
-    };
-    assert_eq!(reachable_roots(&empty), "（无）");
-    note_fence_boundary(&empty, true, false, 1);
-    note_fence_boundary(&empty, false, false, 1);
-
+fn platform_shell_is_not_string_spliced() {
     #[cfg(not(windows))]
     {
         let cmd = shell_command("echo hi");

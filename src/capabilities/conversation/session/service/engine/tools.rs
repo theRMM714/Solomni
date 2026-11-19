@@ -688,23 +688,20 @@ pub(crate) fn available_tools(face: &ToolFace) -> String {
 
 /// 目的：拒绝回执，**不**附工具清单——档位、确认、放行、参数这类拒绝与「换个工具」无关，清单只会扰民。
 pub(crate) fn refuse(why: String) -> ToolOutcome {
-    ToolOutcome {
-        ok: false,
-        output: why,
-    }
+    ToolOutcome::new(false, why)
 }
 
 /// 目的：发现类拒绝（没指明模块 / 没有这个模块 / 模块没声明这个工具）：把可选范围说回去。
 /// 约束：`why` 自带的句号先去掉，别拼出「。。」。
 pub(crate) fn deny(face: &ToolFace, why: String) -> ToolOutcome {
-    ToolOutcome {
-        ok: false,
-        output: format!(
+    ToolOutcome::new(
+        false,
+        format!(
             "{}\n可用：{}",
             why.trim_end_matches('。'),
             available_tools(face)
         ),
-    }
+    )
 }
 
 /// 目的：执行一次 shell：按 scope 派生围栏，host 走 ProcessRunner，VM 走 guest；回执补 scope 提示。
@@ -724,21 +721,15 @@ pub(crate) fn run_shell(
     let call = match api::parse_shell(schema, args_json) {
         Ok(c) => c,
         Err(e) => {
-            return (
-                ToolOutcome {
-                    ok: false,
-                    output: e,
-                },
-                None,
-            );
+            return (ToolOutcome::new(false, e), None);
         }
     };
     if ctx.face.sandbox.private.as_os_str().is_empty() {
         return (
-            ToolOutcome {
-                ok: false,
-                output: "shell 没有私有沙箱（cwd 为空），这次调用没有执行。".to_string(),
-            },
+            ToolOutcome::new(
+                false,
+                "shell 没有私有沙箱（cwd 为空），这次调用没有执行。".to_string(),
+            ),
             None,
         );
     }
@@ -756,10 +747,10 @@ pub(crate) fn run_shell(
     // 同一 reach 的后续调用复用 SID 与 ACL。生命周期归会话，调用结束不释放。
     if ctx.face.tier == crate::kernel::api::Tier::Vm && ctx.face.guest_lease.is_empty() {
         return (
-            ToolOutcome {
-                ok: false,
-                output: "这条虚拟机档会话没有 guest 租约，shell 没有执行。".to_string(),
-            },
+            ToolOutcome::new(
+                false,
+                "这条虚拟机档会话没有 guest 租约，shell 没有执行。".to_string(),
+            ),
             None,
         );
     }
@@ -806,43 +797,35 @@ pub(crate) fn run_shell(
         fence_prep = crate::kernel::api::take_fence_prep();
         outcome
     };
-    // 共享区不承载执行位：相对路径脚本被直接执行（EACCES）时，补一句"用解释器跑"的出路。
-    if !outcome.ok
-        && let Some(hint) = api::shared_exec_hint(&call.script, &outcome.output)
-    {
-        outcome.output.push_str(&hint);
+    // 共享区不承载执行位：相对路径脚本被直接执行（EACCES）时，补一条"用解释器跑"的说明。
+    if let Some(note) = api::shared_exec_note(&call.script, &outcome.output) {
+        outcome.push_note(note);
     }
-    // 回执补「落点 + 本次耗时」：模型据此判断相对路径与耗时（围栏准备到一秒才在行尾补一段）。
-    // 只对执行层给出 `[shell]` 收尾行的调用追加；耗时只取一次：回执行与结构化事实同源（不让两处各测一次）。
+    // 回执补「落点 + 本次耗时」：模型据此判断相对路径与耗时（围栏准备到一秒才单独报一条）。
+    // 只对执行层给出收尾说明的调用追加；耗时只取一次：回执行与结构化事实同源（不让两处各测一次）。
     let elapsed = started.elapsed();
-    let ran = api::did_run(&outcome.output);
+    let ran = api::did_run(&outcome.notes);
     if ran {
-        outcome.output.push('\n');
-        outcome.output.push_str(&api::cwd_elapsed_line(
+        for note in api::place_notes(
             &cwd_view,
             elapsed.as_secs(),
             fence_prep.as_ref().map(|timing| timing.as_secs()),
-        ));
+        ) {
+            outcome.push_note(note);
+        }
     }
-    let external =
-        ctx.face
-            .sandbox
-            .permissions
-            .decision_for(name, Effect::Exec, CallScope::External);
-    let outcome = api::with_scope_hint(outcome, call.scope, external);
     // 事实只从这一次执行产出：实况槽与会话回放读同一份，呈现层不再解析回执。
-    let facts = ran.then(|| {
-        api::shell_facts(
-            &cwd_view,
-            elapsed,
-            fence_prep.map(|timing| timing.total),
-            &outcome.output,
-        )
-    });
+    // 没跑成（围栏拒绝、启动失败）也留一条：落点与耗时是真的，退出码与状态缺省，界面据此显示"最近一次尝试"。
+    let facts = api::shell_facts(
+        &cwd_view,
+        elapsed,
+        fence_prep.map(|timing| timing.total),
+        &outcome.notes,
+    );
     if let Some(slot) = &slot {
-        slot.finish(facts.as_ref(), outcome.ok, &outcome.output);
+        slot.finish(Some(&facts), outcome.ok, &outcome.output);
     }
-    (outcome, facts)
+    (outcome, Some(facts))
 }
 
 /// 目的：外部工具派发：先定模块（信封里的 module；省略时只有唯一模块才兜底），再查该模块的工具表。
@@ -889,14 +872,8 @@ pub(crate) fn dispatch_external(
             }
         };
         let outcome = match ctx.residents.call(&module, &op.service, &op.op, &args) {
-            Ok(receipt) => ToolOutcome {
-                ok: receipt.ok,
-                output: receipt.output,
-            },
-            Err(e) => ToolOutcome {
-                ok: false,
-                output: e,
-            },
+            Ok(receipt) => ToolOutcome::new(receipt.ok, receipt.output),
+            Err(e) => ToolOutcome::new(false, e),
         };
         return (module.clone(), outcome);
     }

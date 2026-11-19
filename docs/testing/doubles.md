@@ -137,7 +137,6 @@
 | `Workdirs` | `InMemoryWorkspace` | 内存布局可观察 | `fail_with` | 不适用 | `FsWorkspace` | 已验收 |
 | `WorkStore` | `InMemoryWorkStore` | 内存文件 / 提交 / 基线可观察；资产路径的 `stat` / `scan` / `ingest` / `copy` 与跨根备份 `copy_under_to_under` 同契约 | `fail_with`、`fail_times`、`fail_on`（按方法 + 键子串，例如只让某条路径的 copy 失败；含整文件 `read_under` / `read_object`） | 不适用 | `FsWorkStore`（含符号链接逃逸拒绝、流式临时文件清理、超限 / 指纹不符拒绝、跨根复制建目标根） | 已验收；**持有者只有 `workspace::service.rs`**（R12） |
 | `PathCodec`（kernel 共享） | 不适用（用真实 `PathBridge`） | 不适用 | 不适用 | 不适用 | `PathBridge`（本机档恒等；虚拟机档两种路径方言互转） | 已验收（`src/tests/prompt.rs`；虚拟机档的路径方言由 e2e 的 vm 档会话场景覆盖） |
-| `ProcessTexts`（kernel 共享） | 不适用（用真实 `CodeProcessTexts`） | 不适用 | 不适用 | 不适用 | `kernel::detail::process::CodeProcessTexts`（文案由机制代码返回） | 已验收（进程机制用例直接注入真实实现） |
 | `ToolHandler`（kernel 共享） | 不适用（真实处理器直接测） | 不适用 | 不适用 | 不适用 | `WorkHandler` / `ProxyHandler` | 已验收（`src/tests/tools/`、`src/tests/runtime/proxy.rs`） |
 | `SysIo` | `InMemorySysIo`（含并发峰值与按文件延时） | 内存内容 + 同时在读的峰值 | `fail_with` | 不适用 | `FsSysIo`（含 lossy / cut） | 已验收；**持有者只有 `tools::service.rs`**（R12） |
 | `HistoryStore` | `InMemoryHistory` | 内存流水可观察 | `fail_with` | 不适用 | `FsHistory` | 已验收；**持有者只有 `session::service.rs`**（R12） |
@@ -164,7 +163,7 @@
 
 - **持有者（R12）**：`ModuleSource` / `ModuleStateStore` 只由 `modules::service.rs` 持有（别的能力经 `modules::api::ModulesOps` 要清单与启停有效值）；`PackageSource` 只由 `packages::service.rs` 持有（别的能力经 `packages::api::Packages` 要运行包库）；`Workdirs` / `WorkStore` 只由 `workspace::service.rs` 持有（别的能力经 `workspace::api::Workspace` 要目录与版本库用例）；`SourceDigest` / `BuildStates` / `BuildCache` 只由 `builds::service.rs` 持有（别的能力经 `builds::api::Builds` 要"确保产物可用"）；`SpaceSurvey` / `SpaceReclaim` / `GuestLiveness` 只由 `storage::service.rs` 持有（别的能力经 `storage::api::Storage` 要空间报告、headroom 与清理）；`Fetcher` / `HostFs` / `Ledger` / `Installers` / `GuestImage` / `Procs` 只由 `provision::service.rs` 持有（别的能力经 `provision::api::Provision` 要状态、装依赖、起取消）。
 
-- `Log`、`PathCodec`、`ProcessTexts`、`ToolHandler`、`HostProbe`、`AskUser`、`ProcessRunner`、`SessionHost` / `Session` 与 `FenceHost` 是**不在某个能力 `ports.rs`** 的端口：它们在 `src/kernel/ports.rs`（地基库单元 `kernel`，无领域语义，R12 的例外）。
+- `Log`、`PathCodec`、`ToolHandler`、`HostProbe`、`AskUser`、`ProcessRunner`、`SessionHost` / `Session` 与 `FenceHost` 是**不在某个能力 `ports.rs`** 的端口：它们在 `src/kernel/ports.rs`（地基库单元 `kernel`，无领域语义，R12 的例外）。
 - 见 [../kernel/unit-map.md](../kernel/unit-map.md)。
 
 - "已验收"指该端口在 `src/tests/` 的契约测试里有成功、失败、空 / 边界与交互记录的断言；真实实现另见 `detail.rs`、`tests/<平台>/` 与 `tests/cross-platform/e2e/`。

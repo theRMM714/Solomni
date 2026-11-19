@@ -105,7 +105,6 @@ fn mcp_adapter_talks_to_a_real_stdio_server() {
     let adapter = McpAdapter::new(
         Arc::new(ProcessSessions::new(
             exe,
-            crate::tests::doubles::test_process_texts(),
             std::path::PathBuf::new(),
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
             Arc::clone(&book),

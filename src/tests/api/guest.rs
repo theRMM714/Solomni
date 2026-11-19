@@ -26,10 +26,7 @@ impl crate::capabilities::vm::api::Vm for DiagnosingVm {
         _lease: &str,
         _run: &crate::capabilities::vm::api::GuestRun,
     ) -> crate::kernel::api::ToolOutcome {
-        crate::kernel::api::ToolOutcome {
-            ok: false,
-            output: "替身不跑命令".to_string(),
-        }
+        crate::kernel::api::ToolOutcome::new(false, "替身不跑命令".to_string())
     }
 
     fn guest_run_fenced(
@@ -38,10 +35,7 @@ impl crate::capabilities::vm::api::Vm for DiagnosingVm {
         _run: &crate::capabilities::vm::api::GuestRun,
         _fence: &crate::kernel::api::FenceSpec,
     ) -> crate::kernel::api::ToolOutcome {
-        crate::kernel::api::ToolOutcome {
-            ok: false,
-            output: "替身不跑命令".to_string(),
-        }
+        crate::kernel::api::ToolOutcome::new(false, "替身不跑命令".to_string())
     }
 
     fn stage_exec(

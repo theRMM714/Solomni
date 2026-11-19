@@ -179,6 +179,21 @@ impl Handle {
             discuss_remind_cap: num("discuss_remind_cap")
                 .map(|v| v as u32)
                 .unwrap_or(current.discuss_remind_cap),
+            lang: {
+                let lang = args
+                    .get("lang")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_else(|| current.lang.clone());
+                if !crate::kernel::api::i18n::is_available(&lang) {
+                    return Err(format!(
+                        "settings.lang 必须是可用语言之一（{}），收到 {}",
+                        crate::kernel::api::i18n::available().join(" / "),
+                        lang
+                    ));
+                }
+                lang
+            },
         };
         self.set_settings(settings)
     }

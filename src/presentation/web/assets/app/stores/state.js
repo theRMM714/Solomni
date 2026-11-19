@@ -4,7 +4,10 @@
  * 不管：拉取快照（调用方用 `app/core/http.js`）、补历史、渲染；不为事件流里冒出的 sid 造会话。
  *   长路径缩写的根列表 pathRoots 也放这里（向导写入、转录读），它是界面状态，不对应任何接口。
  * 联动：会话表与运行态规则见 `docs/presentation/contracts.md` 的「顺序与去重」与
- *   `docs/session/session-model.md`；`app/main.js` 把它交给界面层。 */
+ *   `docs/session/session-model.md`；`app/main.js` 把它交给界面层。
+ *   回执说明的词表收到后交给 `../core/i18n.js`（工具卡片按码渲染，不在前端复制中文表）。 */
+
+import { setCatalog } from '../core/i18n.js';
 
 const DEFAULT_SETTINGS = {
   streaming: true, show_reasoning: true, llm_timeout_secs: 300,
@@ -18,6 +21,7 @@ export function createState() {
     settings: { ...DEFAULT_SETTINGS },
     fence: null,
     toolchains: null,
+    i18n: { lang: 'zh-CN', messages: {} },
     sessions: new Map(),
     activeSid: null,
     treeOpen: new Set(),
@@ -120,6 +124,8 @@ export function projectSnapshot(state, s) {
   state.settings = s.settings || { ...DEFAULT_SETTINGS };
   state.fence = s.fence || null;
   state.toolchains = s.toolchains || null;
+  // 回执说明的词表随快照下来：工具卡片按码取文本，不自己复制一份中文表。
+  if (s.i18n) { state.i18n = s.i18n; setCatalog(s.i18n); }
   return opened;
 }
 

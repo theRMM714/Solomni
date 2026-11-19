@@ -36,25 +36,6 @@ pub trait PathCodec: Send + Sync + std::fmt::Debug {
     fn to_view(&self, host: &Path) -> String;
 }
 
-/// 目的：外部进程回执里那些**中性机制**的收尾标记文案端口——默认实现由进程机制自己提供（代码常量/函数）。
-/// 约束：保留窄端口供测试替身；生产实现 `CodeProcessTexts` 在 `kernel/detail/process.rs`。
-///   围栏裁决与面向用户的拒绝文案不在这里（属业务层的围栏裁决端口实现，见 `tools/service/fence.rs`）。
-#[allow(dead_code)]
-pub trait ProcessTexts: Send + Sync {
-    /// stderr 段的头（工具进程有 stderr 时拼在回执里）。
-    fn stderr_header(&self) -> String;
-    /// 超时说明（到时连根杀树后补的那句）。
-    fn timeout(&self) -> String;
-    /// 围栏没装上（守门进程用固定退出码报明，命令没被执行）。
-    fn fence_failed(&self) -> String;
-    /// 目的：shell 的退出码回执（None = 被信号结束，拿不到退出码）。
-    fn shell_exit(&self, code: Option<i32>) -> String;
-    /// 目的：shell 到点被杀的说明（secs = 本次上限）。
-    fn shell_timeout(&self, secs: u64) -> String;
-    /// 目的：shell 被用户停止的说明（host 取消旗）。
-    fn shell_cancelled(&self) -> String;
-}
-
 /// 目的：**提问端口**——需要用户裁决的机制（围栏、工具执行层，今后任何 yes/no）经它推一条问题，
 ///   并**阻塞**等回答（走会话的**统一裁决通道**：同一条队、同一张卡、同一条回答命令）。
 /// 约束：它是全项目共享的机制接口（R12 的例外，与 `Log` / `ToolHandler` 同一类）；

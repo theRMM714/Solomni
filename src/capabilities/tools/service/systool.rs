@@ -52,10 +52,7 @@ pub fn execute(
         if !o.trim().is_empty() {
             out.push_str(&format!("\nopen：{}", o));
         }
-        return ToolOutcome {
-            ok: true,
-            output: out,
-        };
+        return ToolOutcome::new(true, out);
     }
     if name == DELETE {
         return delete(sb, io, obs, &args);
@@ -119,10 +116,7 @@ fn list(io: &dyn SysIo, spec: &str, path: &Path) -> ToolOutcome {
             .join("\n")
     };
     let header = format!("[list] {} （{} 项）", spec, entries.len());
-    ToolOutcome {
-        ok: true,
-        output: format!("{}\n{}", header, rows),
-    }
+    ToolOutcome::new(true, format!("{}\n{}", header, rows))
 }
 
 /// delete：只删**该 agent 自己的沙箱**。默认只删文件；目录必须显式 recursive=true。
@@ -221,10 +215,7 @@ fn delete(
             }
         }
     }
-    ToolOutcome {
-        ok: true,
-        output: out,
-    }
+    ToolOutcome::new(true, out)
 }
 
 /// read：按行区间返回，行号从 1 数起；回执末尾告诉模型接着用哪个 offset，并如实记账"读到的是不是全文"。
@@ -268,10 +259,7 @@ fn read(
             hash,
         );
         let note = format!("（超出末行：该文件共 {} 行，offset 从 1 数起）", total);
-        return ToolOutcome {
-            ok: true,
-            output: header(note),
-        };
+        return ToolOutcome::new(true, header(note));
     }
     let mut body: Vec<String> = Vec::new();
     let mut used = 0usize;
@@ -346,10 +334,7 @@ fn read(
             "\n[编码] 该文件含非法 UTF-8 字节，以上是按替换字符呈现的近似内容；本程序不猜编码。",
         );
     }
-    ToolOutcome {
-        ok: true,
-        output: out,
-    }
+    ToolOutcome::new(true, out)
 }
 
 /// write：整份写入（同名文件被整份覆盖）。
@@ -378,14 +363,14 @@ fn write(
         return fail(e);
     }
     obs.note_written(path, fnv1a(content));
-    ToolOutcome {
-        ok: true,
-        output: format!(
+    ToolOutcome::new(
+        true,
+        format!(
             "[write] 已写入 {}（{} 字符，UTF-8）",
             spec,
             content.chars().count()
         ),
-    }
+    )
 }
 
 /// edit：按字面替换一处（默认要求唯一命中）。证据是 old_string 本身——它就是要改的那段原文，不需要先读过。
@@ -464,15 +449,15 @@ fn edit(
         return fail(e);
     }
     obs.note_written(path, fnv1a(&out));
-    ToolOutcome {
-        ok: true,
-        output: format!(
+    ToolOutcome::new(
+        true,
+        format!(
             "[edit] 已改 {}（替换 {} 处；该文件现 {} 行）",
             spec,
             n,
             out.lines().count()
         ),
-    }
+    )
 }
 
 /// search：逐行找关键词，返回带行号的命中行（命中总数与截断如实报）。
@@ -539,10 +524,7 @@ fn search(io: &dyn SysIo, args: &serde_json::Value, spec: &str, path: &Path) -> 
     if got.cut {
         out.push_str("\n[截断] 文件超过单次读取上限，只搜了开头部分。");
     }
-    ToolOutcome {
-        ok: true,
-        output: out,
-    }
+    ToolOutcome::new(true, out)
 }
 
 /// patch：把一段**自由格式**的补丁应用到一处或多处文件（信封之后原样跟补丁文本，不走 JSON）。
@@ -658,13 +640,13 @@ fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str)
         }
         obs.note_written(path, fnv1a(content));
     }
-    ToolOutcome {
-        ok: true,
-        output: format!(
+    ToolOutcome::new(
+        true,
+        format!(
             "[patch] 已应用 {} 块改动，写了 {} 个文件：\n{}",
             blocks.len(),
             order.len(),
             lines.join("\n")
         ),
-    }
+    )
 }

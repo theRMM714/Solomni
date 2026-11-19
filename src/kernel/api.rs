@@ -3,9 +3,8 @@
 //! 不管：这些形状与机制自身的实现（在 `contracts/` 与 `detail/`）；机制端口的定义（在 `ports`）。
 //! 联动：消费方是核心（`src/capabilities/runtime/api/`）与各能力；端口见 `src/kernel/ports.rs`。
 
-pub use crate::kernel::contracts::fence::{
-    FENCE_BOUNDARY_MARK, FenceBlocked, FencePart, FenceRunPolicy, FenceSpec,
-};
+pub use crate::kernel::contracts::fence::{FenceBlocked, FencePart, FenceRunPolicy, FenceSpec};
+pub use crate::kernel::contracts::note::{Note, Severity, codes};
 pub use crate::kernel::contracts::run::RunOutcome;
 pub use crate::kernel::contracts::types::{
     Ask, AskOutcome, DEFAULT_LLM_TIMEOUT_SECS, ExecSpec, JobState, SessionId, Tier, ToolOutcome,
@@ -16,6 +15,8 @@ pub use crate::kernel::detail::fs_meta::{
     restrict_private_file, symlink, sync_dir, write_executable,
 };
 pub use crate::kernel::detail::host_probe::{FileStamp, file_stamp};
+// 文案目录的出口：会话、界面与 CLI 都按稳定码取文本，不各自复制词表。
+pub use crate::kernel::detail::i18n;
 pub use crate::kernel::detail::locus::{is_network_path, locus_of, place_contains};
 pub(crate) use crate::kernel::detail::process::kill_tree;
 pub use crate::kernel::detail::process::{FenceTiming, take_fence_prep};

@@ -9,7 +9,7 @@
 ## 一、判据与归属
 - 端口 = 各能力 `ports.rs` 与 `src/kernel/ports.rs` 里的 trait（`Chat` 的定义在 `src/capabilities/llm/api.rs`、`ProxyHost` 的定义在 `src/capabilities/conversation/proxy/api.rs`，因为它们同时是能力的入站面）。
 - 纯逻辑（信封解析、引擎循环、协作状态派生、提示词渲染）**刻意不抽象**：不是 IO、没有可替换实现，就不加 trait。
-- 端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `FenceHost` / `PathCodec` / `ProcessTexts` / `SessionHost`）全项目共享；`TurnHost` 由 `turn` 声明（`src/capabilities/turn/turn/api.rs`）、由 `runtime` 实现（`src/capabilities/runtime/service/handle.rs`）——业务声明它需要宿主代做什么，最顶层（`runtime`）来实现。
+- 端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `FenceHost` / `PathCodec` / `SessionHost`）全项目共享；`TurnHost` 由 `turn` 声明（`src/capabilities/turn/turn/api.rs`）、由 `runtime` 实现（`src/capabilities/runtime/service/handle.rs`）——业务声明它需要宿主代做什么，最顶层（`runtime`）来实现。
 - 新增端口前先问一句：**这是 IO 或可替换点吗**？不是就别加 trait（`tests/gates/structure/capability.js`）。
 - 端口的输入、输出、错误、取消、超时、重复调用与资源清理语义是**架构契约**：生产适配器与测试替身遵守同一份（R3、R11）。
 
@@ -54,7 +54,7 @@
 | `ServiceInstance` | 一个已拉起的常驻服务实例：调用操作、关闭、判活、取回被刷新的操作清单 |
 | `SecretStore` | 模块隐秘字段的落盘（`.home/` 的 `secrets.yaml`；值不进提示词、转录与日志） |
 | `FenceHost` | 围栏授权的释放：`release_by_lease` 按会话租约撤 ACE/删 profile（会话改配、删除），`release_call` 服务一次性调用（撤 ACE、删 profile 与临时目录）；**kernel 共享机制端口** |
-| `Log` / `HostProbe` / `PathCodec` / `ProcessTexts` | 运行日志（三级）/ 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力）/ 模型侧路径 ↔ 宿主路径的翻译 / 外部进程回执的收尾文案 |
+| `Log` / `HostProbe` / `PathCodec` | 运行日志（三级）/ 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力）/ 模型侧路径 ↔ 宿主路径的翻译 |
 | `ToolHandler` | **一类工具的执行者**（按名字认领）：内置、模块与核心自有工具因此走**同一条派发路径** |
 | `AskUser` | **请用户裁决的提问端口**：需要用户裁决的机制（工具执行层、围栏）推一条问题并**阻塞**等一个选项 id——走会话的**统一裁决通道**（不是第二条） |
 | `TurnHost` | **回合推进的宿主契约**：业务在自己的工作线程上需要宿主在核心线程代做的事——取放会话状态、事件台、guest 起停、裁决队与提问端口、生成登记、线程点火、回答裁决卡 |

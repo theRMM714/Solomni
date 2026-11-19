@@ -7,6 +7,7 @@ pub mod confine;
 pub mod file_log;
 pub mod fs_meta;
 pub mod host_probe;
+pub mod i18n;
 pub mod lock;
 pub mod locus;
 pub mod outbound;

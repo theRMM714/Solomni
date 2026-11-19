@@ -384,13 +384,9 @@ fn main() {
     let systools_source =
         capabilities::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"));
 
-    // 进程机制共用的文案（一次执行与长驻会话同一份）。
-    let process_texts: std::sync::Arc<dyn kernel::ports::ProcessTexts> =
-        std::sync::Arc::new(kernel::detail::process::CodeProcessTexts);
     // 工具执行：外层拉起的守门进程就是本程序自己（围栏在它里面装）。
     let tools = kernel::detail::process::ProcTools::new(
         std::env::current_exe().unwrap_or_default(),
-        std::sync::Arc::clone(&process_texts),
         home.clone(),
         std::sync::Arc::clone(&write_allowed),
     )
@@ -476,8 +472,7 @@ fn main() {
                     layout::vm(&root).join("overlays"),
                 )
                 .with_book(std::sync::Arc::clone(&book))
-                .with_log(log.clone())
-                .with_texts(std::sync::Arc::clone(&process_texts)),
+                .with_log(log.clone()),
             ),
             shares,
         ));
@@ -505,7 +500,6 @@ fn main() {
                 Arc::new(
                     kernel::detail::ProcessSessions::new(
                         std::env::current_exe().unwrap_or_default(),
-                        std::sync::Arc::clone(&process_texts),
                         home.clone(),
                         std::sync::Arc::clone(&write_allowed),
                         std::sync::Arc::clone(&book),
@@ -555,7 +549,6 @@ fn main() {
     // **不申请容器身份**（构建是系统动作）：AppContainer 的临时目录写不了文件；可达范围仍由围栏规格给出。
     let build_runner = kernel::detail::process::ProcTools::new(
         std::env::current_exe().unwrap_or_default(),
-        std::sync::Arc::clone(&process_texts),
         home.clone(),
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     );

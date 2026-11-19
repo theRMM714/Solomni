@@ -85,17 +85,14 @@ impl Tools for ToolsService {
     }
 }
 
-/// 目的：宿主执行端口的回执（只描述跑没跑、输出是什么）转成工具面回执。
+/// 目的：宿主执行端口的回执（跑没跑、输出是什么、有哪些说明）转成工具面回执。
 fn host_outcome(out: crate::kernel::api::RunOutcome) -> ToolOutcome {
-    ToolOutcome {
-        ok: out.ok,
-        output: out.output,
-    }
+    ToolOutcome::from(out)
 }
 
 /// 所有工具回执送回模型前都过同一个预算（head+tail + 按工具给的续读提示）。
 fn within_budget(mut out: ToolOutcome, hint: Continuation) -> ToolOutcome {
-    out.output = budget::cap_result(out.output, hint);
+    budget::cap_result(&mut out, hint);
     out
 }
 

@@ -138,10 +138,10 @@ fn refused_batch(
         .map(|(module, _, _)| {
             (
                 module.clone().unwrap_or_default(),
-                ToolOutcome {
-                    ok: false,
-                    output: "用户已停止：这一轮的工具调用**没有执行**。".to_string(),
-                },
+                ToolOutcome::new(
+                    false,
+                    "用户已停止：这一轮的工具调用**没有执行**。".to_string(),
+                ),
                 None,
                 None,
             )
@@ -428,6 +428,8 @@ pub fn converse_with(
                 module: String::new(),
                 name: c.name.clone(),
                 ok: false,
+                severity: crate::kernel::api::Severity::Error,
+                notes: Vec::new(),
                 args: c.args_json.clone(),
                 output: format!(
                     "这一回合走**信封通道**，但供应商返回了原生工具调用（name={}，finish_reason={}）；核心没有执行。请把同样的调用写成信封重发：{{\"type\":\"tool\",\"name\":\"...\",\"args\":{{...}}}}。",
@@ -516,15 +518,20 @@ pub fn converse_with(
                     .iter()
                     .enumerate()
                     .map(|(i, c)| {
-                        let (label, mut outcome, read, shell) = done[i].clone();
+                        let (label, mut outcome, read, mut shell) = done[i].clone();
                         // 模型可见的最末一处：虚拟机档回执与核心自有工具不经过本机执行端口，预算在这里补齐。
-                        outcome.output =
-                            cap_result(outcome.output, continuation_for(&label, &plan[i].1));
+                        cap_result(&mut outcome, continuation_for(&label, &plan[i].1));
+                        if let Some(facts) = shell.as_mut() {
+                            facts.truncated =
+                                crate::capabilities::tools::api::truncated(&outcome.notes);
+                        }
                         ToolCallView {
                             speaker: speaker.to_string(),
                             module: label,
                             name: plan[i].1.clone(),
                             ok: outcome.ok,
+                            severity: outcome.severity,
+                            notes: outcome.notes.clone(),
                             args: plan[i].2.clone(),
                             output: outcome.output,
                             call_id: c.id.clone(),
@@ -581,6 +588,8 @@ pub fn converse_with(
                             module: inv.module.clone().unwrap_or_default(),
                             name: inv.name.clone(),
                             ok: false,
+                            severity: crate::kernel::api::Severity::Error,
+                            notes: Vec::new(),
                             args: inv.args_json.clone(),
                             output: "这条通道用**原生工具调用**：正文里的 JSON 信封不会被当成调用执行。需要工具时请直接发起工具调用（一次可以发起多个）。".to_string(),
                             call_id: String::new(),
@@ -639,6 +648,8 @@ pub fn converse_with(
                     module: inv.module.clone().unwrap_or_default(),
                     name: inv.name.clone(),
                     ok: false,
+                    severity: crate::kernel::api::Severity::Error,
+                    notes: Vec::new(),
                     args: inv.args_json.clone(),
                     output: why,
                     call_id: String::new(),
@@ -712,7 +723,9 @@ pub fn converse_with(
                             );
                             ToolOutcome {
                                 ok: outcome.ok,
+                                severity: outcome.severity,
                                 output: format!("{}\n{}", repaired, outcome.output),
+                                notes: outcome.notes,
                             }
                         }
                         _ => outcome,
@@ -722,15 +735,21 @@ pub fn converse_with(
                     .iter()
                     .enumerate()
                     .map(|(i, (_module, tool, _args))| {
-                        let (label, outcome, read, shell) = done[i].clone();
+                        let (label, outcome, read, mut shell) = done[i].clone();
                         let mut outcome = annotate(outcome);
                         // 与原生通道同一处预算：信封通道的回执也要收进 16k（read / 模块工具的续读提示各按能力给）。
-                        outcome.output = cap_result(outcome.output, continuation_for(&label, tool));
+                        cap_result(&mut outcome, continuation_for(&label, tool));
+                        if let Some(facts) = shell.as_mut() {
+                            facts.truncated =
+                                crate::capabilities::tools::api::truncated(&outcome.notes);
+                        }
                         ToolCallView {
                             speaker: speaker.to_string(),
                             module: label,
                             name: tool.clone(),
                             ok: outcome.ok,
+                            severity: outcome.severity,
+                            notes: outcome.notes.clone(),
                             args: invokes[i].args_json.clone(),
                             output: outcome.output,
                             call_id: String::new(),

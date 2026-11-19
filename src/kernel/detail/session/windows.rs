@@ -4,28 +4,21 @@
 //! 联动：由 `src/kernel/detail/session.rs` 按平台选中；围栏机制在 `confine`。
 
 use super::*;
-use crate::kernel::ports::ProcessTexts;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// 目的：Windows 侧需要随会话宿主一起持有的状态。
 pub(super) struct State {
-    texts: Arc<dyn ProcessTexts>,
     home: PathBuf,
     write_allowed: Arc<AtomicBool>,
     disclosed: Arc<AtomicBool>,
 }
 
 impl State {
-    /// 目的：保存组合根注入的文案、产品私有区与写权限开关。
-    pub(super) fn new(
-        texts: Arc<dyn ProcessTexts>,
-        home: PathBuf,
-        write_allowed: Arc<AtomicBool>,
-    ) -> State {
+    /// 目的：保存组合根注入的产品私有区与写权限开关。
+    pub(super) fn new(home: PathBuf, write_allowed: Arc<AtomicBool>) -> State {
         State {
-            texts,
             home,
             write_allowed,
             disclosed: Arc::new(AtomicBool::new(false)),
@@ -61,11 +54,15 @@ pub(super) fn prepare(
     }
     if !prepared
         && let Some(outcome) = crate::kernel::detail::process::refuse_when_broken(
-            &*state.texts,
             crate::kernel::detail::confine::verify(&spec.fence, &spec.command),
         )
     {
-        return Err(outcome.output);
+        // 启动失败只留一句话：说明在目录里，源语言渲染（界面语言迁移见 tests/gaps.yaml 的 P1 缺口）。
+        return Err(crate::kernel::detail::i18n::render_receipt(
+            crate::kernel::detail::i18n::Lang::source(),
+            &outcome.output,
+            &outcome.notes,
+        ));
     }
     Ok((prepared, Some(state.home.clone())))
 }

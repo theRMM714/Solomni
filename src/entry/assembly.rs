@@ -160,11 +160,8 @@ pub(crate) fn build_vm(root: &Path) -> Arc<dyn Vm + Send + Sync> {
 pub(crate) fn build_runner(
     root: &Path,
 ) -> Result<crate::kernel::detail::process::ProcTools, String> {
-    let texts: Arc<dyn crate::kernel::ports::ProcessTexts> =
-        Arc::new(crate::kernel::detail::process::CodeProcessTexts);
     Ok(crate::kernel::detail::process::ProcTools::new(
         std::env::current_exe().unwrap_or_default(),
-        texts,
         layout::home(root),
         Arc::new(std::sync::atomic::AtomicBool::new(false)),
     ))

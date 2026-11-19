@@ -110,10 +110,16 @@ fn core_rows(
 }
 
 /// 目的：一条工具结果消息的**正文**（回放与实时唯一来源；发送视图按它定位读过的那条消息）。
+/// 约束：模型通道固定用源语言渲染说明——模型看到的是稳定文本，与界面语言无关。
 pub fn tool_result_body(
     c: &crate::capabilities::conversation::session::api::ToolCallView,
 ) -> String {
-    format!("[工具结果] {}\n{}", c.label(), c.output)
+    let body = crate::kernel::api::i18n::render_receipt(
+        crate::kernel::api::i18n::Lang::source(),
+        &c.output,
+        &c.notes,
+    );
+    format!("[工具结果] {}\n{}", c.label(), body)
 }
 
 /// 目的：把**一次模型回复**翻译成发给模型的消息——**实时与重建都只走这一处**。
@@ -270,6 +276,8 @@ pub fn core_operation(
                     module: String::new(),
                     name: tool.to_string(),
                     ok: true,
+                    severity: crate::kernel::api::Severity::Info,
+                    notes: Vec::new(),
                     args: c.args_json.clone(),
                     output: head_chars(&payload.to_string(), 400),
                     call_id: c.id.clone(),
@@ -300,6 +308,8 @@ pub fn core_operation(
                     module: String::new(),
                     name: tool.to_string(),
                     ok: true,
+                    severity: crate::kernel::api::Severity::Info,
+                    notes: Vec::new(),
                     args: t.args_json.clone(),
                     output: head_chars(&payload.to_string(), 400),
                     call_id: String::new(),
@@ -363,6 +373,8 @@ pub fn core_operation(
                 module: String::new(),
                 name,
                 ok: out.ok,
+                severity: out.severity,
+                notes: out.notes.clone(),
                 args,
                 output: out.output,
                 call_id,

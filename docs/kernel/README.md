@@ -18,7 +18,7 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api`（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` / `RunOutcome` / `FenceSpec` / `FencePart` / `FenceBlocked` / `DEFAULT_LLM_TIMEOUT_SECS` / `valid_capability` / `slash` / `JobRegistry`）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`ProcessTexts`、`FenceHost`、`FenceGate`、`UserPath`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执）、`domain`（路径书写、取消表、沙箱模式）、`detail`（`file_log`、`host_probe`、`outbound`、`unpack`、`user_path`、`process`、`procs`、`session`、`confine`：门面 + `job` / `ledger` / `paths` / `prep` / `texts`）。
+- 入站面：`api`（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Note` / `Severity` / `codes` / `Ask` / `AskOutcome` / `RunOutcome` / `FenceSpec` / `FencePart` / `FenceBlocked` / `DEFAULT_LLM_TIMEOUT_SECS` / `valid_capability` / `slash` / `JobRegistry` / `i18n`）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`FenceHost`、`FenceGate`、`UserPath`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执与回执说明）、`domain`（路径书写、取消表、沙箱模式、回执装配）、`detail`（`file_log`、`host_probe`、`outbound`、`unpack`、`user_path`、`process`、`procs`、`session`、`i18n`、`confine`：门面 + `job` / `ledger` / `paths` / `prep`）。
 - `AskUser` 是「需要用户裁决的机制请用户裁决」的**唯一**入口（`src/kernel/ports.rs`），工具执行层与围栏用它。
   - 形状：`ask(问题) -> 选项 id`，**阻塞**。
   - `halt(为什么)` = 停会话 + 落警告；调用方只在有可回答前端时用它，没有前端按 fail-closed 收场。
@@ -65,13 +65,13 @@
   - **容器临时目录先建**（仅 Windows）：`prepare_fence` 在授权前建好 `<私有沙箱>/Packages/<容器名>/AC/Temp`——AppContainer 的 `GetTempPath2` **不读 TMP/TEMP**，编译器这类程序缺了它直接 abort（`Cannot create temporary file`）；目录在 `rw` 之下，递归 ACE 覆盖它，不单列一条授权。`private` 为空时跳过并记一条事实。
   - **未授权档位不是这条路**（仅 Windows）：用户没开 `sandbox.policy.windows.write_acl` 时外层根本不写权限项，容器围栏不装；若策略要求强制则拒绝，否则按无围栏执行并在启动报告标出。Linux / macOS 没有外层授权这一步，围栏照常装。
   - **启动门（组合根）**：默认 CLI 与 `--web` 都先判 `require` vs 本次实际，并把「未授权」与「本机能力缺失」分开报；未满足时只能本次降级 / 重设 / 退出（`src/main.rs`）。没有可回答的前端、或 `on_unavailable=refuse` 且不重设 = 退出，不会启动前端。首次启动（没有 `.home/settings.yaml`）在 Windows 先问一次是否授权写 ACL；选否不写盘、进入启动门。授权后立刻跑机器级预授；后续启动只做 O(深度) 只读对账，缺项只提示 `--setup=fence`，不阻断。`require` + `write_acl=false` 的矛盾配置在加载 / 保存时即拒绝，不会进入门。
-  - **回执文案分两处**：超时、stderr 等机制文案由 `src/kernel/detail/process.rs` 的 `CodeProcessTexts` 返回；围栏拒绝 / 放行等业务文案由 `src/capabilities/tools/service/fence.rs` 的 `ToolFenceGate` 生成，kernel 只把裁决结果原样拼进回执。
-  - **围栏里失败的统一说明**：工具在围栏里非零退出时，守门进程补一条**不分语言**的话（可达范围 + 范围外被围栏拒绝）；成功不打扰。
+  - **回执 = 正文 + 结构化说明**：`RunOutcome` / `ToolOutcome` 的 `output` 只放进程原始输出；超时、退出码、信号、启动失败、围栏没装上都表达成 `Note`（稳定 ASCII 码 + 类型化参数 + `info` / `warning` / `error`），码表在 `src/kernel/contracts/note.rs`。kernel 只产出码与参数，**不构造业务文案**（R6）；文本在边缘按 `locales/<lang>.ftl` 渲染（`src/kernel/detail/i18n.rs`）。
+  - **不声称失败原因**：越界拒绝发生在工具子进程内部（ACL / Landlock / seatbelt 都在那里），守门进程只看得到退出码与被本地化的 OS 文案。回执因此**只说跑没跑、退出码多少**，不写"被围栏拒绝"之类因果；可达范围这类事实由工具层结构化交给界面，不进模型回执。
 - 平台：只有 Windows 有「外层授权写 ACL」这一步；Linux 的 Landlock 与 macOS 的 seatbelt 在守门进程里自足，那里没有 `prepare_fence`（不是存在但空转）。三个平台各自的强制项与降级条件见「二、工具进程与守门协议」。
 - **启动对账只回收归属明确已死的条目**：`reconcile` 走台账、**不调用** `sweep_orphan_aces` / `sweep_profiles`（那两条无归属、会误伤在跑实例）；孤儿清扫只在用户手动的 `--fence-clean`。台账里的机器级条目（`scope = machine`、没有归属）按设计也不回收：它们授给本产品能力 SID、跨会话复用，撤除走 `--fence-clean` 或按条撤销（`src/kernel/detail/confine/windows/record/liveness.rs` 的 `entry_state`）。台账之外的本程序 profile 会以「只报告、不自动删」列出来（没有归属证明，删了会误伤在跑实例），处置入口同样是 `--fence-clean`。
 - **台账写事务串行**：每条授权 / profile 带**归属**（pid + 进程创建时刻 + 会话租约），台账落在 `.home/fence-grants.json`；写事务用**进程内互斥 + 跨进程文件锁**，两个进程不会同时改同一份台账。
 - **锁只罩台账读—改—写**：`with_ledger` 在锁内 `load` → 记账 → `save`，返回即释放；慢的 ACL 写（`grant_verified` / `TreeSetNamedSecurityInfoW`）、`acl_scan`、`has_ace_for` 都在锁外。同进程的并发工具调用不因某一条整树重算互相排队，跨进程锁的持有时间与 ACL 写时长解耦（`src/kernel/detail/confine/windows/record/store.rs`、`src/kernel/detail/confine/windows/record/journal.rs`）。
-- **围栏准备分步计时与进度**（仅 Windows）：`prepare_fence` 只对**真写** ACL 的落点记一步（标签固定词表：解释器目录 / 祖先链 / 受保护根 / 可信基座，不含用户路径），首次真写前 stderr 提示一次「首次为…补权限（可能要几十秒）」，完成后一条汇总（只报 ≥1 秒的类别；纯命中 / 总耗时 <1 秒保持安静）；回执的「其中围栏准备 N 秒」仍来自总耗时，格式与解析口径不变（`src/kernel/detail/confine/prep.rs` 的 `FenceStep` / `FencePrep.steps`、`src/kernel/detail/process.rs` 的 `FenceTiming`）。
+- **围栏准备分步计时与进度**（仅 Windows）：`prepare_fence` 只对**真写** ACL 的落点记一步（标签固定词表：解释器目录 / 祖先链 / 受保护根 / 可信基座，不含用户路径），首次真写前 stderr 提示一次「首次为…补权限（可能要几十秒）」，完成后一条汇总（只报 ≥1 秒的类别；纯命中 / 总耗时 <1 秒保持安静）；耗时的围栏准备部分由工具层按总耗时补一条说明（码 `shell.place.prep`，≥1 秒才报；`src/kernel/detail/confine/prep.rs` 的 `FenceStep` / `FencePrep.steps`、`src/kernel/detail/process.rs` 的 `FenceTiming`）。
 - **身份按 reach、生命周期按会话**：Windows 的容器身份 = `会话租约 + agent + 受保护根集合（reach 指纹，不含工具链、不含 net）`——同一会话里不同 scope 的调用根集合不同 → 不同 SID（窄调用看不到宽调用的根），同一 reach 的后续调用复用 SID 与 ACL。授权由会话持有：调用结束**不**释放，会话改配 / 删除时由 `release_by_lease` 按会话租约撤 ACE、删 profile；删除会话先停 guest、再删目录，然后把按租约撤权甩到后台（先删目录让根内授权走「路径不在 → 只销账」快分支）；进程退出导致后台线程被杀时，残留由 `reconcile` 按死归属回收。
   - **容器身份评估结论（仅 Windows）**：保留 AppContainer profile + reach 指纹，不改全局 SID、也不每次调用换 SID（`src/kernel/detail/confine/windows/container.rs` 的 `container_name` / `ensure_profile`）。理由：profile 必须在场才能拿到 AAPP 组（否则容器连系统解释器都打不开）；ACL 写成本按 reach 的根集合计，同一 reach 复用 profile 才能让后续调用零写；每次调用换 SID 会把授权成本推到每次调用，且并发窄调用互相看不到对方的根；机器级只读交给产品能力 SID、不进 reach 指纹，避免工具链 / 运行包按 scope 各授一次。边界：AppContainer 是同一用户内的 DACL 隔离，不是跨用户安全边界；profile 名是 FNV 指纹，不是秘密。真机判据：`tests/windows/probes/capability.rs` 的 `capability_sid_is_grantable_and_not_blanket`。一次性调用（构建 / 独立模块工具）没有会话，各自唯一租约，跑完走 `release_call`（含 `private/Packages/<名字>` 临时目录）。
 
@@ -85,14 +85,14 @@
   - **容器里的程序名先相对化**（仅 Windows）：AppContainer 下**绝对路径**的程序会被拒（真机：同一文件用 `D:\…\x.exe` 报 Access denied，用 `..\x.exe` 正常——相对路径走 cwd 的目录句柄，不遍历卷根；非系统盘的卷根 DACL 要管理员才写得动）。执行前把首 token 的程序名解析成绝对路径、再改写成相对 cwd 的路径（同卷才改；裸名按容器里生效的 PATH / PATHEXT 解析；跨卷或解析不出则原样）。参数里的路径不动。
   - 环境白名单：外层 `env_clear`，只注入 `fence_env`（PATH / PATHEXT / 系统根 / LANG / TZ 等，`HOME` 与 `TEMP` 指向该 agent 私有沙箱）与模块隐秘字段；其它环境与凭据不进工具进程。
   - **围栏由本次权限 reach 派生**（策略在 `src/capabilities/tools/domain/fence.rs`）：`FenceSpec::for_call` 只把 granted 的 private / shared-read / module-read / module-write / host-read / network 放进 rw / ro_tree / ro / net；shared-write 永不进 rw，module-write 只给指定模块自己的 userdata。`for_session` 只作为**会话 base**（提供主机只读根与全局断网事实）再派生按次围栏，不用于撤权。
-  - **shell 的一次执行**：`run_shell` 走同一个守门进程；`timeout_secs` 是本次的（不沿用模块工具的 30 秒），到点或取消旗置位都杀整棵树；输出原样交回（模型可见的截断由工具层的回执预算统一施加），回执末尾另带 cwd 与本次耗时（由工具层在守门进程给出 shell 收尾行后追加；参数拒绝 / 启动失败不追加）；sandbox / external 都 `require_fs + require_net + allow_degraded=false`，装不上拒绝；Windows 的容器身份按 `会话 + agent + 受保护根集合` 派生（同一 reach 的调用复用 SID 与 ACL；不同 scope 根集合不同 → 不同 SID），授权按会话持有、会话改配 / 删除时回收；工具链与运行包是基础工具链基线，不参与按 reach 授权。
+  - **shell 的一次执行**：`run_shell` 走同一个守门进程；`timeout_secs` 是本次的（不沿用模块工具的 30 秒），到点或取消旗置位都杀整棵树；输出原样交回（模型可见的截断由工具层的回执预算统一施加），落点与本次耗时由工具层补成说明（码 `shell.place` / `shell.place.prep`；没跑成的调用不加落点行，但结构化事实仍记下落点与耗时）；sandbox / external 都 `require_fs + require_net + allow_degraded=false`，装不上拒绝；Windows 的容器身份按 `会话 + agent + 受保护根集合` 派生（同一 reach 的调用复用 SID 与 ACL；不同 scope 根集合不同 → 不同 SID），授权按会话持有、会话改配 / 删除时回收；工具链与运行包是基础工具链基线，不参与按 reach 授权。
   - **VM guest 的 per-call 断网**：guest helper 读策略里的 `net`，false 时在子进程前 `unshare(CLONE_NEWNET)`；失败以 111 fail-closed，不静默降级。helper 同时读 `timeout_secs` 并按它杀树；guest 输出按 `GuestRun.output_limit` 只留开头或开头 + 结尾。
-  - 收尾：stdout / stderr 分别读；模块工具超时 30 秒（`ProcTools::timeout`），shell 用本次 `timeout_secs`；到时连根杀树；输出原样交回——机制层不做模型可见的截断，16k 预算唯一在 `src/capabilities/tools/domain/budget.rs`。超时与机制失败的文案经 `ProcessTexts` 注入；围栏裁决的文案归工具层，机制不硬编码。
+  - 收尾：stdout / stderr 分别读；模块工具超时 30 秒（`ProcTools::timeout`），shell 用本次 `timeout_secs`；到时连根杀树；输出原样交回——机制层不做模型可见的截断，16k 预算唯一在 `src/capabilities/tools/domain/budget.rs`。超时与机制失败记成回执说明的码；围栏裁决的文案归工具层，机制不硬编码。
   - 围栏装不上（本机不支持 / 容器起不来）：命中 `require_fs` / `require_net` 且未同意降级时，守门进程以 `FENCE_FAILED` **拒绝执行**；已同意降级才如实降级继续。Linux 的文件系统与网络两项**独立**判定，一项装不上不影响另一项。能力等级已在启动报告里说明。
   - Windows 外层未授权（`sandbox.policy.windows.write_acl=false`）：容器不装；启动门要求强制时只能本次降级 / 重设 / 退出（`src/main.rs`），否则按无围栏执行；全局网络开关不生效于容器，启动报告的「本次实际」已标出。
   - Windows 未授权时段先自检（`confine::verify`）：`EnvUnavailable` = 本机不支持，降级照跑；`Broken` = 自检说机制有效却装不上（我们写错了），**拒绝执行**，不按无围栏跑。
   - 固定退出码 `111`（`FENCE_FAILED`）用于：`FenceJob` JSON 非法、守门进程里工具命令起不来、工具被信号结束拿不到退出码，或全局策略要求强制而机制装不上（拒绝执行）。
-  - 围栏生效且工具非零退出：守门进程往 stderr 补一条边界说明（可达范围 + 实际网络状态：开 / 关 / 未生效 + 范围外被围栏拒绝）；成功不打扰。
+  - 围栏生效且工具非零退出：回执只如实交退出码（`shell.exit` / `shell.signal` 说明），不补边界说明——拒绝发生在子进程内部，守门进程没有可靠信号（见 `tests/gaps.yaml` 的 `tools.fence-boundary-note-trigger`）。
 - 平台差异：
 
 | 平台 | 文件系统 | 出站网络 | 机制 |

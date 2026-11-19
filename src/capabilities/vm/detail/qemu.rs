@@ -5,9 +5,7 @@
 
 use crate::capabilities::vm::domain::guest::{GuestArch, GuestImage, GuestOs, GuestRun, GuestSpec};
 use crate::capabilities::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
-use crate::kernel::detail::process::CodeProcessTexts;
 use crate::kernel::detail::procs::{self, Entry, ProcessBook};
-use crate::kernel::ports::ProcessTexts;
 use std::collections::VecDeque;
 use std::io::BufReader;
 use std::net::TcpListener;
@@ -51,8 +49,6 @@ pub struct QemuEngine {
     book: Option<std::sync::Arc<ProcessBook>>,
     /// 运行日志（组合根注入；None = 只转控制台）：QEMU 自己的话要能进 logs/ 与对账现场。
     log: Option<std::sync::Arc<dyn crate::kernel::ports::Log + Send + Sync>>,
-    /// shell 回执的收尾文案（与本机守门进程同一份 ProcessTexts）：guest 通道据此产出同形状态行。
-    texts: std::sync::Arc<dyn ProcessTexts>,
 }
 
 impl QemuEngine {
@@ -62,7 +58,6 @@ impl QemuEngine {
             overlay_dir: None,
             book: None,
             log: None,
-            texts: std::sync::Arc::new(CodeProcessTexts),
         }
     }
 
@@ -72,14 +67,7 @@ impl QemuEngine {
             overlay_dir: Some(dir),
             book: None,
             log: None,
-            texts: std::sync::Arc::new(CodeProcessTexts),
         }
-    }
-
-    /// 目的：接上 shell 回执文案（组合根注入与本机守门进程同一份；不接就用生产实现）。
-    pub fn with_texts(mut self, texts: std::sync::Arc<dyn ProcessTexts>) -> QemuEngine {
-        self.texts = texts;
-        self
     }
 
     /// 目的：接上长驻子进程的账（组合根注入）：每次 boot 登记一条，销毁时注销。
@@ -441,7 +429,6 @@ impl VmEngine for QemuEngine {
             overlay,
             book: self.book.clone(),
             pid,
-            texts: std::sync::Arc::clone(&self.texts),
         };
         // agent 要等内核起来才通；投种子时（首启装 agent）不等，交给编排轮询，其余情况先等到就绪再挂载/回命令。
         if spec.seed.is_none() {
@@ -650,7 +637,6 @@ mod tests {
             overlay: None,
             book: None,
             pid: 0,
-            texts: std::sync::Arc::new(CodeProcessTexts),
         };
         assert!(handle.ping(), "被 RST 的那条连接要能靠重连救回来");
         server.join().expect("服务器线程");
@@ -856,7 +842,7 @@ mod tests {
         );
     }
 
-    /// 目的：guest 通道装出来的 shell 回执与本机（kernel 装配）逐字节同形。
+    /// 目的：guest 通道装出来的 shell 回执与本机（kernel 装配）同形：正文与说明分别相等。
     #[test]
     fn guest_shell_receipt_matches_the_host_shape() {
         let run = GuestRun {
@@ -867,22 +853,22 @@ mod tests {
             timeout_secs: 3,
             output_limit: OutputLimit::Shell,
         };
-        let texts = CodeProcessTexts;
-        let host = shell_receipt(&texts, "hello\n", "", ShellEnd::Exit(Some(0)));
-        let guest = shell_outcome(&texts, &run, "hello\n", "", 0, false);
-        assert_eq!(guest.output, host, "正常回执要同形");
+        let host = shell_receipt("hello\n", "", ShellEnd::Exit(Some(0)));
+        let guest = shell_outcome(&run, "hello\n", "", 0, false);
+        assert_eq!(guest.output, host.payload, "正常回执的正文要同形");
+        assert_eq!(guest.notes, host.notes, "正常回执的说明要同形");
         assert!(guest.ok);
 
-        let host_timeout = shell_receipt(&texts, "", "", ShellEnd::TimedOut { secs: 3 });
-        let guest_timeout = shell_outcome(
-            &texts,
-            &run,
-            "",
-            "solomni-guest-fence: timeout\n",
-            124,
-            false,
+        let host_timeout = shell_receipt("", "", ShellEnd::TimedOut { secs: 3 });
+        let guest_timeout = shell_outcome(&run, "", "solomni-guest-fence: timeout\n", 124, false);
+        assert_eq!(
+            guest_timeout.output, host_timeout.payload,
+            "超时回执的正文要同形"
         );
-        assert_eq!(guest_timeout.output, host_timeout, "超时回执要同形");
+        assert_eq!(
+            guest_timeout.notes, host_timeout.notes,
+            "超时回执的说明要同形"
+        );
         assert!(!guest_timeout.ok);
     }
 }

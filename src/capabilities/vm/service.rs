@@ -413,8 +413,5 @@ fn stop_lease(entry: &Arc<Mutex<Lease>>) {
 }
 
 fn fail(why: &str) -> ToolOutcome {
-    ToolOutcome {
-        ok: false,
-        output: why.to_string(),
-    }
+    ToolOutcome::new(false, why.to_string())
 }

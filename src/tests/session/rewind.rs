@@ -548,7 +548,11 @@ pub(crate) fn rebuild_restores_the_last_shell_snapshot_from_the_transcript() {
                 "tool": {
                     "speaker": "a", "module": "", "name": "shell", "ok": true,
                     "args": "{\"command\":\"npm test\",\"scope\":\"sandbox\"}",
-                    "output": "ok\n[shell] 退出码 0\n[shell] cwd /w/a · 耗时 7 秒"
+                    "output": "ok",
+                    "shell": {
+                        "cwd": "/w/a", "elapsed_ms": 7_000,
+                        "exit_code": 0, "status": "exit"
+                    }
                 }
             }]
         })],
@@ -571,9 +575,9 @@ pub(crate) fn rebuild_restores_the_last_shell_snapshot_from_the_transcript() {
     assert!(live.historical, "派生快照要标历史");
 }
 
-/// 目的：新转录里 shell 带着结构化事实（回执被截断、没有尾行）时，重建读事实而不是解析文本。
+/// 目的：重建只读工具行里的结构化事实——回执正文被截断、没有尾行也不影响状态栏。
 #[test]
-pub(crate) fn rebuild_prefers_the_structured_shell_facts_over_the_receipt() {
+pub(crate) fn rebuild_reads_the_structured_shell_facts() {
     let hist = Arc::new(InMemoryHistory::new());
     let io = Arc::new(InMemorySysIo::new());
     let mut core = core_with_all(
@@ -619,7 +623,7 @@ pub(crate) fn rebuild_prefers_the_structured_shell_facts_over_the_receipt() {
         .shell_view(&sid)
         .expect("重建后状态栏要有 shell 快照");
     assert_eq!(live.command, "npm test");
-    assert_eq!(live.cwd, "/w/b", "读事实，不回落到解析");
+    assert_eq!(live.cwd, "/w/b");
     assert_eq!(live.elapsed_secs, Some(331));
     assert_eq!(live.fence_prep_secs, Some(327));
     assert_eq!(live.exit_code, Some(0));

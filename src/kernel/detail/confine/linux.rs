@@ -437,8 +437,6 @@ pub fn run_fenced(
     // 文件系统与网络**独立**收口：一项装不上不该把另一项也丢掉。
     let fs = install_filesystem(spec, command);
     let net = if spec.net { Ok(()) } else { install_net() };
-    let fs_enforced = fs.is_ok();
-    let net_enforced = spec.net || net.is_ok();
     let fs_error = fs.as_ref().err();
     let net_error = net.as_ref().err();
     let required =
@@ -479,11 +477,7 @@ pub fn run_fenced(
         });
     }
     match cmd.status() {
-        Ok(s) => {
-            let code = s.code().unwrap_or(FENCE_FAILED);
-            super::texts::note_fence_boundary(spec, fs_enforced, net_enforced, code);
-            code
-        }
+        Ok(s) => s.code().unwrap_or(FENCE_FAILED),
         Err(e) => {
             eprintln!("[围栏] 工具进程启动失败：{}", e);
             FENCE_FAILED

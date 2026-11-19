@@ -10,7 +10,6 @@ use crate::capabilities::vm::ports::{GuestChannel, GuestVm};
 use crate::kernel::api::ToolOutcome;
 use crate::kernel::detail::procs::ProcessBook;
 use crate::kernel::domain::receipt::{ShellEnd, shell_receipt};
-use crate::kernel::ports::ProcessTexts;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -55,8 +54,6 @@ pub(super) struct QemuHandle {
     pub(super) book: Option<std::sync::Arc<ProcessBook>>,
     /// 目的：这个句柄对应的 QEMU 进程（注销登记用）。
     pub(super) pid: u32,
-    /// 目的：shell 回执的收尾文案（来自引擎，与本机守门进程同一份）。
-    pub(super) texts: std::sync::Arc<dyn ProcessTexts>,
 }
 
 impl QemuHandle {
@@ -335,12 +332,12 @@ impl QemuHandle {
                 let out = String::from_utf8_lossy(&out).into_owned();
                 let err = String::from_utf8_lossy(&err).into_owned();
                 if run.output_limit == OutputLimit::Shell {
-                    return shell_outcome(self.texts.as_ref(), run, &out, &err, code, cancel_sent);
+                    return shell_outcome(run, &out, &err, code, cancel_sent);
                 }
-                return ToolOutcome {
-                    ok: code == 0,
-                    output: cap_output(format!("{}{}", out, err), run.output_limit),
-                };
+                return ToolOutcome::new(
+                    code == 0,
+                    cap_output(format!("{}{}", out, err), run.output_limit),
+                );
             }
             if Instant::now() >= deadline {
                 // 外层兜底：helper 没在预算内收场——按取消通道杀它（helper 会杀整棵进程组），再按 shell 契约收口。
@@ -358,17 +355,14 @@ impl QemuHandle {
                     None,
                 );
                 if run.output_limit == OutputLimit::Shell {
-                    return ToolOutcome {
-                        ok: false,
-                        output: shell_receipt(
-                            self.texts.as_ref(),
-                            "",
-                            "",
-                            ShellEnd::TimedOut {
-                                secs: run.timeout_secs,
-                            },
-                        ),
-                    };
+                    let receipt = shell_receipt(
+                        "",
+                        "",
+                        ShellEnd::TimedOut {
+                            secs: run.timeout_secs,
+                        },
+                    );
+                    return ToolOutcome::new(false, receipt.payload).with_notes(receipt.notes);
                 }
                 return fail("等 guest 里的命令超时");
             }
@@ -393,9 +387,8 @@ pub(super) enum GuestShellEnd {
 }
 
 /// 目的：把一次 guest 执行的结果翻成 shell 回执（正文分区 + 状态行）；非 shell 运行的形状不受影响。
-/// 约束：只有真正跑过命令才产出 `[shell]` 收尾行；helper 的围栏/启动失败保留诊断原文。
+/// 约束：只有真正跑过命令才产出 `shell.*` 结束说明；helper 的围栏/启动失败保留诊断原文。
 pub(super) fn shell_outcome(
-    texts: &dyn ProcessTexts,
     run: &GuestRun,
     out: &str,
     err: &str,
@@ -404,10 +397,10 @@ pub(super) fn shell_outcome(
 ) -> ToolOutcome {
     let end = guest_shell_end(err, code, cancel_sent);
     if end == GuestShellEnd::NotRun {
-        return ToolOutcome {
-            ok: false,
-            output: cap_output(format!("{}{}", out, err), run.output_limit),
-        };
+        return ToolOutcome::new(
+            false,
+            cap_output(format!("{}{}", out, err), run.output_limit),
+        );
     }
     let cleaned = strip_helper_markers(err);
     let (end, ok) = match end {
@@ -422,10 +415,8 @@ pub(super) fn shell_outcome(
         GuestShellEnd::Signal => (ShellEnd::Exit(None), false),
         GuestShellEnd::NotRun => unreachable!("上面已提前返回"),
     };
-    ToolOutcome {
-        ok,
-        output: shell_receipt(texts, out, &cleaned, end),
-    }
+    let receipt = shell_receipt(out, &cleaned, end);
+    ToolOutcome::new(ok, receipt.payload).with_notes(receipt.notes)
 }
 
 /// 目的：按 helper 的机器标记与取消旗判定收尾；围栏失败（die 诊断）判为没执行。
@@ -452,7 +443,7 @@ pub(super) fn guest_shell_end(err: &str, code: i64, cancel_sent: bool) -> GuestS
     GuestShellEnd::Exit(code)
 }
 
-/// 目的：把 helper 的机器标记行剥掉（人读文案由 ProcessTexts 产出；标记不进最终回执）。
+/// 目的：把 helper 的机器标记行剥掉（收尾行由回执 notes 产出；标记不进最终回执）。
 pub(super) fn strip_helper_markers(err: &str) -> String {
     let kept: Vec<&str> = err
         .lines()
@@ -617,10 +608,7 @@ fn cap_output(text: String, limit: OutputLimit) -> String {
 }
 
 fn fail(why: &str) -> ToolOutcome {
-    ToolOutcome {
-        ok: false,
-        output: why.to_string(),
-    }
+    ToolOutcome::new(false, why)
 }
 
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

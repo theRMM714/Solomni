@@ -3,6 +3,7 @@
 //! 不管：带领域逻辑的类型（归各自能力）；各业务自造一份 DTO 副本（R6 禁止）。
 //! 联动：由 `src/kernel/api.rs` 重导出；判据见 ARCHITECTURE.md 的「硬要求清单」R6。
 
+use crate::kernel::contracts::note::{Note, Severity};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -74,12 +75,55 @@ pub fn valid_capability(name: &str) -> bool {
 /// 目的：前端唯一的会话标识 = 工作名（用户的命名，也是落盘目录名）。
 pub type SessionId = String;
 
-/// 目的：一次工具调用的事实结果——`ok` = 成功；`output` 已截断（截断规则由各执行者定）。
-/// 约束：内置工具、模块工具与核心自有工具共用这同一个形状，谁都不该复制第二份（R6）。
+/// 目的：一次工具调用的事实结果——`ok` = 成功；`severity` 分轻重；`output` 是原始输出；
+///   `notes` 是结构化说明（稳定码 + 参数，不带文案）。
+/// 约束：内置工具、模块工具与核心自有工具共用这同一个形状，谁都不该复制第二份（R6）；
+///   `output` 只放被执行者产出的原始文本，**不放**任何需要按语言渲染的句子（那些进 `notes`）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolOutcome {
     pub ok: bool,
+    pub severity: Severity,
     pub output: String,
+    pub notes: Vec<Note>,
+}
+
+impl ToolOutcome {
+    /// 目的：按成败造一条没有说明的回执——成功是 `Info`，失败是 `Error`。
+    pub fn new(ok: bool, output: impl Into<String>) -> ToolOutcome {
+        ToolOutcome {
+            ok,
+            severity: if ok { Severity::Info } else { Severity::Error },
+            output: output.into(),
+            notes: Vec::new(),
+        }
+    }
+
+    /// 目的：就地追加一条说明（执行层边跑边补事实时用）；分级取最重的一条。
+    pub fn push_note(&mut self, note: Note) {
+        self.severity = self.severity.max(note.severity);
+        self.notes.push(note);
+    }
+
+    /// 目的：整批追加说明（例如回执已经把分区与收尾说明拆好）——分级同样取最重的一条。
+    pub fn with_notes(mut self, notes: Vec<Note>) -> ToolOutcome {
+        for note in &notes {
+            self.severity = self.severity.max(note.severity);
+        }
+        self.notes.extend(notes);
+        self
+    }
+}
+
+impl From<crate::kernel::contracts::run::RunOutcome> for ToolOutcome {
+    /// 目的：机制层的中性结果原样抬成工具回执——四个字段一对一，业务层不再逐个搬。
+    fn from(run: crate::kernel::contracts::run::RunOutcome) -> ToolOutcome {
+        ToolOutcome {
+            ok: run.ok,
+            severity: run.severity,
+            output: run.output,
+            notes: run.notes,
+        }
+    }
 }
 
 /// 目的：一条**请用户裁决**的问题：谁在问（信封）+ 消息三段 + 选项集——通道只管送，不解释内容。

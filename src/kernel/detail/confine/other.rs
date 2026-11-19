@@ -40,12 +40,7 @@ pub fn run_fenced(
         return FENCE_FAILED;
     }
     match shell_command(command).current_dir(&spec.cwd).status() {
-        Ok(s) => {
-            let code = s.code().unwrap_or(FENCE_FAILED);
-            // 本平台没有文件系统围栏可装：边界说明恒不触发，调用只为与三平台同一处收口。
-            super::texts::note_fence_boundary(spec, false, false, code);
-            code
-        }
+        Ok(s) => s.code().unwrap_or(FENCE_FAILED),
         Err(e) => {
             eprintln!("[围栏] 工具进程启动失败：{}", e);
             FENCE_FAILED

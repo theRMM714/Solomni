@@ -387,7 +387,7 @@ impl WorkHandler {
 }
 
 fn outcome(ok: bool, output: String) -> ToolOutcome {
-    ToolOutcome { ok, output }
+    ToolOutcome::new(ok, output)
 }
 
 /// 目的：从参数里取一个可选提交号（`work_diff` 的 from / to、`work_reset` 的 to）。
