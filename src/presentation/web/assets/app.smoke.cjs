@@ -332,6 +332,41 @@ setTimeout(async () => {
       if (!readonlyRule) loadErrors.push("只读会话检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("只读会话检查失败：" + e.message); }
   }
+  // **只读条的恢复入口 = f(本视图 run, 在跑)**：正在跑不给按钮；已停止给「继续」；历史快照里过期的 run 不算数。
+  //  翻车现场：停止后点「继续」，history 里那条 run 还停在 stopped，条子先显示「继续」、再变成「启用会话」。
+  let continueBarRules = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () { const read = function (extra) {" +
+          "  const s = Object.assign({ sid: 'ro2', can_update_task: false, running: false, running_known: true," +
+          "    sending: false, activating: false, done: true, readonly: true, lines: [], live: [], fold: {}, scroll: {}," +
+          "    continue_action: null }, extra);" +
+          "  state.sessions.set('ro2', s); state.activeSid = 'ro2'; syncComposer(s);" +
+          "  const bar = document.querySelector('#readonly-bar');" +
+          "  return { text: (bar.children || []).map(function (x) { return String(x.textContent || ''); }).join('|')," +
+          "    buttons: (bar.children || []).filter(function (x) { return x.tagName === 'BUTTON' || x.onclick; }).length };" +
+          " };" +
+          " state.history = [{ name: 'ro2', run: 'stopped' }];" +
+          " const live = read({ run: 'active' });" +
+          " const stopped = read({ run: 'stopped' });" +
+          " const archived = read({ run: 'archived' });" +
+          " const busy = read({ run: 'active', sending: true });" +
+          " return { live: live, stopped: stopped, archived: archived, busy: busy }; })()",
+        sandbox
+      );
+      // 历史快照说 stopped、本视图已经 active：只信本视图 → 只有「启用会话」。
+      const liveOk = r.live.text.indexOf('启用会话') >= 0 && r.live.text.indexOf('继续') < 0 && r.live.buttons === 1;
+      // 已停止：给「继续」，不给「启用会话」。
+      const stoppedOk = r.stopped.text.indexOf('继续') >= 0 && r.stopped.text.indexOf('启用会话') < 0 && r.stopped.buttons === 1;
+      // 已归档：给「恢复归档」。
+      const archivedOk = r.archived.text.indexOf('恢复归档') >= 0 && r.archived.buttons === 1;
+      // 正在跑：一个按钮都不给。
+      const busyOk = r.busy.buttons === 0 && r.busy.text.indexOf('正在跑') >= 0;
+      continueBarRules = liveOk && stoppedOk && archivedOk && busyOk;
+      if (!continueBarRules) loadErrors.push("只读条恢复入口检查：" + JSON.stringify(r));
+    } catch (e) { loadErrors.push("只读条恢复入口检查失败：" + e.message); }
+  }
   // **一行的画法只有一处**：身份在上（每个 kind 都有）、思维链次之、正文按 kind。
   //  ① 只有思维链的行照画（身份 + 思维链），但不留空正文；②完全没内容的行不占位；③工具卡片带身份。
   let lineRule = false;
@@ -1039,7 +1074,7 @@ setTimeout(async () => {
   }
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
-    && rewoundApplies && readonlyRule
+    && rewoundApplies && readonlyRule && continueBarRules
     && taskButtonRule && decisionCardRule && onlyLastStreams && liveMarkdown && lineRule && toolOnlyReasoning && incrementalAppend && pendingReplaced && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches && slashMenu
     && wizardProxy && wizardBlocked && sessionNoteRule && historyRunTag && fenceBanner && nodeCard && tabLadder
     && statusBarRules && thinkingMenuRules && shellCardRules && consoleErrors.length === 0;
@@ -1047,7 +1082,7 @@ setTimeout(async () => {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);
     console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 盘上转录已补:", hydratedHistory, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
-    console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule, "| notice 行:", noticeRow, "| 弹层判据:", modalDismiss, "| 回档图标:", rewindIcon, "| tool-only 思维链:", toolOnlyReasoning, "| 增量追加:", incrementalAppend, "| 乐观替换:", pendingReplaced);
+    console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule, "| 只读条恢复入口:", continueBarRules, "| notice 行:", noticeRow, "| 弹层判据:", modalDismiss, "| 回档图标:", rewindIcon, "| tool-only 思维链:", toolOnlyReasoning, "| 增量追加:", incrementalAppend, "| 乐观替换:", pendingReplaced);
     console.log("流式 Markdown:", liveMarkdown, "| 运行态归一（事件为准 / 快照只对账）:", runningRules, "| @ 菜单每次重拉:", atMenuRefetches, "| / 命令菜单:", slashMenu);
     console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag, "| 围栏横幅:", fenceBanner, "| 节点卡:", nodeCard, "| 标签梯级:", tabLadder, "| 状态栏:", statusBarRules);
     console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));

@@ -5,8 +5,9 @@
 
 import { renderStream } from './stream.js';
 import { renderGate } from './cards.js';
+import { isBusy } from '../../stores/sessions.js';
 
-let doc, app, state;
+let doc, app;
 
 /// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
 const $ = (sel) => doc.querySelector(sel);
@@ -18,7 +19,9 @@ function renderAll() {
 }
 
 /* 只读历史视图：不渲染输入区；按会话状态给唯一的恢复动作——
+ * 正在跑 → 不给按钮（跑完条子自己换回「启用会话」），
  * 已停止 → 「继续」（解冻并接着走），已归档 → 「恢复归档」（翻回 active，不唤醒），其余 → 「启用会话」。
+ * 判据只用**本视图自己的** run 与运行态：历史列表里的 run 是打开那一刻的快照，会一直停在「已停止」。
  * 归档不是终态：这里不给删除，删除仍走侧栏菜单。 */
 function renderReadonly(s) {
   const bar = $('#readonly-bar');
@@ -26,8 +29,7 @@ function renderReadonly(s) {
   bar.innerHTML = '';
   if (!s || !s.readonly) { bar.classList.add('hidden'); return; }
   bar.classList.remove('hidden');
-  const hist = ((state && state.history) || []).find((x) => x.name === s.sid);
-  const run = (hist && hist.run) || s.run || 'active';
+  const run = s.run || 'active';
   const note = doc.createElement('span');
   note.className = 'readonly-note';
   if (s.workspace_missing) {
@@ -44,6 +46,13 @@ function renderReadonly(s) {
     bar.appendChild(b);
     return b;
   };
+  // 正在跑（本页刚点了「继续」，或别的窗口在跑这一轮）：这时没有「恢复」可言，
+  // 给按钮就是假入口——上一版正是在这里露出「启用会话」，用户以为还要再点一次。
+  if (isBusy(s)) {
+    note.textContent = '这一轮正在跑：回答会上屏，跑完就能接着用';
+    bar.appendChild(note);
+    return;
+  }
   if (run === 'archived') {
     note.textContent = '已归档：从会话列表收起，不再被派发或唤醒（记录都还在）';
     bar.appendChild(note);
@@ -65,6 +74,6 @@ export { renderAll, renderReadonly };
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
-  ({ doc, app, state } = deps);
+  ({ doc, app } = deps);
   Object.assign(root, { renderAll, renderReadonly });
 }
