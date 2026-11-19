@@ -7,6 +7,26 @@ use super::*;
 use crate::capabilities::workspace::api::{
     Change, ChangeKind, CommitReport, CommitRequest, PushReport, PushRequest,
 };
+use crate::capabilities::workspace::domain::workstore::MergePlan;
+
+/// 目的：一次推送判定的全部事实——「有没有待推送的东西」只有一个口径。
+/// 约束：`plan` 与 `conflicts` 互斥；`pending` 只在 `plan` 存在时可能非零。
+pub(super) struct PushPlan {
+    /// 目的：这次推送会落进主线的改动数（0 = 内容已与主线一致）。
+    pub(super) pending: usize,
+    /// 目的：这次推送会撞上的冲突（空 = 不冲突）。
+    pub(super) conflicts: Vec<ConflictAt>,
+    /// 目的：合并计划（有冲突时为 None）。
+    pub(super) plan: Option<MergePlan>,
+    /// 目的：工作线上还没进主线的提交条数。
+    pub(super) unpushed: usize,
+    /// 目的：工作线头与它的树。
+    pub(super) work_id: Option<u64>,
+    pub(super) mine: Tree,
+    /// 目的：主线的头与树。
+    pub(super) head: Option<u64>,
+    pub(super) theirs: Tree,
+}
 
 impl WorkspaceService {
     /// 目的：提交的唯一实现（调用方已持 gate、shared、store 锁并已恢复事务）。
@@ -582,6 +602,44 @@ impl WorkspaceService {
         Ok(None)
     }
 
+    /// 目的：算出「现在推送会变成什么」——净改动、冲突、领先提交条数，一次判定给 `work_push` 与 `work_status` 共用。
+    /// 约束：调用方已持 gate、shared 与 store 锁；「有没有待推送的东西」只有这一处口径。
+    pub(super) fn plan_push(&self, store: &Path, agent: &str) -> Result<PushPlan, String> {
+        let (head, theirs) = self.head_tree(store)?;
+        let (work_id, mine) = self.work_tree(store, agent)?;
+        // 基线 = 分叉点（不是 index）：index 在每次推送后会被写成整棵合并树，拿它当 base 会把
+        // 别人刚投喂、我从未提交过的路径当成「我这边删掉了」。
+        let base = self.push_base(store, agent, work_id, &mine, head)?;
+        let main_ancestors = self.head_ancestors(store, head)?;
+        let unpushed = self
+            .head_ancestors(store, work_id)?
+            .into_iter()
+            .filter(|id| !main_ancestors.contains(id))
+            .count();
+        Ok(match plan_merge(&base, &mine, &theirs) {
+            Ok(plan) => PushPlan {
+                pending: plan.changes.len(),
+                conflicts: Vec::new(),
+                plan: Some(plan),
+                unpushed,
+                work_id,
+                mine,
+                head,
+                theirs,
+            },
+            Err(conflicts) => PushPlan {
+                pending: 0,
+                conflicts,
+                plan: None,
+                unpushed,
+                work_id,
+                mine,
+                head,
+                theirs,
+            },
+        })
+    }
+
     /// 目的：把工作线上已提交的改动推送进主线：三方合并 → 一条 squash 提交 → 物化共享区 → 两条线快进。
     /// 约束：冲突整次拒绝（不自动合并）；成功后沙箱里没被本地改过的路径一起快进到合并结果。
     pub(super) fn work_push(
@@ -601,19 +659,24 @@ impl WorkspaceService {
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
-        let (head, theirs) = self.head_tree(&store)?;
-        let (work_id, mine) = self.work_tree(&store, agent)?;
-        // 基线 = 分叉点（不是 index）：index 在每次推送后会被写成整棵合并树，拿它当 base 会把
-        // 别人刚投喂、我从未提交过的路径当成「我这边删掉了」。
-        let base = self.push_base(&store, agent, work_id, &mine, head)?;
-        let plan = match plan_merge(&base, &mine, &theirs) {
-            Ok(p) => p,
-            Err(conflicts) => return Err(render_push_conflicts(&conflicts)),
+        let PushPlan {
+            head,
+            theirs,
+            mine,
+            work_id,
+            plan,
+            conflicts,
+            unpushed,
+            ..
+        } = self.plan_push(&store, agent)?;
+        let Some(plan) = plan else {
+            return Err(render_push_conflicts(&conflicts));
         };
         if plan.changes.is_empty() {
             return Ok(PushReport {
                 commit: None,
                 changes: Vec::new(),
+                unpushed,
             });
         }
         let mut locals: BTreeMap<String, Option<String>> = BTreeMap::new();
@@ -688,6 +751,7 @@ impl WorkspaceService {
         Ok(PushReport {
             commit: Some(id),
             changes: plan.changes,
+            unpushed: 0,
         })
     }
 

@@ -102,7 +102,7 @@ impl ResolveWarningKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             ResolveWarningKind::LocalMissing => {
-                "本地没有这个文件；take=local 只推进基线，不会写入沙箱；要删除主副本这一版，提交时用 deletes 显式列出"
+                "本地没有这个文件；take=local 只推进基线、不写沙箱。主线没改过这个路径时，提交时用 deletes 显式列出就能把它从共享区删掉；主线改过就只能 take=upstream 接受新版，或用 work_reset 撤回那条删除"
             }
             ResolveWarningKind::NoBase => {
                 "从未拉取过（没有基线）；take=local 会把主副本当前版当作已合并，提交会覆盖它"

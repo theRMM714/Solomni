@@ -85,15 +85,11 @@ impl WorkspaceService {
         let mut all_tree: Vec<String> = tree.keys().cloned().collect();
         let truncated = all_tree.len() > MAX_STATUS_TREE;
         all_tree.truncate(MAX_STATUS_TREE);
-        // 未推送条数：工作线上不在主线祖先链里的提交。
-        let main_ancestors = self.head_ancestors(&store, head_id)?;
-        let unpushed = self
-            .head_ancestors(&store, work_id)?
-            .into_iter()
-            .filter(|id| !main_ancestors.contains(id))
-            .count();
+        // 待推送判定与 work_push 共用 plan_push：净改动 / 冲突 / 领先提交数只有一个口径。
+        let push = self.plan_push(&store, agent)?;
+        let unpushed = push.unpushed;
         // 最近提交（新→旧，只沿当前 head 的祖先链：已回滚离开的提交不算"最近"）。
-        let ancestors = main_ancestors;
+        let ancestors = self.head_ancestors(&store, head_id)?;
         let mut ids = self.store.list_commits(&store)?;
         ids.reverse();
         let mut recent = Vec::new();
@@ -110,6 +106,8 @@ impl WorkspaceService {
             head,
             work_head,
             unpushed,
+            pending: push.pending,
+            conflicts: push.conflicts.len(),
             tree: all_tree,
             tree_truncated: truncated,
             entries,

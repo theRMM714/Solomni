@@ -651,16 +651,57 @@ fn render_conflicts(conflicts: &[ConflictAt]) -> String {
     out
 }
 
-/// 推送冲突渲染成模型侧回执：冲突是「我提交之后主线也动过」，解决路径与本地提交冲突不同。
+/// 推送冲突渲染成模型侧回执：冲突是「我提交之后主线也动过」，不同类型的补救路径不同——
+/// 删除型冲突（一边删、另一边改）不能靠"合进沙箱再提交"收敛，必须选边或撤回那条提交。
 fn render_push_conflicts(conflicts: &[ConflictAt]) -> String {
     let mut out = String::from("推送被拒：以下路径有冲突——你提交之后主线也动过（不做自动合并）：");
     for c in conflicts {
         out.push_str(&format!("\n- {}（{}）", c.path, c.kind.reason()));
     }
-    out.push_str(
-        "\n先用 work_versions 看基线 / 主副本 / 沙箱三方，再用 work_pull 取回主线版本，在沙箱里合并（或用 work_resolve 选边），重新 work_commit 之后再 work_push；\n你的工作线提交不会因为这次拒绝丢失。",
-    );
+    let deleted_by_me: Vec<&ConflictAt> = conflicts
+        .iter()
+        .filter(|c| c.kind == Conflict::DeleteVsModify)
+        .collect();
+    let deleted_upstream: Vec<&ConflictAt> = conflicts
+        .iter()
+        .filter(|c| c.kind == Conflict::ModifyVsDelete)
+        .collect();
+    let both: Vec<&ConflictAt> = conflicts
+        .iter()
+        .filter(|c| !matches!(c.kind, Conflict::DeleteVsModify | Conflict::ModifyVsDelete))
+        .collect();
+    if !deleted_by_me.is_empty() {
+        let names = push_conflict_paths(&deleted_by_me);
+        out.push_str(&format!(
+            "\n\n本地删了、主线改了（{}）：删除不会覆盖主线已经改过的内容，work_pull 遇到这类冲突也不写文件，重新提交只会再被拒一次。二选一：\n1. 放弃删除、接受主线版本：work_resolve take=upstream paths=[{}] → work_commit paths=[{}] → work_push（内容回到主线版本，净改动为零）；\n2. 撤回那条删除提交：work_log 找到它的父提交，work_reset to=<父提交>，再 work_pull 取回主线版本，然后 work_push。",
+            names, names, names
+        ));
+    }
+    if !deleted_upstream.is_empty() {
+        let names = push_conflict_paths(&deleted_upstream);
+        out.push_str(&format!(
+            "\n\n主线删了、你改了（{}）：修改不会让主线已经删掉的文件复活。二选一：\n1. 接受删除：work_resolve take=upstream paths=[{}]（沙箱里的本地版本会先备份进 lost/）→ work_commit deletes=[{}] → work_push（净改动为零）；\n2. 撤回那条修改提交：work_log 找到它的父提交，work_reset to=<父提交>，再 work_push。",
+            names, names, names
+        ));
+    }
+    if !both.is_empty() {
+        out.push_str(&format!(
+            "\n\n两边都改了、内容不同（{}）：先用 work_versions 看基线 / 主副本 / 沙箱三方，把主线版本合进沙箱（共享区同一相对路径就是主副本全文），再用 work_resolve take=local head=<主线提交> 登记已解决，最后 work_commit 与 work_push。",
+            push_conflict_paths(&both)
+        ));
+    }
+    out.push_str("\n\n你的工作线提交不会因为这次拒绝丢失。");
     out
+}
+
+/// 目的：把一组冲突路径写成 `paths=[…]` 里能直接用的形式（最多 20 个，其余标总数）。
+fn push_conflict_paths(conflicts: &[&ConflictAt]) -> String {
+    let names: Vec<&str> = conflicts.iter().take(20).map(|c| c.path.as_str()).collect();
+    let mut joined = names.join("、");
+    if conflicts.len() > 20 {
+        joined.push_str(&format!("…（共 {} 条）", conflicts.len()));
+    }
+    joined
 }
 
 /// 空提交的原因渲染成模型侧回执：逐条说清是“一致”“上游已更新”还是“上游已删除”，
