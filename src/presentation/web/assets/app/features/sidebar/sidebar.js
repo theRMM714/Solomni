@@ -21,8 +21,9 @@ const setActive = (...a) => app.setActive(...a);
 /// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
 const $ = (sel) => doc.querySelector(sel);
 
-/// 行尾铅笔菜单：打开 / 编辑配置 / 停止会话（或对已停止的「继续」）/ 归档 / 删除
+/// 行尾铅笔菜单：打开 / 编辑配置 / 停止会话 / 归档 / 删除
 /// （子会话多一项「打开父会话」，不给删除；已归档的只给「恢复归档」与删除）。
+/// 已停止的不再给「停止会话」：恢复入口在只读条的「启用会话」，避免同一个动作出现两处。
 function historyMenu(h) {
   const busy = generating(h.name);
   const stopped = h.run === 'stopped';
@@ -44,8 +45,7 @@ function historyMenu(h) {
     items.push({ label: '恢复归档', icon: 'restore', onClick: () => restoreHistory(h.name) });
   } else {
     // 停止会话 = 冻结整棵子树（派发与唤醒都拒），与输入键的「中断」不是一回事。
-    if (stopped) items.push({ label: '继续', icon: 'play', onClick: () => continueHistory(h.name) });
-    else items.push({ label: '停止会话', icon: 'pause', onClick: () => stopHistory(h.name) });
+    if (!stopped) items.push({ label: '停止会话', icon: 'pause', onClick: () => stopHistory(h.name) });
     items.push({ label: '归档', icon: 'archive', onClick: () => archiveHistory(h.name) });
   }
   if (!h.parent) {
@@ -275,11 +275,11 @@ async function openHistory(name) {
   } catch (err) { ui.notice('操作失败', err.message, 'err'); }
 }
 
-/// 停止会话：先二次确认——停掉后这条会话（含子会话）不再接受派发与唤醒，要「继续」才回到工作。
+/// 停止会话：先二次确认——停掉后这条会话（含子会话）不再接受派发与唤醒，要「启用会话」才回到工作。
 async function stopHistory(name) {
   const ok = await ui.confirmBox(
     '停止会话',
-    '停止「' + name + '」（含它的子会话）？停止后不再接受派发与唤醒；之后点「继续」可以接着走。',
+    '停止「' + name + '」（含它的子会话）？停止后不再接受派发与唤醒，输入区会收起；之后点「启用会话」可以接着用。',
     '停止会话'
   );
   if (!ok) return;
@@ -290,9 +290,6 @@ async function stopHistory(name) {
     ui.toast('ok', '已停止会话：' + name);
   } catch (err) { ui.notice('操作失败', err.message, 'err'); }
 }
-/// 继续：解冻运行态并接着走（已停止的会话回到工作；不新增用户发言）。
-async function continueHistory(name) { await app.continueSession(name); }
-
 /// 归档：整棵子树从主列表收起，记录都在；不删数据，随时可「恢复归档」。
 async function archiveHistory(name) { await app.archiveSession(name); }
 

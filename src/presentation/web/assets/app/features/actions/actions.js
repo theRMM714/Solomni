@@ -123,7 +123,9 @@ function withdrawAgree(agent) {
 async function activateFlow() {
   const s = app.activeSession();
   if (s && s.workspace_missing) { ui.notice('工作区已不存在', '这条会话绑定的工作区已不可达：恢复目录或删除会话后再启用。', 'err'); return; }
-  if (!s || !s.readonly || s.activating) return;
+  // 只读历史视图，或活动视图被「停止会话」冻结之后：这是它们唯一的解冻入口。
+  if (!s || s.activating) return;
+  if (!s.readonly && s.run !== 'stopped') return;
   s.activating = true;
   app.renderAll();
   try {
@@ -184,40 +186,8 @@ async function continueContext() {
   }
 }
 
-/* 会话级恢复动作：与「发送」走同一个控制入口，只是不新增用户发言、也不假装在对话。
- * 三个动作各自对应一种运行态：已停止 → 继续（解冻并接着走）；已归档 → 恢复归档；归档 → 从主列表收起。 */
-
-/// 继续一条已停止的会话：解冻运行态并接着走（不新增用户发言）。
-/// 「继续」在服务端是**整轮生成同步返回**的（回包要等回答跑完），所以不能等它再启用视图：
-/// 发出去就立刻对账并启用，用户才看得到回答上屏、也才点得到「中断」；
-/// 命令自身的失败（解冻被拒 / 模型没起来）仍照报，只是报在这一轮之后。
-async function continueSession(sid) {
-  const inflight = api('POST', actionUrl('control_session'), {
-    session_id: sid,
-    action: 'continue',
-    reason: '会话已停止：继续会解冻并接着走',
-  });
-  // 先挂一个兜底：失败要等这一轮结束才汇报，不能让中间这段成为"未处理的拒绝"。
-  inflight.catch(() => {});
-  const s = state.sessions.get(sid);
-  if (s) { s.sending = true; app.renderAll(); }
-  try {
-    app.markNeedState();
-    await app.refreshState();
-    const cur = app.activeSession();
-    if (cur && cur.sid === sid && cur.readonly) await activateFlow();
-    else app.renderAll();
-  } catch (err) { ui.notice('操作失败', err.message, 'err'); }
-  try {
-    await inflight;
-    ui.toast('ok', '已继续会话：' + sid);
-  } catch (err) { ui.notice('继续失败', err.message, 'err'); }
-  finally {
-    if (s) s.sending = false;
-    app.markNeedState();
-    app.renderAll();
-  }
-}
+/* 会话级状态动作：与「发送」走同一个控制入口，但不新增用户发言、也不假装在对话。
+ * 归档 → 从主列表收起；已归档 → 恢复归档。已停止的恢复入口是只读条上的「启用会话」（见 activateFlow）。 */
 
 /// 归档：整棵子树从主列表收起，记录都还在；不删数据，随时可以恢复归档。
 async function archiveSession(sid) {
@@ -248,5 +218,5 @@ async function restoreArchive(sid) {
 
 export function mount(root, deps) {
   ({ api, ui, app, state } = deps);
-  Object.assign(root, { ACT_IDS, actionUrl, act, rewindTo, restoreMark, applyRewind, withdrawAgree, activateFlow, applyActivation, continueContext, continueSession, archiveSession, restoreArchive });
+  Object.assign(root, { ACT_IDS, actionUrl, act, rewindTo, restoreMark, applyRewind, withdrawAgree, activateFlow, applyActivation, continueContext, archiveSession, restoreArchive });
 }

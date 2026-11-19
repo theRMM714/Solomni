@@ -18,18 +18,19 @@ function renderAll() {
   if (s && s.workDirty) { s.workDirty = false; app.loadWork(s.sid, true); }
 }
 
-/* 只读历史视图：不渲染输入区；按会话状态给唯一的恢复动作——
+/* 历史态视图（只读历史 / 已停止）：不渲染输入区；按会话状态给唯一的恢复动作——
  * 正在跑 → 不给按钮（跑完条子自己换回「启用会话」），
- * 已停止 → 「继续」（解冻并接着走），已归档 → 「恢复归档」（翻回 active，不唤醒），其余 → 「启用会话」。
+ * 已归档 → 「恢复归档」（翻回 active，不唤醒），已停止与只读历史 → 「启用会话」。
+ * 停止即历史态：活动视图被停止后也走这条，和打开一条历史会话看到的是同一种东西。
  * 判据只用**本视图自己的** run 与运行态：历史列表里的 run 是打开那一刻的快照，会一直停在「已停止」。
  * 归档不是终态：这里不给删除，删除仍走侧栏菜单。 */
 function renderReadonly(s) {
   const bar = $('#readonly-bar');
   if (!bar) return;
   bar.innerHTML = '';
-  if (!s || !s.readonly) { bar.classList.add('hidden'); return; }
+  const run = s ? (s.run || 'active') : 'active';
+  if (!s || !(s.readonly || run === 'stopped')) { bar.classList.add('hidden'); return; }
   bar.classList.remove('hidden');
-  const run = s.run || 'active';
   const note = doc.createElement('span');
   note.className = 'readonly-note';
   if (s.workspace_missing) {
@@ -59,13 +60,9 @@ function renderReadonly(s) {
     button('恢复归档', true, () => app.restoreArchive(s.sid));
     return;
   }
-  if (run === 'stopped') {
-    note.textContent = '已停止：不再被派发或唤醒；点「继续」解冻并接着走';
-    bar.appendChild(note);
-    button('继续', true, () => app.continueSession(s.sid));
-    return;
-  }
-  note.textContent = '历史回放（只读）：启用后才能发送消息';
+  note.textContent = run === 'stopped'
+    ? '已停止：不再被派发或唤醒，输入区已收起；点「启用会话」解冻后接着用'
+    : '历史回放（只读）：启用后才能发送消息';
   bar.appendChild(note);
   button(s.activating ? '正在启用…' : '启用会话', true, app.activateFlow, s.activating);
 }

@@ -247,7 +247,7 @@ pub struct SessionEdit {
 /// 目的：上下文「继续」只在后端判断确实有断点时出现（单 agent 上一轮被打断 / 协作泵没走完）。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ContinueView {
-    /// 目的：断点种类：`turn`（继续上一轮）/ `collab`（恢复协作）。
+    /// 目的：断点种类：`turn`（上一轮被打断，继续重开一轮）/ `collab`（恢复协作）。
     pub kind: String,
     /// 目的：按钮文字（后端给，前端不按 kind 自己编）。
     pub label: String,
