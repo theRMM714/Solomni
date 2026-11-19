@@ -256,8 +256,8 @@ prompts/
 
 - 主副本 `work/` 对 agent 只读，agent 只写自己的沙箱（工作副本）。
 - `work_pull` / `work_commit` / `work_push` / `work_sync` / `work_status` / `work_versions` / `work_diff` / `work_resolve` / `work_reset` / `work_lost` 十个**核心自有工具**做同步、查看、差异比较、本地回退、三方比较、显式解决冲突、外部改动采纳与备份恢复。
-- 冲突按文件级三方比较判定，**整体拒绝并逐条点名**，不做自动合并；文本可人工合并后用 `take=local`（带 `head`），图片 / 视频 / 二进制只能显式选边（细则见 [workspace](../workspace/README.md) 与 [PRODUCT.md](../../PRODUCT.md)）。
-- `take=local` 在本地与基线一致时拒绝、主副本提交变化时拒绝；`take=upstream` 覆盖/删除前备份到 `lost/<agent>/@<来源>/<原路径>`（`work_resolve` / `work_reset` / 回档 / 删除 / 留档各有来源），`work_lost` 按当前 hash 恢复：清单报原路径与备份位置，`path` 两种写法都收，同一路径多份备份必须点名一份，恢复一律写回原路径。
+- 冲突按文件级三方比较判定，**整体拒绝并逐条点名**，不做自动合并；文本可人工合并后用 `take=local`（带 `head`），图片 / 视频 / 二进制只能显式选边；删除型冲突（一边删、另一边改）只能选边或 `work_reset` 撤回那条提交，`work_pull` 不写这类文件（细则见 [workspace](../workspace/README.md) 与 [PRODUCT.md](../../PRODUCT.md)）。
+- `take=local` 在本地与基线一致时拒绝、主副本提交变化时拒绝；它只推进基线、不写沙箱——本地缺失时主线没改过该路径可 `work_commit` 的 `deletes` 发布删除，主线改过就只能 `take=upstream` 或 `work_reset`；`take=upstream` 覆盖/删除前备份到 `lost/<agent>/@<来源>/<原路径>`（`work_resolve` / `work_reset` / 回档 / 删除 / 留档各有来源），`work_lost` 按当前 hash 恢复：清单报原路径与备份位置，`path` 两种写法都收，同一路径多份备份必须点名一份，恢复一律写回原路径。
 - 文本、图片、视频与其它二进制都按字节处理；`work_versions` 给 hash、大小与扩展名媒体类型提示，文本预览最多 16 KiB；单文件超过 64 MiB 时提交 / 上传明确拒绝。
 - 用户投喂是同一条提交路径里的**权威提交**（作者 = user）。
 - 用户可在 Web 会话状态栏或 CLI `work` 命令看提交历史、提交详情与文本预览，并把共享区非破坏性回滚到任一提交点；agent 侧仍只拿 `work_*` 工具，不给回滚入口。
