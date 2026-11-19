@@ -321,7 +321,8 @@ const STEPS = [
     run(ctx) {
       ctx.step.announce("L1 单元（--bin solomni）");
       const unitArgs = ["test", "--color", "never", "--bin", "solomni", "--", "--nocapture"].concat(ctx.opts.serial ? ["--test-threads=1"] : []);
-      const unit = ctx.proc.sh("cargo", unitArgs);
+      // 已构建的产品可执行文件路径交给测试：探针不猜 target 布局（cargo check/clippy 可能移走 uplift 的副本）。
+      const unit = ctx.proc.sh("cargo", unitArgs, undefined, { SOLOMNI_TEST_BIN: ctx.bin });
       const uc = parsers.cargoCounts(unit.out);
       const skips = parsers.skipsIn(unit.out);
       const securitySkips = ctx.opts.fenceLive ? securitySkipsIn(skips) : [];
@@ -347,7 +348,7 @@ const STEPS = [
     run(ctx) {
       ctx.step.announce("目标 " + t);
       const tArgs = ["test", "--color", "never", "--test", t, "--", "--nocapture"].concat(ctx.opts.serial ? ["--test-threads=1"] : []);
-      const r = ctx.proc.sh("cargo", tArgs);
+      const r = ctx.proc.sh("cargo", tArgs, undefined, { SOLOMNI_TEST_BIN: ctx.bin });
       const c = parsers.cargoCounts(r.out);
       const skips = parsers.skipsIn(r.out);
       const securitySkips = ctx.opts.fenceLive ? securitySkipsIn(skips) : [];

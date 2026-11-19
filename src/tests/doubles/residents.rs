@@ -209,7 +209,13 @@ impl crate::capabilities::catalog::secrets::ports::SecretStore for InMemorySecre
 }
 
 /// 目的：已构建的产品可执行文件（守门进程就是它自己）；没有就 None（跳过真实进程用例）。
+/// 约束：门禁用 SOLOMNI_TEST_BIN 直接给路径（cargo check/clippy 可能移走 uplift 的副本）；单跑 cargo test 时按 target 布局找。
 pub(crate) fn built_exe() -> Option<std::path::PathBuf> {
+    if let Some(p) = std::env::var_os("SOLOMNI_TEST_BIN").map(std::path::PathBuf::from)
+        && p.is_file()
+    {
+        return Some(p);
+    }
     let me = std::env::current_exe().ok()?;
     let profile_dir = me.parent()?.parent()?;
     let name = if cfg!(windows) {
