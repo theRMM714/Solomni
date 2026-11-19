@@ -106,7 +106,7 @@ pub fn render_pull(r: &PullReport) -> String {
             lines.push(format!("…（共 {} 条）", r.conflicts.len()));
         }
         out.push_str(&format!(
-            "\n冲突（未覆盖）：{}——冲突不会因为把两边内容合进沙箱就消失：\n先用 work_versions 看基线 / 主副本 / 沙箱三方；文本可人工合并后用 work_resolve（take=local）声明已解决，图片 / 视频 / 二进制不能合并，只能选边（take=upstream 取主副本，take=local 保留本地）。",
+            "\n冲突（未覆盖）：{}——冲突不会因为把两边内容合进沙箱就消失：\n先用 work_versions 看基线 / 主副本 / 沙箱三方；文本可人工合并后用 work_resolve（take=local）声明已解决，图片 / 视频 / 二进制不能合并，只能选边（take=upstream 取主副本，take=local 保留本地）。\n如果是「你删了、主线改了」：work_pull 不替你决定——take=upstream 接受主线版本，或 take=local 保留删除（随后 work_commit deletes=[…] 才能发布）。",
             lines.join("、")
         ));
     }
@@ -126,10 +126,16 @@ pub fn render_pull(r: &PullReport) -> String {
 }
 
 /// 目的：把 work_push 的结果说成人能读的几行。
-/// 返回：`None` = 与主线一致（没有可推送内容）；`Some` = 主线新提交号与改动清单。
+/// 返回：没有新提交 = 说明为什么没有（内容已收敛 / 工作线与主线一致）；有 = 主线新提交号与改动清单。
 pub fn render_push(r: &PushReport) -> String {
     let Some(id) = r.commit else {
-        return "没有可推送的内容：你的工作线与主线一致。\n先 work_commit 把沙箱改动记进工作线，再 work_push 发布。"
+        if r.unpushed > 0 {
+            return format!(
+                "没有需要推送的改动：工作线内容已与主线一致（领先 {} 条净改动为零的提交）。\n不必再提交；要清掉这些空提交，用 work_reset to=<它们之前的那条提交>。",
+                r.unpushed
+            );
+        }
+        return "没有可推送的内容：你的工作线与主线一致。\n沙箱里的改动要先 work_commit 记进工作线，再 work_push 发布。"
             .to_string();
     };
     let mut adds = Vec::new();
@@ -248,40 +254,48 @@ pub fn render_diff(r: &DiffReport) -> String {
     out
 }
 
-/// 目的：把 work_reset 的结果说成人能读的几行：工作线移到哪、沙箱改了什么、备份了几份。
+/// 目的：把 work_reset 的结果说成人能读的几行：工作线动没动、沙箱铺回 / 删除了什么、备份了几份。
+/// 约束：只看报告里的两个事实（调用前后的工作线头），不猜调用方给的是 paths 还是 to。
 pub fn render_reset(r: &ResetReport) -> String {
-    let mut out = String::new();
-    match r.moved_to {
-        Some(id) if r.restored.is_empty() && r.removed.is_empty() => {
+    let moved = r.before != r.after;
+    let mut out = match (r.before, r.after) {
+        (Some(a), _) if !moved => format!("工作线没动（还是提交 {}）。", a),
+        (Some(a), Some(b)) => format!("工作线从提交 {} 移到 {}。", a, b),
+        (None, Some(b)) => format!("工作线现在在提交 {}。", b),
+        (Some(a), None) => format!("工作线已从提交 {} 退回未提交状态。", a),
+        (None, None) => "工作线还没有提交（工作线没动）。".to_string(),
+    };
+    if r.restored.is_empty() && r.removed.is_empty() {
+        out.push_str("\n沙箱没动");
+        match (moved, r.after) {
+            (true, _) => out.push_str("（目标版本与沙箱内容本来一致，或你用了 keep_changes）"),
+            (false, Some(_)) => out.push_str("（这些路径本来就与工作线头一致）"),
+            (false, None) => out.push_str("（这些路径本来就与拉取基线一致）"),
+        }
+        out.push('.');
+        if moved {
+            out.push_str("\n要连沙箱一起重铺，再 work_reset 到同一个提交（不带 keep_changes）。");
+        }
+    } else {
+        match (moved, r.after) {
+            (true, Some(b)) => out.push_str(&format!("\n沙箱按提交 {} 重铺。", b)),
+            (_, Some(_)) => out.push_str("\n沙箱按工作线头恢复（工作线里没有的路径退回拉取基线）。"),
+            (_, None) => out.push_str("\n沙箱按拉取基线恢复。"),
+        }
+        if !r.restored.is_empty() {
             out.push_str(&format!(
-                "工作线已移到提交 {}；沙箱没动（keep_changes=true）。",
-                id
+                "\n铺回 {} 个文件：{}",
+                r.restored.len(),
+                paths(&r.restored)
             ));
-            out.push_str("\n要连沙箱一起回到那个版本，去掉 keep_changes 再 work_reset 一次。");
         }
-        Some(id) => {
-            out.push_str(&format!("工作线已移到提交 {}，沙箱按它重铺。", id));
-            if !r.restored.is_empty() {
-                out.push_str(&format!("\n铺回 {} 个文件。", r.restored.len()));
-            }
-            if !r.removed.is_empty() {
-                out.push_str(&format!(
-                    "\n删除 {} 个文件（那个版本里没有）。",
-                    r.removed.len()
-                ));
-            }
-        }
-        None => {
-            out.push_str("已把沙箱按工作线头恢复。");
-            if !r.restored.is_empty() {
-                out.push_str(&format!("\n铺回：{}", paths(&r.restored)));
-            }
-            if !r.removed.is_empty() {
-                out.push_str(&format!("\n删除（工作线里没有）：{}", paths(&r.removed)));
-            }
-            if r.restored.is_empty() && r.removed.is_empty() {
-                out.push_str("\n这些路径本来就与工作线头一致，没有改动。");
-            }
+        if !r.removed.is_empty() {
+            out.push_str(&format!(
+                "\n删除 {} 个文件（{}）：{}",
+                r.removed.len(),
+                if moved { "那个版本里没有" } else { "工作线里没有" },
+                paths(&r.removed)
+            ));
         }
     }
     if r.backed_up > 0 {
@@ -344,7 +358,7 @@ pub fn render_sync(r: &SyncReport) -> String {
 }
 
 /// 目的：把 work_status 的结果说成人能读的几行。
-/// 返回：主线当前提交、你的工作线头与未推送条数、逐条五态、最近主线提交。
+/// 返回：主线当前提交、你的工作线头与待推送净改动数（另含领先空提交条数与冲突数）、逐条五态、最近主线提交。
 pub fn render_status(r: &StatusReport) -> String {
     let mut out = String::new();
     match &r.head {
@@ -360,13 +374,23 @@ pub fn render_status(r: &StatusReport) -> String {
                 "\n你的工作线：提交 {}（{}）：{}",
                 w.id, w.time, w.message
             ));
-            if r.unpushed == 0 {
-                out.push_str("· 已全部推送");
-            } else {
+            if r.conflicts > 0 {
                 out.push_str(&format!(
-                    "· 未推送 {} 条（要进共享区用 work_push）",
+                    "\n· 推送会冲突：{} 个路径（work_push 会整次被拒，先看冲突清单再解决）",
+                    r.conflicts
+                ));
+            } else if r.pending > 0 {
+                out.push_str(&format!(
+                    "\n· 未推送 {} 项改动（分布在 {} 条提交里，要进共享区用 work_push）",
+                    r.pending, r.unpushed
+                ));
+            } else if r.unpushed > 0 {
+                out.push_str(&format!(
+                    "\n· 内容已与主线一致（领先 {} 条净改动为零的提交；不必再推送，要清掉用 work_reset to=<它们的父提交>）",
                     r.unpushed
                 ));
+            } else {
+                out.push_str("\n· 已全部推送");
             }
         }
         None => out.push_str("\n你的工作线：还没有提交（与主线一致）"),

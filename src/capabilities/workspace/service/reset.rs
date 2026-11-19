@@ -41,7 +41,8 @@ impl WorkspaceService {
             self.set_line_head(&store, &Self::work_ref(agent), RefKind::Agent, Some(target))?;
             if req.keep_changes {
                 return Ok(ResetReport {
-                    moved_to: Some(target),
+                    before: head,
+                    after: Some(target),
                     restored: Vec::new(),
                     removed: Vec::new(),
                     backed_up: 0,
@@ -75,7 +76,8 @@ impl WorkspaceService {
                 }
             }
             return Ok(ResetReport {
-                moved_to: Some(target),
+                before: head,
+                after: Some(target),
                 restored,
                 removed,
                 backed_up: backed,
@@ -113,7 +115,8 @@ impl WorkspaceService {
             }
         }
         Ok(ResetReport {
-            moved_to: head,
+            before: head,
+            after: head,
             restored,
             removed,
             backed_up: backed,

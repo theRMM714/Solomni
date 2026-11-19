@@ -15,11 +15,14 @@ pub struct ResetRequest {
     pub keep_changes: bool,
 }
 
-/// 目的：一次 `work_reset` 的结果：新工作线头 + 哪些路径被铺回 / 删除 + 备份了几份旧内容。
+/// 目的：一次 `work_reset` 的结果——只报事实：调用前后的工作线头、铺回 / 删除了哪些路径、备份了几份。
+/// 约束：不带"这次是哪种形态"的判别字段；回执按 `before` 与 `after` 是否相等推导工作线动没动。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResetReport {
-    /// 目的：移动后的工作线头（`paths` 形态 = 原头，不动）。
-    pub moved_to: Option<u64>,
+    /// 目的：调用前的工作线头（None = 工作线还没有提交）。
+    pub before: Option<u64>,
+    /// 目的：调用后的工作线头（`paths` 形态 = 与 `before` 相同）。
+    pub after: Option<u64>,
     /// 目的：铺回沙箱的路径。
     pub restored: Vec<String>,
     /// 目的：从沙箱删掉的路径（工作线里已经没有）。

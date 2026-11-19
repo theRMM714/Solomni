@@ -191,12 +191,15 @@ pub struct PushRequest {
     pub line: u64,
 }
 
-/// 目的：work_push 的结果：`commit` 为空 = 与主线一致（没有可推送的内容）。
+/// 目的：work_push 的结果：`commit` 为空 = 没有可推送的改动。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PushReport {
     pub commit: Option<u64>,
     /// 目的：这次落到主线的改动。
     pub changes: Vec<Change>,
+    /// 目的：本次推送之后工作线还领先主线几条提交（成功推送 = 0；空结果时如实给出，
+    ///   用来说明"没有可推送的改动"是内容已收敛，而不是提交丢了）。
+    pub unpushed: usize,
 }
 
 /// 目的：`work_sync` 的结果——把工作区当前内容采纳成一条 author=external 的提交。
@@ -218,8 +221,12 @@ pub struct StatusReport {
     pub head: Option<CommitSummary>,
     /// 目的：该 agent 工作线当前的提交（与主线不同就是有未推送的内容）。
     pub work_head: Option<CommitSummary>,
-    /// 目的：工作线上还没有进主线的提交条数。
+    /// 目的：工作线上还没有进主线的提交条数（辅助水位：内容可能已收敛）。
     pub unpushed: usize,
+    /// 目的：work_push 会落进主线的净改动路径数（与 work_push 同一次判定）。
+    pub pending: usize,
+    /// 目的：work_push 会撞上的冲突路径数（>0 时推送会整次被拒）。
+    pub conflicts: usize,
     /// 目的：主副本在 head 上的路径清单（有上限；tree_truncated = 如实标注是否截断）。
     pub tree: Vec<String>,
     pub tree_truncated: bool,

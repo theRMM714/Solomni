@@ -1249,6 +1249,11 @@ pub(crate) fn work_reset_restores_paths_and_moves_the_work_line() {
     assert_eq!(rep.restored, vec!["note.md".to_string()]);
     assert!(rep.backed_up >= 1, "覆盖草稿要先备份：{:?}", rep);
     assert_eq!(
+        (rep.before, rep.after),
+        (Some(id2), Some(id2)),
+        "paths 形态不动工作线：前后是同一个头"
+    );
+    assert_eq!(
         store.read_under(&sb, "note.md").unwrap().as_deref(),
         Some(&b"v2\n"[..]),
         "paths 形态把沙箱恢复成工作线头的版本"
@@ -1266,7 +1271,11 @@ pub(crate) fn work_reset_restores_paths_and_moves_the_work_line() {
             },
         )
         .unwrap();
-    assert_eq!(rep.moved_to, Some(id1));
+    assert_eq!(
+        (rep.before, rep.after),
+        (Some(id2), Some(id1)),
+        "to 形态把工作线从 v2 移回 v1"
+    );
     assert_eq!(
         store.read_under(&sb, "note.md").unwrap().as_deref(),
         Some(&b"v1\n"[..]),
@@ -1292,6 +1301,257 @@ pub(crate) fn work_reset_restores_paths_and_moves_the_work_line() {
         .is_err(),
         "只能退到自己的工作线祖先"
     );
+}
+
+/// 目的：work_reset 的回执按事实说清「工作线动没动」——paths 形态不动线，不能套用 to 形态的话术。
+#[test]
+pub(crate) fn work_reset_receipts_name_the_form_that_ran() {
+    use crate::capabilities::workspace::api::{render_reset, ResetRequest};
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    let sb = sandbox_of(&ws, "w", "a");
+    store.write_under(&sb, "note.md", b"v1\n").unwrap();
+    let id1 = ws
+        .work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "v1", 1))
+        .unwrap()
+        .id;
+    store.write_under(&sb, "note.md", b"v2\n").unwrap();
+    let id2 = ws
+        .work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "v2", 2))
+        .unwrap()
+        .id;
+
+    // paths：只把沙箱恢复成工作线头，工作线一点都不动。
+    store.write_under(&sb, "note.md", b"draft\n").unwrap();
+    let rep = ws
+        .work_reset(
+            "w",
+            "a",
+            &ResetRequest {
+                paths: vec!["note.md".to_string()],
+                to: None,
+                keep_changes: false,
+            },
+        )
+        .unwrap();
+    let text = render_reset(&rep);
+    assert!(text.contains("工作线没动"), "{text}");
+    assert!(!text.contains("工作线已移到"), "paths 形态不能说线被移走：{text}");
+
+    // to：这次工作线真的动了——回执要说清从哪个提交移到哪个。
+    let rep = ws
+        .work_reset(
+            "w",
+            "a",
+            &ResetRequest {
+                paths: Vec::new(),
+                to: Some(id1),
+                keep_changes: false,
+            },
+        )
+        .unwrap();
+    let text = render_reset(&rep);
+    assert!(
+        text.contains(&format!("工作线从提交 {id2} 移到 {id1}")),
+        "{text}"
+    );
+}
+
+/// 目的：status 的「有没有待推送的东西」按内容净改动算——内容收敛后不再显示“未推送 N 条”。
+/// 约束：领先的空提交条数仍如实报出（辅助信息），但它不再冒充待推送。
+#[test]
+pub(crate) fn work_status_counts_content_not_pending_commits() {
+    use crate::capabilities::workspace::api::{render_push, render_status};
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    let sb = sandbox_of(&ws, "w", "a");
+
+    let st = ws.work_status("w", "a", &[]).unwrap();
+    assert_eq!((st.pending, st.unpushed), (0, 0), "{:?}", st);
+
+    store.write_under(&sb, "note.md", b"v1\n").unwrap();
+    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "v1", 1))
+        .unwrap();
+    let st = ws.work_status("w", "a", &[]).unwrap();
+    assert_eq!((st.pending, st.unpushed), (1, 1), "{:?}", st);
+    let text = render_status(&st);
+    assert!(text.contains("未推送 1 项改动"), "{text}");
+
+    // 推上去：工作线跟着主线快进，这里才是「已全部推送」。
+    push(&ws, "w", "a", "v1", 1, 1).unwrap();
+    let st = ws.work_status("w", "a", &[]).unwrap();
+    assert_eq!((st.pending, st.unpushed), (0, 0), "{:?}", st);
+    assert!(render_status(&st).contains("已全部推送"), "{}", render_status(&st));
+
+    // 再把内容改出去又改回来：净改动为零，工作线却多了两条提交。
+    store.write_under(&sb, "note.md", b"v2\n").unwrap();
+    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "v2", 2))
+        .unwrap();
+    store.write_under(&sb, "note.md", b"v1\n").unwrap();
+    ws.work_commit(
+        "w",
+        "a",
+        "w--a",
+        &commit_req(&["note.md"], &[], "回到 v1", 3),
+    )
+    .unwrap();
+
+    let st = ws.work_status("w", "a", &[]).unwrap();
+    assert_eq!(st.pending, 0, "内容与主线一致：{:?}", st);
+    assert_eq!(st.unpushed, 2, "领先两条净改动为零的提交：{:?}", st);
+    let text = render_status(&st);
+    assert!(text.contains("内容已与主线一致"), "{text}");
+    assert!(!text.contains("未推送"), "内容收敛时不能说还有待推送：{text}");
+
+    let rep = push(&ws, "w", "a", "空推", 4, 2).unwrap();
+    assert!(rep.commit.is_none(), "{:?}", rep);
+    assert_eq!(rep.unpushed, 2, "{:?}", rep);
+    let text = render_push(&rep);
+    assert!(text.contains("不必再提交"), "{text}");
+    assert!(!text.contains("先 work_commit"), "不能劝人再造空提交：{text}");
+}
+
+/// 目的：删除型冲突（本地删了、主线改了）被拒时，回执给的补救路径要真能走通。
+#[test]
+pub(crate) fn work_push_delete_vs_modify_is_rejected_with_a_working_remedy() {
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    let sb_a = sandbox_of(&ws, "w", "a");
+    store.write_under(&sb_a, "note.md", b"v1\n").unwrap();
+    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "v1", 1))
+        .unwrap();
+    push(&ws, "w", "a", "v1", 1, 1).unwrap();
+    let sb_b = sandbox_of(&ws, "w", "b");
+    ws.work_pull("w", "b", &["note.md".to_string()]).unwrap();
+    store.write_under(&sb_b, "note.md", b"v2\n").unwrap();
+    ws.work_commit("w", "b", "w--b", &commit_req(&["note.md"], &[], "v2", 2))
+        .unwrap();
+    push(&ws, "w", "b", "v2", 2, 2).unwrap();
+
+    store.remove_under(&sb_a, "note.md").unwrap();
+    ws.work_commit("w", "a", "w--a", &commit_req(&[], &["note.md"], "删掉", 3))
+        .unwrap();
+    let err = push(&ws, "w", "a", "删掉", 3, 3).expect_err("删除不能覆盖上游修改");
+    assert!(err.contains("本地删了、主线改了"), "{err}");
+    assert!(
+        err.contains("take=upstream") && err.contains("work_reset"),
+        "要给出两条真能走通的补救路径：{err}"
+    );
+    assert!(
+        !err.contains("再 work_pull 取回主线版本，在沙箱里合并"),
+        "这条补救路径走不通，不能建议：{err}"
+    );
+}
+
+/// 目的：补救路径①（接受主线版本再推）真能收敛：净改动为零，工作线保留提交。
+#[test]
+pub(crate) fn work_accept_upstream_after_a_delete_converges() {
+    use crate::capabilities::workspace::api::ResolveTake;
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    let sb_a = sandbox_of(&ws, "w", "a");
+    store.write_under(&sb_a, "note.md", b"v1\n").unwrap();
+    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "v1", 1))
+        .unwrap();
+    push(&ws, "w", "a", "v1", 1, 1).unwrap();
+    let sb_b = sandbox_of(&ws, "w", "b");
+    ws.work_pull("w", "b", &["note.md".to_string()]).unwrap();
+    store.write_under(&sb_b, "note.md", b"v2\n").unwrap();
+    ws.work_commit("w", "b", "w--b", &commit_req(&["note.md"], &[], "v2", 2))
+        .unwrap();
+    push(&ws, "w", "b", "v2", 2, 2).unwrap();
+    store.remove_under(&sb_a, "note.md").unwrap();
+    ws.work_commit("w", "a", "w--a", &commit_req(&[], &["note.md"], "删掉", 3))
+        .unwrap();
+    assert!(push(&ws, "w", "a", "删掉", 3, 3).is_err());
+
+    ws.work_resolve(
+        "w",
+        "a",
+        &resolve_req(&["note.md"], ResolveTake::Upstream),
+    )
+    .unwrap();
+    assert_eq!(
+        store.read_under(&sb_a, "note.md").unwrap().as_deref(),
+        Some(&b"v2\n"[..]),
+        "接受主线版本：主副本那一版回到沙箱"
+    );
+    ws.work_commit(
+        "w",
+        "a",
+        "w--a",
+        &commit_req(&["note.md"], &[], "接受主线版本", 4),
+    )
+    .unwrap();
+
+    let rep = push(&ws, "w", "a", "空推", 5, 4).unwrap();
+    assert!(rep.commit.is_none(), "净改动为零：{:?}", rep);
+    assert_eq!(rep.unpushed, 2, "工作线保留删除与恢复两条提交：{:?}", rep);
+    let st = ws.work_status("w", "a", &[]).unwrap();
+    assert_eq!(st.pending, 0, "内容与主线一致：{:?}", st);
+    assert_eq!(st.conflicts, 0, "{:?}", st);
+}
+
+/// 目的：补救路径②（撤回删除提交再拉主线版本）真能收敛：工作线退回主线祖先，不再领先。
+#[test]
+pub(crate) fn work_reset_before_the_delete_then_pull_converges() {
+    use crate::capabilities::workspace::api::ResetRequest;
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string(), "b".to_string()])
+        .unwrap();
+    let sb_a = sandbox_of(&ws, "w", "a");
+    store.write_under(&sb_a, "note.md", b"v1\n").unwrap();
+    ws.work_commit("w", "a", "w--a", &commit_req(&["note.md"], &[], "v1", 1))
+        .unwrap();
+    push(&ws, "w", "a", "v1", 1, 1).unwrap();
+    let sb_b = sandbox_of(&ws, "w", "b");
+    ws.work_pull("w", "b", &["note.md".to_string()]).unwrap();
+    store.write_under(&sb_b, "note.md", b"v2\n").unwrap();
+    ws.work_commit("w", "b", "w--b", &commit_req(&["note.md"], &[], "v2", 2))
+        .unwrap();
+    push(&ws, "w", "b", "v2", 2, 2).unwrap();
+
+    // 工作线头要从 work_status 取：work_head 给的是主副本那条线的头。
+    let before_delete = ws
+        .work_status("w", "a", &[])
+        .unwrap()
+        .work_head
+        .expect("推送后工作线有头")
+        .id;
+    store.remove_under(&sb_a, "note.md").unwrap();
+    ws.work_commit("w", "a", "w--a", &commit_req(&[], &["note.md"], "删掉", 3))
+        .unwrap();
+    assert!(push(&ws, "w", "a", "删掉", 3, 3).is_err());
+
+    ws.work_reset(
+        "w",
+        "a",
+        &ResetRequest {
+            paths: Vec::new(),
+            to: Some(before_delete),
+            keep_changes: false,
+        },
+    )
+    .unwrap();
+    let pulled = ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
+    assert!(
+        pulled.updated.contains(&"note.md".to_string()),
+        "撤回删除后基线还是 v1，主副本的 v2 能拉进来：{:?}",
+        pulled
+    );
+    assert_eq!(
+        store.read_under(&sb_a, "note.md").unwrap().as_deref(),
+        Some(&b"v2\n"[..])
+    );
+
+    let rep = push(&ws, "w", "a", "空推", 5, 4).unwrap();
+    assert!(rep.commit.is_none(), "没有领先的改动：{:?}", rep);
+    assert_eq!(rep.unpushed, 0, "工作线退回了主线的祖先：{:?}", rep);
 }
 
 /// 目的：`work_sync` 把用户在产品之外改的磁盘内容记成一条主线提交，不给 external 建工作线。
