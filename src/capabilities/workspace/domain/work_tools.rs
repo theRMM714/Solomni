@@ -279,7 +279,9 @@ pub fn render_reset(r: &ResetReport) -> String {
     } else {
         match (moved, r.after) {
             (true, Some(b)) => out.push_str(&format!("\n沙箱按提交 {} 重铺。", b)),
-            (_, Some(_)) => out.push_str("\n沙箱按工作线头恢复（工作线里没有的路径退回拉取基线）。"),
+            (_, Some(_)) => {
+                out.push_str("\n沙箱按工作线头恢复（工作线里没有的路径退回拉取基线）。")
+            }
             (_, None) => out.push_str("\n沙箱按拉取基线恢复。"),
         }
         if !r.restored.is_empty() {
@@ -293,7 +295,11 @@ pub fn render_reset(r: &ResetReport) -> String {
             out.push_str(&format!(
                 "\n删除 {} 个文件（{}）：{}",
                 r.removed.len(),
-                if moved { "那个版本里没有" } else { "工作线里没有" },
+                if moved {
+                    "那个版本里没有"
+                } else {
+                    "工作线里没有"
+                },
                 paths(&r.removed)
             ));
         }

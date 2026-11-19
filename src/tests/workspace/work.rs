@@ -1306,7 +1306,7 @@ pub(crate) fn work_reset_restores_paths_and_moves_the_work_line() {
 /// 目的：work_reset 的回执按事实说清「工作线动没动」——paths 形态不动线，不能套用 to 形态的话术。
 #[test]
 pub(crate) fn work_reset_receipts_name_the_form_that_ran() {
-    use crate::capabilities::workspace::api::{render_reset, ResetRequest};
+    use crate::capabilities::workspace::api::{ResetRequest, render_reset};
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
@@ -1336,7 +1336,10 @@ pub(crate) fn work_reset_receipts_name_the_form_that_ran() {
         .unwrap();
     let text = render_reset(&rep);
     assert!(text.contains("工作线没动"), "{text}");
-    assert!(!text.contains("工作线已移到"), "paths 形态不能说线被移走：{text}");
+    assert!(
+        !text.contains("工作线已移到"),
+        "paths 形态不能说线被移走：{text}"
+    );
 
     // to：这次工作线真的动了——回执要说清从哪个提交移到哪个。
     let rep = ws
@@ -1381,7 +1384,11 @@ pub(crate) fn work_status_counts_content_not_pending_commits() {
     push(&ws, "w", "a", "v1", 1, 1).unwrap();
     let st = ws.work_status("w", "a", &[]).unwrap();
     assert_eq!((st.pending, st.unpushed), (0, 0), "{:?}", st);
-    assert!(render_status(&st).contains("已全部推送"), "{}", render_status(&st));
+    assert!(
+        render_status(&st).contains("已全部推送"),
+        "{}",
+        render_status(&st)
+    );
 
     // 再把内容改出去又改回来：净改动为零，工作线却多了两条提交。
     store.write_under(&sb, "note.md", b"v2\n").unwrap();
@@ -1401,14 +1408,20 @@ pub(crate) fn work_status_counts_content_not_pending_commits() {
     assert_eq!(st.unpushed, 2, "领先两条净改动为零的提交：{:?}", st);
     let text = render_status(&st);
     assert!(text.contains("内容已与主线一致"), "{text}");
-    assert!(!text.contains("未推送"), "内容收敛时不能说还有待推送：{text}");
+    assert!(
+        !text.contains("未推送"),
+        "内容收敛时不能说还有待推送：{text}"
+    );
 
     let rep = push(&ws, "w", "a", "空推", 4, 2).unwrap();
     assert!(rep.commit.is_none(), "{:?}", rep);
     assert_eq!(rep.unpushed, 2, "{:?}", rep);
     let text = render_push(&rep);
     assert!(text.contains("不必再提交"), "{text}");
-    assert!(!text.contains("先 work_commit"), "不能劝人再造空提交：{text}");
+    assert!(
+        !text.contains("先 work_commit"),
+        "不能劝人再造空提交：{text}"
+    );
 }
 
 /// 目的：删除型冲突（本地删了、主线改了）被拒时，回执给的补救路径要真能走通。
@@ -1469,12 +1482,8 @@ pub(crate) fn work_accept_upstream_after_a_delete_converges() {
         .unwrap();
     assert!(push(&ws, "w", "a", "删掉", 3, 3).is_err());
 
-    ws.work_resolve(
-        "w",
-        "a",
-        &resolve_req(&["note.md"], ResolveTake::Upstream),
-    )
-    .unwrap();
+    ws.work_resolve("w", "a", &resolve_req(&["note.md"], ResolveTake::Upstream))
+        .unwrap();
     assert_eq!(
         store.read_under(&sb_a, "note.md").unwrap().as_deref(),
         Some(&b"v2\n"[..]),
