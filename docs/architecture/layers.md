@@ -29,7 +29,7 @@
 | **只走 api** | 能力之间的调用只经对方 `api` 的 trait 与值；不摸 `service` / `domain` / `detail`，也不反向依赖根与呈现层 | `tests/gates/structure/dependency.js` |
 | **DIP·跨能力** | 需要对方替它做事的点声明成端口，由实现方实现；声明方只经自己的 `api` 交出去 | `tests/gates/structure/dependency.js` |
 | **DIP·能力内部** | `service` 只认 `ports` / `api` 的抽象；具体实现只在组合根 `new` | `tests/gates/structure/capability.js` |
-| **DTD·只传值** | 跨边界只传不可变值（或无状态端口）；锁、原子、可变借用、闭包这类活对象不出境 | `tests/gates/structure/values.js` |
+| **DTO·只传值** | 跨边界只传不可变值（或无状态端口）；锁、原子、可变借用、闭包这类活对象不出境 | `tests/gates/structure/values.js` |
 
 - 出站依赖由**各能力定义端口**、**各能力的 `detail` 实现**；入站依赖由**各能力定义 `api`**；`Faces`（`src/presentation/faces.rs`）只把它们**装配**给呈现层。
 - **能力不定义"前端接口让别人实现"**；呈现层拿到的是 `Faces`（各能力自己的窄 trait 对象 + 事件台 + 根填的值），不是 `Core`，也不是任何锁；`Faces` 只做装配，不得长判定（`src/presentation/faces.rs`）。
