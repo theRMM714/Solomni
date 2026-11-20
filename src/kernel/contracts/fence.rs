@@ -109,6 +109,8 @@ pub enum FencePart {
     ContainerIdentity,
     /// 授权台账（写 ACL 之前先落盘的那一份）：落不下就不能动本机权限项。
     Ledger,
+    /// 落点的强制完整性标签：高于 Low 且不许向上写时，DACL 授权再对容器也写不进。
+    IntegrityLabel,
 }
 
 impl FencePart {
@@ -133,6 +135,7 @@ impl FencePart {
             FencePart::Parent => "数据边界的父目录",
             FencePart::ContainerIdentity => "容器身份",
             FencePart::Ledger => "授权台账",
+            FencePart::IntegrityLabel => "落点的完整性标签",
         }
     }
 
@@ -151,6 +154,9 @@ impl FencePart {
                 "确认本机能建 AppContainer profile（受限会话里建不起来）"
             }
             FencePart::Ledger => "确认产品私有区 .home/ 可写（授权台账要落在那里）",
+            FencePart::IntegrityLabel => {
+                "提权清掉这个目录的强制完整性标签（icacls 只能设级别、删不掉标签），或把落点换到未打标签的目录"
+            }
             FencePart::AuthorizedRead | FencePart::Parent => {
                 "这一次不影响围栏成立；下次想让它可达再补"
             }

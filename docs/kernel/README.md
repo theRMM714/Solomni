@@ -42,6 +42,9 @@
 | 私有沙箱 | `HOME` / `TEMP` 的落点，也是**容器临时目录**（`Packages/<容器名>/AC/Temp`）的父目录：进程连临时文件都落不下 |
 | 其余数据边界（共享主副本、模块 `userdata/`） | 这次执行要读写的根：读不到输入、写不进产物 |
 | 容器身份 / 授权台账 | 围栏本身的前提（派生不出 SID、台账落不下就先不动本机权限项） |
+| 落点的完整性标签 | 高于 Low 且带「不许向上写」时，DACL 授权再对容器也写不进：授权会报成功、命令却落不下产物 |
+
+- 完整性标签是 DACL 之外的另一道检查：容器令牌恒为 Low，授写叶子带 Medium 及以上的 `SYSTEM_MANDATORY_LABEL_ACE`（`NO_WRITE_UP`）就被挡。`prepare_fence` 授权后逐叶子读一次标签（`src/kernel/detail/confine/windows/acl/label.rs`，只读、免提权），命中按必要落点报 `FencePart::IntegrityLabel`。**只看叶子本身**：写一个对象只对它做完整性检查，祖先只被穿过；叶子继承到的标签会出现在它自己的 SACL 里。未打标签的对象不做这项检查——那是容器能写的正常基线。
 
 - 可选（缺了命令照跑，只是可达范围小一点）：
   - 用户显式授权的主机只读根（`.home/settings.yaml` 的 `sandbox.policy.host_read_roots`）。

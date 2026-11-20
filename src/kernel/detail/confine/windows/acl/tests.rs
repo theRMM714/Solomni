@@ -1,9 +1,10 @@
-//! 目的：ACL 纯逻辑的脱机单测——ACE 布局解析、身份判等、继承位、通用位展开与覆盖关系。
-//! 管：ace_parts / entry_of / is_object_ace / inheritable_flags_ok / expand_generics / rights_covered 的用例。
+//! 目的：ACL 纯逻辑的脱机单测——ACE 布局解析、身份判等、继承位、通用位展开与覆盖关系、完整性标签判据。
+//! 管：ace_parts / entry_of / is_object_ace / inheritable_flags_ok / expand_generics / rights_covered / parse_label_sacl / blocking_integrity_rid 的用例。
 //! 不管：需要真机 DACL 的路径（tests/<平台>/ 的真机探针覆盖）。
 //! 联动：acl.rs 汇总导出；用例只走纯字节，不碰 IO。
 
 use super::ace::*;
+use super::label::*;
 use super::verify::inheritable_flags_ok;
 use windows_sys::Win32::Security::{
     ACE_INHERITED_OBJECT_TYPE_PRESENT, ACE_OBJECT_TYPE_PRESENT, CONTAINER_INHERIT_ACE,
@@ -204,4 +205,119 @@ fn object_ace_identity_carries_the_guids() {
         entry_of(&same),
         "继承对象 GUID 也是身份的一部分"
     );
+}
+
+/// 造一条强制标签 ACE：S-1-16-<rid> + 策略掩码。
+fn label_ace(rid: u32, policy: u32) -> Vec<u8> {
+    let mut sid = vec![1u8, 1, 0, 0, 0, 0, 0, 16];
+    sid.extend_from_slice(&rid.to_le_bytes());
+    ace_bytes(SYSTEM_MANDATORY_LABEL_ACE_TYPE, 0, policy, 0, 0, &sid)
+}
+
+/// 造一份 SACL：头（修订 2、总长、条数）+ 逐条 ACE。
+fn sacl_of(aces: &[Vec<u8>]) -> Vec<u8> {
+    let mut body: Vec<u8> = Vec::new();
+    for a in aces {
+        body.extend_from_slice(a);
+    }
+    let size = (8 + body.len()) as u16;
+    let mut out = vec![2u8, 0];
+    out.extend_from_slice(&size.to_le_bytes());
+    out.extend_from_slice(&(aces.len() as u16).to_le_bytes());
+    out.extend_from_slice(&[0, 0]);
+    out.extend_from_slice(&body);
+    out
+}
+
+/// 目的：无标签是容器能写的正常基线——无 SACL、空 SACL 都不算命中。
+#[test]
+fn unlabeled_object_is_the_writable_baseline() {
+    assert_eq!(blocking_integrity_rid(&UNLABELED), None);
+    assert_eq!(parse_label_sacl(&[]).expect("空切片当作无 SACL").rid, None);
+    assert_eq!(
+        parse_label_sacl(&sacl_of(&[]))
+            .expect("空 SACL 认得出来")
+            .rid,
+        None
+    );
+}
+
+/// 目的：与容器同级（Low）不算向上写，不挡。
+#[test]
+fn low_label_does_not_block_the_container() {
+    let label = parse_label_sacl(&sacl_of(&[label_ace(0x1000, 1)])).expect("Low 标签认得出来");
+    assert_eq!(label.rid, Some(0x1000));
+    assert_eq!(blocking_integrity_rid(&label), None, "同级不算向上写");
+}
+
+/// 目的：高于容器的级别带「不许向上写」就挡——Medium / High / System 逐条钉住。
+#[test]
+fn higher_labels_with_no_write_up_block_the_container() {
+    for rid in [0x2000u32, 0x3000, 0x4000] {
+        let label = parse_label_sacl(&sacl_of(&[label_ace(rid, 1)])).expect("标签认得出来");
+        assert_eq!(label.rid, Some(rid));
+        assert_eq!(label.policy, MANDATORY_POLICY_NO_WRITE_UP);
+        assert_eq!(
+            blocking_integrity_rid(&label),
+            Some(rid),
+            "RID {:#x} 应当挡写",
+            rid
+        );
+    }
+}
+
+/// 目的：策略里没有「不许向上写」就不挡写（只读向上限制不在本判据范围内）。
+#[test]
+fn label_without_no_write_up_does_not_block_writes() {
+    for policy in [0u32, 0x2] {
+        let label = parse_label_sacl(&sacl_of(&[label_ace(0x2000, policy)])).expect("标签认得出来");
+        assert_eq!(
+            blocking_integrity_rid(&label),
+            None,
+            "策略 {:#x} 不含不许向上写",
+            policy
+        );
+    }
+}
+
+/// 目的：标签 ACE 不一定排在第一条——按 AceSize 逐条走，前面的审计 ACE 要跳得过去。
+#[test]
+fn label_ace_is_found_after_other_sacl_entries() {
+    let audit = ace_bytes(2, 0, 0, 0, 0, &sid_tail());
+    let label = parse_label_sacl(&sacl_of(&[audit, label_ace(0x2000, 1)])).expect("标签认得出来");
+    assert_eq!(label.rid, Some(0x2000));
+    assert_eq!(blocking_integrity_rid(&label), Some(0x2000));
+}
+
+/// 目的：布局认不出就如实报错，绝不猜成「无标签」——猜错等于把挡写的事实静默吞掉。
+#[test]
+fn malformed_sacl_is_reported_not_guessed_as_unlabeled() {
+    assert!(parse_label_sacl(&[2, 0, 8]).is_err(), "头长度不够要报");
+    let full = sacl_of(&[label_ace(0x2000, 1)]);
+    let mut zero_size = full.clone();
+    zero_size[10] = 0;
+    zero_size[11] = 0;
+    assert!(parse_label_sacl(&zero_size).is_err(), "AceSize 为 0 要报");
+    assert!(
+        parse_label_sacl(&full[..full.len() - 4]).is_err(),
+        "ACE 越界要报"
+    );
+    let mut no_subs = full.clone();
+    no_subs[17] = 0;
+    assert!(parse_label_sacl(&no_subs).is_err(), "子权威数为 0 要报");
+    // 标识机构不是 S-1-16-：这不是完整性标签，认不出就报。
+    let mut wrong_authority = full.clone();
+    wrong_authority[23] = 5;
+    assert!(parse_label_sacl(&wrong_authority).is_err());
+}
+
+/// 目的：诊断文案的级别名——已知级别给名字，其余给 RID 文本。
+#[test]
+fn integrity_names_cover_the_known_levels() {
+    assert_eq!(integrity_name(0x0000), "Untrusted");
+    assert_eq!(integrity_name(0x1000), "Low");
+    assert_eq!(integrity_name(0x2000), "Medium");
+    assert_eq!(integrity_name(0x3000), "High");
+    assert_eq!(integrity_name(0x4000), "System");
+    assert_eq!(integrity_name(0x5000), "RID 20480");
 }

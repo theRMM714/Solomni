@@ -332,6 +332,83 @@ fn grants_are_written_when_the_environment_allows_it() {
     discard(&base);
 }
 
+/// 目的：给探针目录打 Medium + 不许向上写的可继承完整性标签（标签挡写用例的前置）。
+/// 返回：打上了给 true；本机不允许（非提权会话）给 false，调用方据此如实跳过。
+fn set_medium_label(path: &Path) -> bool {
+    use windows_sys::Win32::Security::Authorization::SetNamedSecurityInfoW;
+    let mut sid: Vec<u8> = vec![1, 1, 0, 0, 0, 0, 0, 16];
+    sid.extend_from_slice(&0x2000u32.to_le_bytes());
+    // ACE：类型 0x11、标志 (OI)(CI)、掩码 NO_WRITE_UP，后面紧跟 S-1-16-8192。
+    let mut ace: Vec<u8> = vec![SYSTEM_MANDATORY_LABEL_ACE_TYPE, 0x03];
+    ace.extend_from_slice(&((8 + 4 + sid.len()) as u16).to_le_bytes());
+    ace.extend_from_slice(&MANDATORY_POLICY_NO_WRITE_UP.to_le_bytes());
+    ace.extend_from_slice(&sid);
+    let mut sacl: Vec<u8> = vec![2, 0];
+    sacl.extend_from_slice(&((8 + ace.len()) as u16).to_le_bytes());
+    sacl.extend_from_slice(&1u16.to_le_bytes());
+    sacl.extend_from_slice(&[0, 0]);
+    sacl.extend_from_slice(&ace);
+    let w = wide(path);
+    // SAFETY: sacl 是刚构造的完整 ACL 字节，指针与长度在本次调用期间一直有效。
+    let rc = unsafe {
+        SetNamedSecurityInfoW(
+            w.as_ptr(),
+            SE_FILE_OBJECT,
+            LABEL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            sacl.as_ptr() as *const windows_sys::Win32::Security::ACL,
+        )
+    };
+    rc == 0
+}
+
+/// 【真机】授写叶子带高于 Low 的「不许向上写」完整性标签时，prepare_fence 如实报 blocked：
+///   DACL 授权写成功了也不算成立——容器令牌是 Low，写 Medium 对象会被完整性检查挡掉。
+/// 打标签需要提权；打不上就如实跳过（不静默当作通过）。
+#[test]
+fn prepare_reports_a_blocking_integrity_label() {
+    let _fence = crate::tests::fence_acl_guard();
+    let base = std::env::temp_dir().join(format!("solomni-label-probe-{}", std::process::id()));
+    let target = base.join("target");
+    std::fs::create_dir_all(&target).expect("建探针目录");
+    if !set_medium_label(&target) {
+        eprintln!("[探针] 本机打不上完整性标签（需要提权）：标签挡写探针跳过（不静默当作通过）");
+        discard(&base);
+        return;
+    }
+    let spec = FenceSpec {
+        agent: "probe-label".to_string(),
+        lease: String::new(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: vec![target.clone()],
+        cwd: target.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let home = base.join(".home");
+    let outcome = prepare_fence(&spec, "cmd", &home);
+    let blocked = outcome
+        .blocked
+        .expect("标签挡写要如实报 blocked，不能报成功");
+    assert_eq!(blocked.part, FencePart::IntegrityLabel);
+    assert_eq!(blocked.path, target, "要指明是哪个落点");
+    assert!(
+        blocked.why.contains("Medium"),
+        "诊断要指明标签级别：{}",
+        blocked.why
+    );
+    assert!(
+        blocked.line().contains(&target.display().to_string()),
+        "给用户的一句话要带路径：{}",
+        blocked.line()
+    );
+    clean(&home).ok();
+    discard(&base);
+}
+
 /// 分根计时只在**真写 ACL** 时产生步骤：第一次有、第二次纯命中为空；标签只用固定词表、不带用户路径。
 #[test]
 fn fence_steps_only_cover_real_acl_writes() {
