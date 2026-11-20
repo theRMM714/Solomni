@@ -20,7 +20,7 @@ node dev.js clippy    # T0 静态检查（cargo clippy --all-targets --all-featu
 ```
 
 - **cargo 只经入口跑**：`node dev.js …` / `node run-tests.js` / `node start.js` 都注入同一份环境解析；`node dev.js cargo -- <参数>` 是唯一透传口（任意 cargo 子命令，环境与缓存不变）。
-- **要在终端直接敲 `cargo`，先按 `env.js` 注入环境**：`CARGO_HOME=platform/<os>/cargo`、`RUSTUP_HOME=platform/<os>/rustup`（借用 PATH 上的 rustup proxy 时保留系统的 `RUSTUP_HOME`——它靠这个找 toolchain）、`TMPDIR` / `TMP` / `TEMP`=`target/tmp`、`PATH` 前置 `platform/<os>/cargo/bin`、Windows GNU 的 `.tools/mingw64/bin` 与 POSIX 项目内 Zig cc 的 `.tools/toolchains/<target>/cc/<version>/bin`（门禁另外前置 `.tools/bin`，`cargo install --root .tools` 装的工具在那里）。具体值以 `node env.js` 的解析结果为准（机器可读：`node env.js --print-env`）；IDE / rust-analyzer 同配置。
+- **要在终端直接敲 `cargo`，先按 `env.js` 注入环境**：`CARGO_HOME=platform/<os>/cargo`、`RUSTUP_HOME=platform/<os>/rustup`（借用 PATH 上的 rustup proxy 时保留系统的 `RUSTUP_HOME`——它靠这个找 toolchain）、`TMPDIR` / `TMP` / `TEMP`=`target/tmp`、`PATH` 前置 `platform/<os>/cargo/bin`、`.tools/toolchains/active.json` 登记的项目内工具链 bin（python / node / cc，判据与产品侧 `src/entry/toolchains.rs` 的 compose 同一套：target 相符、bin 只认相对普通组件且目录在场、工具 env 非空键值导出）、Windows GNU 的 `.tools/mingw64/bin` 与 POSIX 项目内 Zig cc 的 `.tools/toolchains/<target>/cc/<version>/bin`（门禁另外前置 `.tools/bin`，`cargo install --root .tools` 装的工具在那里）；宿主 PATH 垫底如实回退。具体值以 `node env.js` 的解析结果为准（机器可读：`node env.js --print-env`，含 `nodeBin` 与工具链在场事实）；IDE / rust-analyzer 同配置。
 - **未注入就不要敲**：裸 shell 的 `cargo build/test/fmt/clippy/install` 会用 PATH 上的系统工具链（Windows 多为 msvc，缺 `link.exe`；门禁与 CI 用项目内 GNU），缓存与临时目录也会落到项目外（项目外写零容忍，见 [quality-isolation.md](quality-isolation.md) 的「项目外写」）；只把 `platform/<os>/cargo/bin` 加进系统 PATH 却不给 `RUSTUP_HOME`、用 ambient cargo 装东西，同样不成立。
 - **原因**：①工具链一致性——不注入就用 PATH 上的系统工具链（Windows 多为 msvc）；②项目外写零容忍——`CARGO_HOME`、临时目录必须钉在项目内（[quality-isolation.md](quality-isolation.md) 的「项目外写」）；③门禁解析器与 CI 用同一份环境（[env.js](../../env.js)），手工绕开会让本地结论与 CI 对不上。
 
@@ -109,7 +109,7 @@ node run-tests.js
 
 ### 环境引导自检（`tests/env-bootstrap.mjs`）
 
-- `env.js` 跑在门禁与产品**之前**（`start.bat` / `node env.js setup`）：它坏了等于用户装不上环境。这条自检用**真实子进程**（`<临时根>/env.js setup --yes`）+ **本地应答源**把 Windows 的 MinGW 引导链逐条钉住，并钉住**借用门槛**（借来的 cargo 能打印版本但构建不了时必须拒绝借用）；POSIX 上把 Linux / macOS 的 Zig cc 引导链逐条钉住（宿主 cc 可用时零下载、缺失且同意后才装、无 TTY 不下载、sha256 闸、`--target=` 翻译、macOS 缺 CLT 的准确前置）；只写 `target/test-scratch/`、不碰外网、不装 Rust（假 cargo / rustc）。另跑一次只读的 `node env.js` 自诊断：状态里必须始终有 `build:` 结论，借用不可用时明说"不借用"。原样跑它：`node tests/env-bootstrap.mjs`。
+- `env.js` 跑在门禁与产品**之前**（`start.bat` / `node env.js setup`）：它坏了等于用户装不上环境。这条自检用**真实子进程**（`<临时根>/env.js setup --yes`）+ **本地应答源**把 Windows 的 MinGW 引导链逐条钉住，并钉住**借用门槛**（借来的 cargo 能打印版本但构建不了时必须拒绝借用）；POSIX 上把 Linux / macOS 的 Zig cc 引导链逐条钉住（宿主 cc 可用时零下载、缺失且同意后才装、无 TTY 不下载、sha256 闸、`--target=` 翻译、macOS 缺 CLT 的准确前置）；只写 `target/test-scratch/`、不碰外网、不装 Rust（假 cargo / rustc）。另跑一次只读的 `node env.js` 自诊断：状态里必须始终有 `build:` 结论，借用不可用时明说"不借用"；并钉住工具链注入判据（active.json → PATH 前置 / `nodeBin` / 在场事实：target 不符不注入、不安全或不在场的 bin 不进 PATH、未登记回退宿主）。原样跑它：`node tests/env-bootstrap.mjs`。
 
 | 场景 | 判据 |
 | --- | --- |
@@ -127,9 +127,10 @@ node run-tests.js
 | POSIX 宿主 `cc` 缺失 + 无 TTY | 退出 1、明说无交互终端不下载、指向 C 工具链与 `node env.js setup --yes`，不请求源 |
 | POSIX sha256 不符 | 退出 1、报不符、保留归档、不解包 |
 | macOS 缺 CLT | 退出 1、报 Xcode Command Line Tools / `xcode-select --install`，不下载 Zig |
+| 工具链注入（active.json） | 项目内 python/node bin 前置于宿主 PATH、`nodeBin` 指向项目内可执行、工具 env 非空键值导出、缺项如实报；target 不符整份不注入，相对逃逸 / 绝对路径 / 不在场的 bin 不进 PATH，未登记回退宿主 |
 
 - dlltool 只在 Windows、Zig 引导只在 POSIX：各自平台缺的另一条路如实 `[探针]` 跳过，不算通过。
-- **这条自检只钉保留的引导链**：`env.js` 做 Rust / MinGW / Zig cc 引导（`node env.js setup`）；运行前提基础工具链（Python / Node / C-C++）仍由产品 `node start.js --provision --ensure=toolchain --yes` 补齐（`kind: toolchain` 组别名只补缺项，全齐时打印「没有缺项，无需补齐」且不联网）；Zig cc 与运行前提共用同一安装路径，`env.js` 先装好并合并登记 `cc`，产品补齐时按磁盘在场项重写 `active.json`。
+- **这条自检只钉保留的引导链**：`env.js` 做 Rust / MinGW / Zig cc 引导（`node env.js setup`），并把 `active.json` 登记的项目内 python / node / cc bin 前置进门禁与启动器子进程的 PATH（与 Rust 同等待遇，判据同产品侧 compose）；运行前提基础工具链（Python / Node / C-C++）的安装仍由产品 `node start.js --provision --ensure=toolchain --yes` 补齐（`kind: toolchain` 组别名只补缺项，全齐时打印「没有缺项，无需补齐」且不联网）；Zig cc 与运行前提共用同一安装路径，`env.js` 先装好并合并登记 `cc`，产品补齐时按磁盘在场项重写 `active.json`。
 
 ### 依赖哈希检查（`pins.js`）
 
