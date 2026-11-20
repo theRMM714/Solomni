@@ -97,8 +97,9 @@ pub(super) fn watchdog_serve(_parent: u32, _child: u32) -> i32 {
     2
 }
 
-/// 目的：用 `OpenProcess` + `GetExitCodeProcess` 判活。
-pub(super) fn alive(pid: u32) -> bool {
+/// 目的：用 `OpenProcess` + `GetExitCodeProcess` 判活；打不开时按错误码分出「已不在」与「判不了」。
+/// 约束：`ERROR_ACCESS_DENIED` 是唯一算「判不了」的错误码——其余错误说明这个 pid 已经不存在。
+pub(super) fn presence(pid: u32) -> Presence {
     use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
     use windows_sys::Win32::System::Threading::{
         GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -106,12 +107,22 @@ pub(super) fn alive(pid: u32) -> bool {
     unsafe {
         let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if h.is_null() {
-            return false;
+            const ERROR_ACCESS_DENIED: i32 = 5;
+            let err = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            return if err == ERROR_ACCESS_DENIED {
+                Presence::Unknown
+            } else {
+                Presence::Dead
+            };
         }
         let mut code: u32 = 0;
         let ok = GetExitCodeProcess(h, &mut code);
         CloseHandle(h);
-        ok != 0 && code == STILL_ACTIVE as u32
+        if ok != 0 && code == STILL_ACTIVE as u32 {
+            Presence::Live
+        } else {
+            Presence::Dead
+        }
     }
 }
 

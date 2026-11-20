@@ -483,15 +483,18 @@ mod imp {
     /// 目的：一条归属还算不算活着——创建时刻对得上才算，pid 复用了也对不上。
     /// 约束：记录里没有归属证据（created = 0）判死，交清扫回收——留着的代价是死实例永久占住盘符
     ///   （下一次清扫照样认不出它是谁）。读不到创建时刻分两种：进程已不在（判死），
-    ///   或拒绝访问 / 取不到时间（判不了）——后者退回 process_alive 保守留下，宁可漏回收也不误撤
-    ///   正在用的盘符；等它下次能被打开时再判。
+    ///   或拒绝访问 / 取不到时间（判不了）——后者按 `procs::presence` 的三态保守留下，
+    ///   宁可漏回收也不误撤正在用的盘符；等它下次能被打开时再判。
     pub(super) fn user_alive(user: &User) -> bool {
         if user.pid == 0 || user.created == 0 {
             return false;
         }
         match crate::kernel::detail::procs::created(user.pid) {
             Some(created) => created == user.created,
-            None => crate::kernel::detail::confine::process_alive(user.pid),
+            None => !matches!(
+                crate::kernel::detail::procs::presence(user.pid),
+                crate::kernel::detail::procs::Presence::Dead
+            ),
         }
     }
 

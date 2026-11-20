@@ -243,9 +243,32 @@ pub fn watchdog_serve(parent: u32, child: u32) -> i32 {
     platform::watchdog_serve(parent, child)
 }
 
+/// 目的：一个 pid 的存在性结论——「判不了」与「已不在」分开，让各调用方自己定保守方向。
+/// 约束：`Unknown` 只覆盖**权限不足**（句柄打不开、拒绝访问）；进程已退出与 pid 空号都算 `Dead`。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Presence {
+    /// 目的：进程还在。
+    Live,
+    /// 目的：进程已不在（含已退出、pid 空号）。
+    Dead,
+    /// 目的：判不了（打不开句柄）——调用方决定往哪边保守。
+    Unknown,
+}
+
+/// 目的：探一个 pid 现在还在不在，三态如实回。
+/// 约束：0 号 pid 是空号，直接判死，不问平台。
+pub fn presence(pid: u32) -> Presence {
+    if pid == 0 {
+        return Presence::Dead;
+    }
+    platform::presence(pid)
+}
+
 /// 目的：这个 pid 还活着吗（探不到就当没了：账上留一条死记录比误判活着更糟）。
+/// 约束：判不了的按不在处理——本机制只关心「能不能确认它还活着」；要按「判不了就留下」的
+///   方向保守，用 `presence` 自己解释三态。
 pub fn alive(pid: u32) -> bool {
-    platform::alive(pid)
+    presence(pid) == Presence::Live
 }
 
 /// 目的：收掉一个进程（先礼后兵：Unix 先 TERM 再 KILL；Windows 连整棵树）。
