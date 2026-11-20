@@ -148,30 +148,36 @@ node run-tests.js --fence-live
 - 仅允许在一次性 runner、VM 或明确授权的环境使用：它会改本机状态（写目录 ACL、建容器 profile）并创建容器身份。
 - 普通开发机上**不要**开；本地默认安全模式（见 [quality-isolation.md](quality-isolation.md)）。
 
-- **本地门禁的前提：仓库根没有被 Windows 写沙箱打上 Low 完整性标签。**
-- DSH 的 Windows 写沙箱后端（`@deepseek-ai/dsh-sandbox-windows-acl`）在授写权时给授权根设置 `SYSTEM_MANDATORY_LABEL_ACE`（Low、no-write-up、`(OI)(CI)` 可继承）。标签按**映像文件**生效：Windows 的进程完整性 = min(令牌, 映像)。但标签只对**继承到它的对象**生效：根目录打标后新建的子项才继承，已存在的子目录（例如 `target/`）可能没有标签，里面的测试二进制仍以 Medium 运行——所以"仓库根里的 cargo / rustc / 链接器 / 测试二进制 / solomni.exe 全以 Low 运行"并不总成立。判据要按**具体路径**查，不要只看根。它不随会话结束自动撤销，回收要 `SeRelabelPrivilege`。
+- **本地门禁的前提：仓库树没有被 Windows 写沙箱留下完整性标签。** 标签有两条互不相同的失败路径，判据与处置也不同（见下）。
+- DSH 的 Windows 写沙箱后端（`@deepseek-ai/dsh-sandbox-windows-acl`）在授写权时给授权根设置 `SYSTEM_MANDATORY_LABEL_ACE`（Low、no-write-up、`(OI)(CI)` 可继承）。标签按**映像文件**生效：Windows 的进程完整性 = min(令牌, 映像)。但标签只对**继承到它的对象**生效：根目录打标后新建的子项才继承，已存在的子目录（例如 `target/`）可能没有标签，里面的测试二进制仍以 Medium 运行——所以"仓库根里的 cargo / rustc / 链接器 / 测试二进制 / solomni.exe 全以 Low 运行"并不总成立。判据要按**具体路径**查，不要只看根。它不随会话结束自动撤销。
 
-- 带标签时以下失败都是**假失败**，不是产品缺陷：
+- **路径一：Low 标签落在映像文件上 → 宿主进程以 Low 运行。** 以下失败都是**假失败**，不是产品缺陷：
 
 - 写 `%TEMP%`（中完整性）被拒：链接器报 `Cannot create temporary file in …\Temp\: Permission denied`，产品自检报 `建自检目录失败：拒绝访问`（`--doctor` 的 `fs=false`），真机探针只能 env-skip（`run-tests.js`）。
 - 改目录 DACL 被拒（错误码 5）：容器围栏装不上；
 - 读用户目录下的解释器被拒：doctor 报「没有 python」、L4 真工具场景报 python 不可达；
-- 拉子进程 / 抓管道受会话沙箱限制（Node 管道 stdio 被 EPERM、`status` 为 null）：把 stdout 重定向到文件再读（`stdio: ["ignore", fd, "ignore"]`），不要用管道。这一条与 Low 标签是两件事。
+- 拉子进程 / 抓管道受会话沙箱限制（Node 管道 stdio 被 EPERM、`status` 为 null）：把 stdout 重定向到文件再读（`stdio: ["ignore", fd, "ignore"]`），不要用管道。这一条与完整性标签是两件事。
 
-- **判据（唯一）**：对**根和实际要跑的可执行文件**分别跑 `icacls <路径> | findstr Mandatory`；任一处打出 `Mandatory Label\Low Mandatory Level` 就按下面处置。不要只看 `whoami /groups`：shell 可能显示 Medium，决定进程完整性的是映像文件上的标签。
+- **路径二：显式 Medium 及以上 + `NO_WRITE_UP` 落在容器的授写叶子上 → 容器写不进。** AppContainer 令牌恒为 Low，写 Medium 对象被完整性检查挡掉，Win32 给 `1314`（`0x80070522`，`A required privilege is not held by the client` / 「客户端没有所需的特权」）。**宿主进程是 Medium，所以内置文件工具照常能写**——「工具能写、shell 写不进」的不对称就是这条，不是 DACL 授权坏了。产品侧由 `prepare_fence` 授权后读标签如实报 `FencePart::IntegrityLabel`（`src/kernel/detail/confine/windows/acl/label.rs`），不再报成功。
+
+- **判据（两条都要查）**：
+
+1. 路径一：对**根和实际要跑的可执行文件**分别跑 `icacls <路径> | findstr Mandatory`；任一处打出 `Mandatory Label\Low Mandatory Level` 就按下面处置。不要只看 `whoami /groups`：shell 可能显示 Medium，决定进程完整性的是映像文件上的标签。
+2. 路径二：对**容器要写的叶子**（会话私有沙箱、模块 `userdata/`）跑同一条命令；合格标准是**没有 `Mandatory` 行**（未打标签）。打出 `Low` 对容器够用但会触发路径一；打出 `Medium` 及以上且带 `(NW)` 就是挡写。未打标签的对象不做完整性检查——那才是容器能写的正常基线（本机真实 UWP 包目录即无 SACL）。
 
 - **处置，按优先级：**
 
 1. 以「完全权限」启动会话：没有文件写授权就不会打标签，也不留残留（首选）；受限会话里可仅为单次执行申请放宽，批准范围仅限该次，且不替代真机围栏验收。
-2. 提权还原级别（清残留）：`icacls "<根>" /setintegritylevel "(OI)(CI)Medium" /T /C`（需要 `SeRelabelPrivilege`，只能在管理员窗口做）。复查时 `Mandatory` 行**仍在**：这条命令给每个对象写上显式 `Medium` 标签（目录形如 `Mandatory Label\Medium Mandatory Level:(OI)(CI)(NW)`，文件形如 `(I)(NW)`），这是正常终态而不是残留——`Medium` 只挡 Low 进程写 Medium 对象，对 Medium 会话没有影响。合格标准是**不再有 `Low Mandatory Level`**。它也只清已有对象：被写沙箱再次授写的根会重新打上 Low，其下新建的子项（例如 `cargo clean` 后重编的 `solomni.exe`）继续继承——要从源头避免见第 1 条。
-3. 把二进制复制到未打标记的目录再跑（临时绕过）：`TEMP` 不要指进被标记的树，探针落在系统临时目录。
-4. 换一台不受限的机器或交给 CI：跨平台与真机结论以 CI 为准。
+2. 提权还原级别（只清路径一）：`icacls "<根>" /setintegritylevel "(OI)(CI)Medium" /T /C`（只能在管理员窗口做）。复查时 `Mandatory` 行**仍在**：这条命令给每个对象写上显式 `Medium` 标签（目录形如 `Mandatory Label\Medium Mandatory Level:(OI)(CI)(NW)`，文件形如 `(I)(NW)`）。对 Medium 宿主会话没有影响，**但它恰好制造路径二**——所以这条命令不是完整清理，容器授写叶子还要按第 3 条摘掉标签。它也只清已有对象：被写沙箱再次授写的根会重新打上 Low，其下新建的子项（例如 `cargo clean` 后重编的 `solomni.exe`）继续继承——要从源头避免见第 1 条。
+3. 提权摘掉标签（清路径二）：`icacls` **只能设级别、删不掉标签**，`icacls <路径> /remove *S-1-16-8192` 是空操作（它只动 DACL，标签在 SACL）。要调 `SetNamedSecurityInfoW` 带 `LABEL_SECURITY_INFORMATION` 传一份空 SACL（`AclRevision=2, AclSize=8, AceCount=0`），先清产品根再清子树，否则子项会从根重新继承。清完按判据第 2 条复查到没有 `Mandatory` 行。
+4. 把二进制复制到未打标记的目录再跑（临时绕过）：`TEMP` 不要指进被标记的树，探针落在系统临时目录。
+5. 换一台不受限的机器或交给 CI：跨平台与真机结论以 CI 为准。
 
 - 随 DSH 分发的 `diagnose-windows-sandbox-acl` 只修 **ACL 侧**（补 `WRITE_DAC` / `WRITE_OWNER`、删显式 AppContainer 包 ACE），不碰完整性标签；产品的快照 / 还原只带 `DACL_SECURITY_INFORMATION`（标签在 SACL）。标签残留按上面第 1/2/3 条处理。
 
 > 带 Low 标签时的一切围栏 / L4 结论都不可信：doctor 报 `fs=false`、读写 DACL 都 Error 5、python 在工具进程里不可达。
 > 清掉标签后同一条 `node run-tests.js --fence-live` 应全绿、doctor 报 `fs=true net=true tree=true`。
-> 换普通或提权（`High`）的 shell 不解决——映像是 Low，进程照样是 Low。
+> 换普通或提权（`High`）的 shell 不解决路径一——映像是 Low，进程照样是 Low；也不解决路径二——挡写的是对象上的标签，与宿主 shell 的级别无关。
 
 ### 虚拟机档与真机行为（本地 opt-in）
 

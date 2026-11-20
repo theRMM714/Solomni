@@ -437,6 +437,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             }
         }
     }
+    check_integrity_labels(spec, &mut prep);
     free_sid(sid);
     if !written.is_empty() {
         // 如实打印足迹：用户看得见到底动了哪些目录、授给了谁。
@@ -465,6 +466,34 @@ fn is_machine_target(target: &GrantTarget) -> bool {
         && target.rights == RIGHTS_STAT
         && !target.recursive
         && !target.inherit
+}
+
+/// 目的：授权后核对完整性标签——DACL 给对了也不代表容器写得进，高于 Low 的「不许向上写」标签会另行挡写。
+/// 约束：只读、不递归，只看**授写叶子本身**：写一个对象只对它做完整性检查，祖先只被穿过（不算写），
+///   所以祖先带标签不挡叶子；叶子继承到的标签会出现在它自己的 SACL 里，读叶子就够。
+///   命中按必要落点走 FencePrep::fail（裁决 / fail-closed），不静默报成功。
+fn check_integrity_labels(spec: &FenceSpec, prep: &mut FencePrep) {
+    for leaf in &spec.rw {
+        if leaf.as_os_str().is_empty() || missing(leaf) {
+            continue;
+        }
+        match integrity_label(leaf) {
+            Ok(label) => {
+                if let Some(rid) = blocking_integrity_rid(&label) {
+                    let why = format!(
+                        "这个目录带 {} 完整性标签且不许向上写，容器令牌是 Low，DACL 授权再对也写不进",
+                        integrity_name(rid)
+                    );
+                    eprintln!("[围栏] 完整性标签挡写（{}）：{}", leaf.display(), why);
+                    prep.fail(FencePart::IntegrityLabel, leaf.clone(), why);
+                }
+            }
+            Err(e) => {
+                eprintln!("[围栏] 完整性标签读不出来（{}）：{}", leaf.display(), e);
+                prep.fail(FencePart::IntegrityLabel, leaf.clone(), e);
+            }
+        }
+    }
 }
 
 /// 目的：本机能不能强制住容器围栏（**不写任何目录 ACL**）：建容器 profile + 派生容器 SID 是容器能起来的全部前提；
