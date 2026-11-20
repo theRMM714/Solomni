@@ -17,6 +17,23 @@ const RELEASE = process.argv.includes("--release");
 const PROFILE = RELEASE ? "release" : "debug";
 const BIN = path.join(ROOT, "target", PROFILE, EXE);
 
+// 产品运行期间 Ctrl+C 不退出本进程：事件发给控制台里的每个进程，产品自己处理（Web 模式下是「回到 CLI」）；
+// 本进程一退，libuv 的作业对象会连带把子进程直接杀掉（TerminateProcess），产品来不及撤视图盘，
+// Explorer 里就留下一个盘符。构建期与测试期不接管——那时 Ctrl+C 就该立刻停下。
+let held = [];
+function holdConsole() {
+  if (held.length) return;
+  for (const sig of ["SIGINT", "SIGBREAK"]) {
+    const ignore = () => {};
+    process.on(sig, ignore);
+    held.push([sig, ignore]);
+  }
+}
+function releaseConsole() {
+  for (const [sig, ignore] of held) process.removeListener(sig, ignore);
+  held = [];
+}
+
 const log = (m) => console.log("[start] " + m);
 const die = (m) => { console.error("[start] " + m); process.exit(1); };
 
@@ -56,7 +73,13 @@ function run(cargoEnv) {
   log(process.argv.includes("--web")
     ? "starting Web UI (default 127.0.0.1:3081, open http://127.0.0.1:3081)"
     : "starting CLI (type web at the prompt for the Web UI, or start with --web)");
-  const r = spawnSync(argv[0], argv.slice(1), { cwd: ROOT, stdio: "inherit", env: cargoEnv });
+  holdConsole();
+  let r;
+  try {
+    r = spawnSync(argv[0], argv.slice(1), { cwd: ROOT, stdio: "inherit", env: cargoEnv });
+  } finally {
+    releaseConsole();
+  }
   if (r.error) die("run failed: " + r.error.message);
   return r.status === null ? 1 : r.status;
 }
