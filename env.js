@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Solomni 环境层：路径约定（platform/<os>、.tools/）、工具链探测、环境拼装与（征得同意的）项目内安装。
- * 管：工具链在哪、环境怎么拼、缺了怎么补；不管：构建、运行、测试编排（那些在 start.js / run-tests.js）。
+ * 管：工具链在哪、环境怎么拼（Rust / C 链接器与项目内 python/node/cc 的 bin 都前置，宿主 PATH 垫底）、缺了怎么补；
+ *   不管：构建、运行、测试编排（那些在 start.js / run-tests.js）。
  * 为什么单独一层：环境是“换机器 / 换开发环境”时唯一要改的地方；启动器与测试入口共用同一份解析，不再各写一遍。
  * 收敛规则：缓存与产物一律落在项目内 platform/<os>/ 与 .tools/（AGENTS.md）；系统工具链可只读借用，但不写它的 home。
  * 完整性：下载源的校验值与**那条链接成对**放在 links.yaml（`<键>.sha256`），不写死在代码里——
@@ -160,7 +161,6 @@ let profileCache;
 function baseToolchainProfile() {
   if (profileCache !== undefined) return profileCache;
   profileCache = [];
-  if (IS_WIN) return profileCache;
   const file = path.join(ROOT, "dependencies.yaml");
   if (!fs.existsSync(file)) return profileCache;
   for (const raw of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
@@ -176,17 +176,17 @@ function buildCCReady(dep) {
 }
 
 /**
- * 目的：把 env.js 装好的 Zig cc 合并登记进 `.tools/toolchains/active.json`。
- * 为什么：启动报告与 active_roots 只读 active.json；不登记就会把项目内 cc 报成宿主回退，围栏也看不到它的只读根。
- * 约束：保留已有工具条目（python / node）；原子替换；清单版本缺失时不写半份登记；字段已一致时不写盘。
+ * 目的：把装好的工具链合并登记进 `.tools/toolchains/active.json`（与产品 provision 共用同一份登记）。
+ * 为什么：启动报告、围栏只读根与 env.js 注入都只读 active.json；不登记就会把项目内工具报成宿主回退。
+ * 参数：wantedList 形如 [{ id, version, bin: [相对产品根的 bin 目录] }]；缺 id / version / bin 的条目不写。
+ * 约束：保留其它工具条目；原子替换；字段已一致时不写盘。
  */
-function syncBuildCCActive(dep) {
-  if (IS_WIN || !buildCCReady(dep) || !dep.version) return;
+function syncToolchainActive(wantedList) {
+  const wanted = wantedList.filter((w) => w && w.id && w.version && Array.isArray(w.bin) && w.bin.length);
+  if (!wanted.length) return;
   const file = path.join(TOOLS, "toolchains", "active.json");
-  const bin = dep.installRel + "/bin";
-  const wanted = { id: "cc", version: dep.version, bin: [bin], env: {} };
   const profile = baseToolchainProfile().slice();
-  if (!profile.includes("cc")) profile.push("cc");
+  for (const w of wanted) if (!profile.includes(w.id)) profile.push(w.id);
   let current = null;
   try {
     current = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -197,21 +197,24 @@ function syncBuildCCActive(dep) {
   const usable = current && current.target === TARGET_KEY
     && Array.isArray(current.profile) && Array.isArray(current.tools);
   if (usable) {
-    const cc = current.tools.find((t) => t && t.id === "cc");
-    const same = cc && cc.version === wanted.version
-      && Array.isArray(cc.bin) && cc.bin.length === 1 && cc.bin[0] === bin
-      && profile.every((id) => current.profile.includes(id));
+    const same = wanted.every((w) => {
+      const cur = current.tools.find((t) => t && t.id === w.id);
+      return cur && cur.version === w.version
+        && Array.isArray(cur.bin) && cur.bin.length === w.bin.length
+        && w.bin.every((b, i) => cur.bin[i] === b);
+    }) && profile.every((id) => current.profile.includes(id));
     if (same) return;
   }
+  const ids = new Set(wanted.map((w) => w.id));
   const doc = {
     target: TARGET_KEY,
     profile: usable ? current.profile.filter((id) => typeof id === "string") : profile.slice(),
     tools: usable
-      ? current.tools.filter((t) => t && typeof t === "object" && t.id && t.id !== "cc")
+      ? current.tools.filter((t) => t && typeof t === "object" && t.id && !ids.has(t.id))
       : [],
   };
   for (const id of profile) if (!doc.profile.includes(id)) doc.profile.push(id);
-  doc.tools.push(wanted);
+  for (const w of wanted) doc.tools.push({ id: w.id, version: w.version, bin: w.bin, env: {} });
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + ".tmp";
   fs.writeFileSync(tmp, JSON.stringify(doc, null, 2) + "\n");
@@ -221,13 +224,72 @@ function syncBuildCCActive(dep) {
 /** 目的：cc 已可用时登记；由 ensure / ensureProject 在返回前调用（status / --print-env 保持只读）。 */
 function registerBuildCC() {
   const dep = buildCC();
-  if (buildCCReady(dep)) syncBuildCCActive(dep);
+  if (buildCCReady(dep)) {
+    syncToolchainActive([{ id: "cc", version: dep.version, bin: [dep.installRel + "/bin"] }]);
+  }
 }
 
 /** 目的：拼 PATH 时该放项目内 C 工具链的哪个 bin 目录；没装就返回空。 */
 function projectCCBinOnPath() {
   const dep = buildCC();
   return buildCCReady(dep) ? [dep.bin] : [];
+}
+
+/**
+ * 目的：读 `.tools/toolchains/active.json`，合成项目内工具链的 bin 目录、env 与在场事实。
+ * 为什么：python/node/cc 与 Rust 同等待遇——门禁与启动器子进程的 PATH 由这里前置项目内 bin，
+ *   不再依赖宿主 PATH 上恰好有什么。判据与产品侧 `src/entry/toolchains.rs` 的 compose 同一套：
+ *   target 不符不注入；bin 只认相对普通组件（拒绝对路径 / `..` / `.`）且目录在场；env 收非空键值。
+ * 返回：{ bins, env, tools, missing, nodeBin }；active.json 缺失 / 非法 / 目标不符给 null（回退宿主 PATH）。
+ */
+function activeToolchains() {
+  const file = path.join(TOOLS, "toolchains", "active.json");
+  let doc;
+  try {
+    doc = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (e) {
+    return null;
+  }
+  if (!doc || doc.target !== TARGET_KEY || !Array.isArray(doc.tools) || !Array.isArray(doc.profile)) return null;
+  const bins = [];
+  const env = {};
+  const tools = [];
+  const installed = new Set();
+  let nodeBin = null;
+  const nodeExe = IS_WIN ? "node.exe" : "node";
+  for (const t of doc.tools) {
+    if (!t || typeof t.id !== "string" || !Array.isArray(t.bin)) continue;
+    const ok = [];
+    for (const b of t.bin) {
+      if (typeof b !== "string" || !b || path.isAbsolute(b)) continue;
+      const parts = b.split(/[\\/]/);
+      if (parts.some((c) => !c || c === ".." || c === ".")) continue;
+      const dir = path.join(ROOT, ...parts);
+      try {
+        if (fs.statSync(dir).isDirectory()) ok.push(dir);
+      } catch (e) { /* 不在场：与产品侧同口径，跳过该 bin */ }
+    }
+    if (!ok.length) continue;
+    for (const [k, v] of Object.entries(t.env || {})) {
+      if (String(k).trim() && String(v).trim()) env[k] = String(v);
+    }
+    // 项目内 node 可执行（入口 re-exec 用）：只在 node 工具自己的 bin 目录里找。
+    if (t.id === "node" && !nodeBin) {
+      for (const dir of ok) {
+        const p = path.join(dir, nodeExe);
+        try {
+          if (fs.statSync(p).isFile()) { nodeBin = p; break; }
+        } catch (e) { /* 试下一个 bin 目录 */ }
+      }
+    }
+    bins.push(...ok);
+    installed.add(t.id);
+    tools.push({ id: t.id, version: typeof t.version === "string" ? t.version : "" });
+  }
+  const missing = doc.profile.filter((id) => typeof id === "string" && !installed.has(id));
+  const seen = new Set();
+  const dedup = bins.filter((b) => (seen.has(b) ? false : (seen.add(b), true)));
+  return { bins: dedup, env, tools, missing, nodeBin };
 }
 
 /**
@@ -403,11 +465,17 @@ function composeEnv(cargo, source) {
   if (source !== "ambient") {
     env.RUSTUP_HOME = process.env.SOLOMNI_RUSTUP_HOME || P_RUSTUP;
   }
+  // 项目内工具链（python/node/cc）与 Rust 同等待遇：bin 前置、宿主 PATH 垫底如实回退。
+  const tc = activeToolchains();
   const front = [path.join(cargoHome, "bin"), path.dirname(cargo)]
+    .concat(tc ? tc.bins : [])
     .concat(EXTRA_PATH)
     .concat(IS_WIN ? mingwBinOnPath() : projectCCBinOnPath())
     .filter(Boolean);
-  setEnvPath(env, front.concat([envPath(env)].filter(Boolean)).join(path.delimiter));
+  const seen = new Set();
+  const dedup = front.filter((p) => (seen.has(p) ? false : (seen.add(p), true)));
+  setEnvPath(env, dedup.concat([envPath(env)].filter(Boolean)).join(path.delimiter));
+  if (tc) for (const [k, v] of Object.entries(tc.env)) env[k] = v;
   return env;
 }
 
@@ -452,6 +520,7 @@ function resolve(opts) {
     cargo = ac;
     source = "ambient";
   }
+  const tc = activeToolchains();
   return {
     osKey: OS_KEY,
     platformDir: PLATFORM_DIR,
@@ -462,6 +531,11 @@ function resolve(opts) {
     rustupHome: process.env.SOLOMNI_RUSTUP_HOME || P_RUSTUP,
     source,
     extraPath: EXTRA_PATH.slice(),
+    // 项目内 node 可执行（入口 re-exec 用）与工具链在场事实；未登记给 null / 空表。
+    nodeBin: tc ? tc.nodeBin : null,
+    toolchains: tc ? tc.tools : [],
+    toolchainMissing: tc ? tc.missing : [],
+    toolchainEnv: tc ? tc.env : {},
     env: composeEnv(cargo, source),
   };
 }
@@ -1057,6 +1131,15 @@ function status() {
     lines.push("binutils: " + (override && binutilsReady(override) ? override + "（SOLOMNI_MINGW_BIN）" :
       binutilsReady(WINLIBS_BIN) ? WINLIBS_BIN : "(not ready)"));
   }
+  const tc = activeToolchains();
+  if (tc) {
+    const facts = tc.tools.map((t) => t.id + " " + t.version).join("、");
+    lines.push("toolchains: 项目内 " + (facts || "(无在场工具)")
+      + (tc.missing.length ? "；缺 " + tc.missing.join("、") + "（node env.js setup 可补齐）" : ""));
+    lines.push("project node: " + (tc.nodeBin || "(不在场)"));
+  } else {
+    lines.push("toolchains: 未登记（node env.js setup 可补齐 python/node/cc）");
+  }
   if (!r) {
     lines.push("resolved: (not found)");
     lines.push("build: 不可用 —— 项目内与 PATH 上都没有 cargo（补全：node env.js setup）");
@@ -1098,16 +1181,17 @@ function printEnv() {
     rustupHome: r.env.RUSTUP_HOME || r.rustupHome,
     platformDir: r.platformDir, toolsDir: r.toolsDir, mingwBin: r.mingwBin,
     host: p.host, canBuild: p.ok,
+    nodeBin: r.nodeBin, toolchains: r.toolchains, toolchainMissing: r.toolchainMissing,
     // 给「要在终端直接敲 cargo」的人一份完整变量表（机器读；就是解析后的那一份，不另拼一套）。
     // 借用系统 rustup 时 RUSTUP_HOME 如实给系统值（未导出时给 rustup 的默认目录）。
-    env: {
+    env: Object.assign({
       PATH: r.env[pathKey] || "",
       CARGO_HOME: r.env.CARGO_HOME || "",
       RUSTUP_HOME: r.env.RUSTUP_HOME || path.join(require("os").homedir(), ".rustup"),
       TMP: r.env.TMP || "",
       TMPDIR: r.env.TMPDIR || "",
       TEMP: r.env.TEMP || "",
-    },
+    }, r.toolchainEnv),
   }, null, 2));
 }
 

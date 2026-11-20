@@ -2,7 +2,7 @@
  * 环境引导自检：\`env.js\` 的 MinGW（Windows）与 Zig cc（Linux / macOS）引导链。
  * 管：用**真实子进程**跑 \`<临时根>/env.js setup --yes\`，配一个本地 HTTP 服务器按需应答（206 / 不认 Range / 中途断开）；
  *     借用工具的"能构建"门槛（\`probeBuild\`）、POSIX 的"宿主 cc 可用就不下载 / 缺失才自举"、
- *     \`--target=\` 翻译与 \`node env.js\` 的自诊断输出。
+ *     \`--target=\` 翻译、\`node env.js\` 的自诊断输出，以及工具链注入判据（active.json → PATH 前置 / nodeBin / 在场事实）。
  * 不管：Rust 侧 provision 的校验（在 \`provision\` 的单元用例里）、dev.js 的子命令表（在 \`tests/dev-loop.mjs\`）。
  * 判据：见 \`docs/testing/execution-ci.md\` 的「环境引导自检」。dlltool 只在 Windows；Zig 只在 POSIX。
  * 约束：只写 \`target/test-scratch/\`（不入库）；不碰真实 \`.tools/\`、不碰外网、不起 Rust 安装。
@@ -682,6 +682,103 @@ async function runPosixCases() {
 }
 
 /**
+ * 目的：工具链注入自检——active.json 登记的项目内 python/node/cc bin 必须前置进 --print-env 的 PATH，
+ *   判据与产品侧 compose 同一套（target 不符不注入、bin 只认相对普通组件且目录在场、env 收非空键值）。
+ * 为什么机器查：门禁与启动器子进程的工具链解析全经这一份注入；判据漂了就是宿主依赖回潮。
+ * 约束：夹具根只写 target/test-scratch/；假 cargo 让解析走 override，不触网、不装东西。
+ */
+function toolchainInjectionSelfCheck() {
+  const dir = path.join(SCRATCH, "toolchain-injection");
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  fs.copyFileSync(path.join(ROOT, "env.js"), path.join(dir, "env.js"));
+  fs.copyFileSync(path.join(ROOT, "links.yaml"), path.join(dir, "links.yaml"));
+  const os = IS_WIN ? "windows" : IS_MAC ? "macos" : "linux";
+  const arch = process.arch === "x64" ? "x86_64" : process.arch === "arm64" ? "aarch64" : process.arch;
+  const target = os + "-" + arch;
+  const rel = (...segs) => segs.join("/");
+  const pyBinRel = rel(".tools", "toolchains", target, "python", "9.9.9", "pbin");
+  const nodeBinRel = rel(".tools", "toolchains", target, "node", "9.9.9", "nbin");
+  const pyBin = path.join(dir, ...pyBinRel.split("/"));
+  const nodeBin = path.join(dir, ...nodeBinRel.split("/"));
+  fs.mkdirSync(pyBin, { recursive: true });
+  fs.mkdirSync(nodeBin, { recursive: true });
+  const nodeExe = path.join(nodeBin, IS_WIN ? "node.exe" : "node");
+  fs.writeFileSync(nodeExe, "");
+  const ambient = path.join(dir, "ambient-bin");
+  fs.mkdirSync(ambient, { recursive: true });
+  const activeFile = path.join(dir, ".tools", "toolchains", "active.json");
+  fs.mkdirSync(path.dirname(activeFile), { recursive: true });
+  const writeActive = (doc) => fs.writeFileSync(activeFile, JSON.stringify(doc, null, 2));
+  const goodDoc = {
+    target,
+    profile: ["python", "node", "cc"],
+    tools: [
+      { id: "python", version: "9.9.9", bin: [pyBinRel], env: { E2E_TC_VAR: "1", EMPTY: "" } },
+      { id: "node", version: "9.9.9", bin: [nodeBinRel], env: {} },
+      { id: "evil", version: "1", bin: ["../escape", path.join(dir, "abs"), rel(".tools", "gone")], env: {} },
+    ],
+  };
+  // 假 cargo（空文件）：解析走 SOLOMNI_CARGO override，构建探测必然失败但 --print-env 照常输出。
+  const fakeCargo = path.join(dir, "fake-cargo");
+  fs.writeFileSync(fakeCargo, "");
+  const env = { ...process.env, SOLOMNI_CARGO: fakeCargo, PATH: ambient };
+  delete env.SOLOMNI_CARGO_HOME;
+  delete env.SOLOMNI_MINGW_BIN;
+  const printEnv = () => {
+    const r = spawnSync(process.execPath, ["env.js", "--print-env"], { cwd: dir, env, encoding: "utf8", timeout: 60000 });
+    assert.equal(r.status, 0, "--print-env 要正常退出：" + (r.stderr || ""));
+    return JSON.parse(r.stdout);
+  };
+  const pathParts = (j) => j.env.PATH.split(path.delimiter);
+
+  // ① 正常登记：python/node bin 前置（在宿主垫底之前），nodeBin 指向项目内可执行，env 收非空键值。
+  writeActive(goodDoc);
+  let j = printEnv();
+  let parts = pathParts(j);
+  assert.ok(parts.includes(pyBin), "python bin 要进 PATH：" + j.env.PATH);
+  assert.ok(parts.includes(nodeBin), "node bin 要进 PATH：" + j.env.PATH);
+  assert.ok(parts.indexOf(pyBin) < parts.indexOf(ambient), "项目内 bin 要在宿主 PATH 之前");
+  assert.ok(parts.indexOf(nodeBin) < parts.indexOf(ambient), "项目内 bin 要在宿主 PATH 之前");
+  assert.equal(j.nodeBin, nodeExe, "nodeBin 要指向项目内 node 可执行");
+  assert.equal(j.env.E2E_TC_VAR, "1", "工具 env 的非空键值要导出");
+  assert.ok(!("EMPTY" in j.env) || j.env.EMPTY !== "", "空值键不导出");
+  assert.deepEqual(j.toolchains.map((t) => t.id).sort(), ["node", "python"], "在场工具如实列出");
+  assert.deepEqual(j.toolchainMissing, ["cc"], "profile 声明但没装的工具要报缺");
+  // 不安全 bin（相对逃逸 / 绝对路径 / 不在场）一律不进 PATH。
+  assert.ok(!parts.some((p) => p.includes("escape")), "相对逃逸的 bin 不许进 PATH");
+  assert.ok(!parts.includes(path.join(dir, "abs")), "绝对路径的 bin 不许进 PATH");
+  assert.ok(!parts.some((p) => p.endsWith("gone")), "不在场的 bin 目录不许进 PATH");
+
+  // ② target 不符：整份不注入（与产品侧同口径），nodeBin 给 null。
+  writeActive({ ...goodDoc, target: "other-target" });
+  j = printEnv();
+  parts = pathParts(j);
+  assert.ok(!parts.includes(pyBin) && !parts.includes(nodeBin), "target 不符不许注入");
+  assert.equal(j.nodeBin, null, "target 不符 nodeBin 要给 null");
+  assert.deepEqual(j.toolchains, [], "target 不符工具表为空");
+
+  // ③ active.json 不在场：回退宿主 PATH，不报错。
+  fs.rmSync(activeFile);
+  j = printEnv();
+  assert.equal(j.nodeBin, null, "未登记 nodeBin 要给 null");
+  assert.ok(pathParts(j).includes(ambient), "未登记宿主 PATH 照常垫底");
+
+  // ④ 状态入口也要报工具链事实（登记 / 未登记两种形态）。
+  writeActive(goodDoc);
+  let st = spawnSync(process.execPath, ["env.js"], { cwd: dir, env, encoding: "utf8", timeout: 60000 });
+  assert.equal(st.status, 0, "状态要正常退出：" + (st.stderr || ""));
+  assert.match(st.stdout, /^toolchains: 项目内/m, "状态要报项目内工具链");
+  assert.match(st.stdout, /^project node: /m, "状态要报项目内 node");
+  fs.rmSync(activeFile);
+  st = spawnSync(process.execPath, ["env.js"], { cwd: dir, env, encoding: "utf8", timeout: 60000 });
+  assert.match(st.stdout, /^toolchains: 未登记/m, "未登记要如实报并指路 setup");
+
+  fs.rmSync(dir, { recursive: true, force: true });
+  console.log("PASS toolchain-injection");
+}
+
+/**
  * 目的：`node env.js`（只读状态）必须能自诊断——有 host、有构建探测结论；借用不可用时明说"不借用"。
  * 为什么机器查：本机掉进去的正是这条假绿——状态的每一行都"正常"，构建却必然失败（缺链接器）。
  */
@@ -708,11 +805,13 @@ function statusSelfCheck() {
 if (!IS_WIN) {
   // Windows 的 MinGW 用例不适用；POSIX 走 Zig cc 自举用例（本地夹具，不连外网）。
   await runPosixCases();
+  toolchainInjectionSelfCheck();
   statusSelfCheck();
   console.log("ENV-BOOTSTRAP-OK");
 } else {
   fs.rmSync(SCRATCH, { recursive: true, force: true });
   for (const c of CASES) await runCase(c);
+  toolchainInjectionSelfCheck();
   statusSelfCheck();
   console.log("ENV-BOOTSTRAP-OK");
 }
