@@ -6,6 +6,7 @@
 "use strict";
 
 const { mask: rustMask } = require("./rust-mask.js");
+const { parseMechanismsText } = require("./mechanisms.js");
 
 /** 词法归一：统一分隔符、去掉 \\?\ 扩展前缀、收掉 '.' 与 '..' 段。 */
 function normPath(s) {
@@ -197,6 +198,14 @@ function gateParserSelfTest(root) {
     [rustSource.length, (rustSource.match(/\n/g) || []).length],
   );
   eq("rustMask 跳过字符串里的转义引号", rustMask('let s = "a\\"ureq";').includes("ureq"), false);
+  eq(
+    "parseMechanismsText 读「机制: 层号」并跳过注释空行",
+    [...parseMechanismsText("# 表头\n\ndetail/procs: 0\nports: 3  # 端口面\n").tiers],
+    [["detail/procs", 0], ["ports", 3]],
+  );
+  eq("parseMechanismsText 报重复归层", /归了两次层/.test(parseMechanismsText("ports: 1\nports: 2\n").problems.join()), true);
+  eq("parseMechanismsText 报行号与格式", /第 2 行/.test(parseMechanismsText("ports: 1\ndetail/procs: 零\n").problems.join()), true);
+  eq("parseMechanismsText 报机制名不合规", /不合规/.test(parseMechanismsText("Detail/Procs: 0\n").problems.join()), true);
   return bad;
 }
 

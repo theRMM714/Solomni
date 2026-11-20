@@ -1,10 +1,10 @@
 <!-- docs-template: spec -->
 # 分层与依赖方向
 > 定位：依赖方向的唯一权威：三层 + 地基库怎么分、开放架构五条、层号怎么算、单元与子业务怎么分工。
-> 效力：规范｜核对：2026-11-17｜依据：`layers.yaml`、`tests/gates/structure/layers.js`
+> 效力：规范｜核对：2026-11-21｜依据：`layers.yaml`、`docs/kernel/mechanisms.yaml`、`tests/gates/structure/layers.js`、`tests/gates/structure/kernel-mechanisms.js`
 
 ## 适用与判据
-- 改代码前先读本文；归层与依赖方向以本文为准，违规由 T0 结构审查判定（`tests/gates/structure/layers.js`、`dependency.js`），零豁免。
+- 改代码前先读本文；归层与依赖方向以本文为准，违规由 T0 结构审查判定（`tests/gates/structure/layers.js`、`kernel-mechanisms.js`、`dependency.js`），零豁免。
 
 ## 一、三层与地基库
 - 对外表述是**三层 + 一块地基库**：**根**（启动程序与组合根）、**呈现层**、**业务层**；`kernel/` 是**地基库，不是层**；测试层横切，不参与运行时分层。依赖箭头只有一种画法（外层指向内层）：
@@ -65,9 +65,18 @@
 - 合并单元只搬目录、不改子业务内部的分区与 `super::` 语义；单元不写实现，只声明子业务。
 - **状态不参与归层**：层号只回答「能依赖谁」，状态归谁见 [state.md](state.md)。
 
+## 五、kernel 内部的机制分层（第二张表）
+- 地基库内部也是依赖图，不是一坨平的文件：内部按**机制**切，一个机制管一种机制——`contracts/<名>`（共享形状）、`domain/<名>`（纯逻辑）、`detail/<名>`（实现）、`ports`（全项目共享的出站面）。机制对机制**只许严格向下**，同层互依赖一律判红（`docs/kernel/mechanisms.yaml`、`tests/gates/structure/kernel-mechanisms.js`）。
+- 两张表粒度不同，别混：`layers.yaml` 一行一个**能力**（判据是有自己的业务用例 + ≥2 调用方）；`mechanisms.yaml` 一行一个**机制**（没有业务词、没有用户可见后果）。机制不因调用方多就升格成能力（判据见 [boundaries.md](boundaries.md)）。
+- 判据四条与能力层同口径，但环要显式报出：① 盘上每个机制都要在表里归层，表里的机制也要在盘上；② 依赖边只许从高层指向低层；③ 声明层号 == 按现有依赖重算的层号；④ 机制之间不许成环——成环时只报环路径，不拿层号糊过去。
+- 层号同样是事实的缓存：动过一条边就 `node tests/gates/structure/kernel-mechanisms.js --write` 重算全表，把「这个机制为什么抬高」留在 diff 里；不想抬层就消掉那条边。
+- 跨机制的常设例外只有 `ports`（R12）：全项目共享的出站端口面，由各机制实现，不参与「谁依赖谁」的业务推导；它自己只依赖共享形状。
+- 机制表只说机制与层号，不替代逐文件职责：[unit-map.md](../kernel/unit-map.md) 仍由 `tests/gates/structure/map.js` 双向比对。
+
 ## 检查
 - 分层与依赖方向 → T0 结构审查的 apiOnly / apiPorts / domainPorts / foreignImpl / coreCycles / reverse / presentation / layers 判据（`tests/gates/structure/dependency.js`、`tests/gates/structure/layers.js`；清单 `node run-tests.js --list`）。
 - 声明层号 == 重算层号、层号连续、目录全覆盖 → `node tests/gates/structure/layers.js`。
+- kernel 机制：登记双向对账、同层互依赖、声明层号 == 重算层号、机制成环 → `node tests/gates/structure/kernel-mechanisms.js`。
 - 结构图与层表渲染 → `node tests/gates/structure/graph.js`、`node tests/docs-sync.mjs`。
 
 ## 路由

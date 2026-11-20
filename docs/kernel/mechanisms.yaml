@@ -1,0 +1,55 @@
+# kernel 机制分层表——kernel 内部机制分层的唯一权威。
+#
+# 粒度：一个机制 = src/kernel/<分区>/<名字>（分区为 contracts / domain / detail），
+# 共享端口面单列成 ports（R12 的跨层例外面）。这不是能力表：能力在 layers.yaml，
+# 判据是「自己的用例 + ≥2 调用方」；机制没有调用方判据，只答「谁可以依赖谁」。
+#
+# 规则：机制只能依赖由层号严格更低的机制；同层不许互相依赖（同层有边就必然能成环）。
+# 层号是事实的缓存，不是意图：动过机制之间的依赖就重算全表——
+#   node tests/gates/structure/kernel-mechanisms.js --write
+# 不想抬层就只能消掉那条边。成环时门禁先报环路径，不拿层号糊过去。
+#
+# 这份表由 T0 结构审查的 structure/kernel-mechanisms 与磁盘双向比对。
+# 第 0 层
+contracts/fence: 0
+contracts/note: 0
+detail/fs_meta: 0
+detail/lock: 0
+detail/outbound: 0
+detail/procs: 0
+detail/unpack: 0
+domain/jobs: 0
+domain/layout: 0
+domain/name: 0
+domain/path: 0
+domain/platform: 0
+
+# 第 1 层
+contracts/run: 1
+detail/i18n: 1
+detail/locus: 1
+domain/fence: 1
+domain/receipt: 1
+
+# 第 2 层
+contracts/types: 2
+
+# 第 3 层
+ports: 3
+
+# 第 4 层
+detail/file_log: 4
+detail/host_probe: 4
+detail/user_path: 4
+detail/view_drive: 4
+detail/view_drive_lifecycle: 4
+domain/actor: 4
+
+# 第 5 层
+detail/confine: 5
+
+# 第 6 层
+detail/process: 6
+
+# 第 7 层
+detail/session: 7

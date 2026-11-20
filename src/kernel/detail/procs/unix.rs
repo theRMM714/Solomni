@@ -208,16 +208,16 @@ fn kill_group(pid: u32) {
     }
 }
 
-/// 目的：用 `kill -0` 判活。
-pub(super) fn alive(pid: u32) -> bool {
-    Command::new("kill")
-        .arg("-0")
-        .arg(pid.to_string())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+/// 目的：用 `kill -0` 判活；`ESRCH` 是已不在，其余（`EPERM` 等）是判不了。
+/// 约束：直接走 libc 才拿得到错误码（另起 `kill` 进程只能看到退出码），与 `terminate` 同一套信号接口。
+pub(super) fn presence(pid: u32) -> Presence {
+    if unsafe { libc::kill(pid as i32, 0) } == 0 {
+        return Presence::Live;
+    }
+    match std::io::Error::last_os_error().raw_os_error() {
+        Some(libc::ESRCH) => Presence::Dead,
+        _ => Presence::Unknown,
+    }
 }
 
 /// 目的：先按进程组 TERM，再 KILL；不是组长就退回单 pid。

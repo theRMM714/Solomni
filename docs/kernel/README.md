@@ -1,8 +1,8 @@
 # kernel（地基库）
 
 > 定位：没有领域语义的机制库；不是层，是依赖图最底层的地基。
-> 效力：规范｜核对：2026-11-13｜依据：`src/kernel/api.rs`
-> 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
+> 效力：规范｜核对：2026-11-21｜依据：`src/kernel/api.rs`、`docs/kernel/mechanisms.yaml`
+> 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；机制与机制之间的层号在 `docs/kernel/mechanisms.yaml`（门禁 `tests/gates/structure/kernel-mechanisms.js`），分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
@@ -133,7 +133,9 @@
   - Unix：读该 pid 的命令行；含该条 `marker` 才 `terminate`（按进程组先 TERM，最多等 3 秒，再 KILL——守门进程拉起的服务跟着收）；不含就按 pid 已被复用作废条目。
   - 报告三项：`dropped` / `killed` / `alive`；有动静才打印一行。
 - 存活探测与终止：
-  - 存活探测：Unix 用 `kill -0`；Windows 用 `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` + `GetExitCodeProcess`。
+  - 存活探测只有一处实现：`src/kernel/detail/procs.rs` 的 `presence(pid) -> Presence`（`Live` / `Dead` / `Unknown`，`Unknown` 只表示权限不足探不到）。Unix 用 `kill(pid, 0)` 取 `ESRCH` 判死；Windows 用 `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` + `GetExitCodeProcess`，句柄打不开且错误码是 `ERROR_ACCESS_DENIED` 记 `Unknown`。`alive` 只是 `presence == Live` 的简写。
+  - **三态由调用方解释**，因为两边的保守方向相反：进程账要回收，探不到按死处理（账上留死记录比误判活着更糟）；视图盘回收要留住正在用的盘符，探不到按活着处理（宁可漏回收也不误撤映射）。
+  - 归属证据（创建时刻 / 命令行标记）才是身份判据；`presence` 只回答「这个 pid 还在不在」，不用来认亲。
   - 终止：Unix 按进程组先 TERM 再 KILL（不是组长的就发单 pid）；Windows 用 `taskkill /PID <pid> /T /F`。
 - 接线点：
   - QEMU 引擎、SMB helper、virtiofsd 在起进程处走 `guard` → `spawn` → `attach`，并在 `ProcessBook` 里 `record`（带 `created` / `guard_note`）；销毁时 `forget`。
@@ -146,6 +148,14 @@
 - **唯一实例**：组合根创建一个 `FileLog` 并注入协调业务与呈现层；测试用 `NoopLog`。
 - **按运行分文件**：每次运行在根目录 `logs/` 下按时间戳建一个 `.log` 文件；`logs/` 不入库。一次运行的因果链在同一份文件里，排查不跨文件拼。
 - **关键节点必须埋点**：通道降级、HTTP 失败、会话动作失败、装配失败、工具执行异常（端口在 `src/kernel/ports.rs`，机制在 `src/kernel/detail/file_log.rs`）。出问题时**看日志定因**，不靠推理猜。
+
+## 五、机制分层（`mechanisms.yaml`）
+
+- 按**机制**归层，一个机制管一种机制：`contracts/<名>`（共享形状）、`domain/<名>`（纯逻辑）、`detail/<名>`（实现）、`ports`（全项目共享的出站面）。表在 `docs/kernel/mechanisms.yaml`，判据在 `tests/gates/structure/kernel-mechanisms.js`。
+- 三条硬判：盘上每个机制都要归层、表里的机制也要在盘上；依赖边只许指向严格更低层（**同层互依赖判红**）；声明层号 == 按现有依赖重算的层号。第四条是环：机制之间成环时只报环路径，不拿层号糊过去。
+- 当前 28 个机制、8 层，读到顶的顺序是 `detail/confine`（5）→ `detail/process`（6）→ `detail/session`（7）：越往上越是装配别人的机制。
+- 动过一条边就 `node tests/gates/structure/kernel-mechanisms.js --write` 重算全表；不想抬层就消掉那条边。层级理由写在 diff 里，不在散文里。
+- 粒度区别：能力（`layers.yaml`）按业务用例切、可以互相调用对方的 `api`；机制（本表）没有业务语义、只许单向。机制不因调用方多就升格成能力。
 
 ## 改动本单元时必须同步
 
@@ -167,3 +177,4 @@
 | 文件 | 内容 |
 | --- | --- |
 | [`unit-map.md`](unit-map.md) | 逐文件职责（T0 与磁盘双向比对） |
+| [`mechanisms.yaml`](mechanisms.yaml) | 机制与机制之间的层号（T0 双向比对，动过边就跑 `--write`） |
