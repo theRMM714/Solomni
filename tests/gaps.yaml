@@ -58,6 +58,36 @@
   blocked_by: |
     本期不做（用户决定）；macOS 另有平台机制缺口，Windows guest 需要完整的新机制。
 
+- id: vm.guest-root-image-shared-artifact
+  scope: global
+  level: T4
+  why: |
+    两平台的 guest 虚拟根目前是两条独立链路：Linux 走 `guest-rootfs` 多步构造（cloud 镜像 tar → sfdisk/dd
+    切 rootfs.ext4 → debugfs rdump → 按需装通用内核（cloud 内核没编 CONFIG_NET_9P）→ 装 qemu-guest-agent →
+    清 fstab 与 remount 单元、补 9p/virtio 模块 → 生成 initrd → unshare -r + mke2fs -d 打包）；Windows 走
+    `guest-disk` 单文件直下 Debian cloud qcow2，首启靠 cloud-init 联网装 qemu-guest-agent，再在维护启动里
+    刷 apt 装 python3 / cifs-utils / C-C++ 与固定版本 Node，逐个自证后写回 `guest.yaml`。
+    后果：Windows 首启依赖网络与 cloud-init 时序（失败即整档不可用）；两份产物无法互相验证；镜像基线按
+    2.3 GB 构造、used 约 800 MB，其中完整 Debian 里产品用不到的部分约 300–500 MB。`debian:13-slim`
+    （78 包，无内核 / 无 init 本体 / 无 systemd / 无 qemu-guest-agent）能减掉这部分，但它本身当不了 VM 根，
+    只能作构建输入。
+  how: |
+    1) 去 cloud-init：仍以 cloud 镜像为构建输入，chroot 装 qemu-guest-agent 并 disable cloud-init 单元，
+       首启不再联网、不再走 cloud-init 时序。这一步与换 slim 正交，收益最大。
+    2) CI 构建一次、两平台消费同一产物：Linux runner 产出 rootfs.ext4 + 通用内核 + initrd 并发布为发布资产；
+       Windows 侧改用 `-kernel` 直启消费同一份，删除 `guest-disk` 单文件 qcow2 与"首启装 qga + 刷 apt 装
+       运行时"整条链；`dependencies.yaml` 的 probe 与 `docs/provision/README.md` 的基线同次改。
+    3) 换 `debian:13-slim` 作构建输入单独度量：内核、init、qga、cifs-utils、python3、node 仍要装，只减少
+       base 里用不到的部分（预期镜像 2.3 GB → 约 1.9 GB，非量级变化），先量后定，不先换基线。
+    4) Windows 本地不造 ext4（无 unshare / mke2fs，且发行版是纯 Rust 不装环境），构造只在 CI 的 Linux 侧。
+  accept: |
+    两平台用同一份 guest 产物（同一 sha256）起 VM；Windows 首启不联网、不跑 cloud-init，guest 内 python3 /
+    node / gcc / cifs-utils 均可用并自证写回 `guest.yaml`；镜像与 used 体积有量化对比；`node run-tests.js`
+    全绿，guest 相关 T4 探针在 Linux 与 Windows 上都通过。
+  blocked_by: |
+    需要 CI 产物发布通道与 Windows 侧 `-kernel` 直启路径（当前均未实现）；slim 的净收益要等内核 / init /
+    qga 补齐后实测。
+
 - id: release.binary-distribution
   scope: global
   level: T5
