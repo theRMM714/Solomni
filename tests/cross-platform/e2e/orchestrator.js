@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * L4 端到端编排（跨平台）：清隔离根 → 起假供应商 → 起 Web → 跑断言驱动 → 收尾杀掉自己起的进程。
+ * L4 端到端编排（跨平台）：清隔离根 → 起假供应商 → 起 Web → 跑断言驱动 → 收尾杀掉自己起的进程、
+ * 回收视图盘与围栏痕迹。
  * 夹具根 = 本目录下的 root/：真实 .home/ 与 session/ 全程不被触碰。
  * 成功打印固定标记 E2E-OK（见 docs/testing/execution-ci.md）。
  */
@@ -241,6 +242,60 @@ async function stopGraceful(child) {
   }
 }
 
+/** 视图盘回收（仅 Windows）：核心在收尾总被硬杀（Windows 上 kill 即 TerminateProcess，控制台清理钩子
+ * 不跑），盘符映射与 .home/view-drive.json 登记必然留下；--fence-clean 只回收 ACL 与 profile，不碰视图盘。
+ * 这里按「映射目标 == 夹具根」精确回收：不判 pid 活性（pid 复用会让活性判断不可靠），指向其它根的盘符
+ * （别的实例的视图盘）一律不碰。返回是否收干净（false = 有残留，改判 e2e）。 */
+function reclaimFixtureViewDrive() {
+  if (process.platform !== "win32") return true;
+  const { spawnSync } = require("child_process");
+  const norm = (p) => path.win32.normalize(String(p)).replace(/[\\/]+$/, "").toLowerCase();
+  const fixtureTarget = norm(FIXTURE);
+  // subst 枚举行形如 "Z:\: => D:\...\root"；只认这个形状，别的行不猜。
+  const list = () => {
+    const r = spawnSync("subst", [], { encoding: "utf8", timeout: 10000 });
+    if (r.error || r.status !== 0) return null;
+    const out = [];
+    for (const line of (r.stdout || "").split(/\r?\n/)) {
+      const m = line.match(/^([A-Za-z]):\\:\s*=>\s*(.+)$/);
+      if (m) out.push({ letter: m[1].toUpperCase() + ":", target: m[2].trim() });
+    }
+    return out;
+  };
+  const mine = (maps) => maps.filter((m) => norm(m.target) === fixtureTarget);
+  const before = list();
+  if (!before) {
+    console.error("[e2e] 视图盘回收：subst 枚举失败，无法确认盘符状态");
+    return false;
+  }
+  for (const m of mine(before)) {
+    const r = spawnSync("subst", [m.letter, "/d"], { encoding: "utf8", timeout: 10000 });
+    if (r.error || r.status !== 0) {
+      const why = ((r.stderr || r.stdout || "").trim() || (r.error && r.error.message) || "退出码 " + r.status);
+      console.error("[e2e] 视图盘回收：撤 " + m.letter + " 失败：" + why);
+    }
+  }
+  const after = list();
+  const remaining = after ? mine(after) : mine(before);
+  // 登记只删映射已撤掉的条目；撤不掉的留着，让下次启动清扫还有证据可循。
+  const record = path.join(FIXTURE, ".home", "view-drive.json");
+  try {
+    const entries = JSON.parse(fs.readFileSync(record, "utf8"));
+    const kept = entries.filter((e) => remaining.some((m) => m.letter === String(e.letter).toUpperCase()));
+    if (kept.length === 0) fs.rmSync(record, { force: true });
+    else fs.writeFileSync(record, JSON.stringify(kept, null, 2) + "\n");
+  } catch (e) {
+    if (e.code !== "ENOENT") console.error("[e2e] 视图盘登记清理失败：" + e.message);
+  }
+  if (remaining.length > 0) {
+    console.error("[e2e] 视图盘回收不干净：" + remaining.map((m) => m.letter).join("、") + " 仍指向夹具根");
+    return false;
+  }
+  const removed = mine(before).map((m) => m.letter);
+  console.log("[e2e] 视图盘回收：" + (removed.length ? "撤掉 " + removed.join("、") + "，登记已清" : "无残留"));
+  return true;
+}
+
 async function main() {
   if (!fs.existsSync(BIN)) {
     console.error("[e2e] 找不到二进制（" + path.relative(PRODUCT_ROOT, BIN) + "）：先 cargo build");
@@ -378,6 +433,8 @@ async function main() {
     await sleep(300);
     // 夹具的 .vm 是软链（真机跑才建）：收尾只删链本身，仓库那份不动。
     dropFixtureVm();
+    // 视图盘回收排在围栏回收前：两项都必定执行，失败各自改判，不互相跳过。
+    const viewClean = reclaimFixtureViewDrive();
     // 收尾回收：这次真机跑（--fence-live）写过目录 ACL、建过容器 profile，必须按台账撤干净，
     // 再按名字前缀扫掉整族遗留 profile。CI 机器是一次性的，但本地跑同样不许留痕。
     // 回收失败要改判 e2e：留下没人管的痕迹和断言失败同样是失败——真机残留过一条只有
@@ -391,6 +448,10 @@ async function main() {
     console.log("[e2e] 围栏回收（退出码 " + cleaned.status + "）：" + say);
     if (cleaned.status !== 0) {
       console.error("E2E-FAILED（围栏回收未完成：本机留下了没人管的痕迹）");
+      return 1;
+    }
+    if (!viewClean) {
+      console.error("E2E-FAILED（视图盘回收未完成：本机留下了没人管的盘符映射）");
       return 1;
     }
   }
