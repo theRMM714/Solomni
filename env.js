@@ -1102,7 +1102,7 @@ async function ensureBuildCC(yes) {
     const env = Object.assign({}, process.env);
     setEnvPath(env, dep.bin + path.delimiter + (envPath(env) || ""));
     if (probeHostCC({ env }).ok) {
-      syncBuildCCActive(dep);
+      registerBuildCC();
       return true;
     }
     log("项目内 Zig cc 在场但不能构建，重新安装");
@@ -1114,7 +1114,7 @@ async function ensureBuildCC(yes) {
     return false;
   }
   installBuildCC(dep);
-  syncBuildCCActive(dep);
+  registerBuildCC();
   return buildCCReady(dep);
 }
 
