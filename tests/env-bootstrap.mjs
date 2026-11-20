@@ -1000,8 +1000,11 @@ function reexecSelfCheck() {
     tools: [{ id: "node", version: "9.9.9", bin: [binRel], env: {} }],
   }));
   fs.writeFileSync(path.join(dir, "entry.cjs"), 'require("./env.js").reexecProjectNode();\nconsole.log(process.execPath);\n');
+  // 守卫标记由调用方环境可能带进来（门禁经 run-tests.js re-exec 后跑本自检）；夹具自己控制它。
+  const baseEnv = { ...process.env };
+  delete baseEnv.SOLOMNI_NODE_REEXEC;
   const runEntry = (extraEnv) => spawnSync(process.execPath, [path.join(dir, "entry.cjs")], {
-    cwd: dir, env: { ...process.env, ...(extraEnv || {}) }, encoding: "utf8", timeout: 60000,
+    cwd: dir, env: { ...baseEnv, ...(extraEnv || {}) }, encoding: "utf8", timeout: 60000,
   });
 
   // ① 项目内 node 在场：入口改由它跑。
