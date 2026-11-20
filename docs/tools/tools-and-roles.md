@@ -136,15 +136,14 @@ roles:
   - 超时与用户停止没有命令退出码（`src/capabilities/tools/domain/shell.rs` 的 `exit_code` 从说明里取，取不到就是 None），只用状态行表达，不伪造 124 / 143。
   - cwd 用本环境写法：本机档 = 视图盘打开时的视图写法（**视图写法目前只用于 shell（cwd == 私有沙箱）的容器 cwd 与程序名；模块工具沿用宿主 cwd，不参与视图盘收敛**）（如 `S:\session\<工作>\<agent>`，盘符按实例分配，别假设恒为 Z:；宿主路径由路径码翻译；`SOLOMNI_VIEW_DRIVE=0` 或视图盘不可用时回退宿主路径）；虚拟机档 = guest 内路径（路径桥，宿主 `D:\a\b` → `/solomni-host/d/a/b`，见 `src/capabilities/vm/domain/paths.rs`；UNC 外部根在 guest 里是 `/solomni-host/unc/<server>/<share>/…`，模型照此写法给路径即可）。
 - 回放只读结构化事实：`src/capabilities/conversation/session/domain/tools.rs` 的 `last_shell` 取最后一条带命令的 shell 工具行的 `shell` 事实（cwd / 耗时毫秒 / 围栏准备 / 退出码 / 状态 / 是否截断），不解析回执正文；没有结构化事实的行跳过。派生快照标 `historical`。
-- **scope 是本次调用的 reach 请求，profile 才是用户上限**：sandbox 只给 private + 基础 / 项目工具链只读（net=false）；external 在 sandbox 上再加 shared-read / module-read / host-read / network。requested 不是 granted 子集 = 拒绝，不弹卡。
+- **scope 是本次调用的 reach 请求，profile 才是用户上限**：sandbox 只给 private + 基础 / 项目工具链只读（net=false）；external 在 sandbox 上再加 module-read / host-read / network（共享区主副本不进容器：读 / 改先 `work_pull`）。requested 不是 granted 子集 = 拒绝，不弹卡。
 - profile：view 不发放；workspace sandbox allow、external deny；external sandbox allow、external ask；all_reach sandbox / external allow。sandbox 与 external 都要求围栏真强制（`allow_degraded=false`），装不上拒绝。
 - 围栏：shell 的 `for_call` 另加 `runtime_roots`（项目内基础工具链 + 本 agent 模块运行包根）；这些是**可信执行基座**，Windows 上一次性授给**本产品的能力 SID**（`S-1-15-3-*`，见 [kernel/README.md](../kernel/README.md) 的「授权主体分两个」）、按机器级归属记台账（`scope=machine`、无归属，启动对账不回收）、不参与按次授权。shell 的容器 cwd 走视图盘（产品根映射成实例独占的盘符；模块工具仍用宿主 cwd），PowerShell 逐级解析只经过产品根内的层级，产品根之外的祖先不授；产品根上的一条 `(OI)(CI)` 读属性是机器级授权——授给同一个能力 SID、跨会话复用（对账时不回收），不再每次会话重写。其余可达范围按 `会话 + agent + 根集合` 派生容器身份，授权按会话持有（调用结束不释放，会话改配/删除时回收）；一次性调用（构建/独立模块工具）各自唯一租约、跑完即撤。首次真写 ACL 前 stderr 提示一次（解释器目录 / 祖先链 / 受保护根 / 可信基座），完成后一条汇总；回执行文不变（仍只报总秒数）。
-- **外部工作区的授权粒度**：`create_session` 的 `workspace_grant` 只在给了外部工作区（`workspace` 非空）时生效，取值 `none` / `session` / `workspace`（缺省 `session`，见 `src/capabilities/workspace/domain/workspace.rs` 的 `WorkspaceGrant`）；子会话沿父会话继承、不能自选，没给外部工作区时非 `session` 粒度直接拒绝（`src/capabilities/work/service/create.rs` 的 `resolve_workspace_binding`）。三态差别是容器里的 shell / 模块工具能不能读这个外部根、以及每个新会话第一次用时要等多久：`none` 容器与内置文件工具都读不到（共享区仍可写）；`session` 每次会话首次使用时按容器写 ACL、结束递归撤，代价是整棵子树的授权等待（见上一条「围栏」）；`workspace` 一次性把外部根只读授给本产品能力 SID（机器级、ACE 常驻），之后各会话零写零等待，撤销用 `solomni --fence-revoke <该目录的绝对路径>`（见 [docs/entry/README.md](../entry/README.md)）；虚拟机档的隔离是挂载边界（`machine_ro_tree` 以只读挂载兑现），宿主不写 ACL，所以 `workspace` 粒度在那里不产生一次性授权成本。向导按 `GET /api/workspace-cost?path=<绝对路径>` 报「N 个文件、M 个目录；首次按工作区授权约 X–Y 秒（一次性）」（数不完时写「至少」，估算失败如实提示且不挡创建；`src/presentation/web/assets/app/features/wizard/`）。
 - 平台：Linux / macOS 用 sh；Windows 用 PowerShell（pwsh 7 优先、5.1 回退；`pwsh` 是 Microsoft Store 的应用执行别名——0 字节重解析点——时不选它，那种文件在围栏里起不来，判据在 `src/kernel/detail/process/windows.rs` 的 `exe_fact`；`-File` 临时 .ps1，UTF-8 BOM；脚本先设 `$ErrorActionPreference = 'Stop'`，未处理的 cmdlet 错误中止并以非 0 结束，要容错就在脚本里显式 `-ErrorAction SilentlyContinue` 或 try/catch）；VM Linux guest 用 /bin/sh，helper 按 `timeout_secs` 杀树；host 停止经 QGA 给 helper 发 SIGTERM，立即杀整棵进程树。guest 通道产出与本机同形的正文与说明：超时 / 信号由 `src/capabilities/vm/detail/guest_helper.rs` 的机器标记（`solomni-guest-fence: timeout` / `solomni-guest-fence: signal`）表达、用户停止按宿主取消旗判定，由通道翻译成 `shell.timeout` / `shell.signal` 说明；cwd·耗时由工具层在通道返回后统一补（`src/capabilities/conversation/session/service/engine/tools.rs`）。围栏拒绝（helper 的 `solomni-guest-fence:` 诊断）没有结束说明——命令没有执行。
 - 围栏基线：本机 Linux / macOS 的只读运行基线**只对 `/dev/null` 例外给写权**（标准重定向要能丢弃输出，`>/dev/null` / `2>/dev/null` 不能用 EACCES 把脚本带偏）；guest helper 同一口径。其余 `/dev` 节点不放行（`src/kernel/detail/confine/linux.rs` 的 `WRITABLE_BASELINE`、`src/kernel/detail/confine/macos.rs` 的 profile、`src/capabilities/vm/detail/guest_helper.rs` 的基线）。
 - 状态：最近一次 shell 在会话状态栏出 chip（运行中；结束后按 `ShellLive.status` 分退出码 / 超时 / 停止 / 信号 + 耗时），点开看命令、scope、cwd、状态、退出码、耗时与回执预览；数据来自 `SessionView.shell`，不替代转录里的工具行。重建 / 回放的会话按转录派生（`historical`）：cwd 与耗时只读工具行的结构化事实，起止时间不伪造。
-- 角色：executor / solo / core_proxy。代理的 shell 只做验收性核对，不替执行席产出；共享区只读，仍没有 work_pull / work_commit / work_push / work_sync / work_diff / work_reset / 模块工具。
-- 路径：shell 不接受模型给的 path 参数，**不适用** §七 的路径寻址表；边界是围栏。共享区内容先 work_pull 进沙箱；external 只额外读主副本，不写。
+- 角色：executor / solo / core_proxy。代理的 shell 只做验收性核对，不替执行席产出；共享区主副本不进它的容器（要读先 work_pull），仍没有 work_pull / work_commit / work_push / work_sync / work_diff / work_reset / 模块工具。
+- 路径：shell 不接受模型给的 path 参数，**不适用** §七 的路径寻址表；边界是围栏。共享区内容先 work_pull 进沙箱；external 额外给模块目录、主机只读根与联网，共享区主副本不进容器。
 - 隐私：shell 不注入模块 secrets，不声明 module-write；模块 userdata 不可写。
 
 ## 六、核心操作必须走工具调用
@@ -173,7 +172,7 @@ roles:
 
 | 占位符 | 运行时替换为 | 可达范围 |
 | --- | --- | --- |
-| `{{work_root}}` | 本次工作共享区根：默认 `session/<工作名>/work/`，根会话绑定外部工作区时是该目录的绝对路径（**主副本**）；虚拟机档由路径桥渲染成 guest 内写法（内部布局落在会话树挂载点下，外部绑定时落在外部工作区挂载点下） | 本工作内的 agent（**只读**：agent 会话里写它会被工具层拒绝，写入走 `work_commit` + `work_push`） |
+| `{{work_root}}` | 本次工作共享区根：默认 `session/<工作名>/work/`，根会话绑定外部工作区时是该目录的绝对路径（**主副本**）；虚拟机档由路径桥渲染成 guest 内写法（内部布局落在会话树挂载点下，外部绑定时落在外部工作区挂载点下） | 本工作内 agent 的内置文件工具（**只读**：写会被拒绝，写入走 `work_commit` + `work_push`）；容器里的进程（shell / 模块工具）读不到它，要就地处理先 `work_pull` |
 | `{{sandbox_root}}` | 该 agent 私有沙箱 `session/<工作名>/<agent实例名>/` 的绝对路径 | 只有它自己（**永远全权**） |
 | `{{module_roots}}` | 该 agent 使用的模块目录的绝对路径（一行一个） | 只有使用该模块的 agent（**对 agent 的内置文件工具永久只读，含 `userdata/`**：agent 只有使用权；模块工具 / 服务进程可写自己的 `userdata/`） |
 

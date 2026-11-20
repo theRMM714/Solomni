@@ -1,7 +1,6 @@
 //! 目的：环境事实的派生规则——把调用方已取好的事实算成权限面、沙箱清单、围栏、进程环境与工具链根。
 //! 管：`member`（一席的围栏 / 运行路径 / 工具链根 / 模块注入项）、`sandboxes`（每个 agent 的沙箱）、
-//!   `permissions`（权限链）、`workspace_grant`（共享区授权粒度）、`network_allowed` 与
-//!   `host_read_roots`（全局策略派生的网络开关与主机只读根）。
+//!   `permissions`（权限链）、`network_allowed` 与 `host_read_roots`（全局策略派生的网络开关与主机只读根）。
 //! 不管：取事实（history / workspace / registry / 清单在 `runtime`）、落盘、启停 guest 与工具进程。
 //! 联动：`runtime/service/env.rs` 取好事实后转调这里；行为与错误文案必须逐字一致。
 
@@ -14,7 +13,7 @@ use crate::capabilities::catalog::modules::api::Roster;
 use crate::capabilities::catalog::packages::api::PackagePlan;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::AppSettings;
-use crate::capabilities::conversation::session::api::{SessionMeta, WorkspaceGrant};
+use crate::capabilities::conversation::session::api::SessionMeta;
 use crate::capabilities::permission::api::PermissionSet;
 use crate::capabilities::workspace::api::{Sandbox, Sandboxes, WorkRoots};
 use crate::kernel::api::{FenceSpec, Tier};
@@ -64,8 +63,6 @@ pub struct SandboxesFacts<'a> {
     pub roster: &'a Roster,
     /// 目的：虚拟机档给 guest↔宿主的路径翻译器。
     pub codec: Option<Arc<dyn PathCodec>>,
-    /// 目的：外部工作区的授权粒度。
-    pub grant: WorkspaceGrant,
 }
 
 /// 目的：派生一席的围栏、运行路径、工具链根与模块注入项；纯函数，不取事实、不落盘。
@@ -93,7 +90,7 @@ pub fn member(facts: &MemberFacts<'_>) -> MemberEnv {
 }
 
 /// 目的：按 agent 名单组装沙箱清单；模块目录只对使用它的 agent 可达。
-/// 参数：`facts` = 已取好的工作名、名单、工作区根、模块清单、路径翻译器与授权粒度；
+/// 参数：`facts` = 已取好的工作名、名单、工作区根、模块清单与路径翻译器；
 ///   `permissions` = 某个 agent 的生效权限（协作主会话的发言席要按子会话 narrowing 取）。
 /// 错误：工作区没给出某个 agent 的私有根时逐字报「工作区没有给出 agent {名} 的沙箱路径」。
 pub fn sandboxes(
@@ -128,7 +125,6 @@ pub fn sandboxes(
             modules_with_userdata,
             permissions: permissions(&a.name)?,
             path_codec: facts.codec.clone(),
-            shared_grant: facts.grant,
         });
     }
     Ok(Sandboxes {
@@ -140,7 +136,6 @@ pub fn sandboxes(
 }
 
 /// 目的：一条会话的生效权限：全局默认 → 根 ceiling → 每层 narrowing → 全局硬黑名单。
-/// 约束：授权粒度为 `none` 时共享区读写一并收紧为 none（内置读工具与 shell 拿到同一份事实）。
 pub fn permissions(chain: &[SessionMeta], app: &AppSettings) -> Result<PermissionSet, String> {
     let root = chain.first().ok_or_else(|| "会话权限链为空".to_string())?;
     let mut out = app.sandbox.defaults.to_permission_set();
@@ -152,11 +147,7 @@ pub fn permissions(chain: &[SessionMeta], app: &AppSettings) -> Result<Permissio
             out = out.apply_narrowing(layer)?;
         }
     }
-    let out = out.with_hard_deny(&app.sandbox.policy.deny);
-    if workspace_grant(chain) == WorkspaceGrant::None {
-        return Ok(out.without_shared());
-    }
-    Ok(out)
+    Ok(out.with_hard_deny(&app.sandbox.policy.deny))
 }
 
 /// 目的：这条配置是否放行出站网络（工具 / guest / 常驻服务 / 构建都看它）。
@@ -176,13 +167,4 @@ pub fn host_read_roots(app: &AppSettings) -> Vec<PathBuf> {
         .filter(|p| !p.is_empty())
         .map(PathBuf::from)
         .collect()
-}
-
-/// 目的：这条会话生效的外部工作区授权粒度：链上最近一份绑定说了算，没有绑定就是 `session` 缺省。
-pub fn workspace_grant(chain: &[SessionMeta]) -> WorkspaceGrant {
-    chain
-        .iter()
-        .rev()
-        .find_map(|m| m.workspace.as_ref().map(|b| b.grant))
-        .unwrap_or(WorkspaceGrant::Session)
 }

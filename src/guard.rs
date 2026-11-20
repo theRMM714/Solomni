@@ -4,10 +4,9 @@
 //! 联动：由工具进程按 `--fence-run` 拉起、由 `procs::watch` 按 `--proc-watchdog` 拉起；`src/main.rs` 负责分发。
 
 use crate::kernel::api::layout;
-/// 目的：`--fence-revoke` 的两行用法（单参路径 / 双参 SID+路径）；返回 2 让调用方直接收场。
+/// 目的：`--fence-revoke` 的用法（SID + 路径）；返回 2 让调用方直接收场。
 fn revoke_usage() -> i32 {
-    eprintln!("用法：solomni --fence-revoke <路径>（撤该外部工作区的机器级只读授权）");
-    eprintln!("      solomni --fence-revoke <SID> <路径>（按 SID 撤一条授权，台账外残留也照撤）");
+    eprintln!("用法：solomni --fence-revoke <SID> <路径>（按 SID 撤一条授权，台账外残留也照撤）");
     2
 }
 
@@ -83,20 +82,8 @@ pub fn fence_grant(args: &[String], root: &std::path::Path) -> Option<i32> {
             }
         };
         match (first, second) {
-            (Some(raw), None) => {
-                // 单参数是路径；SID 属于旧语义的「<SID> <路径>」双参数形式，缺路径按用法错处理，不能当路径吃掉。
-                if raw.starts_with("S-1-") {
-                    return Some(revoke_usage());
-                }
-                // 规范化只用于同一性判定；路径不在了交给内核如实报错（那是失败，不是用法错）。
-                let path = std::path::Path::new(&raw)
-                    .canonicalize()
-                    .unwrap_or_else(|_| std::path::PathBuf::from(&raw));
-                return Some(revoke_machine_report(
-                    crate::kernel::api::revoke_machine_grants(&home, &path),
-                    &path,
-                ));
-            }
+            // 单参数不再是合法形式：撤授权必须指明是哪个 SID 的哪一条（工作区不再有机器级预授）。
+            (Some(_), None) => return Some(revoke_usage()),
             (Some(sid), Some(path)) => {
                 return Some(report(confine::revoke_grant(
                     &home,
@@ -219,25 +206,6 @@ fn report(done: Result<String, String>) -> i32 {
         }
         Err(e) => {
             eprintln!("[围栏] {}", e);
-            1
-        }
-    }
-}
-
-/// 目的：单参 `--fence-revoke` 的结果呈现：撤到几条、没记录、失败，各有各的话（0 = 成功，1 = 失败）。
-/// 约束：没记录也算成功（幂等）；失败必须如实进 stderr 并给非零。
-pub(crate) fn revoke_machine_report(done: Result<usize, String>, path: &std::path::Path) -> i32 {
-    match done {
-        Ok(0) => {
-            println!("[围栏] 没有机器级授权记录：{}", path.display());
-            0
-        }
-        Ok(n) => {
-            println!("[围栏] 撤销 {} 条机器级授权：{}", n, path.display());
-            0
-        }
-        Err(e) => {
-            eprintln!("[围栏] 撤销未完成：{}", e);
             1
         }
     }

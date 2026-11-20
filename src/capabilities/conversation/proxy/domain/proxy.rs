@@ -356,9 +356,6 @@ pub struct NewSession {
     /// 目的：外部工作区根（仅人经呈现层：产品目录之外的绝对路径）；None = 产品内布局。
     /// 约束：子会话不接受（沿父会话继承），核心代理的建会话工具也不暴露这个字段。
     pub workspace: Option<String>,
-    /// 目的：外部工作区的围栏授权粒度（仅人经呈现层，与 workspace 同生共死）；None = 缺省（逐会话授/撤）。
-    /// 约束：与 workspace 一样不暴露给核心代理，子会话沿父会话继承。
-    pub workspace_grant: Option<String>,
 }
 
 /// 目的：一条要转达的消息（元信息 + 正文）——正文由工具层从参数取，宿主据此真正投递。
@@ -559,7 +556,6 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
         permission,
         // 工作区只由人经呈现层给；核心代理建的子会话整段继承父会话。
         workspace: None,
-        workspace_grant: None,
     })
 }
 

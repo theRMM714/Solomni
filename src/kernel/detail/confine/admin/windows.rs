@@ -4,7 +4,6 @@
 //! 联动：由 `src/kernel/detail/confine/admin.rs` 按平台选中。
 
 use super::super::ledger::{Ledger, ReconcileReport};
-use super::super::prep::{CalibrationReport, MachineGrantReport};
 use super::super::windows;
 use crate::kernel::api::FenceSpec;
 use std::path::Path;
@@ -94,35 +93,7 @@ pub(super) fn retire_legacy_machine_grants(
     windows::retire_legacy_machine_grants(home, out)
 }
 
-/// 目的：给外部工作区授机器级一次性只读。
-pub(super) fn ensure_workspace_grant(
-    home: &Path,
-    root: &Path,
-) -> Result<MachineGrantReport, String> {
-    windows::ensure_workspace_grant(home, root)
-}
-
-/// 目的：撤掉外部工作区的机器级只读授权。
-pub(super) fn revoke_machine_grants(home: &Path, path: &Path) -> Result<usize, String> {
-    windows::revoke_machine_grants(home, path)
-}
-
 /// 目的：全量回收。
 pub(super) fn clean_all(home: &Path) -> Result<String, String> {
     windows::clean_all(home)
-}
-
-/// 目的：建树、真写一次机器级只读 ACL、计时、撤权。
-pub(super) fn calibrate_machine_grant(home: &Path) -> Result<CalibrationReport, String> {
-    let c = windows::calibrate_machine_grant(home)?;
-    Ok(CalibrationReport {
-        path: c.path,
-        objects: c.objects,
-        ms: c.ms,
-    })
-}
-
-/// 目的：删掉标定用的合成树。
-pub(super) fn remove_calibration_tree(path: &Path) -> Result<(), String> {
-    windows::remove_calibration_tree(path)
 }

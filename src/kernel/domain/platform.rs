@@ -3,7 +3,7 @@
 //! 不管：任何 IO；任何平台机制实现（各机制的 `<os>.rs` 后端负责）；业务策略。
 //! 联动：由 `src/kernel/api.rs` 重导出；机制后端与各能力的 detail 按需引用。
 
-use std::path::{Component, Path, Prefix};
+use std::path::Path;
 
 /// 目的：可执行文件的后缀（Windows 为 `.exe`，其余平台为空）。
 pub const EXE_SUFFIX: &str = if cfg!(windows) { ".exe" } else { "" };
@@ -44,31 +44,6 @@ pub fn host_path_eq(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// 目的：路径是不是 UNC 网络共享（Windows 前缀；其余平台恒 false）。
-/// 约束：按路径前缀判定，不能先 canonicalize（扩展路径 `\\?\C:\` 会被误判成 UNC）。
-pub fn is_network_share(path: &Path) -> bool {
-    matches!(
-        path.components().next(),
-        Some(Component::Prefix(p))
-            if matches!(p.kind(), Prefix::UNC(..) | Prefix::VerbatimUNC(..))
-    )
-}
-
-/// 目的：按卷分组时的卷键（Windows 盘符或前缀；其余平台没有这个维度）。
-/// 约束：canonicalize 之后的扩展写法（`\\?\D:\`）要归一成 `D:`，否则同一个卷会记成两个键。
-pub fn volume_key(path: &Path) -> Option<String> {
-    if !cfg!(windows) {
-        return None;
-    }
-    match path.components().next() {
-        Some(Component::Prefix(p)) => match p.kind() {
-            Prefix::VerbatimDisk(d) => Some(format!("{}:", d as char)),
-            _ => Some(p.as_os_str().to_string_lossy().into_owned()),
-        },
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -86,16 +61,5 @@ mod tests {
         assert!(host_path_eq(a, b), "同一写法必须相等");
         let mixed = Path::new("root/alpha");
         assert_eq!(cfg!(windows), host_path_eq(a, mixed));
-    }
-
-    #[test]
-    fn volume_key_and_network_share_only_exist_on_windows_prefixes() {
-        if cfg!(windows) {
-            assert_eq!(volume_key(Path::new("D:/data")), Some("D:".to_string()));
-            assert!(is_network_share(Path::new("//server/share")));
-        } else {
-            assert_eq!(volume_key(Path::new("/data")), None);
-            assert!(!is_network_share(Path::new("/data")));
-        }
     }
 }

@@ -20,7 +20,7 @@
 | `src/capabilities/turn/turn/service/state.rs` | 状态本体与访问器：在世表、运行态、创建占位、裁决队表、每会话 shell 槽 |
 | `src/capabilities/turn/turn/service/session.rs` | 会话本体 `Turn`：持状态、要交给 `session` 装配的能力面（`session_ports`）（`workspace` / `vm` / `residents` / `secrets` / `tools` / `systools` / `prompt` / `llm` / `log` / `compact` / `base_roots`）与重建要的四处事实（`root` / `history` / `modules` / `packages`），转发全部状态访问器，给 `running_refusal` 的唯一实现 |
 | `src/capabilities/turn/turn/service/admit.rs` | 会话准入：`admit`（落盘 + 进在世表）、`ensure_session`（不在世就重建再放入）、`dispatch_gate`（终态会话拒绝派发）、`resume_subtree`（把停掉的子树拉回运行态） |
-| `src/capabilities/turn/turn/service/facts.rs` | 一席事实的取用：沙箱清单、权限面、外部工作区授权粒度、`env::api::member` 算出的工具环境（`MemberEnvParts`）、上下文预算与 `Turn::build_single`（取完事实后交 `session` 装配）；只经各能力 `api` 取，不持端口 |
+| `src/capabilities/turn/turn/service/facts.rs` | 一席事实的取用：沙箱清单、权限面、`env::api::member` 算出的工具环境（`MemberEnvParts`）、上下文预算与 `Turn::build_single`（取完事实后交 `session` 装配）；只经各能力 `api` 取，不持端口 |
 | `src/capabilities/turn/turn/service/rebuild.rs` | 从落盘重建会话：外部工作区绑定复检（`workspace_binding_of`）、三形态重建（`rebuild_session`）、转录回放（`replay_reads` / `replay_dialogue`）与代理会话装配（`build_proxy`） |
 | `src/capabilities/turn/turn/service/turn.rs` | 单 agent 的回合收发：工具形态刷新、生成前准备、节点派发准备、取放会话的两段（`take_single` / `take_collab`）、裁决作废、派发目标、事件收编与落盘手柄、改需求的重建请求 |
 | `src/capabilities/turn/turn/service/flow.rs` | 协作流水线推进与协作动作：链推进、节点派发与子会话、协作步（`take_*` / `put_*`）、裁决卡动作与改需求 |

@@ -15,7 +15,7 @@ pub enum CallScope {
     None,
     /// 目的：只碰私有沙箱。
     Sandbox,
-    /// 目的：沙箱之外再加共享区 / 模块目录 / 主机只读根 / 网络（私有沙箱仍保留）。
+    /// 目的：沙箱之外再加模块目录 / 主机只读根 / 网络（私有沙箱仍保留；共享区主副本不进容器）。
     External,
 }
 
@@ -36,7 +36,6 @@ impl CallScope {
             CallScope::Sandbox => ReachSet::from([Reach::Private]),
             CallScope::External => ReachSet::from([
                 Reach::Private,
-                Reach::SharedRead,
                 Reach::ModuleRead,
                 Reach::HostRead,
                 Reach::Network,

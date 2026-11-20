@@ -17,4 +17,4 @@
 | `src/capabilities/system/detail/setup/path/rules.rs` | PATH 分段规则与可移植的 unset / undo 逻辑（Windows 后端与跨平台单测共用） |
 | `src/capabilities/system/detail/setup/shim.rs` | 便携入口模块门面：只有 Windows 有实现（`src/capabilities/system/detail/setup/shim/windows.rs`），其余平台为空模块 |
 | `src/capabilities/system/detail/setup/shim/windows.rs` | 便携入口 `bin/solomni.cmd` 的生成与核对：固定 `--root <绝对根>`、参数透传、内容相同不重写 |
-| `src/capabilities/system/detail/setup/fence.rs` | 围栏机器级预授：`fence` 模式的分步进度、成功后退役旧的全应用包机器级授权、`fence-calibrate` 的合成树标定与成本样本回写、状态缺项清单、首次授权后的自动预授；无 ACL 的平台由平台事实如实降级 |
+| `src/capabilities/system/detail/setup/fence.rs` | 围栏机器级预授：`fence` 模式的分步进度、成功后退役旧的全应用包机器级授权、状态缺项清单、首次授权后的自动预授；无 ACL 的平台由平台事实如实降级 |

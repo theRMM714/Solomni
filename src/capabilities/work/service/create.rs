@@ -9,31 +9,6 @@ use crate::capabilities::conversation::session::api::{
     flat_modules, guest_lease_for, guest_scope, subtree_of, tree_meta, work_root,
 };
 use crate::capabilities::vm::api::GuestStop;
-use crate::kernel::api::layout;
-
-/// 目的：这次创建要不要在宿主上付一次性的机器级只读授权。
-/// 约束：只有本机档写宿主 ACL；虚拟机档的隔离是挂载边界（`machine_ro_tree` 以只读挂载兑现），不写宿主 ACL。
-fn pays_host_grant(meta: &SessionMeta) -> bool {
-    let once = meta
-        .workspace
-        .as_ref()
-        .is_some_and(|b| b.grant == crate::capabilities::workspace::api::WorkspaceGrant::Workspace);
-    once && meta.exec.tier == crate::kernel::api::Tier::Host
-}
-
-/// 目的：workspace 粒度的一次性机器级只读授权——只有本机档付；会话已落盘，甩到后台，创建保持毫秒级。
-/// 约束：虚拟机档是挂载边界，宿主不写 ACL；`root` 是产品根（授权状态落在它的 `.home` 下）。
-fn pay_workspace_grant(root: &std::path::Path, meta: &SessionMeta) {
-    if !pays_host_grant(meta) {
-        return;
-    }
-    if let Some(binding) = meta.workspace.as_ref() {
-        crate::capabilities::workspace::api::ensure_in_background(
-            &layout::home(root),
-            &binding.root,
-        );
-    }
-}
 
 impl Work {
     /// 目的：工作名的缺省与唯一化（命名策略在 `session`；这里只提供"存在吗"）。
@@ -129,33 +104,24 @@ impl Work {
         &self,
         probe: &dyn HostProbe,
         raw: Option<&std::path::Path>,
-        grant: Option<crate::capabilities::conversation::session::api::WorkspaceGrant>,
         tier: crate::kernel::api::Tier,
         parent: Option<&str>,
     ) -> Result<Option<crate::capabilities::conversation::session::api::WorkspaceBinding>, String>
     {
         if let Some(p) = parent {
-            if raw.is_some() || grant.is_some() {
-                return Err("子会话不能自选工作区或授权粒度：沿父会话继承".to_string());
+            if raw.is_some() {
+                return Err("子会话不能自选工作区：沿父会话继承".to_string());
             }
             let top = work_root(self.history.as_ref(), p)?;
             return Ok(self.history.meta(&top)?.workspace);
         }
         let Some(raw) = raw else {
-            if grant.is_some_and(|g| {
-                g != crate::capabilities::conversation::session::api::WorkspaceGrant::Session
-            }) {
-                return Err("没有指定外部工作区时，工作区授权粒度无意义".to_string());
-            }
             return Ok(None);
         };
         let product = crate::capabilities::workspace::api::product_root(&self.root, probe);
         let root = crate::capabilities::workspace::api::resolve(raw, tier, &product, probe)?;
         Ok(Some(
-            crate::capabilities::conversation::session::api::WorkspaceBinding {
-                root,
-                grant: grant.unwrap_or_default(),
-            },
+            crate::capabilities::conversation::session::api::WorkspaceBinding { root },
         ))
     }
 
@@ -178,13 +144,8 @@ impl Work {
         {
             return Err(format!("工作名已存在：{}", spec.name));
         }
-        let workspace = self.resolve_workspace_binding(
-            host,
-            spec.workspace.as_deref(),
-            spec.workspace_grant,
-            spec.tier,
-            parent,
-        )?;
+        let workspace =
+            self.resolve_workspace_binding(host, spec.workspace.as_deref(), spec.tier, parent)?;
         // **代理形态**（第三人形态）：没有名单、没有需求——用户选这一形态就是**授予全权**。
         // 它不是一个 agent 工作，装配与其余形态没有共同点，所以在这里就地分岔、不往下走。
         if spec.mode == WorkMode::Proxy {
@@ -615,8 +576,6 @@ impl Work {
             return Err(e);
         }
         self.record_events(&name, &mut events);
-        // 只有本机档 + workspace 粒度才付机器级只读授权（一次性成本）：会话已经落盘，甩到后台慢慢付，创建本身保持毫秒级。
-        pay_workspace_grant(&self.root, &meta);
         // 事实（开场转录 + 提示）随结果交出：核心不持有事件台，发布是 api 层的职责。
         Ok(WorkOpened {
             sid: name,
@@ -804,106 +763,5 @@ impl Work {
         turn.put(name.to_string(), Session::Single(session));
         self.record_events(name, &mut events);
         Ok((name.to_string(), events))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn meta(
-        tier: crate::kernel::api::Tier,
-        grant: crate::capabilities::workspace::api::WorkspaceGrant,
-    ) -> SessionMeta {
-        SessionMeta {
-            name: "w".to_string(),
-            mode: WorkMode::Single,
-            delegate: false,
-            modules: Vec::new(),
-            task: None,
-            ts: 0,
-            agents: Vec::new(),
-            exec: crate::kernel::api::ExecSpec {
-                tier,
-                ..Default::default()
-            },
-            workspace: Some(
-                crate::capabilities::conversation::session::api::WorkspaceBinding {
-                    root: std::path::PathBuf::from("C:\\ws"),
-                    grant,
-                },
-            ),
-            sandbox: Default::default(),
-            thinking: None,
-            parent: None,
-            node: None,
-            delegation: None,
-            context_freshness: false,
-            run: Default::default(),
-        }
-    }
-
-    /// 目的：workspace 粒度只有本机档付宿主的机器级授权；虚拟机档与其它粒度都不付。
-    #[test]
-    fn host_grant_is_paid_only_by_the_host_tier_with_workspace_grant() {
-        use crate::capabilities::workspace::api::WorkspaceGrant;
-        use crate::kernel::api::Tier;
-        assert!(pays_host_grant(&meta(
-            Tier::Host,
-            WorkspaceGrant::Workspace
-        )));
-        assert!(!pays_host_grant(&meta(Tier::Vm, WorkspaceGrant::Workspace)));
-        assert!(!pays_host_grant(&meta(Tier::Host, WorkspaceGrant::Session)));
-        assert!(!pays_host_grant(&meta(Tier::Host, WorkspaceGrant::None)));
-    }
-
-    /// 目的：只有该付的那一种会把授权甩到后台，并把状态写进产品根的 `.home`；其它组合不留痕迹。
-    /// 约束：只在非 Windows 跑（内核桩返回零报告，不写真实 ACL）。
-    #[cfg(not(windows))]
-    #[test]
-    fn workspace_grant_is_paid_in_the_background_under_the_product_home() {
-        use crate::capabilities::workspace::api::WorkspaceGrant;
-        use crate::kernel::api::Tier;
-        let base = std::env::temp_dir().join(format!(
-            "solomni-pay-grant-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
-        let root = base.join("product");
-        let ws = base.join("ws");
-        std::fs::create_dir_all(&root).expect("建产品根");
-        std::fs::create_dir_all(&ws).expect("建工作区");
-        std::fs::write(ws.join("a.txt"), b"a").expect("写一个对象");
-        // 不付的两种：虚拟机档（挂载边界）、没有外部工作区。
-        pay_workspace_grant(&root, &meta(Tier::Vm, WorkspaceGrant::Workspace));
-        let mut detached = meta(Tier::Host, WorkspaceGrant::Workspace);
-        detached.workspace = None;
-        pay_workspace_grant(&root, &detached);
-        assert!(!layout::home(&root).exists(), "不该付的组合不留痕迹");
-        // 该付的一种：状态文件由后台线程写出来（内核桩：0 写、0 复用）。
-        let mut pay = meta(Tier::Host, WorkspaceGrant::Workspace);
-        pay.workspace.as_mut().expect("有绑定").root = ws.clone();
-        pay_workspace_grant(&root, &pay);
-        let state = layout::home(&root).join("workspace-grants.json");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while !state.is_file() && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        assert!(state.is_file(), "后台授权要写状态：{}", state.display());
-        let v: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&state).expect("读状态")).expect("JSON");
-        let key = ws
-            .canonicalize()
-            .expect("规范化工作区")
-            .display()
-            .to_string();
-        assert_eq!(
-            v["roots"][key.as_str()]["mode"],
-            serde_json::json!("workspace")
-        );
-        let _ = std::fs::remove_dir_all(&base);
     }
 }

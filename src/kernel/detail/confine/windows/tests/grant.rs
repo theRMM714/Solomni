@@ -26,7 +26,6 @@ fn internet_client_capability_is_only_built_when_net_is_true() {
 fn container_profile_follows_the_session_and_reach() {
     let _fence = crate::tests::fence_acl_guard();
     let a = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "甲".to_string(),
         lease: "w".to_string(),
         private: PathBuf::new(),
@@ -126,7 +125,6 @@ fn grant_targets_include_parents_with_stat_only() {
         .join("modules")
         .join("m0");
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -202,7 +200,6 @@ fn shell_cwd_gets_every_ancestor_stat_only() {
         .join("b")
         .join("work");
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe".to_string(),
         lease: String::new(),
         private: private.clone(),
@@ -257,7 +254,6 @@ fn grant_targets_keep_module_read_only_and_cwd_read_only() {
     let module = base.join("modules").join("m0");
     let userdata = module.join("userdata");
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -306,7 +302,6 @@ fn grants_are_written_when_the_environment_allows_it() {
         return;
     }
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -352,7 +347,6 @@ fn fence_steps_only_cover_real_acl_writes() {
         return;
     }
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe-steps".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -416,7 +410,6 @@ fn trusted_base_grants_are_machine_scope() {
         return;
     }
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe-base".to_string(),
         lease: String::new(),
         private: private.clone(),
@@ -469,7 +462,6 @@ fn revoke_removes_the_container_ace_from_the_given_roots() {
         return;
     }
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -515,7 +507,6 @@ fn read_only_grants_write_ro_aces_and_revoke_removes_them() {
         return;
     }
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe-ro".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -564,7 +555,6 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
     std::fs::create_dir_all(&leaf).expect("建探针目录");
     std::fs::write(leaf.join("data.txt"), "x").expect("写探针文件");
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe-leftover".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -673,7 +663,6 @@ fn object_ace_is_covered_by_the_write_then_equal_check() {
     let file = base.join("data.txt");
     std::fs::write(&file, b"x").expect("写探针文件");
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe-object-ace".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -758,7 +747,6 @@ fn acl_write_flavours_are_probed_for_scope_and_readability() {
     let pre = base.join("preflight");
     std::fs::create_dir_all(&pre).expect("建预检目录");
     let pre_spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "acl-probe-preflight".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -789,7 +777,6 @@ fn acl_write_flavours_are_probed_for_scope_and_readability() {
         std::fs::write(tree.join("a.txt"), b"a").expect("写根文件");
         std::fs::write(tree.join("sub").join("b.txt"), b"b").expect("写子文件");
         let spec = FenceSpec {
-            machine_ro_tree: Vec::new(),
             agent: format!("acl-probe-{tag}"),
             lease: String::new(),
             private: PathBuf::new(),
@@ -1071,7 +1058,6 @@ fn clean_keeps_machine_scope_unless_full_cleanup_is_requested() {
         return;
     }
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe-clean".to_string(),
         lease: String::new(),
         private: PathBuf::new(),

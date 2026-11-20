@@ -90,7 +90,7 @@ function fillShellCard(body, sh) {
     body.appendChild(cmd);
   }
   body.appendChild(popoverRow('scope', sh.scope === 'external'
-    ? 'external（共享区 / 模块目录 / 主机只读根 / 网络）'
+    ? 'external（模块目录 / 主机只读根 / 网络）'
     : 'sandbox（只碰私有沙箱）'));
   body.appendChild(popoverRow('cwd', sh.cwd || '—'));
   body.appendChild(popoverRow('状态', shellStatusLabel(sh, running)));

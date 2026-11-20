@@ -1,5 +1,5 @@
-//! 目的：turn 侧取「一席事实」的地方——沙箱清单、权限链与生效权限、外部工作区授权粒度、工具环境事实（含 `env::api::member`）、上下文预算，都从这里从端口读齐。
-//! 管：`sandboxes` / `permission_chain` / `permissions_for` / `workspace_grant` / `permission_for_agent` 的取数与派生，
+//! 目的：turn 侧取「一席事实」的地方——沙箱清单、权限链与生效权限、工具环境事实（含 `env::api::member`）、上下文预算，都从这里从端口读齐。
+//! 管：`sandboxes` / `permission_chain` / `permissions_for` / `permission_for_agent` 的取数与派生，
 //!   `member_env` 的入参收口与逐字段拷贝、`member_face` 的薄入口、`build_single` 的整场装配，`context_budget` 的窗口与阈值。
 //! 不管：装配规则（在 `session::service::assemble`）、登记处里有什么（`registry`）、会话怎么落盘（`service/admit.rs`）。
 //! 联动：`runtime/service/env.rs` 的薄入口转调这里；`service/rebuild.rs` 重建会话时也取这里的事实。
@@ -11,7 +11,7 @@ use crate::capabilities::catalog::packages::api::PackagePlan;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::conversation::session::api::{
-    AgentSession, MemberSpec, SessionEvent, SessionMeta, SingleSpec, WorkspaceGrant, work_root_of,
+    AgentSession, MemberSpec, SessionEvent, SessionMeta, SingleSpec, work_root_of,
 };
 use crate::capabilities::llm::api::Channel;
 #[cfg(test)]
@@ -23,7 +23,7 @@ use crate::capabilities::workspace::api::{Sandbox, Sandboxes};
 use crate::kernel::api::Tier;
 use crate::kernel::ports::HostProbe;
 
-/// 目的：一席事实的取用：沙箱、权限、工作区授权、工具面入参与上下文预算。
+/// 目的：一席事实的取用：沙箱、权限、工具面入参与上下文预算。
 impl Turn {
     /// 目的：组装本次工作的沙箱清单：工作根来自 Workspace 端口，模块目录来自清单。
     /// 参数：`registry` = 登记处；`probe` = 宿主探针（虚拟机档据此给 guest↔宿主翻译器）。
@@ -42,8 +42,6 @@ impl Turn {
         // 虚拟机档给 guest↔宿主翻译器：system 工具跑在宿主侧，但收模型给的 guest 写法；
         // **同一份**也交给 @ 改写（挂载点、命令装配与用户引用用同一座桥，三处不会各给一种写法）。
         let path_codec = crate::capabilities::vm::api::path_codec_of(&self.root, probe, &meta.exec);
-        // 外部工作区的授权粒度：只影响围栏派生（共享区是否要每会话重授），不改权限面。
-        let shared_grant = self.workspace_grant(meta)?;
         // 逐席组装的规则在 env：模块目录只对使用它的 agent 可达，私有根缺一份就如实报缺哪个 agent。
         crate::capabilities::turn::env::api::sandboxes(
             &crate::capabilities::turn::env::api::SandboxesFacts {
@@ -53,7 +51,6 @@ impl Turn {
                 roots: &roots,
                 roster,
                 codec: path_codec,
-                grant: shared_grant,
             },
             &|agent| self.permission_for_agent(registry, meta, agent),
         )
@@ -79,16 +76,9 @@ impl Turn {
         meta: &SessionMeta,
     ) -> Result<PermissionSet, String> {
         let chain = self.permission_chain(meta)?;
-        // 合成规则（默认 → 根 ceiling → 每层 narrowing → 硬黑名单 → 无共享区授权就收紧）在 env。
+        // 合成规则（默认 → 根 ceiling → 每层 narrowing → 硬黑名单）在 env。
         let app = registry.app();
         crate::capabilities::turn::env::api::permissions(&chain, app)
-    }
-
-    /// 目的：这条会话生效的外部工作区授权粒度：沿权限链找最近一份绑定（创建时只写在根），
-    ///   没有绑定就是 `session` 缺省。
-    pub(crate) fn workspace_grant(&self, meta: &SessionMeta) -> Result<WorkspaceGrant, String> {
-        let chain = self.permission_chain(meta)?;
-        Ok(crate::capabilities::turn::env::api::workspace_grant(&chain))
     }
 
     /// 目的：某个 agent 的生效权限：协作主会话里的发言席优先取它自己的子会话 narrowing。

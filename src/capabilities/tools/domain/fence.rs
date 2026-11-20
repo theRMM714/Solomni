@@ -5,28 +5,8 @@
 
 use crate::capabilities::permission::api::{Reach, ReachSet};
 use crate::capabilities::workspace::api::Sandbox;
-use crate::capabilities::workspace::api::WorkspaceGrant;
 use crate::kernel::api::{Ask, FenceBlocked, FenceSpec};
 use std::path::{Path, PathBuf};
-
-/// 目的：把共享区按会话的**工作区授权粒度**派生成围栏落点（三态）。
-/// 约束：`read_shared` 为假（读决定 / reach / 路径范围任一不放行）时**完全不派生**；
-///   白名单范围（Paths）仍要挂根——允许的子树要能读，具体能读哪棵仍由权限集在工具层判。
-fn push_shared(
-    sb: &Sandbox,
-    read_shared: bool,
-    ro_tree: &mut Vec<PathBuf>,
-    machine_ro_tree: &mut Vec<PathBuf>,
-) {
-    if !read_shared {
-        return;
-    }
-    match sb.shared_grant {
-        WorkspaceGrant::Session => ro_tree.push(sb.shared.clone()),
-        WorkspaceGrant::Workspace => machine_ro_tree.push(sb.shared.clone()),
-        WorkspaceGrant::None => {}
-    }
-}
 
 impl FenceSpec {
     /// 目的：为**一次调用**派生围栏；base 是同一会话的 for_session 结果（提供主机只读根与全局断网事实）。
@@ -39,7 +19,6 @@ impl FenceSpec {
     ) -> FenceSpec {
         let mut rw: Vec<PathBuf> = Vec::new();
         let mut ro_tree: Vec<PathBuf> = Vec::new();
-        let mut machine_ro_tree: Vec<PathBuf> = Vec::new();
         let mut ro: Vec<PathBuf> = Vec::new();
         if sb.permissions.may_write_granted(reach, Reach::Private) {
             rw.push(sb.private.clone());
@@ -51,12 +30,6 @@ impl FenceSpec {
         {
             rw.push(root.join("userdata"));
         }
-        push_shared(
-            sb,
-            sb.permissions.may_read_shared() && reach.contains(Reach::SharedRead),
-            &mut ro_tree,
-            &mut machine_ro_tree,
-        );
         if sb.permissions.may_read(Reach::ModuleRead) && reach.contains(Reach::ModuleRead) {
             ro_tree.extend(sb.modules.values().cloned());
         }
@@ -69,15 +42,12 @@ impl FenceSpec {
         ro.dedup();
         ro_tree.sort();
         ro_tree.dedup();
-        machine_ro_tree.sort();
-        machine_ro_tree.dedup();
         FenceSpec {
             agent: sb.agent.clone(),
             lease: sb.session.clone(),
             rw,
             ro,
             ro_tree,
-            machine_ro_tree,
             private: sb.private.clone(),
             cwd: PathBuf::new(),
             net: reach.contains(Reach::Network) && base.net,
@@ -88,7 +58,6 @@ impl FenceSpec {
     pub fn for_session(sb: &Sandbox, host_roots: &[PathBuf], global_net: bool) -> FenceSpec {
         let mut rw: Vec<PathBuf> = Vec::new();
         let mut ro_tree: Vec<PathBuf> = Vec::new();
-        let mut machine_ro_tree: Vec<PathBuf> = Vec::new();
         let mut ro: Vec<PathBuf> = Vec::new();
         if sb.permissions.may_write(Reach::Private) {
             rw.push(sb.private.clone());
@@ -100,12 +69,6 @@ impl FenceSpec {
                 }
             }
         }
-        push_shared(
-            sb,
-            sb.permissions.may_read_shared(),
-            &mut ro_tree,
-            &mut machine_ro_tree,
-        );
         if sb.permissions.may_read(Reach::ModuleRead) {
             ro_tree.extend(sb.modules.values().cloned());
         }
@@ -118,15 +81,12 @@ impl FenceSpec {
         ro.dedup();
         ro_tree.sort();
         ro_tree.dedup();
-        machine_ro_tree.sort();
-        machine_ro_tree.dedup();
         FenceSpec {
             agent: sb.agent.clone(),
             lease: sb.session.clone(),
             rw,
             ro,
             ro_tree,
-            machine_ro_tree,
             private: sb.private.clone(),
             cwd: PathBuf::new(),
             net: global_net && sb.permissions.allows_network(),
@@ -161,7 +121,6 @@ impl FenceSpec {
             rw,
             ro: Vec::new(),
             ro_tree: vec![module_root.to_path_buf()],
-            machine_ro_tree: Vec::new(),
             private,
             cwd: module_root.to_path_buf(),
             net: false,

@@ -37,8 +37,6 @@ pub struct WorkSpec {
     /// 目的：外部工作区根（已规范化的绝对路径）；None = 产品内 `session/<名>/work`。
     /// 约束：只有顶层会话能指定；子会话沿父链继承同一个根。
     pub workspace: Option<std::path::PathBuf>,
-    /// 目的：外部工作区的围栏授权粒度（仅顶层且给了 workspace 时有效；缺省 = 逐会话授/撤）。
-    pub workspace_grant: Option<crate::capabilities::conversation::session::api::WorkspaceGrant>,
 }
 
 /// 目的：创建工作后的结果：最终实例名（重名已加尾号）、名单，以及**开场事实**。
@@ -418,7 +416,7 @@ pub(crate) struct ReadyActivation {
 /// 目的：工作方法族与两段结果（实现在 `service`，入站面只经这里取）。
 pub(crate) use crate::capabilities::work::service::{PreparedEdit, PreparedWork, Work};
 
-/// 目的：建代理会话要落进 `meta` 的那几项——工作名、授予时刻、档位、guest 规格、授权粒度与外部工作区。
+/// 目的：建代理会话要落进 `meta` 的那几项——工作名、授予时刻、档位、guest 规格与外部工作区。
 pub(crate) struct ProxySeed<'a> {
     /// 目的：新会话的工作名，也是它在会话目录里的落盘名。
     pub(crate) name: &'a str,
@@ -428,7 +426,7 @@ pub(crate) struct ProxySeed<'a> {
     pub(crate) tier: Tier,
     /// 目的：虚拟机档要用的 guest 规格（空串按没给）。
     pub(crate) guest: Option<&'a str>,
-    /// 目的：权威档的授权粒度。
+    /// 目的：权威档的权限档位。
     pub(crate) profile: crate::capabilities::permission::api::ProfileId,
     /// 目的：外部工作区绑定（已解析，不是原始路径）。
     pub(crate) workspace: Option<crate::capabilities::conversation::session::api::WorkspaceBinding>,

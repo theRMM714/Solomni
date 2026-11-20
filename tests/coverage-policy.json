@@ -54,9 +54,9 @@
     },
     {
       "file": "src/capabilities/system/detail/setup/fence.rs",
-      "from": 14,
-      "to": 37,
-      "reason": "Windows 专有的机器级 ACL 真写（预授与成本标定）：非 Windows 在上面的护栏就返回，守卫之后的路径在 Linux 覆盖率作业里永远执行不到；由 --setup=fence / --setup=fence-calibrate 真机冒烟与三平台探针验收"
+      "from": 15,
+      "to": 21,
+      "reason": "Windows 专有的机器级 ACL 真写：非 Windows 在上面的护栏就返回，守卫之后的路径在 Linux 覆盖率作业里永远执行不到；由 --setup=fence 真机冒烟与三平台探针验收"
     },
     {
       "file": "src/capabilities/lifecycle/service/history.rs",

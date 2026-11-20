@@ -1,5 +1,5 @@
-//! 目的：`prep` 的 Windows 后端——围栏授权准备、机器级标定与按次回收。
-//! 管：把 `confine/windows/` 的实现转交给门面；标定报告的跨层形状。
+//! 目的：`prep` 的 Windows 后端——围栏授权准备与按次回收。
+//! 管：把 `confine/windows/` 的实现转交给门面。
 //! 不管：台账条目形状（在 `ledger.rs`）；非 Windows 的降级（在 `prep.rs` 的共享函数）。
 //! 联动：由 `src/kernel/detail/confine/prep.rs` 按平台选中。
 

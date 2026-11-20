@@ -19,7 +19,6 @@ fn env_whitelist_drops_foreign_vars_and_moves_home_into_the_sandbox() {
     }
     let private = PathBuf::from("demo").join("agent-a");
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "a".to_string(),
         lease: String::new(),
         private: private.clone(),
@@ -128,7 +127,6 @@ fn receipt_markers_are_structured_codes() {
 fn sandbox_mode_refuses_missing_requirements_until_degraded() {
     use crate::kernel::api::{SandboxMode, SandboxRequirements};
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "a".to_string(),
         lease: String::new(),
         rw: Vec::new(),
@@ -156,7 +154,6 @@ fn sandbox_mode_refuses_missing_requirements_until_degraded() {
     assert!(mode.check(&spec, false).is_ok(), "本进程同意降级后放行");
     mode.set_degraded(false);
     let allow_net = FenceSpec {
-        machine_ro_tree: Vec::new(),
         net: true,
         ro: Vec::new(),
         ..spec.clone()
@@ -250,7 +247,6 @@ fn real_runner(exe: PathBuf, home: &std::path::Path, timeout_secs: u64) -> ProcT
 
 fn spec_for(dir: &Path) -> FenceSpec {
     FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "proc".to_string(),
         lease: String::new(),
         private: PathBuf::new(),

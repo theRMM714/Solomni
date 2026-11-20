@@ -83,7 +83,7 @@
 - 本次隔离覆盖文件系统可达范围，并对齐本机 Linux 的只读基线、解释器目录、`cwd`、env 白名单、按 `GuestRun.timeout_secs` 超时杀整棵进程树与输出体积护栏（传输/内存用，1M 字符；模型可见的 16k 由宿主预算统一收口）。只读基线里的 `/dev/null` 例外给写权（标准重定向要能丢弃输出，`2>/dev/null` 不能 EACCES）。guest 通道产出与本机同形的正文与状态行（`[shell]` 收尾四态；cwd·耗时尾行由工具层追加）：超时 / 信号由 `src/capabilities/vm/detail/guest_helper.rs` 的机器标记（`solomni-guest-fence: timeout` / `solomni-guest-fence: signal`）表达、用户停止按宿主取消旗判定，通道翻译成状态行、不写人读句（装配见 `src/kernel/domain/receipt.rs`）。
 - 网络按 per-call `GuestAccess.net`：false 时 helper 在子进程前 `unshare(CLONE_NEWNET)`，失败 fail-closed；QEMU 网卡仍受 VM 级全局开关。
 - 用户在生成中按停止：host 置取消旗后经 QGA 给 guest helper 发 SIGTERM，helper 杀掉子进程组并退出；`timeout_secs` 仍照常收口。
-- 稳定挂载根：共享 guest 只挂三个稳定根——会话树根（各 agent 私沙与 `.work` 的父目录，rw）、外部工作区根（仅根会话绑定外部工作区时，rw）、模块树根（rw）；内部布局下共享区在会话树内、不重复挂，外部绑定时会话树根与外部根互不包含、各挂一条。新 agent 沙箱按会话树根出现、新模块目录按模块树根出现，不逐项枚举挂载；具体某个 agent 能看什么由当次围栏决定。外部工作区根必须可写：`src/capabilities/vm/service.rs` 会把只读挂载无条件并入每次调用的允许集，只读会绕过 per-agent 的共享区读取范围；guest 不直接写共享区，写共享区走宿主侧 `work_commit` + `work_push`。
+- 稳定挂载根：共享 guest 只挂三个稳定根——会话树根（各 agent 私沙与 `.work` 的父目录，rw）、外部工作区根（仅根会话绑定外部工作区时，rw）、模块树根（rw）；内部布局下共享区在会话树内、不重复挂，外部绑定时会话树根与外部根互不包含、各挂一条。新 agent 沙箱按会话树根出现、新模块目录按模块树根出现，不逐项枚举挂载；具体某个 agent 能看什么由当次围栏决定。外部工作区根挂 rw：`src/capabilities/vm/service.rs` 会把只读挂载无条件并入每次调用的允许集，只读会让它绕过按次授权；**共享区主副本不进任何按次允许集**——容器里的进程要读 / 要改先 `work_pull`，发布走宿主侧 `work_commit` + `work_push`。
 - 运行包集合仍是启动期装配：新子会话只加模块、不加新包时直接加入运行中的 guest；包集合变化按新计划重建共享 guest（要求树空闲）；`system` 包仍按 guest 全局叠写，per-agent 只保证文件可达范围，不承诺系统包隔离。
 - 每个 QEMU 与共享进程起时记账（`.home/` 的 `processes.json`，`src/kernel/detail/procs.rs`：用途 + 归属 + 标记），销毁时注销。
 - 共享守护进程（`virtiofsd` / SMB helper）由对应共享后端按租约起停：起时进同一份进程账并绑父死子亡，释放时清理（`virtiofsd` 按进程组）。

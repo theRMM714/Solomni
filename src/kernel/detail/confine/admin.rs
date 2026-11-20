@@ -4,7 +4,6 @@
 //! 联动：由 `ledger.rs` / `prep.rs` / `confine.rs` 调用。
 
 use super::ledger::{Ledger, ReconcileReport};
-use super::prep::{CalibrationReport, MachineGrantReport};
 use crate::kernel::api::FenceSpec;
 use std::path::Path;
 
@@ -84,30 +83,7 @@ pub(super) fn retire_legacy_machine_grants(
     backend::retire_legacy_machine_grants(home, out)
 }
 
-/// 目的：给一个外部工作区授机器级一次性只读。
-pub(super) fn ensure_workspace_grant(
-    home: &Path,
-    root: &Path,
-) -> Result<MachineGrantReport, String> {
-    backend::ensure_workspace_grant(home, root)
-}
-
-/// 目的：撤掉某个外部工作区的机器级只读授权。
-pub(super) fn revoke_machine_grants(home: &Path, path: &Path) -> Result<usize, String> {
-    backend::revoke_machine_grants(home, path)
-}
-
 /// 目的：全量回收（连机器级授权一起撤）。
 pub(super) fn clean_all(home: &Path) -> Result<String, String> {
     backend::clean_all(home)
-}
-
-/// 目的：`--setup=fence-calibrate` 的合成树标定。
-pub(crate) fn calibrate_machine_grant(home: &Path) -> Result<CalibrationReport, String> {
-    backend::calibrate_machine_grant(home)
-}
-
-/// 目的：删掉标定用的合成树。
-pub(crate) fn remove_calibration_tree(path: &Path) -> Result<(), String> {
-    backend::remove_calibration_tree(path)
 }

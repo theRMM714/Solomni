@@ -33,7 +33,6 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
         tier: crate::kernel::api::Tier::Host,
         guest: None,
         workspace: None,
-        workspace_grant: None,
     };
     assert!(
         core.create_work(one_agent).is_ok(),
@@ -65,7 +64,6 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
         tier: crate::kernel::api::Tier::Host,
         guest: None,
         workspace: None,
-        workspace_grant: None,
     };
     let opened = core
         .create_work(cross)

@@ -81,14 +81,14 @@
 | `src/kernel/detail/confine/paths/windows.rs` | `paths` 的 Windows 后端：真身解析、重解析点判定、node 开关、程序名改写与 `cmd` shell |
 | `src/kernel/detail/confine/paths/unix.rs` | `paths` 的非 Windows 后端：执行位、链接与 `sh` shell |
 | `src/kernel/detail/confine/prep.rs` | 围栏准备与清理（门面）：`FencePrep` / `FenceStep`、机器级预授与清理；Windows 实现在 `src/kernel/detail/confine/prep/windows.rs` |
-| `src/kernel/detail/confine/prep/windows.rs` | `prep` 的 Windows 后端：围栏授权准备、机器级标定与按次回收 |
+| `src/kernel/detail/confine/prep/windows.rs` | `prep` 的 Windows 后端：围栏授权准备与按次回收 |
 | `src/kernel/detail/confine/tests.rs` | 围栏机制的单元测试：环境注入、安装目录上溯、Windows 程序名改写、作业 JSON、解释器解析、node realpath 与租约归属 |
 | `src/kernel/detail/confine/linux.rs` | Linux 围栏后端：Landlock 强制可达范围（`spec.rw` 读写、运行基线只读、其余拒绝），seccomp 在 `net=false` 时拒绝非本地 socket；机制不可用时如实降级 |
 | `src/kernel/detail/confine/macos.rs` | macOS 围栏后端：生成 seatbelt profile（默认拒绝，再逐条放行运行基线与 `spec.rw`；按 `net` 放行 `network-outbound` / 拒绝）交 `sandbox_init` 装上，装不上如实降级 |
 | `src/kernel/detail/confine/other.rs` | 其他平台后端：如实降级——只保证超时与整棵进程树终止，绝不作有文件系统围栏的假装 |
 | `src/kernel/detail/confine/windows/` | Windows 围栏后端目录：入口与策略派发在 `windows.rs`（容器 cwd 走 `src/kernel/detail/view_drive.rs` 的视图盘写法，祖先授权不再需要），DACL 授权在 `acl.rs`、机器级一次性预授在 `machine.rs`、授权台账与撤权在 `record/`、容器身份与作业对象在 `container.rs`、真机探针在 `tests.rs` |
 | `src/kernel/detail/confine/windows.rs` | Windows 围栏后端入口：按 agent 派生 AppContainer SID、逐条授权可达范围，再用 `STARTUPINFOEX` 在容器与作业对象里起工具（`net` 决定是否授 internetClient） |
-| `src/kernel/detail/confine/windows/machine.rs` | Windows 机器级一次性预授：落点清单（产品根 `(OI)(CI)` 读属性、`.tools` / `runtimes` 递归只读）、只读缺项与幂等执行，逐条计时；外部工作区一次性只读的授/撤，以及旧全应用包机器级授权的退役（先授后撤、浅路径先撤、逐条台账事务） |
+| `src/kernel/detail/confine/windows/machine.rs` | Windows 机器级一次性预授：落点清单（产品根 `(OI)(CI)` 读属性、`.tools` / `runtimes` 递归只读）、只读缺项与幂等执行，逐条计时；旧全应用包机器级授权的退役（先授后撤、浅路径先撤、逐条台账事务） |
 | `src/kernel/detail/confine/windows/acl.rs` | Windows 安全描述符操作的入口：`ace` / `grant` / `target` / `scan` / `verify` / `access` 六个职责子模块与内联单测 `tests` 的声明，并向 `windows.rs` 重导出同一个调用面 |
 | `src/kernel/detail/confine/windows/acl/ace.rs` | ACE 布局与身份：类型常量、`AceParts` / `AceView` / `DaclScan` / `AceEntry`、`ace_parts` 偏移算法、GUID 文本、`expand_generics` / `rights_covered` |
 | `src/kernel/detail/confine/windows/acl/grant.rs` | 授权写入与撤销：`grant_one` / `grant_one_object_ace` / `write_ace` / `revoke_one` |
@@ -112,4 +112,4 @@
 | `src/kernel/detail/confine/windows/tests.rs` | Windows 围栏真机探针的父模块：共享夹具（`expect_granted` / `dump_aces` / `acl_round_trip` / `discard` / `container_diag` / `node_runs`）与 `container` / `grant` / `workspace` 三个用例族子模块声明 |
 | `src/kernel/detail/confine/windows/tests/container.rs` | 容器内真机往返用例族：叶子读得到写得到、父目录内容列不到、模块只读、绝对路径程序、按次临时目录与并发隔离 |
 | `src/kernel/detail/confine/windows/tests/grant.rs` | 围栏授权用例族：落点清单与 STAT 祖先、权限位覆盖、写后核对、台账归属与撤销、失败回滚 |
-| `src/kernel/detail/confine/windows/tests/workspace.rs` | 视图盘与外部工作区用例族：容器 cwd 落在映射盘符、机器级一次性只读首写与复用、显式 ensure 与撤权 |
+| `src/kernel/detail/confine/windows/tests/workspace.rs` | 视图盘用例：容器 cwd 落在映射盘符 |

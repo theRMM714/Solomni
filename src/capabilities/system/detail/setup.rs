@@ -1,4 +1,4 @@
-//! 目的：便携维护（`--setup`）的实现——PATH shim 与用户 PATH、围栏机器级一次性预授与标定、只读状态。
+//! 目的：便携维护（`--setup`）的实现——PATH shim 与用户 PATH、围栏机器级一次性预授、只读状态。
 //! 管：模式分派、状态视图（JSON）、围栏缺项对账；PATH 分段与 shim 内容在 path.rs / shim.rs，ACL 机制在 kernel 的 confine。
 //! 不管：命令语法、回执前缀与退出码（在 presentation/cli/boot.rs）；模式名与服务语义的对应（在 api 的 SetupMode）。
 //! 联动：SystemService 经 SetupOps 端口调用；entry 的启动对账用 fence_missing / fence_ensure。
@@ -47,9 +47,6 @@ impl SetupOps for SetupHost {
                 SetupMode::Unset => sink(&path::unset_line(&self.root).map_err(Fault::failed)?),
                 SetupMode::Undo => sink(&path::undo_line(&self.root).map_err(Fault::failed)?),
                 SetupMode::Fence => fence::grant(&self.root, &mut sink).map_err(Fault::failed)?,
-                SetupMode::FenceCalibrate => {
-                    fence::calibrate(&self.root, &mut sink).map_err(Fault::failed)?
-                }
                 SetupMode::All => {
                     sink(&path::path_line(&self.root).map_err(Fault::failed)?);
                     fence::grant(&self.root, &mut sink).map_err(Fault::failed)?;
@@ -115,18 +112,5 @@ mod tests {
         assert_eq!(unsupported["supported"], json!(false));
         assert_eq!(unsupported["missing"], json!([]));
         assert_eq!(unsupported["error"], json!("本平台没有 ACL 一步"));
-    }
-
-    /// 目的：非 Windows 上围栏标定如实报不可用（不静默成功），并覆盖模式分派。
-    #[cfg(not(windows))]
-    #[test]
-    fn fence_calibrate_reports_unavailable_off_windows() {
-        use super::*;
-        let root = std::path::Path::new(".");
-        let err = SetupHost::new(root)
-            .apply(SetupMode::FenceCalibrate, &mut |_| {})
-            .expect_err("非 Windows 无标定");
-        assert_eq!(err.code, 1);
-        assert!(err.message.contains("本平台"), "{}", err.message);
     }
 }

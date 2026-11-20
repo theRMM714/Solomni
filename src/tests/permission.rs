@@ -123,7 +123,7 @@ fn sandbox_places_follow_the_permission_set() {
     assert!(!sb.can_write(&Place::Private, &private.join("x")));
 }
 
-/// 围栏派生：共享区永远不进 rw；私有沙箱进 rw；模块目录只读、userdata 只给模块写 reach。
+/// 围栏派生：共享区不进任何围栏；私有沙箱进 rw；模块目录只读、userdata 只给模块写 reach。
 #[test]
 fn fence_spec_scopes_module_dirs_and_userdata() {
     use crate::kernel::api::FenceSpec;
@@ -144,7 +144,7 @@ fn fence_spec_scopes_module_dirs_and_userdata() {
     assert!(session.rw.contains(&sb.private), "私有沙箱可写");
     assert_eq!(session.private, sb.private, "HOME/TEMP 落在私有沙箱");
 
-    // 一次调用：只有声明 module-write 才给 userdata；只有 shared-read 才给共享区只读。
+    // 一次调用：只有声明 module-write 才给 userdata；shared-read 不再把共享区放进围栏。
     let write = ReachSet::from([Reach::Private, Reach::ModuleWrite]);
     let call = FenceSpec::for_call(&sb, &write, Some("data"), &session);
     assert!(call.rw.contains(&module.join("userdata")));
@@ -156,7 +156,10 @@ fn fence_spec_scopes_module_dirs_and_userdata() {
 
     let read = ReachSet::from([Reach::Private, Reach::SharedRead]);
     let call = FenceSpec::for_call(&sb, &read, None, &session);
-    assert!(call.ro_tree.contains(&sb.shared));
+    assert!(
+        !call.ro_tree.contains(&sb.shared),
+        "共享区不再进围栏：容器读不到共享区，读由宿主内工具直读主副本"
+    );
     assert!(!call.net, "workspace 没有 network reach");
 }
 
@@ -181,52 +184,6 @@ fn deny_write_decision_withholds_private_rw() {
         "写被拒时调用围栏也不给私有写"
     );
     assert!(!sb.can_write(&Place::Private, &sb.private.join("x")));
-}
-
-/// 共享区授权粒度三态：会话级走按次只读、工作区级走机器级一次性只读、无权限完全不授。
-#[test]
-fn shared_grant_routes_to_session_machine_or_nothing() {
-    use crate::capabilities::conversation::session::api::WorkspaceGrant;
-    use crate::kernel::api::FenceSpec;
-
-    let mut sb = test_sandbox("a1", &[]);
-    sb.permissions = pset(ProfileId::Workspace);
-    let reach = ReachSet::from([Reach::Private, Reach::SharedRead]);
-    let base = FenceSpec::for_session(&sb, &[], false);
-
-    sb.shared_grant = WorkspaceGrant::Session;
-    let call = FenceSpec::for_call(&sb, &reach, None, &base);
-    assert!(call.ro_tree.contains(&sb.shared), "会话级按次授共享区只读");
-    assert!(!call.machine_ro_tree.contains(&sb.shared));
-
-    sb.shared_grant = WorkspaceGrant::Workspace;
-    let call = FenceSpec::for_call(&sb, &reach, None, &base);
-    assert!(
-        !call.ro_tree.contains(&sb.shared),
-        "工作区级不给容器 SID 逐次授权"
-    );
-    assert!(
-        call.machine_ro_tree.contains(&sb.shared),
-        "工作区级走机器级一次性只读"
-    );
-
-    sb.shared_grant = WorkspaceGrant::None;
-    let call = FenceSpec::for_call(&sb, &reach, None, &base);
-    assert!(
-        !call.ro_tree.contains(&sb.shared) && !call.machine_ro_tree.contains(&sb.shared),
-        "无权限时完全不授共享区"
-    );
-
-    // 显式关掉共享区读（ScopeMode::None）：三态之外再收一层，围栏里连根都不挂。
-    sb.shared_grant = WorkspaceGrant::Workspace;
-    sb.permissions.shared_read = ScopeMode::None;
-    let call = FenceSpec::for_call(&sb, &reach, None, &base);
-    assert!(!call.ro_tree.contains(&sb.shared) && !call.machine_ro_tree.contains(&sb.shared));
-
-    // 路径白名单仍挂根：能读哪一棵由工具层按相对路径再判，围栏不因白名单掐掉整根。
-    sb.permissions.shared_read = ScopeMode::Paths(paths(&["docs"]));
-    let call = FenceSpec::for_call(&sb, &reach, None, &base);
-    assert!(call.machine_ro_tree.contains(&sb.shared));
 }
 
 /// 目的：work_status 的路径清单按读作用域过滤，显式越界路径直接拒绝。

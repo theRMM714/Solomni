@@ -42,13 +42,6 @@ fn admin_actions_degrade_without_acl_support() {
     assert!(super::machine_missing(&root).is_err());
     assert!(super::machine_ensure(&root, &home, &mut |_| {}).is_err());
     super::retire_legacy_machine_grants(&home, &mut |_| {}).unwrap();
-    assert!(super::calibrate_machine_grant(&home).is_err());
-    super::remove_calibration_tree(&root).unwrap();
-    assert_eq!(
-        super::ensure_workspace_grant(&home, &root).unwrap(),
-        super::MachineGrantReport::default()
-    );
-    assert_eq!(super::revoke_machine_grants(&home, &root).unwrap(), 0);
     assert_eq!(
         super::clean_all(&home).unwrap(),
         "本平台的围栏不留权限项，无需清理"
@@ -68,7 +61,6 @@ fn admin_actions_degrade_without_acl_support() {
 #[test]
 fn selfcheck_injection_switch_reports_env_unavailable() {
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "a".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -102,26 +94,6 @@ fn selfcheck_injection_switch_reports_env_unavailable() {
     assert!(
         !selfcheck_forced_unavailable(),
         "注入是一次性的，不该留下状态"
-    );
-}
-/// 目的：老围栏描述符没有 machine_ro_tree 字段时，读出来必须是空集（不能当成"有落点"去授权）。
-#[test]
-fn fence_spec_without_machine_ro_tree_defaults_to_empty() {
-    let json = r#"{"agent":"a","lease":"","rw":[],"ro":[],"ro_tree":[],"private":"","cwd":"","net":false}"#;
-    let spec: FenceSpec = serde_json::from_str(json).expect("老形状要能读");
-    assert!(spec.machine_ro_tree.is_empty());
-}
-
-/// 目的：非 Windows 没有 ACL 这一步——显式授权返回零报告、撤权返回 0，而不是假装写了。
-#[cfg(not(windows))]
-#[test]
-fn machine_grant_apis_are_noops_off_windows() {
-    let home = std::env::temp_dir().join("solomni-noop-grants");
-    let report = ensure_workspace_grant(&home, &home).expect("非 Windows 不该失败");
-    assert_eq!(report, MachineGrantReport::default());
-    assert_eq!(
-        revoke_machine_grants(&home, &home).expect("非 Windows 撤权不该失败"),
-        0
     );
 }
 
@@ -259,7 +231,6 @@ fn view_program_command_translates_programs_inside_the_root() {
 #[test]
 fn fence_job_round_trips_and_rejects_incomplete_json() {
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "a".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -280,7 +251,6 @@ fn fence_job_round_trips_and_rejects_incomplete_json() {
     assert_eq!(FenceJob::from_json(&text).expect("回读守门进程入参"), job);
     // 没有台账可落是合法形态（探针），所以 home 允许缺省；prepared 缺了才报错。
     let bare = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "b".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -590,7 +560,6 @@ fn node_commands_get_the_realpath_skip_and_nothing_else_does() {
 #[test]
 fn non_node_commands_carry_no_interpreter_switch() {
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "a".to_string(),
         lease: String::new(),
         rw: Vec::new(),

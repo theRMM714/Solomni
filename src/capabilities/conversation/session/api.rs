@@ -44,8 +44,6 @@ pub use crate::capabilities::conversation::session::service::assemble::{
 };
 // 核心核实环境：`collab` 的各关卡按角色装配只读核实工具，装配逻辑留在本能力。
 pub use crate::capabilities::conversation::session::service::verify::{VerifySpec, verify_tools};
-/// 目的：工作区授权粒度的形状归工作区能力面，这里重导出，调用方不必跨能力拼路径。
-pub use crate::capabilities::workspace::api::WorkspaceGrant;
 
 // 回合引擎：TurnIo（一次回合的 IO 槽位）、两类回合结果与轮循环（由 `service/engine/` 实现）。
 pub use crate::capabilities::conversation::session::service::engine::io::{MemberTurn, TurnIo};
