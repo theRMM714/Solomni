@@ -219,11 +219,17 @@ jobs:
     # 开发工具链统一项目内（与本机同一口径）：env.js setup 装 Rust/cc/python/node，setup-dev 装组件与供应链工具。
     # OS_KEY 让缓存路径落 platform/<os>/——与 env.js 默认的 CARGO_HOME / RUSTUP_HOME 同一路径。
     env:
-      OS_KEY: ${{ runner.os == 'Windows' && 'windows' || (runner.os == 'macOS' && 'macos' || 'linux') }}
+      OS_KEY: ${{ matrix.oskey }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            oskey: windows
+          - os: ubuntu-latest
+            oskey: linux
+          - os: macos-latest
+            oskey: macos
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -356,11 +362,17 @@ jobs:
     timeout-minutes: 60
     # 开发工具链统一项目内（与本机同一口径）；OS_KEY 让缓存路径落 platform/<os>/（env.js 默认路径）。
     env:
-      OS_KEY: ${{ runner.os == 'Windows' && 'windows' || (runner.os == 'macOS' && 'macos' || 'linux') }}
+      OS_KEY: ${{ matrix.oskey }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            oskey: windows
+          - os: ubuntu-latest
+            oskey: linux
+          - os: macos-latest
+            oskey: macos
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -479,9 +491,9 @@ jobs:
     runs-on: ubuntu-latest
     # 冷机要编译两遍（普通 + 插桩）再跑 L4；给足时间，超时按失败处理。
     timeout-minutes: 60
-    # 开发工具链统一项目内（与本机同一口径）；OS_KEY 让缓存路径落 platform/<os>/（env.js 默认路径）。
+    # 开发工具链统一项目内（与本机同一口径）；缓存路径落 platform/linux/（env.js 默认路径）。
     env:
-      OS_KEY: ${{ runner.os == 'Windows' && 'windows' || (runner.os == 'macOS' && 'macos' || 'linux') }}
+      OS_KEY: linux
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
