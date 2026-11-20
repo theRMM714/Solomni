@@ -29,6 +29,9 @@ function create(opts) {
     }
     e.SOLOMNI_FENCE_LIVE = fenceLive ? "1" : "0";
     e.SOLOMNI_FENCE_WRITE = fenceLive ? "1" : "0";
+    // re-exec 守卫是入口内部的事（run-tests.js 自己重跑时带的标记），不进门禁步骤环境——
+    // 漏下去会把自检里「入口应 re-exec」的夹具场景静默关掉。
+    delete e.SOLOMNI_NODE_REEXEC;
     return e;
   }
 
