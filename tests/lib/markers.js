@@ -26,7 +26,7 @@ const MARKERS = [
   { text: TEXT.REPORT_FAIL, owner: "run-tests.js", meaning: "本次车道有硬失败步骤或 T0 任一项不过（同时以非零退出码暴露）" },
   { text: TEXT.REPORT_ACCEPTED, owner: "run-tests.js", meaning: "本平台与跨平台缺口账为空；只在整跑模式打印，审查模式不打印" },
   { text: TEXT.FRONTEND_SMOKE_OK, owner: "src/presentation/web/assets/smoke.cjs", meaning: "前端冒烟全部通过（steps.js 据此判通过）" },
-  { text: TEXT.DEV_LOOP_OK, owner: "tests/dev-loop.mjs", meaning: "dev.js 的固定子命令表、cargo -- 透传口与拒绝出口自检通过" },
+  { text: TEXT.DEV_LOOP_OK, owner: "tests/dev-loop.mjs", meaning: "dev.js 的固定子命令表、run -- 透传口、--ambient 宿主开关与拒绝出口自检通过" },
   { text: TEXT.PINS_TOOL_OK, owner: "tests/pins-tool.mjs", meaning: "pins.js 的台账解析 / 来源推导 / 原地重写自检通过（不碰网络）" },
   { text: TEXT.ENV_BOOTSTRAP_OK, owner: "tests/env-bootstrap.mjs", meaning: "env.js 的下载 / 续传 / 结构判定 / sha256 闸自检通过；非 Windows 那部分记 [探针]" },
   { text: TEXT.E2E_OK, owner: "tests/cross-platform/e2e/orchestrator.js", meaning: "L4 端到端编排通过（整跑与 ci-e2e 都按它判）" },

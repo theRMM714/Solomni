@@ -82,6 +82,7 @@
 - PR 是任务进度的唯一落点：决定、证据与 CI 结论记在 PR 正文或评论。
 - Draft 期不跑 CI；需要他平台结论时手动派发（`docs/testing/execution-ci.md`）。
 - 用户要求文档审计 / 治理时按 `docs/workflow/docs-audit.md` 执行，不套用编程任务的实施节奏。
+- 命令只经入口跑：`node dev.js run -- <命令…>`（环境、缓存与临时目录按 `env.js` 注入）或 `node run-tests.js`；裸 shell 敲 `cargo` 不注入环境。宿主环境必须显式：`node dev.js --ambient run -- <命令…>`，只给对照排查用，验收不认（细则见 `docs/testing/execution-ci.md`）。
 
 ## 七、Git 与 CI
 

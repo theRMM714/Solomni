@@ -17,9 +17,10 @@
 node dev.js test      # L1 单元（cargo test --bin solomni）
 node dev.js fmt       # T0 格式（cargo fmt --all -- --check）
 node dev.js clippy    # T0 静态检查（cargo clippy --all-targets --all-features --keep-going -- -D warnings）
+node dev.js run -- <命令…>   # 透传：任意命令用同一份项目内环境执行
 ```
 
-- **cargo 只经入口跑**：`node dev.js …` / `node run-tests.js` / `node start.js` 都注入同一份环境解析；`node dev.js cargo -- <参数>` 是唯一透传口（任意 cargo 子命令，环境与缓存不变）。
+- **命令只经入口跑**：`node dev.js …` / `node run-tests.js` / `node start.js` 都注入同一份环境解析；`node dev.js run -- <命令…>` 是唯一透传口（任意命令——cargo、rustfmt、clippy、node、cc——环境、缓存与临时目录不变）。**宿主环境必须显式**：`node dev.js --ambient run -- <命令…>` 才改用宿主工具链与环境，并在 stderr 说明缓存与临时目录可能落到项目外；它只给对照排查用，验收不认。
 - **入口 node 也统一项目内**：`run-tests.js` / `dev.js` / `start.js` / `setup-dev.js` / `tests/ci-e2e.mjs` / `tests/coverage.mjs` 启动时项目内 node（active.json 解析出的 `nodeBin`）在场即 re-exec 到它（`SOLOMNI_NODE_REEXEC` 守卫防循环），下游所有 `process.execPath` 随之统一；宿主 node 只点火（与 cargo 同构）。项目内 node 缺失或起不来：如实回退宿主继续。CI e2e 入口的环境与门禁同源（`tests/lib/proc.js` 的 `buildEnv`：env.js 解析 + 项目内工具链与 `.tools/bin` 前置 + 临时钉项目内 + 围栏开关）。
 - **要在终端直接敲 `cargo`，先按 `env.js` 注入环境**：`CARGO_HOME=platform/<os>/cargo`、`RUSTUP_HOME=platform/<os>/rustup`（借用 PATH 上的 rustup proxy 时保留系统的 `RUSTUP_HOME`——它靠这个找 toolchain）、`TMPDIR` / `TMP` / `TEMP`=`target/tmp`、`PATH` 前置 `platform/<os>/cargo/bin`、`.tools/toolchains/active.json` 登记的项目内工具链 bin（python / node / cc，判据与产品侧 `src/entry/toolchains.rs` 的 compose 同一套：target 相符、bin 只认相对普通组件且目录在场、工具 env 非空键值导出）、Windows GNU 的 `.tools/mingw64/bin` 与 POSIX 项目内 Zig cc 的 `.tools/toolchains/<target>/cc/<version>/bin`（门禁另外前置 `.tools/bin`，`cargo install --root .tools` 装的工具在那里）；宿主 PATH 垫底如实回退。具体值以 `node env.js` 的解析结果为准（机器可读：`node env.js --print-env`，含 `nodeBin` 与工具链在场事实）；IDE / rust-analyzer 同配置。
 - **未注入就不要敲**：裸 shell 的 `cargo build/test/fmt/clippy/install` 会用 PATH 上的系统工具链（Windows 多为 msvc，缺 `link.exe`；门禁与 CI 用项目内 GNU），缓存与临时目录也会落到项目外（项目外写零容忍，见 [quality-isolation.md](quality-isolation.md) 的「项目外写」）；只把 `platform/<os>/cargo/bin` 加进系统 PATH 却不给 `RUSTUP_HOME`、用 ambient cargo 装东西，同样不成立。
@@ -447,7 +448,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 | `TEST-REPORT-FAIL` | 本次车道有硬失败步骤或 T0 任一项不过（同时以非零退出码暴露） | `run-tests.js` |
 | `TEST-REPORT-ACCEPTED` | 本平台与跨平台缺口账为空；只在整跑模式打印，审查模式不打印 | `run-tests.js` |
 | `FRONTEND-SMOKE-OK` | 前端冒烟全部通过（steps.js 据此判通过） | `src/presentation/web/assets/smoke.cjs` |
-| `DEV-LOOP-OK` | dev.js 的固定子命令表、cargo -- 透传口与拒绝出口自检通过 | `tests/dev-loop.mjs` |
+| `DEV-LOOP-OK` | dev.js 的固定子命令表、run -- 透传口、--ambient 宿主开关与拒绝出口自检通过 | `tests/dev-loop.mjs` |
 | `PINS-TOOL-OK` | pins.js 的台账解析 / 来源推导 / 原地重写自检通过（不碰网络） | `tests/pins-tool.mjs` |
 | `ENV-BOOTSTRAP-OK` | env.js 的下载 / 续传 / 结构判定 / sha256 闸自检通过；非 Windows 那部分记 [探针] | `tests/env-bootstrap.mjs` |
 | `E2E-OK` | L4 端到端编排通过（整跑与 ci-e2e 都按它判） | `tests/cross-platform/e2e/orchestrator.js` |
