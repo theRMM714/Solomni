@@ -1180,6 +1180,17 @@ fn validation_presentation_and_serialization_edges_are_explicit() {
     assert_eq!(ScopeMode::None.listing(), "（无）");
     assert_eq!(ScopeMode::Paths(Vec::new()).listing(), "（整棵共享区）");
     assert!(CallScope::None.reach().is_empty());
+    assert_eq!(CallScope::Sandbox.reach(), ReachSet::from([Reach::Private]));
+    assert_eq!(
+        CallScope::External.reach(),
+        ReachSet::from([
+            Reach::Private,
+            Reach::ModuleRead,
+            Reach::HostRead,
+            Reach::Network,
+        ]),
+        "external 不再请求 shared-read：共享区主副本不进容器，读 / 改先 work_pull"
+    );
 
     assert_eq!(serde_json::to_string(&ScopeMode::All).unwrap(), "\"all\"");
     assert_eq!(serde_json::to_string(&ScopeMode::None).unwrap(), "\"none\"");
