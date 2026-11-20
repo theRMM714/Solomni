@@ -227,7 +227,7 @@ function runFull() {
   // CI 前置步骤（门禁之外执行）的墙钟由 workflow 经环境变量带进来，进报告，免得只能靠感觉。
   const preinstallMs = Number(process.env.SOLOMNI_CI_PREINSTALL_MS || 0);
   if (preinstallMs > 0) {
-    step.push({ step: "CI 前置：供应链工具安装", status: "pass", ms: preinstallMs, detail: "在 run-tests 之前完成（CI 墙钟）", raw: null });
+    step.push({ step: "CI 前置：开发工具链安装", status: "pass", ms: preinstallMs, detail: "在 run-tests 之前完成（CI 墙钟）", raw: null });
   }
 
   for (const s of stepsLib.STEPS) {

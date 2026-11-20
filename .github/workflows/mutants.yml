@@ -1,7 +1,8 @@
 # 突变测试（手动抽查 + 每周一定时）：只在需要时抽查「测试能不能发现 bug」，不参与验收（见 docs/testing/execution-ci.md）。
 # 定时只在默认分支（main）的最新提交上跑；同一提交已有结论就跳过，省 runner 也省时间。
 # 只有 Linux 单平台：范围是平台无关的纯逻辑，三平台只是 3 倍成本。
-# cargo-mutants 用 taiki-e/install-action 装预编译二进制：CI 是一次性临时环境，不改本机。
+# cargo-mutants 用 taiki-e/install-action 装预编译二进制（落项目内 CARGO_HOME/bin）：CI 是一次性临时环境，不改本机。
+# 开发工具链统一项目内（与 test.yml 同一口径）：env.js setup 装齐 Rust/cc/python/node，工具链缓存与 test.yml 同 key。
 name: 突变测试
 
 on:
@@ -80,22 +81,32 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       mutants: ${{ steps.plan.outputs.mutants }}
       shards: ${{ steps.plan.outputs.shards }}
+    # CARGO_HOME 指 env.js 默认的项目内路径：taiki-e 装的 cargo-mutants 也落项目内，不写 runner home。
     env:
-      CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
-      SOLOMNI_CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
+      CARGO_HOME: ${{ github.workspace }}/platform/linux/cargo
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # 点火 node：固定 24；mutation-plan 经 env.js 解析环境，node 只负责点火。
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "lts/*"
-      - name: 准备 Rust 与项目内 CARGO_HOME
+          node-version: "24"
+      # 工具链统一项目内：与 test.yml 同一 key（只恢复不保存，保存由 test.yml 的 quality 统一做）。
+      - name: 恢复项目内工具链缓存
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            platform/linux/rustup
+            .tools/toolchains
+            .tools/mingw64
+            .tools/bin
+          key: ${{ runner.os }}-${{ runner.arch }}-toolchains-${{ hashFiles('dependencies.yaml', 'links.yaml', 'dev-tools.js') }}
+      - name: 装齐项目内工具链（env.js）
         run: |
-          rustc --version
-          cargo --version
-          mkdir -p platform/ci/cargo
-      - name: 装 cargo-mutants（预编译，一次性环境）
+          mkdir -p platform/linux/cargo
+          node env.js setup --yes
+      - name: 装 cargo-mutants（预编译，落项目内 CARGO_HOME/bin）
         uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-mutants
@@ -118,10 +129,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    # 借用 runner 自带 Rust，但缓存/安装落项目内（见 docs/testing/execution-ci.md）。
+    # 开发工具链统一项目内（与本机同一口径）；CARGO_HOME 指 env.js 默认路径，taiki-e 也落项目内。
     env:
-      CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
-      SOLOMNI_CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
+      CARGO_HOME: ${{ github.workspace }}/platform/linux/cargo
       MUTATION_SHARD: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -129,20 +139,29 @@ jobs:
           # 只读 job：突变调查不写仓库，关闭令牌持久化（zizmor artipacked）。
           persist-credentials: false
 
+      # 点火 node：固定 24；ci-mutation 经 env.js 解析环境，node 只负责点火。
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "lts/*"
+          node-version: "24"
 
-      - name: 准备 Rust（借用 runner 自带工具链，不写它的 home）
+      # 工具链缓存：与 test.yml 同一 key（只恢复不保存，保存由 test.yml 的 quality 统一做）。
+      - name: 恢复项目内工具链缓存
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            platform/linux/rustup
+            .tools/toolchains
+            .tools/mingw64
+            .tools/bin
+          key: ${{ runner.os }}-${{ runner.arch }}-toolchains-${{ hashFiles('dependencies.yaml', 'links.yaml', 'dev-tools.js') }}
+
+      - name: 装齐项目内工具链（env.js）
         run: |
-          rustc --version
-          cargo --version
-
-      - name: 建项目内 CARGO_HOME（装工具与缓存都落这里）
-        run: mkdir -p platform/ci/cargo
+          mkdir -p platform/linux/cargo
+          node env.js setup --yes
 
       # 装到项目内 CARGO_HOME/bin（job env 已把 CARGO_HOME 指过去），不写 runner 的 home。
-      - name: 装 cargo-mutants（预编译，一次性环境）
+      - name: 装 cargo-mutants（预编译，落项目内 CARGO_HOME/bin）
         uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-mutants
@@ -152,11 +171,11 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            platform/ci/cargo
+            platform/linux/cargo
             target/debug
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-
 
       - name: 跑突变测试
         env:
@@ -172,9 +191,9 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            platform/ci/cargo
+            platform/linux/cargo
             target/debug
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
 
       - name: 留产物（本片报告与 mutants.out；无论成败）
         if: always()
@@ -202,7 +221,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "lts/*"
+          node-version: "24"
 
       - name: 取回各片产物
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2

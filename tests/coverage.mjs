@@ -18,8 +18,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import envLayer from "../env.js";
 
+const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // 入口 re-exec：项目内 node 在场就用它跑本入口（宿主 node 只点火），编排器随之统一。
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) envLayer.reexecProjectNode();
@@ -665,8 +667,11 @@ function printDiff(diff) {
 
 function collect() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
-  const env = { ...process.env };
-  const shown = spawnSync("cargo", ["llvm-cov", "show-env", "--sh"], { cwd: ROOT, encoding: "utf8" });
+  // 环境与门禁同源（proc.buildEnv：项目内 cargo / .tools/bin 的 cargo-llvm-cov / 临时钉项目内）；
+  // 裸 process.env 只有点火 node 的 PATH，找不到项目内工具。
+  const gateEnv = require("./lib/proc.js").create({ root: ROOT, fenceLive: false }).buildEnv();
+  const env = { ...gateEnv };
+  const shown = spawnSync("cargo", ["llvm-cov", "show-env", "--sh"], { cwd: ROOT, env: gateEnv, encoding: "utf8" });
   if (shown.status !== 0) throw new Error("cargo llvm-cov show-env 失败：\n" + (shown.stderr || shown.stdout));
   for (const line of shown.stdout.split(/\r?\n/)) {
     const m = line.match(/^export\s+([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
