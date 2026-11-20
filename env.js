@@ -1270,10 +1270,12 @@ function installRuntimeToolchain(dep) {
   fs.rmSync(tmp, { recursive: true, force: true });
   fs.mkdirSync(tmp, { recursive: true });
   log("extracting " + dep.tool + "...");
-  const tar = IS_WIN && ext === ".zip" ? zipTar() : "tar";
+  // Windows 一律用 System32 的 bsdtar 全路径：Git Bash 会把 GNU tar 排在 PATH 前面，
+  // 它把 -C D:\… 的盘符冒号当远程主机语法（CI 实证 "Cannot connect to D:"）；bsdtar 认 Windows 路径，且 zip/gz/xz 都能读。
+  const tar = IS_WIN ? zipTar() : "tar";
   const t = tar
     ? spawnSync(tar, ["-xf", archive, "-C", tmp], { stdio: "inherit" })
-    : { error: new Error("没有能读 zip 的 tar 实现"), status: 1 };
+    : { error: new Error("没有能读归档的 tar 实现（Windows 10 1803+ 自带 System32\\tar.exe）"), status: 1 };
   if (t.error || t.status !== 0) {
     fs.rmSync(tmp, { recursive: true, force: true });
     die("解包 " + archive + " 失败：检查系统 tar（Windows 10 1803+ / Linux / macOS 都应有）。");

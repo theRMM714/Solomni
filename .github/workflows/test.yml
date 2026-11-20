@@ -261,7 +261,7 @@ jobs:
       - name: 建项目内 CARGO_HOME（缓存要求目录先存在）
         if: ${{ !inputs.clean }}
         shell: bash
-        run: mkdir -p platform/${{ env.OS_KEY }}/cargo
+        run: mkdir -p "platform/${OS_KEY}/cargo"
 
       # 只缓存项目内路径：缓存身份含 path，改路径即新缓存项（旧项自动淘汰，见 docs/testing/execution-ci.md）。
       # 恢复所有 ref（PR 读 main 的缓存）；保存只在 main，见每个 job 末尾的 save 步骤。
@@ -404,7 +404,7 @@ jobs:
       - name: 建项目内 CARGO_HOME（缓存要求目录先存在）
         if: ${{ !inputs.clean }}
         shell: bash
-        run: mkdir -p platform/${{ env.OS_KEY }}/cargo
+        run: mkdir -p "platform/${OS_KEY}/cargo"
 
       # 只缓存项目内路径：缓存身份含 path，改路径即新缓存项（旧项自动淘汰，见 docs/testing/execution-ci.md）。
       # 恢复所有 ref（PR 读 main 的缓存）；保存只在 main，见每个 job 末尾的 save 步骤。
@@ -523,7 +523,7 @@ jobs:
       - name: 建项目内 CARGO_HOME（缓存要求目录先存在）
         if: ${{ !inputs.clean }}
         shell: bash
-        run: mkdir -p platform/${{ env.OS_KEY }}/cargo
+        run: mkdir -p "platform/${OS_KEY}/cargo"
 
       # 只缓存依赖：插桩产物带 RUSTFLAGS，跨提交复用会把编译缓存搅乱，不缓存 target/。
       - name: 恢复依赖缓存（inputs.clean 时跳过）
