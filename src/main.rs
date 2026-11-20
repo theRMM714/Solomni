@@ -51,7 +51,7 @@ fn view_drive_begin(root: &Path, home: &Path) -> bool {
     kernel::api::view_drive_begin(root, home)
 }
 
-/// 目的：只清扫视图盘的崩溃残留（不分配盘符）：维护命令与早退路径用它，别让残留映射一直占字母。
+/// 目的：只清扫视图盘的崩溃残留（不分配盘符）：每次启动都跑一遍，别让死登记与残留映射越积越多。
 fn view_drive_sweep(home: &Path) {
     kernel::api::view_drive_sweep(home);
 }
@@ -700,6 +700,9 @@ fn main() {
         }
     }
 
+    // 视图盘记录：先清上一次崩溃 / 强杀留下的死登记——映射随进程一起消失，记录还留在 `.home/`。
+    // 放在分配之前、且不受开关影响：`SOLOMNI_VIEW_DRIVE=0` 或产品根不可用时也要把残留清掉。
+    view_drive_sweep(&home);
     // 视图盘唯一的分配点：维护旗、探针与启动期早退都已返回；`std::process::exit` 不走 Drop，早分配必然泄漏盘符。
     // 细节与逃生口见 `view_drive_begin` 的目的/约束。
     let view_drive = view_drive_begin(&root, &home);
