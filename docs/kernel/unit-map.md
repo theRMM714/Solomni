@@ -67,7 +67,7 @@
 | `src/kernel/detail/session/windows.rs` | `session` 的 Windows 后端：常驻服务拉起前的容器围栏准备 |
 | `src/kernel/detail/session/unix.rs` | `session` 的非 Windows 后端：没有容器围栏准备 |
 | `src/kernel/detail/view_drive.rs` | 视图盘模块门面：只有 Windows 有实现（`src/kernel/detail/view_drive/windows.rs`），其余平台为空模块 |
-| `src/kernel/detail/view_drive/windows.rs` | 视图盘的 Windows 实现：产品根映射成实例独占盘符、宿主与视图路径互译、按 pid 登记与退出释放及残留清扫 |
+| `src/kernel/detail/view_drive/windows.rs` | 视图盘的 Windows 实现：产品根映射成实例独占盘符、宿主与视图路径互译、按 pid 登记与退出释放；死登记（映射已不在 / 目标不匹配）在启动清扫里摘掉，条目清空即删记录文件 |
 | `src/kernel/detail/view_drive_lifecycle.rs` | 视图盘生命周期门面：分配、清扫、释放与路径编解码；按平台选中 `src/kernel/detail/view_drive_lifecycle/{windows,unix}.rs` |
 | `src/kernel/detail/view_drive_lifecycle/windows.rs` | 视图盘生命周期的 Windows 后端：逃生口、真分配与释放 |
 | `src/kernel/detail/view_drive_lifecycle/unix.rs` | 视图盘生命周期的非 Windows 后端：不分配、编解码恒 `None` |

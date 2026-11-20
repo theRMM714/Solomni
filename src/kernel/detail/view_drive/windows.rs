@@ -231,7 +231,16 @@ fn load_entries(home: &Path) -> Vec<ViewEntry> {
         .unwrap_or_default()
 }
 
+/// 目的：把条目落盘；没有条目就删掉记录文件——空数组也算残留，不留。
+/// 约束：调用方必须已持有 lock_view；文件本来就不存在时删除不算错。
 fn save_entries(home: &Path, entries: &[ViewEntry]) -> Result<(), String> {
+    if entries.is_empty() {
+        return match std::fs::remove_file(record_path(home)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("删视图盘记录失败：{}", e)),
+        };
+    }
     std::fs::create_dir_all(home).map_err(|e| format!("建私有区失败：{}", e))?;
     let text = serde_json::to_string_pretty(entries).map_err(|e| e.to_string())?;
     std::fs::write(record_path(home), text).map_err(|e| e.to_string())
@@ -696,6 +705,7 @@ mod tests {
             entry("Z:", r"D:\root", &[1, 2]),
             entry("Y:", r"D:\dead", &[3]),
             entry("X:", r"D:\stale", &[4]),
+            entry("W:", r"D:\gone", &[5]),
         ];
         let query = |letter: &str| match letter {
             "Z:" => Some(PathBuf::from(r"D:\root")),
@@ -708,10 +718,13 @@ mod tests {
         let sweep = sweep_entries(entries, alive, query, exists);
         assert_eq!(sweep.kept.len(), 1);
         assert_eq!(sweep.kept[0].users, vec![2], "死 pid 摘掉、活归属留着");
-        // Y 根不存在要撤映射；X 的映射指向别处只丢条目、不撤别人的映射（不在 remove 里）。
+        // Y 根不存在要撤映射；X 的映射指向别处只丢条目、不撤别人的映射（不在 remove 里）；
+        // W 的映射已经不在（进程被强杀后的样子）只丢条目，没有映射可撤。
         assert_eq!(sweep.remove.len(), 1);
         assert!(sweep.remove.iter().any(|e| e.letter == "Y:"));
         assert!(!sweep.remove.iter().any(|e| e.letter == "X:"));
+        assert!(!sweep.remove.iter().any(|e| e.letter == "W:"));
+        assert!(!sweep.kept.iter().any(|e| e.letter == "W:"));
     }
 
     #[test]
@@ -752,5 +765,74 @@ mod tests {
         assert_eq!(free_letter(occupied).as_deref(), Some("X:"));
         assert_eq!(free_letter(|_| true), None);
         assert!(free_letter(|_| false).is_some_and(|l| l == "Z:"));
+    }
+
+    /// 目的：一套干净的临时私有区；盘符一律用 Q:，没映射时就等于"映射已不在"。
+    fn temp_home(name: &str) -> PathBuf {
+        let home = std::env::temp_dir().join(format!(
+            "solomni-view-drive-{}-{}",
+            name,
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("建临时私有区");
+        home
+    }
+
+    #[test]
+    fn saving_no_entries_removes_the_record_file() {
+        let home = temp_home("save-empty");
+        save_entries(&home, &[entry("Q:", r"D:\root", &[1])]).expect("写记录");
+        assert!(record_path(&home).exists());
+        save_entries(&home, &[]).expect("存空记录");
+        assert!(!record_path(&home).exists(), "没有条目就不留文件");
+        save_entries(&home, &[]).expect("再存一次空记录不算错");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn sweep_removes_a_record_whose_mapping_is_gone() {
+        // 进程被强杀后的样子：映射随进程消失，记录里还挂着死 pid。
+        let home = temp_home("sweep-gone");
+        let root = home.join("product-root");
+        std::fs::create_dir_all(&root).expect("建假产品根");
+        save_entries(
+            &home,
+            &[ViewEntry {
+                letter: "Q:".to_string(),
+                root: root.to_string_lossy().into_owned(),
+                users: vec![0],
+            }],
+        )
+        .expect("写记录");
+        assert!(record_path(&home).exists());
+        sweep_view_drive(&home);
+        assert!(
+            !record_path(&home).exists(),
+            "映射已不在的记录要在启动清扫里删掉"
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn release_cleans_the_record_when_the_mapping_is_gone() {
+        let home = temp_home("release-gone");
+        let root = home.join("product-root");
+        std::fs::create_dir_all(&root).expect("建假产品根");
+        save_entries(
+            &home,
+            &[ViewEntry {
+                letter: "Q:".to_string(),
+                root: root.to_string_lossy().into_owned(),
+                users: vec![std::process::id()],
+            }],
+        )
+        .expect("写记录");
+        release_view_drive(&home);
+        assert!(
+            !record_path(&home).exists(),
+            "最后一个使用者注销后记录文件要一起清掉"
+        );
+        let _ = std::fs::remove_dir_all(&home);
     }
 }
