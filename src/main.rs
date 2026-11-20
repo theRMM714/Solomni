@@ -53,7 +53,7 @@ fn view_drive_begin(root: &Path, home: &Path) -> bool {
 
 /// 目的：只清扫视图盘的崩溃残留（不分配盘符）：每次启动都跑一遍，别让死登记与残留映射越积越多。
 fn view_drive_sweep(home: &Path) {
-    kernel::api::view_drive_sweep(home);
+    let _ = kernel::api::view_drive_sweep(home);
 }
 
 /// 目的：退出时注销本进程的视图盘登记（最后一个使用者才真撤映射）。

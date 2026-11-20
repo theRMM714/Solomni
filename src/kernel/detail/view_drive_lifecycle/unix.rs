@@ -13,8 +13,10 @@ pub(super) fn begin(_root: &Path, _home: &Path) -> bool {
     false
 }
 
-/// 目的：非 Windows 没有视图盘可清扫。
-pub(super) fn sweep(_home: &Path) {}
+/// 目的：非 Windows 没有视图盘可清扫（撤掉的盘符恒 0）。
+pub(super) fn sweep(_home: &Path) -> usize {
+    0
+}
 
 /// 目的：非 Windows 没有视图盘可释放。
 pub(super) fn release(_home: &Path) {}

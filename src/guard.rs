@@ -244,6 +244,15 @@ pub fn fence_clean(root: &std::path::Path) -> i32 {
             failed = true;
         }
     }
+    // 视图盘是 Windows 独有的盘符映射：崩溃残留的映射与登记也在这次清扫里回收，
+    // 不必等下一个实例启动时才被顺手清掉（否则 --fence-clean 之后盘符还挂着）。
+    if crate::kernel::api::IS_WINDOWS {
+        let reclaimed = crate::kernel::api::view_drive_sweep(&home);
+        lines.push(match reclaimed {
+            0 => "没有残留的视图盘盘符映射".to_string(),
+            n => format!("撤掉 {} 个残留的视图盘盘符映射", n),
+        });
+    }
     for line in &lines {
         if failed {
             eprintln!("[围栏] 清理未完成：{}", line);
