@@ -858,6 +858,8 @@ fn real_shell_fence_denies_outside_paths_without_claiming_a_reason() {
 }
 
 /// 目的：生成的 .ps1 让**未处理的 PowerShell 错误**以非 0 收场；显式容错与原生退出码不变。
+///   同时钉住两条容易被当成工具缺陷的回执口径：调用方降级错误后失败不进退出码；首个原生命令之前
+///   `$LASTEXITCODE` 是空而不是 0。
 /// 约束：这条契约只测脚本包装本身，不装容器围栏（CI 无 ACL 也能跑）；缺 PowerShell 就如实跳过。
 #[cfg(windows)]
 #[test]
@@ -880,16 +882,37 @@ fn generated_shell_script_fails_on_unhandled_powershell_errors() {
             "Get-Content C:\\definitely-missing-solomni-xyz",
             Some(1),
             "未处理的 cmdlet 错误要以 1 中止",
+            None,
         ),
-        ("Write-Error \"boom\"", Some(1), "Write-Error 要以 1 中止"),
+        (
+            "Write-Error \"boom\"",
+            Some(1),
+            "Write-Error 要以 1 中止",
+            None,
+        ),
         (
             "Get-Content C:\\definitely-missing-solomni-xyz -ErrorAction SilentlyContinue; Write-Output ok",
             Some(0),
             "显式静默的错误不算失败",
+            Some("ok"),
         ),
-        ("cmd /c exit 3", Some(3), "原生退出码照旧转发"),
+        ("cmd /c exit 3", Some(3), "原生退出码照旧转发", None),
+        // 报告 #2 的现场：调用方自己把错误降级以后，失败只进 stderr——包装器不假装成功，也不替脚本猜。
+        (
+            "$ErrorActionPreference = 'Continue'; New-Item -ItemType File -Path no-such-dir\\x.txt -ErrorAction Continue | Out-Null; Write-Output done",
+            Some(0),
+            "降级后的失败不进退出码（要靠退出码判成败就别降级）",
+            Some("done"),
+        ),
+        // 报告 #3 的现场：cmdlet 不写 $LASTEXITCODE，首个原生命令之前它是空，不是 0。
+        (
+            "if ($null -eq $LASTEXITCODE) { Write-Output 'last-exit-null' } else { Write-Output \"last-exit=$LASTEXITCODE\" }",
+            Some(0),
+            "首个原生命令之前 $LASTEXITCODE 是空",
+            Some("last-exit-null"),
+        ),
     ];
-    for (script, want, why) in cases {
+    for (script, want, why, must_see) in cases {
         let (_, path) = tools
             .shell_script_file(&crate::kernel::ports::ShellRun {
                 fence: &spec,
@@ -924,6 +947,13 @@ fn generated_shell_script_fails_on_unhandled_powershell_errors() {
         );
         if want == Some(1) {
             assert!(!stderr.trim().is_empty(), "错误要留在 stderr：{}", script);
+        }
+        if let Some(needle) = must_see {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                stdout.contains(needle),
+                "stdout 缺少 {needle:?}（{stdout}，script = {script}）"
+            );
         }
         let _ = std::fs::remove_file(&path);
     }
