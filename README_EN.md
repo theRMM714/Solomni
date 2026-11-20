@@ -92,8 +92,10 @@ node start.js --provision --ensure --yes # optional (Linux / Windows): install Q
   project — the price of "no writes outside"; the gate also snapshots out-of-project cache roots and fails if
   anything was written.
 - The **base toolchains** for module tools/builds (Python / Node / C-C++) are a runtime prerequisite: they live
-  under `.tools/toolchains/` and are prepended to PATH at startup. Only the product installs them (`--provision`,
-  `kind: toolchain`, group alias fills only what is missing); afterwards the Rust side writes what is present into
+  under `.tools/toolchains/` and are prepended to PATH at startup. Two installers share one manifest: the dev
+  environment is bootstrapped by `env.js` (`node env.js setup --yes`, same treatment as Rust), and runtime users
+  are served by the product (`--provision`, `kind: toolchain`, group alias fills only what is missing, judged
+  installed by probe + ledger identity); afterwards what is present is written into
   `.tools/toolchains/active.json` (`profile` / `target` / per-tool `id` / `version` / `bin` / `env`), which startup
   reads read-only. The
   host fallback is only usable when the Windows fence can grant it (an adequate existing entry, or the directory is
@@ -123,11 +125,15 @@ node dev.js test|fmt|clippy   # one-layer dev commands; cargo only runs through 
 - `node setup-dev.js --check` validates required items only (`--strict` requires the whole list);
   `node run-tests.js --strict-env` turns missing required tools into failures, and the CI `quality` job uses it so a
   missing tool can never masquerade as a pass.
-- The environment is its own layer ([env.js](env.js)): path conventions, **Rust / MinGW / Zig cc** toolchain detection,
-  environment composition and installation live there (runtime prerequisites are not installed here); `node env.js`
+- The environment is its own layer ([env.js](env.js)): path conventions, **Rust / MinGW / Zig cc / Python / Node**
+  toolchain detection, environment composition and installation live there (runtime prerequisites get the same
+  treatment as Rust: missing ones are installed project-locally with consent, then recorded with the product ledger
+  identity and merged into active.json); `node env.js`
   shows the resolved environment and `node env.js --print-env` prints the machine-readable result plus the full
-  variable table (`env`: `PATH` / `CARGO_HOME` / `RUSTUP_HOME` / `TMP` / `TMPDIR` / `TEMP`). `setup-dev.js` installs
-  only Rust (components / targets / crates) and points at the product for the rest. On Windows with a **GNU build target** the first run
+  variable table (`env`: `PATH` / `CARGO_HOME` / `RUSTUP_HOME` / `TMP` / `TMPDIR` / `TEMP`, plus the project-local
+  `nodeBin` and toolchain presence facts). `setup-dev.js` installs the full dev environment
+  (Rust components / targets / crates; runtime prerequisites and Zig cc when the host `cc` is missing are
+  bootstrapped by env.js). On Windows with a **GNU build target** the first run
   asks for consent and installs a portable MinGW (`dlltool.exe`, needed by `windows-sys` raw-dylib) into the project's
   `.tools/` — a borrowed msvc toolchain that links needs no dlltool; a machine with a full binutils can point
   `SOLOMNI_MINGW_BIN=<bin dir>` at it instead of downloading ~260 MB.
