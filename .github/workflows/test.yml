@@ -1,7 +1,9 @@
 # 三平台测试：GitHub 托管 runner 是一次性机器，「会改本机状态」的真机围栏测试只在这里开。
 # 本地默认安全模式（见 TESTING.md）：会改本机状态的测试要显式 --fence-live。
 #
-# 触发：**PR（目标 main，且已 Ready for review）与手动 workflow_dispatch**；push 不触发。
+# 触发：**PR（目标 main，且已 Ready for review）、手动 workflow_dispatch，以及 push 到 main**。push 只跑
+# cache-seed（把工具链缓存播种到 main，供后续 PR 恢复），其余 job 在 push 事件上全部跳过：不跑门禁、
+# 不碰 ci-report，也不为了一次合并把整套门禁在 main 上再跑一遍（PR 上已经跑过同一份 head）。
 # Draft PR 的 opened / synchronize 仍会创建 run，但所有 job 跳过（不耗 runner、不发布 ci-report）；
 # 标 Ready（ready_for_review）才跑验收，之后的推送也重跑。PR 验收 PR head 提交（SOURCE_SHA），
 # 报告的 sha 因此等于 PR 头；手动派发验收 github.sha。代码验收的 CI 价值是给出本机拿不到的结论（他平台编译、
@@ -13,7 +15,7 @@
 # 覆盖率不是验收闸门：它不进 gate 的判定（tests/ci-gate.mjs 不读它），job 级 continue-on-error 让它红了也不改
 # workflow 结论——报告只作为观察指标留档。
 # 平台无关的是 changes（分流）、docs（文档审查）、structure（结构审查）、workflow（工作流静态检查）、
-# gate（验收闸门）与 publish-report（汇总发布）。
+# gate（验收闸门）与 publish-report（汇总发布）。push 到 main 只跑 cache-seed（三平台并行播种工具链缓存）。
 # 有代码变更 → quality / coverage / e2e；有文档变更 → docs；structure / workflow 始终跑（结构代码和文档两边都能破坏；
 # workflow 改坏会让必填检查不上报，所以不按变更类型跳过）。
 # gate 汇总五个 lane 的结果，是规则集里唯一代表代码/文档验收的必填检查：quality / e2e 是矩阵 job，被 job 级 if 跳过时
@@ -23,8 +25,10 @@
 # changes 只是路由，不要设为 required（卡住不应阻塞合并）；也不要用 workflow 级 paths-ignore（required check 会永远 pending）。
 # 第三方 action 一律 SHA pin（行尾注释保留可读版本）；升级时同一个 diff 改 SHA 与注释，不跑无人审的浮动 tag。
 # 缓存只读不写：任何 ref 都能恢复，保存只在 main（PR 的缓存分支作用域只对同分支可见，存了只会挤掉主线缓存项）。
+# main 上的工具链缓存由 push 触发的 cache-seed 播种（合并即 push），依赖与编译产物缓存仍由手动派发到 main 的 quality 保存。
 # 开发工具链统一项目内（与本机同一口径）：quality / e2e / coverage 跑 env.js setup（+ setup-dev）装齐
-# Rust / cc / python / node / 组件 / 供应链工具，探针在场即跳过；工具链缓存按清单哈希取，只由 quality 保存。
+# Rust / cc / python / node / 组件 / 供应链工具，探针在场即跳过；工具链缓存按清单哈希取，只由 cache-seed
+# （push 到 main）与 quality（手动派发到 main）保存——播种 job 只写工具链，不写 cargo / target，见其注释。
 # setup-node 固定 24 只作点火：门禁入口 re-exec 到项目内 node（env.js 的 reexecProjectNode）。
 name: 测试
 
@@ -39,6 +43,11 @@ on:
     branches: [main]
     # ready_for_review 不在默认活动类型里：不加这一项，Draft 转 Ready 不会触发 CI。
     types: [opened, synchronize, reopened, ready_for_review]
+  # 合并 PR 就是一次 main 上的 push：只跑 cache-seed 播种工具链缓存，其余 job 用各自的
+  # `github.event_name != 'push'` 守卫跳过。规则集没有 restrictions 规则，"禁止直接 push" 由
+  # pull_request 规则实现，与这里的 push 触发器不冲突（详见 docs/testing/execution-ci.md）。
+  push:
+    branches: [main]
 
 # PR 触发时验收 PR head（不是 merge commit）；手动派发时就是 github.sha。报告与发布共用这一份；
 # checkout 用 base 仓的 refs/pull/<N>/head，指向同一个 head 提交。
@@ -58,7 +67,7 @@ jobs:
   changes:
     name: 变更分流
     # Draft 不跑：Draft 的 opened / synchronize 会创建 run，这里跳过（不耗 runner）。
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -108,7 +117,7 @@ jobs:
     needs: changes
     # 有文档变更才跑；纯代码 PR 跳过（代码不会碰门户、链接、根文档路由）。
     # 只有显式 false 才跳过：分类器缺失/分类失败一律按全量跑。
-    if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (needs.changes.result != 'success' || needs.changes.outputs.docs_changed != 'false') }}
+    if: ${{ github.event_name != 'push' && always() && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (needs.changes.result != 'success' || needs.changes.outputs.docs_changed != 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -138,7 +147,7 @@ jobs:
     name: 结构审查
     # 始终跑：代码↔文档结构两边都能破坏（新增 src 文件没进 unit-map；删 unit-map 一行 / 提示词键表一个键）。
     # 平台无关，只跑一次；不放进三平台 quality，避免每个平台各跑一遍。
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    if: ${{ github.event_name != 'push' && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -168,7 +177,7 @@ jobs:
     name: 工作流静态检查
     # 恒跑（与 structure 同理）：workflow 文件本身坏了，必填检查可能根本不上报，所以不按变更类型跳过。
     # actionlint 阻断（YAML / 表达式 / 内联 bash 的 shellcheck）；zizmor 阻断（安全审查，findings 即整个 job 失败）。
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    if: ${{ github.event_name != 'push' && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -211,7 +220,7 @@ jobs:
     name: 质量与单元（${{ matrix.os }}）
     needs: changes
     # 有代码变更才跑；结构审查由独立 structure job 承担，这里用 --skip-audit。
-    if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (needs.changes.result != 'success' || needs.changes.outputs.code_changed != 'false') }}
+    if: ${{ github.event_name != 'push' && always() && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (needs.changes.result != 'success' || needs.changes.outputs.code_changed != 'false') }}
     runs-on: ${{ matrix.os }}
     # 比 e2e 宽：要额外装 Rust 组件与供应链工具（setup-dev；供应链门禁见 docs/testing/levels.md 的 T0）。
     # 冷机要全量引导工具链（Rust / MinGW / python / node / 组件 / 供应链工具），给足墙钟；缓存命中后远快于此。
@@ -356,7 +365,7 @@ jobs:
     name: 端到端（${{ matrix.os }}）
     needs: changes
     # 有代码变更才跑；文档-only 时跳过。
-    if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (needs.changes.result != 'success' || needs.changes.outputs.code_changed != 'false') }}
+    if: ${{ github.event_name != 'push' && always() && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (needs.changes.result != 'success' || needs.changes.outputs.code_changed != 'false') }}
     runs-on: ${{ matrix.os }}
     # HTTP 旅程 + 浏览器旅程各起一次编排器；浏览器缺失时要下载 Chromium，冷机还要全量引导工具链，留足墙钟。
     timeout-minutes: 60
@@ -487,7 +496,7 @@ jobs:
     continue-on-error: true
     needs: changes
     # 有代码变更才跑；覆盖率要跑单元/平台测试 + 插桩构建 + L4，成本高于 quality，不放进矩阵。
-    if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (needs.changes.result != 'success' || needs.changes.outputs.code_changed != 'false') }}
+    if: ${{ github.event_name != 'push' && always() && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (needs.changes.result != 'success' || needs.changes.outputs.code_changed != 'false') }}
     runs-on: ubuntu-latest
     # 冷机要编译两遍（普通 + 插桩）再跑 L4；给足时间，超时按失败处理。
     timeout-minutes: 60
@@ -575,7 +584,7 @@ jobs:
     # always()：依赖失败或被跳过也要给出结论；取消的 job 结果不是 success，同样判失败，不让 skipped 冒充通过。
     # coverage 不在 needs 里：覆盖率报告不是验收闸门，等它只会让合并多一个无关的等待。
     needs: [changes, docs, structure, workflow, quality, e2e]
-    if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    if: ${{ github.event_name != 'push' && always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -609,7 +618,7 @@ jobs:
     # fork PR 的 token 只读，发布必然失败；测试照跑，只跳过发布。
     # Draft 的 run 里依赖 job 都跳过：这里也跳过，免得发布出空报告。
     # 分类失败时 structure / quality / e2e 已按全量兜底，这里照常发布。
-    if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository)) }}
+    if: ${{ github.event_name != 'push' && always() && !cancelled() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository)) }}
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -739,3 +748,71 @@ jobs:
             node tests/ci-merge.mjs
             RUNNER_OS="${runner_os}" node tests/ci-publish.mjs
           done
+
+  # push 到 main（合并 PR）时唯一跑的 job：把项目内工具链装进 main 的缓存，供后续 PR 恢复。
+  # 只播工具链、不播 cargo / target：播种 run 里没有源码依赖图，存下去的是空 target，
+  # 而缓存键不可覆盖——那会把后续 PR 的编译缓存永久毒化。依赖与编译产物缓存仍由手动派发到 main 的 quality 刷新。
+  # 先 lookup-only 查一次：缓存已经在就只花几秒，不必为了「保存」再跑一遍安装。
+  cache-seed:
+    name: 播种工具链缓存（${{ matrix.os }}）
+    # 只有 push 事件；其余触发方式走质量的正常恢复 / 保存路径（见各 job 的 save 步骤）。
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ${{ matrix.os }}
+    # 冷机全量引导一次工具链（与 quality 同一份清单、同一份缓存 key）。
+    timeout-minutes: 60
+    env:
+      OS_KEY: ${{ matrix.oskey }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            oskey: windows
+          - os: ubuntu-latest
+            oskey: linux
+          - os: macos-latest
+            oskey: macos
+    steps:
+      # 只读 job：只装工具链进项目内目录，不写仓库。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      # 点火 node：与 quality 同一版本；env.js 只用内置模块，不需要 npm ci。
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      # lookup-only：命中就只置 cache-hit，不下载（命中时本 job 全程几秒）。
+      - name: 查询项目内工具链缓存
+        id: toolchain
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            platform/${{ env.OS_KEY }}/rustup
+            .tools/toolchains
+            .tools/mingw64
+            .tools/bin
+          key: ${{ runner.os }}-${{ runner.arch }}-toolchains-${{ hashFiles('dependencies.yaml', 'links.yaml', 'dev-tools.js') }}
+          lookup-only: true
+
+      - name: 装齐项目内开发工具链（env.js + setup-dev）
+        if: ${{ steps.toolchain.outputs.cache-hit != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node env.js setup --yes
+          node setup-dev.js --yes
+
+      # 与 quality 的恢复 key 逐字一致：同一份清单哈希、同一批路径。
+      - name: 保存项目内工具链缓存（仅未命中时）
+        if: ${{ steps.toolchain.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            platform/${{ env.OS_KEY }}/rustup
+            .tools/toolchains
+            .tools/mingw64
+            .tools/bin
+          key: ${{ steps.toolchain.outputs.cache-primary-key }}

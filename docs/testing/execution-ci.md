@@ -276,18 +276,19 @@ MUTATION_SHARD=2/4 node tests/ci-mutation.mjs     # 只跑第 2 片
 
 ### CI（GitHub Actions）：跨平台与真机的参考事实来源
 
-- 跨平台验收工作流是 `.github/workflows/test.yml`，**两种触发：PR（目标 `main`，且已 Ready for review）与手动 `workflow_dispatch`**；`push` 不触发。Draft PR 的 `opened` / `synchronize` 仍会创建 run，但所有 job 跳过（不耗 runner，也不发布 `ci-report`）；标 Ready（`ready_for_review`）才跑验收，之后的推送同样重跑。
+- 跨平台验收工作流是 `.github/workflows/test.yml`，**三种触发：PR（目标 `main`，且已 Ready for review）、手动 `workflow_dispatch`，以及 `push` 到 `main`**。`push` 只跑 `cache-seed`（把工具链缓存播种到 `main`），其余 job 都用 `github.event_name != 'push'` 守卫跳过——合并不会重跑门禁，也不会碰 `ci-report`。Draft PR 的 `opened` / `synchronize` 仍会创建 run，但所有 job 跳过（不耗 runner，也不发布 `ci-report`）；标 Ready（`ready_for_review`）才跑验收，之后的推送同样重跑。
 - PR 验收 PR head 提交（`SOURCE_SHA`），报告的 `sha` 因此等于 PR 头；手动派发验收 `github.sha`。
 - 矩阵 `windows-latest / ubuntu-latest / macos-latest`（`fail-fast: false`，一个平台失败不影响另外两个出结论）。
 - 来自 fork 的 PR 照跑测试，但不发布 `ci-report`（token 只读）。
 
-- 平台相关的 job 是 `quality` 与 `e2e`；`coverage` 固定在 Linux 单平台且不进验收闸门；`changes` / `docs` / `structure` / `workflow` / `gate` / `publish-report` 是平台无关的 job：
+- 平台相关的 job 是 `quality`、`e2e` 与 `cache-seed`（后者只在 `push` 到 `main` 时跑）；`coverage` 固定在 Linux 单平台且不进验收闸门；`changes` / `docs` / `structure` / `workflow` / `gate` / `publish-report` 是平台无关的 job：
 
 | job | 跑什么 | 对应入口 |
 | --- | --- | --- |
 | `quality` | 平台门禁 + 供应链 + L1 单元 + 平台探针 + 前端冒烟 + 前端类型检查（tsc） + 开发回路 / 变更分流 / 环境引导自检（**跳过 L4 与结构审查**） | `node run-tests.js --fence-live --skip-e2e --skip-audit --strict-env` |
 | `e2e` | L4 端到端 HTTP 与浏览器两条（自己构建产品，与 `quality` 并行） | `node tests/ci-e2e.mjs`（CI 专用；本地整跑用 `node run-tests.js --fence-live`） |
 | `coverage` | 覆盖率报告（Linux，含测试进程与 L4 子进程；只报不拦：不进 `gate` 判定，`continue-on-error` 让它红了也不改 workflow 结论） | `node tests/coverage.mjs --collect` |
+| `cache-seed` | 仅 `push` 到 `main`：三平台各自用 `lookup-only` 查工具链缓存，未命中才装工具链并保存（只播工具链，不播 cargo / `target`） | `node env.js setup --yes` + `node setup-dev.js --yes` |
 | `changes` | 判定 `code_changed` / `docs_changed`；从 base 取分类器副本，自测 + `include_str!/include_bytes!` 文档消费自检 | `node tests/ci-changes.mjs`（副本） |
 | `docs` | 有文档变更：文档审查（门户 / 链接 / 根文档路由） | `node run-tests.js --audit=docs` |
 | `structure` | 始终跑：结构审查（代码↔文档结构；文档与真相源比对 + 纯文本检查） | `node run-tests.js --audit=structure` |
@@ -337,8 +338,8 @@ MUTATION_SHARD=2/4 node tests/ci-mutation.mjs     # 只跑第 2 片
 > 规则集是仓库外的事实（GitHub 设置），本仓由用户在 GitHub 设置里改；核实用只读命令：
 > `gh api repos/<owner>/<repo>/rulesets --jq '.[].id'`，再取对应 id 的 `required_status_checks`。
 
-- `workflow_dispatch` 的 `clean` 输入（`true`）跳过缓存恢复，按干净机器跑；PR 触发没有这个输入，缓存照用。缓存覆盖**项目内**路径，分两份：**工具链缓存**（`platform/<os>/rustup`、`.tools/toolchains`、`.tools/mingw64`、`.tools/bin`；key = `dependencies.yaml` + `links.yaml` + `dev-tools.js` 哈希，不给 restore-keys——半套工具链比全新安装更坏；只由 quality 保存，e2e / coverage / mutants 只恢复，免得空 `.tools/bin` 抢住同 key）；**依赖与编译产物缓存**（`platform/<os>/cargo` 含 registry / git / 工具，以及 `target/debug`；key 含 `Cargo.lock`）。**不缓存 `target/` 根**（报告与日志必须来自本次运行）。
-- **恢复与保存拆开**：所有 ref 都用 `actions/cache/restore`（PR 读 main 的缓存），只有 `main` 上的运行才 `actions/cache/save`——PR 的缓存作用域只对同分支可见，存了只会挤掉主线缓存项；save 失败不挡验收。本工作流**没有 `push` 触发**，所以 main 的缓存只靠「手动派发到 main」刷新（合并后的 Ready PR 在 PR head 上跑，不写 main 缓存）。缓存身份包含 `path`，改路径即新缓存项、旧项自动淘汰，首次冷启动重下一次。
+- `workflow_dispatch` 的 `clean` 输入（`true`）跳过缓存恢复，按干净机器跑；PR 触发没有这个输入，缓存照用。缓存覆盖**项目内**路径，分两份：**工具链缓存**（`platform/<os>/rustup`、`.tools/toolchains`、`.tools/mingw64`、`.tools/bin`；key = `dependencies.yaml` + `links.yaml` + `dev-tools.js` 哈希，不给 restore-keys——半套工具链比全新安装更坏；由 `cache-seed`（`push` 到 `main`）与 `quality`（手动派发到 `main`）保存，e2e / coverage / mutants 只恢复，免得空 `.tools/bin` 抢住同 key）；**依赖与编译产物缓存**（`platform/<os>/cargo` 含 registry / git / 工具，以及 `target/debug`；key 含 `Cargo.lock`）。**不缓存 `target/` 根**（报告与日志必须来自本次运行）。
+- **恢复与保存拆开**：所有 ref 都用 `actions/cache/restore`（PR 读 main 的缓存），只有 `main` 上的运行才 `actions/cache/save`——PR 的缓存作用域只对同分支可见，存了只会挤掉主线缓存项；save 失败不挡验收。合并 PR 就是一次 `main` 上的 `push`：`cache-seed` 先用 `lookup-only` 查工具链缓存，未命中才装并保存——工具链缓存因此随合并自动刷新，命中后该 job 只花几秒。依赖与编译产物缓存仍只由「手动派发到 main」的 `quality` 刷新：播种 run 里没有源码依赖图，存下去是空 `target`，而缓存键不可覆盖，会毒化后续 PR 的编译缓存。缓存身份包含 `path`，改路径即新缓存项、旧项自动淘汰，首次冷启动重下一次。
 - **CI 开发工具链统一项目内（与本机同一口径）**：quality / e2e / coverage 跑 `node env.js setup --yes`（quality / coverage 再跑 `node setup-dev.js --yes`）装齐 Rust / cc / python / node / 组件 / 供应链工具，探针在场即跳过；`setup-node` 固定 24 只作点火，门禁入口 re-exec 到项目内 node。cargo-mutants（CI 专用，不在开发清单）仍用 `taiki-e/install-action` 预编译装，落项目内 `CARGO_HOME/bin`——不写项目外。
 - 工具链预安装用时经 `SOLOMNI_CI_PREINSTALL_MS` 带进门禁报告，在 `steps` 里以「CI 前置：开发工具链安装」出现——安装不在 `run-tests.js` 内，只能这样进报告。
 
@@ -365,7 +366,7 @@ MUTATION_SHARD=2/4 node tests/ci-mutation.mjs     # 只跑第 2 片
 - **纯叙述型文档** → 不依赖本机之外：本地 `node run-tests.js --docs`（文档审查 + 结构审查）通过即可；PR 标 Ready 时走 `changes` + `docs` + `structure` + `workflow` + `gate`，不产生三平台验收。
 - 用户明确要求派发时例外。
 
-- **触发**：PR 标 Ready（或对 Ready 的 PR 推送）即自动跑；Draft 不跑。需要单独验证某个分支或干净机器时手动派发，用 `gh` 发起，`--ref` 指向要验证的分支（`main` 禁止直接 push，通常派发任务分支 `task/<简述>`，`AGENTS.md`）：
+- **触发**：PR 标 Ready（或对 Ready 的 PR 推送）即自动跑；Draft 不跑；`push` 到 `main` 只跑 `cache-seed`，不跑验收。需要单独验证某个分支或干净机器时手动派发，用 `gh` 发起，`--ref` 指向要验证的分支（`main` 禁止直接 push，通常派发任务分支 `task/<简述>`，`AGENTS.md`）：
 
 > **Draft 的 run 只证明工作流文件被接受**（YAML 解析通过）：所有 job 跳过、不产报告、不发布 `ci-report`，
 > 不能当任何验收结论。要验证工作流本身（产物上传/下载、合并与发布链路），必须手动派发或等 Ready 后跑一次。
