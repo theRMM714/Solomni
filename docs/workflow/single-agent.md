@@ -24,7 +24,7 @@
 - 迭代时按门禁判一次用 `node run-tests.js --skip-e2e`，验收用 `node run-tests.js`。
 - 查清单 / 步骤 / 标记用 `node run-tests.js --list`；只跑需要的几项用 `--only=<gate|lane|step>`，任意子集不写报告、不能当验收。
 - 纯叙述型文档改动用 `node run-tests.js --docs`（文档审查 + 结构审查，不跑代码 / 三平台 / L4；`docs/presentation/contracts.md` 除外，它走全量）。
-- cargo 只经这些入口跑（透传口 `node dev.js cargo -- <参数>`）；要在终端直接敲，先按 `env.js` 注入环境——`CARGO_HOME`、`RUSTUP_HOME`、`TMPDIR` / `TMP` / `TEMP` 与 `PATH` 的清单见 [execution-ci.md](../testing/execution-ci.md) 的「本机开发回路」；不注入会用 PATH 上的系统工具链并把缓存、临时目录写到项目外（`AGENTS.md`）。
+- 命令只经这些入口跑（透传口 `node dev.js run -- <命令…>`；宿主环境要显式 `node dev.js --ambient run -- <命令…>`，只给对照排查用）；要在终端直接敲 `cargo`，先按 `env.js` 注入环境——`CARGO_HOME`、`RUSTUP_HOME`、`TMPDIR` / `TMP` / `TEMP` 与 `PATH` 的清单见 [execution-ci.md](../testing/execution-ci.md) 的「本机开发回路」；不注入会用 PATH 上的系统工具链并把缓存、临时目录写到项目外（`AGENTS.md`）。
 
 ## 三、收口
 1. 按 `TESTING.md` 运行适用测试和质量检查：代码任务本地 `node run-tests.js` 全绿；纯叙述型文档任务用 `node run-tests.js --docs`，只代表文档审查 + 结构审查通过。失败则继续修复，不把 `env-skip`、`gap` 或 `blocked` 写成通过。
