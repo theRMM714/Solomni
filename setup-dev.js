@@ -14,6 +14,9 @@ const path = require("path");
 const env = require("./env.js");
 const DEV = require("./dev-tools.js");
 
+// 入口 re-exec：项目内 node 在场就用它跑本入口（宿主 node 只点火）；被 require 时不触发。
+if (require.main === module) env.reexecProjectNode();
+
 const ROOT = __dirname;
 const CHECK = process.argv.includes("--check");
 const STRICT = process.argv.includes("--strict");

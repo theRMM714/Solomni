@@ -11,6 +11,9 @@
 const { spawnSync } = require("child_process");
 const env = require("./env.js");
 
+// 入口 re-exec：项目内 node 在场就用它跑本入口（宿主 node 只点火）；被 require 时不触发（自检导入本文件）。
+if (require.main === module) env.reexecProjectNode();
+
 const ROOT = __dirname;
 // 透传口：只认 `--` 之后的参数。它不改变环境解析，也不给第二条"绕过 env.js"的路。
 const PASSTHROUGH = "cargo";

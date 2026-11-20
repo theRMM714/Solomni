@@ -18,8 +18,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import envLayer from "../env.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// 入口 re-exec：项目内 node 在场就用它跑本入口（宿主 node 只点火），编排器随之统一。
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) envLayer.reexecProjectNode();
 const OUT_DIR = path.join(ROOT, "target", "coverage");
 const POLICY = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "coverage-policy.json"), "utf8"));
 // 只报不拦：阈值不达标只打回执，不阻塞合并；--strict 临时转回硬门禁。

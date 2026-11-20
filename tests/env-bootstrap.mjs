@@ -2,7 +2,8 @@
  * 环境引导自检：\`env.js\` 的 MinGW（Windows）与 Zig cc（Linux / macOS）引导链。
  * 管：用**真实子进程**跑 \`<临时根>/env.js setup --yes\`，配一个本地 HTTP 服务器按需应答（206 / 不认 Range / 中途断开）；
  *     借用工具的"能构建"门槛（\`probeBuild\`）、POSIX 的"宿主 cc 可用就不下载 / 缺失才自举"、
- *     \`--target=\` 翻译、\`node env.js\` 的自诊断输出，以及工具链注入判据（active.json → PATH 前置 / nodeBin / 在场事实）。
+ *     \`--target=\` 翻译、\`node env.js\` 的自诊断输出、工具链注入判据（active.json → PATH 前置 / nodeBin / 在场事实）、
+ *     python/node 安装链与跨语言身份钉住，以及入口 re-exec（项目内 node 接管 / 守卫 / 回退）。
  * 不管：Rust 侧 provision 的校验（在 \`provision\` 的单元用例里）、dev.js 的子命令表（在 \`tests/dev-loop.mjs\`）。
  * 判据：见 \`docs/testing/execution-ci.md\` 的「环境引导自检」。dlltool 只在 Windows；Zig 只在 POSIX。
  * 约束：只写 \`target/test-scratch/\`（不入库）；不碰真实 \`.tools/\`、不碰外网、不起 Rust 安装。
@@ -975,6 +976,64 @@ function toolchainInjectionSelfCheck() {
 }
 
 /**
+ * 目的：入口 re-exec 自检——项目内 node 在场时入口必须改由它跑（下游 process.execPath 统一）；
+ *   守卫防循环、未登记回退宿主、项目内 node 起不来也回退宿主。
+ * 约束：夹具 node 是宿主 node 的硬链接（跨卷退回复制）；只写 target/test-scratch/。
+ */
+function reexecSelfCheck() {
+  const dir = path.join(SCRATCH, "reexec");
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  fs.copyFileSync(path.join(ROOT, "env.js"), path.join(dir, "env.js"));
+  fs.copyFileSync(path.join(ROOT, "links.yaml"), path.join(dir, "links.yaml"));
+  const os = IS_WIN ? "windows" : IS_MAC ? "macos" : "linux";
+  const arch = process.arch === "x64" ? "x86_64" : process.arch === "arm64" ? "aarch64" : process.arch;
+  const binRel = ".tools/toolchains/" + os + "-" + arch + "/node/9.9.9/nbin";
+  const binDir = path.join(dir, ...binRel.split("/"));
+  fs.mkdirSync(binDir, { recursive: true });
+  const nodeExe = path.join(binDir, IS_WIN ? "node.exe" : "node");
+  try { fs.linkSync(process.execPath, nodeExe); } catch (e) { fs.copyFileSync(process.execPath, nodeExe); }
+  if (!IS_WIN) fs.chmodSync(nodeExe, 0o755);
+  const activeFile = path.join(dir, ".tools", "toolchains", "active.json");
+  const writeActive = () => fs.writeFileSync(activeFile, JSON.stringify({
+    target: os + "-" + arch, profile: ["node"],
+    tools: [{ id: "node", version: "9.9.9", bin: [binRel], env: {} }],
+  }));
+  fs.writeFileSync(path.join(dir, "entry.cjs"), 'require("./env.js").reexecProjectNode();\nconsole.log(process.execPath);\n');
+  const runEntry = (extraEnv) => spawnSync(process.execPath, [path.join(dir, "entry.cjs")], {
+    cwd: dir, env: { ...process.env, ...(extraEnv || {}) }, encoding: "utf8", timeout: 60000,
+  });
+
+  // ① 项目内 node 在场：入口改由它跑。
+  writeActive();
+  let r = runEntry();
+  assert.equal(r.status, 0, "re-exec 要正常退出：" + (r.stderr || ""));
+  assert.equal(r.stdout.trim(), nodeExe, "入口要改由项目内 node 跑");
+
+  // ② 守卫：已 re-exec 过的进程不再 re-exec（防循环）。
+  r = runEntry({ SOLOMNI_NODE_REEXEC: "1" });
+  assert.equal(r.status, 0, "守卫路径要正常退出：" + (r.stderr || ""));
+  assert.equal(r.stdout.trim(), process.execPath, "守卫在场不许再 re-exec");
+
+  // ③ 未登记：照宿主 node 跑。
+  fs.rmSync(activeFile);
+  r = runEntry();
+  assert.equal(r.status, 0, "未登记要正常退出：" + (r.stderr || ""));
+  assert.equal(r.stdout.trim(), process.execPath, "未登记照宿主 node 跑");
+
+  // ④ 项目内 node 起不来（空文件冒充）：如实报一句，照宿主继续。
+  writeActive();
+  fs.writeFileSync(nodeExe, "");
+  r = runEntry();
+  assert.equal(r.status, 0, "起不来要回退宿主而不是失败：" + (r.stderr || ""));
+  assert.equal(r.stdout.trim(), process.execPath, "起不来照宿主 node 跑");
+  assert.match(r.stderr, /项目内 node 起不来/, "回退要如实报原因");
+
+  fs.rmSync(dir, { recursive: true, force: true });
+  console.log("PASS entry-reexec");
+}
+
+/**
  * 目的：`node env.js`（只读状态）必须能自诊断——有 host、有构建探测结论；借用不可用时明说"不借用"。
  * 为什么机器查：本机掉进去的正是这条假绿——状态的每一行都"正常"，构建却必然失败（缺链接器）。
  */
@@ -1004,6 +1063,7 @@ if (!IS_WIN) {
   toolchainIdentityPin();
   await toolchainInstallCases();
   toolchainInjectionSelfCheck();
+  reexecSelfCheck();
   statusSelfCheck();
   console.log("ENV-BOOTSTRAP-OK");
 } else {
@@ -1012,6 +1072,7 @@ if (!IS_WIN) {
   toolchainIdentityPin();
   await toolchainInstallCases();
   toolchainInjectionSelfCheck();
+  reexecSelfCheck();
   statusSelfCheck();
   console.log("ENV-BOOTSTRAP-OK");
 }

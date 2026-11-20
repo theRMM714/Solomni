@@ -12,6 +12,8 @@ const path = require("path");
 const { execFileSync } = require("child_process");
 
 const ROOT = __dirname;
+// 入口 re-exec：项目内 node 在场就用它跑门禁（宿主 node 只点火），下游所有 process.execPath 随之统一。
+if (require.main === module) require("./env.js").reexecProjectNode();
 const cli = require("./tests/lib/cli.js");
 const opts = cli.parse(process.argv.slice(2));
 if (opts.invalid) {

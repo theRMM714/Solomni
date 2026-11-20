@@ -6,8 +6,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import envLayer from "../env.js";
 
+const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// 入口 re-exec：项目内 node 在场就用它跑本入口（宿主 node 只点火），编排器随之统一。
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) envLayer.reexecProjectNode();
 const IS_WIN = process.platform === "win32";
 const EXE = IS_WIN ? "solomni.exe" : "solomni";
 const BIN = path.join(ROOT, "target", "debug", EXE);
@@ -16,9 +21,10 @@ const REPORT = path.join(ROOT, "target", "e2e-report.json");
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
 // 输出走文件而不是管道：受限环境里"用管道抓子进程输出"会 EPERM（与 run-tests.js 的 sh 同一条约束）。
-// 环境必须带上真机围栏开关：编排器与产品都从这两个变量判断能不能真写 ACL / 建容器 profile，
-// 不带就等于把真机 e2e 悄悄降成安全模式（那正是 CI 要给出的结论）。本地请用 node run-tests.js --fence-live。
-const ENV = Object.assign({}, process.env, { SOLOMNI_FENCE_LIVE: "1", SOLOMNI_FENCE_WRITE: "1" });
+// 环境与门禁同源（proc.buildEnv：env.js 解析 + 项目内工具链与 .tools/bin 前置 + 临时钉项目内 + 真机围栏开关）：
+// 编排器与产品都从围栏开关判断能不能真写 ACL / 建容器 profile，不带就等于把真机 e2e 悄悄降成安全模式。
+// 本地请用 node run-tests.js --fence-live。
+const ENV = require("./lib/proc.js").create({ root: ROOT, fenceLive: true }).buildEnv();
 
 function run(cmd, args, logName, timeoutMs, extraEnv) {
   const logFile = path.join(LOG_DIR, logName);

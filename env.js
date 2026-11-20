@@ -221,6 +221,33 @@ function syncToolchainActive(wantedList) {
   fs.renameSync(tmp, file);
 }
 
+/** 目的：项目内 node 可执行（入口 re-exec 用）；未登记 / 不在场给 null。独立于 cargo 解析。 */
+function projectNodeBin() {
+  const tc = activeToolchains();
+  return tc ? tc.nodeBin : null;
+}
+
+/**
+ * 目的：入口 re-exec——项目内 node 在场就用它重跑当前入口（宿主 node 只点火，与 cargo 同构）。
+ * 为什么：下游所有 process.execPath 都该是项目内 node，门禁结论不再随宿主 node 版本漂。
+ * 约束：SOLOMNI_NODE_REEXEC 守卫防循环；项目内 node 缺失 / 与当前同一个 / 起不来都返回 false（调用方照宿主继续）。
+ * 返回：false = 未 re-exec；re-exec 发生时直接按子进程退出码退出，不返回。
+ */
+function reexecProjectNode() {
+  if (process.env.SOLOMNI_NODE_REEXEC === "1") return false;
+  const node = projectNodeBin();
+  if (!node || path.resolve(node) === path.resolve(process.execPath)) return false;
+  const r = spawnSync(node, [process.argv[1]].concat(process.argv.slice(2)), {
+    stdio: "inherit",
+    env: Object.assign({}, process.env, { SOLOMNI_NODE_REEXEC: "1" }),
+  });
+  if (r.error) {
+    console.error("[env] 项目内 node 起不来（" + r.error.message + "）：照宿主 node 继续");
+    return false;
+  }
+  process.exit(r.status === null ? 1 : r.status);
+}
+
 /** 目的：cc 已可用时登记；由 ensure / ensureProject 在返回前调用（status / --print-env 保持只读）。 */
 function registerBuildCC() {
   const dep = buildCC();
@@ -1394,6 +1421,6 @@ async function main() {
 
 // 只导出入口层（dev.js / setup-dev.js / start.js / 门禁的 tests/lib/proc.js）真正用到的这些；
 // 路径常量、下载与安装细节是这个文件自己的实现。readToolchainDep / installIdentity 供自检钉住跨语言身份口径。
-module.exports = { resolve, ensure, ensureProject, pinTemp, findProjectCargo, probeBuild, readToolchainDep, installIdentity };
+module.exports = { resolve, ensure, ensureProject, pinTemp, findProjectCargo, probeBuild, readToolchainDep, installIdentity, projectNodeBin, reexecProjectNode };
 
 if (require.main === module) main();
