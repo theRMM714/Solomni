@@ -67,9 +67,9 @@ pub(super) fn begin(root: &Path, home: &Path) -> bool {
     }
 }
 
-/// 目的：只清扫视图盘的崩溃残留（不分配盘符）。
-pub(super) fn sweep(home: &Path) {
-    view_drive::sweep_view_drive(home);
+/// 目的：只清扫视图盘的崩溃残留（不分配盘符）；返回撤掉的盘符个数。
+pub(super) fn sweep(home: &Path) -> usize {
+    view_drive::sweep_view_drive(home)
 }
 
 /// 目的：退出时注销本进程的视图盘登记。
@@ -103,10 +103,14 @@ mod tests {
         std::fs::create_dir_all(&home).expect("建临时私有区");
         let root = home.join("product-root");
         std::fs::create_dir_all(&root).expect("建假产品根");
+        let pid = std::process::id();
         let record = serde_json::json!([{
             "letter": "Q:",
             "root": root.to_string_lossy(),
-            "users": [std::process::id()],
+            "users": [{
+                "pid": pid,
+                "created": crate::kernel::detail::procs::created(pid).unwrap_or(0),
+            }],
         }]);
         std::fs::write(home.join("view-drive.json"), record.to_string()).expect("写记录");
         cleanup(&home);

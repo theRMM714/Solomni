@@ -22,8 +22,8 @@ pub fn begin(root: &Path, home: &Path) -> bool {
     backend::begin(root, home)
 }
 
-/// 目的：只清扫视图盘的崩溃残留（不分配盘符）。
-pub fn sweep(home: &Path) {
+/// 目的：只清扫视图盘的崩溃残留（不分配盘符）；返回撤掉的盘符个数（没有视图盘恒 0）。
+pub fn sweep(home: &Path) -> usize {
     backend::sweep(home)
 }
 

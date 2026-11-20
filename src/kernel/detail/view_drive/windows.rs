@@ -5,10 +5,13 @@
 //! 不管：ACL 授权（confine/windows）、装配层在何时调用（入口层组合根与守门进程）。
 //! 联动：confine/windows.rs 的 prepare_fence 用 active_shell_view(spec) 判断祖先链边界，
 //!   container.rs 用它决定 CreateProcessW 的 cwd 与程序名写法；ports::PathCodec 的实现在这里。
-//!   记录文件 .home/view-drive.json 是 JSON 数组：[{"letter":"Z:","root":"D:\\…","users":[123]}]。
-//!   每个进程启动时分配（同 root 复用字母、登记自己的 pid），退出时注销；启动清扫死 pid、
-//!   目标不存在或不匹配的条目，让残留的盘符映射不会越积越多。盘符映射是登录会话级的
-//!   （同用户的所有进程都看得见），因此守门进程只调 attach_view_drive 读记录、校验映射，不重复登记 pid。
+//!   记录文件 .home/view-drive.json 是 JSON 数组：
+//!   [{"letter":"Z:","root":"D:\\…","users":[{"pid":123,"created":133456789012345678}]}]。
+//!   每个进程启动时分配（同 root 复用字母、登记自己的 pid 与进程创建时刻），退出时注销；启动清扫
+//!   归属已死的条目、目标不存在或不匹配的条目，让残留的盘符映射不会越积越多。系统会复用 pid，
+//!   所以只认「pid + 创建时刻」这一对——与围栏台账 current_owner 的归属模型同一口径。盘符映射是
+//!   登录会话级的（同用户的所有进程都看得见），因此守门进程只调 attach_view_drive 读记录、校验映射，
+//!   不重复登记。
 
 use crate::kernel::contracts::fence::FenceSpec;
 use crate::kernel::ports::PathCodec;
@@ -188,7 +191,17 @@ struct ViewEntry {
     letter: String,
     root: String,
     #[serde(default)]
-    users: Vec<u32>,
+    users: Vec<User>,
+}
+
+/// 目的：一条归属——进程 pid 与它的创建时刻（FILETIME，100ns）。
+/// 约束：系统会复用 pid，pid 单独不足以证明「还是登记的那个进程」；创建时刻对不上即判死。
+///   created = 0 是记录里没有归属证据（旧格式），判活按已死处理，交清扫回收。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct User {
+    pid: u32,
+    #[serde(default)]
+    created: u64,
 }
 
 fn record_path(home: &Path) -> PathBuf {
@@ -256,12 +269,12 @@ struct Sweep {
     remove: Vec<ViewEntry>,
 }
 
-/// 目的：纯逻辑清扫——死 pid 摘掉、映射不在或指向别处就丢条目、目标根已不存在就撤映射、没用户的撤映射。
-/// 参数：alive 判 pid 活性；query 查盘符当前映射目标（None = 没映射）；exists 判记录的目标根还在不在。
+/// 目的：纯逻辑清扫——死归属摘掉、映射不在或指向别处就丢条目、目标根已不存在就撤映射、没用户的撤映射。
+/// 参数：alive 判一条归属的活性；query 查盘符当前映射目标（None = 没映射）；exists 判记录的目标根还在不在。
 /// 约束：映射指向别处（别的程序占了同一字母）时只丢条目、不撤别人的映射。
 fn sweep_entries(
     entries: Vec<ViewEntry>,
-    alive: impl Fn(u32) -> bool,
+    alive: impl Fn(&User) -> bool,
     query: impl Fn(&str) -> Option<PathBuf>,
     exists: impl Fn(&Path) -> bool,
 ) -> Sweep {
@@ -279,7 +292,7 @@ fn sweep_entries(
             remove.push(entry);
             continue;
         }
-        entry.users.retain(|pid| alive(*pid));
+        entry.users.retain(|user| alive(user));
         if entry.users.is_empty() {
             remove.push(entry);
         } else {
@@ -467,15 +480,36 @@ mod imp {
         Ok(())
     }
 
-    fn pid_alive(pid: u32) -> bool {
-        pid != 0 && crate::kernel::detail::confine::process_alive(pid)
+    /// 目的：一条归属还算不算活着——创建时刻对得上才算，pid 复用了也对不上。
+    /// 约束：记录里没有归属证据（created = 0）判死，交清扫回收——留着的代价是死实例永久占住盘符
+    ///   （下一次清扫照样认不出它是谁）。读不到创建时刻分两种：进程已不在（判死），
+    ///   或拒绝访问 / 取不到时间（判不了）——后者退回 process_alive 保守留下，宁可漏回收也不误撤
+    ///   正在用的盘符；等它下次能被打开时再判。
+    pub(super) fn user_alive(user: &User) -> bool {
+        if user.pid == 0 || user.created == 0 {
+            return false;
+        }
+        match crate::kernel::detail::procs::created(user.pid) {
+            Some(created) => created == user.created,
+            None => crate::kernel::detail::confine::process_alive(user.pid),
+        }
+    }
+
+    /// 目的：本进程的归属（pid + 创建时刻）——登记前必须拿到，证不出归属就不登记。
+    /// 约束：读不到自己的创建时刻说明查询链路坏了；此时登记只会写一条清扫时判不出的记录，直接报错。
+    pub(super) fn self_owner() -> Result<User, String> {
+        let pid = std::process::id();
+        match crate::kernel::detail::procs::created(pid) {
+            Some(created) if created != 0 => Ok(User { pid, created }),
+            _ => Err("读不到本进程创建时刻，无法登记视图盘归属（映射不做无主登记）".to_string()),
+        }
     }
 
     /// 目的：清扫记录并尽力撤掉孤儿映射，返回留下的条目与被撤掉的盘符。
     /// 约束：调用方必须已持有 lock_view；撤不掉的条目以空 users 保留，留给下次清扫。
     fn sweep_locked(home: &Path) -> (Vec<ViewEntry>, Vec<String>) {
         let entries = load_entries(home);
-        let sweep = sweep_entries(entries, pid_alive, query_letter, |path| path.is_dir());
+        let sweep = sweep_entries(entries, user_alive, query_letter, |path| path.is_dir());
         let mut kept = sweep.kept;
         let mut removed = Vec::new();
         for entry in sweep.remove {
@@ -505,18 +539,20 @@ mod imp {
         (kept, removed)
     }
 
-    /// 目的：只清扫记录、不分配盘符：摘死 pid 与目标不存在的条目、撤孤儿映射、落盘。
-    pub(super) fn sweep(home: &Path) {
+    /// 目的：只清扫记录、不分配盘符：摘死归属与目标不存在的条目、撤孤儿映射、落盘。
+    /// 返回：撤掉的盘符个数（--fence-clean 据此报结论）。
+    pub(super) fn sweep(home: &Path) -> usize {
         let Ok(_lock) = lock_view(home) else {
-            return;
+            return 0;
         };
         let (kept, removed) = sweep_locked(home);
         if let Err(e) = save_entries(home, &kept) {
             eprintln!("[视图盘] 记录落盘失败：{}", e);
         }
-        for letter in removed {
-            clear_active(&letter);
+        for letter in &removed {
+            clear_active(letter);
         }
+        removed.len()
     }
 
     /// 目的：分配/复用视图盘：清扫记录、同根复用、找空字母建映射；成功设进程级 active。
@@ -524,14 +560,14 @@ mod imp {
         let root = normalize_root(root)?;
         let _lock = lock_view(home)?;
         let (mut kept, _removed) = sweep_locked(home);
-        let pid = std::process::id();
+        let me = self_owner()?;
         if let Some(pos) = kept
             .iter()
             .position(|e| same_path(Path::new(&e.root), &root))
         {
             let entry = &mut kept[pos];
-            if !entry.users.contains(&pid) {
-                entry.users.push(pid);
+            if !entry.users.contains(&me) {
+                entry.users.push(me.clone());
             }
             let letter = entry.letter.clone();
             save_entries(home, &kept)?;
@@ -557,7 +593,7 @@ mod imp {
         entries.push(ViewEntry {
             letter: letter.clone(),
             root: root.to_string_lossy().into_owned(),
-            users: vec![pid],
+            users: vec![me],
         });
         if let Err(e) = save_entries(home, &entries) {
             let _ = remove_mapping(&letter, &root);
@@ -617,7 +653,8 @@ mod imp {
         let mut changed = false;
         let mut removed_letters: Vec<String> = Vec::new();
         for entry in &mut entries {
-            let Some(pos) = entry.users.iter().position(|p| *p == pid) else {
+            // 按 pid 摘本进程的条目：同 pid 的旧归属（上一世创建时刻不同）本来就是死的，一起摘掉不吃亏。
+            let Some(pos) = entry.users.iter().position(|user| user.pid == pid) else {
                 continue;
             };
             entry.users.remove(pos);
@@ -649,9 +686,10 @@ mod imp {
     }
 }
 
-/// 目的：只清扫视图盘记录、不分配盘符：摘死 pid 与目标不存在的条目、撤孤儿映射、落盘。
+/// 目的：只清扫视图盘记录、不分配盘符：摘死归属与目标不存在的条目、撤孤儿映射、落盘。
+/// 返回：撤掉的盘符个数（--fence-clean 据此报结论）。
 /// 约束：不登记本进程、不改 active。
-pub fn sweep_view_drive(home: &Path) {
+pub fn sweep_view_drive(home: &Path) -> usize {
     imp::sweep(home)
 }
 
@@ -679,7 +717,11 @@ pub fn release_view_drive_within(home: &Path, wait: std::time::Duration) {
 mod tests {
     use super::*;
 
-    fn entry(letter: &str, root: &str, users: &[u32]) -> ViewEntry {
+    fn user(pid: u32, created: u64) -> User {
+        User { pid, created }
+    }
+
+    fn entry(letter: &str, root: &str, users: &[User]) -> ViewEntry {
         ViewEntry {
             letter: letter.to_string(),
             root: root.to_string(),
@@ -716,10 +758,10 @@ mod tests {
     #[test]
     fn sweep_drops_dead_pids_and_stale_targets_but_keeps_live_ones() {
         let entries = vec![
-            entry("Z:", r"D:\root", &[1, 2]),
-            entry("Y:", r"D:\dead", &[3]),
-            entry("X:", r"D:\stale", &[4]),
-            entry("W:", r"D:\gone", &[5]),
+            entry("Z:", r"D:\root", &[user(1, 10), user(2, 20)]),
+            entry("Y:", r"D:\dead", &[user(3, 30)]),
+            entry("X:", r"D:\stale", &[user(4, 40)]),
+            entry("W:", r"D:\gone", &[user(5, 50)]),
         ];
         let query = |letter: &str| match letter {
             "Z:" => Some(PathBuf::from(r"D:\root")),
@@ -727,11 +769,15 @@ mod tests {
             "X:" => Some(PathBuf::from(r"D:\stale-other")),
             _ => None,
         };
-        let alive = |pid: u32| pid == 2;
+        let alive = |user: &User| user.pid == 2;
         let exists = |path: &Path| path != Path::new(r"D:\dead");
         let sweep = sweep_entries(entries, alive, query, exists);
         assert_eq!(sweep.kept.len(), 1);
-        assert_eq!(sweep.kept[0].users, vec![2], "死 pid 摘掉、活归属留着");
+        assert_eq!(
+            sweep.kept[0].users,
+            vec![user(2, 20)],
+            "死 pid 摘掉、活归属留着"
+        );
         // Y 根不存在要撤映射；X 的映射指向别处只丢条目、不撤别人的映射（不在 remove 里）；
         // W 的映射已经不在（进程被强杀后的样子）只丢条目，没有映射可撤。
         assert_eq!(sweep.remove.len(), 1);
@@ -769,7 +815,7 @@ mod tests {
             "只撤正好指向本产品根的映射：根内子目录 Y:、C:\\Temp、同前缀的 D:\\root2 都不算"
         );
         // 记录里还有活持有者的字母是在用的视图盘，不撤。
-        let kept = vec![entry("Z:", r"D:\root", &[7])];
+        let kept = vec![entry("Z:", r"D:\root", &[user(7, 70)])];
         assert!(orphan_mappings(Path::new(r"D:\root"), &kept, query).is_empty());
     }
 
@@ -779,6 +825,46 @@ mod tests {
         assert_eq!(free_letter(occupied).as_deref(), Some("X:"));
         assert_eq!(free_letter(|_| true), None);
         assert!(free_letter(|_| false).is_some_and(|l| l == "Z:"));
+    }
+
+    #[test]
+    fn ownership_needs_the_creation_time_not_just_the_pid() {
+        let me = imp::self_owner().expect("本进程的归属要能读出来");
+        assert!(imp::user_alive(&me), "pid 与创建时刻都对得上 = 活着");
+        // pid 复用：同一个 pid、上一世实例的创建时刻 → 判死，不能凭 pid 继续占住盘符。
+        assert!(
+            !imp::user_alive(&User {
+                pid: me.pid,
+                created: me.created.wrapping_add(1),
+            }),
+            "创建时刻对不上就是另一个进程，哪怕 pid 相同"
+        );
+        // 记录里没有归属证据（旧格式 / 无主条目）→ 判死，交清扫回收。
+        assert!(
+            !imp::user_alive(&User {
+                pid: me.pid,
+                created: 0,
+            }),
+            "没有创建时刻的记录证不出归属，留着就会让死实例永久占住盘符"
+        );
+        assert!(!imp::user_alive(&User { pid: 0, created: 0 }));
+    }
+
+    #[test]
+    fn records_carry_pid_and_creation_time_and_reject_the_pid_only_shape() {
+        let entries = vec![entry("Z:", r"D:\root", &[user(7, 1234)])];
+        let text = serde_json::to_string(&entries).expect("序列化记录");
+        assert!(
+            text.contains(r#""created":1234"#),
+            "记录要带上创建时刻：{}",
+            text
+        );
+        let back: Vec<ViewEntry> = serde_json::from_str(&text).expect("反序列化记录");
+        assert_eq!(back, entries);
+        // 旧格式（users 是裸 pid）不再被认：整份记录解析失败 → 按空记录处理，
+        // 残留映射交给孤儿映射兜底回收，不会因 pid 复用被当成"还有人用"。
+        let old = r#"[{"letter":"Z:","root":"D:\\root","users":[123]}]"#;
+        assert!(serde_json::from_str::<Vec<ViewEntry>>(old).is_err());
     }
 
     /// 目的：一套干净的临时私有区；盘符一律用 Q:，没映射时就等于"映射已不在"。
@@ -796,7 +882,7 @@ mod tests {
     #[test]
     fn saving_no_entries_removes_the_record_file() {
         let home = temp_home("save-empty");
-        save_entries(&home, &[entry("Q:", r"D:\root", &[1])]).expect("写记录");
+        save_entries(&home, &[entry("Q:", r"D:\root", &[user(1, 10)])]).expect("写记录");
         assert!(record_path(&home).exists());
         save_entries(&home, &[]).expect("存空记录");
         assert!(!record_path(&home).exists(), "没有条目就不留文件");
@@ -815,7 +901,7 @@ mod tests {
             &[ViewEntry {
                 letter: "Q:".to_string(),
                 root: root.to_string_lossy().into_owned(),
-                users: vec![0],
+                users: vec![user(0, 0)],
             }],
         )
         .expect("写记录");
@@ -838,7 +924,7 @@ mod tests {
             &[ViewEntry {
                 letter: "Q:".to_string(),
                 root: root.to_string_lossy().into_owned(),
-                users: vec![std::process::id()],
+                users: vec![user(std::process::id(), 1)],
             }],
         )
         .expect("写记录");
@@ -861,7 +947,7 @@ mod tests {
             &[ViewEntry {
                 letter: "Q:".to_string(),
                 root: root.to_string_lossy().into_owned(),
-                users: vec![std::process::id()],
+                users: vec![user(std::process::id(), 1)],
             }],
         )
         .expect("写记录");

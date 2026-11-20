@@ -243,9 +243,10 @@ async function stopGraceful(child) {
 }
 
 /** 视图盘回收（仅 Windows）：核心在收尾总被硬杀（Windows 上 kill 即 TerminateProcess，控制台清理钩子
- * 不跑），盘符映射与 .home/view-drive.json 登记必然留下；--fence-clean 只回收 ACL 与 profile，不碰视图盘。
- * 这里按「映射目标 == 夹具根」精确回收：不判 pid 活性（pid 复用会让活性判断不可靠），指向其它根的盘符
- * （别的实例的视图盘）一律不碰。返回是否收干净（false = 有残留，改判 e2e）。 */
+ * 不跑），盘符映射与 .home/view-drive.json 登记必然留下。产品的 --fence-clean 现在也清扫视图盘，
+ * 这里仍先自己收一遍：只按「映射目标 == 夹具根」精确回收（不判归属活性——那是产品登记清扫的事），
+ * 指向其它根的盘符（别的实例的视图盘）一律不碰，残留直接判 e2e 失败。
+ * 返回是否收干净（false = 有残留，改判 e2e）。 */
 function reclaimFixtureViewDrive() {
   if (process.platform !== "win32") return true;
   const { spawnSync } = require("child_process");
