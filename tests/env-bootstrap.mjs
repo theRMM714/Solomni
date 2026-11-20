@@ -785,7 +785,15 @@ async function toolchainInstallCases() {
   fs.mkdirSync(ambient, { recursive: true });
   if (!IS_WIN) fs.writeFileSync(path.join(ambient, "cc"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   // 宿主 cc 桩前置（绕过 Zig 引导）；真 PATH 垫底——curl/tar 这些系统工具还要找得到。
-  const env = { ...process.env, SOLOMNI_CARGO: fakeCargo, PATH: ambient + path.delimiter + (process.env.PATH || ""), NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
+  // Windows 再前置一个坏 tar：安装必须走 System32 bsdtar 全路径，不许被 PATH 顺序（Git Bash 的 GNU tar）带偏。
+  let pathFront = ambient;
+  if (IS_WIN) {
+    const fakeBin = path.join(dir, "fakebin");
+    fs.mkdirSync(fakeBin, { recursive: true });
+    fs.writeFileSync(path.join(fakeBin, "tar.exe"), "");
+    pathFront = fakeBin + path.delimiter + ambient;
+  }
+  const env = { ...process.env, SOLOMNI_CARGO: fakeCargo, PATH: pathFront + path.delimiter + (process.env.PATH || ""), NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
   delete env.SOLOMNI_CARGO_HOME;
   delete env.SOLOMNI_MINGW_BIN;
   delete env.SOLOMNI_ACCEPT_ASSET_CHANGE;
