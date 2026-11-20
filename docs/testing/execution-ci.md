@@ -106,7 +106,7 @@ node run-tests.js
 > 安全模式（默认）不给真机围栏授权，而容器 shell 是**严格**围栏（不许降级）：这一步里的 shell 场景如实记一条
 > `[探针]` 跳过、不判失败；真机围栏（`--fence-live` / CI 的 `e2e` job）才跑它。
 > 仓库有项目内工具链（`.tools/toolchains/active.json`）时，编排器把 `.tools/` 链进夹具根：产品按**产品根**找工具链，
-> 夹具根没有就会回落宿主 PATH；宿主解释器装在用户目录（scoop / nvm）时容器围栏里跑不到。没有项目内工具链（如 CI 未装置备）则保持宿主回退。
+> 夹具根没有就会回落宿主 PATH；宿主解释器装在用户目录（scoop / nvm）时容器围栏里跑不到。CI 与本机同样经 `env.js setup` 装齐项目内工具链；只有真没有（如本地未装置备）才保持宿主回退。
 
 ### 环境引导自检（`tests/env-bootstrap.mjs`）
 
@@ -208,7 +208,7 @@ node run-tests.js --coverage
 - 统计前剔除 `src/tests/**`、`tests/**`、`*tests.rs` 与 `#[cfg(test)]` 到配对右花括号的整段；否则内联测试会把覆盖率抬高。`policy.excludes` 的显式 seam 豁免必须逐条写文件、行段与理由，评估时打印豁免行数。
 - Linux 同时采集测试进程与产品子进程：先 `cargo llvm-cov --workspace --all-targets --no-report`，再用同一份插桩环境 `cargo build --bin solomni`，然后以 `E2E_COVERAGE=1` 跑 L4（优雅停止让子进程写 profile），最后合并 `*.profraw` 出报告。测试或 E2E 失败（坏跑）非零退出；桶与变更行不达标只打回执、退出 0。
 - Windows 不判定行覆盖：Node 的 `SIGINT` 在 Windows 是 `TerminateProcess`，产品子进程来不及写 profile；只靠进程内报告会让产品桶假性不达标。macOS 不在本门禁内，避免为同一结论再付一份 runner。平台专有行为由三平台 `quality` 的真机探针与安全行为矩阵承担，不靠行覆盖替代。
-- 工具缺失（`cargo-llvm-cov` 或 `llvm-tools-preview`）直接失败并打印安装命令，不再记 env-skip；CI 的 `coverage` job 用 `taiki-e/install-action` 固定版本安装。
+- 工具缺失（`cargo-llvm-cov` 或 `llvm-tools-preview`）直接失败并打印安装命令，不再记 env-skip；CI 的 `coverage` job 经 `env.js setup` + `setup-dev` 装进项目内（`cargo-llvm-cov` 落 `.tools/bin`、`llvm-tools-preview` 落项目内 rustup），与本机同一口径。
 - 报告落 `target/coverage/`；未覆盖的生产路径在本次内补测或给出显式 seam，不留缺口条目。
 
 ### 突变测试工作流（手动 + 每周一）
@@ -337,10 +337,10 @@ MUTATION_SHARD=2/4 node tests/ci-mutation.mjs     # 只跑第 2 片
 > 规则集是仓库外的事实（GitHub 设置），本仓由用户在 GitHub 设置里改；核实用只读命令：
 > `gh api repos/<owner>/<repo>/rulesets --jq '.[].id'`，再取对应 id 的 `required_status_checks`。
 
-- `workflow_dispatch` 的 `clean` 输入（`true`）跳过缓存恢复，按干净机器跑；PR 触发没有这个输入，缓存照用。缓存覆盖**项目内**路径（`platform/ci/cargo`：借用 runner 自带 Rust 时的 `CARGO_HOME`，含 registry / git / 工具；以及 `target/debug`），**不缓存 `target/` 根**（报告与日志必须来自本次运行）。
+- `workflow_dispatch` 的 `clean` 输入（`true`）跳过缓存恢复，按干净机器跑；PR 触发没有这个输入，缓存照用。缓存覆盖**项目内**路径，分两份：**工具链缓存**（`platform/<os>/rustup`、`.tools/toolchains`、`.tools/mingw64`、`.tools/bin`；key = `dependencies.yaml` + `links.yaml` + `dev-tools.js` 哈希，不给 restore-keys——半套工具链比全新安装更坏；只由 quality 保存，e2e / coverage / mutants 只恢复，免得空 `.tools/bin` 抢住同 key）；**依赖与编译产物缓存**（`platform/<os>/cargo` 含 registry / git / 工具，以及 `target/debug`；key 含 `Cargo.lock`）。**不缓存 `target/` 根**（报告与日志必须来自本次运行）。
 - **恢复与保存拆开**：所有 ref 都用 `actions/cache/restore`（PR 读 main 的缓存），只有 `main` 上的运行才 `actions/cache/save`——PR 的缓存作用域只对同分支可见，存了只会挤掉主线缓存项；save 失败不挡验收。本工作流**没有 `push` 触发**，所以 main 的缓存只靠「手动派发到 main」刷新（合并后的 Ready PR 在 PR head 上跑，不写 main 缓存）。缓存身份包含 `path`，改路径即新缓存项、旧项自动淘汰，首次冷启动重下一次。
-- CI 借 runner 自带 Rust（`CARGO_HOME` / `SOLOMNI_CARGO_HOME` 指项目内），不跑 `rustup` 安装——不写项目外。
-- 供应链工具在进门前预编译装（工具获取策略见 [quality-isolation.md](quality-isolation.md)）；安装用时经 `SOLOMNI_CI_PREINSTALL_MS` 带进门禁报告，在 `steps` 里以「CI 前置：供应链工具安装」出现——安装不在 `run-tests.js` 内，只能这样进报告。
+- **CI 开发工具链统一项目内（与本机同一口径）**：quality / e2e / coverage 跑 `node env.js setup --yes`（quality / coverage 再跑 `node setup-dev.js --yes`）装齐 Rust / cc / python / node / 组件 / 供应链工具，探针在场即跳过；`setup-node` 固定 24 只作点火，门禁入口 re-exec 到项目内 node。cargo-mutants（CI 专用，不在开发清单）仍用 `taiki-e/install-action` 预编译装，落项目内 `CARGO_HOME/bin`——不写项目外。
+- 工具链预安装用时经 `SOLOMNI_CI_PREINSTALL_MS` 带进门禁报告，在 `steps` 里以「CI 前置：开发工具链安装」出现——安装不在 `run-tests.js` 内，只能这样进报告。
 
 - **为什么必须有 CI**（`run-tests.js`）——下面这些结论本地拿不到：
 

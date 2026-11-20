@@ -37,7 +37,7 @@ function dropFixtureVm() {
 
 /** 夹具根的 .tools：产品按**产品根**找项目内工具链（`.tools/toolchains/active.json`），
  * 夹具根没有它就会回落宿主 PATH——宿主解释器常装在用户目录（scoop / nvm），容器围栏里跑不到。
- * 仓库里有项目内工具链就链过去；没有（例如 CI 没装置备）就保持宿主回退，如实说。 */
+ * 仓库里有项目内工具链就链过去（CI 与本机同样经 env.js setup 装齐）；没有（例如本地没装置备）就保持宿主回退，如实说。 */
 function linkFixtureToolchains() {
   const from = path.join(PRODUCT_ROOT, ".tools");
   const to = path.join(FIXTURE, ".tools");

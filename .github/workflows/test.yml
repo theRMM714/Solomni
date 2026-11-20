@@ -23,6 +23,9 @@
 # changes 只是路由，不要设为 required（卡住不应阻塞合并）；也不要用 workflow 级 paths-ignore（required check 会永远 pending）。
 # 第三方 action 一律 SHA pin（行尾注释保留可读版本）；升级时同一个 diff 改 SHA 与注释，不跑无人审的浮动 tag。
 # 缓存只读不写：任何 ref 都能恢复，保存只在 main（PR 的缓存分支作用域只对同分支可见，存了只会挤掉主线缓存项）。
+# 开发工具链统一项目内（与本机同一口径）：quality / e2e / coverage 跑 env.js setup（+ setup-dev）装齐
+# Rust / cc / python / node / 组件 / 供应链工具，探针在场即跳过；工具链缓存按清单哈希取，只由 quality 保存。
+# setup-node 固定 24 只作点火：门禁入口 re-exec 到项目内 node（env.js 的 reexecProjectNode）。
 name: 测试
 
 on:
@@ -72,7 +75,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "lts/*"
+          node-version: "24"
 
       # 分类器自带样例自测与 include_str! 文档消费自检：自测失败 = job 失败，下游按全量兜底。
       # 从 base 取分类器副本再执行：PR 若改 tests/ci-changes.mjs 想把自己判成全文档，改的是 head 的脚本，
@@ -117,7 +120,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "lts/*"
+          node-version: "24"
 
       # 只跑文档自身的检查（门户/链接/根文档路由），不编译、不跑三平台。
       - name: 文档审查
@@ -147,7 +150,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "lts/*"
+          node-version: "24"
 
       # 只跑代码↔文档结构审查，不编译、不跑三平台。
       - name: 结构审查
@@ -177,7 +180,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "lts/*"
+          node-version: "24"
 
       # 闸门判定脚本自身的自测：要合并进去的 gate 逻辑必须在这一步就验过（9 个样例，含「覆盖率不参与判定」）。
       - name: 闸门判定自测
@@ -210,12 +213,13 @@ jobs:
     # 有代码变更才跑；结构审查由独立 structure job 承担，这里用 --skip-audit。
     if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (needs.changes.result != 'success' || needs.changes.outputs.code_changed != 'false') }}
     runs-on: ${{ matrix.os }}
-    # 比 e2e 宽：要额外预编译装 cargo-audit / cargo-deny（供应链门禁，见 docs/testing/levels.md 的 T0）。
-    timeout-minutes: 45
-    # 借用 runner 自带 Rust，但缓存/安装落项目内（见 docs/testing/execution-ci.md）。
+    # 比 e2e 宽：要额外装 Rust 组件与供应链工具（setup-dev；供应链门禁见 docs/testing/levels.md 的 T0）。
+    # 冷机要全量引导工具链（Rust / MinGW / python / node / 组件 / 供应链工具），给足墙钟；缓存命中后远快于此。
+    timeout-minutes: 60
+    # 开发工具链统一项目内（与本机同一口径）：env.js setup 装 Rust/cc/python/node，setup-dev 装组件与供应链工具。
+    # OS_KEY 让缓存路径落 platform/<os>/——与 env.js 默认的 CARGO_HOME / RUSTUP_HOME 同一路径。
     env:
-      CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
-      SOLOMNI_CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
+      OS_KEY: ${{ runner.os == 'Windows' && 'windows' || (runner.os == 'macOS' && 'macos' || 'linux') }}
     strategy:
       fail-fast: false
       matrix:
@@ -228,22 +232,30 @@ jobs:
           # fork PR 的 head 分支在对方仓；用 base 仓为每个 PR 建的 refs/pull/<N>/head（同仓 PR 同样可用）。
           ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
 
-      # 最新稳定线：Node 的 lts/* = 当前 LTS（生产稳定线），随 LTS 迁移自动跟进，不用手工改版本号。
+      # 点火 node：固定 24（与项目内 node 同主版本）；门禁入口 re-exec 到项目内 node，这里只负责点火。
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "lts/*"
+          node-version: "24"
 
-      # 只借 runner 自带 Rust（探测可用即用），不装、不改它的 home；只读它的 toolchain。
-      - name: 准备 Rust（借用 runner 自带工具链）
-        run: |
-          rustc --version
-          cargo --version
+      # 工具链缓存：Rust / cc / python / node / 供应链工具（探针在场即跳过安装）。
+      # 缓存身份 = 清单 + 链接台账 + 开发工具清单的哈希：任一版本变动整体失效；
+      # 不给 restore-keys——半套工具链比全新安装更坏（身份不符的缓存宁可不要）。
+      - name: 恢复项目内工具链缓存（inputs.clean 时跳过）
+        if: ${{ !inputs.clean }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            platform/${{ env.OS_KEY }}/rustup
+            .tools/toolchains
+            .tools/mingw64
+            .tools/bin
+          key: ${{ runner.os }}-${{ runner.arch }}-toolchains-${{ hashFiles('dependencies.yaml', 'links.yaml', 'dev-tools.js') }}
 
       # 只缓存依赖与 debug 产物。不缓存 target/ 根：报告与日志来自本次运行，不能被上一次的缓存顶替。
       - name: 建项目内 CARGO_HOME（缓存要求目录先存在）
         if: ${{ !inputs.clean }}
         shell: bash
-        run: mkdir -p platform/ci/cargo
+        run: mkdir -p platform/${{ env.OS_KEY }}/cargo
 
       # 只缓存项目内路径：缓存身份含 path，改路径即新缓存项（旧项自动淘汰，见 docs/testing/execution-ci.md）。
       # 恢复所有 ref（PR 读 main 的缓存）；保存只在 main，见每个 job 末尾的 save 步骤。
@@ -252,30 +264,26 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            platform/ci/cargo
+            platform/${{ env.OS_KEY }}/cargo
             target/debug
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-
 
       # 前端类型检查用项目内 node_modules（清单与锁文件入库）；不跑第三方安装脚本。
       - name: 安装前端类型检查依赖（npm ci）
         run: npm ci --ignore-scripts --no-audit --no-fund
 
-      # 仅 CI：预编译装供应链工具（快）。本地开发不引第三方，仍按 run-tests.js 的提示 cargo install 到项目内。
-      # 安装用时经 SOLOMNI_CI_PREINSTALL_MS 带进门禁报告（见 docs/testing/execution-ci.md）。
-      - name: 记录供应链工具安装起跑
+      # 装齐项目内开发工具链（与本机同一口径；缓存命中即跳过）：Rust/cc/python/node 经 env.js，
+      # 组件 / 交叉 target / 供应链工具经 setup-dev。用时经 SOLOMNI_CI_PREINSTALL_MS 带进门禁报告。
+      - name: 装齐项目内开发工具链（env.js + setup-dev）
         shell: bash
-        run: echo "SOLOMNI_PREINSTALL_START_MS=$(node -e 'console.log(Date.now())')" >> "$GITHUB_ENV"
-
-      - name: 安装供应链检查工具（预编译，仅 CI）
-        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
-        with:
-          tool: cargo-audit,cargo-deny
-
-      - name: 记录供应链工具安装耗时（进测试报告）
-        shell: bash
-        run: echo "SOLOMNI_CI_PREINSTALL_MS=$(( $(node -e 'console.log(Date.now())') - SOLOMNI_PREINSTALL_START_MS ))" >> "$GITHUB_ENV"
+        run: |
+          set -euo pipefail
+          start=$(node -e 'console.log(Date.now())')
+          node env.js setup --yes
+          node setup-dev.js --yes
+          echo "SOLOMNI_CI_PREINSTALL_MS=$(( $(node -e 'console.log(Date.now())') - start ))" >> "$GITHUB_ENV"
 
       # 结构审查已由 structure job 跑过；这里只跑平台相关门禁与测试（--skip-audit）。
       - name: 质量门禁 + 单元 + 平台探针（跳过 L4 与结构审查）
@@ -316,15 +324,27 @@ jobs:
           if-no-files-found: ignore
 
       # 保存只在 main：PR 的缓存作用域只对同分支可见，存了只会挤掉主线缓存项；save 失败不挡验收。
+      - name: 保存项目内工具链缓存（仅 main）
+        if: ${{ !inputs.clean && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            platform/${{ env.OS_KEY }}/rustup
+            .tools/toolchains
+            .tools/mingw64
+            .tools/bin
+          key: ${{ runner.os }}-${{ runner.arch }}-toolchains-${{ hashFiles('dependencies.yaml', 'links.yaml', 'dev-tools.js') }}
+
       - name: 保存依赖与编译产物缓存（仅 main）
         if: ${{ !inputs.clean && github.ref == 'refs/heads/main' }}
         continue-on-error: true
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            platform/ci/cargo
+            platform/${{ env.OS_KEY }}/cargo
             target/debug
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
 
   e2e:
     name: 端到端（${{ matrix.os }}）
@@ -332,11 +352,11 @@ jobs:
     # 有代码变更才跑；文档-only 时跳过。
     if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (needs.changes.result != 'success' || needs.changes.outputs.code_changed != 'false') }}
     runs-on: ${{ matrix.os }}
-    # HTTP 旅程 + 浏览器旅程各起一次编排器；浏览器缺失时要下载 Chromium，留足墙钟。
-    timeout-minutes: 45
+    # HTTP 旅程 + 浏览器旅程各起一次编排器；浏览器缺失时要下载 Chromium，冷机还要全量引导工具链，留足墙钟。
+    timeout-minutes: 60
+    # 开发工具链统一项目内（与本机同一口径）；OS_KEY 让缓存路径落 platform/<os>/（env.js 默认路径）。
     env:
-      CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
-      SOLOMNI_CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
+      OS_KEY: ${{ runner.os == 'Windows' && 'windows' || (runner.os == 'macOS' && 'macos' || 'linux') }}
     strategy:
       fail-fast: false
       matrix:
@@ -348,15 +368,22 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
 
+      # 点火 node：固定 24；ci-e2e 入口 re-exec 到项目内 node，这里只负责点火。
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "lts/*"
+          node-version: "24"
 
-      # 只借 runner 自带 Rust（探测可用即用），不装、不改它的 home；只读它的 toolchain。
-      - name: 准备 Rust（借用 runner 自带工具链）
-        run: |
-          rustc --version
-          cargo --version
+      # 工具链缓存：与 quality 同一 key（同机同清单共用一份）；探针在场即跳过安装。
+      - name: 恢复项目内工具链缓存（inputs.clean 时跳过）
+        if: ${{ !inputs.clean }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            platform/${{ env.OS_KEY }}/rustup
+            .tools/toolchains
+            .tools/mingw64
+            .tools/bin
+          key: ${{ runner.os }}-${{ runner.arch }}-toolchains-${{ hashFiles('dependencies.yaml', 'links.yaml', 'dev-tools.js') }}
 
       # 浏览器 E2E 用项目内 playwright（根 package.json + 锁文件）；不跑安装脚本，浏览器由 CLI 单独下载。
       - name: 安装浏览器 E2E 依赖（npm ci）
@@ -365,7 +392,7 @@ jobs:
       - name: 建项目内 CARGO_HOME（缓存要求目录先存在）
         if: ${{ !inputs.clean }}
         shell: bash
-        run: mkdir -p platform/ci/cargo
+        run: mkdir -p platform/${{ env.OS_KEY }}/cargo
 
       # 只缓存项目内路径：缓存身份含 path，改路径即新缓存项（旧项自动淘汰，见 docs/testing/execution-ci.md）。
       # 恢复所有 ref（PR 读 main 的缓存）；保存只在 main，见每个 job 末尾的 save 步骤。
@@ -374,11 +401,11 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            platform/ci/cargo
+            platform/${{ env.OS_KEY }}/cargo
             target/debug
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-
 
       # 浏览器二进制单独缓存：按 playwright 锁文件版本取，换版本自动失效。
       - name: 恢复浏览器缓存（inputs.clean 时跳过）
@@ -389,6 +416,11 @@ jobs:
           key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-playwright-
+
+      # 装齐项目内工具链（与本机同一口径；缓存命中即跳过）：e2e 要构建产品、编 indexer、跑 python/node 模块工具。
+      # 组件 / 供应链工具由 quality job 的 setup-dev 装（同一份工具链缓存），这里不重复装。
+      - name: 装齐项目内工具链（env.js）
+        run: node env.js setup --yes
 
       # 自己构建产品（不依赖 quality job 的产物，才能和它并行）：构建 + HTTP 旅程 + 浏览器旅程 + 写 e2e-report.json。
       - name: 跑 L4 端到端（HTTP + 浏览器）
@@ -416,15 +448,17 @@ jobs:
           if-no-files-found: ignore
 
       # 保存只在 main（同 quality job）：PR 只恢复 main 的缓存，不往缓存池里加同分支私有项。
+      # 工具链缓存只由 quality 保存（它跑 setup-dev，.tools/bin 齐全）；这里只恢复不保存，
+      # 免得空 .tools/bin 抢先占住同 key，让供应链工具每次重装。
       - name: 保存依赖与编译产物缓存（仅 main）
         if: ${{ !inputs.clean && github.ref == 'refs/heads/main' }}
         continue-on-error: true
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            platform/ci/cargo
+            platform/${{ env.OS_KEY }}/cargo
             target/debug
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
 
       - name: 保存浏览器缓存（仅 main）
         if: ${{ !inputs.clean && github.ref == 'refs/heads/main' }}
@@ -445,9 +479,9 @@ jobs:
     runs-on: ubuntu-latest
     # 冷机要编译两遍（普通 + 插桩）再跑 L4；给足时间，超时按失败处理。
     timeout-minutes: 60
+    # 开发工具链统一项目内（与本机同一口径）；OS_KEY 让缓存路径落 platform/<os>/（env.js 默认路径）。
     env:
-      CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
-      SOLOMNI_CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
+      OS_KEY: ${{ runner.os == 'Windows' && 'windows' || (runner.os == 'macOS' && 'macos' || 'linux') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -457,38 +491,44 @@ jobs:
           # 变更行门禁要拿 PR 基线做 git diff；浅克隆没有基线提交。
           fetch-depth: 0
 
+      # 点火 node：固定 24；coverage 入口 re-exec 到项目内 node，这里只负责点火。
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "lts/*"
+          node-version: "24"
 
-      - name: 准备 Rust（借用 runner 自带工具链）
-        run: |
-          rustc --version
-          cargo --version
+      # 工具链缓存：与 quality 同一 key（只恢复不保存——保存由 quality 统一做，见那里的注释）。
+      - name: 恢复项目内工具链缓存（inputs.clean 时跳过）
+        if: ${{ !inputs.clean }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            platform/${{ env.OS_KEY }}/rustup
+            .tools/toolchains
+            .tools/mingw64
+            .tools/bin
+          key: ${{ runner.os }}-${{ runner.arch }}-toolchains-${{ hashFiles('dependencies.yaml', 'links.yaml', 'dev-tools.js') }}
 
       - name: 建项目内 CARGO_HOME（缓存要求目录先存在）
         if: ${{ !inputs.clean }}
         shell: bash
-        run: mkdir -p platform/ci/cargo
+        run: mkdir -p platform/${{ env.OS_KEY }}/cargo
 
       # 只缓存依赖：插桩产物带 RUSTFLAGS，跨提交复用会把编译缓存搅乱，不缓存 target/。
       - name: 恢复依赖缓存（inputs.clean 时跳过）
         if: ${{ !inputs.clean }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: platform/ci/cargo
-          key: ${{ runner.os }}-coverage-cargo-${{ hashFiles('Cargo.lock') }}
+          path: platform/${{ env.OS_KEY }}/cargo
+          key: ${{ runner.os }}-${{ runner.arch }}-coverage-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-coverage-cargo-
+            ${{ runner.os }}-${{ runner.arch }}-coverage-cargo-
 
-      # cargo-llvm-cov 只在 CI 装（本地按 docs/testing/execution-ci.md 的提示装到项目内 .tools）。
-      - name: 安装覆盖率工具
-        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
-        with:
-          tool: cargo-llvm-cov@0.9.1
-
-      - name: 安装 LLVM 覆盖率运行时
-        run: rustup component add llvm-tools-preview
+      # 装齐项目内工具链（与本机同一口径）：cargo-llvm-cov 与 llvm-tools-preview 经 setup-dev
+      # 装进项目内（.tools/bin 与项目内 rustup），不再用 runner 的 rustup / 预编译动作。
+      - name: 装齐项目内开发工具链（env.js + setup-dev）
+        run: |
+          node env.js setup --yes
+          node setup-dev.js --yes
 
       # 四步：测试进程内 profile → 插桩构建产品 → L4 子进程 profile → 合并报告并按风险区统计 80/60/100。
       # 只报不拦（tests/coverage-policy.json 的 reportOnly）：桶与变更行不达标只打回执，本 job 变红不阻塞合并，
@@ -512,8 +552,8 @@ jobs:
         continue-on-error: true
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: platform/ci/cargo
-          key: ${{ runner.os }}-coverage-cargo-${{ hashFiles('Cargo.lock') }}
+          path: platform/${{ env.OS_KEY }}/cargo
+          key: ${{ runner.os }}-${{ runner.arch }}-coverage-cargo-${{ hashFiles('Cargo.lock') }}
 
   gate:
     name: 验收闸门
@@ -537,7 +577,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "lts/*"
+          node-version: "24"
 
       - name: 按变更类型核对五个 lane
         env:

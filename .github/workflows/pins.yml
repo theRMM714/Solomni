@@ -22,9 +22,10 @@ jobs:
           # 只读 job：pins check 不写文件，关闭令牌持久化（zizmor artipacked）。
           persist-credentials: false
 
+      # 点火 node：固定 24（pins check 是纯 JS + 网络，不需要项目内工具链）。
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "lts/*"
+          node-version: "24"
 
       # GITHUB_TOKEN 只用于 GitHub API 的限流额度；check 不写任何文件。
       - name: 校验当前 pin 与上游
