@@ -199,6 +199,9 @@ fn lock_path(home: &Path) -> PathBuf {
     home.join("view-drive.lock")
 }
 
+/// 目的：常规路径（分配 / 清扫 / 正常退出）愿意为记录锁等多久。
+const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// 目的：视图盘记录的跨进程写事务锁（与台账同一套路：进程内互斥 + 文件锁、60 秒有界等待）。
 struct ViewGuard {
     _proc: std::sync::MutexGuard<'static, ()>,
@@ -208,16 +211,17 @@ struct ViewGuard {
 static VIEW_MUTEX: Mutex<()> = Mutex::new(());
 
 fn lock_view(home: &Path) -> Result<ViewGuard, String> {
+    lock_view_within(home, LOCK_WAIT)
+}
+
+/// 目的：同上，但跨进程锁的等待上限由调用方给——退出清理只肯等很短，不能堵住进程退出。
+fn lock_view_within(home: &Path, wait: std::time::Duration) -> Result<ViewGuard, String> {
     let proc = VIEW_MUTEX
         .lock()
         .map_err(|_| "视图盘记录进程内锁已被毒化".to_string())?;
     std::fs::create_dir_all(home).map_err(|e| format!("建私有区失败：{}", e))?;
     // 跨进程那半是内核的文件锁契约；等多久是本模块自己的策略。
-    let file = crate::kernel::api::lock_within(
-        &lock_path(home),
-        std::time::Duration::from_secs(60),
-        "视图盘记录",
-    )?;
+    let file = crate::kernel::api::lock_within(&lock_path(home), wait, "视图盘记录")?;
     Ok(ViewGuard {
         _proc: proc,
         _file: file,
@@ -600,7 +604,12 @@ mod imp {
 
     /// 目的：注销本进程并回收没人用的映射（撤不掉就留下空归属条目给下次启动清扫）。
     pub(super) fn release(home: &Path) {
-        let Ok(_lock) = lock_view(home) else {
+        release_within(home, LOCK_WAIT)
+    }
+
+    /// 目的：同上，但锁等待有上限：控制台事件线程上退出时不能久等。
+    pub(super) fn release_within(home: &Path, wait: std::time::Duration) {
+        let Ok(_lock) = lock_view_within(home, wait) else {
             return;
         };
         let mut entries = load_entries(home);
@@ -659,6 +668,11 @@ pub fn attach_view_drive(home: &Path) -> Option<ViewDrive> {
 /// 目的：注销本进程的登记；该盘没有别的存活进程时撤映射并清条目。
 pub fn release_view_drive(home: &Path) {
     imp::release(home)
+}
+
+/// 目的：同上，但跨进程记录锁最多等 wait：给进程退出清理用，不能堵在锁上不退出。
+pub fn release_view_drive_within(home: &Path, wait: std::time::Duration) {
+    imp::release_within(home, wait)
 }
 
 #[cfg(test)]
@@ -792,7 +806,7 @@ mod tests {
 
     #[test]
     fn sweep_removes_a_record_whose_mapping_is_gone() {
-        // 进程被强杀后的样子：映射随进程消失，记录里还挂着死 pid。
+        // 映射已被撤、记录里还挂着死 pid 的样子（另一个实例正常退出撤了映射，记录没落盘）。
         let home = temp_home("sweep-gone");
         let root = home.join("product-root");
         std::fs::create_dir_all(&root).expect("建假产品根");
@@ -833,6 +847,26 @@ mod tests {
             !record_path(&home).exists(),
             "最后一个使用者注销后记录文件要一起清掉"
         );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn bounded_release_cleans_up_like_the_regular_one() {
+        // 退出清理只肯等很短：锁空着时必须与常规释放同效，记录照样清掉。
+        let home = temp_home("release-bounded");
+        let root = home.join("product-root");
+        std::fs::create_dir_all(&root).expect("建假产品根");
+        save_entries(
+            &home,
+            &[ViewEntry {
+                letter: "Q:".to_string(),
+                root: root.to_string_lossy().into_owned(),
+                users: vec![std::process::id()],
+            }],
+        )
+        .expect("写记录");
+        release_view_drive_within(&home, std::time::Duration::ZERO);
+        assert!(!record_path(&home).exists(), "限时释放同样要清掉记录");
         let _ = std::fs::remove_dir_all(&home);
     }
 }

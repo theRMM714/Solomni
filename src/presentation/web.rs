@@ -131,11 +131,18 @@ mod interrupt {
     #[cfg(windows)]
     mod imp {
         use super::{Arc, AtomicBool, set};
-        use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
+        use windows_sys::Win32::System::Console::{
+            CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler,
+        };
 
-        unsafe extern "system" fn handler(_ctrl: u32) -> i32 {
-            set();
-            1 // TRUE = 已处理，进程继续（不按默认终止）
+        unsafe extern "system" fn handler(ctrl: u32) -> i32 {
+            // 只有 Ctrl+C / Ctrl+Break 是「回 CLI」；关窗、注销、关机要真的退出，
+            // 返回 FALSE 让视图盘的退出清理钩子与默认处理接手（否则进程被强杀、盘符留在 Explorer 里）。
+            if ctrl == CTRL_C_EVENT || ctrl == CTRL_BREAK_EVENT {
+                set();
+                return 1; // TRUE = 已处理，进程继续（不按默认终止）
+            }
+            0
         }
 
         pub struct Guard;
