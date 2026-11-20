@@ -1025,8 +1025,15 @@ function reexecSelfCheck() {
   assert.equal(r.stdout.trim(), process.execPath, "未登记照宿主 node 跑");
 
   // ④ 项目内 node 起不来（空文件冒充）：如实报一句，照宿主继续。
-  writeActive();
-  fs.writeFileSync(nodeExe, "");
+  // 空文件放独立 bin 目录——nodeExe 是运行中 node 的硬链接，写它会碰到真身（Windows 还锁着）。
+  const badBinRel = ".tools/toolchains/" + os + "-" + arch + "/node/0.0.0/badbin";
+  const badBin = path.join(dir, ...badBinRel.split("/"));
+  fs.mkdirSync(badBin, { recursive: true });
+  fs.writeFileSync(path.join(badBin, IS_WIN ? "node.exe" : "node"), "");
+  fs.writeFileSync(activeFile, JSON.stringify({
+    target: os + "-" + arch, profile: ["node"],
+    tools: [{ id: "node", version: "0.0.0", bin: [badBinRel], env: {} }],
+  }));
   r = runEntry();
   assert.equal(r.status, 0, "起不来要回退宿主而不是失败：" + (r.stderr || ""));
   assert.equal(r.stdout.trim(), process.execPath, "起不来照宿主 node 跑");
