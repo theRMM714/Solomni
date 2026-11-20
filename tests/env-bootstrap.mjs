@@ -15,6 +15,9 @@ import http from "node:http";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCRATCH = path.join(ROOT, "target", "test-scratch", "env-bootstrap");
@@ -682,6 +685,199 @@ async function runPosixCases() {
 }
 
 /**
+ * 目的：安装身份跨语言钉住——同一份合成清单，env.js 与 Rust install_identity 必须算出同一指纹。
+ * 为什么机器查：env.js 装完按身份写产品台账，产品按它判「已装」；材料布局漂了就是重复下载。
+ * 约束：常量与 `src/tests/provision/service.rs` 的 install_identity_is_pinned_across_languages 共享。
+ */
+function toolchainIdentityPin() {
+  const envLayer = require(path.join(ROOT, "env.js"));
+  const dep = {
+    id: "toolchain.python.pin-test", tool: "python", version: "9.9.9", target: "test-target",
+    source: "test.source", sha256: "ab".repeat(32), sizeMb: 48, wrappers: false,
+    installRel: "test/install", probeRel: "test/install/probe", binsJoined: "bin,sbin",
+  };
+  assert.equal(
+    envLayer.installIdentity(dep),
+    "99076528b675dd67741122f3fa801f6c8ca87f9359bb883441b13d657537eb26",
+    "身份材料布局要与 Rust install_identity 逐字节一致"
+  );
+  console.log("PASS toolchain-identity-pin");
+}
+
+/**
+ * 目的：python/node 脚本侧安装链自检——真清单布局 + 本地应答源，钉住同意闸、校验闸、探针闸、
+ *   台账身份与 active.json 合并登记、在场跳过（不重复下载）。
+ * 约束：夹具根只写 target/test-scratch/；假 cargo 走 override、binutils 预置 / 宿主 cc 桩绕过 Rust/C 引导，
+ *   不触外网、不装 Rust。
+ */
+async function toolchainInstallCases() {
+  const envLayer = require(path.join(ROOT, "env.js"));
+  const dir = path.join(SCRATCH, "toolchain-install");
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  fs.copyFileSync(path.join(ROOT, "env.js"), path.join(dir, "env.js"));
+  fs.copyFileSync(path.join(ROOT, "dependencies.yaml"), path.join(dir, "dependencies.yaml"));
+  const pyDep = envLayer.readToolchainDep("python");
+  const nodeDep = envLayer.readToolchainDep("node");
+  assert.ok(pyDep && nodeDep, "清单要有当前平台的 python/node 条目");
+  // 清单函数给的是相对字段；在场判定一律落在夹具根，不碰真仓库的安装。
+  const pyProbe = path.join(dir, pyDep.probeRel);
+  const nodeProbe = path.join(dir, nodeDep.probeRel);
+  const pyInstall = path.join(dir, pyDep.installRel);
+
+  // 按真清单布局造夹具归档：bin 目录与探针文件都从清单条目派生，不在测试里抄第二份布局。
+  const makeArchive = (dep, withProbe) => {
+    const s = path.join(dir, "stage-" + dep.tool + (withProbe ? "" : "-nopro"));
+    fs.rmSync(s, { recursive: true, force: true });
+    for (const b of dep.bins) {
+      fs.mkdirSync(path.join(s, ...b.slice(dep.installRel.length + 1).split("/")), { recursive: true });
+    }
+    if (withProbe) {
+      const p = path.join(s, path.relative(dep.install, dep.probe));
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, "");
+    }
+    const isZip = IS_WIN && dep.tool === "node";
+    const out = path.join(dir, dep.tool + (isZip ? ".zip" : ".tar.gz"));
+    const tar = IS_WIN ? path.join(process.env.SystemRoot || "C:/Windows", "System32", "tar.exe") : "tar";
+    const args = isZip ? ["-a", "-cf", out, "-C", s, "."] : ["-czf", out, "-C", s, "."];
+    const r = spawnSync(tar, args, { encoding: "utf8" });
+    assert.equal(r.status, 0, "造夹具归档失败：" + (r.stderr || r.error || ""));
+    return { buf: fs.readFileSync(out), sha: crypto.createHash("sha256").update(fs.readFileSync(out)).digest("hex") };
+  };
+  const pyArc = makeArchive(pyDep, true);
+  const nodeArc = makeArchive(nodeDep, true);
+  const pyBad = makeArchive(pyDep, false);
+
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    requests.push(req.url);
+    const body = req.url.includes("python") ? (req.url.includes("bad") ? pyBad.buf : pyArc.buf)
+      : req.url.includes("node") ? nodeArc.buf : null;
+    if (!body) { res.writeHead(404); res.end(); return; }
+    res.writeHead(200, { "Content-Length": body.length });
+    res.end(body);
+  });
+  await new Promise((done) => server.listen(0, "127.0.0.1", done));
+  const base = "http://127.0.0.1:" + server.address().port;
+  const pyUrl = base + "/python.tar.gz";
+  const nodeUrl = base + (IS_WIN ? "/node.zip" : "/node.tar.gz");
+  const rewrite = (text, key, val) => text.split(/\r?\n/).map((l) => (l.startsWith(key + ":") ? key + ": " + val : l)).join("\n");
+  const writeLinks = (pySha, pySrc) => {
+    let text = fs.readFileSync(path.join(ROOT, "links.yaml"), "utf8");
+    text = rewrite(text, pyDep.source, pySrc || pyUrl);
+    text = rewrite(text, pyDep.source + ".sha256", pySha);
+    text = rewrite(text, nodeDep.source, nodeUrl);
+    text = rewrite(text, nodeDep.source + ".sha256", nodeArc.sha);
+    fs.writeFileSync(path.join(dir, "links.yaml"), text + "\n");
+  };
+  writeLinks(pyArc.sha);
+
+  // 假 cargo（override）+ binutils 预置（Windows）/ 宿主 cc 桩（POSIX）：绕过 Rust/C 引导，只测工具链安装链。
+  const fakeCargo = path.join(dir, "fake-cargo");
+  fs.writeFileSync(fakeCargo, "");
+  const mingwBin = path.join(dir, ".tools", "mingw64", "bin");
+  fs.mkdirSync(mingwBin, { recursive: true });
+  fs.writeFileSync(path.join(mingwBin, "dlltool.exe"), "");
+  fs.writeFileSync(path.join(mingwBin, "as.exe"), "");
+  const ambient = path.join(dir, "ambient-bin");
+  fs.mkdirSync(ambient, { recursive: true });
+  if (!IS_WIN) fs.writeFileSync(path.join(ambient, "cc"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  // 宿主 cc 桩前置（绕过 Zig 引导）；真 PATH 垫底——curl/tar 这些系统工具还要找得到。
+  const env = { ...process.env, SOLOMNI_CARGO: fakeCargo, PATH: ambient + path.delimiter + (process.env.PATH || ""), NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
+  delete env.SOLOMNI_CARGO_HOME;
+  delete env.SOLOMNI_MINGW_BIN;
+  delete env.SOLOMNI_ACCEPT_ASSET_CHANGE;
+  // 必须异步 spawn：应答源跑在本进程事件循环里，spawnSync 会把它堵死（curl 干等到超时）。
+  const runSetup = (args) => new Promise((resolve, reject) => {
+    const logPath = path.join(dir, "setup-run.log");
+    const fd = fs.openSync(logPath, "w");
+    const child = spawn(process.execPath, ["env.js", "setup"].concat(args), { cwd: dir, env, stdio: ["ignore", fd, fd] });
+    const timer = setTimeout(() => { try { child.kill(); } catch {} reject(new Error("setup 超时（120s）")); }, 120000);
+    child.on("error", (e) => { clearTimeout(timer); fs.closeSync(fd); reject(e); });
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      fs.closeSync(fd);
+      const out = fs.readFileSync(logPath, "utf8");
+      resolve({ status: code, stdout: out, stderr: out });
+    });
+  });
+  const reset = () => {
+    fs.rmSync(path.join(dir, ".tools", "toolchains"), { recursive: true, force: true });
+    fs.rmSync(path.join(dir, ".vm"), { recursive: true, force: true });
+    for (const f of fs.readdirSync(path.join(dir, ".tools"))) {
+      if (/^(python|node)\.(tar\.gz|zip|tar\.xz)$/.test(f)) fs.rmSync(path.join(dir, ".tools", f), { force: true });
+    }
+    requests.length = 0;
+  };
+  const readJson = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
+
+  try {
+    // ① --yes 全装：探针在场、台账身份与指纹函数一致、active.json 登记 python/node、各请求一次。
+    let r = await runSetup(["--yes"]);
+    assert.equal(r.status, 0, "setup --yes 要成功：error=" + (r.error && r.error.message) + " signal=" + r.signal + "\n" + (r.stderr || "") + (r.stdout || ""));
+    assert.ok(fs.existsSync(pyProbe), "python 探针要在场");
+    assert.ok(fs.existsSync(nodeProbe), "node 探针要在场");
+    const ledger = readJson(path.join(dir, ".vm", "state", "deps.json"));
+    assert.equal(ledger[pyDep.id], envLayer.installIdentity({ ...pyDep, sha256: pyArc.sha }), "python 台账身份需要与指纹函数一致");
+    assert.equal(ledger[nodeDep.id], envLayer.installIdentity({ ...nodeDep, sha256: nodeArc.sha }), "node 台账身份需要与指纹函数一致");
+    const active = readJson(path.join(dir, ".tools", "toolchains", "active.json"));
+    for (const dep of [pyDep, nodeDep]) {
+      const t = active.tools.find((x) => x && x.id === dep.tool);
+      assert.ok(t, "active.json 要登记 " + dep.tool);
+      assert.equal(t.version, dep.version, dep.tool + " 版本按清单");
+      assert.deepEqual(t.bin, dep.bins, dep.tool + " bin 目录按清单");
+    }
+    assert.equal(requests.filter((u) => u.includes("python")).length, 1, "python 只请求一次");
+    assert.equal(requests.filter((u) => u.includes("node")).length, 1, "node 只请求一次");
+    assert.ok(!fs.existsSync(path.join(dir, ".tools", "python.tar.gz")), "装完归档要删");
+    console.log("PASS toolchain-install-full");
+
+    // ② 在场跳过：再跑一次 --yes，零请求（产品 provision 装过的也不动）。
+    requests.length = 0;
+    r = await runSetup(["--yes"]);
+    assert.equal(r.status, 0, "在场重跑要成功：" + (r.stderr || ""));
+    assert.equal(requests.length, 0, "探针在场不许再下载");
+    console.log("PASS toolchain-install-skip-present");
+
+    // ③ 无 TTY 无 --yes：不下载、如实报、指路 setup --yes。
+    reset();
+    r = await runSetup([]);
+    assert.equal(r.status, 0, "cargo 就绪时 setup 不因工具链缺项失败：" + (r.stderr || ""));
+    assert.equal(requests.length, 0, "没同意不许请求源");
+    assert.ok(!fs.existsSync(pyProbe) && !fs.existsSync(nodeProbe), "没同意不许装");
+    assert.match(r.stderr, /无交互终端/, "要明说无交互终端不下载");
+    assert.match(r.stderr, /setup --yes/, "要指路 setup --yes");
+    console.log("PASS toolchain-install-no-tty");
+
+    // ④ sha256 不符：退出 1、报两值与来源、保留归档、不装。
+    reset();
+    writeLinks("0".repeat(64));
+    r = await runSetup(["--yes"]);
+    assert.equal(r.status, 1, "哈希不符要如实失败");
+    assert.match(r.stderr, /sha256 不符/, "要报哈希不符");
+    assert.ok(r.stderr.includes("0".repeat(64)), "要报台账值");
+    assert.ok(r.stderr.includes(pyArc.sha), "要报实际值");
+    assert.ok(fs.existsSync(path.join(dir, ".tools", "python.tar.gz")), "不符的归档不许删");
+    assert.ok(!fs.existsSync(pyProbe), "不符不准装");
+    console.log("PASS toolchain-install-sha-mismatch");
+
+    // ⑤ 归档缺探针（布局不符）：退出 1、不替换安装目录、临时目录清掉。
+    reset();
+    writeLinks(pyBad.sha, base + "/python-bad.tar.gz");
+    r = await runSetup(["--yes"]);
+    assert.equal(r.status, 1, "布局不符要如实失败");
+    assert.match(r.stderr, /找不到探针/, "要报探针缺失");
+    assert.ok(!fs.existsSync(pyInstall), "安装目录不许被半份替换");
+    assert.ok(!fs.readdirSync(path.dirname(pyInstall)).some((f) => f.includes(".tmp-")), "临时目录要清掉");
+    console.log("PASS toolchain-install-bad-layout");
+  } finally {
+    server.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
  * 目的：工具链注入自检——active.json 登记的项目内 python/node/cc bin 必须前置进 --print-env 的 PATH，
  *   判据与产品侧 compose 同一套（target 不符不注入、bin 只认相对普通组件且目录在场、env 收非空键值）。
  * 为什么机器查：门禁与启动器子进程的工具链解析全经这一份注入；判据漂了就是宿主依赖回潮。
@@ -805,12 +1001,16 @@ function statusSelfCheck() {
 if (!IS_WIN) {
   // Windows 的 MinGW 用例不适用；POSIX 走 Zig cc 自举用例（本地夹具，不连外网）。
   await runPosixCases();
+  toolchainIdentityPin();
+  await toolchainInstallCases();
   toolchainInjectionSelfCheck();
   statusSelfCheck();
   console.log("ENV-BOOTSTRAP-OK");
 } else {
   fs.rmSync(SCRATCH, { recursive: true, force: true });
   for (const c of CASES) await runCase(c);
+  toolchainIdentityPin();
+  await toolchainInstallCases();
   toolchainInjectionSelfCheck();
   statusSelfCheck();
   console.log("ENV-BOOTSTRAP-OK");

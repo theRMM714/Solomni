@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * 开发环境安装 / 同步：把开发与门禁需要的东西装到**项目内**（platform/<os>/ 与 .tools/）。
- * 管：项目内 Rust 工具链、Rust 组件、交叉 target、供应链工具；--check 只读校验、--offline 不下载。
- * 不管：运行前提的基础工具链（Python / Node / C-C++，由产品 solomni --provision --ensure=toolchain 自己补）；条目清单（dev-tools.js，唯一真相）。
+ * 管：项目内 Rust 工具链、Rust 组件、交叉 target、供应链工具；运行前提工具链（Python / Node / C-C++）经 env.js 统一引导（与 Rust 同等待遇）；--check 只读校验、--offline 不下载。
+ * 不管：条目清单（dev-tools.js，唯一真相）；产品运行期的 provision（最终用户仍由产品自己补齐）。
  * 用法：node setup-dev.js [--check] [--strict] [--yes] [--offline]
  * 约束：required: false 的条目（交叉 target、覆盖率工具）缺了不阻断 --check；--strict 要求清单全齐。
  * 约束：只写项目内（RUSTUP_HOME / CARGO_HOME / .tools）；不碰系统 ~/.rustup、~/.cargo。
@@ -70,8 +70,12 @@ function probeRunnable(name, e) {
   if (!ready) die("项目内工具链不可用（platform/<os>/）：先 node setup-dev.js --yes");
   const e = ready.env;
   log("项目内工具链：" + ready.cargo);
-  // 运行前提（Python / Node / C-C++）不在这里装：核心编出来后由产品补齐（下载源与版本在 dependencies.yaml）。
-  log("运行前提基础工具链由产品补：solomni --provision --ensure=toolchain --yes");
+  // 运行前提工具链（Python / Node）已由 env.js 统一引导装进项目内（下载源与版本在 dependencies.yaml）；
+  // 产品 provision 仍是运行期用户的补齐入口，两条路共用同一份清单与 active.json 登记。
+  const tcFacts = (ready.toolchains || []).map((t) => t.id + " " + t.version).join("、");
+  const tcMissing = ready.toolchainMissing || [];
+  log("运行前提工具链：" + (tcFacts || "(未登记)") +
+    (tcMissing.length ? "；缺 " + tcMissing.join("、") + "（node env.js setup --yes 可补齐）" : ""));
 
   const comps = installedComponents(e);
   const targets = installedTargets(e);

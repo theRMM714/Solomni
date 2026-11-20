@@ -166,6 +166,34 @@ fn install_identity_follows_the_manifest() {
     assert_ne!(base, install_identity(&resized), "体积变了身份要变");
 }
 
+/// 目的：安装身份与脚本侧 env.js 逐字节同口径——同一份合成清单两侧必须算出同一指纹。
+///   env.js 装完工具链按这个身份写台账，产品按它判「已装」；口径漂了就是重复下载。
+///   钉住常量与 `tests/env-bootstrap.mjs` 的工具链身份用例共享；材料布局变更时两侧同步更新。
+#[test]
+fn install_identity_is_pinned_across_languages() {
+    let mut dep = dep_of(
+        "toolchain.python.pin-test",
+        "toolchain",
+        "test/install",
+        "test/install/probe",
+    );
+    dep.source = "test.source".to_string();
+    dep.sha256 = "ab".repeat(32);
+    dep.size_mb = 48;
+    dep.toolchain = Some(ToolchainSpec {
+        tool: "python".to_string(),
+        version: "9.9.9".to_string(),
+        target: Some("test-target".to_string()),
+        bins: vec!["bin".to_string(), "sbin".to_string()],
+        wrappers: false,
+    });
+    assert_eq!(
+        install_identity(&dep),
+        "99076528b675dd67741122f3fa801f6c8ca87f9359bb883441b13d657537eb26",
+        "身份材料布局要与 env.js 的 installIdentity 逐字节一致"
+    );
+}
+
 /// 目的：探针在场但台账里没有记录 = 还没按当前清单装好（升级后第一次跑要重装）。
 #[test]
 fn a_probe_without_a_ledger_entry_is_not_installed() {

@@ -560,7 +560,11 @@ async function ensureProject(opts) {
     if (!r) die("项目内工具链装好了却仍找不到 cargo（platform/<os>/cargo/bin）");
   }
   assertProjectBuildable(r);
-  registerBuildCC();
+  const tcMissing = await ensureRuntimeToolchains(yes);
+  registerInstalledToolchains();
+  r = resolve({ requireProject: true });
+  if (!r) die("项目内工具链装好了却仍找不到 cargo（platform/<os>/cargo/bin）");
+  if (tcMissing.length) log("toolchains still missing: " + tcMissing.join(", ") + "（node env.js setup --yes 可补齐）");
   return r;
 }
 
@@ -641,7 +645,12 @@ async function ensure(opts) {
   // dlltool 目录刚进 EXTRA_PATH，PATH 要重新拼一次。
   ready = resolve({});
   if (!ready) die("environment not ready: no usable cargo (project or PATH)");
-  registerBuildCC();
+  // 运行前提工具链与 Rust 同等待遇：缺就征得同意装进项目内，装完登记再重新解析（PATH 才含新 bin）。
+  const tcMissing = await ensureRuntimeToolchains(yes);
+  registerInstalledToolchains();
+  ready = resolve({});
+  if (!ready) die("environment not ready: no usable cargo (project or PATH)");
+  if (tcMissing.length) log("toolchains still missing: " + tcMissing.join(", ") + "（node env.js setup --yes 可补齐）");
   return ready;
 }
 
@@ -959,8 +968,8 @@ function sha256File(file) {
   return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
-/** 目的：Zig 归档完整性闸——校验值与下载源成对放在 links.yaml；不符时保留归档并报出两值与来源。 */
-function verifyBuildCCHash(archive, dep, url, want) {
+/** 目的：工具链归档完整性闸——校验值与下载源成对放在 links.yaml；不符时保留归档并报出两值与来源。 */
+function verifyArchiveHash(archive, dep, url, want) {
   const got = sha256File(archive);
   if (got === want) {
     log("sha256 verified");
@@ -1061,7 +1070,7 @@ function installBuildCC(dep) {
   if (!download(url, archive, false)) {
     die("下载没有完成（网络中断？）。重跑会重新下载整份；也可以手动把归档放到 " + archive + "。");
   }
-  verifyBuildCCHash(archive, dep, url, want);
+  verifyArchiveHash(archive, dep, url, want);
   const tmp = dep.install + ".tmp-" + process.pid;
   fs.rmSync(tmp, { recursive: true, force: true });
   fs.mkdirSync(tmp, { recursive: true });
@@ -1116,6 +1125,183 @@ async function ensureBuildCC(yes) {
   installBuildCC(dep);
   registerBuildCC();
   return buildCCReady(dep);
+}
+
+/**
+ * 目的：从清单窄读 `toolchain.<tool>.<target>` 条目——脚本侧引导与产品 provision 共用同一份真相。
+ * 为什么读清单：版本 / 安装路径 / 下载源 / bins 载荷在 dependencies.yaml 只有一份；在 JS 里再抄一份必然腐烂。
+ * 返回：安装与登记需要的字段（bins 已拼成相对产品根的目录）；缺条目或缺关键字段给 null。
+ */
+function readToolchainDep(tool) {
+  const file = path.join(ROOT, "dependencies.yaml");
+  if (!fs.existsSync(file)) return null;
+  const want = "toolchain." + tool + "." + TARGET_KEY;
+  let dep = null;
+  let inDep = false;
+  for (const raw of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    const line = raw.replace(/\s+#.*$/, "").trim();
+    if (!line || line.startsWith("#")) continue;
+    const id = line.match(/^-\s+id:\s*(\S+)$/);
+    if (id) {
+      if (inDep) break; // 只读这一条，下一条开始就停
+      if (id[1] === want) { inDep = true; dep = { id: id[1] }; }
+      continue;
+    }
+    if (!inDep) continue;
+    const bins = line.match(/^bins:\s*\[(.*)\]$/);
+    if (bins) { dep.binsRaw = bins[1]; continue; }
+    const kv = line.match(/^([a-z_]+):\s*(\S+)$/);
+    if (kv && ["install", "probe", "source", "strip", "tool", "version", "target", "wrappers", "size_mb"].includes(kv[1])) {
+      dep[kv[1]] = kv[2];
+    }
+  }
+  if (!dep || !dep.install || !dep.probe || !dep.source || !dep.version || !dep.binsRaw) return null;
+  const installRel = dep.install.replace(/\/+$/, "");
+  const bins = dep.binsRaw.split(",").map((s) => s.trim()).filter(Boolean);
+  if (!bins.length) return null;
+  return {
+    id: dep.id,
+    tool: dep.tool || tool,
+    version: dep.version,
+    target: dep.target || "",
+    source: dep.source,
+    strip: Number(dep.strip || 0),
+    sizeMb: Number(dep.size_mb || 0),
+    wrappers: dep.wrappers === "true",
+    installRel,
+    probeRel: dep.probe,
+    install: path.join(ROOT, ...dep.install.split("/")),
+    probe: path.join(ROOT, ...dep.probe.split("/")),
+    bins: bins.map((b) => installRel + "/" + b),
+    binDirs: bins.map((b) => path.join(ROOT, ...installRel.split("/"), ...b.split("/"))),
+    binsJoined: bins.join(","),
+  };
+}
+
+/**
+ * 目的：安装身份指纹——与 Rust 侧 `src/capabilities/provision/domain.rs` 的 install_identity 逐字节同口径。
+ * 为什么：env.js 装完把同一身份写进产品台账（.vm/state/deps.json），产品补齐时按探针 + 身份判「已装」，不重复下载。
+ * 约束：材料布局 / schema 变更必须两侧同步（各有钉住用例）；pin 取 links.yaml 的 `<source>.sha256`。
+ */
+function installIdentity(dep) {
+  const own = String(dep.sha256 || "").trim();
+  const pin = (own || LINKS[dep.source + ".sha256"] || "").toLowerCase();
+  const toolchain = dep.tool + "|" + dep.version + "|" + dep.target + "|" + dep.binsJoined + "|" + dep.wrappers;
+  const material = "schema=1\nid=" + dep.id + "\nkind=toolchain\ninstall=" + dep.installRel +
+    "\nprobe=" + dep.probeRel + "\nsource=" + dep.source + "\npin=" + pin +
+    "\nguest=\nfamily=\nsize=" + dep.sizeMb + "\ntoolchain=" + toolchain + "\n";
+  return crypto.createHash("sha256").update(material, "utf8").digest("hex");
+}
+
+/** 目的：把 env.js 装好的工具链身份写进产品台账（保留其它条目；临时文件 + 改名，与产品写入口同形）。 */
+function recordToolchainLedger(installed) {
+  if (!installed.length) return;
+  const file = path.join(ROOT, ".vm", "state", "deps.json");
+  let ledger = {};
+  try {
+    const cur = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (cur && typeof cur === "object" && !Array.isArray(cur)) ledger = cur;
+  } catch (e) { /* 不在场或坏 JSON 都按空台账（与产品 read_ledger 同口径） */ }
+  for (const dep of installed) ledger[dep.id] = installIdentity(dep);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = file + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(ledger, null, 2) + "\n");
+  fs.renameSync(tmp, file);
+}
+
+/** 目的：把磁盘在场的工具链全部合并登记进 active.json（在场判据同产品台账：bin 目录全部在场）。 */
+function registerInstalledToolchains() {
+  const wanted = [];
+  for (const tool of ["python", "node", "cc"]) {
+    const dep = readToolchainDep(tool);
+    if (!dep) continue;
+    const ready = dep.binDirs.every((d) => {
+      try { return fs.statSync(d).isDirectory(); } catch (e) { return false; }
+    });
+    if (ready) wanted.push({ id: dep.tool, version: dep.version, bin: dep.bins });
+  }
+  syncToolchainActive(wanted);
+}
+
+/**
+ * 目的：把清单里的 python/node 装进项目内（与产品 provision 同一安装位置；解包即用，无包装）。
+ * 约束：先解到临时目录、探针在场才 rename 替换旧目录；归档一次性下载（不做续传，与 Zig 同口径）。
+ */
+function installRuntimeToolchain(dep) {
+  const url = link(dep.source);
+  const want = link(dep.source + ".sha256").toLowerCase();
+  fs.mkdirSync(TOOLS, { recursive: true });
+  const ext = url.endsWith(".zip") ? ".zip" : url.endsWith(".tar.xz") ? ".tar.xz" : ".tar.gz";
+  const archive = path.join(TOOLS, dep.tool + ext);
+  fs.rmSync(archive, { force: true });
+  log("downloading " + url + " (about " + dep.sizeMb + " MB)");
+  if (!download(url, archive, false)) {
+    die("下载没有完成（网络中断？）。重跑会重新下载整份；也可以手动把归档放到 " + archive + "。");
+  }
+  verifyArchiveHash(archive, dep, url, want);
+  const tmp = dep.install + ".tmp-" + process.pid;
+  fs.rmSync(tmp, { recursive: true, force: true });
+  fs.mkdirSync(tmp, { recursive: true });
+  log("extracting " + dep.tool + "...");
+  const tar = IS_WIN && ext === ".zip" ? zipTar() : "tar";
+  const t = tar
+    ? spawnSync(tar, ["-xf", archive, "-C", tmp], { stdio: "inherit" })
+    : { error: new Error("没有能读 zip 的 tar 实现"), status: 1 };
+  if (t.error || t.status !== 0) {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    die("解包 " + archive + " 失败：检查系统 tar（Windows 10 1803+ / Linux / macOS 都应有）。");
+  }
+  let src = tmp;
+  for (let i = 0; i < dep.strip; i++) {
+    const dirs = fs.readdirSync(src, { withFileTypes: true }).filter((e) => e.isDirectory());
+    if (dirs.length !== 1) {
+      fs.rmSync(tmp, { recursive: true, force: true });
+      die("解包后第 " + (i + 1) + " 层不是单一目录，无法按清单 strip=" + dep.strip + " 剥壳。");
+    }
+    src = path.join(src, dirs[0].name);
+  }
+  const probeRel = path.relative(dep.install, dep.probe);
+  if (!fs.existsSync(path.join(src, probeRel))) {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    die("解出的包里找不到探针（" + dep.tool + "）：" + probeRel + "——归档内容与清单布局不符。");
+  }
+  fs.rmSync(dep.install, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(dep.install), { recursive: true });
+  fs.renameSync(src, dep.install);
+  fs.rmSync(tmp, { recursive: true, force: true });
+  fs.rmSync(archive, { force: true });
+  log("project-local " + dep.tool + " ready: " + path.relative(ROOT, dep.install));
+}
+
+/**
+ * 目的：补齐运行前提工具链（python / node）——与 Rust 同等待遇：缺就征得同意装进项目内。
+ * 约束：探针在场就跳过（产品 provision 装过的不动）；无 TTY 且没 --yes 不下载、如实报；
+ *   装完写产品台账身份并合并登记 active.json。返回仍缺的工具 id 列表。
+ */
+async function ensureRuntimeToolchains(yes) {
+  const missing = [];
+  const installed = [];
+  for (const tool of ["python", "node"]) {
+    const dep = readToolchainDep(tool);
+    if (!dep) {
+      log("dependencies.yaml 缺少当前平台的 toolchain." + tool + " 条目（" + TARGET_KEY + "）：跳过");
+      missing.push(tool);
+      continue;
+    }
+    if (fs.existsSync(dep.probe)) continue;
+    const ans = await ask("把项目内 " + tool + " " + dep.version + "（约 " + dep.sizeMb + "MB）装进 " +
+      path.relative(ROOT, dep.install) + " 吗？[y/N] ", { yes });
+    if (ans === null || ans.trim().toLowerCase() !== "y") {
+      console.error("[env] " + tool + " 未安装" + (ans === null ? "（无交互终端，不擅自下载）" : "") +
+        "；node env.js setup --yes 或产品 node start.js --provision --ensure=toolchain --yes 可补齐。");
+      missing.push(tool);
+      continue;
+    }
+    installRuntimeToolchain(dep);
+    installed.push(dep);
+  }
+  recordToolchainLedger(installed);
+  return missing;
 }
 
 function status() {
@@ -1207,7 +1393,7 @@ async function main() {
 }
 
 // 只导出入口层（dev.js / setup-dev.js / start.js / 门禁的 tests/lib/proc.js）真正用到的这些；
-// 路径常量、下载与安装细节是这个文件自己的实现。
-module.exports = { resolve, ensure, ensureProject, pinTemp, findProjectCargo, probeBuild };
+// 路径常量、下载与安装细节是这个文件自己的实现。readToolchainDep / installIdentity 供自检钉住跨语言身份口径。
+module.exports = { resolve, ensure, ensureProject, pinTemp, findProjectCargo, probeBuild, readToolchainDep, installIdentity };
 
 if (require.main === module) main();

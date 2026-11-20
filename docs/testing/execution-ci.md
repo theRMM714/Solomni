@@ -109,7 +109,7 @@ node run-tests.js
 
 ### 环境引导自检（`tests/env-bootstrap.mjs`）
 
-- `env.js` 跑在门禁与产品**之前**（`start.bat` / `node env.js setup`）：它坏了等于用户装不上环境。这条自检用**真实子进程**（`<临时根>/env.js setup --yes`）+ **本地应答源**把 Windows 的 MinGW 引导链逐条钉住，并钉住**借用门槛**（借来的 cargo 能打印版本但构建不了时必须拒绝借用）；POSIX 上把 Linux / macOS 的 Zig cc 引导链逐条钉住（宿主 cc 可用时零下载、缺失且同意后才装、无 TTY 不下载、sha256 闸、`--target=` 翻译、macOS 缺 CLT 的准确前置）；只写 `target/test-scratch/`、不碰外网、不装 Rust（假 cargo / rustc）。另跑一次只读的 `node env.js` 自诊断：状态里必须始终有 `build:` 结论，借用不可用时明说"不借用"；并钉住工具链注入判据（active.json → PATH 前置 / `nodeBin` / 在场事实：target 不符不注入、不安全或不在场的 bin 不进 PATH、未登记回退宿主）。原样跑它：`node tests/env-bootstrap.mjs`。
+- `env.js` 跑在门禁与产品**之前**（`start.bat` / `node env.js setup`）：它坏了等于用户装不上环境。这条自检用**真实子进程**（`<临时根>/env.js setup --yes`）+ **本地应答源**把 Windows 的 MinGW 引导链逐条钉住，并钉住**借用门槛**（借来的 cargo 能打印版本但构建不了时必须拒绝借用）；POSIX 上把 Linux / macOS 的 Zig cc 引导链逐条钉住（宿主 cc 可用时零下载、缺失且同意后才装、无 TTY 不下载、sha256 闸、`--target=` 翻译、macOS 缺 CLT 的准确前置）；只写 `target/test-scratch/`、不碰外网、不装 Rust（假 cargo / rustc）。另跑一次只读的 `node env.js` 自诊断：状态里必须始终有 `build:` 结论，借用不可用时明说"不借用"；并钉住工具链注入判据（active.json → PATH 前置 / `nodeBin` / 在场事实：target 不符不注入、不安全或不在场的 bin 不进 PATH、未登记回退宿主）、python/node 安装链（同意闸、sha256 闸、探针闸、台账身份、active.json 登记、在场跳过）与跨语言安装身份钉住（与 Rust `install_identity` 共享常量）。原样跑它：`node tests/env-bootstrap.mjs`。
 
 | 场景 | 判据 |
 | --- | --- |
@@ -128,9 +128,15 @@ node run-tests.js
 | POSIX sha256 不符 | 退出 1、报不符、保留归档、不解包 |
 | macOS 缺 CLT | 退出 1、报 Xcode Command Line Tools / `xcode-select --install`，不下载 Zig |
 | 工具链注入（active.json） | 项目内 python/node bin 前置于宿主 PATH、`nodeBin` 指向项目内可执行、工具 env 非空键值导出、缺项如实报；target 不符整份不注入，相对逃逸 / 绝对路径 / 不在场的 bin 不进 PATH，未登记回退宿主 |
+| python/node 全装（`--yes`） | 探针在场、台账身份与指纹函数一致、active.json 按清单登记 bin 与版本、各请求一次、装完删归档 |
+| python/node 在场重跑 | 零请求（探针在场不重复下载，产品装过的也不动） |
+| python/node 无 TTY 无 `--yes` | 不下载、如实报未安装并指路 `setup --yes` |
+| python/node sha256 不符 | 退出 1、报台账值 / 实际值 / 来源、保留归档、不装 |
+| python/node 归档缺探针 | 退出 1、报探针缺失、不替换安装目录、临时目录清掉 |
+| 安装身份跨语言钉住 | 同一份合成清单与 Rust `install_identity` 算出同一指纹（常量与 `src/tests/provision/service.rs` 共享） |
 
 - dlltool 只在 Windows、Zig 引导只在 POSIX：各自平台缺的另一条路如实 `[探针]` 跳过，不算通过。
-- **这条自检只钉保留的引导链**：`env.js` 做 Rust / MinGW / Zig cc 引导（`node env.js setup`），并把 `active.json` 登记的项目内 python / node / cc bin 前置进门禁与启动器子进程的 PATH（与 Rust 同等待遇，判据同产品侧 compose）；运行前提基础工具链（Python / Node / C-C++）的安装仍由产品 `node start.js --provision --ensure=toolchain --yes` 补齐（`kind: toolchain` 组别名只补缺项，全齐时打印「没有缺项，无需补齐」且不联网）；Zig cc 与运行前提共用同一安装路径，`env.js` 先装好并合并登记 `cc`，产品补齐时按磁盘在场项重写 `active.json`。
+- **引导链分工**：`env.js` 做 Rust / MinGW / Zig cc / Python / Node 引导（`node env.js setup`）——运行前提与 Rust 同等待遇：缺就征得同意装进项目内（无 TTY 无 `--yes` 不下载），装完写产品台账身份（`.vm/state/deps.json`，与 Rust `install_identity` 逐字节同口径，两侧各有钉住用例）并合并登记 `active.json`；同时把 `active.json` 登记的项目内 python / node / cc bin 前置进门禁与启动器子进程的 PATH（判据同产品侧 compose）。产品 `node start.js --provision --ensure=toolchain --yes` 仍是运行期用户的补齐入口（`kind: toolchain` 组别名只补缺项，按探针 + 台账身份判已装，全齐时打印「没有缺项，无需补齐」且不联网）；两条路共用同一安装路径与清单，产品补齐时按磁盘在场项重写 `active.json`。
 
 ### 依赖哈希检查（`pins.js`）
 
@@ -249,7 +255,7 @@ MUTATION_SHARD=2/4 node tests/ci-mutation.mjs     # 只跑第 2 片
 - 入口与门禁共用同一份环境解析（[env.js](../../env.js)）：借用系统 `cargo` 可以，但 `CARGO_HOME` 与临时目录仍钉在项目内。
 - 借用的门槛是**能构建**：借用前编译并链接一个空程序，链接不了就当没有可用工具链（Windows 上 msvc host 缺 `link.exe` 是常见原因），如实报出 host 与编译器原文，再走项目内安装。
 
-- **开发环境同步**：换机器 / 换人开发时跑 `node setup-dev.js`（`--check` 只读校验）。它统一用**项目内**工具链（`platform/<os>/rustup`、`platform/<os>/cargo`），组件、交叉 target 与项目内工具都装那里——**不写系统 `~/.rustup`、`~/.cargo`**；条目清单见 [dev-tools.js](../../dev-tools.js)。
+- **开发环境同步**：换机器 / 换人开发时跑 `node setup-dev.js`（`--check` 只读校验）。它统一用**项目内**工具链（`platform/<os>/rustup`、`platform/<os>/cargo`），组件、交叉 target 与项目内工具都装那里——**不写系统 `~/.rustup`、`~/.cargo`**；运行前提工具链（Python / Node）经 `env.js` 统一引导一并装进项目内（与 Rust 同等待遇），node/python 探测走注入后的 PATH；条目清单见 [dev-tools.js](../../dev-tools.js)。
 - 清单分**必装**（rustfmt / clippy / cargo-audit / cargo-deny：T0 判据本身）与**可选**（交叉 target、llvm-tools-preview / cargo-llvm-cov）：`--check` 只对必装项非零，`--strict` 才要求全齐；缺可选项目不阻断开发，但报告里会如实记 `env-skip`。
 - **前端类型检查依赖**：根 `package.json` / `package-lock.json` 固定 TypeScript 5.9.3（7.0.2 native 的 `include` 通配在 Windows 上会报 TS18003，升级前先验证）；首次或换机后跑 `npm ci --ignore-scripts`（项目内 `node_modules`，不入库）。`frontend-typecheck` 步骤以 `tsconfig.json` 为工程文件运行项目内 TypeScript；缺 `node_modules` 时记 `env-skip`，CI 的 `--strict-env` 下算失败。
 

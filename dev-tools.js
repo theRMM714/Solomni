@@ -32,7 +32,7 @@ module.exports = {
     { name: "cargo-llvm-cov", why: "覆盖率发现模式（--coverage）", required: false },
   ],
 
-  // 只探测、不代装：缺了相关测试会如实 env-skip（探针行可见）。
+  // 只探测、不代装：安装由 env.js 统一引导（node env.js setup --yes，与 Rust 同等待遇）；缺了相关测试会如实 env-skip（探针行可见）。
   probe: [
     { name: "node", why: "前端冒烟与 node 模块工具" },
     { name: "python", why: "python 模块工具与真实 MCP 端到端" },
