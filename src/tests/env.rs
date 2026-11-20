@@ -1,4 +1,4 @@
-//! 目的：钉环境事实的派生——权限链、共享区授权、guest 租约、一席的工具环境与沙箱清单、全局策略（网络开关与宿主只读根）。
+//! 目的：钉环境事实的派生——权限链、guest 租约、一席的工具环境与沙箱清单、全局策略（网络开关与宿主只读根）。
 //! 管：`env::api` 六个派生函数的行为与错误文案；纯内存，不碰端口、不落盘。
 //! 不管：取事实（`runtime` 的 history / workspace / registry）、机制侧怎么用围栏。
 //! 联动：`src/capabilities/env/domain/env.rs`；`runtime/service/env.rs` 取事实后转调。
@@ -7,15 +7,12 @@ use crate::capabilities::catalog::modules::api::Roster;
 use crate::capabilities::catalog::packages::api::PackagePlan;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::AppSettings;
-use crate::capabilities::conversation::session::api::{
-    Mode, RunState, SessionMeta, WorkspaceBinding, WorkspaceGrant,
-};
+use crate::capabilities::conversation::session::api::{Mode, RunState, SessionMeta};
 use crate::capabilities::permission::api::{
-    PermissionDefaults, PermissionLayer, ProfileId, Reach, ReachSet, ScopeMode, SessionSandbox,
+    PermissionDefaults, PermissionLayer, ProfileId, Reach, ReachSet, SessionSandbox,
 };
 use crate::capabilities::turn::env::api::{
     MemberFacts, SandboxesFacts, host_read_roots, member, network_allowed, permissions, sandboxes,
-    workspace_grant,
 };
 use crate::capabilities::workspace::api::{Sandbox, WorkRoots};
 use crate::kernel::api::{ExecSpec, Tier};
@@ -61,7 +58,6 @@ fn sandbox() -> Sandbox {
         modules_with_userdata: Default::default(),
         permissions: PermissionDefaults::default().to_permission_set(),
         path_codec: None,
-        shared_grant: WorkspaceGrant::Session,
     }
 }
 
@@ -97,25 +93,6 @@ fn permissions_narrow_with_the_chain_and_keep_the_hard_deny() {
         out.deny.iter().any(|d| d == "secret/"),
         "全局硬黑名单必须并上"
     );
-}
-
-#[test]
-fn a_workspace_grant_of_none_closes_the_shared_root() {
-    let mut root = meta("root", None, Tier::Host, Mode::Single);
-    root.workspace = Some(WorkspaceBinding {
-        root: PathBuf::from("shared"),
-        grant: WorkspaceGrant::None,
-    });
-    let child = meta("root--a", Some("root"), Tier::Host, Mode::Collab);
-    let chain = vec![root, child];
-    assert_eq!(workspace_grant(&chain), WorkspaceGrant::None);
-    let out = permissions(&chain, &AppSettings::default()).expect("权限链应能求值");
-    assert_eq!(out.shared_read, ScopeMode::None);
-    assert_eq!(out.shared_write, ScopeMode::None);
-    assert!(!out.reach.contains(Reach::SharedRead));
-    assert!(!out.reach.contains(Reach::SharedWrite));
-    assert!(!out.read_ok("notes/a.md"));
-    assert!(!out.write_ok("notes/a.md"));
 }
 
 #[test]
@@ -222,7 +199,6 @@ fn sandboxes_give_each_agent_only_its_own_modules() {
         roots: &roots,
         roster: &roster,
         codec: None,
-        grant: WorkspaceGrant::Session,
     };
     let out = sandboxes(&facts, &|_| {
         Ok(PermissionDefaults::default().to_permission_set())

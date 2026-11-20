@@ -222,9 +222,7 @@ impl GuestAccess {
         let map = |paths: &[PathBuf]| -> Vec<String> {
             paths.iter().map(|p| to_guest_path(p, os, mounts)).collect()
         };
-        // 机器级一次性只读落点在 guest 里与 ro_tree 没有区别（guest 没有 ACL，只差宿主侧撤不撤）。
-        let mut ro_tree: Vec<PathBuf> = fence.ro_tree.clone();
-        ro_tree.extend(fence.machine_ro_tree.iter().cloned());
+        let ro_tree: Vec<PathBuf> = fence.ro_tree.clone();
         GuestAccess {
             agent: fence.agent.clone(),
             rw: map(&fence.rw),
@@ -575,11 +573,10 @@ pub fn mounts_from(plan: &ExecPlan, fence: &FenceSpec, bridge: &PathBridge) -> V
             read_only: true,
         });
     }
-    let roots: [(&[PathBuf], bool); 4] = [
+    let roots: [(&[PathBuf], bool); 3] = [
         (&fence.rw, false),
         (&fence.ro, true),
         (&fence.ro_tree, true),
-        (&fence.machine_ro_tree, true),
     ];
     for (list, read_only) in roots {
         for host in list {

@@ -2,7 +2,6 @@
 //!   本产品的能力 SID（S-1-15-3-*，见 container::CAPABILITY_NAME），后续围栏准备就只剩 O(深度) 的 ACE 读。
 //!   不授给 ALL APPLICATION PACKAGES：那会把读权限下放给本机所有 AppContainer 应用。
 //! 管：落点清单（产品根 / .tools / runtimes）、只读判定、逐条授权与分步计时、失败如实上报，
-//!   外部工作区的显式一次性只读授权/撤权（ensure_workspace_grant / revoke_machine_grants），
 //!   以及旧全应用包机器级授权的退役（retire_legacy_machine_grants）。
 //! 不管：每会话的容器数据授权（windows.rs 的 prepare_fence）、ACE 读写（acl.rs）、台账（record/）。
 //! 联动：system 能力的便携维护（detail/setup/fence.rs）与启动首次授权共用 machine_ensure；状态查询与 --setup=status 共用 machine_missing。
@@ -10,77 +9,6 @@
 use super::*;
 use crate::kernel::api::layout;
 use std::time::Instant;
-
-/// 目的：合成树的形状——50 个目录 × 40 个文件 = 2050 个对象，足够让整树写 ACL 的耗时稳定。
-const CALIBRATION_DIRS: usize = 50;
-const CALIBRATION_FILES_PER_DIR: usize = 40;
-/// 目的：合成树的对象总数（写 ACL 的单价乘数）。
-pub(crate) const CALIBRATION_OBJECTS: u64 =
-    (CALIBRATION_DIRS + CALIBRATION_DIRS * CALIBRATION_FILES_PER_DIR) as u64;
-
-/// 目的：一次合成树标定的结果；`path` 留给调用方记完成本样本后清理。
-pub(crate) struct Calibration {
-    pub(crate) path: PathBuf,
-    pub(crate) objects: u64,
-    pub(crate) ms: u64,
-}
-
-/// 目的：建合成树（只在私有区自建目录），返回对象数。
-fn build_calibration_tree(tree: &Path) -> Result<u64, String> {
-    std::fs::create_dir_all(tree).map_err(|e| format!("建标定目录失败：{}", e))?;
-    for d in 0..CALIBRATION_DIRS {
-        let dir = tree.join(format!("d{}", d));
-        std::fs::create_dir_all(&dir).map_err(|e| format!("建标定子目录失败：{}", e))?;
-        for f in 0..CALIBRATION_FILES_PER_DIR {
-            std::fs::write(dir.join(format!("f{}", f)), b"x")
-                .map_err(|e| format!("建标定文件失败：{}", e))?;
-        }
-    }
-    Ok(CALIBRATION_OBJECTS)
-}
-
-/// 目的：`--setup=fence-calibrate`：在私有区建合成树、真写一次递归机器级只读 ACE 并计时，再递归撤权。
-/// 约束：只动自建目录；测量包含写后核对（与真实授权同一条路）。树与样本由调用方处理。
-pub(crate) fn calibrate_machine_grant(home: &Path) -> Result<Calibration, String> {
-    let tree = home.join(format!("fence-calibrate-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&tree);
-    let objects = build_calibration_tree(&tree)?;
-    let owned = match product_capability_sid() {
-        Ok(owned) => owned,
-        Err(e) => {
-            let _ = std::fs::remove_dir_all(&tree);
-            return Err(format!("派生本产品能力 SID 失败：{}", e));
-        }
-    };
-    let sid = owned.as_ptr() as PSID;
-    let started = Instant::now();
-    let granted = grant_verified(sid, &tree, RIGHTS_RO, true, true);
-    let ms = started.elapsed().as_millis() as u64;
-    let revoked = if granted.is_ok() {
-        revoke_one(sid, &tree, true)
-    } else {
-        Ok(())
-    };
-    if let Err(e) = granted {
-        let _ = std::fs::remove_dir_all(&tree);
-        return Err(format!("标定授权失败：{}", e));
-    }
-    if let Err(e) = revoked {
-        let _ = std::fs::remove_dir_all(&tree);
-        return Err(format!("标定撤权失败：{}", e));
-    }
-    Ok(Calibration {
-        path: tree,
-        objects,
-        ms,
-    })
-}
-
-/// 目的：记完成本样本后删掉合成树（ACE 已撤；普通删除即可）。
-pub(crate) fn remove_calibration_tree(path: &Path) -> Result<(), String> {
-    std::fs::remove_dir_all(path)
-        .map_err(|e| format!("删除标定目录失败（{}）：{}", path.display(), e))
-}
 
 /// 目的：一个机器级落点：路径 + 权限位 + 递归/继承 + 给用户看的这一环叫什么。
 /// 约束：形状与 GrantTarget 对齐；RIGHTS_STAT 只授读属性（容器判存在性），RIGHTS_RO 递归只读（工具链与运行包）。
@@ -237,106 +165,6 @@ pub(crate) fn machine_ensure(
     } else {
         Err(errors.join("；"))
     }
-}
-
-// 契约出口：prep.rs 的 ensure_workspace_grant 转发它；装配层接上调用点之前显式放行。
-#[allow(dead_code)]
-/// 目的：给一个外部工作区授**机器级一次性只读**（外部工作区绑定等显式动作先付一次成本）。
-///   授给本产品能力 SID、递归、可继承——之后每会话的围栏准备只剩一次 DACL 读，不再重付整树成本。
-/// 参数：home = 产品私有区（台账）；root = 工作区目录。
-/// 返回：本次是否真写了 ACL（written / reused）与动作耗时。
-/// 错误：盘卷根、目录不存在、台账或 ACL 写失败都如实返回（台账先落、失败不静默）。
-pub(crate) fn ensure_workspace_grant(
-    home: &Path,
-    root: &Path,
-) -> Result<MachineGrantReport, String> {
-    if root.parent().is_none() {
-        return Err("工作区是盘卷根：拒绝对盘根写继承 ACE（换一个具体目录）".to_string());
-    }
-    if !root.is_dir() {
-        return Err(format!("工作区目录不存在：{}", root.display()));
-    }
-    let owned = product_capability_sid()?;
-    let base = owned.as_ptr() as PSID;
-    let base_text = sid_to_string(base);
-    let started = Instant::now();
-    let target = GrantTarget {
-        path: root.to_path_buf(),
-        rights: RIGHTS_RO,
-        recursive: true,
-        inherit: true,
-        part: FencePart::AuthorizedRead,
-    };
-    let product = product_root(home);
-    let result = grant_machine_journaled(home, base, &base_text, &target, &product);
-    match result {
-        Ok(true) => Ok(MachineGrantReport {
-            written: 1,
-            reused: 0,
-            ms: started.elapsed().as_millis() as u64,
-        }),
-        Ok(false) => Ok(MachineGrantReport {
-            written: 0,
-            reused: 1,
-            ms: started.elapsed().as_millis() as u64,
-        }),
-        Err(e) => Err(e),
-    }
-}
-
-// 契约出口：prep.rs 的 revoke_machine_grants 转发它；装配层接上调用点之前显式放行。
-#[allow(dead_code)]
-/// 目的：撤掉某个工作区的**机器级只读**授权：盘上 ACE（含子对象继承副本）+ 台账条目一起销。
-///   显式动作可以慢：递归撤权 O(子树)，先如实提示再动手。
-/// 返回：销掉的台账条目数；台账里没有这个路径的机器级条目就直接 0——不从父目录继承来的 ACE 不在本命令职责里。
-/// 错误：路径不在了、ACE 撤不掉、台账更新失败都如实返回；台账落盘失败时文件保持原样，重跑可再撤。
-pub(crate) fn revoke_machine_grants(home: &Path, path: &Path) -> Result<usize, String> {
-    if std::fs::symlink_metadata(path).is_err() {
-        return Err(format!("这个路径现在不在了：{}", path.display()));
-    }
-    // 先看台账：单参撤权只撤我们发过的那条机器级授权，别去碰从父目录继承来的 ACE
-    //（那些不是本程序的授权，递归撤它们既慢又会改掉用户目录原有的语义）。
-    let recorded = {
-        let _lock = lock_ledger(home)?;
-        load_record(home)
-            .grants
-            .iter()
-            .any(|g| g.scope == GrantScope::Machine && same_path(&g.path, path))
-    };
-    if !recorded {
-        return Ok(0);
-    }
-    let owned = product_capability_sid()?;
-    let base = owned.as_ptr() as PSID;
-    if has_any_ace_for(base, path) {
-        eprintln!(
-            "[围栏] 正在撤销机器级只读授权（递归子树，可能要几十秒）：{}",
-            path.display()
-        );
-        if let Err(e) = revoke_one(base, path, true) {
-            return Err(format!("撤销未完成（{}）：{}", path.display(), e));
-        }
-    }
-    // 台账只删「机器级 + 同一路径」的条目：路径逐分量比、大小写不敏感（台账里存的是历史字符串）。
-    let _lock = lock_ledger(home)?;
-    let mut rec = load_record(home);
-    let before = rec.grants.len();
-    rec.grants
-        .retain(|g| !(g.scope == GrantScope::Machine && same_path(&g.path, path)));
-    let removed = before - rec.grants.len();
-    if removed == 0 {
-        return Ok(0);
-    }
-    // 该路径上再没有任何授权引用时，快照也一并销掉（没有可管理的 ACE 了）。
-    let still_granted = rec.grants.iter().any(|g| same_path(&g.path, path));
-    if !still_granted {
-        rec.snapshots.retain(|s| !same_path(&s.path, path));
-    }
-    if let Err(e) = save_record(home, &rec) {
-        return Err(format!("已撤掉 ACE，但台账更新失败：{}", e));
-    }
-    rec.drop_if_empty(home);
-    Ok(removed)
 }
 
 /// 目的：台账里该退役的旧条目——**机器级 + ALL APPLICATION PACKAGES**，浅路径在前。
@@ -558,18 +386,5 @@ mod tests {
         assert_eq!(got.len(), 2, "只认机器级的全应用包条目：{:?}", shape);
         assert_eq!(Path::new(&got[0].path), base, "浅路径先撤：{:?}", shape);
         assert_eq!(Path::new(&got[1].path), deep);
-    }
-
-    /// 目的：合成树形状稳定（对象数固定）且用后能删干净；ACL 标定本身由 `--setup=fence-calibrate` 真跑验证。
-    #[test]
-    fn calibration_tree_has_a_stable_object_count_and_cleans_up() {
-        let base =
-            std::env::temp_dir().join(format!("solomni-calibrate-tree-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        let objects = build_calibration_tree(&base).expect("建合成树");
-        assert_eq!(objects, CALIBRATION_OBJECTS);
-        assert!(base.join("d0").join("f0").is_file(), "合成树要真的有文件");
-        remove_calibration_tree(&base).expect("清理合成树");
-        assert!(!base.exists(), "合成树用后不得留痕");
     }
 }

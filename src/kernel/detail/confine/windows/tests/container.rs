@@ -41,7 +41,6 @@ fn container_roundtrip_sees_leaf_but_not_parent_content() {
     // 父目录里另放一个条目：容器应当**读不到**它（只读属性只够按名穿过，不够读内容）。
     std::fs::write(base.join("parent-secret.txt"), "PARENT-SECRET").expect("写父目录条目");
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe-roundtrip".to_string(),
         lease: String::new(),
         private: PathBuf::new(),
@@ -174,7 +173,6 @@ fn container_roundtrip_keeps_module_read_only_and_peer_unreachable() {
     std::fs::write(module.join("script.py"), "print(1)\n").expect("写模块脚本");
     std::fs::write(peer.join("secret.txt"), "PEER-SECRET").expect("写另一席的明文");
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe-module".to_string(),
         lease: String::new(),
         private: userdata.clone(),
@@ -291,7 +289,6 @@ fn container_runs_a_node_module_tool_with_realpath_skipped() {
     )
     .expect("写主脚本");
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe-node".to_string(),
         lease: String::new(),
         rw: vec![userdata.clone()],
@@ -416,7 +413,6 @@ fn container_runs_a_program_given_by_absolute_path() {
     std::fs::copy(&cmd_exe, c_leaf.join("cmd2.exe")).expect("拷到 cwd");
     std::fs::copy(&cmd_exe, d_leaf.join("cmd2.exe")).expect("拷到相邻目录");
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe-exec".to_string(),
         lease: String::new(),
         rw: vec![c_leaf.clone(), d_leaf.clone()],
@@ -475,7 +471,6 @@ fn container_runs_a_program_given_by_absolute_path() {
 fn container_temp_dir_follows_gettemp2_layout() {
     let _fence = crate::tests::fence_acl_guard();
     let mut spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe-temp".to_string(),
         lease: String::new(),
         rw: Vec::new(),
@@ -536,7 +531,6 @@ fn container_has_a_writable_temp_dir() {
     std::fs::create_dir_all(&sandbox).expect("建私有沙箱");
     std::fs::create_dir_all(&leaf).expect("建工作目录");
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe-temp".to_string(),
         lease: String::new(),
         rw: vec![sandbox.clone(), leaf.clone()],
@@ -641,7 +635,6 @@ fn concurrent_calls_of_one_agent_are_isolated_and_released_independently() {
     }
     let home = base.join(".home");
     let spec_of = |lease: &str, root: &Path, private: &Path| FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe-overlap".to_string(),
         lease: lease.to_string(),
         private: private.to_path_buf(),
@@ -779,7 +772,6 @@ fn one_shot_release_only_removes_its_own_grant_and_profile() {
     }
     let home = base.join(".home");
     let spec_of = |lease: &str| FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: "probe-per-call".to_string(),
         lease: lease.to_string(),
         private: private.clone(),

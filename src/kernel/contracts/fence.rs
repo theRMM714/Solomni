@@ -42,7 +42,7 @@ pub struct FenceSpec {
     ///   同名 agent 的多个并发会话共用同一容器 SID 与同一批授权，释放时靠它区分"还有哪个会话在用"。
     #[serde(default)]
     pub lease: String,
-    /// 目的：可读可写的根——本次工作共享区（若这一席可写）+ 该 agent 私有沙箱 + 模块自己的 `userdata/`
+    /// 目的：可读可写的根——该 agent 私有沙箱 + 模块自己的 `userdata/`（共享区主副本永不进这里）
     ///   （后者只随模块自身的工具 / 服务 / 构建围栏出现；agent 会话的模块目录始终在 `ro_tree`）。
     pub rw: Vec<PathBuf>,
     /// 目的：只读的根——**用户显式授权**的额外可达范围（默认空）。
@@ -54,11 +54,6 @@ pub struct FenceSpec {
     ///   与 `ro` 分开的理由：Windows 上用户授权的 `ro` 不递归，而模块目录必须递归可读。
     #[serde(default)]
     pub ro_tree: Vec<PathBuf>,
-    /// 目的：机器级一次性只读落点——Windows 上授给本产品能力 SID（不是本席容器身份），可继承、跨会话复用，
-    ///   本次调用一般零写；用于外部工作区这类不该每个会话重付写 ACL 代价的目录。
-    /// 约束：只给只读位；unix 与虚拟机档没有 ACL，按 `ro_tree` 同等的只读挂载兑现。
-    #[serde(default)]
-    pub machine_ro_tree: Vec<PathBuf>,
     /// 目的：该 agent 私有沙箱——工具进程 HOME / TEMP 的落点（空 = 退回 cwd）。
     #[serde(default)]
     pub private: PathBuf,

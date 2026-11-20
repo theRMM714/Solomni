@@ -66,30 +66,6 @@ impl FencePrep {
     }
 }
 
-/// 目的：`--setup=fence-calibrate` 的合成树标定结果。
-pub(crate) struct CalibrationReport {
-    /// 目的：标定用的合成树根（用后清理）。
-    pub(crate) path: std::path::PathBuf,
-    /// 目的：真写 ACL 的对象数。
-    pub(crate) objects: u64,
-    /// 目的：整段标定的墙钟耗时（毫秒）。
-    pub(crate) ms: u64,
-}
-
-/// 目的：一次**显式**机器级只读授权的结论（外部工作区绑定之类动作回报成本用）。
-/// 约束：written 为 0 表示只命中已有 ACE（复用）、这次没付写 ACL 的代价；ms 只算这一次动作的墙钟。
-// 契约出口：装配层（绑定工作区的向导/命令）消费它；bin 内暂时还没有调用点，不因此删出口。
-#[allow(dead_code)]
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MachineGrantReport {
-    /// 目的：这次真写了 ACL 的落点数（0 = 已就绪）。
-    pub written: usize,
-    /// 目的：已有够用 ACE、这次没写 ACL 的落点数。
-    pub reused: usize,
-    /// 目的：这次动作的墙钟耗时（毫秒，含读 DACL 与台账）。
-    pub ms: u64,
-}
-
 /// 目的：一次性的**机器级**预授还缺哪些落点（空 = 已就绪）。只读、O(深度 + 2)，启动对账用。
 ///   Windows 之外没有「机器级 ACL」这一步，如实返回未支持而不是假称就绪。
 pub fn machine_missing(root: &std::path::Path) -> Result<Vec<String>, String> {
@@ -112,28 +88,6 @@ pub fn retire_legacy_machine_grants(
     out: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
     super::admin::retire_legacy_machine_grants(home, out)
-}
-
-/// 目的：给一个外部工作区授**机器级一次性只读**（授本产品能力 SID、可继承、跨会话复用）：绑定工作区时先付一次成本。
-///   Windows 之外没有 ACL 这一步：如实返回零报告（只读挂载语义由平台后端兑现）。
-// 契约出口：装配层在绑定工作区时调用，bin 内暂时还没有调用点。
-#[allow(dead_code)]
-pub fn ensure_workspace_grant(
-    home: &std::path::Path,
-    root: &std::path::Path,
-) -> Result<MachineGrantReport, String> {
-    super::admin::ensure_workspace_grant(home, root)
-}
-
-/// 目的：撤掉某个外部工作区的**机器级只读**授权（盘上 ACE + 台账条目）：解除绑定/收回共享时用。
-///   显式动作 O(子树)，会慢；返回销掉的台账条目数。Windows 之外没有 ACL 可撤，如实返回 0。
-// 契约出口：装配层在解除绑定/收回共享时调用，bin 内暂时还没有调用点。
-#[allow(dead_code)]
-pub fn revoke_machine_grants(
-    home: &std::path::Path,
-    path: &std::path::Path,
-) -> Result<usize, String> {
-    super::admin::revoke_machine_grants(home, path)
 }
 
 /// 目的：全量回收：连机器级授权一起撤（`--fence-clean` 用）。

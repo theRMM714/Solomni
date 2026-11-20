@@ -6,7 +6,7 @@
 
 ## 管什么 / 不管什么
 
-- 管：权限面——`api::permissions` 先套根会话 ceiling、再逐层 narrowing，最后并上全局硬黑名单；共享区授权为 `None` 时收掉共享读写的 reach。
+- 管：权限面——`api::permissions` 先套根会话 ceiling、再逐层 narrowing，最后并上全局硬黑名单。
 - 管：沙箱清单——`api::sandboxes` 按 agent 名单组装，每席只挂自己的模块目录，缺沙箱路径就地报错。
 - 管：一席的环境——`api::member` 派生围栏、模块变量、运行时可执行文件与工具链根。
 - 管：全局策略——`api::network_allowed` 读设置里的网络开关，`api::host_read_roots` 把用户填的宿主只读根逐条去空白、丢掉空项后转成路径；两处都只有这一个出处。
@@ -16,12 +16,12 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api::member` / `api::sandboxes` / `api::permissions` / `api::workspace_grant` / `api::network_allowed` / `api::host_read_roots`，以及事实结构 `api::MemberFacts` / `api::MemberEnv` / `api::SandboxesFacts`；别的业务与测试只经 `api` 取用（R1）。
+- 入站面：`api::member` / `api::sandboxes` / `api::permissions` / `api::network_allowed` / `api::host_read_roots`，以及事实结构 `api::MemberFacts` / `api::MemberEnv` / `api::SandboxesFacts`；别的业务与测试只经 `api` 取用（R1）。
 - 状态归属：**不持任何状态**——历史、工作区根、模块名册、包计划与 registry 设置都是入参；派生结果随调用返回，本单元没有字段、没有缓存、没有后台任务。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`session`（`SessionMeta` / `WorkspaceGrant`）、`workspace`（`Sandbox` / `Sandboxes` / `WorkRoots`）、`modules`（`Roster`）、`packages`（`PackagePlan`）、`permission`（`PermissionSet`）、`registry`（`AppSettings` / `AgentMeta`）、`kernel`（`FenceSpec` / `Tier`、`ports::PathCodec`）
+- 经 `::api` 用到：`session`（`SessionMeta`）、`workspace`（`Sandbox` / `Sandboxes` / `WorkRoots`）、`modules`（`Roster`）、`packages`（`PackagePlan`）、`permission`（`PermissionSet`）、`registry`（`AppSettings` / `AgentMeta`）、`kernel`（`FenceSpec` / `Tier`、`ports::PathCodec`）
 - 谁在用我：`runtime`（`src/capabilities/runtime/service/env.rs` 的三条薄入口：guest 诊断准备与两席沙箱 / 权限）、`turn`（`src/capabilities/turn/turn/service/facts.rs` 取事实后转调派生函数）、`collab`（`src/capabilities/conversation/collab/service/collab.rs` 的会话设置取网络开关与宿主只读根）、`cli` / `web`（入口装配取网络开关与宿主只读根条数）、`src/tests/env.rs`
 
 ## 一、事实进、结果出

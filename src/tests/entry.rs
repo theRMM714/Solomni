@@ -91,37 +91,25 @@ fn product_commands_are_not_dispatched_by_the_entry() {
     }
 }
 
-/// 目的：`--fence-revoke` 只有一套解析、两种 arity——单参数撤机器级条目，双参数走旧的 SID+路径语义。
+/// 目的：`--fence-revoke` 只认「SID + 路径」两参，单参与零参按用法错处理。
 /// 约束：断的是参数分派（不真机写 ACL）；路径不在时 Windows 报失败、非 Windows 没有 ACL 可撤。
 #[test]
-fn fence_revoke_splits_arity_without_crossing_meanings() {
+fn fence_revoke_requires_sid_and_path() {
     let root = TempRoot::new("revoke");
     std::fs::create_dir_all(root.path().join(".home")).expect("建私有区");
     let here = root.path().to_str().expect("临时路径是 UTF-8").to_string();
     assert_eq!(
         after_root(root.path(), &argv(&["--fence-revoke", here.as_str()])),
-        Some(0),
-        "单参数：撤该路径的机器级条目（没有记录也照成功退）"
-    );
-    let inline = format!("--fence-revoke={here}");
-    assert_eq!(
-        after_root(root.path(), &argv(&[inline.as_str()])),
-        Some(0),
-        "单参数的 = 形式同义"
+        Some(2),
+        "单参数（只有路径）：工作区不再有机器级预授，按用法错"
     );
     assert_eq!(
         after_root(root.path(), &argv(&["--fence-revoke", "S-1-15-2-1"])),
         Some(2),
-        "单参数只给 SID：缺路径按用法错，不能把 SID 当路径吃掉"
+        "单参数只给 SID：缺路径按用法错"
     );
     let missing = root.path().join("missing");
     let missing = missing.to_str().expect("临时路径是 UTF-8");
-    let expected = if cfg!(windows) { 1 } else { 0 };
-    assert_eq!(
-        after_root(root.path(), &argv(&["--fence-revoke", missing])),
-        Some(expected),
-        "单参数 + 路径不在：Windows 失败 1，非 Windows 无 ACL 可撤"
-    );
     assert_eq!(
         after_root(
             root.path(),
@@ -133,17 +121,6 @@ fn fence_revoke_splits_arity_without_crossing_meanings() {
     assert_eq!(
         after_root(root.path(), &argv(&["--fence-revoke"])),
         Some(2),
-        "零参数：只给两行用法"
-    );
-    // 结果呈现的三个分支：撤到条数、内核失败（前者 0，后者 1）；0 条已在上面的真路径里走到。
-    assert_eq!(
-        crate::guard::revoke_machine_report(Ok(2), root.path()),
-        0,
-        "撤到条数：成功退 0"
-    );
-    assert_eq!(
-        crate::guard::revoke_machine_report(Err("授不上".to_string()), root.path()),
-        1,
-        "撤不动：失败退 1"
+        "零参数：只给用法"
     );
 }

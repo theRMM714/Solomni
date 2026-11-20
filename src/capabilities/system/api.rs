@@ -84,7 +84,7 @@ pub struct BuildRequest {
     pub guest: Option<String>,
 }
 
-/// 目的：便携维护（`--setup`）的模式——PATH shim 的写/摘/还原、只读状态、围栏机器级预授与标定。
+/// 目的：便携维护（`--setup`）的模式——PATH shim 的写/摘/还原、只读状态、围栏机器级预授。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetupMode {
     /// 把 `<root>/bin` 追加进用户 PATH（并写好 shim）。
@@ -97,8 +97,6 @@ pub enum SetupMode {
     Status,
     /// 围栏机器级一次性预授。
     Fence,
-    /// 围栏授权成本的标定样本。
-    FenceCalibrate,
     /// 先改 PATH 再预授。
     All,
 }
@@ -113,7 +111,6 @@ impl SetupMode {
             "unset" => SetupMode::Unset,
             "undo" => SetupMode::Undo,
             "fence" => SetupMode::Fence,
-            "fence-calibrate" => SetupMode::FenceCalibrate,
             "all" => SetupMode::All,
             _ => return None,
         })
@@ -127,14 +124,13 @@ impl SetupMode {
             SetupMode::Undo => "undo",
             SetupMode::Status => "status",
             SetupMode::Fence => "fence",
-            SetupMode::FenceCalibrate => "fence-calibrate",
             SetupMode::All => "all",
         }
     }
 
     /// 目的：可用模式的一行清单（用法错时给人看，与 `parse` 同一处口径）。
     pub fn list() -> &'static str {
-        "path / unset / undo / status / fence / fence-calibrate / all"
+        "path / unset / undo / status / fence / all"
     }
 }
 

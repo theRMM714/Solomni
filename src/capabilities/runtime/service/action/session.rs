@@ -255,12 +255,6 @@ impl Handle {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string()),
-            workspace_grant: args
-                .get("workspace_grant")
-                .and_then(|v| v.as_str())
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string()),
         })
     }
 }

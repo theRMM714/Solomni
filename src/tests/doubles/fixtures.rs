@@ -97,7 +97,6 @@ pub(crate) fn test_sandbox(
         modules_with_userdata: std::collections::BTreeSet::new(),
         permissions: Default::default(),
         path_codec: None,
-        shared_grant: crate::capabilities::conversation::session::api::WorkspaceGrant::Session,
     }
 }
 

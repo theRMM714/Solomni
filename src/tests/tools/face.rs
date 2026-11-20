@@ -457,7 +457,6 @@ pub(crate) fn module_lease_serializes_exclusive_calls_but_allows_parallel_reader
             Arc::new(NoFenceHost),
         );
         let fence = FenceSpec {
-            machine_ro_tree: Vec::new(),
             agent: "a".to_string(),
             lease: "w".to_string(),
             rw: Vec::new(),
@@ -541,7 +540,6 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
             tier: crate::kernel::api::Tier::Host,
             guest: None,
             workspace: None,
-            workspace_grant: None,
         })
         .expect("建会话")
         .sid;

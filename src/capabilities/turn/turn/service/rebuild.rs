@@ -482,7 +482,7 @@ impl Turn {
         self.build_proxy_with(meta, &channel, registry)
     }
 
-    /// 目的：用已解析的通道造代理会话：私有沙箱、共享区授权粒度、权限面与工具面都按 meta 取。
+    /// 目的：用已解析的通道造代理会话：私有沙箱、权限面与工具面都按 meta 取。
     fn build_proxy_with(
         &self,
         meta: &SessionMeta,
@@ -499,7 +499,6 @@ impl Turn {
             .get(PROXY_PRIVATE_DIR)
             .cloned()
             .ok_or_else(|| "代理会话没有私有沙箱路径".to_string())?;
-        let shared_grant = self.workspace_grant(meta)?;
         let sb = Sandbox {
             work_name: meta.name.clone(),
             session: meta.name.clone(),
@@ -512,7 +511,6 @@ impl Turn {
             // 代理发言席自己住在宿主上（文件工具也跑在宿主），不需要 guest 翻译；
             // 但视图盘打开时仍要同一个视图写法，否则环境块渲染视图路径、寻址却按宿主根判越界。
             path_codec: crate::kernel::api::view_codec(),
-            shared_grant,
         };
         let tool_mode = registry.tool_mode(None);
         // 身份是**角色提示词**（core_proxy），不是某个 agent 的模块能力包：

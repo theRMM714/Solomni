@@ -504,7 +504,6 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
                 parent: Some("w-notify".to_string()),
                 permission: None,
                 workspace: None,
-                workspace_grant: None,
             };
             Ok(core.create_session(&spec)?.0.session)
         })
@@ -610,7 +609,6 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         tier: Tier::Host,
         guest: None,
         workspace: None,
-        workspace_grant: None,
     };
     let (opened, _head) = faces.work.create_work(spec.clone()).expect("建代理会话");
     assert!(opened.agents.is_empty(), "代理会话没有名单");
@@ -705,7 +703,6 @@ pub(crate) fn proxy_session_exposes_context_usage() {
         tier: Tier::Host,
         guest: None,
         workspace: None,
-        workspace_grant: None,
     };
     let sid = faces.work.create_work(spec).expect("建代理会话").0.sid;
     faces
@@ -758,7 +755,6 @@ pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
                     parent: Some(proxy),
                     permission: None,
                     workspace: None,
-                    workspace_grant: None,
                 };
                 Ok(core.create_session(&spec)?.0.session)
             }

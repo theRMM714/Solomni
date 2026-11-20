@@ -6,7 +6,6 @@
 
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::conversation::session::domain::mode::Mode;
-use crate::capabilities::workspace::api::WorkspaceGrant;
 use serde::{Deserialize, Serialize};
 
 /// 目的：会话元信息：创建工作时由用户决定的身份（形态 / 名单 / 档位 / 归属），
@@ -68,16 +67,13 @@ pub struct SessionMeta {
     pub run: RunState,
 }
 
-/// 目的：根会话绑定到产品目录之外的共享区主副本时记录的工作区根（绝对路径）与围栏授权粒度。
+/// 目的：根会话绑定到产品目录之外的共享区主副本时记录的工作区根（绝对路径）。
 /// 约束：子会话不写这个字段（沿 `parent` 链继承工作根的绑定）；会话建好后不再改。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceBinding {
     /// 目的：规范化后的绝对路径（创建时校验；之后只读）。
     pub root: std::path::PathBuf,
-    /// 目的：外部工作区在围栏里的授权粒度（创建时由人选；缺省 = 今天的行为：逐会话授/撤）。
-    #[serde(default)]
-    pub grant: WorkspaceGrant,
 }
 
 /// 目的：会话运行态（**持久**事实，落在 meta.yaml）：派发与唤醒都要先过它。

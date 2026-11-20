@@ -137,10 +137,6 @@ pub use ledger::{
     sweep_orphan_aces,
 };
 pub use paths::{fence_env, shell_command};
-#[cfg(all(windows, test))]
-pub(crate) use windows::release_fence;
-// 一次围栏准备里真写 ACL 的分步耗时条目：Windows 产生，回执交棒跨平台读。
-pub(crate) use admin::{calibrate_machine_grant, remove_calibration_tree};
 #[cfg(windows)]
 pub use prep::FencePrep;
 pub use prep::FenceStep;
@@ -149,9 +145,10 @@ pub use prep::clean;
 #[cfg(windows)]
 pub use prep::prepare_fence;
 pub use prep::{
-    MachineGrantReport, clean_all, ensure_workspace_grant, machine_ensure, machine_missing,
-    retire_legacy_machine_grants, revoke_machine_grants, sweep_profiles,
+    clean_all, machine_ensure, machine_missing, retire_legacy_machine_grants, sweep_profiles,
 };
+#[cfg(all(windows, test))]
+pub(crate) use windows::release_fence;
 
 #[cfg(windows)]
 pub(crate) use paths::{

@@ -459,7 +459,6 @@ pub(crate) fn create_work_validates_user_choices() {
         tier: crate::kernel::api::Tier::Host,
         guest: None,
         workspace: None,
-        workspace_grant: None,
     };
     let opened = core
         .create_work(two_agents)

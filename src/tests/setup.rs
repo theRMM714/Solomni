@@ -218,10 +218,6 @@ fn unknown_mode_is_refused_and_omitted_mode_means_status() {
     let root = crate::tests::scratch("setup-dispatch");
     assert!(SetupMode::parse("bogus").is_none());
     assert_eq!(SetupMode::parse(""), Some(SetupMode::Status));
-    assert_eq!(
-        SetupMode::parse("fence-calibrate"),
-        Some(SetupMode::FenceCalibrate)
-    );
     let value = SetupHost::new(&root)
         .apply(SetupMode::Status, &mut |_| {})
         .expect("状态要读得到");
@@ -314,7 +310,6 @@ fn setup_modes_round_trip_through_their_ids() {
         SetupMode::Undo,
         SetupMode::Status,
         SetupMode::Fence,
-        SetupMode::FenceCalibrate,
         SetupMode::All,
     ] {
         assert_eq!(

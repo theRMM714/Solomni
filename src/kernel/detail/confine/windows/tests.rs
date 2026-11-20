@@ -87,7 +87,6 @@ pub(super) fn acl_round_trip(base: &Path, tag: &str) -> bool {
         Err(_) => return false,
     };
     let spec = FenceSpec {
-        machine_ro_tree: Vec::new(),
         agent: format!("acl-preflight-{tag}"),
         lease: String::new(),
         private: PathBuf::new(),

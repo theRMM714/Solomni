@@ -4,7 +4,6 @@
 //! 联动：由 `src/kernel/detail/confine/admin.rs` 在非 Windows 目标选中。
 
 use super::super::ledger::{Ledger, ReconcileReport};
-use super::super::prep::{CalibrationReport, MachineGrantReport};
 use crate::kernel::api::FenceSpec;
 use std::path::Path;
 
@@ -81,30 +80,7 @@ pub(super) fn retire_legacy_machine_grants(
     Ok(())
 }
 
-/// 目的：非 Windows 没有 ACL 步骤，返回零报告。
-pub(super) fn ensure_workspace_grant(
-    _home: &Path,
-    _root: &Path,
-) -> Result<MachineGrantReport, String> {
-    Ok(MachineGrantReport::default())
-}
-
-/// 目的：非 Windows 没有 ACL 可撤。
-pub(super) fn revoke_machine_grants(_home: &Path, _path: &Path) -> Result<usize, String> {
-    Ok(0)
-}
-
 /// 目的：非 Windows 围栏不留权限项，无需清理。
 pub(super) fn clean_all(_home: &Path) -> Result<String, String> {
     Ok("本平台的围栏不留权限项，无需清理".to_string())
-}
-
-/// 目的：非 Windows 没有机器级 ACL 标定。
-pub(super) fn calibrate_machine_grant(_home: &Path) -> Result<CalibrationReport, String> {
-    Err("本平台没有机器级 ACL 标定（已登记缺口）".to_string())
-}
-
-/// 目的：非 Windows 没有标定树可删。
-pub(super) fn remove_calibration_tree(_path: &Path) -> Result<(), String> {
-    Ok(())
 }

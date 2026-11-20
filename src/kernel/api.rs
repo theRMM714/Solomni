@@ -21,12 +21,6 @@ pub use crate::kernel::detail::locus::{is_network_path, locus_of, place_contains
 pub(crate) use crate::kernel::detail::process::kill_tree;
 pub use crate::kernel::detail::process::{FenceTiming, take_fence_prep};
 pub use crate::kernel::detail::procs::unix_seconds;
-// 外部工作区的机器级一次性只读授权/撤权：装配层在绑定与解绑时调用（契约出口，消费点由装配层接）。
-// 暂未接上时显式放行未用导入，不把出口从契约里删掉。
-#[allow(unused_imports)]
-pub use crate::kernel::detail::confine::{
-    MachineGrantReport, ensure_workspace_grant, revoke_machine_grants,
-};
 // 视图盘是内核对外契约的一部分：装配层与守门进程按需取用，bin crate 内暂时不会每个都调用到。
 // 对未用到的重导出显式放行，不把它们从出口删掉——出口少一个，契约就悄悄漂了。
 pub use crate::kernel::detail::lock::lock_within;
@@ -48,5 +42,4 @@ pub use crate::kernel::domain::name::{dedup_suffix, validate_dir_name};
 pub use crate::kernel::domain::path::{is_unc, native, slash, unc_parts};
 pub use crate::kernel::domain::platform::{
     EXE_SUFFIX, HAS_EXTERNAL_ACL_STEP, HOST_ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, host_path_eq,
-    is_network_share, volume_key,
 };

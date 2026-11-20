@@ -179,7 +179,6 @@ pub(crate) fn single_work(
         tier: crate::kernel::api::Tier::Host,
         guest: None,
         workspace: None,
-        workspace_grant: None,
     }
 }
 

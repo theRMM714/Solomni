@@ -3,10 +3,6 @@
 //! 不管：用例实现（在 `service/`）；寻址与版本化的纯规则（在 `domain/`）；落盘机制（在 `detail/`）。
 //! 联动：实现见 `service.rs`；`tools` 借 `Place` / `Sandbox` 定位读写落点。
 
-pub use crate::capabilities::workspace::detail::estimate::{
-    estimate_workspace_cost, record_grant_cost,
-};
-pub use crate::capabilities::workspace::detail::grant_job::ensure_in_background;
 pub use crate::capabilities::workspace::domain::asset::{
     FileVersion, MAX_ASSET_BYTES, VERSION_TEXT_LIMIT, media_hint,
 };
@@ -21,8 +17,7 @@ pub use crate::capabilities::workspace::domain::work_tools::{
     str_list,
 };
 pub use crate::capabilities::workspace::domain::workspace::{
-    AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage, WorkspaceGrant,
-    safe_file_name,
+    AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage, safe_file_name,
 };
 /// 目的：版本库共享类型（提交 / 拉取 / 推送 / 状态 / 差异 / 回退）——`tools`、呈现层与测试只从这里取。
 /// 约束：`WorkState` 等类型只在测试与呈现层命名，本 crate 的实现不直接用，故整组允许未使用告警。

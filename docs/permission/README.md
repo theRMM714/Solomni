@@ -61,7 +61,7 @@
 - 输入：会话生效权限（profile 的 reach / decision）、工具声明（effect / 最大 reach / 是否接 scope）、本次参数。
 
 1. granted = 会话 reach ∩ 工具最大 reach；
-2. 工具声明 scope 时：requested = sandbox（只有 private）或 external（private + shared-read + module-read + host-read + network）；若 requested 不是 granted 的子集 → 拒绝（不是问）；granted = granted ∩ requested；
+2. 工具声明 scope 时：requested = sandbox（只有 private）或 external（private + module-read + host-read + network）；若 requested 不是 granted 的子集 → 拒绝（不是问）；granted = granted ∩ requested；
 3. decision = 会话逐工具覆盖 → profile 的 effect/scope 决定（四档都显式给出；工具声明没有「默认处置」这一层，判定只有一个来源）；
 4. deny 不执行；ask 有前端进裁决队、无前端拒绝；allow 执行；
 5. 执行层按 granted 派生围栏 / 做路径判定。
@@ -69,15 +69,14 @@
 - 卡片上的 allow_turn 只表示「本轮剩余 ask 都不再问」；它不改 reach、不改 profile、不落盘。后续调用如果 reach 不够，仍然拒绝。
 - **shell 的 scope** 是本次调用的 reach 请求，不是第二个权限档：
   - sandbox（缺省）：只 private + 基础 / 项目工具链只读；net=false；workspace 及以上 allow，view 不发放；不碰共享 / 模块 / 主机只读根。
-  - external：在 sandbox 之上加 shared-read / module-read / host-read / network；external 档 ask、all_reach 档 allow；共享区 / 模块目录仍只读，module-write 不声明，模块 secrets 不注入。
+  - external：在 sandbox 之上加 module-read / host-read / network（共享区主副本不进容器：读 / 改先 `work_pull`）；external 档 ask、all_reach 档 allow；模块目录仍只读，module-write 不声明，模块 secrets 不注入。
   - sandbox 与 external 都要求围栏真强制（`allow_degraded=false`），装不上就拒绝；命令被围栏拒绝时回执提示 external，**不自动升级**。
   - Windows 上容器身份 = `会话租约 + agent + 受保护根集合`（reach 指纹，不含工具链、不含 net）：同一会话里不同 scope 的调用根集合不同 → 不同 SID（按次收窄因此真实成立）；同一 reach 的后续调用复用 SID 与 ACL。授权**按会话持有**，会话改配 / 删除时撤销；一次性调用（构建 / 独立模块工具）各自唯一租约、跑完即撤。
-  - **外部工作区授权粒度三态**（绑定在根会话 meta 的 `workspace.grant`，子会话沿 `parent` 链继承最近一份）：`session`（缺省）逐会话授/撤共享区；`workspace` 该工作区一次性机器级只读（跨会话零写，代价是本产品任何会话的容器都能读，不限本会话）；`none` 不向容器授共享区，且生效权限里把 `shared-read` / `shared-write` 整个拿掉（`PermissionSet::without_shared`），内置文件工具与 shell 拿到的是同一份事实。粒度只影响围栏与共享区读范围，不改变文件归属。
   - **工具链与运行包不是 reach**：`.tools/` 与 `runtimes/<包>` 是可信执行基座（只读、无秘密、本来就要执行），一次性授给**本产品的能力 SID**（`S-1-15-3-*`，不是 `ALL APPLICATION PACKAGES`——那会把读权限下放给本机所有 AppContainer 应用，见 [kernel/README.md](../kernel/README.md) 的「授权主体分两个」）、按机器级归属记台账（`scope=machine`、无归属，跨会话复用、启动对账不回收），不参与按 reach 的容器身份与按次授权；共享区 / 模块目录 / 用户只读根才按 reach 收窄。产品根上的一条 `(OI)(CI)` 只读属性同属机器级授权（授给同一个能力 SID、跨会话复用、启动对账不回收），也不属于 reach：容器 cwd 走视图盘写法（产品根映射成实例独占的盘符），产品根之外的祖先不授。**机器级一次性预授**（`--setup=fence`，或首次授权成功后自动一次）把产品根 `(OI)(CI)` 只读属性、`.tools/` 与 `runtimes/` 递归只读一次写掉；之后每个新会话只剩按 reach 的容器 SID 授权，不再重复写这批 ACE。
 
 ## 四、围栏派生
 
-- `FenceSpec::for_call` 按本次 granted 派生：private 进 rw；module-write 只把该模块的 userdata 放进 rw；shared-read / module-read 进 ro_tree；host-read 进 ro；network 与全局开关求交。shared-write 永不进 rw。shell 的 per-call 围栏另加项目内**基础工具链根**（只读）；模块工具的放行仍走它自己的命令解释器基线。
+- `FenceSpec::for_call` 按本次 granted 派生：private 进 rw；module-write 只把该模块的 userdata 放进 rw；module-read 进 ro_tree（shared-read 不进围栏：共享区主副本只由宿主内的文件工具直读）；host-read 进 ro；network 与全局开关求交。shared-write 永不进 rw。shell 的 per-call 围栏另加项目内**基础工具链根**（只读）；模块工具的放行仍走它自己的命令解释器基线。
 - `FenceSpec::for_session` 只作**会话 base**（提供主机只读根与全局断网事实）再派生按次围栏；撤销走会话租约（`release_by_lease`），不再按「会话并集」反推落点。
 - VM guest 的 per-call 断网由 guest helper 按策略里的 net 做 `unshare(CLONE_NEWNET)`；失败 fail-closed，不静默降级。
 
