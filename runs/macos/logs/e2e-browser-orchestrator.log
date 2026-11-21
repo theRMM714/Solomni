@@ -1,0 +1,38 @@
+[e2e] 夹具 .tools 已链接：跑项目内工具链
+[e2e] 夹具解释器：python → /Users/runner/work/Solomni/Solomni/.tools/toolchains/macos-aarch64/python/3.14.9/python/bin/python
+[e2e] 真模块已复制进夹具：harvest / render / indexer
+[e2e] 试编译器：c++
+Apple clang version 21.0.0 (clang-2100.1.1.101)
+Target: arm64-apple-darwin25.6.0
+Thread model: posix
+InstalledDir: /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin
+[e2e] indexer 就绪：modules/indexer/build/indexer（124056 字节）
+MOCK-UP 8556
+[工具链] 项目内：python 3.14.9、node 24.11.0
+[工具链] 项目内未安装：cc；补全：solomni --provision --ensure=toolchain --yes
+[工具链] 宿主回退 cc → /usr/bin/gcc（围栏可用）
+[围栏] macOS：seatbelt（sandbox_init，私有且已弃用的 ABI）强制可达范围，并按 net 断网/放行出站
+[围栏] 本机能力：文件系统=可用 断网=可用 进程树=可用（macOS：seatbelt（sandbox_init，私有且已弃用的 ABI）强制可达范围，并按 net 断网/放行出站）
+[围栏] 本次实际：文件系统=可用 断网=可用 进程树=可用；容器授权=不适用；只读根=0 个（sandbox.policy.windows.write_acl 只影响 Windows 的目录 ACL；本平台围栏在守门进程里自足，与授权无关）
+[沙箱] 本进程已降级：缺失的强制项按如实降级执行；重启后重新评估
+Solomni 转录中心：http://127.0.0.1:3099（只监听本机）
+PASS 登记假供应商
+PASS 登记模型 m1
+PASS 登记模型 m2
+PASS 设核心默认 m1
+PASS 登记 agent 单兵
+PASS 登记 agent 双子
+[browser] 使用系统浏览器：msedge
+[browser] browser.version = 157.0.4341.60
+PASS 首页加载完成
+PASS 向导创建会话：ui-browser-1795273681243（ui-browser-1795273681243）
+PASS 发送消息并收到回复
+PASS 设置 write 需确认
+PASS 裁决卡提交后继续生成
+PASS 设置保存
+PASS 存储回收（当前没有到策略条件的项，给出明确提示）
+PASS 浏览器上传文件到 work/
+PASS 浏览器控制台无错误
+BROWSER-E2E-OK
+E2E-OK
+[e2e] 围栏回收（退出码 0）：[围栏] 清理完成：本平台的围栏不留权限项，无需清理 | [围栏] 清理完成：扫掉 0 个本程序建过的容器 profile | [工具链] 项目内：python 3.14.9、node 24.11.0 | [工具链] 项目内未安装：cc；补全：solomni --provision --ensure=toolchain --yes | [工具链] 宿主回退 cc → /usr/bin/gcc（围栏可用）
