@@ -258,8 +258,12 @@ fn feed(
             continue;
         };
         // 供应商可以在最后一块只发 usage（没有 choices）；先收用量，再处理正文。
+        // 分块只报一部分字段：新值**并进**已有值，不拿半份覆盖整份。
         if let Some(usage) = usage_of(&v) {
-            state.usage = Some(usage);
+            state.usage = Some(match state.usage {
+                Some(known) => known.widen(usage),
+                None => usage,
+            });
         }
         let Some(choice) = v.get("choices").and_then(|c| c.get(0)) else {
             continue;
@@ -436,18 +440,12 @@ async fn read_text(
     }
 }
 
-/// 从响应/流数据块里取 usage（OpenAI 形状；容忍只给 input/output 的别名）。
+/// 从响应/流数据块里取 usage（OpenAI 与 Anthropic 两种形状；缺的字段就是 None）。
+/// 归一的口径见函数体：两种形状的输入含义不同，prompt 必须是**这次请求的完整输入**。
 /// 全零 / 没有 usage = None：不把"供应商没报"伪装成精确的 0。
 fn usage_of(v: &serde_json::Value) -> Option<TokenUsage> {
     let u = v.get("usage")?;
     let n = |keys: &[&str]| keys.iter().find_map(|k| u.get(*k).and_then(|x| x.as_u64()));
-    let prompt = n(&["prompt_tokens", "input_tokens"]).unwrap_or(0);
-    let completion = n(&["completion_tokens", "output_tokens"]).unwrap_or(0);
-    let total = n(&["total_tokens"])
-        .or_else(|| (prompt > 0 || completion > 0).then_some(prompt + completion));
-    if prompt == 0 && completion == 0 && total.unwrap_or(0) == 0 {
-        return None;
-    }
     // 缓存：Anthropic 形状给顶层两个字段；OpenAI 形状给 prompt_tokens_details.cached_tokens。
     let cache_read = n(&["cache_read_input_tokens"]).or_else(|| {
         u.get("prompt_tokens_details")
@@ -455,6 +453,25 @@ fn usage_of(v: &serde_json::Value) -> Option<TokenUsage> {
             .and_then(|x| x.as_u64())
     });
     let cache_creation = n(&["cache_creation_input_tokens"]);
+    // **两种形状的输入口径不同**：Anthropic 的 input_tokens 只是"没命中缓存的输入"，缓存读写单独报；
+    // OpenAI 的 prompt_tokens 已含命中缓存的部分（同时给两字段的转换层按 OpenAI 读）。
+    let anthropic = u.get("prompt_tokens").is_none() && u.get("input_tokens").is_some();
+    let prompt = if anthropic {
+        n(&["input_tokens"]).unwrap_or(0) + cache_read.unwrap_or(0) + cache_creation.unwrap_or(0)
+    } else {
+        n(&["prompt_tokens"]).unwrap_or(0)
+    };
+    let completion = n(&["completion_tokens", "output_tokens"]).unwrap_or(0);
+    // Anthropic 若也回了 total_tokens，那多半是不含缓存的旧口径：按归一后的 prompt 重算。
+    let total = if anthropic {
+        (prompt > 0 || completion > 0).then_some(prompt + completion)
+    } else {
+        n(&["total_tokens"])
+            .or_else(|| (prompt > 0 || completion > 0).then_some(prompt + completion))
+    };
+    if prompt == 0 && completion == 0 && total.unwrap_or(0) == 0 {
+        return None;
+    }
     let mut usage = TokenUsage::new(prompt, completion, total);
     usage.cache_read = cache_read;
     usage.cache_creation = cache_creation;
@@ -544,10 +561,15 @@ mod tests {
         assert_eq!(u.cache_read, Some(800));
         assert_eq!(u.cache_creation, None, "没报缓存写入就是 None");
 
+        // Anthropic 的 input_tokens 只是"没命中缓存的那部分"：prompt 必须把缓存读写加回来，
+        // 否则 total 会小得离谱（50+10=60 vs 真实 1560），自动压缩的阈值也就永远触发不了。
         let anthropic = json!({"usage": {"input_tokens": 50, "output_tokens": 10,
             "cache_read_input_tokens": 1200, "cache_creation_input_tokens": 300}});
         let u = usage_of(&anthropic).expect("有 usage");
-        assert_eq!(u.total_tokens, 60);
+        assert_eq!(
+            (u.prompt_tokens, u.completion_tokens, u.total_tokens),
+            (1550, 10, 1560)
+        );
         assert_eq!(u.cache_read, Some(1200));
         assert_eq!(u.cache_creation, Some(300));
 
@@ -557,5 +579,27 @@ mod tests {
         assert!(
             usage_of(&json!({"usage": {"prompt_tokens": 0, "completion_tokens": 0}})).is_none()
         );
+    }
+
+    /// 目的：流式分块只报一部分字段时，后一块不把前一块已知的输入/缓存抹成 0。
+    #[test]
+    fn usage_chunks_merge_field_wise() {
+        let tail = usage_of(&json!({"usage": {"output_tokens": 10}})).expect("有 output");
+        let head = usage_of(&json!({"usage": {"input_tokens": 50,
+            "cache_read_input_tokens": 1200, "cache_creation_input_tokens": 300}}))
+        .expect("有 input");
+        let merged = tail.widen(head);
+        assert_eq!(
+            (
+                merged.prompt_tokens,
+                merged.completion_tokens,
+                merged.total_tokens
+            ),
+            (1550, 10, 1560)
+        );
+        assert_eq!(merged.cache_read, Some(1200));
+        assert_eq!(merged.cache_creation, Some(300));
+        // 反过来并也一样（谁先到都一样）。
+        assert_eq!(tail.widen(head).total_tokens, head.widen(tail).total_tokens);
     }
 }
