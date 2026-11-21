@@ -8,7 +8,7 @@ tools:
   read:
     capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
-    desc: 读取文本文件（UTF-8）。
+    desc: 按行窗口读取文本文件（UTF-8）：默认从头读，可用 offset/limit 直接读任意一段；总行数与版本按整份文件统计，超过 1MB 也能读后半段。
     parallel: true                    # 只读、无副作用：同一回复里的多个读取**真的并发跑**
     params:
       path:

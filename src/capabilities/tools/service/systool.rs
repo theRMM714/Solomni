@@ -330,8 +330,19 @@ fn read(
     spec: &str,
     path: &Path,
 ) -> ToolOutcome {
-    let got = match io.read(path) {
-        Ok(g) => g,
+    let offset = args
+        .get("offset")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1)
+        .max(1);
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(MAX_READ_LINES as u64)
+        .clamp(1, MAX_READ_LINES as u64);
+    // 机制层只取请求窗口，但会扫完整份文件算行数与版本：>1MB 的文件也能直接读后半段。
+    let page = match io.read_page(path, offset as u32, limit as u32) {
+        Ok(p) => p,
         // 目录不是文件：如实引导到 list，而不是把 IO 错原样丢给模型。
         Err(e) => match io.list(path) {
             Ok(_) => {
@@ -343,16 +354,11 @@ fn read(
             Err(_) => return fail(e),
         },
     };
-    let header = |body: String| format!("[read] {} （{} 字节）\n{}", spec, got.bytes, body);
-    let lines: Vec<&str> = got.text.lines().collect();
-    let total = lines.len();
-    let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
-    let limit = args
-        .get("limit")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(total as u64)
-        .max(1) as usize;
-    let hash = fnv1a(&got.text);
+    let header = |body: String| format!("[read] {} （{} 字节）\n{}", spec, page.bytes, body);
+    let total = page.total_lines as usize;
+    let offset = offset as usize;
+    let lines: Vec<&str> = page.text.lines().collect();
+    let hash = fnv1a(&page.text);
     if offset > total {
         obs.note_read(
             path,
@@ -366,11 +372,12 @@ fn read(
     let mut body: Vec<String> = Vec::new();
     let mut used = 0usize;
     let mut to = offset - 1;
-    let mut line_cut = false;
-    for (i, line) in lines.iter().enumerate().skip(offset - 1).take(limit) {
+    let mut line_cut = page.line_cut;
+    for (i, line) in lines.iter().enumerate() {
+        let line_no = offset + i;
         let (text, cut) = truncate_chars(line, MAX_READ_LINE_CHARS);
         line_cut |= cut;
-        let mut row = format!("{}: {}", i + 1, text);
+        let mut row = format!("{}: {}", line_no, text);
         if cut {
             row.push_str(&format!(
                 "［本行超过 {} 字符，已截断］",
@@ -383,18 +390,21 @@ fn read(
             break;
         }
         used += cost;
-        to = i + 1;
+        to = line_no;
         body.push(row);
     }
     // 记账：只有"从头到尾、每一行都完整、没有编码损失"的一次读取才算见过全文。
     // 单行被 MAX_READ_LINE_CHARS 截断时，模型看到的是省略号，不是那一行的原文。
-    let complete = !got.cut && !got.lossy && !line_cut && offset == 1 && to == total;
-    let why = if got.lossy {
+    let complete = !page.lossy && !line_cut && offset == 1 && to == total;
+    let why = if page.lossy {
         "文件含非法 UTF-8 字节，读到的不是全部原文".to_string()
-    } else if got.cut {
-        "文件超过单次读取上限，只读到开头部分".to_string()
     } else if line_cut {
         "有单行超过显示上限被截断，读到的不是全部原文".to_string()
+    } else if page.window_cut && to < total {
+        format!(
+            "只读了第 {}-{} 行（共 {} 行；本次到单次读取上限）",
+            offset, to, total
+        )
     } else {
         format!("只读了第 {}-{} 行（共 {} 行）", offset, to, total)
     };
@@ -407,12 +417,12 @@ fn read(
             path: rel,
             from: offset as u64,
             to: to as u64,
-            blob: crate::capabilities::workspace::api::content_hash(got.text.as_bytes()),
+            blob: page.hash.clone(),
         });
     }
-    // 观察事实：完整读 = 全文；分段读 = 读到的行区间。机制截断、单行截断、编码损失都不记
+    // 观察事实：完整读 = 全文；分段读 = 读到的行区间。单行截断、编码损失都不记
     //（模型看到的不是原文，拿去授权改写会覆盖掉自己没看见的字节）。
-    if !got.cut && !got.lossy && !line_cut {
+    if !page.lossy && !line_cut {
         let coverage = if complete {
             Coverage::Full
         } else {
@@ -421,32 +431,36 @@ fn read(
         observe(
             obs,
             &Origin::of(sb, place, path),
-            got.hash.clone(),
+            page.hash.clone(),
             coverage,
             total,
             ObservationSource::Read,
         );
     }
     let mut out = header(body.join("\n"));
-    let tail = if got.cut {
-        // 机制层只读了开头：总行数不可知，也不能声称"到文件末尾"。
-        format!(
-            "（已显示第 {}-{} 行；文件超过单次读取上限，只读到开头部分，总行数这次无法统计）",
-            offset, to
-        )
-    } else if to < total {
-        format!(
-            "（已显示第 {}-{} 行，共 {} 行；继续读用 offset={}）",
-            offset,
-            to,
-            total,
-            to + 1
-        )
+    let tail = if to < total {
+        if page.window_cut {
+            format!(
+                "（已显示第 {}-{} 行，共 {} 行；本次到单次读取上限，继续读用 offset={}）",
+                offset,
+                to,
+                total,
+                to + 1
+            )
+        } else {
+            format!(
+                "（已显示第 {}-{} 行，共 {} 行；继续读用 offset={}）",
+                offset,
+                to,
+                total,
+                to + 1
+            )
+        }
     } else {
         format!("（已到文件末尾，共 {} 行）", total)
     };
     out.push_str(&format!("\n{}", tail));
-    if got.lossy {
+    if page.lossy {
         out.push_str(
             "\n[编码] 该文件含非法 UTF-8 字节，以上是按替换字符呈现的近似内容；本程序不猜编码。",
         );

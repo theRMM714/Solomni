@@ -5,7 +5,7 @@
 
 use crate::capabilities::tools::api::LineRange;
 use crate::capabilities::tools::ports::{
-    DirEntry, Expect, FileRead, Mutation, SysIo, WriteFault, WriteOp, WriteReceipt,
+    DirEntry, Expect, FilePage, FileRead, Mutation, SysIo, WriteFault, WriteOp, WriteReceipt,
 };
 use crate::capabilities::workspace::api::{Sha256, content_hash};
 use std::collections::{BTreeMap, BTreeSet};
@@ -304,6 +304,71 @@ pub(crate) fn rollback(path: &Path, previous: Option<&[u8]>) -> Result<(), Write
     }
 }
 
+/// 目的：按行窗口扫描整份文件时的选区状态：只留请求区间的行，同时数完整份行数。
+struct PageScan {
+    offset: u32,
+    end: u32,
+    max_bytes: usize,
+    text: String,
+    started: bool,
+    used: usize,
+    lossy: bool,
+    window_cut: bool,
+    line_cut: bool,
+    collecting: bool,
+}
+
+impl PageScan {
+    fn new(offset: u32, limit: u32, max_bytes: usize) -> PageScan {
+        let offset = offset.max(1);
+        PageScan {
+            offset,
+            end: offset.saturating_add(limit.max(1)),
+            max_bytes: max_bytes.max(1),
+            text: String::new(),
+            started: false,
+            used: 0,
+            lossy: false,
+            window_cut: false,
+            line_cut: false,
+            collecting: true,
+        }
+    }
+
+    fn want(&self, line: u32) -> bool {
+        self.collecting && line >= self.offset && line < self.end
+    }
+
+    /// 目的：收下一整行（`truncated` 表示这一行只拿到了字节上限内的前缀）。
+    fn push(&mut self, line: u32, raw: &[u8], truncated: bool) {
+        if !self.want(line) {
+            return;
+        }
+        let raw = raw.strip_suffix(b"\r").unwrap_or(raw);
+        let (text, bad) = if truncated {
+            (String::from_utf8_lossy(raw).into_owned(), false)
+        } else {
+            match std::str::from_utf8(raw) {
+                Ok(t) => (t.to_string(), false),
+                Err(_) => (String::from_utf8_lossy(raw).into_owned(), true),
+            }
+        };
+        self.lossy |= bad;
+        self.line_cut |= truncated;
+        // 用 started 而不是 text.is_empty()：开头的空行也是选中行，不能被当成"还没开始"。
+        if self.started {
+            self.text.push('\n');
+        }
+        self.started = true;
+        self.used = self.used.saturating_add(text.len() + 1);
+        self.text.push_str(&text);
+        if self.used >= self.max_bytes && line + 1 < self.end {
+            self.window_cut = true;
+            self.collecting = false;
+        }
+    }
+}
+
 pub struct FsSysIo {
     /// 目的：单次读取的字节上限（超出只读开头部分，如实标注）。
     pub max_read_bytes: usize,
@@ -351,6 +416,62 @@ impl SysIo for FsSysIo {
             lossy,
             cut: n < total,
             hash,
+        })
+    }
+
+    fn read_page(&self, path: &Path, offset: u32, limit: u32) -> Result<FilePage, String> {
+        let meta = std::fs::metadata(path).map_err(|e| format!("读取失败：{}", e))?;
+        if !meta.is_file() {
+            return Err(format!("不是一个普通文件：{}", path.display()));
+        }
+        let bytes = meta.len() as usize;
+        let mut file = std::fs::File::open(path).map_err(|e| format!("读取失败：{}", e))?;
+        let mut scan = PageScan::new(offset, limit, self.max_read_bytes);
+        let mut hasher = Sha256::new();
+        let mut buf = [0u8; 64 * 1024];
+        let mut line: Vec<u8> = Vec::new();
+        let mut line_truncated = false;
+        let mut line_no: u32 = 0;
+        let mut read_any = false;
+        let mut last_byte = 0u8;
+        loop {
+            let n = file
+                .read(&mut buf)
+                .map_err(|e| format!("读取失败：{}", e))?;
+            if n == 0 {
+                break;
+            }
+            read_any = true;
+            last_byte = buf[n - 1];
+            hasher.update(&buf[..n]);
+            for &b in &buf[..n] {
+                if b == b'\n' {
+                    line_no = line_no.saturating_add(1);
+                    scan.push(line_no, &line, line_truncated);
+                    line.clear();
+                    line_truncated = false;
+                } else if scan.want(line_no + 1) {
+                    if line.len() < scan.max_bytes {
+                        line.push(b);
+                    } else {
+                        line_truncated = true;
+                    }
+                }
+            }
+        }
+        // 最后一段没有换行符时也是一行；文件以换行结尾时不再补一行空行。
+        if !line.is_empty() || (read_any && last_byte != b'\n') {
+            line_no = line_no.saturating_add(1);
+            scan.push(line_no, &line, line_truncated);
+        }
+        Ok(FilePage {
+            text: scan.text,
+            bytes,
+            lossy: scan.lossy,
+            window_cut: scan.window_cut,
+            line_cut: scan.line_cut,
+            hash: hasher.finish_hex(),
+            total_lines: line_no,
         })
     }
 
