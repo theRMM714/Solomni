@@ -14,7 +14,7 @@ pub use crate::capabilities::conversation::session::domain::events::{
     qualify, stopped_note, working,
 };
 pub use crate::capabilities::conversation::session::domain::history::{
-    Delegation, HistoryView, RunState, SessionMeta, WorkspaceBinding,
+    Delegation, HistoryView, RunState, SessionMeta, UsageTotals, WorkspaceBinding,
 };
 pub use crate::capabilities::conversation::session::domain::mode::Mode;
 #[allow(unused_imports)]

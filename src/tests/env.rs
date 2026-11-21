@@ -25,6 +25,7 @@ use std::path::PathBuf;
 /// 一条最小会话 meta：权限段与工作区绑定由调用方按需覆盖。
 fn meta(name: &str, parent: Option<&str>, tier: Tier, mode: Mode) -> SessionMeta {
     SessionMeta {
+        usage_totals: Default::default(),
         context_freshness: false,
         name: name.to_string(),
         mode,

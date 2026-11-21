@@ -135,6 +135,7 @@ pub(crate) fn seed_session(
     exec: ExecSpec,
 ) {
     hist.create(&SessionMeta {
+        usage_totals: Default::default(),
         context_freshness: false,
         name: name.to_string(),
         mode,

@@ -116,6 +116,9 @@ pub struct Round {
     ///   约束：它**不进对话**（text_msgs 为空，行上带 cut）——点「继续」是从断点**重开一轮**，
     ///   不是把这半句当发言续写（见 docs/session/session-model.md）。
     pub cut: bool,
+    /// 目的：这一轮的供应商用量（`None` = 没报 / 失败轮）；回合末由驱动并进会话的累计。
+    /// 约束：原样透传，不做估算——账面上只记真实花费。
+    pub usage: Option<crate::capabilities::llm::api::TokenUsage>,
 }
 
 impl Round {
@@ -268,6 +271,8 @@ pub fn converse_with(
         // 用户「停止」：请求已被取消关闭。停止优先于同一次调用的错误；
         // 后面的工具分支只记录"未执行"的失败行，绝不真的执行已流到一半的 tool_call。
         let user_stopped = done.cancelled || cancel.load(std::sync::atomic::Ordering::Relaxed);
+        // 这一轮的用量先取出来：下面几处分支会遮蔽 `done`（工具批次结果同名）。
+        let usage = done.usage;
         if user_stopped {
             // 这一轮只记录"未执行"的失败行；循环顶部据此退出，不再发起下一次调用。
             aborted = true;
@@ -295,6 +300,7 @@ pub fn converse_with(
                     verb: None,
                     degraded: false,
                     cut: true,
+                    usage,
                 });
             }
         }
@@ -313,6 +319,7 @@ pub fn converse_with(
                 verb: None,
                 degraded: false,
                 cut: false,
+                usage,
             });
             return rounds;
         }
@@ -403,6 +410,7 @@ pub fn converse_with(
                     verb: Some(verb),
                     degraded,
                     cut: false,
+                    usage,
                 });
                 return rounds;
             }
@@ -464,6 +472,7 @@ pub fn converse_with(
                 verb: None,
                 degraded: false,
                 cut: false,
+                usage,
             });
             return rounds;
         }
@@ -576,6 +585,7 @@ pub fn converse_with(
                         verb: None,
                         degraded: false,
                         cut: false,
+                        usage,
                     });
                 }
                 continue;
@@ -622,6 +632,7 @@ pub fn converse_with(
                         verb: None,
                         degraded: false,
                         cut: false,
+                        usage,
                     });
                     continue;
                 }
@@ -681,6 +692,7 @@ pub fn converse_with(
                     verb: None,
                     degraded: true,
                     cut: false,
+                    usage,
                 });
             }
             // 合法信封：**一次回复里的多个调用一起执行**（同一套声明并发调度），各成一条工具行。
@@ -794,6 +806,7 @@ pub fn converse_with(
                         verb: None,
                         degraded: false,
                         cut: false,
+                        usage,
                     });
                 }
             }
@@ -825,6 +838,7 @@ pub fn converse_with(
                     verb: None,
                     degraded: reply.degraded || reply.verb == Verb::Tool,
                     cut: false,
+                    usage,
                 });
                 return rounds;
             }

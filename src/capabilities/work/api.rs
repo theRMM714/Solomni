@@ -301,6 +301,9 @@ pub struct SessionView {
     /// 约束：协作主会话没有一条持续发给模型的对话，因此没有这个字段。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<crate::capabilities::conversation::session::api::ContextUsage>,
+    /// 目的：这条会话**累计**的模型花费（跨回合、跨压缩；回档不清零）：面板显示累计输入 / 输出与缓存命中。
+    /// 约束：总是出现（全零 = 还没调用过模型）；只累计供应商精确报回的调用，估算不进。
+    pub usage_totals: crate::capabilities::conversation::session::api::UsageTotals,
     /// 目的：最近一次 shell 的运行状态（状态栏卡片）；没跑过 shell 就是 null。
     /// 约束：总是出现（null = 没有）——前端据此清掉回档已经截掉的旧快照。
     pub shell: Option<crate::capabilities::conversation::session::api::ShellLive>,

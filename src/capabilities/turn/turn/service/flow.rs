@@ -10,7 +10,7 @@ use crate::capabilities::conversation::collab::api::AfterTurn;
 use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::conversation::session::api::{
     Answered, DecisionQueue, GateTicket, Mode, RunState, SessionEvent, SessionMeta, TurnIo,
-    flat_modules, work_root,
+    UsageTotals, flat_modules, work_root,
 };
 use crate::capabilities::prompt::api::Segment;
 use crate::capabilities::turn::turn::api::{Prepared, RestoreRequest, Session};
@@ -377,6 +377,7 @@ impl Turn {
             return Ok(child);
         }
         let meta = SessionMeta {
+            usage_totals: Default::default(),
             context_freshness: false,
             name: child.clone(),
             mode: Mode::Single,
@@ -472,10 +473,12 @@ impl Turn {
     pub(crate) fn put_single(
         &mut self,
         sid: &str,
-        s: crate::capabilities::conversation::session::api::AgentSession,
+        mut s: crate::capabilities::conversation::session::api::AgentSession,
     ) -> Option<String> {
+        let usage_delta = s.take_usage_delta();
         self.unmark_running(sid);
         self.put(sid.to_string(), Session::Single(s));
+        self.flush_usage_totals(sid, usage_delta);
         // 子会话完成 = 它的节点交付了：标记**正跑在这个会话里的那个节点**（产出即交付物），并交回父会话。
         // 一个 agent 一个会话（可能依次服务多个节点），所以按 sub_session 认节点，不靠 meta.node。
         let (meta, _) = self.history.load(sid).ok()?;
@@ -498,13 +501,33 @@ impl Turn {
     pub(crate) fn put_single_recorded(
         &mut self,
         sid: &str,
-        s: crate::capabilities::conversation::session::api::AgentSession,
+        mut s: crate::capabilities::conversation::session::api::AgentSession,
         events: &[SessionEvent],
     ) {
+        let usage_delta = s.take_usage_delta();
         self.unmark_running(sid);
         self.put(sid.to_string(), Session::Single(s));
+        self.flush_usage_totals(sid, usage_delta);
         let mut ev = events.to_vec();
         self.record_events(sid, &mut ev);
+    }
+
+    /// 目的：把这一回合**真实花掉**的用量并进会话 meta 的累计（面板的累计输入 / 输出读它）。
+    /// 约束：只写本会话自己的 meta（子会话花的花在子会话身上）；回档、折叠、压缩都不动它。
+    fn flush_usage_totals(&self, sid: &str, delta: UsageTotals) {
+        if delta.is_empty() {
+            return;
+        }
+        let Ok(mut meta) = self.history.meta(sid) else {
+            return;
+        };
+        meta.usage_totals.add(delta);
+        if let Err(e) = self.history.save_meta(&meta) {
+            self.log.warn(
+                "turn::usage",
+                &format!("累计用量写回失败（{}）：{}", sid, e),
+            );
+        }
     }
 
     /// 目的：生成线程崩溃：会话对象随线程一起没了，但**转录在盘上**。

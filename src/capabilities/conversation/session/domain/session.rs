@@ -6,8 +6,9 @@
 use crate::capabilities::conversation::session::domain::events::{
     LineView, SessionEvent, ToolCallView,
 };
+use crate::capabilities::conversation::session::domain::history::UsageTotals;
 use crate::capabilities::conversation::session::domain::tools::MemberTools;
-use crate::capabilities::llm::api::{BoxedChat, Msg};
+use crate::capabilities::llm::api::{BoxedChat, Msg, TokenUsage};
 
 /// 目的：把"保留前 keep 行"对齐到**回复边界**：keep 落在某次回复内部时，退到该回复的第一行之前。
 ///   为什么必须对齐：一次回复的消息是「一条助手消息 + N 条结果」，截在中间会留下孤儿结果
@@ -68,6 +69,9 @@ pub struct AgentSession {
     pub(crate) context_window: u64,
     /// 目的：最近一次模型调用的用量；None = 还没调用过。
     pub(crate) last_usage: Option<crate::capabilities::conversation::session::api::ContextUsage>,
+    /// 目的：本会话**这次生成里**精确报回的用量增量（核心线程交回会话时并进 meta 的累计）。
+    /// 约束：只由 `note_usage` 累加、由 `take_usage_delta` 取走清零；它不参与上下文判定。
+    usage_delta: UsageTotals,
     /// 目的：压缩点（第一行保留行的 id）；0 = 没压过。
     /// 约束：此前的内容已被摘要取代，对话里补不回来。
     pub(crate) compacted_upto: u64,
@@ -198,6 +202,7 @@ impl AgentSession {
             compact_keep_percent: 0,
             context_window: 0,
             last_usage: None,
+            usage_delta: UsageTotals::default(),
             compacted_upto: 0,
             compacted_line: 0,
             compact_factory: None,
@@ -247,6 +252,7 @@ impl AgentSession {
             compact_keep_percent: 0,
             context_window: 0,
             last_usage: None,
+            usage_delta: UsageTotals::default(),
             compacted_upto,
             compacted_line,
             compact_factory: None,
@@ -459,6 +465,22 @@ impl AgentSession {
             u.window = self.context_window;
         }
         self.last_usage = usage;
+    }
+
+    /// 目的：记一次**供应商精确报回**的调用用量（回合内每轮、压缩调用都算），供累计写进 meta。
+    /// 约束：估算的用量不要走这里——账面只记真实花费。
+    pub(crate) fn note_usage(&mut self, usage: TokenUsage) {
+        self.usage_delta.calls += 1;
+        self.usage_delta.prompt += usage.prompt_tokens;
+        self.usage_delta.completion += usage.completion_tokens;
+        self.usage_delta.cache_read += usage.cache_read.unwrap_or(0);
+        self.usage_delta.cache_creation += usage.cache_creation.unwrap_or(0);
+    }
+
+    /// 目的：取走本次生成累计的用量增量并清零（核心线程在会话交回 / 落盘时并进 meta）。
+    /// 返回：还没记过任何调用时是全零（`UsageTotals::is_empty`）。
+    pub(crate) fn take_usage_delta(&mut self) -> UsageTotals {
+        std::mem::take(&mut self.usage_delta)
     }
 
     /// 目的：发送视图的字符数（拿不到供应商 usage 时的压缩兜底）。

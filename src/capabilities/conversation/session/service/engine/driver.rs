@@ -58,6 +58,10 @@ pub fn compact_turn(
         None => &mut s.chat,
     };
     let done = chat.complete(&msgs, opts, &mut keep);
+    // 压缩调用也是真实花费：并进会话的累计（下一轮据此不再重复触发压缩的那份估算不在此列）。
+    if let Some(u) = done.usage {
+        s.note_usage(u);
+    }
     if let Some(err) = done.error {
         return Err(err);
     }
@@ -324,6 +328,14 @@ fn run_rounds(
     };
     let rounds = run(s, spec, io, cancel, emit, &mut on_round, sink);
     s.next_line = next_line.get();
+
+    // 这一回合每一轮（工具轮、被截断的轮、失败轮都算只记它实际报回的）的精确用量并进累计：
+    // 回合可能调用多次模型，`last_usage` 只留最后一次，账面必须逐轮加。
+    for r in &rounds {
+        if let Some(u) = r.usage {
+            s.note_usage(u);
+        }
+    }
 
     // 只补记账（不构造行、不外送）：顺序与出账时序一致。
     for (round, views) in rounds.iter().zip(per_round.into_inner()) {

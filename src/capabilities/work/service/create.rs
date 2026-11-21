@@ -260,6 +260,7 @@ impl Work {
         let name = spec.name.clone();
         let agent_names: Vec<String> = metas.iter().map(|m| m.name.clone()).collect();
         let meta = SessionMeta {
+            usage_totals: Default::default(),
             context_freshness: false,
             name: name.clone(),
             mode: spec.mode,
@@ -718,6 +719,7 @@ impl Work {
         // 先解析核心通道：没有模型就不建（工作区都还没有，失败什么都不留）。
         registry.core_channel()?;
         let meta = SessionMeta {
+            usage_totals: Default::default(),
             context_freshness: false,
             name: name.to_string(),
             mode: WorkMode::Proxy,

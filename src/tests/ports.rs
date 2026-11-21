@@ -51,6 +51,7 @@ fn provider() -> Provider {
 
 fn meta(name: &str) -> SessionMeta {
     SessionMeta {
+        usage_totals: Default::default(),
         context_freshness: false,
         name: name.to_string(),
         mode: Mode::Single,
