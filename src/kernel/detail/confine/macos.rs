@@ -6,6 +6,7 @@
 
 use super::{Capability, FENCE_FAILED, FenceVerdict, shell_command};
 use crate::kernel::contracts::fence::FenceSpec;
+use crate::kernel::detail::launch::interpreter_dirs;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::path::Path;
@@ -191,7 +192,7 @@ fn install_profile(spec: &FenceSpec, command: &str) -> Result<(), String> {
     );
     // 排障开关：把解释器解析结果与完整 profile 打出来（探针打开它；正常运行不打，免得污染工具回执）。
     if std::env::var("SOLOMNI_FENCE_PROFILE").is_ok() {
-        let dirs: Vec<String> = super::interpreter_dirs(command)
+        let dirs: Vec<String> = interpreter_dirs(command)
             .iter()
             .map(|d| d.display().to_string())
             .collect();
@@ -234,7 +235,7 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
             ro_paths.push(p.to_string());
         }
     }
-    for dir in super::interpreter_dirs(command) {
+    for dir in interpreter_dirs(command) {
         ro_paths.push(dir.to_string_lossy().replace('\\', "/"));
     }
     // 用户显式授权的主机只读根（`sandbox.policy.host_read_roots`）：只放 `file-read*`，不碰 `file-write*`。

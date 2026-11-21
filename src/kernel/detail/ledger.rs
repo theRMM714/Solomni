@@ -8,6 +8,8 @@ mod admin;
 mod windows;
 
 /// 目的：ACL 的那批符号——台账的 Windows 实现要按它读现值、撤权、还原快照。
+/// 约束：本机权限项只在 Windows 上存在，其它平台没有可转出的 ACL 符号（转出即空导入）。
+#[cfg(windows)]
 pub(crate) use crate::kernel::detail::acl::*;
 /// 目的：Windows 台账实现（盘上格式、日志、对账、回收）——只在 Windows 上存在；`confine` 的机器级预授按它读写。
 #[cfg(windows)]
