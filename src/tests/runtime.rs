@@ -985,6 +985,7 @@ pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
     let mut core = native_core(
         NativeGateway {
             scripts: Mutex::new(vec![scripts()]),
+            seen: Default::default(),
         },
         Arc::clone(&hist),
         Arc::clone(&io),
@@ -1025,6 +1026,7 @@ pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
     let mut core2 = native_core(
         NativeGateway {
             scripts: Mutex::new(Vec::new()),
+            seen: Default::default(),
         },
         Arc::clone(&hist),
         Arc::clone(&io),
@@ -1081,6 +1083,7 @@ pub(crate) fn read_facts_rebuild_identically_to_live() {
                 }]),
                 NativeStep::Text("{\"type\":\"say\",\"text\":\"读了\"}".to_string()),
             ]]),
+            seen: Default::default(),
         },
         Arc::clone(&hist),
         Arc::clone(&io),
@@ -1125,6 +1128,125 @@ pub(crate) fn read_facts_rebuild_identically_to_live() {
         .expect("重建");
     let rebuilt = core.single_reads(&sid).expect("重建后的单 agent 会话");
     assert_eq!(rebuilt, live, "回放的读事实必须与实时逐条一致");
+}
+
+/// 目的：读过的文件在别处被改后，**下一次发给模型的消息**里那条工具结果要换成过期占位符。
+/// 约束：只换发送视图，转录本身逐字不动（回档 / 折叠 / 面板都按原样读）；判据门槛为保底 0%、省下的字符过 FRESHNESS_MIN_SAVED_CHARS。
+///   这里的"改过"用沙箱副本对不上来构造（内存版本库里没存这份内容）；按内容比对的过期判定本身由 work_stale_reads 的用例钉住。
+#[test]
+pub(crate) fn stale_read_turns_into_a_placeholder_in_the_next_send_view() {
+    use crate::capabilities::llm::api::ToolCall;
+    let hist = Arc::new(InMemoryHistory::new());
+    let io = Arc::new(InMemorySysIo::new());
+    // 400 行 ≈ 12K 字符：整份一次读完（< MAX_READ_CHARS），换掉后省下的字符远超 8000。
+    let mut big = String::new();
+    for i in 1..=400 {
+        big.push_str(&format!(
+            "第{:03}行 这是一段用于撑大上下文以便触发展开替换的正文。\n",
+            i
+        ));
+    }
+    io.seed(&["w", "a", "big.txt"], &big);
+    let path = s(&["w", "a", "big.txt"]);
+    let seen: SeenLog = Default::default();
+    let mut core = native_core(
+        NativeGateway {
+            // 栈式发放：只给第一回合的脚本（先 read 再发言），第二回合自然落到「脚本用完了」。
+            scripts: Mutex::new(vec![vec![
+                NativeStep::Calls(vec![ToolCall {
+                    id: "c1".to_string(),
+                    name: "read".to_string(),
+                    args_json: format!("{{\"path\":\"{}\"}}", path),
+                }]),
+                NativeStep::Text("{\"type\":\"say\",\"text\":\"读完了\"}".to_string()),
+            ]]),
+            seen: Arc::clone(&seen),
+        },
+        Arc::clone(&hist),
+        Arc::clone(&io),
+    );
+    core.registry_mut().probe_model_tools("m").expect("探测");
+    let mut spec = work("w", WorkMode::Single, &["a"]);
+    spec.freshness = Some((true, 0));
+    let sid = core.create_work(spec).unwrap().sid;
+
+    with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "读 big.txt",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
+    assert_eq!(core.single_reads(&sid).expect("单 agent 会话").len(), 1);
+
+    // 读过之后文件在别处被改：沙箱存档里对不上这份内容（判过期），下一次发送视图必须带占位符。
+    with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "继续",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
+
+    let sent = seen
+        .lock()
+        .expect("锁")
+        .last()
+        .cloned()
+        .expect("第二回合要发请求");
+    let placeholder = sent
+        .iter()
+        .find(|m| m.content.starts_with("[已过期：") && m.content.contains("big.txt"));
+    let note = placeholder.unwrap_or_else(|| {
+        panic!(
+            "发给模型的消息里没有过期占位符：{:?}",
+            sent.iter()
+                .map(|m| m.content.chars().take(60).collect::<String>())
+                .collect::<Vec<_>>()
+        )
+    });
+    assert!(
+        note.content.contains("第1-400行"),
+        "占位符要带行窗口：{}",
+        note.content
+    );
+
+    // 转录不动：原文还在，只是发送视图换掉。
+    let history = core.single_history(&sid).expect("单 agent 历史");
+    assert!(
+        history.iter().any(|m| m.content.contains("第001行")),
+        "转录必须保留原文（占位符只换发送视图）"
+    );
+
+    let view = core
+        .work
+        .session_view(
+            &core.turn,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+            &sid,
+        )
+        .expect("会话视图");
+    let stats = view.freshness_stats.expect("这一轮要留下替换统计");
+    assert_eq!(stats.judged, 1, "判出 1 条过期读");
+    assert_eq!(stats.replaced, 1, "换掉 1 条");
+    assert!(!stats.skipped, "省下的量够付缓存失效");
+    assert_eq!(stats.keep_percent, 0, "保底 0%");
+    assert!(
+        stats.saved_tokens > 2_000,
+        "省下的 tokens：{}",
+        stats.saved_tokens
+    );
 }
 
 /// 目的：一个模型都没登记时**不能建会话**——不能再用内置假模型把流程跑起来。

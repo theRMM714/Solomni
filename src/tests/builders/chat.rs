@@ -374,9 +374,11 @@ pub(crate) fn native_member(
     }
 }
 
-/// 目的：原生形态的网关：每次要通道就弹出一份脚本（第一份给实时会话，第二份给重建）。
+/// 目的：原生形态的网关：每次要通道就弹出一份脚本（第一份给实时会话，第二份给重建），并把每次请求看到的消息记进 `seen`。
+/// 约束：`seen` 由调用方持有并读；同一个网关弹出的所有通道共这一本账。
 pub(crate) struct NativeGateway {
     pub(crate) scripts: Mutex<Vec<Vec<NativeStep>>>,
+    pub(crate) seen: SeenLog,
 }
 
 impl ChatGateway for NativeGateway {
@@ -408,7 +410,7 @@ impl ChatGateway for NativeGateway {
         Box::new(NativeChat {
             steps,
             declared: Arc::new(Mutex::new(Vec::new())),
-            seen: Arc::new(Mutex::new(Vec::new())),
+            seen: Arc::clone(&self.seen),
         })
     }
     fn core_channel(&self, _c: &Channel) -> BoxedChat {
