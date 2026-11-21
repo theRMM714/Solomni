@@ -18,6 +18,7 @@ pub(crate) fn child_edit_writes_back_to_the_agent_roster() {
         Default::default(),
     );
     let child = SessionMeta {
+        usage_totals: Default::default(),
         context_freshness: false,
         name: "w--a".to_string(),
         mode: Mode::Single,
@@ -83,6 +84,7 @@ pub(crate) fn tree_wide_module_overlap_is_allowed_on_child_edit() {
         Default::default(),
     );
     let child = SessionMeta {
+        usage_totals: Default::default(),
         context_freshness: false,
         name: "w--a".to_string(),
         mode: Mode::Single,
@@ -515,6 +517,7 @@ pub(crate) fn guest_lease_follows_the_tier_and_the_proxy_root() {
     use crate::kernel::api::types::ExecSpec;
     use crate::kernel::api::types::Tier;
     let meta = |name: &str, parent: Option<&str>, tier: Tier, mode: Mode| SessionMeta {
+        usage_totals: Default::default(),
         context_freshness: false,
         name: name.to_string(),
         mode,

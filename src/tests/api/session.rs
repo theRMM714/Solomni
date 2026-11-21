@@ -125,6 +125,11 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
     assert_eq!(ctx.prompt_tokens, 900);
     assert!(ctx.exact, "供应商回的 usage 要标成精确");
     assert!(ctx.window > 0, "窗口来自登记处（缺省 128K）");
+    let totals = view.usage_totals;
+    assert_eq!(totals.calls, 1, "累计花费要记住调用次数");
+    assert_eq!(totals.prompt, 900, "累计要记住输入总量");
+    assert_eq!(totals.completion, 120, "累计要记住输出总量");
+    assert_eq!(totals.cache_read, 0, "这份 usage 没报缓存读");
 
     // 落盘：刷新/重建读的是同一条 usage 事件，不靠内存里那份。
     let (_, events) = faces.history.open(&sid).expect("读流水");
@@ -138,6 +143,28 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
     let last =
         crate::capabilities::conversation::session::api::last_usage(&events).expect("读回用量");
     assert_eq!(last.total_tokens, 1020);
+
+    // 跨回合累加：第二轮的用量叠在 meta 的同一本账上，不覆盖也不清零。
+    faces
+        .turn
+        .say(
+            &sid,
+            "再做一件",
+            crate::capabilities::runtime::api::Output::Final,
+        )
+        .expect("第二轮");
+    let views = faces
+        .work
+        .session_views(&faces.history.list().expect("列表"))
+        .expect("视图");
+    let totals = views
+        .iter()
+        .find(|v| v.sid == sid)
+        .expect("会话在视图里")
+        .usage_totals;
+    assert_eq!(totals.calls, 2, "第二轮也要累计调用次数");
+    assert_eq!(totals.prompt, 1800, "输入按轮相加");
+    assert_eq!(totals.completion, 240, "输出按轮相加");
 }
 
 #[test]

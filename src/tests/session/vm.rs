@@ -62,6 +62,7 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
         vm_spec(),
     );
     let child = SessionMeta {
+        usage_totals: Default::default(),
         context_freshness: false,
         name: "w--a".to_string(),
         mode: Mode::Single,
@@ -132,6 +133,7 @@ pub(crate) fn proxy_children_share_the_proxy_tree_guest() {
     let hist = Arc::new(InMemoryHistory::new());
     seed_session(&hist, "p", Mode::Proxy, Vec::new(), vm_spec());
     let child = SessionMeta {
+        usage_totals: Default::default(),
         context_freshness: false,
         name: "p--a".to_string(),
         mode: Mode::Single,

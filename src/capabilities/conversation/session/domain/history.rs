@@ -60,11 +60,49 @@ pub struct SessionMeta {
     ///   缺省 false = 只记读事实、发送视图原样（不付判定的成本）。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub context_freshness: bool,
+    /// 目的：这条会话**累计**的模型花费（跨回合、跨压缩；回档不动它——花出去的钱退不回来）。
+    /// 约束：只累计供应商**精确**报回的调用（字符估算不进）；由核心线程在会话交回时累加。
+    #[serde(default, skip_serializing_if = "UsageTotals::is_empty")]
+    pub usage_totals: UsageTotals,
     /// 目的：运行态：停止后不再被派发或唤醒；关闭是终态。缺省（active）= 正常运行。
     ///   它与"这一刻在不在跑"（推的 `Working`，短暂不落盘）是两件事：**它是持久事实**，
     ///   重启/回档后照样成立（见 docs/session/session-model.md 二）。
     #[serde(default, skip_serializing_if = "RunState::is_active")]
     pub run: RunState,
+}
+
+/// 目的：一条会话**累计**的模型花费（面板读它显示累计输入 / 输出与缓存命中）。
+/// 约束：它是账面事实——不随回档、折叠、压缩变化，只累加供应商精确报回的调用；
+///   单位是 token；Anthropic 形状的缓存读/写已在 llm 层并进 `prompt`，这里分开记只为算出命中率。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsageTotals {
+    /// 目的：累计的模型调用次数（含压缩调用）。
+    pub calls: u64,
+    /// 目的：累计输入 token（含命中缓存与写入缓存的部分）。
+    pub prompt: u64,
+    /// 目的：累计输出 token。
+    pub completion: u64,
+    /// 目的：累计**命中**前缀缓存的输入 token。
+    pub cache_read: u64,
+    /// 目的：累计**写进**前缀缓存的输入 token。
+    pub cache_creation: u64,
+}
+
+impl UsageTotals {
+    /// 目的：serde 的 `skip_serializing_if` 用：全零（还没调用过）时不写进 meta.yaml。
+    pub fn is_empty(&self) -> bool {
+        *self == UsageTotals::default()
+    }
+
+    /// 目的：把一次调用的用量并进来（增量由会话在交回核心线程时给出）。
+    pub fn add(&mut self, other: UsageTotals) {
+        self.calls += other.calls;
+        self.prompt += other.prompt;
+        self.completion += other.completion;
+        self.cache_read += other.cache_read;
+        self.cache_creation += other.cache_creation;
+    }
 }
 
 /// 目的：根会话绑定到产品目录之外的共享区主副本时记录的工作区根（绝对路径）。

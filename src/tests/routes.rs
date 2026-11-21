@@ -258,6 +258,7 @@ fn report() -> RuntimeReport {
 
 fn meta(name: &str) -> SessionMeta {
     SessionMeta {
+        usage_totals: Default::default(),
         context_freshness: false,
         name: name.to_string(),
         mode: Mode::Single,
@@ -462,6 +463,7 @@ impl WorkOps for FakeFaces {
         Ok(history
             .iter()
             .map(|h| SessionView {
+                usage_totals: Default::default(),
                 sid: h.name.clone(),
                 mode: h.mode,
                 done: h.done,
@@ -574,6 +576,7 @@ impl RuntimeOps for FakeFaces {
     fn activate(&self, _sid: &str) -> Result<SessionView, String> {
         self.guard()?;
         Ok(SessionView {
+            usage_totals: Default::default(),
             sid: "w1".to_string(),
             mode: Mode::Single,
             done: false,

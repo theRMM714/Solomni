@@ -803,3 +803,64 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
     );
     assert_eq!(back.compacted_upto, 0, "压缩点该一起回退掉");
 }
+
+#[test]
+fn the_compaction_call_is_counted_in_cumulative_usage() {
+    use crate::capabilities::llm::api::TokenUsage;
+    let mut member = std::collections::BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "第一件事".to_string(),
+            "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"摘要一\"}}"
+                .to_string(),
+        ],
+    );
+    let gateway = super::super::doubles::ScriptGateway::new(member, vec![])
+        .with_usage(TokenUsage::new(900, 120, Some(1020)));
+    let handle = crate::capabilities::runtime::api::Handle::spawn(
+        super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
+    )
+    .expect("起核心线程");
+    let faces = Faces::from_handle(&handle);
+    let mut st = faces.registry.settings().expect("读设置");
+    st.compact_keep_percent = 0;
+    st.sandbox.policy.windows.write_acl = true;
+    faces.registry.set_settings(st).expect("写设置");
+    let sid = faces
+        .work
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    faces
+        .turn
+        .say(
+            &sid,
+            "先做第一件事",
+            crate::capabilities::runtime::api::Output::Final,
+        )
+        .expect("说一句");
+    let totals = faces
+        .work
+        .session_views(&faces.history.list().expect("列表"))
+        .expect("视图")
+        .into_iter()
+        .find(|v| v.sid == sid)
+        .expect("会话在视图里")
+        .usage_totals;
+    assert_eq!(totals.calls, 1, "第一轮记一次");
+
+    faces.turn.compact(&sid).expect("手动压缩");
+    let totals = faces
+        .work
+        .session_views(&faces.history.list().expect("列表"))
+        .expect("视图")
+        .into_iter()
+        .find(|v| v.sid == sid)
+        .expect("会话在视图里")
+        .usage_totals;
+    assert_eq!(totals.calls, 2, "压缩调用也是真实花费，要计入累计");
+    assert_eq!(totals.prompt, 1800, "压缩调用的输入也要累加");
+    assert_eq!(totals.completion, 240, "压缩调用的输出也要累加");
+}

@@ -165,6 +165,12 @@ impl Work {
                         .unwrap_or(false),
                     Err(_) => false,
                 };
+                // 累计用量是**这条会话自己**的账面（子会话各记各的，不汇总到工作根）：与"当前上下文用量"分开。
+                let usage_totals = self
+                    .history
+                    .meta(&sid)
+                    .map(|m| m.usage_totals)
+                    .unwrap_or_default();
                 let thinking = match work_root(self.history.as_ref(), &sid) {
                     Ok(root) => thinking_cache
                         .entry(root.clone())
@@ -197,6 +203,7 @@ impl Work {
                     pending,
                     continue_action,
                     context,
+                    usage_totals,
                     shell,
                     workspace: entry.and_then(|h| h.workspace.clone()),
                     workspace_missing: entry.map(|h| h.workspace_missing).unwrap_or(false),

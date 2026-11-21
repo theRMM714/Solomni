@@ -339,6 +339,7 @@ pub(crate) fn deleting_a_session_releases_its_fence_lease() {
 #[test]
 pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
     let meta = SessionMeta {
+        usage_totals: Default::default(),
         context_freshness: false,
         name: "w".to_string(),
         mode: Mode::Single,
@@ -371,6 +372,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
     assert_eq!(back.run, RunState::Active, "缺省运行态 = 正常运行");
     // 运行态是**持久事实**：停止 / 关闭写进 meta 后重启照样成立。
     let stopped = SessionMeta {
+        usage_totals: Default::default(),
         context_freshness: false,
         thinking: None,
         run: RunState::Stopped,
