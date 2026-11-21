@@ -26,6 +26,7 @@
 - **token 用量是通道事实**：`Completion.usage` 带供应商回的 prompt / completion / total（拿不到 = None），`Chat::last_usage()` 让调用方在一次工具循环结束后读最近一次用量。
 - 流式请求带 `stream_options: {include_usage: true}`；供应商 400/422 明确拒绝该参数时，`HttpChat` 去掉参数**只重试一次**（此时还没收到内容，不会重复正文），用量退回「拿不到」。
 - 非流式直接读响应体 `usage`。
+- **两种供应商形状归一**：Anthropic 的 `input_tokens` 只是"没命中缓存的输入"，归一后 prompt = input + cache_read + cache_creation、total = prompt + completion；OpenAI 形状 `prompt_tokens` 已含命中缓存的部分。流式分块只报一部分字段时 `TokenUsage::widen` 按字段取大合并，不拿半份覆盖整份。
 
 ## 二、思考强度片段
 

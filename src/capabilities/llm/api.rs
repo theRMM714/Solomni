@@ -266,6 +266,29 @@ impl TokenUsage {
             cache_creation: None,
         }
     }
+
+    /// 目的：把同一次调用分块上报的两份 usage 并成一份：每个字段取已知的最大值。
+    /// 约束：只在**一次调用内**用（流式分块可能只报输入、也可能只报输出）；字段块里没报就不该抹掉已知值。
+    pub fn widen(self, other: TokenUsage) -> TokenUsage {
+        let wider = |a: Option<u64>, b: Option<u64>| match (a, b) {
+            (Some(x), Some(y)) => Some(x.max(y)),
+            (x, y) => x.or(y),
+        };
+        let prompt_tokens = self.prompt_tokens.max(other.prompt_tokens);
+        let completion_tokens = self.completion_tokens.max(other.completion_tokens);
+        // total 可能是"只有输入的那块"报的（= prompt），并完两半后要按合并结果抬到至少 prompt+completion。
+        let total_tokens = self
+            .total_tokens
+            .max(other.total_tokens)
+            .max(prompt_tokens + completion_tokens);
+        TokenUsage {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            cache_read: wider(self.cache_read, other.cache_read),
+            cache_creation: wider(self.cache_creation, other.cache_creation),
+        }
+    }
 }
 
 /// 目的：一次补全的结果：正文 + 供应商给的**结束原因**（原样带回，不翻译）。
