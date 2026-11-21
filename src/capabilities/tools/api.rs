@@ -3,7 +3,9 @@
 //! 不管：实现与机制（在 `service/` / `detail/`）；端口定义（在 `ports.rs`）。
 //! 联动：实现见 `service.rs`；`runtime` 等消费方只持 `Arc<dyn Tools>` / `Arc<dyn ToolExec>`。
 
-pub use crate::capabilities::tools::domain::budget::{cap_result, continuation_for};
+pub use crate::capabilities::tools::domain::budget::{
+    ResultBudget, cap_result_with, continuation_for,
+};
 pub use crate::capabilities::tools::domain::commands::{Command, CommandBook, Phase};
 pub use crate::capabilities::tools::domain::patch::{EditFault, Fault};
 pub use crate::capabilities::tools::domain::roles::{RoleTable, SystemTools, action_audit};
@@ -341,21 +343,29 @@ pub trait ToolExec: Send + Sync {
         path: Option<&std::ffi::OsStr>,
         parallel: bool,
         ask: Option<&dyn crate::kernel::ports::AskUser>,
+        budget: ResultBudget,
     ) -> ToolOutcome;
 
     /// 执行一次**一次性 shell**：平台 shell、按次超时、取消与 head+tail 截断都在 kernel 的 `ProcessRunner` 后面；
     /// 跑完（若这次用的是按次临时 profile）由本能力释放围栏授权。
-    fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome;
+    fn run_shell(
+        &self,
+        run: &crate::kernel::ports::ShellRun<'_>,
+        budget: ResultBudget,
+    ) -> ToolOutcome;
 
     /// 执行一次**内置工具**：放行、寻址、参数校验在本能力的 domain，机制在 `SysIo` 后面。
-    /// 参数：`observations` = 会话的观察账本（按值传入）；`gate` = 写入门禁（`None` = 直调兜底，只给旧测试用）。
+    /// 参数：`observations` = 会话的观察账本（按值传入）；`gate` = 写入门禁（`None` = 直调兜底，只给旧测试用）；
+    ///   `budget` = 本批回执预算，read 在**执行前**按它选行，整批不会超剩余上下文。
     /// 返回：结论与更新后的账本（见 `Recorded`）。
+    #[allow(clippy::too_many_arguments)]
     fn run_builtin(
         &self,
         sb: &crate::capabilities::workspace::api::Sandbox,
         builtin_tools: &ToolBook,
         observations: Observations,
         gate: Option<&dyn WriteGate>,
+        budget: ResultBudget,
         name: &str,
         args_json: &str,
     ) -> Recorded;

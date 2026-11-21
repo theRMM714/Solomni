@@ -562,6 +562,7 @@ fn run(
     let mut acc = String::new();
     // 发给模型的对话视图：开着过期清理时，过期读取已换成占位符（见 send_view）。
     let view = send_view(s);
+    let window = s.context_window();
     let rounds = {
         let AgentSession { chat, tools, .. } = s;
         converse_with(
@@ -570,6 +571,7 @@ fn run(
             spec.identity,
             view,
             llm,
+            window,
             &label,
             cancel,
             &mut |chunk| {

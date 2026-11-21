@@ -5,6 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
+use crate::capabilities::conversation::session::api::run_batch;
 #[test]
 pub(crate) fn tool_loop_rejects_undeclared_tool() {
     let runner = Arc::new(RecordingRunner {
@@ -318,6 +319,7 @@ pub(crate) fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did()
             &test_systools().tools,
             std::mem::take(obs),
             None,
+            crate::capabilities::tools::api::ResultBudget::full(),
             "edit",
             &full,
         );
@@ -423,6 +425,7 @@ pub(crate) fn builtin_edit_refuses_files_it_cannot_see_whole() {
             &test_systools().tools,
             std::mem::take(&mut obs),
             None,
+            crate::capabilities::tools::api::ResultBudget::full(),
             "edit",
             &args,
         );
@@ -454,6 +457,7 @@ pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
                 &test_systools().tools,
                 std::mem::take(obs),
                 None,
+                crate::capabilities::tools::api::ResultBudget::full(),
                 tool,
                 &args,
             );
@@ -541,6 +545,92 @@ pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
         io.get(&["demo", "a1", "note.txt"]).as_deref(),
         Some("别人改过的内容"),
         "拒不覆盖"
+    );
+}
+
+/// 目的：剩余上下文连最小回执都放不下时，run_batch 必须在执行前整批失败——shell 绝不产生副作用。
+#[test]
+pub(crate) fn exhausted_budget_skips_the_whole_batch() {
+    let runner = Arc::new(RecordingRunner {
+        calls: Mutex::new(Vec::new()),
+        out: "不该跑".into(),
+        ok: true,
+    });
+    let mut wt = member_with_tools("m0", Vec::new(), Arc::clone(&runner));
+    let mut tools = wt.tools.take().expect("工具面");
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let plan = vec![
+        (
+            Some("m0".to_string()),
+            "grep".to_string(),
+            "{\"pattern\":\"x\"}".to_string(),
+        ),
+        (None, "read".to_string(), "{\"path\":\"a\"}".to_string()),
+    ];
+    let budget = crate::capabilities::tools::api::ResultBudget::for_batch(20_000, 19_800, 2);
+    assert!(budget.exhausted(), "构造前提：预算已枯竭");
+    let mut events = 0;
+    let done = run_batch(&mut tools, &plan, None, None, &cancel, budget, &mut |_| {
+        events += 1
+    });
+    assert_eq!(done.len(), 2, "每个调用都要有回执");
+    for (_, outcome, _, _, _) in &done {
+        assert!(!outcome.ok);
+        assert!(
+            outcome.output.contains("上下文剩余不足") && outcome.output.contains("没有执行"),
+            "{}",
+            outcome.output
+        );
+    }
+    assert!(
+        runner.calls.lock().expect("锁").is_empty(),
+        "预检失败不得落进程"
+    );
+    assert_eq!(events, 0, "预检失败不该发执行事件");
+}
+
+/// 目的：read 的可见内容与观察事实必须同受一批预算约束；被预算切掉的行绝不能记成读过。
+#[test]
+pub(crate) fn read_respects_the_batch_budget_and_records_only_what_it_shows() {
+    let io = Arc::new(InMemorySysIo::new());
+    let sb = test_sandbox("a1", &[]);
+    let path = s(&["demo", "a1", "long.txt"]);
+    let long = "a".repeat(2_500);
+    io.seed(
+        &["demo", "a1", "long.txt"],
+        &format!("{}\nsecond\nthird\n", long),
+    );
+    let exec = test_tools_svc_with(
+        Arc::new(SilentRunner),
+        Arc::clone(&io),
+        Arc::new(NoFenceHost),
+    );
+    let budget = crate::capabilities::tools::api::ResultBudget::for_batch(20_000, 17_500, 1);
+    assert_eq!(budget.limit(), 1_000, "构造前提：这一批只给 1000 字符");
+    assert!(!budget.exhausted(), "构造前提：还没枯竭，read 应当执行");
+    let done = exec.run_builtin(
+        &sb,
+        &test_systools().tools,
+        crate::capabilities::tools::api::Observations::default(),
+        None,
+        budget,
+        "read",
+        &format!("{{\"path\":\"{}\"}}", path),
+    );
+    assert!(done.outcome.ok, "{}", done.outcome.output);
+    assert!(
+        done.outcome.output.chars().count() <= budget.limit(),
+        "read 自己就得收进预算，不能留给 round 二次截断：{} 字符",
+        done.outcome.output.chars().count()
+    );
+    assert!(
+        done.outcome.output.contains("本行超过本次预算"),
+        "第一行超预算要如实标记：{}",
+        done.outcome.output
+    );
+    assert!(
+        done.observations.facts().is_empty(),
+        "显示被截断的读取不得留下观察事实"
     );
 }
 

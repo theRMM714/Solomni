@@ -11,7 +11,7 @@ use crate::capabilities::conversation::session::api::{
 use crate::capabilities::conversation::session::domain::tools::MemberTools;
 use crate::capabilities::llm::api::{self as envelope, Verb};
 use crate::capabilities::llm::api::{Chat, Chunk, CompleteOpts, Msg};
-use crate::capabilities::tools::api::{cap_result, continuation_for};
+use crate::capabilities::tools::api::{ResultBudget, cap_result_with, continuation_for};
 use crate::kernel::api::types::ToolOutcome;
 
 /// 目的：一次工具调用的产出：调用视图 + 它压进历史的消息。
@@ -158,6 +158,8 @@ pub fn converse_with(
     identity: &str,
     dialogue: Vec<Msg>,
     llm: crate::capabilities::llm::api::LlmOpts,
+    // 本会话的上下文窗口（token）：工具批按它算这一批回执能占多少剩余空间。
+    window: u64,
     speaker: &str,
     cancel: &std::sync::atomic::AtomicBool,
     on: &mut dyn FnMut(Chunk) -> bool,
@@ -506,10 +508,19 @@ pub fn converse_with(
                 // 调度：**连续**声明可并发的调用合成一批并发跑，其余各自独占（写入类因此是批次之间的屏障）。
                 // 结果按原始下标返回，随后一律按原序回填——并发只影响执行，不影响上下文里的顺序。
                 note_unauthorized(ctx, &plan, sink);
+                let budget = if user_stopped {
+                    ResultBudget::full()
+                } else {
+                    ResultBudget::for_batch(
+                        window,
+                        usage.map(|u| u.total_tokens).unwrap_or(0),
+                        plan.len(),
+                    )
+                };
                 let done = if user_stopped {
                     refused_batch(&plan)
                 } else {
-                    run_batch(ctx, &plan, confirms.as_mut(), ask, cancel, sink)
+                    run_batch(ctx, &plan, confirms.as_mut(), ask, cancel, budget, sink)
                 };
                 // 先按原序把工具行建好（执行已经做完），再让**唯一那处**构造函数产出这一回复的消息：
                 // 被中断的那一轮正文已作为 cut 行留档，这里只留「未执行」工具行、正文置空、不进对话。
@@ -523,8 +534,8 @@ pub fn converse_with(
                     .enumerate()
                     .map(|(i, c)| {
                         let (label, mut outcome, read, observations, mut shell) = done[i].clone();
-                        // 模型可见的最末一处：虚拟机档回执与核心自有工具不经过本机执行端口，预算在这里补齐。
-                        cap_result(&mut outcome, continuation_for(&label, &plan[i].1));
+                        // 模型可见的最末一处：与执行侧共用同一批预算（执行侧已收过的原样放回）。
+                        cap_result_with(&mut outcome, continuation_for(&label, &plan[i].1), budget);
                         if let Some(facts) = shell.as_mut() {
                             facts.truncated =
                                 crate::capabilities::tools::api::truncated(&outcome.notes);
@@ -718,10 +729,19 @@ pub fn converse_with(
                     .collect();
                 // 内置工具（read/write/edit/search）优先且不属于任何模块；外部工具按模块定 cwd。
                 note_unauthorized(ctx, &plan, sink);
+                let budget = if user_stopped {
+                    ResultBudget::full()
+                } else {
+                    ResultBudget::for_batch(
+                        window,
+                        usage.map(|u| u.total_tokens).unwrap_or(0),
+                        plan.len(),
+                    )
+                };
                 let done = if user_stopped {
                     refused_batch(&plan)
                 } else {
-                    run_batch(ctx, &plan, confirms.as_mut(), ask, cancel, sink)
+                    run_batch(ctx, &plan, confirms.as_mut(), ask, cancel, budget, sink)
                 };
                 // 修过信封就如实标注在回执最前面（模型与用户都能看到核心没有瞎猜）
                 let annotate = |outcome: ToolOutcome| -> ToolOutcome {
@@ -747,8 +767,8 @@ pub fn converse_with(
                     .map(|(i, (_module, tool, _args))| {
                         let (label, outcome, read, observations, mut shell) = done[i].clone();
                         let mut outcome = annotate(outcome);
-                        // 与原生通道同一处预算：信封通道的回执也要收进 16k（read / 模块工具的续读提示各按能力给）。
-                        cap_result(&mut outcome, continuation_for(&label, tool));
+                        // 与原生通道同一处预算：信封通道的回执也收进同一批剩余空间（read / 模块工具的续读提示各按能力给）。
+                        cap_result_with(&mut outcome, continuation_for(&label, tool), budget);
                         if let Some(facts) = shell.as_mut() {
                             facts.truncated =
                                 crate::capabilities::tools::api::truncated(&outcome.notes);

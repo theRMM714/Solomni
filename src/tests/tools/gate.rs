@@ -162,6 +162,7 @@ fn run(
         &test_systools().tools,
         std::mem::take(obs),
         Some(gate),
+        crate::capabilities::tools::api::ResultBudget::full(),
         tool,
         &args,
     );

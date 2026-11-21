@@ -483,6 +483,7 @@ pub(crate) fn module_lease_serializes_exclusive_calls_but_allows_parallel_reader
                         None,
                         parallel,
                         None,
+                        crate::capabilities::tools::api::ResultBudget::full(),
                     );
                 });
             }

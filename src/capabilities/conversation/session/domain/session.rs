@@ -554,6 +554,11 @@ impl AgentSession {
         }
     }
 
+    /// 目的：本会话的上下文窗口（token）；0 = 未配置（工具预算不收紧）。
+    pub fn context_window(&self) -> u64 {
+        self.context_window
+    }
+
     /// 目的：最近一次调用的用量（状态栏与压缩判定读它）。
     pub fn context_usage(
         &self,

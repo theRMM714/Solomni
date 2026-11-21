@@ -77,6 +77,7 @@ pub(crate) fn run_execution<S: Seat>(
             &identity,
             vec![crate::capabilities::llm::api::Msg::user(user)],
             Default::default(),
+            0,
             &id,
             &cancel,
             &mut noop,

@@ -265,6 +265,7 @@ impl Discussion {
             identity,
             dialogue.to_vec(),
             llm,
+            0,
             speaker,
             cancel.as_ref(),
             &mut on_chunk,

@@ -91,8 +91,12 @@ fn host_outcome(out: crate::kernel::api::run::RunOutcome) -> ToolOutcome {
 }
 
 /// 所有工具回执送回模型前都过同一个预算（head+tail + 按工具给的续读提示）。
-fn within_budget(mut out: ToolOutcome, hint: Continuation) -> ToolOutcome {
-    budget::cap_result(&mut out, hint);
+fn within_budget(
+    mut out: ToolOutcome,
+    hint: Continuation,
+    budget: budget::ResultBudget,
+) -> ToolOutcome {
+    budget::cap_result_with(&mut out, hint, budget);
     out
 }
 
@@ -107,6 +111,7 @@ impl ToolExec for ToolsService {
         path: Option<&std::ffi::OsStr>,
         parallel: bool,
         ask: Option<&dyn crate::kernel::ports::AskUser>,
+        budget: budget::ResultBudget,
     ) -> ToolOutcome {
         let lease = self.module_lease(module);
         if parallel {
@@ -122,6 +127,7 @@ impl ToolExec for ToolsService {
                     Some(self.gate.as_ref()),
                 )),
                 Continuation::Command,
+                budget,
             )
         } else {
             let _exclusive = lease.write().unwrap_or_else(|e| e.into_inner());
@@ -136,11 +142,16 @@ impl ToolExec for ToolsService {
                     Some(self.gate.as_ref()),
                 )),
                 Continuation::Command,
+                budget,
             )
         }
     }
 
-    fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome {
+    fn run_shell(
+        &self,
+        run: &crate::kernel::ports::ShellRun<'_>,
+        budget: budget::ResultBudget,
+    ) -> ToolOutcome {
         // 容器授权按会话持有（见 container_name）：调用结束不释放，会话结束/崩溃时统一回收。
         let run = crate::kernel::ports::ShellRun {
             fence: run.fence,
@@ -154,6 +165,7 @@ impl ToolExec for ToolsService {
         within_budget(
             host_outcome(self.runner.run_shell(&run)),
             Continuation::Command,
+            budget,
         )
     }
 
@@ -163,21 +175,24 @@ impl ToolExec for ToolsService {
         builtin_tools: &ToolBook,
         observations: Observations,
         gate: Option<&dyn crate::capabilities::tools::api::WriteGate>,
+        budget: budget::ResultBudget,
         name: &str,
         args_json: &str,
     ) -> Recorded {
         let mut observations = observations;
         let outcome = within_budget(
-            crate::capabilities::tools::service::systool::execute(
+            crate::capabilities::tools::service::systool::execute_with_budget(
                 sb,
                 builtin_tools,
                 self.io.as_ref(),
                 &mut observations,
                 gate,
+                budget,
                 name,
                 args_json,
             ),
             budget::continuation_for("", name),
+            budget,
         );
         Recorded {
             outcome,

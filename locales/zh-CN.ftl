@@ -17,6 +17,7 @@ fence-failed = [围栏] 工具进程没有进入围栏：命令未执行（当�
 result-truncated = [结果截断] 输出共 { $total } 字符；保留开头 { $head } 与结尾 { $tail } 字符。
 result-truncated-command = 需要更多请缩小命令的输出（只取要看的行、或用 head/tail 之类的筛选），或把输出写到文件再用 read 分段查看。
 result-truncated-read = 需要更多请用 offset/limit 分段读取。
+result-truncated-context = [上下文将满] 本次只按剩余空间保留 { $limit } 字符；继续前请先压缩会话，或分页读取。
 
 # 分级标签：CLI 把一次调用归成三态时用它们（界面用图标与颜色，不用这些词）。
 cli-ok = 成功

@@ -135,6 +135,7 @@ impl Handle {
             host_plan.path.as_deref(),
             decl.parallel,
             None,
+            crate::capabilities::tools::api::ResultBudget::full(),
         );
         // 按次收尾：撤 ACE、删按次 profile 与临时目录；失败如实记录（残留由 reconcile 按死归属回收）。
         if let Err(e) = self.tools.release_call(&fence) {

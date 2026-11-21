@@ -39,14 +39,39 @@ fn write_fail(fault: &WriteFault, spec: &str) -> crate::kernel::api::types::Tool
     out
 }
 
-/// 目的：执行一次内置工具调用（`args_json` = 模型信封里的 args 对象）。
-/// 约束：顺序是解析 JSON → 认工具 → 按声明校验参数 → 补缺省 → 寻址（内置工具一律需要一个 path）。
+/// 目的：执行一次内置工具调用（`args_json` = 模型信封里的 args 对象），使用不按上下文收紧的静态预算。
+/// 约束：只给测试直调；生产路径一律走 execute_with_budget。
+#[cfg(test)]
 pub fn execute(
     sb: &Sandbox,
     book: &crate::capabilities::tools::api::ToolBook,
     io: &dyn SysIo,
     obs: &mut Observations,
     gate: Option<&dyn crate::capabilities::tools::api::WriteGate>,
+    name: &str,
+    args_json: &str,
+) -> ToolOutcome {
+    execute_with_budget(
+        sb,
+        book,
+        io,
+        obs,
+        gate,
+        crate::capabilities::tools::api::ResultBudget::full(),
+        name,
+        args_json,
+    )
+}
+
+/// 目的：带本批预算执行内置工具——read 在**执行前**按它选行，事后再由调用方按同一预算兜底。
+#[allow(clippy::too_many_arguments)]
+pub fn execute_with_budget(
+    sb: &Sandbox,
+    book: &crate::capabilities::tools::api::ToolBook,
+    io: &dyn SysIo,
+    obs: &mut Observations,
+    gate: Option<&dyn crate::capabilities::tools::api::WriteGate>,
+    budget: crate::capabilities::tools::api::ResultBudget,
     name: &str,
     args_json: &str,
 ) -> ToolOutcome {
@@ -115,7 +140,7 @@ pub fn execute(
         return fail(e);
     }
     match name {
-        READ => read(sb, &place, io, obs, &args, &spec, &path),
+        READ => read(sb, &place, io, obs, budget, &args, &spec, &path),
         WRITE => write(
             gate,
             io,
@@ -321,11 +346,13 @@ fn delete(
 }
 
 /// read：按行区间返回，行号从 1 数起；回执末尾告诉模型接着用哪个 offset，并如实记账"读到的是不是全文"。
+#[allow(clippy::too_many_arguments)]
 fn read(
     sb: &Sandbox,
     place: &Place,
     io: &dyn SysIo,
     obs: &mut Observations,
+    budget: crate::capabilities::tools::api::ResultBudget,
     args: &serde_json::Value,
     spec: &str,
     path: &Path,
@@ -369,6 +396,10 @@ fn read(
         let note = format!("（超出末行：该文件共 {} 行，offset 从 1 数起）", total);
         return ToolOutcome::new(true, header(note));
     }
+    // 正文预算：既不超过静态读取上限，也不超过本批分给这一条的剩余空间（给文件头与续读提示留 512 字符）。
+    let body_budget = MAX_READ_CHARS
+        .min(budget.limit().saturating_sub(512))
+        .max(256);
     let mut body: Vec<String> = Vec::new();
     let mut used = 0usize;
     let mut to = offset - 1;
@@ -386,7 +417,16 @@ fn read(
         }
         // 字符预算用完就停：至少给出第一行，绝不空手而归。
         let cost = row.chars().count() + 1;
-        if !body.is_empty() && used + cost > MAX_READ_CHARS {
+        if used + cost > body_budget {
+            if body.is_empty() {
+                // 第一行就超过本批预算：按字符切到预算内并标成截断，绝不把它记成完整读过。
+                let keep = body_budget.saturating_sub(40).max(32);
+                let (head, _) = truncate_chars(&row, keep);
+                row = format!("{}［本行超过本次预算，已截断］", head);
+                line_cut = true;
+                to = line_no;
+                body.push(row);
+            }
             break;
         }
         used += cost;
