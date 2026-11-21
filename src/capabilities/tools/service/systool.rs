@@ -404,6 +404,8 @@ fn read(
     let mut used = 0usize;
     let mut to = offset - 1;
     let mut line_cut = page.line_cut;
+    // 是否真的因为本批预算而少给了行：只有这时才提示“先压缩会话”，显式 limit 截断不提示。
+    let mut budget_cut = false;
     for (i, line) in lines.iter().enumerate() {
         let line_no = offset + i;
         let (text, cut) = truncate_chars(line, MAX_READ_LINE_CHARS);
@@ -418,6 +420,7 @@ fn read(
         // 字符预算用完就停：至少给出第一行，绝不空手而归。
         let cost = row.chars().count() + 1;
         if used + cost > body_budget {
+            budget_cut = true;
             if body.is_empty() {
                 // 第一行就超过本批预算：按字符切到预算内并标成截断，绝不把它记成完整读过。
                 let keep = body_budget.saturating_sub(40).max(32);
@@ -505,7 +508,16 @@ fn read(
             "\n[编码] 该文件含非法 UTF-8 字节，以上是按替换字符呈现的近似内容；本程序不猜编码。",
         );
     }
-    ToolOutcome::new(true, out)
+    let mut outcome = ToolOutcome::new(true, out);
+    if budget_cut {
+        outcome.push_note(
+            crate::kernel::api::note::Note::warning(
+                crate::kernel::api::note::codes::RESULT_TRUNCATED_CONTEXT,
+            )
+            .arg("limit", body_budget),
+        );
+    }
+    outcome
 }
 
 /// write：整份写入（同名文件被整份覆盖）。

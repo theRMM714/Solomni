@@ -629,6 +629,14 @@ pub(crate) fn read_respects_the_batch_budget_and_records_only_what_it_shows() {
         done.outcome.output
     );
     assert!(
+        done.outcome
+            .notes
+            .iter()
+            .any(|n| n.code == crate::kernel::api::note::codes::RESULT_TRUNCATED_CONTEXT),
+        "read 因预算少给行时必须提示先压缩会话：{:?}",
+        done.outcome.notes
+    );
+    assert!(
         done.observations.facts().is_empty(),
         "显示被截断的读取不得留下观察事实"
     );
