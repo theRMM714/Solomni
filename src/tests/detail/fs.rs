@@ -10,6 +10,7 @@ fn meta(name: &str) -> SessionMeta {
     SessionMeta {
         usage_totals: Default::default(),
         context_freshness: false,
+        freshness_keep_percent: 80,
         name: name.to_string(),
         mode: Mode::Single,
         delegate: false,

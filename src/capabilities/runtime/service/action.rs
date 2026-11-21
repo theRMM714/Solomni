@@ -233,7 +233,11 @@ impl Handle {
             "set_context_freshness" => {
                 let sid = s("session_id");
                 let on = args.get("on").and_then(|v| v.as_bool()).unwrap_or(false);
-                self.call(move |core| core.set_context_freshness(&sid, on))?;
+                let keep_percent = args
+                    .get("keep_percent")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v.min(u8::MAX as u64) as u8);
+                self.call(move |core| core.set_context_freshness(&sid, on, keep_percent))?;
                 Ok(Acted::Done(serde_json::json!({ "ok": true })))
             }
             "edit_session" => {
@@ -554,6 +558,7 @@ impl Core {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(std::path::PathBuf::from),
+            freshness: spec.freshness,
         };
         // 有父 = 子工作（`create_work_inner` 直接给 parent）；没有父 = 顶层会话，走同一个入口包装。
         let prepared = match parent.as_deref() {

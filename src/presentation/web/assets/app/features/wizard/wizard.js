@@ -6,7 +6,7 @@
 import { wizardCopy } from './copy.js';
 
 let g, doc, state, api, ui, app;
-let areaInput, btn, busyButton, emptyHint, field, fold, hint, selectInput, textInput;
+let areaInput, btn, busyButton, checkbox, emptyHint, field, fold, hint, numberInput, selectInput, textInput;
 const actionUrl = (...a) => app.actionUrl(...a);
 const atClose = (...a) => app.atClose(...a);
 const atLoad = (...a) => app.atLoad(...a);
@@ -31,7 +31,8 @@ async function openWizard(draft) {
   const resumed = !!(draft && draft.__wizardDraft);
   // 两种形态共用一份 agent 卡片列表：single 恰好 0/1 个；collab 可多个。
   const w = resumed ? draft : {
-    mode: 'single', agents: [], task: '', tier: 'host', guest: '', permission: 'workspace', __wizardDraft: true,
+    mode: 'single', agents: [], task: '', tier: 'host', guest: '', permission: 'workspace',
+    context_freshness: false, freshness_keep_percent: 80, __wizardDraft: true,
   };
   if (!Array.isArray(w.agents)) w.agents = [];
   // 名称与需求是**弹层里**输入框的现值（在本作用域之外）：由弹层装好后把取值钩子挂上来。
@@ -52,6 +53,21 @@ async function openWizard(draft) {
   tierGroup.appendChild(hostR.wrap); tierGroup.appendChild(vmR.wrap);
   tierField.appendChild(tierLabel); tierField.appendChild(tierGroup);
   ui.attachHelp(tierField, wizardCopy.tier);
+  // 上下文：过期内容替换与保底。挂在形态与档位之后：先定形态，再定这轮的上下文策略。
+  const ctxField = doc.createElement('div'); ctxField.className = 'wf-field';
+  const ctxLabel = doc.createElement('div'); ctxLabel.className = 'wf-label'; ctxLabel.textContent = '上下文';
+  const freshOn = checkbox('过期内容换成占位符', !!w.context_freshness, wizardCopy.context.lead);
+  const keepNow = () => Math.max(0, Math.min(90, Math.round(Number(w.freshness_keep_percent)) || 0));
+  const freshKeep = numberInput('保底缓存（前多少内容原样保留，%）', keepNow(), 0, 90);
+  const syncCtx = () => { freshKeep.input.disabled = !w.context_freshness; };
+  freshOn.box.addEventListener('change', () => { w.context_freshness = !!freshOn.box.checked; syncCtx(); });
+  freshKeep.input.addEventListener('change', () => {
+    w.freshness_keep_percent = Math.max(0, Math.min(90, Math.round(Number(freshKeep.input.value) || 0)));
+    freshKeep.input.value = String(w.freshness_keep_percent);
+  });
+  ctxField.appendChild(ctxLabel); ctxField.appendChild(freshOn.wrap); ctxField.appendChild(freshKeep.wrap);
+  ui.attachHelp(ctxField, wizardCopy.context);
+  syncCtx();
   const profileField = doc.createElement('div'); profileField.className = 'wf-field';
   const profileLabel = doc.createElement('div'); profileLabel.className = 'wf-label'; profileLabel.textContent = '权限档位';
   const profileSel = selectInput([
@@ -461,6 +477,8 @@ function pickWorkspaceDir(onPick) {
       if (w.mode === 'proxy') {
         // 代理：没有名单、没有需求——选这个形态就是授予全权（档位由上面的选择显式落盘）。
         const proxyBody = { name, mode: 'proxy', agents: [], tier: w.tier, guest: w.tier === 'vm' ? vmGuest : null, permission: w.permission || 'all_reach' };
+        proxyBody.context_freshness = !!w.context_freshness;
+        proxyBody.freshness_keep_percent = keepNow();
         const proxyWs = workspaceIn.value.trim();
         if (proxyWs) {
           proxyBody.workspace = proxyWs;
@@ -496,6 +514,8 @@ function pickWorkspaceDir(onPick) {
       const names = agents.map((a) => a.name);
       const dup = names.filter((n, i) => names.indexOf(n) !== i)[0];
       const body = { name, mode: w.mode, agents, tier: w.tier, permission: w.permission || 'workspace' };
+      body.context_freshness = !!w.context_freshness;
+      body.freshness_keep_percent = keepNow();
       const bodyWs = workspaceIn.value.trim();
       if (bodyWs) {
         body.workspace = bodyWs;
@@ -517,6 +537,7 @@ function pickWorkspaceDir(onPick) {
     c.body.appendChild(field('形态', modeSel));
     c.body.appendChild(modeHint);
     c.body.appendChild(tierField);
+    c.body.appendChild(ctxField);
     c.body.appendChild(profileField);
     c.body.appendChild(pick.wrap);
     c.body.appendChild(pick.hint);
@@ -548,6 +569,7 @@ async function startSession(body) {
     lines: [], live: [], pending: null, sending: false,
     running: false, working: null, running_known: false,
     context: null, shell: null, work: null, workAt: 0, workDirty: false, workError: '',
+    context_freshness: body.context_freshness === true, freshness_keep_percent: Number(body.freshness_keep_percent == null ? 80 : body.freshness_keep_percent),
     done: false, awaiting: null, fold: {}, scroll: {},
   };
   // 开场事实由 /api/sessions 那一刻就推给事件台了（回包只给头部序号），所以这里**合流**一次：
@@ -597,6 +619,6 @@ async function loadPathRoots(sid) {
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
   ({ g, doc, state, api, ui, app } = deps);
-  ({ areaInput, btn, busyButton, emptyHint, field, fold, hint, selectInput, textInput } = ui);
+  ({ areaInput, btn, busyButton, checkbox, emptyHint, field, fold, hint, numberInput, selectInput, textInput } = ui);
   Object.assign(root, { openWizard, startSession, setActive, applyPathRoots, loadPathRoots });
 }

@@ -19,6 +19,9 @@ impl Work {
         sid: &str,
     ) -> Result<SessionConfig, String> {
         let (meta, events) = self.history_open(sid)?;
+        // 过期内容替换与保底是**工作根**的会话级事实：配置界面读根上的值。
+        let root = work_root(self.history.as_ref(), sid).unwrap_or_else(|_| sid.to_string());
+        let root_meta = self.history.meta(&root)?;
         let tier = meta.exec.tier;
         // 机器能力（与某条会话无关）：界面据此决定虚拟机档能不能**选**；虚拟根是会话级，另行校验。
         let qemu = self.qemu_path(registry);
@@ -61,10 +64,9 @@ impl Work {
             guests: self.provision.guest_bases()?,
             net: crate::capabilities::turn::env::api::network_allowed(registry.app()),
             permission: self.permission_view(turn, registry, &meta)?,
-            thinking: self.thinking_view_for_root(
-                registry,
-                &work_root(self.history.as_ref(), sid).unwrap_or_else(|_| sid.to_string()),
-            ),
+            thinking: self.thinking_view_for_root(registry, &root),
+            context_freshness: root_meta.context_freshness,
+            freshness_keep_percent: root_meta.freshness_keep_percent,
             pins: meta.exec.pins.clone(),
             runtime: self.runtime_report_for(registry, probe, &meta.exec),
             runtimes_dir: crate::kernel::api::path::slash(&self.packages.runtimes_dir()),
@@ -489,6 +491,7 @@ impl Work {
             "pins": meta.exec.pins,
             "thinking": meta.thinking,
             "context_freshness": meta.context_freshness,
+            "freshness_keep_percent": meta.freshness_keep_percent,
             "permission": serde_json::to_value(&meta.sandbox).unwrap_or(serde_json::Value::Null),
             "permission_effective": turn.permissions_for(registry, meta).ok().map(|p| serde_json::json!({
                 "profile": p.profile,

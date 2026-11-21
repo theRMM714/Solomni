@@ -255,6 +255,28 @@ impl Handle {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string()),
+            freshness: parse_freshness(args)?,
         })
     }
+}
+
+/// 目的：解析创建时的过期内容替换参数：只有显式打开才生效，百分比 0..=90（缺省 80）。
+/// 错误：百分比超范围时如实拒绝（100% 等于永不替换，开关会形同关闭）。
+fn parse_freshness(args: &serde_json::Value) -> Result<Option<(bool, u8)>, String> {
+    if !args
+        .get("context_freshness")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        return Ok(None);
+    }
+    let keep = args
+        .get("freshness_keep_percent")
+        .and_then(|v| v.as_u64())
+        .map(|v| v.min(u8::MAX as u64) as u8)
+        .unwrap_or(80);
+    if keep > 90 {
+        return Err("过期内容保底最多 90%（100% 等于永不替换）".to_string());
+    }
+    Ok(Some((true, keep)))
 }

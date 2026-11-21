@@ -341,6 +341,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
     let meta = SessionMeta {
         usage_totals: Default::default(),
         context_freshness: false,
+        freshness_keep_percent: 80,
         name: "w".to_string(),
         mode: Mode::Single,
         delegate: false,
@@ -374,6 +375,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
     let stopped = SessionMeta {
         usage_totals: Default::default(),
         context_freshness: false,
+        freshness_keep_percent: 80,
         thinking: None,
         run: RunState::Stopped,
         workspace: None,

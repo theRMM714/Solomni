@@ -7,7 +7,7 @@ import { thinkingLabel } from '../../stores/settings.js';
 import { sessionConfigCopy } from './copy.js';
 
 let g, doc, api, ui, app;
-let areaInput, btn, emptyHint, field, hint, selectInput, syncSelect, textInput;
+let areaInput, btn, checkbox, emptyHint, field, hint, numberInput, selectInput, syncSelect, textInput;
 const actionUrl = (...a) => app.actionUrl(...a);
 const modelOptions = (...a) => app.modelOptions(...a);
 const refreshState = (...a) => app.refreshState(...a);
@@ -290,6 +290,30 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
   secThink.appendChild(think.note ? ui.hint(think.note) : ui.detail(sessionConfigCopy.thinkNote));
   box.appendChild(secThink);
 
+  // 上下文：过期内容替换开关与保底（工作根共享）；改了就生效，与创建向导走同一个动作。
+  const secCtx = ui.div('cfg-sec');
+  secCtx.appendChild(ui.div('cfg-sec-title', '上下文（工作根共享）'));
+  const on = checkbox('过期内容换成占位符', !!cfg.context_freshness, sessionConfigCopy.freshness.lead);
+  const keepPct = Number(cfg.freshness_keep_percent == null ? 80 : cfg.freshness_keep_percent);
+  const keepIn = numberInput('保底缓存（%）', keepPct, 0, 90);
+  const apply = async () => {
+    const keep = Math.max(0, Math.min(90, Math.round(Number(keepIn.input.value) || 0)));
+    const want = !!on.box.checked;
+    try {
+      await api('POST', actionUrl('set_context_freshness'), { session_id: sid, on: want, keep_percent: keep });
+      await refreshState();
+      c.setMsg(want ? '过期内容：已改为占位符（保底 ' + keep + '%）' : '过期内容：保持原样');
+      loadConfig(sid, c, box, setSync);
+    } catch (e) { c.setMsg(e.message, true); }
+  };
+  on.box.onchange = apply;
+  keepIn.input.onchange = apply;
+  secCtx.appendChild(on.wrap);
+  secCtx.appendChild(keepIn.wrap);
+  secCtx.appendChild(ui.detail(sessionConfigCopy.freshness.detail));
+  secCtx.appendChild(ui.detail(sessionConfigCopy.freshnessKeep.detail));
+  box.appendChild(secCtx);
+
   // 动作
   const acts = ui.div('cfg-actions');
   const save = btn('保存', 'btn btn-primary');
@@ -450,6 +474,6 @@ function guestPicker(guests, current, onChange) {
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
   ({ g, doc, api, ui, app } = deps);
-  ({ areaInput, btn, emptyHint, field, hint, selectInput, syncSelect, textInput } = ui);
+  ({ areaInput, btn, checkbox, emptyHint, field, hint, numberInput, selectInput, syncSelect, textInput } = ui);
   Object.assign(root, { openConfig, loadConfig, buildConfigForm, cfgAgentBlock, cfgRuntimeBlock, guestPicker });
 }

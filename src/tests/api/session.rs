@@ -306,6 +306,7 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
     let (opened, _) = faces
         .work
         .create_work(WorkSpec {
+            freshness: None,
             name: "组合".to_string(),
             mode: WorkMode::Single,
             agents: picked,
@@ -717,28 +718,67 @@ fn set_context_freshness_action_flips_the_work_switch_and_reports_it() {
         !view(&faces).context_freshness,
         "默认关：只记读事实、不改发送视图"
     );
-    for on in [true, false] {
-        faces
-            .actions
-            .act(ActionCall {
-                id: "set_context_freshness".to_string(),
-                args: serde_json::json!({ "session_id": sid, "on": on }),
-                caller: Caller::User,
-                out: Output::Final,
-            })
-            .expect("切开关");
-        // 切开关会把子树会话从内存移除（与思考档一致），所以查**落盘事实**而不是视图。
-        assert_eq!(
-            faces
-                .history
-                .open(&sid)
-                .expect("读 meta")
-                .0
-                .context_freshness,
-            on,
-            "开关写到工作根 meta 上"
-        );
-    }
+    assert_eq!(view(&faces).freshness_keep_percent, 80, "默认保底 80%");
+    let flip = |on: bool, keep: Option<u8>| {
+        let mut args = serde_json::json!({ "session_id": sid, "on": on });
+        if let Some(keep) = keep {
+            args["keep_percent"] = serde_json::json!(keep);
+        }
+        faces.actions.act(ActionCall {
+            id: "set_context_freshness".to_string(),
+            args,
+            caller: Caller::User,
+            out: Output::Final,
+        })
+    };
+    flip(true, Some(70)).expect("开开关并设保底");
+    // 切开关会把子树会话从内存移除（与思考档一致），所以查**落盘事实**而不是视图。
+    let meta = faces.history.open(&sid).expect("读 meta").0;
+    assert!(meta.context_freshness, "开关写到工作根 meta 上");
+    assert_eq!(meta.freshness_keep_percent, 70, "保底也写在工作根 meta 上");
+    // 关开关不带百分比：百分比保持不变（下次再开会沿用它）。
+    flip(false, None).expect("关开关");
+    let meta = faces.history.open(&sid).expect("读 meta").0;
+    assert!(!meta.context_freshness);
+    assert_eq!(meta.freshness_keep_percent, 70, "不带百分比时沿用现值");
+    // 100% 等于永不替换，与关闭无异：只接受 0..=90。
+    let err = flip(true, Some(91)).expect_err("超过 90% 要拒绝");
+    assert!(err.contains("90%"), "错误要说清上限：{err}");
+    assert!(
+        !faces
+            .history
+            .open(&sid)
+            .expect("读 meta")
+            .0
+            .context_freshness,
+        "拒绝后不改落盘事实"
+    );
+}
+
+#[test]
+fn create_work_takes_the_context_freshness_chosen_in_the_wizard() {
+    let handle = spawn(vec![module_of("a")], Vec::new());
+    let faces = Faces::from_handle(&handle);
+    let opened = faces
+        .work
+        .create_work(WorkSpec {
+            freshness: Some((true, 60)),
+            ..single_work("w-fresh-wizard", &["a"])
+        })
+        .expect("建会话");
+    let sid = opened.0.sid;
+    let meta = faces.history.open(&sid).expect("读 meta").0;
+    assert!(meta.context_freshness, "创建时勾选就落盘");
+    assert_eq!(meta.freshness_keep_percent, 60, "创建时的保底也落盘");
+    let view = faces
+        .work
+        .session_views(&faces.history.list().expect("列历史"))
+        .expect("会话视图")
+        .into_iter()
+        .find(|v| v.sid == sid)
+        .expect("找到会话");
+    assert!(view.context_freshness, "视图回报创建时的开关");
+    assert_eq!(view.freshness_keep_percent, 60, "视图回报创建时的保底");
 }
 
 #[test]

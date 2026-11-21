@@ -164,6 +164,7 @@ pub(crate) fn single_work(
     modules: &[&str],
 ) -> crate::capabilities::work::api::WorkSpec {
     crate::capabilities::work::api::WorkSpec {
+        freshness: None,
         name: name.to_string(),
         mode: crate::capabilities::work::api::WorkMode::Single,
         agents: vec![crate::capabilities::catalog::registry::api::AgentMeta {

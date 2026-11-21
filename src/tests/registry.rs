@@ -205,6 +205,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
 
     // 组合：一个 agent（多模块合并）
     let spec = WorkSpec {
+        freshness: None,
         name: "w".to_string(),
         mode: WorkMode::Single,
         agents: vec![AgentMeta {
@@ -239,6 +240,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
 
     // 同一模块可跨 agent 共用
     let cross = WorkSpec {
+        freshness: None,
         name: "cross".to_string(),
         mode: WorkMode::Collab,
         agents: vec![

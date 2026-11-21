@@ -173,6 +173,7 @@ pub(crate) fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
         }]
     };
     WorkSpec {
+        freshness: None,
         name: name.to_string(),
         mode,
         agents,

@@ -78,6 +78,8 @@ function align(state, cur, v) {
   cur.permission_label = v.permission_label || cur.permission_label;
   if (v.thinking !== undefined) cur.thinking = v.thinking || null;
   if (v.context_freshness !== undefined) cur.context_freshness = !!v.context_freshness;
+  if (v.freshness_keep_percent !== undefined) cur.freshness_keep_percent = Number(v.freshness_keep_percent);
+  cur.freshness_stats = v.freshness_stats || null;
   cur.permission_narrowed = !!v.permission_narrowed;
   cur.permission_parent = v.permission_parent || null;
   if (v.context !== undefined) cur.context = v.context || null;

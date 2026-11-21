@@ -174,6 +174,7 @@ impl Work {
                         .permission
                         .unwrap_or(crate::capabilities::permission::api::ProfileId::AllReach),
                     workspace,
+                    freshness: spec.freshness,
                 },
             )?;
             return Ok((
@@ -259,9 +260,12 @@ impl Work {
 
         let name = spec.name.clone();
         let agent_names: Vec<String> = metas.iter().map(|m| m.name.clone()).collect();
+        // 过期内容替换与保底是**工作根**的会话级事实：顶层由创建向导决定，子会话沿根继承。
+        let (freshness_on, freshness_keep) = spec.freshness.unwrap_or((false, 80));
         let meta = SessionMeta {
             usage_totals: Default::default(),
-            context_freshness: false,
+            context_freshness: freshness_on,
+            freshness_keep_percent: freshness_keep,
             name: name.clone(),
             mode: spec.mode,
             delegate,
@@ -539,8 +543,9 @@ impl Work {
                     guest_lease_for(self.history.as_ref(), &meta)?,
                     &host_plan,
                 );
-                // 过期清理是**落盘事实**：装配时按 meta 装回开关，默认关。
+                // 过期清理是**落盘事实**：装配时按 meta 装回开关与保底，默认关。
                 s.set_context_freshness(meta.context_freshness);
+                s.set_freshness_keep_percent(meta.freshness_keep_percent);
                 (Session::Single(s), opened)
             }
             WorkMode::Collab => {
@@ -694,6 +699,7 @@ impl Work {
             guest,
             profile,
             workspace,
+            freshness,
         } = seed;
         validate_work_name(name)?;
         if turn.holds(name) || self.history.load(name).is_ok() {
@@ -718,9 +724,11 @@ impl Work {
         }
         // 先解析核心通道：没有模型就不建（工作区都还没有，失败什么都不留）。
         registry.core_channel()?;
+        let (freshness_on, freshness_keep) = freshness.unwrap_or((false, 80));
         let meta = SessionMeta {
             usage_totals: Default::default(),
-            context_freshness: false,
+            context_freshness: freshness_on,
+            freshness_keep_percent: freshness_keep,
             name: name.to_string(),
             mode: WorkMode::Proxy,
             delegate: false,

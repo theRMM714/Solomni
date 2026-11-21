@@ -411,10 +411,20 @@ impl Core {
             .set_thinking(&mut self.turn, self.registry.as_ref(), sid, level)
     }
 
-    /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。
-    pub(crate) fn set_context_freshness(&mut self, sid: &str, on: bool) -> Result<(), String> {
-        self.work
-            .set_context_freshness(&mut self.turn, self.registry.as_ref(), sid, on)
+    /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）；保底 percent 缺省沿用现值。
+    pub(crate) fn set_context_freshness(
+        &mut self,
+        sid: &str,
+        on: bool,
+        keep_percent: Option<u8>,
+    ) -> Result<(), String> {
+        self.work.set_context_freshness(
+            &mut self.turn,
+            self.registry.as_ref(),
+            sid,
+            on,
+            keep_percent,
+        )
     }
 
     /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。

@@ -91,6 +91,12 @@ pub struct AgentSession {
     /// 约束：false = 只记事实、发送视图原样；true = 发送前把过期读取换成占位符。
     /// 它必须跟着会话走：回放与实时产出同一条请求，否则缓存与可复现性都坏。
     context_freshness: bool,
+    /// 目的：**过期内容保底**：发送视图里前这么多内容原样保留（0 = 不保底）。
+    /// 约束：与开关一样由工作根 meta 派生；替换总量太小（不够付一次缓存失效）时整体不替换。
+    freshness_keep_percent: u8,
+    /// 目的：最近一次发送视图的替换统计（面板显示"本次替换 N 处 · 省 T tokens"）。
+    /// 约束：只反映**这一次**发送；开关关、判定失败或还没发过时为 None。
+    freshness_stats: Option<FreshnessStats>,
     /// 目的：本会话里"读过什么"的台账（读事实 + 当时那条工具结果消息的正文）。
     /// 约束：**派生视图的输入**，不是对话内容；压缩会移走旧消息，所以按正文匹配、不按下标。
     pub(crate) reads: Vec<ReadAt>,
@@ -145,20 +151,86 @@ pub fn expired_note(fact: &crate::capabilities::workspace::api::ReadFact) -> Str
     )
 }
 
+/// 目的：一次发送视图的过期替换统计（面板显示"本次替换 N 处 · 省 T tokens"）。
+/// 约束：skipped = 判出了过期但省下的量不够付一次缓存失效，整体回退成原样。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct FreshnessStats {
+    /// 目的：这次判定过的读条数。
+    pub judged: u64,
+    /// 目的：实际换掉的条数（整体回退时为 0）。
+    pub replaced: u64,
+    /// 目的：换掉后估计省下的输入 token（4 字符 ≈ 1 token，与压缩估算同一口径）。
+    pub saved_tokens: u64,
+    /// 目的：这次用的保底百分比（0 = 不保底）。
+    pub keep_percent: u8,
+    /// 目的：省下的量太小，这次没有替换。
+    pub skipped: bool,
+}
+
+/// 目的：一次替换至少省这么多字符（≈2K token）才值得付一次缓存前缀失效。
+pub const FRESHNESS_MIN_SAVED_CHARS: usize = 8000;
+
 /// 目的：**发送视图**的派生——判成过期的那条工具结果换成占位符，其余逐字保留。
 /// 约束：按**正文**定位消息（压缩会把旧消息移走、下标不可靠）；正文找不到就跳过，
 ///   绝不动别的行。reads 与 stale 同序，只包含确实判定过的读。
-pub fn freshness_view(dialogue: &[Msg], reads: &[(&ReadAt, bool)]) -> Vec<Msg> {
+///   保底：keep_chars 是前缀字符预算，从头累加到跨过它的消息之前一律原样（保住前缀缓存）。
+pub fn freshness_view(
+    dialogue: &[Msg],
+    reads: &[(&ReadAt, bool)],
+    keep_chars: usize,
+) -> (Vec<Msg>, FreshnessStats) {
+    let mut stats = FreshnessStats::default();
     let mut msgs = dialogue.to_vec();
+    // 保底前缀的边界：第一条可以替换的消息下标。0 = 不保底（从第一条起都能换）；
+    // 预算盖住整段对话时停在末尾（一条都不换）。
+    let mut boundary = 0usize;
+    if keep_chars > 0 {
+        boundary = msgs.len();
+        let mut acc = 0usize;
+        for (i, m) in msgs.iter().enumerate() {
+            if acc >= keep_chars {
+                boundary = i;
+                break;
+            }
+            acc += m.content.chars().count();
+        }
+    }
+    let mut saved_chars = 0usize;
     for (r, stale) in reads {
         if !*stale {
             continue;
         }
-        if let Some(m) = msgs.iter_mut().find(|m| m.content == r.body) {
-            m.content = expired_note(&r.fact);
+        stats.judged += 1;
+        let Some(idx) = msgs.iter().position(|m| m.content == r.body) else {
+            continue;
+        };
+        if idx < boundary {
+            continue;
         }
+        let note = expired_note(&r.fact);
+        saved_chars += msgs[idx]
+            .content
+            .chars()
+            .count()
+            .saturating_sub(note.chars().count());
+        msgs[idx].content = note;
+        stats.replaced += 1;
     }
-    msgs
+    // 省得太少就不换：换一次要付一次前缀缓存失效，不值。
+    if stats.replaced > 0 && saved_chars < FRESHNESS_MIN_SAVED_CHARS {
+        return (
+            dialogue.to_vec(),
+            FreshnessStats {
+                judged: stats.judged,
+                replaced: 0,
+                saved_tokens: 0,
+                keep_percent: stats.keep_percent,
+                skipped: true,
+            },
+        );
+    }
+    stats.saved_tokens = (saved_chars / 4) as u64;
+    (msgs, stats)
 }
 
 /// 目的：摘要消息（发送视图里是 **user 角色**）：`compact` 与重建共用一份口径，实时与回放才逐条相同。
@@ -209,6 +281,8 @@ impl AgentSession {
             model: None,
             thinking: None,
             context_freshness: false,
+            freshness_keep_percent: super::history::default_freshness_keep_percent(),
+            freshness_stats: None,
             reads: Vec::new(),
             id: id.to_string(),
             params,
@@ -259,6 +333,8 @@ impl AgentSession {
             model: None,
             thinking: None,
             context_freshness: false,
+            freshness_keep_percent: super::history::default_freshness_keep_percent(),
+            freshness_stats: None,
             reads: Vec::new(),
             id: id.to_string(),
             next_line: next,
@@ -325,6 +401,26 @@ impl AgentSession {
     /// 目的：本会话是否开着过期清理。
     pub fn context_freshness(&self) -> bool {
         self.context_freshness
+    }
+
+    /// 目的：过期内容保底百分比（0 = 不保底）：由工作根 meta 派生，界面只读。
+    pub fn set_freshness_keep_percent(&mut self, percent: u8) {
+        self.freshness_keep_percent = percent;
+    }
+
+    /// 目的：本会话的保底百分比。
+    pub fn freshness_keep_percent(&self) -> u8 {
+        self.freshness_keep_percent
+    }
+
+    /// 目的：最近一次发送视图的替换统计（面板读；没发过时为 None）。
+    pub fn freshness_stats(&self) -> Option<FreshnessStats> {
+        self.freshness_stats
+    }
+
+    /// 目的：写回这一次发送视图的统计（只由驱动在发请求前调）。
+    pub(crate) fn set_freshness_stats(&mut self, stats: Option<FreshnessStats>) {
+        self.freshness_stats = stats;
     }
 
     /// 目的：记下"读过这个范围"（发送视图据此判断过期）。
@@ -756,10 +852,15 @@ mod tests {
         }
     }
 
+    // 省够门槛才有替换：正文得够长，短正文会整体回退（见 FRESHNESS_MIN_SAVED_CHARS）。
+    fn long_body(tag: &str) -> String {
+        format!("[工具结果] read\n{}", tag.repeat(3000))
+    }
+
     #[test]
     fn freshness_view_replaces_only_the_stale_tool_result() {
-        let stale = Msg::user("[工具结果] read\nold text");
-        let fresh = Msg::user("[工具结果] read\nstill there");
+        let stale = Msg::user(long_body("old "));
+        let fresh = Msg::user(long_body("new "));
         let dialogue = vec![Msg::user("hi"), stale.clone(), fresh.clone()];
         let r1 = ReadAt {
             body: stale.content.clone(),
@@ -769,13 +870,17 @@ mod tests {
             body: fresh.content.clone(),
             fact: fact(),
         };
-        let out = freshness_view(&dialogue, &[(&r1, true), (&r2, false)]);
+        let (out, stats) = freshness_view(&dialogue, &[(&r1, true), (&r2, false)], 0);
         assert_eq!(out.len(), 3);
         assert_eq!(
             out[1].content,
             "[已过期：docs/README.md 第3-9行，读取后文件已修改；需要时重新 read]"
         );
         assert_eq!(out[2].content, fresh.content);
+        assert_eq!(stats.judged, 1);
+        assert_eq!(stats.replaced, 1);
+        assert!(stats.saved_tokens > 2000);
+        assert!(!stats.skipped);
     }
 
     #[test]
@@ -784,8 +889,44 @@ mod tests {
             body: "gone".to_string(),
             fact: fact(),
         };
-        let out = freshness_view(&[Msg::user("hi")], &[(&r, true)]);
+        let (out, stats) = freshness_view(&[Msg::user("hi")], &[(&r, true)], 0);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].content, "hi");
+        assert_eq!(stats.judged, 1);
+        assert_eq!(stats.replaced, 0);
+    }
+
+    #[test]
+    fn freshness_view_keeps_the_floor_prefix_untouched() {
+        let stale = Msg::user(long_body("old "));
+        let fresh = Msg::user(long_body("new "));
+        let dialogue = vec![Msg::user("hi"), stale.clone(), fresh.clone()];
+        let r = ReadAt {
+            body: stale.content.clone(),
+            fact: fact(),
+        };
+        // 保底预算盖住整段对话：一条都不换。
+        let keep = dialogue
+            .iter()
+            .map(|m| m.content.chars().count())
+            .sum::<usize>();
+        let (out, stats) = freshness_view(&dialogue, &[(&r, true)], keep);
+        assert_eq!(out[1].content, stale.content);
+        assert_eq!(stats.replaced, 0);
+    }
+
+    #[test]
+    fn freshness_view_skips_when_savings_do_not_pay_the_cache_loss() {
+        let stale = Msg::user("[工具结果] read\nold text");
+        let r = ReadAt {
+            body: stale.content.clone(),
+            fact: fact(),
+        };
+        let dialogue = vec![stale.clone()];
+        let (out, stats) = freshness_view(&dialogue, &[(&r, true)], 0);
+        assert_eq!(out[0].content, stale.content);
+        assert_eq!(stats.judged, 1);
+        assert_eq!(stats.replaced, 0);
+        assert!(stats.skipped);
     }
 }

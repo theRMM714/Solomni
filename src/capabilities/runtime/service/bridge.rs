@@ -257,6 +257,7 @@ impl Core {
                     guest: None,
                     profile: crate::capabilities::permission::api::ProfileId::AllReach,
                     workspace: None,
+                    freshness: None,
                 },
             )
             .map(|(sid, _)| sid)

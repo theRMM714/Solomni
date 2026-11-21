@@ -5,10 +5,6 @@ export const workCopy = {
   historical: '来自转录回放：耗时与 cwd 取自当时的回执；完整回执在转录的 shell 工具行。',
   fresh: '完整回执在转录的 shell 工具行；这里只保留最近一次。',
   noContext: '还没有模型调用。下一次调用后这里会显示精确用量；拿不到供应商 usage 时按字符估算并标注。',
-  freshnessOff: {
-    label: '开：读过的文件被改后，那条工具结果换成占位符',
-    reason: '省上下文；每次发送要多读一遍对象库，且会失效部分缓存。',
-  },
   nonDestructive: '回滚是非破坏性的：目标之后的提交仍保留，可再次回滚；只改共享区，不动各 agent 沙箱。',
   rollbackBody: '这是非破坏性回滚：目标之后的提交仍保留在历史里，可再次回滚；只改共享区主副本，不动各 agent 沙箱，后续拉取可能遇到冲突。',
   overwrite: '确认后会覆盖这些路径当前的内容；建议先 work_sync，保留外部修改。',

@@ -38,6 +38,9 @@ pub struct WorkSpec {
     /// 目的：外部工作区根（已规范化的绝对路径）；None = 产品内 `session/<名>/work`。
     /// 约束：只有顶层会话能指定；子会话沿父链继承同一个根。
     pub workspace: Option<std::path::PathBuf>,
+    /// 目的：创建时就打开过期内容替换（None = 关）：`(开, 保底百分比)`，保底 0..=90。
+    /// 约束：只写在工作根 meta 上；开启且没给百分比时用默认 80。
+    pub freshness: Option<(bool, u8)>,
 }
 
 /// 目的：创建工作后的结果：最终实例名（重名已加尾号）、名单，以及**开场事实**。
@@ -210,6 +213,10 @@ pub struct SessionConfig {
     pub permission: PermissionView,
     /// 目的：思考强度（工作根会话级）：当前档 + 可选档与不可用原因。
     pub thinking: ThinkingView,
+    /// 目的：过期内容替换开关（工作根会话级）：配置界面的「上下文」区据此画勾。
+    pub context_freshness: bool,
+    /// 目的：过期内容保底百分比（0 = 不保底；只写工作根）。
+    pub freshness_keep_percent: u8,
     pub pins: BTreeMap<String, String>,
     /// 目的：本机能不能承载**当前档位**（虚拟机档的前置条件）：界面据此决定虚拟机档能不能选。
     pub tier_ready: bool,
@@ -275,6 +282,12 @@ pub struct SessionView {
     /// 目的：过期内容替换开关（工作根会话级）：状态栏「工具」菜单据此画勾。
     /// 约束：总是出现（false = 关）；子会话沿工作根共享同一个值。
     pub context_freshness: bool,
+    /// 目的：过期内容保底百分比（0 = 不保底）：与开关一样是工作根会话级。
+    pub freshness_keep_percent: u8,
+    /// 目的：最近一次发送视图的替换统计（判了几条、换了几条、省多少 token）。
+    /// 约束：只活在活会话里——重建后为 None，面板就不显示这一行。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub freshness_stats: Option<crate::capabilities::conversation::session::api::FreshnessStats>,
     /// 目的：这条会话是不是带收窄层（子会话）。
     pub permission_narrowed: bool,
     /// 目的：子会话的父档位（根为空）；权限快速切换据此禁用更高档。
@@ -434,6 +447,8 @@ pub(crate) struct ProxySeed<'a> {
     pub(crate) profile: crate::capabilities::permission::api::ProfileId,
     /// 目的：外部工作区绑定（已解析，不是原始路径）。
     pub(crate) workspace: Option<crate::capabilities::conversation::session::api::WorkspaceBinding>,
+    /// 目的：创建时定的过期内容替换（None = 关）：`(开, 保底百分比)`，写进新会话的工作根 meta。
+    pub(crate) freshness: Option<(bool, u8)>,
 }
 
 /// 目的：工作的入站契约：建工作、会话配置与编辑、文件与提交历史，以及运行报告与核心推荐。

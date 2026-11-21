@@ -156,14 +156,20 @@ impl Work {
                         Err(_) => (String::new(), String::new(), false, None),
                     };
                 let shell = turn.shell_view(&sid);
-                // 过期内容替换是**工作根**的会话级事实：子会话与工作根共享同一个开关。
-                let context_freshness = match work_root(self.history.as_ref(), &sid) {
-                    Ok(root) => self
-                        .history
-                        .meta(&root)
-                        .map(|m| m.context_freshness)
-                        .unwrap_or(false),
-                    Err(_) => false,
+                // 过期内容替换是**工作根**的会话级事实：子会话与工作根共享同一个开关与保底。
+                let (context_freshness, freshness_keep_percent) =
+                    match work_root(self.history.as_ref(), &sid) {
+                        Ok(root) => self
+                            .history
+                            .meta(&root)
+                            .map(|m| (m.context_freshness, m.freshness_keep_percent))
+                            .unwrap_or((false, 80)),
+                        Err(_) => (false, 80),
+                    };
+                // 最近一次发送视图的替换统计只活在活会话里：重建后为 None，面板就不显示这一行。
+                let freshness_stats = match turn.session(&sid) {
+                    Some(Session::Single(s)) => s.freshness_stats(),
+                    _ => None,
                 };
                 // 累计用量是**这条会话自己**的账面（子会话各记各的，不汇总到工作根）：与"当前上下文用量"分开。
                 let usage_totals = self
@@ -196,6 +202,8 @@ impl Work {
                     permission_label,
                     thinking,
                     context_freshness,
+                    freshness_keep_percent,
+                    freshness_stats,
                     permission_narrowed,
                     permission_parent,
                     can_update_task,
