@@ -23,7 +23,10 @@ pub const SEARCH: &str = "search";
 pub const SHELL: &str = "shell";
 
 /// 目的：单次读取回传的字符上限（超出如实截断，并在回执里给出接着读的 offset）。
-pub const MAX_READ_CHARS: usize = 60_000;
+/// 约束：必须低于 budget::MAX_RESULT_CHARS，给文件头与“接着读”提示留余量——否则发送前还会被
+///   cap_result 从中间截断，模型看到的就不是我们记成“全文”的那份内容了。
+pub const MAX_READ_CHARS: usize =
+    crate::capabilities::tools::domain::budget::MAX_RESULT_CHARS - 2_000;
 /// 目的：回执里单行的字符上限（长行截断，避免一行吃掉整个上下文）。
 pub const MAX_READ_LINE_CHARS: usize = 2_000;
 /// 目的：单次 search 回传的命中行数上限（超出如实截断；命中总数照实报）。
@@ -225,7 +228,8 @@ impl Observations {
     }
 
     /// 目的：记一条观察事实（门禁的授权证据）。
-    pub(crate) fn note_fact(&mut self, fact: crate::capabilities::tools::api::ObservationFact) {
+    pub(crate) fn note_fact(&mut self, mut fact: crate::capabilities::tools::api::ObservationFact) {
+        fact.coverage = fact.coverage.normalized();
         self.facts.push(fact);
     }
 

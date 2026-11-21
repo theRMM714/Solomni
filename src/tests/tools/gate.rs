@@ -29,6 +29,28 @@ pub(crate) fn coverage_union_requires_every_line() {
         !Coverage::Ranges(vec![LineRange::new(1, 2), LineRange::new(4, 4)]).covers_all(4),
         "缺第 3 行就不算全文"
     );
+    assert_eq!(
+        Coverage::Ranges(vec![
+            LineRange::new(4, 4),
+            LineRange::new(1, 2),
+            LineRange::new(2, 3),
+            LineRange::new(3, 3),
+        ])
+        .normalized(),
+        Coverage::Ranges(vec![LineRange::new(1, 4)]),
+        "区间要排序、去重并合并相邻/重叠"
+    );
+    assert_eq!(
+        Coverage::Ranges(vec![LineRange::new(1, 1)])
+            .union(&Coverage::Ranges(vec![LineRange::new(2, 2)])),
+        Coverage::Ranges(vec![LineRange::new(1, 2)]),
+        "多次分段读的事实可以并成一段"
+    );
+    assert_eq!(
+        Coverage::Ranges(vec![LineRange::new(1, 2)]).union(&Coverage::Full),
+        Coverage::Full,
+        "任一方是全文，并集就是全文"
+    );
 }
 
 /// 目的：单行被显示上限截断时，读到的不是原文，不能成为"全文观察"。
@@ -48,8 +70,40 @@ pub(crate) fn read_with_a_truncated_line_is_not_full() {
     assert!(out.ok, "{}", out.output);
     assert!(out.output.contains("本行超过"), "{}", out.output);
     assert!(
-        obs.facts().iter().all(|f| !f.is_full()),
+        obs.facts()
+            .iter()
+            .all(|f| !f.coverage.covers_all(f.total_lines)),
         "截断行不能记全文：{:?}",
+        obs.facts()
+    );
+}
+
+/// 目的：读取输出被回执预算截断时，模型没看到全文，不能记成全文观察。
+#[test]
+pub(crate) fn read_capped_by_the_result_budget_is_not_full() {
+    let io = std::sync::Arc::new(InMemorySysIo::new());
+    let text: String = (1..=4_000).map(|i| format!("第 {i} 行\n")).collect();
+    io.seed(&["demo", "a1", "long.txt"], &text);
+    let note = s(&["demo", "a1", "long.txt"]);
+    let mut obs = Observations::default();
+    let out = run(
+        &io,
+        &mut obs,
+        &FakeGate::allowing(),
+        "read",
+        format!("{{\"path\":\"{}\"}}", note),
+    );
+    assert!(out.ok, "{}", out.output);
+    assert!(
+        out.output.chars().count() <= 16_000,
+        "读回执本身必须留在发送预算内：{}",
+        out.output.chars().count()
+    );
+    assert!(
+        obs.facts()
+            .iter()
+            .all(|f| !f.coverage.covers_all(f.total_lines)),
+        "只读了一部分就不能记全文：{:?}",
         obs.facts()
     );
 }

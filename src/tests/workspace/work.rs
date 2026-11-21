@@ -127,6 +127,107 @@ pub(crate) fn session_gate_rejects_unobserved_and_stale_tracked_paths() {
         Ok(()),
         "untracked 不受门禁限制"
     );
+
+    // 同一版本多次分段读：并集覆盖全文就等价于完整读。
+    let split = [
+        fact(
+            version.clone(),
+            Coverage::Ranges(vec![LineRange::new(1, 1)]),
+        ),
+        fact(
+            version.clone(),
+            Coverage::Ranges(vec![LineRange::new(2, 2)]),
+        ),
+    ];
+    assert_eq!(check(&split, "base.md", Need::Full), Ok(()));
+    let gap = [
+        fact(
+            version.clone(),
+            Coverage::Ranges(vec![LineRange::new(1, 1)]),
+        ),
+        fact(
+            version.clone(),
+            Coverage::Ranges(vec![LineRange::new(1, 1)]),
+        ),
+    ];
+    assert_eq!(
+        check(&gap, "base.md", Need::Full),
+        Err(GateFault::NotFull { total: 2 }),
+        "重复读同一段补不上缺口"
+    );
+
+    // 读完全文后 edit 只改了第 2 行：新版本的观察只有第 2 行，write 仍被拒。
+    let edited_version = content_hash(b"one\nTWO\n");
+    let after_edit = [
+        fact(version.clone(), Coverage::Full),
+        fact(
+            edited_version.clone(),
+            Coverage::Ranges(vec![LineRange::new(2, 2)]),
+        ),
+    ];
+    let edited = crate::capabilities::workspace::api::GateFile {
+        hash: edited_version,
+        size: None,
+    };
+    let gate = SessionWriteGate {
+        workspace: ws.as_ref(),
+        work: "w",
+        agent: "a",
+        facts: &after_edit,
+        worktree: "a",
+    };
+    assert_eq!(
+        gate.check("base.md", Need::Full, Some(&edited)),
+        Err(GateFault::NotFull { total: 2 }),
+        "edit 记的是改动行，不是全文"
+    );
+    assert_eq!(
+        gate.check("base.md", Need::Observed, Some(&edited)),
+        Ok(()),
+        "后续 edit / patch Update 只需观察过新版本"
+    );
+}
+
+/// 目的：压缩把读过的工具行移出上下文后，那条观察不再授权后一轮的写。
+#[test]
+pub(crate) fn compaction_drops_read_authorization() {
+    use crate::capabilities::tools::api::SessionWriteGate;
+    use crate::capabilities::tools::api::WriteGate;
+    use crate::capabilities::tools::api::{
+        Coverage, GateFault, Need, ObservationFact, ObservationSource, Observations,
+    };
+    use crate::capabilities::workspace::api::content_hash;
+
+    let (ws, _dirs, _store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.work_commit_user("w", "base.md", b"one\ntwo\n", 1, 0)
+        .unwrap();
+    let fact = ObservationFact {
+        reply: 10,
+        path: "base.md".to_string(),
+        worktree: "a".to_string(),
+        version: content_hash(b"one\ntwo\n"),
+        coverage: Coverage::Full,
+        total_lines: 2,
+        source: ObservationSource::Read,
+    };
+    let mut obs = Observations::default();
+    obs.set_reply(10);
+    obs.note_fact(fact);
+    obs.retain_from(11);
+    assert!(obs.facts().is_empty(), "压缩点之前的读要一并丢掉");
+    let gate = SessionWriteGate {
+        workspace: ws.as_ref(),
+        work: "w",
+        agent: "a",
+        facts: obs.facts(),
+        worktree: "a",
+    };
+    assert_eq!(
+        gate.check("base.md", Need::Full, None),
+        Err(GateFault::NotObserved),
+        "上下文里已经没有那段读了，不能凭历史授权覆盖"
+    );
 }
 
 /// 目的：过期判定按内容——指纹相同不过期，改到读过的行才过期。
