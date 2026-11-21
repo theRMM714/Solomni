@@ -10,7 +10,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/capabilities/workspace/api.rs` | 入站能力面：寻址 / 文件视图 / 共享区版本化 / 备份恢复的契约与共享类型，以及外部工作区根策略（`product_root` / `policy` / `resolve` / `recheck`）的导出（其它能力只准用这里） |
-| `src/capabilities/workspace/service.rs` | 门面与底座：`Workdirs` / `WorkStore` 只在这里（R12）；`WorkspaceService` 的构造、实例级 gate、树回溯、恢复事务、提交号预留、待恢复事务与外部工作区冲突核校 |
+| `src/capabilities/workspace/service.rs` | 门面与底座：`Workdirs` / `WorkStore` 只在这里（R12）；`WorkspaceService` 的构造、实例级 gate、树回溯、恢复事务、提交号预留、待恢复事务与外部工作区冲突核校；`work_gate_info` 的受管判定与当前 / 基线版本快照 |
 | `src/capabilities/workspace/service/roots.rs` | 外部工作区根的策略：按档位判网络路径 / 共享根 / 文件系统根 / UTF-8 与产品根的互包含（文本 + 落点身份），并做目录与可写探测；创建走 `resolve`，加载复检走 `recheck`，两种用法共用同一份 `policy` |
 | `src/capabilities/workspace/service/commit.rs` | 提交族：`commit_locked` 的两条线分派与对象落盘、`refs/agents/<agent>`（发布线）与 `refs/agents/<agent>/saves`（存档线）的读写、归档点、树铺设、归档清理、存档提交与用户提交 |
 | `src/capabilities/workspace/service/diff.rs` | 差异族：`work_diff` 取两侧树（工作线头 / 指定提交 / 沙箱扫描）、按对象与沙箱文件取文本、组装 `DiffReport` |

@@ -19,6 +19,9 @@ cases:
   - id: cargo/tests::tools::face
     tier: T1
     note: 工具面装配
+  - id: cargo/tests::tools::gate
+    tier: T1
+    note: 先读后改门禁（覆盖 / 过期 / 截断行）
   - id: cargo/tests::tools::patch
     tier: T1
     note: 补丁工具

@@ -393,6 +393,17 @@ impl AgentSession {
         }
     }
 
+    /// 目的：按落盘转录回填观察账本（重启后的写门禁仍看得到活动窗口里的读）。
+    /// 约束：只给重建路径；没有工具面的会话（核心压缩）无账本可填，因此是空操作。
+    pub fn restore_observations(
+        &mut self,
+        facts: Vec<crate::capabilities::tools::api::ObservationFact>,
+    ) {
+        if let Some(t) = self.tools.as_mut() {
+            t.observations.restore_facts(facts);
+        }
+    }
+
     /// 目的：过期内容自动清理的开关（用户在界面上控制成本；落盘在 meta）。
     pub fn set_context_freshness(&mut self, on: bool) {
         self.context_freshness = on;
@@ -703,6 +714,10 @@ impl AgentSession {
         self.dialogue.insert(0, summary_message(summary));
         for m in self.marks.iter_mut() {
             *m = m.saturating_sub(cut) + 1;
+        }
+        // 被压进摘要的那段工具行不再发给模型：它们的观察证据一并作废（重读比误改便宜）。
+        if let Some(t) = self.tools.as_mut() {
+            t.observations.retain_from(plan.up_to);
         }
         Some(self.note_compacted(plan.up_to, summary))
     }

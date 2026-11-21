@@ -213,6 +213,7 @@ impl Turn {
                     freshness: freshness.0,
                     freshness_keep_percent: freshness.1,
                     reads: replay_reads(events),
+                    observations: replay_observations(events, compacted_upto),
                     usage: crate::capabilities::conversation::session::api::last_usage(events),
                 };
                 Session::Single(
@@ -239,6 +240,7 @@ impl Turn {
                 ));
                 s.set_context_freshness(freshness.0);
                 s.set_freshness_keep_percent(freshness.1);
+                s.restore_observations(replay_observations(events, compacted_upto));
                 for (body, fact) in replay_reads(events) {
                     s.note_read_at(body, fact);
                 }
@@ -286,6 +288,40 @@ fn replay_reads(
                     fact,
                 ));
             }
+        }
+    }
+    out
+}
+
+/// 目的：把转录里的观察事实重新装回写门禁的账本（重启后仍认活动窗口里的读）。
+///
+/// 约束：压缩点之前的行已不在发送视图里，它们的观察证据一并作废；回档后的转录本身已截断，不另判。
+fn replay_observations(
+    events: &[serde_json::Value],
+    compacted_upto: u64,
+) -> Vec<crate::capabilities::tools::api::ObservationFact> {
+    let mut out = Vec::new();
+    for ev in events {
+        if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
+            continue;
+        }
+        let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
+            continue;
+        };
+        for l in lines {
+            let Some(t) = l.get("tool") else {
+                continue;
+            };
+            let Ok(c) = serde_json::from_value::<
+                crate::capabilities::conversation::session::api::ToolCallView,
+            >(t.clone()) else {
+                continue;
+            };
+            out.extend(
+                c.observations
+                    .into_iter()
+                    .filter(|f| f.reply >= compacted_upto),
+            );
         }
     }
     out
@@ -559,5 +595,46 @@ impl Turn {
                 spec,
             ),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::replay_observations;
+
+    fn line(reply: u64, path: &str) -> serde_json::Value {
+        serde_json::json!({
+            "type": "transcript",
+            "lines": [{
+                "tool": {
+                    "speaker": "a",
+                    "module": "",
+                    "name": "read",
+                    "ok": true,
+                    "args": "{}",
+                    "output": "",
+                    "reply": reply,
+                    "observations": [{
+                        "reply": reply,
+                        "path": path,
+                        "worktree": "a",
+                        "version": "v",
+                        "coverage": "Full",
+                        "total_lines": 1,
+                        "source": "Read"
+                    }]
+                }
+            }]
+        })
+    }
+
+    /// 目的：重启回填只认压缩点之后的行——压缩掉的读不再授权写。
+    #[test]
+    fn replay_observations_drops_rows_before_the_compaction_point() {
+        let events = vec![line(3, "old.md"), line(5, "live.md")];
+        let facts = replay_observations(&events, 4);
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].path, "live.md");
+        assert_eq!(facts[0].reply, 5);
     }
 }

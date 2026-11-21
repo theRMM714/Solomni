@@ -129,14 +129,7 @@ impl Round {
 }
 
 /// 用户已停止：**不执行**，但每个调用仍留一条失败行，说明为什么没有执行。
-fn refused_batch(
-    plan: &[(Option<String>, String, String)],
-) -> Vec<(
-    String,
-    ToolOutcome,
-    Option<crate::capabilities::workspace::api::ReadFact>,
-    Option<crate::capabilities::tools::api::ShellFacts>,
-)> {
+fn refused_batch(plan: &[(Option<String>, String, String)]) -> Vec<CallDone> {
     plan.iter()
         .map(|(module, _, _)| {
             (
@@ -146,6 +139,7 @@ fn refused_batch(
                     "用户已停止：这一轮的工具调用**没有执行**。".to_string(),
                 ),
                 None,
+                Vec::new(),
                 None,
             )
         })
@@ -446,6 +440,7 @@ pub fn converse_with(
                 call_id: String::new(),
                 reply: reply_id,
                 read: None,
+                observations: Vec::new(),
                 shell: None,
             };
             let msgs_of = reply_msgs(mode, &dialog_raw, std::slice::from_ref(&view));
@@ -527,7 +522,7 @@ pub fn converse_with(
                     .iter()
                     .enumerate()
                     .map(|(i, c)| {
-                        let (label, mut outcome, read, mut shell) = done[i].clone();
+                        let (label, mut outcome, read, observations, mut shell) = done[i].clone();
                         // 模型可见的最末一处：虚拟机档回执与核心自有工具不经过本机执行端口，预算在这里补齐。
                         cap_result(&mut outcome, continuation_for(&label, &plan[i].1));
                         if let Some(facts) = shell.as_mut() {
@@ -546,6 +541,7 @@ pub fn converse_with(
                             call_id: c.id.clone(),
                             reply: reply_id,
                             read,
+                            observations,
                             shell,
                         }
                     })
@@ -605,6 +601,7 @@ pub fn converse_with(
                             call_id: String::new(),
                             reply: reply_id,
                             read: None,
+                            observations: Vec::new(),
                             shell: None,
                         };
                     on_tool(&view);
@@ -666,6 +663,7 @@ pub fn converse_with(
                     call_id: String::new(),
                     reply: reply_id,
                     read: None,
+                    observations: Vec::new(),
                     shell: None,
                 };
                 on_tool(&view);
@@ -747,7 +745,7 @@ pub fn converse_with(
                     .iter()
                     .enumerate()
                     .map(|(i, (_module, tool, _args))| {
-                        let (label, outcome, read, mut shell) = done[i].clone();
+                        let (label, outcome, read, observations, mut shell) = done[i].clone();
                         let mut outcome = annotate(outcome);
                         // 与原生通道同一处预算：信封通道的回执也要收进 16k（read / 模块工具的续读提示各按能力给）。
                         cap_result(&mut outcome, continuation_for(&label, tool));
@@ -767,6 +765,7 @@ pub fn converse_with(
                             call_id: String::new(),
                             reply: reply_id,
                             read,
+                            observations,
                             shell,
                         }
                     })

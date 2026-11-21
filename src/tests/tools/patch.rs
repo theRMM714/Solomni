@@ -176,8 +176,9 @@ pub(crate) fn a_patch_without_end_marker_is_refused_with_the_line() {
 }
 
 #[test]
-pub(crate) fn rewind_clears_the_read_ledger_so_overwrite_needs_a_fresh_read() {
-    // 回档把转录截掉了：那段"我完整读过 / 我写过"的证据随之作废（保守，宁肯让模型重读）。
+pub(crate) fn rewind_leaves_the_file_untracked_so_overwrite_is_allowed() {
+    // 回档把转录与工作线一起截掉了：这个路径不再受管，按 tracked-only 不拦；
+    // 若它仍受管（主线或工作线头里有），门禁会要求重新观察当前版本。
     let io = Arc::new(InMemorySysIo::new());
     let note = s(&["w", "a", "note.txt"]);
     let write = format!(
@@ -225,7 +226,7 @@ pub(crate) fn rewind_clears_the_read_ledger_so_overwrite_needs_a_fresh_read() {
         crate::capabilities::lifecycle::api::RewindTarget::Delete(0),
     )
     .unwrap();
-    // 第二轮：同一个路径已存在，而账本已被清空 → 拒绝并提示先读
+    // 第二轮：路径已存在但未追踪 → 放行（覆盖的是 scratch 内容，不是受管版本）
     let e2 = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -239,16 +240,11 @@ pub(crate) fn rewind_clears_the_read_ledger_so_overwrite_needs_a_fresh_read() {
     })
     .unwrap();
     let v2 = tool_views(&e2);
-    assert!(!v2[0].ok, "回档后旧的读取证据不再算数：{}", v2[0].output);
-    assert!(
-        v2[0].output.contains("必须在本次会话里先"),
-        "{}",
-        v2[0].output
-    );
+    assert!(v2[0].ok, "未追踪路径不设读门禁：{}", v2[0].output);
     assert_eq!(
         io.get(&["w", "a", "note.txt"]).as_deref(),
         Some("v1"),
-        "拒不覆盖"
+        "写入照常落盘"
     );
 }
 

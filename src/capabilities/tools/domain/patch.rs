@@ -233,13 +233,28 @@ pub enum EditFault {
 /// 目的：在内容上按顺序应用若干处整行替换，返回新内容。
 ///    - 按整行比较；行尾风格（\r\n 还是 \n）与原文件一致；末尾有没有换行也保持一致。
 ///    - 失败 = （第几处改动，从 1 数起, 事实）；失败时不返回半成品（调用方整体不写盘）。
+#[cfg(test)]
 pub fn apply_edits(current: &str, edits: &[Edit]) -> Result<String, (usize, EditFault)> {
+    apply_edits_tracked(current, edits).map(|(out, _)| out)
+}
+
+/// 目的：应用结果（新内容 + 新内容里被改过的行区间，1 起、含两端）。
+pub type AppliedEdits = (String, Vec<(usize, usize)>);
+
+/// 目的：与 `apply_edits` 同一套规则，另外返回新内容里被改过的行区间（1 起、含两端）。
+/// 约束：区间按新内容计；空替换（删除若干行）记在删除点所在行，不给"整份都看过"的假授权。
+pub fn apply_edits_tracked(
+    current: &str,
+    edits: &[Edit],
+) -> Result<AppliedEdits, (usize, EditFault)> {
     let eol = if current.contains("\r\n") {
         "\r\n"
     } else {
         "\n"
     };
     let mut lines: Vec<String> = current.lines().map(|l| l.to_string()).collect();
+    // 新内容里的改动区间（0 起、含两端）；后续替换在它前面插入 / 删除时同步平移。
+    let mut marks: Vec<(usize, usize)> = Vec::new();
     for (k, edit) in edits.iter().enumerate() {
         let want: Vec<&str> = edit.search.lines().collect();
         let hits = find_lines(&lines, &want);
@@ -256,13 +271,48 @@ pub fn apply_edits(current: &str, edits: &[Edit]) -> Result<String, (usize, Edit
         }
         let at = hits[0];
         let new: Vec<String> = edit.replace.lines().map(|l| l.to_string()).collect();
-        lines.splice(at..at + want.len(), new);
+        let removed_end = at + want.len();
+        let inserted = new.len();
+        let delta = inserted as isize - want.len() as isize;
+        for (s, e) in marks.iter_mut() {
+            if *s >= removed_end {
+                *s = (*s as isize + delta) as usize;
+                *e = (*e as isize + delta) as usize;
+            } else if *e >= at {
+                *s = (*s).min(at);
+                *e = if *e >= removed_end {
+                    (*e as isize + delta) as usize
+                } else {
+                    at + inserted.saturating_sub(1)
+                };
+            }
+        }
+        let mark = if inserted == 0 {
+            (at, at)
+        } else {
+            (at, at + inserted - 1)
+        };
+        lines.splice(at..removed_end, new);
+        marks.push(mark);
     }
     let mut out = lines.join(eol);
     if current.ends_with('\n') && !out.is_empty() {
         out.push_str(eol);
     }
-    Ok(out)
+    let total = out.lines().count();
+    let ranges = if total == 0 {
+        Vec::new()
+    } else {
+        marks
+            .into_iter()
+            .map(|(s, e)| {
+                let s = s.min(total - 1);
+                let e = e.min(total - 1).max(s);
+                (s + 1, e + 1)
+            })
+            .collect()
+    };
+    Ok((out, ranges))
 }
 
 /// 整行精确匹配的全部起点。

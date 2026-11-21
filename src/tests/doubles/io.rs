@@ -90,12 +90,27 @@ impl SysIo for InMemorySysIo {
             .get(&key)
             .cloned()
             .ok_or_else(|| format!("读取失败：{} 不存在", key))?;
+        let hash = crate::capabilities::workspace::api::content_hash(text.as_bytes());
         Ok(FileRead {
             bytes: text.len(),
             text,
             lossy: self.lossy,
             cut: self.cut,
+            hash,
         })
+    }
+
+    fn fingerprint(&self, path: &std::path::Path) -> Result<Option<String>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        let key = path.to_string_lossy().into_owned();
+        Ok(self
+            .files
+            .lock()
+            .expect("锁")
+            .get(&key)
+            .map(|text| crate::capabilities::workspace::api::content_hash(text.as_bytes())))
     }
     fn list(
         &self,

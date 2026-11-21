@@ -152,6 +152,11 @@ pub struct Observations {
     /// 目的：本次调用里 `read` 产生的**读取事实**（哪个工作树、哪个路径、哪几行、当时的指纹）。
     /// 约束：取走后挂到工具行上随转录落盘；发送视图据它判定这段内容是否过期。
     reads: Vec<crate::capabilities::workspace::api::ReadFact>,
+    /// 目的：本次调用产生的观察事实（读、写、改、patch）；门禁按"路径 + 整份版本 + 覆盖"授权。
+    /// 约束：挂在工具行上随转录落盘；不像 `seen` 那样只记 FNv1a，也不把"改过"当"读过全文"。
+    facts: Vec<crate::capabilities::tools::api::ObservationFact>,
+    /// 当前正在执行的模型回复号；新产生的观察事实记上它，压缩时按它丢弃失效观察。
+    reply: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -169,6 +174,34 @@ impl Observations {
         self.written.clear();
         self.removed.clear();
         self.reads.clear();
+        self.facts.clear();
+    }
+
+    /// 目的：告诉账本"接下来是第几次回复在干活"；事实据此带上回复号。
+    pub(crate) fn set_reply(&mut self, reply: u64) {
+        self.reply = reply;
+    }
+
+    /// 目的：当前回复号（构造观察事实时用）。
+    pub fn reply(&self) -> u64 {
+        self.reply
+    }
+
+    /// 目的：当前账本里的全部观察事实（门禁只读投影）。
+    pub fn facts(&self) -> &[crate::capabilities::tools::api::ObservationFact] {
+        &self.facts
+    }
+
+    /// 目的：按落盘转录回填观察事实（重启 / 回档后门禁仍能看到活动窗口里的读）。
+    /// 约束：先清空再装——调用方给的已经是活动窗口的投影，不叠加进程里那一份。
+    pub fn restore_facts(&mut self, facts: Vec<crate::capabilities::tools::api::ObservationFact>) {
+        self.facts = facts;
+    }
+
+    /// 目的：压缩发送视图后，丢掉起点早于 `up_to` 的观察事实——那段内容模型已经看不到了。
+    /// 约束：回复号就是该回复第一行的行 id，所以 `reply < up_to` 等价于"这次观察已被压缩掉"。
+    pub fn retain_from(&mut self, up_to: u64) {
+        self.facts.retain(|f| f.reply >= up_to);
     }
 
     /// 目的：取走"这次调用写过哪些路径"（取走即清空，下一次调用从零开始）。
@@ -189,6 +222,11 @@ impl Observations {
     /// 目的：记一条读取事实——发送视图据此判断这段读过的内容过期没有。
     pub(crate) fn note_read_fact(&mut self, fact: crate::capabilities::workspace::api::ReadFact) {
         self.reads.push(fact);
+    }
+
+    /// 目的：记一条观察事实（门禁的授权证据）。
+    pub(crate) fn note_fact(&mut self, fact: crate::capabilities::tools::api::ObservationFact) {
+        self.facts.push(fact);
     }
 
     /// 目的：记一次删除——work_commit 要把它写成 `deletes`，否则沙箱删了、工作线里还留着。
@@ -214,6 +252,11 @@ impl Observations {
         self.written.insert(path.to_path_buf());
     }
 
+    /// 目的：只记"这个路径被这次调用改过"（给存档线自动提交用），不冒充"整份读过"。
+    pub(crate) fn note_touched(&mut self, path: &Path) {
+        self.written.insert(path.to_path_buf());
+    }
+
     /// 目的：合并一个**并发分支**的账本（分支里只跑声明可并发的只读工具）。
     ///    规则与逐个记账一致：完整读到记为所见、部分读到只补空白（读到一半不会让已知变成未知）。
     ///    调用方**必须按原始调用顺序**合并——那样并发批次与串行执行的结果完全相同。
@@ -232,6 +275,7 @@ impl Observations {
         }
         // 读取事实是"这次调用读到的东西"，并发分支按原序并入（去重靠事实本身的内容）。
         self.reads.extend(branch.reads.iter().cloned());
+        self.facts.extend(branch.facts.iter().cloned());
     }
 
     fn known(&self, path: &Path) -> Option<u64> {

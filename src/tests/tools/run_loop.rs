@@ -317,6 +317,7 @@ pub(crate) fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did()
             &sb,
             &test_systools().tools,
             std::mem::take(obs),
+            None,
             "edit",
             &full,
         );
@@ -421,6 +422,7 @@ pub(crate) fn builtin_edit_refuses_files_it_cannot_see_whole() {
             &sb,
             &test_systools().tools,
             std::mem::take(&mut obs),
+            None,
             "edit",
             &args,
         );
@@ -451,6 +453,7 @@ pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
                 &sb,
                 &test_systools().tools,
                 std::mem::take(obs),
+                None,
                 tool,
                 &args,
             );
@@ -617,4 +620,127 @@ pub(crate) fn service_ops_are_scoped_to_the_agent_module_face() {
         "未分配模块的服务不能进提示词"
     );
     assert_eq!(filtered["m0"].len(), 1);
+}
+
+/// 目的：同一批里的 read 不授权同批的 write；下一批才生效。
+/// 约束：账本取**批前快照**，读结果要等这一批回填进转录后才算模型看过。
+#[test]
+pub(crate) fn read_in_the_same_batch_does_not_authorize_write() {
+    use crate::capabilities::llm::api::ToolCall;
+    let io = Arc::new(InMemorySysIo::new());
+    io.seed(&["w", "a", "base.md"], "base\n");
+    let path = abs(&["w", "a", "base.md"]);
+    let ws = test_workspace_store(
+        Arc::new(InMemoryWorkspace::new()),
+        Arc::new(InMemoryWorkStore::new()),
+    );
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.work_commit_user("w", "base.md", b"base\n", 1, 0)
+        .unwrap();
+    let write = || ToolCall {
+        id: "write".to_string(),
+        name: "write".to_string(),
+        args_json: serde_json::json!({"path": path, "content": "new\n"}).to_string(),
+    };
+    let read = || ToolCall {
+        id: "read".to_string(),
+        name: "read".to_string(),
+        args_json: serde_json::json!({"path": path}).to_string(),
+    };
+    let declared = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut m = native_member(
+        "a",
+        Arc::clone(&io),
+        vec![
+            NativeStep::Calls(vec![read(), write()]),
+            NativeStep::Calls(vec![read(), write()]),
+            NativeStep::Text("{\"type\":\"say\",\"text\":\"完成\"}".to_string()),
+        ],
+        declared,
+        seen,
+    );
+    {
+        let t = m.tools.as_mut().expect("工具环境");
+        let mut sb = t.face.sandbox.clone();
+        sb.work_name = "w".to_string();
+        sb.session = "w".to_string();
+        sb.shared = abs(&["w", "work"]);
+        sb.private = abs(&["w", "a"]);
+        t.face.sandbox = sb.clone();
+        t.face.fence = crate::kernel::api::fence::FenceSpec::for_session(&sb, &[], false);
+        t.workspace = Some(ws);
+    }
+    let exec = run_execution(std::slice::from_mut(&mut m), "任务", &test_prompts());
+    let trace = exec.traces.get("a").expect("工具记录");
+    let writes: Vec<&crate::capabilities::conversation::session::api::ToolCallView> =
+        trace.iter().filter(|v| v.name == "write").collect();
+    assert_eq!(writes.len(), 2, "两批各写一次：{trace:?}");
+    assert!(
+        !writes[0].ok && writes[0].output.contains("FS_NOT_OBSERVED"),
+        "同批 read 不能授权 write：{:?}",
+        writes[0].output
+    );
+    assert!(
+        writes[1].ok,
+        "上一批的 read 已进转录，下一次 write 应放行：{:?}",
+        writes[1].output
+    );
+}
+
+/// 目的：work_commit 是发布口——把没读过的受管改动提交上去等于绕过 write 门禁，必须硬拒。
+/// 约束：只拦 tracked 且当前内容与基线不同的路径；新文件与删除不在这一道门里。
+#[test]
+pub(crate) fn work_commit_refuses_unobserved_tracked_changes() {
+    use crate::capabilities::llm::api::ToolCall;
+    let io = Arc::new(InMemorySysIo::new());
+    let store = Arc::new(InMemoryWorkStore::new());
+    let ws = test_workspace_store(Arc::new(InMemoryWorkspace::new()), store.clone());
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.work_commit_user("w", "base.md", b"base\n", 1, 0)
+        .unwrap();
+    // 沙箱里改过、但模型没读过：账本为空，commit 必须拒绝。
+    store.seed(&abs(&["w", "a"]), "base.md", "changed\n");
+    let commit = ToolCall {
+        id: "commit".to_string(),
+        name: "work_commit".to_string(),
+        args_json: serde_json::json!({"paths": ["base.md"], "message": "未读提交"}).to_string(),
+    };
+    let mut m = native_member(
+        "a",
+        Arc::clone(&io),
+        vec![
+            NativeStep::Calls(vec![commit]),
+            NativeStep::Text("{\"type\":\"say\",\"text\":\"完成\"}".to_string()),
+        ],
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(Vec::new())),
+    );
+    {
+        let t = m.tools.as_mut().expect("工具环境");
+        let mut sb = t.face.sandbox.clone();
+        sb.work_name = "w".to_string();
+        sb.session = "w".to_string();
+        sb.shared = abs(&["w", "work"]);
+        sb.private = abs(&["w", "a"]);
+        t.face.sandbox = sb.clone();
+        t.face.fence = crate::kernel::api::fence::FenceSpec::for_session(&sb, &[], false);
+        t.handlers = crate::capabilities::workspace::api::work_handlers(
+            &ws,
+            &sb,
+            &["work_commit".to_string()],
+        );
+        t.face.allowed.push("work_commit".to_string());
+        t.workspace = Some(Arc::clone(&ws));
+    }
+    let exec = run_execution(std::slice::from_mut(&mut m), "任务", &test_prompts());
+    let trace = exec.traces.get("a").expect("工具记录");
+    let commits: Vec<&crate::capabilities::conversation::session::api::ToolCallView> =
+        trace.iter().filter(|v| v.name == "work_commit").collect();
+    assert_eq!(commits.len(), 1, "一次提交：{trace:?}");
+    assert!(
+        !commits[0].ok && commits[0].output.contains("FS_NOT_OBSERVED"),
+        "未读的受管改动不能经 work_commit 发布：{:?}",
+        commits[0].output
+    );
 }

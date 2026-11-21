@@ -19,6 +19,8 @@ pub struct FileRead {
     pub lossy: bool,
     /// 目的：只读了开头部分（超出单次读取上限）。
     pub cut: bool,
+    /// 目的：**整份**原始字节的 SHA-256（不是截断前缀）；读取失败不算。
+    pub hash: String,
 }
 
 /// 目的：目录里的一项（列目录用；大小只对文件有意义，目录恒为 0）。
@@ -32,6 +34,9 @@ pub struct DirEntry {
 ///   读严格按 UTF-8 解码，非法字节如实标注；写一律 UTF-8；列目录只报名字/类型/大小。
 pub trait SysIo: Send + Sync {
     fn read(&self, path: &std::path::Path) -> Result<FileRead, String>;
+    /// 目的：整份文件的 SHA-256；不存在 = Ok(None)，其它错误如实报。
+    /// 约束：按原始字节流式算，不经过 UTF-8 解码；不用于判断目录。
+    fn fingerprint(&self, path: &std::path::Path) -> Result<Option<String>, String>;
     fn write(&self, path: &std::path::Path, content: &str) -> Result<(), String>;
     /// 列一个目录（按名字排序）。路径不是目录时如实报错——调用方据此把 read 的失败引导到 list。
     fn list(&self, path: &std::path::Path) -> Result<Vec<DirEntry>, String>;

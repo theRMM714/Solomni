@@ -270,6 +270,9 @@ pub struct ToolCallView {
     /// 约束：只有"整份原文都读到"的读取才有；发送视图据此判定这段内容过期没有（见 `ReadFact`）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read: Option<crate::capabilities::workspace::api::ReadFact>,
+    /// 目的：这次调用产生的观察事实（读过 / 写过 / 改过哪些行、当时整份版本）；发送视图据此判写入门禁。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observations: Vec<crate::capabilities::tools::api::ObservationFact>,
     /// 目的：这次调用若是一次 shell，执行层当场算好的结构化事实（耗时 / 围栏准备 / 落点 / 退出码 / 状态 / 截断）；
     ///   实况卡片与会话回放都读它，不解析回执文本。
     #[serde(default, skip_serializing_if = "Option::is_none")]

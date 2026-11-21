@@ -19,6 +19,241 @@ pub use crate::capabilities::tools::domain::systool::{
     is_freeform, names, patch_decl, refuse, tool_notes,
 };
 
+pub use crate::capabilities::workspace::api::GateFile;
+use crate::capabilities::workspace::api::Workspace;
+
+/// 目的：一个从 1 开始、闭区间的行范围。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LineRange {
+    /// 目的：起点行号（1 起）。
+    pub from: u32,
+    /// 目的：终点行号（1 起、含此行）。
+    pub to: u32,
+}
+
+impl LineRange {
+    /// 目的：按端点造一个闭区间。
+    pub fn new(from: u32, to: u32) -> LineRange {
+        LineRange { from, to }
+    }
+}
+
+/// 目的：这次观察覆盖了文件的哪些行。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Coverage {
+    /// 目的：整份原文都看过（完整读、整份写、patch Add）。
+    Full,
+    /// 目的：只看过这些行（分段读、edit、patch Update）。
+    Ranges(Vec<LineRange>),
+}
+
+impl Coverage {
+    /// 目的：行区间并集是否覆盖 1..=total；Full 直接为真。
+    /// 约束：空文件（total == 0）只有 Full 才能覆盖；区间不能凭空覆盖不存在的行。
+    pub fn covers_all(&self, total: u32) -> bool {
+        match self {
+            Coverage::Full => true,
+            Coverage::Ranges(ranges) => {
+                if total == 0 {
+                    return false;
+                }
+                let mut sorted: Vec<LineRange> = ranges
+                    .iter()
+                    .copied()
+                    .filter(|r| r.from <= r.to && r.from <= total)
+                    .map(|r| LineRange::new(r.from, r.to.min(total)))
+                    .collect();
+                sorted.sort_by_key(|r| r.from);
+                let mut next = 1u32;
+                for r in sorted {
+                    if r.from > next {
+                        return false;
+                    }
+                    if r.to >= next {
+                        next = r.to.saturating_add(1);
+                    }
+                    if next > total {
+                        return true;
+                    }
+                }
+                next > total
+            }
+        }
+    }
+}
+
+/// 目的：观察来源，只用于诊断与显示，不参与授权判定。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ObservationSource {
+    /// 目的：完整或分段 read。
+    Read,
+    /// 目的：整份 write。
+    Write,
+    /// 目的：单处或多处 edit。
+    Edit,
+    /// 目的：patch 的 Add 块。
+    PatchAdd,
+    /// 目的：patch 的 Update 块。
+    PatchUpdate,
+    /// 目的：work_diff 的差异。
+    Diff,
+}
+
+/// 目的：一条观察事实——某个路径的某个整份版本，被看过哪些行。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ObservationFact {
+    /// 目的：这条观察来自哪一次模型回复（= 该回复第一行的行 id）；压缩按它丢弃失效观察。
+    pub reply: u64,
+    /// 目的：工作树内的相对路径（斜杠分隔）。
+    pub path: String,
+    /// 目的：空 = 主副本；否则 = agent 沙箱名。
+    pub worktree: String,
+    /// 目的：整份内容的 SHA-256 十六进制串；必须与 ReadFact.blob / Change.hash 同算法。
+    pub version: String,
+    /// 目的：这条事实覆盖了该版本的哪些行。
+    pub coverage: Coverage,
+    /// 目的：该版本的逻辑行数；区间覆盖是否等于全文时用。
+    pub total_lines: u32,
+    /// 目的：这条事实由哪种操作产生（诊断与显示）。
+    pub source: ObservationSource,
+}
+
+impl ObservationFact {
+    /// 目的：这条事实是否覆盖了该版本的全文。
+    pub fn is_full(&self) -> bool {
+        self.coverage.covers_all(self.total_lines)
+    }
+}
+
+/// 目的：写入门禁要求观察到的程度。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Need {
+    /// 目的：观察过该版本即可（edit 单处、patch Update、work_commit）。
+    Observed,
+    /// 目的：必须完整观察过该版本（write 覆盖、patch Add 覆盖、replace_all）。
+    Full,
+}
+
+/// 目的：写入门禁拒绝的原因；带稳定错误码，供模型与 UI 区分。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GateFault {
+    /// 目的：当前上下文里没有这个版本的任何观察。
+    NotObserved,
+    /// 目的：观察到的是旧版本；当前版本已经变了。
+    Stale {
+        /// 目的：账本里那次的版本哈希。
+        observed: String,
+        /// 目的：磁盘上当前的版本哈希。
+        current: String,
+    },
+    /// 目的：观察过，但只覆盖了部分行，而这次要求全文。
+    NotFull {
+        /// 目的：该版本的逻辑行数。
+        total: u32,
+    },
+    /// 目的：当前内容存在，但没有权限/信息判断。
+    Unavailable(String),
+}
+
+impl GateFault {
+    /// 目的：稳定错误码。
+    pub fn code(&self) -> &'static str {
+        match self {
+            GateFault::NotObserved => "FS_NOT_OBSERVED",
+            GateFault::Stale { .. } => "FS_STALE_VERSION",
+            GateFault::NotFull { .. } => "FS_NOT_FULLY_READ",
+            GateFault::Unavailable(_) => "FS_GATE_UNAVAILABLE",
+        }
+    }
+
+    /// 目的：给模型看的中文说明；保留现有测试依赖的关键短语。
+    pub fn message(&self, path: &str) -> String {
+        let body = match self {
+            GateFault::NotObserved => format!("要先看过 {} 当前版本才能改；请 read 后再改。", path),
+            GateFault::Stale { .. } => format!(
+                "{} 在你读过之后又被改动过（内容与当时不同）：请重新 read 一遍再决定怎么写，不要凭记忆覆盖。",
+                path
+            ),
+            GateFault::NotFull { .. } => format!(
+                "这次要整份覆盖 {}，但你只读到一部分：整份覆盖会丢掉没读到的内容。请先完整 read 全文，或改用 edit 只改那一处。",
+                path
+            ),
+            GateFault::Unavailable(why) => format!(
+                "暂时无法确认 {} 的当前版本（{}）；请稍后重试，不要凭记忆覆盖。",
+                path, why
+            ),
+        };
+        format!("[{}] {}", self.code(), body)
+    }
+}
+
+/// 目的：写入门禁端口；None = 不做门禁（内部写、直调测试）。
+/// 约束：current = 即将被替换/覆盖的磁盘版本；None = 文件不存在。
+pub trait WriteGate: Send + Sync {
+    /// 目的：判断账本是否足以支撑这次写入；`current` 是即将被覆盖的磁盘版本。
+    fn check(&self, path: &str, need: Need, current: Option<&GateFile>) -> Result<(), GateFault>;
+}
+
+/// 目的：一次工具调用用的只读门禁——按路径向工作区取快照，再对账本里的观察事实。
+/// 约束：只在调用期间借用；每次 check 都重新取该路径的当前状态，不缓存、不跨调用复用。
+pub struct SessionWriteGate<'a> {
+    /// 目的：取 tracked / 当前 / 基线版本的工作区。
+    pub workspace: &'a (dyn Workspace + Send + Sync),
+    /// 目的：工作名（定位工作线）。
+    pub work: &'a str,
+    /// 目的：agent 名（定位它的工作线）。
+    pub agent: &'a str,
+    /// 目的：当前上下文账本里的观察事实（调用方已按批前快照裁剪）。
+    pub facts: &'a [ObservationFact],
+    /// 目的：这些事实属于哪棵工作树（空 = 主副本）。
+    pub worktree: &'a str,
+}
+
+impl WriteGate for SessionWriteGate<'_> {
+    fn check(&self, path: &str, need: Need, current: Option<&GateFile>) -> Result<(), GateFault> {
+        let infos = self
+            .workspace
+            .work_gate_info(self.work, self.agent, &[path.to_string()])
+            .map_err(GateFault::Unavailable)?;
+        let Some(info) = infos.first() else {
+            return Err(GateFault::Unavailable(format!(
+                "拿不到 {} 的追踪状态",
+                path
+            )));
+        };
+        if !info.tracked {
+            return Ok(());
+        }
+        let target = current.or(info.current.as_ref()).or(info.base.as_ref());
+        let Some(target) = target else {
+            return Err(GateFault::NotObserved);
+        };
+        let mine: Vec<&ObservationFact> = self
+            .facts
+            .iter()
+            .filter(|f| f.path == path && f.worktree == self.worktree)
+            .collect();
+        let same: Vec<&&ObservationFact> =
+            mine.iter().filter(|f| f.version == target.hash).collect();
+        if same.is_empty() {
+            return match mine.first() {
+                Some(old) => Err(GateFault::Stale {
+                    observed: old.version.clone(),
+                    current: target.hash.clone(),
+                }),
+                None => Err(GateFault::NotObserved),
+            };
+        }
+        match need {
+            Need::Observed => Ok(()),
+            Need::Full if same.iter().any(|f| f.is_full()) => Ok(()),
+            Need::Full => Err(GateFault::NotFull {
+                total: same[0].total_lines,
+            }),
+        }
+    }
+}
+
 /// 目的：工具总表、角色表与名字表的**能力面**：别的能力只问"这一席能用哪些工具"，**看不见三张表的字段**。
 /// 约束：表本体（`SystemTools`）是纯数据、没有端口；组合根装载一次，`runtime` 只持 `Arc<dyn Tools>`
 ///   并与协作会话共享（见 `service.rs`）。
@@ -83,12 +318,14 @@ pub trait ToolExec: Send + Sync {
     fn run_shell(&self, run: &crate::kernel::ports::ShellRun<'_>) -> ToolOutcome;
 
     /// 执行一次**内置工具**：放行、寻址、参数校验在本能力的 domain，机制在 `SysIo` 后面。
-    /// 参数：`observations` = 会话的观察账本（按值传入）；返回结论与更新后的账本（见 `Recorded`）。
+    /// 参数：`observations` = 会话的观察账本（按值传入）；`gate` = 写入门禁（`None` = 直调兜底，只给旧测试用）。
+    /// 返回：结论与更新后的账本（见 `Recorded`）。
     fn run_builtin(
         &self,
         sb: &crate::capabilities::workspace::api::Sandbox,
         builtin_tools: &ToolBook,
         observations: Observations,
+        gate: Option<&dyn WriteGate>,
         name: &str,
         args_json: &str,
     ) -> Recorded;

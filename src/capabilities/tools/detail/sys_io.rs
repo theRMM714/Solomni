@@ -4,8 +4,26 @@
 //! 联动：实现 `ports::SysIo`，由 `main.rs` 构造注入 `service/`。
 
 use crate::capabilities::tools::ports::{DirEntry, FileRead, SysIo};
+use crate::capabilities::workspace::api::Sha256;
 use std::io::Read;
 use std::path::Path;
+
+/// 目的：流式算整份原始字节的 SHA-256；内存只保留一个块。
+fn hash_file(path: &Path) -> Result<String, String> {
+    let mut file = std::fs::File::open(path).map_err(|e| format!("读取失败：{}", e))?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| format!("读取失败：{}", e))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hasher.finish_hex())
+}
 
 /// 删除链接本身：Windows 的目录链接 / junction 可能只认 `remove_dir`，先试 `remove_file` 再退。
 fn remove_link(path: &Path) -> Result<(), String> {
@@ -116,12 +134,23 @@ impl SysIo for FsSysIo {
                 }
             }
         };
+        let hash = hash_file(path)?;
         Ok(FileRead {
             text,
             bytes: total,
             lossy,
             cut: n < total,
+            hash,
         })
+    }
+
+    fn fingerprint(&self, path: &Path) -> Result<Option<String>, String> {
+        match std::fs::metadata(path) {
+            Ok(meta) if meta.is_file() => hash_file(path).map(Some),
+            Ok(_) => Err(format!("不是一个普通文件：{}", path.display())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("读取失败：{}", e)),
+        }
     }
 
     fn write(&self, path: &Path, content: &str) -> Result<(), String> {

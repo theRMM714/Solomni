@@ -29,7 +29,7 @@ tools:
   write:
     capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
-    desc: 整份写入文本文件（UTF-8）：文件不存在则新建；已存在则整份覆盖，但**要求你在本次会话里先完整读过它、或在本次会话里写过它**（核心刚写过的内容它知道，不必再读一遍；只改一处请用 edit）。
+    desc: 整份写入文本文件（UTF-8）：文件不存在则新建；已存在则整份覆盖。受管文件（主线或你的工作线里的路径）**要求你当前上下文里仍能完整看到它这一版**（读过、或你刚刚整份写过）；读后它又被改过会被拒绝，先重读。新建或未受管文件不要求先读；只改一处请用 edit。
     params:
       path:
         type: string
@@ -42,7 +42,7 @@ tools:
   edit:
     capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
-    desc: 对已存在的文本文件做一处精确替换（按字面匹配，不动别处）。
+    desc: 对已存在的文本文件做一处精确替换（按字面匹配，不动别处）。受管文件要求你当前上下文里有它这一版；replace_all 要求看过全文。
     params:
       path:
         type: string

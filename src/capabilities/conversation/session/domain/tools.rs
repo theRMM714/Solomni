@@ -325,6 +325,7 @@ impl CoreVerify for MemberTools {
             &self.face.sandbox,
             &self.face.builtin_tools,
             std::mem::take(&mut self.observations),
+            None,
             name,
             args,
         );
