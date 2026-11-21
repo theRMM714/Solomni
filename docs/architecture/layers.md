@@ -75,6 +75,7 @@
 
 ## 检查
 - 分层与依赖方向 → T0 结构审查的 apiOnly / apiPorts / domainPorts / foreignImpl / coreCycles / reverse / presentation / layers 判据（`tests/gates/structure/dependency.js`、`tests/gates/structure/layers.js`；清单 `node run-tests.js --list`）。
+- 呈现层「每屏许取哪几个能力的 ::api」→ `structure/presentation-inbound`（`tests/gates/structure/presentation-inbound.js`，权威清单 `docs/presentation/inbound.yaml`）：清单外的取用报外溢、清单里没用到的报过期，呈现层内部只许取根、兄弟文件不得互相引用。
 - 声明层号 == 重算层号、层号连续、目录全覆盖 → `node tests/gates/structure/layers.js`。
 - kernel 机制：登记双向对账、同层互依赖、声明层号 == 重算层号、机制成环 → `node tests/gates/structure/kernel-mechanisms.js`。
 - 结构图与层表渲染 → `node tests/gates/structure/graph.js`、`node tests/docs-sync.mjs`。
