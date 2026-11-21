@@ -189,12 +189,9 @@ fn coverage_of_changes(lines: &[(u32, u32)]) -> Coverage {
     if lines.is_empty() {
         return Coverage::Ranges(Vec::new());
     }
-    Coverage::Ranges(
-        lines
-            .iter()
-            .map(|(from, to)| LineRange::new(*from, *to))
-            .collect(),
-    )
+    Coverage::Ranges(crate::capabilities::tools::api::normalize_ranges(
+        lines.iter().map(|(from, to)| LineRange::new(*from, *to)),
+    ))
 }
 
 /// list：列目录（名字 / 是否目录 / 字节数，按名字排序）。
@@ -852,7 +849,7 @@ fn apply_patch(
                                     .iter()
                                     .map(|(from, to)| LineRange::new(*from as u32, *to as u32)),
                             );
-                            coverage.insert(path.clone(), Coverage::Ranges(all));
+                            coverage.insert(path.clone(), Coverage::Ranges(all).normalized());
                         }
                         sources
                             .entry(path.clone())

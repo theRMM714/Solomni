@@ -303,14 +303,23 @@ pub fn apply_edits_tracked(
     let ranges = if total == 0 {
         Vec::new()
     } else {
-        marks
+        let mut clamped: Vec<(usize, usize)> = marks
             .into_iter()
             .map(|(s, e)| {
                 let s = s.min(total - 1);
                 let e = e.min(total - 1).max(s);
                 (s + 1, e + 1)
             })
-            .collect()
+            .collect();
+        clamped.sort_unstable();
+        let mut merged: Vec<(usize, usize)> = Vec::with_capacity(clamped.len());
+        for (s, e) in clamped {
+            match merged.last_mut() {
+                Some(last) if s <= last.1.saturating_add(1) => last.1 = last.1.max(e),
+                _ => merged.push((s, e)),
+            }
+        }
+        merged
     };
     Ok((out, ranges))
 }
@@ -588,6 +597,26 @@ mod tests {
         )
         .expect("删除");
         assert_eq!(out3, "留\n");
+    }
+
+    #[test]
+    fn adjacent_edits_merge_into_one_range() {
+        let (out, ranges) = apply_edits_tracked(
+            "一\n二\n三\n",
+            &[
+                Edit {
+                    search: "一".to_string(),
+                    replace: "一改".to_string(),
+                },
+                Edit {
+                    search: "二".to_string(),
+                    replace: "二改".to_string(),
+                },
+            ],
+        )
+        .expect("两处都能改");
+        assert_eq!(out, "一改\n二改\n三\n");
+        assert_eq!(ranges, vec![(1, 2)], "相邻改动合并成一段，避免碎片事实");
     }
 
     #[test]

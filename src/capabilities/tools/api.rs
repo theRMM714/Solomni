@@ -48,6 +48,25 @@ pub enum Coverage {
 }
 
 impl Coverage {
+    /// 目的：把一组行区间排序、去重、合并相邻与重叠区间。
+    /// 约束：只保留 from <= to 的合法区间；相邻区间合并（1-2 + 3-4 = 1-4）不改变覆盖语义。
+    pub fn normalized(&self) -> Coverage {
+        match self {
+            Coverage::Full => Coverage::Full,
+            Coverage::Ranges(ranges) => Coverage::Ranges(normalize_ranges(ranges.iter().copied())),
+        }
+    }
+
+    /// 目的：两次观察的覆盖并集；任一方为 Full 则结果 Full。
+    pub fn union(&self, other: &Coverage) -> Coverage {
+        match (self, other) {
+            (Coverage::Full, _) | (_, Coverage::Full) => Coverage::Full,
+            (Coverage::Ranges(a), Coverage::Ranges(b)) => {
+                Coverage::Ranges(normalize_ranges(a.iter().chain(b).copied()))
+            }
+        }
+    }
+
     /// 目的：行区间并集是否覆盖 1..=total；Full 直接为真。
     /// 约束：空文件（total == 0）只有 Full 才能覆盖；区间不能凭空覆盖不存在的行。
     pub fn covers_all(&self, total: u32) -> bool {
@@ -57,13 +76,11 @@ impl Coverage {
                 if total == 0 {
                     return false;
                 }
-                let mut sorted: Vec<LineRange> = ranges
-                    .iter()
-                    .copied()
-                    .filter(|r| r.from <= r.to && r.from <= total)
+                let sorted: Vec<LineRange> = normalize_ranges(ranges.iter().copied())
+                    .into_iter()
+                    .filter(|r| r.from <= total)
                     .map(|r| LineRange::new(r.from, r.to.min(total)))
                     .collect();
-                sorted.sort_by_key(|r| r.from);
                 let mut next = 1u32;
                 for r in sorted {
                     if r.from > next {
@@ -80,6 +97,22 @@ impl Coverage {
             }
         }
     }
+}
+
+/// 目的：排序、去重并合并相邻/重叠的行区间；输入里的空区间（from > to）直接丢弃。
+pub fn normalize_ranges(ranges: impl IntoIterator<Item = LineRange>) -> Vec<LineRange> {
+    let mut sorted: Vec<LineRange> = ranges.into_iter().filter(|r| r.from <= r.to).collect();
+    sorted.sort_by_key(|r| (r.from, r.to));
+    let mut out: Vec<LineRange> = Vec::with_capacity(sorted.len());
+    for r in sorted {
+        match out.last_mut() {
+            Some(last) if r.from <= last.to.saturating_add(1) => {
+                last.to = last.to.max(r.to);
+            }
+            _ => out.push(r),
+        }
+    }
+    out
 }
 
 /// 目的：观察来源，只用于诊断与显示，不参与授权判定。
@@ -116,13 +149,6 @@ pub struct ObservationFact {
     pub total_lines: u32,
     /// 目的：这条事实由哪种操作产生（诊断与显示）。
     pub source: ObservationSource,
-}
-
-impl ObservationFact {
-    /// 目的：这条事实是否覆盖了该版本的全文。
-    pub fn is_full(&self) -> bool {
-        self.coverage.covers_all(self.total_lines)
-    }
 }
 
 /// 目的：写入门禁要求观察到的程度。
@@ -244,12 +270,16 @@ impl WriteGate for SessionWriteGate<'_> {
                 None => Err(GateFault::NotObserved),
             };
         }
+        // 同一版本的多次分段读按并集授权：读满 1..=total 就等价于一次完整读。
+        // 不同版本的事实不合并（版本相同才走到这里）；total_lines 取最小值，宁可少授权。
+        let total = same.iter().map(|f| f.total_lines).min().unwrap_or(0);
+        let coverage = same.iter().fold(Coverage::Ranges(Vec::new()), |acc, f| {
+            acc.union(&f.coverage)
+        });
         match need {
             Need::Observed => Ok(()),
-            Need::Full if same.iter().any(|f| f.is_full()) => Ok(()),
-            Need::Full => Err(GateFault::NotFull {
-                total: same[0].total_lines,
-            }),
+            Need::Full if coverage.covers_all(total) => Ok(()),
+            Need::Full => Err(GateFault::NotFull { total }),
         }
     }
 }
