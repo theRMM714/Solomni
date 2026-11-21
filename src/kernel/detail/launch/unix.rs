@@ -44,11 +44,6 @@ pub(super) fn interpreter_roots_for_exe(exe: &Path) -> Vec<PathBuf> {
     dirs.into_iter().filter(|d| d.is_dir()).collect()
 }
 
-/// 目的：其它平台的围栏只读放行，目录存在即可。
-pub(super) fn interpreter_dir_usable(_dir: &Path) -> Result<(), String> {
-    Ok(())
-}
-
 /// 目的：非 Windows 的工具进程用 `sh -c` 解释命令行。
 pub(super) fn shell_command(command: &str) -> Command {
     let mut c = Command::new("sh");

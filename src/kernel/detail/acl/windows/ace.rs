@@ -3,7 +3,7 @@
 //! 不管：怎么读对象 DACL（scan.rs）、怎么把 ACE 写进去（grant.rs）、写后核对（verify.rs）。
 //! 联动：scan.rs 与 verify.rs 共用这里的偏移与身份口径；acl.rs 汇总导出。
 
-use super::super::*;
+use super::*;
 use windows_sys::Win32::Security::{ACE_INHERITED_OBJECT_TYPE_PRESENT, ACE_OBJECT_TYPE_PRESENT};
 
 /// 目的：ACE 类型：允许 / 拒绝各三种形态。windows-sys 不导出这些常量，按 SDK 的 ACE 头自己认。

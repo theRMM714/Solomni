@@ -1,18 +1,28 @@
-//! 目的：围栏授权台账的跨平台形状与按条回收入口。
-//! 管：Owner / ReconcileReport / Ledger 形状，对账、台账读取、按路径或 SID 精确还原。
-//! 不管：平台 ACL 读写（在 windows/record/）、启动流程（在根）。
-//! 联动：启动对账由 `src/main.rs` 与 `src/entry/` 调用；Windows 条目的读写与撤权在 `windows/record/`。
+//! 目的：围栏授权台账的跨平台形状与按条回收入口——一次执行动过哪些本机权限项，收尾时据此精确撤销。
+//! 管：Owner / ReconcileReport / Ledger 形状，对账、台账读取、按路径或 SID 精确还原、全量回收；Windows 的盘上格式在 `ledger/windows/`。
+//! 不管：ACL 怎么读写与还原（在 `acl`）、容器 SID 怎么派生（在 `container`）、一次围栏准备（在 `confine`）、启动流程（在根）。
+//! 联动：启动对账由 `src/main.rs` 与 `src/guard.rs` 调用；`confine` 的 prepare_fence 写账、release_by_lease 按账收尾。
+
+mod admin;
+#[cfg(windows)]
+mod windows;
+
+/// 目的：ACL 的那批符号——台账的 Windows 实现要按它读现值、撤权、还原快照。
+pub(crate) use crate::kernel::detail::acl::*;
+/// 目的：Windows 台账实现（盘上格式、日志、对账、回收）——只在 Windows 上存在；`confine` 的机器级预授按它读写。
+#[cfg(windows)]
+pub(crate) use windows::*;
 
 /// 目的：启动期对账——按台账回收"归属明确已死"的陈旧授权；无法判定的报告后跳过（启动与 `--fence-reconcile` 共用）。
 /// 约束：只有 Windows 写本机权限项；其它平台没有台账，如实返回空报告。
 pub fn reconcile(home: &std::path::Path) -> ReconcileReport {
-    super::admin::reconcile(home)
+    admin::reconcile(home)
 }
 
 /// 目的：孤儿授权清扫：按容器 SID 族在产品根内撤掉台账之外的残留 ACE（--fence-clean 用）。
 ///   只有 Windows 写本机 ACL，其它平台没有这一步（而不是"存在但空转"）。
 pub fn sweep_orphan_aces(root: &std::path::Path) -> Result<usize, String> {
-    super::admin::sweep_orphan_aces(root)
+    admin::sweep_orphan_aces(root)
 }
 
 /// 目的：台账条目的归属——哪个进程还需要这条授权（pid + 进程创建时刻，防 PID 复用）。
@@ -169,13 +179,13 @@ pub struct Ledger {
 /// 目的：台账现值（清单 + "当前实际 ACE 与台账对不对得上"的差异）。
 /// 约束：只有 Windows 写本机权限项，所以台账只在 Windows 上有内容；其它平台如实说"本平台不留权限项"。
 pub fn ledger(home: &std::path::Path) -> Ledger {
-    super::admin::ledger(home)
+    admin::ledger(home)
 }
 
 /// 目的：按路径**只还原一条**快照（其余条目与整份 DACL 不受影响）。
 /// 错误：台账里没有该路径、路径不在了、写回被拒都如实返回；失败时台账不改（供重试）。
 pub fn restore_one(home: &std::path::Path, path: &std::path::Path) -> Result<String, String> {
-    super::admin::restore_one(home, path)
+    admin::restore_one(home, path)
 }
 
 /// 目的：按 **SID + 路径**只撤一条授权（其余条目不受影响）；**不在台账里也照撤**（台账外残留走这条）。
@@ -185,11 +195,35 @@ pub fn revoke_grant(
     sid: &str,
     path: &std::path::Path,
 ) -> Result<String, String> {
-    super::admin::revoke_grant(home, sid, path)
+    admin::revoke_grant(home, sid, path)
 }
 
 /// 目的：按名**只删一个**容器 profile（连该容器的存储一起删）。
 /// 错误：删除被拒时如实返回；失败时台账不改动。
 pub fn remove_profile_one(home: &std::path::Path, name: &str) -> Result<String, String> {
-    super::admin::remove_profile_one(home, name)
+    admin::remove_profile_one(home, name)
+}
+
+/// 目的：按会话租约撤 ACE、删 profile（会话改配 / 删除时由围栏适配器调用）。
+pub fn release_by_lease(home: &std::path::Path, lease: &str) -> Result<(), String> {
+    admin::release_by_lease(home, lease)
+}
+
+/// 目的：一次**一次性调用**的收尾——撤它自己的 ACE、删它的按次 profile、删 `private/Packages/<名字>` 空壳。
+pub fn release_call(
+    spec: &crate::kernel::contracts::fence::FenceSpec,
+    home: &std::path::Path,
+) -> Result<(), String> {
+    admin::release_call(spec, home)
+}
+
+/// 目的：扫掉本程序建过的整族容器 profile：台账只记"我们知道写过什么"，而 profile 可能来自没有台账的路径
+///   （探针、夹具的台账被删、进程被杀）。名字前缀是本程序独有的，所以按它扫。返回扫掉的个数。
+pub fn sweep_profiles() -> Result<usize, String> {
+    admin::sweep_profiles()
+}
+
+/// 目的：全量回收：连机器级授权一起撤（`--fence-clean` 用）。
+pub fn clean_all(home: &std::path::Path) -> Result<String, String> {
+    admin::clean_all(home)
 }

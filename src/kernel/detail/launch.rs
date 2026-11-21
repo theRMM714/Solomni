@@ -1,7 +1,7 @@
-//! 目的：命令里的程序解析、解释器安装根、shell 启动与环境白名单。
-//! 管：PATH / PATHEXT 解析、安装目录上溯、围栏环境；平台分支在 `paths/windows.rs` / `paths/unix.rs`。
-//! 不管：围栏授权与台账、平台容器生命周期。
-//! 联动：由 `prep.rs`、`process.rs` 与 `entry/toolchains.rs` 消费。
+//! 目的：命令里的程序解析、解释器安装根、shell 启动与环境白名单——「这个命令要怎么起」的形状。
+//! 管：PATH / PATHEXT 解析、安装目录上溯、围栏环境白名单、程序名改写（容器内的相对写法）；平台分支在 `launch/windows.rs` / `launch/unix.rs`。
+//! 不管：围栏授权与台账（在 `acl` / `ledger`）、容器身份（在 `container`）、平台容器生命周期。
+//! 联动：由 `confine` 的后端、`container` 的容器内启动、`process.rs` 与 `entry/toolchains.rs` 消费。
 
 use crate::kernel::contracts::fence::FenceSpec;
 use std::ffi::OsString;
@@ -121,11 +121,6 @@ pub(super) fn interpreter_dirs_in(
 /// 目的：解释器程序 → 要授权的安装根（Windows 按真身；Unix 链接与真身都留）。
 pub(crate) fn interpreter_roots_for_exe(exe: &std::path::Path) -> Vec<std::path::PathBuf> {
     platform::interpreter_roots_for_exe(exe)
-}
-
-/// 目的：这个解释器安装目录在**平台围栏**下能不能放行（只读探测，不写权限项）。
-pub(crate) fn interpreter_dir_usable(dir: &std::path::Path) -> Result<(), String> {
-    platform::interpreter_dir_usable(dir)
 }
 
 /// 目的：程序所在目录 → 该程序的「安装目录」：<root>/bin|Scripts 这种布局上溯一层，其余就是所在目录。

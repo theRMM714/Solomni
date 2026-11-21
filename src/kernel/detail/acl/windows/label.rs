@@ -3,7 +3,7 @@
 //! 不管：DACL 的读写与核对（scan.rs / grant.rs / verify.rs）、命中后拒不拒绝执行（windows.rs 的 prepare_fence）。
 //! 联动：判据由 prepare_fence 在授权后逐落点调用；ACE 与 SID 的字节口径与 ace.rs 同源。
 
-use super::super::*;
+use super::*;
 use std::path::Path;
 use windows_sys::Win32::Foundation::LocalFree;
 use windows_sys::Win32::Security::Authorization::GetNamedSecurityInfoW;

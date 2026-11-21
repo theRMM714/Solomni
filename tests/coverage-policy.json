@@ -92,8 +92,8 @@
       "min": 100,
       "globs": [
         "src/capabilities/permission/**",
-        "src/kernel/detail/confine/paths.rs",
-        "src/kernel/detail/confine/ledger.rs",
+        "src/kernel/detail/launch.rs",
+        "src/kernel/detail/ledger.rs",
         "src/kernel/detail/confine/prep.rs",
         "src/kernel/detail/confine/job.rs",
         "src/kernel/detail/confine.rs",

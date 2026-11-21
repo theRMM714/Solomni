@@ -7,7 +7,6 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::kernel::detail::confine::windows as confine_backend;
 use crate::kernel::detail::view_drive::ViewDrive;
 
 /// 目的：Windows 没有执行位，文件存在即算（PATH 解析已按 PATHEXT 试过扩展名）。
@@ -69,11 +68,6 @@ pub(crate) fn canonical_path_var(path_var: &OsStr) -> OsString {
         );
     }
     std::env::join_paths(out).unwrap_or_else(|_| path_var.to_os_string())
-}
-
-/// 目的：这个解释器安装目录在平台围栏下能不能放行（只读探测，不写权限项）。
-pub(super) fn interpreter_dir_usable(dir: &Path) -> Result<(), String> {
-    confine_backend::interpreter_dir_usable(dir)
 }
 
 /// 目的：node 的「跳过 realpath」开关——主模块看 `-main`，依赖与 ESM 看另一个（两个都要）。

@@ -168,7 +168,7 @@ node run-tests.js --fence-live
 - 读用户目录下的解释器被拒：doctor 报「没有 python」、L4 真工具场景报 python 不可达；
 - 拉子进程 / 抓管道受会话沙箱限制（Node 管道 stdio 被 EPERM、`status` 为 null）：把 stdout 重定向到文件再读（`stdio: ["ignore", fd, "ignore"]`），不要用管道。这一条与完整性标签是两件事。
 
-- **路径二：显式 Medium 及以上 + `NO_WRITE_UP` 落在容器的授写叶子上 → 容器写不进。** AppContainer 令牌恒为 Low，写 Medium 对象被完整性检查挡掉，Win32 给 `1314`（`0x80070522`，`A required privilege is not held by the client` / 「客户端没有所需的特权」）。**宿主进程是 Medium，所以内置文件工具照常能写**——「工具能写、shell 写不进」的不对称就是这条，不是 DACL 授权坏了。产品侧由 `prepare_fence` 授权后读标签如实报 `FencePart::IntegrityLabel`（`src/kernel/detail/confine/windows/acl/label.rs`），不再报成功。
+- **路径二：显式 Medium 及以上 + `NO_WRITE_UP` 落在容器的授写叶子上 → 容器写不进。** AppContainer 令牌恒为 Low，写 Medium 对象被完整性检查挡掉，Win32 给 `1314`（`0x80070522`，`A required privilege is not held by the client` / 「客户端没有所需的特权」）。**宿主进程是 Medium，所以内置文件工具照常能写**——「工具能写、shell 写不进」的不对称就是这条，不是 DACL 授权坏了。产品侧由 `prepare_fence` 授权后读标签如实报 `FencePart::IntegrityLabel`（`src/kernel/detail/acl/windows/label.rs`），不再报成功。
 
 - **判据（两条都要查）**：
 
@@ -223,8 +223,8 @@ node run-tests.js --coverage
 | --- | --- | --- |
 | `catalog` | `src/capabilities/catalog/registry/detail/yaml_settings.rs` | weekly |
 | `conversation` | `src/capabilities/conversation/slate/service.rs` | weekly |
-| `kernel` | `src/kernel/detail/confine/paths.rs` | weekly |
-| `kernel` | `src/kernel/detail/confine/ledger.rs` | weekly |
+| `kernel` | `src/kernel/detail/launch.rs` | weekly |
+| `kernel` | `src/kernel/detail/ledger.rs` | weekly |
 | `kernel` | `src/kernel/detail/unpack.rs` | weekly |
 | `kernel` | `src/kernel/domain/path.rs` | weekly |
 | `lifecycle` | `src/capabilities/lifecycle/service/rewind.rs` | none |
@@ -241,7 +241,7 @@ node run-tests.js --coverage
 > 7 个单元、周检 14 个文件；本表由 `tests/specs/*.yaml` 的 `mutation` 块生成（`node tests/docs-sync.mjs --write`），不手写。
 <!-- END:mutation-scope -->
 
-- 安全纯逻辑必须在 `weekly` 里（`src/capabilities/permission/domain/permission.rs`、`src/kernel/detail/confine/paths.rs`）；安全面的突变存活率目标 **≥90%**，在阶段出口人工审计，不接 CI 门禁。
+- 安全纯逻辑必须在 `weekly` 里（`src/capabilities/permission/domain/permission.rs`、`src/kernel/detail/launch.rs`）；安全面的突变存活率目标 **≥90%**，在阶段出口人工审计，不接 CI 门禁。
 - 定时：`.github/workflows/mutants.yml` 的 `schedule: cron "0 4 * * 1"`（UTC 04:00 = 北京时间周一 12:00）。GitHub 只在**默认分支最新提交**上跑定时；同一提交若已有 `weekly` 结论（`all-caught` 或 `missed`），preflight 读 ci-mutation 分支上一次 weekly 的 meta.json 后跳过；`404`、坏 JSON、`timeout`、`baseline-failed`、`error` 都照常重跑。手动派发永远执行。
 - 分片并行：`plan` job 先跑 `node tests/mutation-plan.mjs`（`cargo mutants --list --json` 数变异体，约 350 个/片、单个约 29s → 3h 量级），把 n 现算后喂给 `mutation` 的矩阵（`matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}`），每片 `timeout-minutes: 240`、`fail-fast: false` 各自给结论。数不出来时退回固定 4 片并在日志告警。手动与定时共用 `ci-mutation-run` 并发组，不取消正在跑的那次。
 - 分片报告由 `tests/ci-mutation-merge.mjs` 合并成一份（最坏状态优先：`baseline-failed` > `error` > `missed` > `timeout` > `all-caught`），跑在独立的 `merge` job，缺片（超时被取消）也照发并如实打印。

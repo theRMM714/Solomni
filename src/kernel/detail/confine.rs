@@ -16,7 +16,7 @@ mod macos;
 #[cfg(target_os = "macos")]
 use macos as backend;
 #[cfg(windows)]
-mod windows;
+pub(crate) mod windows;
 #[cfg(windows)]
 use windows as backend;
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
@@ -24,10 +24,7 @@ mod other;
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 use other as backend;
 
-mod admin;
 mod job;
-mod ledger;
-mod paths;
 mod prep;
 
 #[cfg(test)]
@@ -35,8 +32,7 @@ mod tests;
 
 /// 目的：守门模式参数：主程序带它启动 = 以守门进程身份执行（内部协议，用户不直接用）。
 pub const FENCE_FLAG: &str = "--fence-run";
-/// 目的：围栏装不上时守门进程的退出码（工具执行据此如实报错，不静默）。
-pub const FENCE_FAILED: i32 = 111;
+pub use crate::kernel::contracts::fence::FENCE_FAILED;
 
 /// 目的：本机能不能强制住这次执行的围栏——**机制层的验证结论**，与"外层授权了没有"无关。
 ///   三态的理由：把"本机不允许"与"我们的机制写错了"分开。
@@ -92,13 +88,13 @@ impl FenceHostAdapter {
 impl crate::kernel::ports::FenceHost for FenceHostAdapter {
     /// 目的：按会话租约撤销本进程为该会话写下的全部授权与 profile（会话改配 / 删除时调用）。
     fn release_by_lease(&self, lease: &str) -> Result<(), String> {
-        admin::release_by_lease(&self.home, lease)
+        crate::kernel::detail::ledger::release_by_lease(&self.home, lease)
     }
 
     /// 目的：一次**一次性调用**的收尾——撤它自己的 ACE、删它的按次 profile、删 `private/Packages/<名字>` 空壳。
     /// 约束：三步各自记错、合并返回；profile 删不掉时临时目录仍要尽力清（它只是宿主侧的空壳）。
     fn release_call(&self, spec: &FenceSpec) -> Result<(), String> {
-        admin::release_call(spec, &self.home)
+        crate::kernel::detail::ledger::release_call(spec, &self.home)
     }
 }
 
@@ -129,14 +125,13 @@ impl Capability {
     }
 }
 
+pub use crate::kernel::detail::launch::{fence_env, shell_command};
+/// 目的：台账条目的归属（测试按它组装样本，见 `tests.rs`）。
+#[cfg(test)]
+pub use crate::kernel::detail::ledger::Owner;
+#[cfg(all(windows, test))]
+pub(crate) use crate::kernel::detail::ledger::release_fence;
 pub use job::{FenceJob, launcher, run_fenced};
-#[cfg(any(windows, test))]
-pub use ledger::Owner;
-pub use ledger::{
-    Ledger, LedgerEntry, ledger, reconcile, remove_profile_one, restore_one, revoke_grant,
-    sweep_orphan_aces,
-};
-pub use paths::{fence_env, shell_command};
 #[cfg(windows)]
 pub use prep::FencePrep;
 pub use prep::FenceStep;
@@ -144,15 +139,9 @@ pub use prep::FenceStep;
 pub use prep::clean;
 #[cfg(windows)]
 pub use prep::prepare_fence;
-pub use prep::{
-    clean_all, machine_ensure, machine_missing, retire_legacy_machine_grants, sweep_profiles,
-};
-#[cfg(all(windows, test))]
-pub(crate) use windows::release_fence;
+pub use prep::{machine_ensure, machine_missing, retire_legacy_machine_grants};
 
+pub(crate) use crate::kernel::detail::acl::interpreter_dir_usable;
 #[cfg(windows)]
-pub(crate) use paths::{
-    NODE_REALPATH_FLAGS, container_program_command, view_program_command,
-    windows_program_separators,
-};
-pub(crate) use paths::{interpreter_dir_usable, interpreter_dirs, interpreter_roots_for_exe};
+pub(crate) use crate::kernel::detail::launch::NODE_REALPATH_FLAGS;
+pub(crate) use crate::kernel::detail::launch::interpreter_roots_for_exe;

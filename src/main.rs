@@ -156,7 +156,7 @@ fn main() {
     // 启动对账（装配期，会话尚未开工）：按台账回收上一次运行被杀/崩溃留下的陈旧授权。
     // 只回收归属明确已死的条目；无法判定的报告后跳过；失败如实报、台账保留供重试（--fence-reconcile / --fence-clean）。
     {
-        let rep = kernel::detail::confine::reconcile(&home);
+        let rep = kernel::detail::ledger::reconcile(&home);
         if rep.has_activity() {
             println!("[围栏] 启动对账：{}", rep.summary());
         }

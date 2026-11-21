@@ -3,7 +3,7 @@
 //! 不管：结论怎么用（release.rs 回收、reconcile.rs 对账各按自己的策略处置）。
 //! 联动：归属字段 Owner 在 confine/ledger.rs；判不了时取保守结论——宁可漏回收，也不误撤在用的授权。
 
-use super::super::super::Owner;
+use super::super::Owner;
 use super::{GrantEntry, GrantScope};
 use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
 use windows_sys::Win32::System::Threading::{

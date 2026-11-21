@@ -1,19 +1,14 @@
 //! 目的：围栏要授权的落点清单——数据边界叶子、它们的父目录只读、可信执行基座与系统基线主体。
-//! 管：GrantTarget 与 rw_part / grant_targets / is_trusted_base / system_baseline_sid / interpreter_dirs。
+//! 管：GrantTarget 与 rw_part / grant_targets / is_trusted_base / system_baseline_sid。
 //! 不管：ACE 怎么写（grant.rs）、写后怎么核对（verify.rs）。
-//! 联动：windows.rs 的 prepare_fence 用这份清单逐条授权；解释器目录口径与 confine.rs 共用。
+//! 联动：confine 的 prepare_fence 用这份清单逐条授权（解释器目录由调用方算好、经 launch 解析）。
 
-use super::super::*;
+use super::*;
 use crate::kernel::domain::layout;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;
 use windows_sys::Win32::Security::PSID;
-
-/// 目的：命令里解释器的安装目录：共用实现在 confine.rs（Windows 的目录 ACL 与 macOS 的 seatbelt 同一套语义）。
-pub(crate) fn interpreter_dirs(command: &str) -> Vec<PathBuf> {
-    super::super::super::interpreter_dirs(command)
-}
 
 /// 目的：一个授权落点：**哪一环**（决定授不上时能不能降级）+ 路径 + 权限位 + 递归与继承。
 /// 约束：把落点收成一个名字，prepare / release / 回滚与探针共用同一份形状。

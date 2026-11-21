@@ -11,14 +11,6 @@
 #
 # 这份表由 T0 结构审查的 structure/kernel-mechanisms 与磁盘双向比对。
 # 第 0 层
-# 第 1 层
-# 第 2 层
-# 第 3 层
-# 第 4 层
-# 第 5 层
-# 第 6 层
-# 第 7 层
-# 第 0 层
 contracts/fence: 0
 contracts/note: 0
 detail/fs_meta: 0
@@ -54,10 +46,22 @@ detail/view_drive_lifecycle: 4
 domain/actor: 4
 
 # 第 5 层
-detail/confine: 5
+detail/launch: 5
 
 # 第 6 层
-detail/process: 6
+detail/container: 6
 
 # 第 7 层
-detail/session: 7
+detail/acl: 7
+
+# 第 8 层
+detail/ledger: 8
+
+# 第 9 层
+detail/confine: 9
+
+# 第 10 层
+detail/process: 10
+
+# 第 11 层
+detail/session: 11

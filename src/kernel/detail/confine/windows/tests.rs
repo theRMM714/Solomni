@@ -6,7 +6,7 @@
 use super::*;
 
 /// 目的：授权应当成立——必要落点全授上，不成立就把结论打出来（它是这一路的判据）。
-pub(super) fn expect_granted(prep: &FencePrep, what: &str) {
+pub(crate) fn expect_granted(prep: &FencePrep, what: &str) {
     assert!(prep.ok(), "{}：必要落点授不上 {:?}", what, prep.blocked);
 }
 
@@ -18,7 +18,7 @@ mod grant;
 mod workspace;
 
 /// 目的：本产品能力 SID 的**可释放**形式——用例沿用 free_sid 收尾，不必各自持有派生出的字节缓冲。
-pub(super) fn product_sid() -> Result<PSID, String> {
+pub(crate) fn product_sid() -> Result<PSID, String> {
     let owned = product_capability_sid()?;
     sid_from_string(&sid_to_string(owned.as_ptr() as PSID))
 }
@@ -68,7 +68,7 @@ fn dump_aces(path: &Path) -> String {
 }
 
 /// 目的：探针目录的收尾——删不掉就如实打印，不静默（受限环境里写坏的 DACL 会让删除失败）。
-pub(super) fn discard(base: &Path) {
+pub(crate) fn discard(base: &Path) {
     if let Err(e) = std::fs::remove_dir_all(base)
         && base.exists()
     {
@@ -77,7 +77,7 @@ pub(super) fn discard(base: &Path) {
 }
 
 /// 目的：ACL 往返预检——在自有 base 里记 ACE 集合、写、读回、撤后集合不变；做不了就返回 false。
-pub(super) fn acl_round_trip(base: &Path, tag: &str) -> bool {
+pub(crate) fn acl_round_trip(base: &Path, tag: &str) -> bool {
     let target = base.join("acl-preflight");
     if std::fs::create_dir_all(&target).is_err() {
         return false;

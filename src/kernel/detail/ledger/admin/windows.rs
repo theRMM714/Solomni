@@ -1,10 +1,10 @@
-//! 目的：`admin` 的 Windows 后端——台账、授权释放与机器级预授的真实实现。
-//! 管：把管理动作转交给 `confine/windows/` 的实现。
-//! 不管：跨平台降级文案（在 `admin/other.rs`）；一次围栏准备的步骤。
-//! 联动：由 `src/kernel/detail/confine/admin.rs` 按平台选中。
+//! 目的：`admin` 的 Windows 后端——台账与授权释放的真实实现。
+//! 管：把管理动作转交给 `ledger/windows/` 与 `container` 的实现。
+//! 不管：跨平台降级文案（在 `admin/other.rs`）、机器级预授（在 `confine`）；一次围栏准备的步骤。
+//! 联动：由 `src/kernel/detail/ledger/admin.rs` 按平台选中。
 
-use super::super::ledger::{Ledger, ReconcileReport};
 use super::super::windows;
+use super::super::{Ledger, ReconcileReport};
 use crate::kernel::contracts::fence::FenceSpec;
 use std::path::Path;
 
@@ -19,11 +19,11 @@ pub(super) fn release_call(spec: &FenceSpec, home: &Path) -> Result<(), String> 
     if let Err(e) = windows::release_fence(spec, home) {
         errors.push(e);
     }
-    let name = windows::container_name(spec);
+    let name = crate::kernel::detail::container::container_name(spec);
     if let Err(e) = windows::remove_profile_one(home, &name) {
         errors.push(e);
     }
-    if let Some(dir) = windows::container_package_dir(spec)
+    if let Some(dir) = crate::kernel::detail::container::container_package_dir(spec)
         && dir.is_dir()
         && let Err(e) = std::fs::remove_dir_all(&dir)
     {
@@ -69,28 +69,6 @@ pub(super) fn remove_profile_one(home: &Path, name: &str) -> Result<String, Stri
 /// 目的：清扫本程序建过的整族容器 profile。
 pub(super) fn sweep_profiles() -> Result<usize, String> {
     windows::sweep_profiles()
-}
-
-/// 目的：一次性的机器级预授还缺哪些落点。
-pub(super) fn machine_missing(root: &Path) -> Result<Vec<String>, String> {
-    windows::machine_missing(root)
-}
-
-/// 目的：把机器级落点一次性授好。
-pub(super) fn machine_ensure(
-    root: &Path,
-    home: &Path,
-    out: &mut dyn FnMut(&str),
-) -> Result<(), String> {
-    windows::machine_ensure(root, home, out)
-}
-
-/// 目的：退役台账里旧的机器级授权。
-pub(super) fn retire_legacy_machine_grants(
-    home: &Path,
-    out: &mut dyn FnMut(&str),
-) -> Result<(), String> {
-    windows::retire_legacy_machine_grants(home, out)
 }
 
 /// 目的：全量回收。

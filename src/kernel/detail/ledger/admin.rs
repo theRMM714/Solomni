@@ -1,9 +1,9 @@
-//! 目的：围栏台账与管理动作的平台分派——哪些动作有真实机制、哪些平台如实降级。
-//! 管：按平台选中台账读写、授权释放、机器级预授与清理的实现。
-//! 不管：台账条目的形状（在 `ledger.rs`）、一次围栏准备的步骤（在 `prep.rs`）。
-//! 联动：由 `ledger.rs` / `prep.rs` / `confine.rs` 调用。
+//! 目的：台账动作的平台分派——哪些动作有真实机制、哪些平台如实降级。
+//! 管：按平台选中台账读写、授权释放、profile 清扫与全量回收的实现。
+//! 不管：台账条目的形状（在 `ledger.rs`）、机器级预授（在 `confine` 的 prep.rs）、一次围栏准备的步骤。
+//! 联动：只由 `ledger.rs` 门面调用。
 
-use super::ledger::{Ledger, ReconcileReport};
+use super::{Ledger, ReconcileReport};
 use crate::kernel::contracts::fence::FenceSpec;
 use std::path::Path;
 
@@ -59,28 +59,6 @@ pub(super) fn remove_profile_one(home: &Path, name: &str) -> Result<String, Stri
 /// 目的：清扫本程序建过的整族容器 profile。
 pub(super) fn sweep_profiles() -> Result<usize, String> {
     backend::sweep_profiles()
-}
-
-/// 目的：一次性的机器级预授还缺哪些落点。
-pub(super) fn machine_missing(root: &Path) -> Result<Vec<String>, String> {
-    backend::machine_missing(root)
-}
-
-/// 目的：把机器级落点一次性授好（幂等；每条进度交给 `out`）。
-pub(super) fn machine_ensure(
-    root: &Path,
-    home: &Path,
-    out: &mut dyn FnMut(&str),
-) -> Result<(), String> {
-    backend::machine_ensure(root, home, out)
-}
-
-/// 目的：退役台账里旧的机器级授权。
-pub(super) fn retire_legacy_machine_grants(
-    home: &Path,
-    out: &mut dyn FnMut(&str),
-) -> Result<(), String> {
-    backend::retire_legacy_machine_grants(home, out)
 }
 
 /// 目的：全量回收（连机器级授权一起撤）。

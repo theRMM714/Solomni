@@ -133,7 +133,7 @@ function writeTable(root) {
   const minimal = recompute(root);
   const file = path.join(root, TABLE);
   const head = fs.existsSync(file)
-    ? fs.readFileSync(file, "utf8").split(/\r?\n/).filter((l) => /^#/.test(l))
+    ? fs.readFileSync(file, "utf8").split(/\r?\n/).filter((l) => /^#/.test(l) && !/^#\s*第\s*\d+\s*层/.test(l))
     : [];
   const rows = [...minimal].sort((x, y) => x[1] - y[1] || x[0].localeCompare(y[0]));
   const body = ["kernel: 0"];

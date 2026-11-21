@@ -6,9 +6,9 @@
 #[cfg(windows)]
 use std::ffi::OsString;
 
-use super::ledger::ReconcileReport;
-use super::paths::*;
 use super::*;
+use crate::kernel::detail::launch::*;
+use crate::kernel::detail::ledger::ReconcileReport;
 
 #[test]
 fn effective_paths_follows_platform_acl_step() {

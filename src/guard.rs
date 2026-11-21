@@ -48,7 +48,6 @@ pub fn proc_watch(args: &[String], flag: usize) -> i32 {
 /// 约束：与 --fence-clean 共用同一份台账与同一套 ACE 读法（confine 的 catalog / restore_one / revoke_grant /
 ///   remove_profile_one）；**未指定的条目一概不动**。
 pub fn fence_grant(args: &[String], root: &std::path::Path) -> Option<i32> {
-    use crate::kernel::detail::confine;
     let home = layout::home(root);
     let after = |flag: &str| -> Option<String> {
         args.iter()
@@ -58,7 +57,7 @@ pub fn fence_grant(args: &[String], root: &std::path::Path) -> Option<i32> {
     };
     // 启动对账的手动入口（与启动期同一份实现）：按台账回收归属明确已死的陈旧授权。
     if args.iter().any(|a| a == "--fence-reconcile") {
-        let rep = confine::reconcile(&home);
+        let rep = crate::kernel::detail::ledger::reconcile(&home);
         if rep.errors.is_empty() {
             println!("[围栏] {}", rep.summary());
             return Some(0);
@@ -85,7 +84,7 @@ pub fn fence_grant(args: &[String], root: &std::path::Path) -> Option<i32> {
             // 单参数不再是合法形式：撤授权必须指明是哪个 SID 的哪一条（工作区不再有机器级预授）。
             (Some(_), None) => return Some(revoke_usage()),
             (Some(sid), Some(path)) => {
-                return Some(report(confine::revoke_grant(
+                return Some(report(crate::kernel::detail::ledger::revoke_grant(
                     &home,
                     &sid,
                     &std::path::PathBuf::from(path),
@@ -96,7 +95,7 @@ pub fn fence_grant(args: &[String], root: &std::path::Path) -> Option<i32> {
     }
     // 列清单：机器可读优先（默认 JSON）；--human 给一行一句的可读版。恒退出 0，判定归调用方。
     if args.iter().any(|a| a == "--fence-ledger") {
-        let view = confine::ledger(&home);
+        let view = crate::kernel::detail::ledger::ledger(&home);
         if args.iter().any(|a| a == "--human") {
             for line in ledger_lines(&view) {
                 println!("[围栏] {}", line);
@@ -118,7 +117,7 @@ pub fn fence_grant(args: &[String], root: &std::path::Path) -> Option<i32> {
             eprintln!("用法：solomni --fence-restore 路径（要整体收尾用 --fence-clean）");
             return Some(2);
         };
-        return Some(report(confine::restore_one(
+        return Some(report(crate::kernel::detail::ledger::restore_one(
             &home,
             &std::path::PathBuf::from(path),
         )));
@@ -129,14 +128,16 @@ pub fn fence_grant(args: &[String], root: &std::path::Path) -> Option<i32> {
             eprintln!("用法：solomni --fence-profile-rm <profile 名>");
             return Some(2);
         };
-        return Some(report(confine::remove_profile_one(&home, &name)));
+        return Some(report(crate::kernel::detail::ledger::remove_profile_one(
+            &home, &name,
+        )));
     }
     None
 }
 
 /// 一行一句的可读清单（时间记 Unix 秒：不引时区与本地化）。
-fn ledger_lines(view: &crate::kernel::detail::confine::Ledger) -> Vec<String> {
-    use crate::kernel::detail::confine::LedgerEntry;
+fn ledger_lines(view: &crate::kernel::detail::ledger::Ledger) -> Vec<String> {
+    use crate::kernel::detail::ledger::LedgerEntry;
     let mut out: Vec<String> = Vec::new();
     if !view.note.is_empty() {
         out.push(view.note.clone());
@@ -217,7 +218,7 @@ pub fn fence_clean(root: &std::path::Path) -> i32 {
     let home = layout::home(root);
     let mut lines: Vec<String> = Vec::new();
     let mut failed = false;
-    match crate::kernel::detail::confine::clean_all(&home) {
+    match crate::kernel::detail::ledger::clean_all(&home) {
         Ok(msg) => lines.push(msg),
         Err(e) => {
             lines.push(format!("台账回收未完成：{}", e));
@@ -225,7 +226,7 @@ pub fn fence_clean(root: &std::path::Path) -> i32 {
         }
     }
     // 孤儿授权清扫必须排在 profile 清扫**之前**：profile 删了就派生不出 SID，没法按 SID 找残留。
-    match crate::kernel::detail::confine::sweep_orphan_aces(root) {
+    match crate::kernel::detail::ledger::sweep_orphan_aces(root) {
         Ok(0) => {
             if crate::kernel::api::platform::HAS_EXTERNAL_ACL_STEP {
                 lines.push("产品根内没有台账外的孤儿授权".to_string());
@@ -237,7 +238,7 @@ pub fn fence_clean(root: &std::path::Path) -> i32 {
             failed = true;
         }
     }
-    match crate::kernel::detail::confine::sweep_profiles() {
+    match crate::kernel::detail::ledger::sweep_profiles() {
         Ok(n) => lines.push(format!("扫掉 {} 个本程序建过的容器 profile", n)),
         Err(e) => {
             lines.push(format!("容器 profile 清扫未完成：{}", e));

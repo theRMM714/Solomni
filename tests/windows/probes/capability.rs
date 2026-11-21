@@ -303,7 +303,7 @@ fn run(sid: PSID, caps: &[PSID], cwd: &Path, command: &str) -> Result<u32, Strin
     let app = wide_path(&shell_exe);
     let dir = wide_path(cwd);
     // 环境块显式给：LOCALAPPDATA 缺了 CreateProcessW 直接报 os error 203
-    //（与 src/kernel/detail/confine/paths.rs 的 fence_env 同一条约束）。
+    //（与 src/kernel/detail/launch.rs 的 fence_env 同一条约束）。
     let mut block: Vec<u16> = Vec::new();
     let mut push = |k: &str, v: &str| {
         block.extend(std::ffi::OsStr::new(k).encode_wide());

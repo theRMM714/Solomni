@@ -3,8 +3,8 @@
 //! 不管：单条授权的建立（journal.rs）与单条人工处置（catalog.rs）。
 //! 联动：入口是 --fence-reconcile（src/main.rs）；落盘与锁在 store.rs，判活在 liveness.rs。
 
+use super::super::ReconcileReport;
 use super::super::*;
-use crate::kernel::detail::confine::ledger::ReconcileReport;
 use std::path::{Path, PathBuf};
 
 /// 目的：启动期对账——按台账回收"归属明确已死"的陈旧授权；无法判定的报告后跳过。
