@@ -659,6 +659,7 @@ pub(crate) fn rewind_never_splits_a_reply() {
     let mut core = native_core(
         NativeGateway {
             scripts: Mutex::new(vec![steps]),
+            seen: Default::default(),
         },
         Arc::clone(&hist),
         Arc::clone(&io),

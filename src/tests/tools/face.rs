@@ -17,6 +17,7 @@ pub(crate) fn tool_mode_change_needs_no_session_rebuild() {
             scripts: Mutex::new(vec![vec![NativeStep::Text(
                 "{\"type\":\"say\",\"text\":\"答一\"}".to_string(),
             )]]),
+            seen: Default::default(),
         },
         Arc::clone(&hist),
         Arc::clone(&io),

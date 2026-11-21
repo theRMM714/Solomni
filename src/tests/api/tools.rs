@@ -61,6 +61,7 @@ fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
     let core = crate::tests::builders::native_core(
         crate::tests::builders::NativeGateway {
             scripts: std::sync::Mutex::new(Vec::new()),
+            seen: Default::default(),
         },
         Arc::new(InMemoryHistory::new()),
         Arc::new(crate::tests::doubles::InMemorySysIo::new()),
