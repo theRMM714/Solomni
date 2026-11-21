@@ -26,9 +26,9 @@ pub use crate::capabilities::conversation::session::domain::rewind::{
     next_line_id, rewind_marks, truncate_events, turn_of_line,
 };
 pub use crate::capabilities::conversation::session::domain::session::{
-    AgentSession, CompactChatFactory, CompactChatSpec, CompactionPlan, ReadAt, SessionParams,
-    TurnRun, delta_visible, freshness_view, keep_whole_replies, stream_piece, summary_message,
-    unique_work_name,
+    AgentSession, CompactChatFactory, CompactChatSpec, CompactionPlan, FreshnessStats, ReadAt,
+    SessionParams, TurnRun, delta_visible, freshness_view, keep_whole_replies, stream_piece,
+    summary_message, unique_work_name,
 };
 pub use crate::capabilities::conversation::session::domain::tools::{
     CoreVerify, ModuleTools, ServiceOp, ShellLive, ShellSlot, ToolFace, last_shell,

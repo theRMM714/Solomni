@@ -378,7 +378,9 @@ impl Turn {
         }
         let meta = SessionMeta {
             usage_totals: Default::default(),
+            // 子会话的开关与保底沿**工作根**继承：重建时取自根 meta，这两格只是占位。
             context_freshness: false,
+            freshness_keep_percent: 80,
             name: child.clone(),
             mode: Mode::Single,
             delegate: false,

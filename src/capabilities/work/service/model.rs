@@ -174,15 +174,17 @@ impl Work {
         Ok(())
     }
 
-    /// 目的：切换这条工作的**过期内容替换**开关：写在工作根 meta 上，整棵子树共享。
+    /// 目的：切换这条工作的**过期内容替换**开关与保底：写在工作根 meta 上，整棵子树共享。
     /// 约束：整棵 work tree 有会话在生成时拒绝（发送视图在回合内不换）；切换后丢掉内存里的会话，
     ///   下一次访问按新开关从转录重建（开关是落盘事实，回放与实时必须同一条请求）。
+    ///   保底 percent 缺省沿用现值；只接受 0..=90（100% 等于永不替换，开关会形同关闭）。
     pub(crate) fn set_context_freshness(
         &mut self,
         turn: &mut Turn,
         registry: &dyn Registry,
         sid: &str,
         on: bool,
+        keep_percent: Option<u8>,
     ) -> Result<(), String> {
         let root = work_root(self.history.as_ref(), sid)?;
         for s in subtree_of(self.history.as_ref(), &root) {
@@ -191,10 +193,15 @@ impl Work {
             }
         }
         let mut meta = self.history.meta(&root)?;
-        if meta.context_freshness == on {
+        let keep = keep_percent.unwrap_or(meta.freshness_keep_percent);
+        if keep > 90 {
+            return Err("过期内容保底最多 90%（100% 等于永不替换）".to_string());
+        }
+        if meta.context_freshness == on && meta.freshness_keep_percent == keep {
             return Ok(());
         }
         meta.context_freshness = on;
+        meta.freshness_keep_percent = keep;
         self.history.save_meta(&meta)?;
         self.record_config(turn, registry, &root, &meta);
         for s in subtree_of(self.history.as_ref(), &root) {

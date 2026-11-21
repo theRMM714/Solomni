@@ -1118,7 +1118,8 @@ pub(crate) fn read_facts_rebuild_identically_to_live() {
     assert!(tool_views(&events)[0].read.is_some(), "工具行要带上读事实");
 
     // 开关打开会丢掉内存会话：下一次访问按转录重建（回放必须与实时同一份台账）。
-    core.set_context_freshness(&sid, true).expect("开开关");
+    core.set_context_freshness(&sid, true, None)
+        .expect("开开关");
     core.turn
         .ensure_session(&sid, core.registry.as_ref(), core.probe.as_ref())
         .expect("重建");
@@ -1161,6 +1162,7 @@ fn creating_a_session_without_core_default_is_refused() {
 fn creating_a_proxy_without_core_default_is_refused() {
     let mut core = core_with_settings(InMemorySettings::without_core());
     let spec = WorkSpec {
+        freshness: None,
         name: "no-core-proxy".to_string(),
         mode: WorkMode::Proxy,
         agents: Vec::new(),

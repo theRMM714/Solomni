@@ -60,6 +60,10 @@ pub struct SessionMeta {
     ///   缺省 false = 只记读事实、发送视图原样（不付判定的成本）。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub context_freshness: bool,
+    /// 目的：**过期内容保底**（百分比）：发送视图里前这么多内容原样保留，只替换其后的过期读取。
+    /// 约束：只写在工作根上（子会话沿根继承）；值域 0..=90，0 = 不保底。
+    #[serde(default = "default_freshness_keep_percent")]
+    pub freshness_keep_percent: u8,
     /// 目的：这条会话**累计**的模型花费（跨回合、跨压缩；回档不动它——花出去的钱退不回来）。
     /// 约束：只累计供应商**精确**报回的调用（字符估算不进）；由核心线程在会话交回时累加。
     #[serde(default, skip_serializing_if = "UsageTotals::is_empty")]
@@ -69,6 +73,11 @@ pub struct SessionMeta {
     ///   重启/回档后照样成立（见 docs/session/session-model.md 二）。
     #[serde(default, skip_serializing_if = "RunState::is_active")]
     pub run: RunState,
+}
+
+/// 目的：meta 里省略保底百分比时的默认值（开启开关时的默认保底 80%）。
+pub(crate) fn default_freshness_keep_percent() -> u8 {
+    80
 }
 
 /// 目的：一条会话**累计**的模型花费（面板读它显示累计输入 / 输出与缓存命中）。

@@ -130,8 +130,10 @@ pub struct RebuildSpec<'a> {
     pub context: (u64, u8, u8),
     /// 目的：本会话的模型（agent 没填就是核心默认）。
     pub model: Option<String>,
-    /// 目的：过期内容自动清理的开关（落盘在 meta）。
+    /// 目的：过期内容自动清理的开关（落盘在**工作根** meta）。
     pub freshness: bool,
+    /// 目的：过期内容保底百分比（0 = 不保底；与开关一样从工作根 meta 取）。
+    pub freshness_keep_percent: u8,
     /// 目的：读台账（正文 + 读事实），重建后与实时一致。
     pub reads: Vec<(String, ReadFact)>,
     /// 目的：最近一次调用的用量（状态栏与压缩判定读它）。
@@ -150,8 +152,10 @@ pub struct ProxySpec<'a> {
     pub context: (u64, u8, u8),
     /// 目的：本会话的模型（None = 核心默认）。
     pub model: Option<String>,
-    /// 目的：过期内容自动清理的开关（落盘在 meta）。
+    /// 目的：过期内容自动清理的开关（落盘在**工作根** meta）。
     pub freshness: bool,
+    /// 目的：过期内容保底百分比（0 = 不保底；与开关一样从工作根 meta 取）。
+    pub freshness_keep_percent: u8,
 }
 
 /// 目的：装配一席的工具环境：发放名单过滤 → 工作区工具执行者 → 模块工具表与已就绪服务 → 说明块 → 工具面。
@@ -310,7 +314,7 @@ pub fn rebuild_single(ports: &SessionPorts, spec: RebuildSpec<'_>) -> AgentSessi
         spec.context,
         spec.model,
         &ports.compact,
-        Some(spec.freshness),
+        Some((spec.freshness, spec.freshness_keep_percent)),
     );
     for (body, fact) in spec.reads {
         s.note_read_at(body, fact);
@@ -336,7 +340,7 @@ pub fn proxy_session(ports: &SessionPorts, spec: ProxySpec<'_>) -> AgentSession 
         spec.context,
         spec.model,
         &ports.compact,
-        Some(spec.freshness),
+        Some((spec.freshness, spec.freshness_keep_percent)),
     );
     s
 }
@@ -348,13 +352,14 @@ fn apply_knobs(
     context: (u64, u8, u8),
     model: Option<String>,
     compact: &Arc<dyn CompactChatFactory>,
-    freshness: Option<bool>,
+    freshness: Option<(bool, u8)>,
 ) {
     let (window, percent, keep_percent) = context;
     s.set_context_budget(window, percent, keep_percent);
     s.set_model(model);
     s.set_compact_factory(Arc::clone(compact));
-    if let Some(on) = freshness {
+    if let Some((on, keep_percent)) = freshness {
         s.set_context_freshness(on);
+        s.set_freshness_keep_percent(keep_percent);
     }
 }

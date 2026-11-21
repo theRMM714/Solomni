@@ -314,6 +314,12 @@ tools:
       permission:
         type: string
         desc: 创建时的权限档位：view / workspace / external / all_reach（仅人经呈现层；代理子会话继承父 ceiling）
+      context_freshness:
+        type: boolean
+        desc: 仅人经呈现层可用：建会话时就打开过期内容替换（读过的文件被改后，那条工具结果在发给模型前换成占位符）；省略 = 关
+      freshness_keep_percent:
+        type: integer
+        desc: 仅人经呈现层可用：过期内容保底百分比 0–90（前这么多内容原样保留，只替换其后的过期读）；省略 = 80，只有 context_freshness 为真时才生效
       request_id:
         type: string
         desc: 幂等标识（核心代理必填）：同一个 request_id 重放不会重复创建
@@ -854,10 +860,11 @@ tools:
   set_context_freshness:
     capability: none
     callers: [user]
-    desc: 切换这条工作（会话级）的过期内容替换：开着时，读过的文件被改过之后，那条工具结果在发给模型前整条换成占位符（省上下文；代价是替换点之后的缓存失效）。写在工作根会话的 meta 上，子会话共享；生成中拒绝。
+    desc: 切换这条工作（会话级）的过期内容替换：开着时，读过的文件被改过之后，那条工具结果在发给模型前换成占位符（省上下文；代价是替换点之后的缓存失效）。保底百分比保住发送视图的前缀（前缀缓存靠它）；替换省下的量不够付一次缓存失效时整体不换。写在工作根会话的 meta 上，子会话共享；生成中拒绝。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id（子会话也可以，作用在工作根上） }
       on: { type: boolean, desc: 开 / 关（省略 = 关） }
+      keep_percent: { type: integer, desc: 保底百分比 0–90（0 = 不保底）；只接受 0–90，100 等于永不替换；省略 = 沿用现值 }
   probe_model_tools:
     capability: none
     callers: [user]

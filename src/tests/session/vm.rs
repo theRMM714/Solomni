@@ -64,6 +64,7 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
     let child = SessionMeta {
         usage_totals: Default::default(),
         context_freshness: false,
+        freshness_keep_percent: 80,
         name: "w--a".to_string(),
         mode: Mode::Single,
         delegate: false,
@@ -135,6 +136,7 @@ pub(crate) fn proxy_children_share_the_proxy_tree_guest() {
     let child = SessionMeta {
         usage_totals: Default::default(),
         context_freshness: false,
+        freshness_keep_percent: 80,
         name: "p--a".to_string(),
         mode: Mode::Single,
         delegate: false,

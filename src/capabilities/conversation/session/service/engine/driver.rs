@@ -423,21 +423,32 @@ fn run_rounds(
     rounds
 }
 
-/// 目的：发给模型的对话视图——过期读取换成占位符，其余原样。
+/// 目的：发给模型的对话视图——过期读取换成占位符，其余原样；同时把这次替换的统计写回会话。
 ///
 /// 约束：只改**派生视图**，不动 `dialogue` 与转录。开关关、没有工作区、判定失败三者都原样返回——
 ///   判定失败宁可供旧内容，也不悄悄丢内容。主副本的读对照主线树，私有沙箱的读对照沙箱当前内容。
-fn send_view(s: &AgentSession) -> Vec<crate::capabilities::llm::api::Msg> {
-    let mut msgs = s.dialogue.clone();
-    if !s.context_freshness() || s.reads().is_empty() {
-        return msgs;
+///   保底：前 freshness_keep_percent 的内容原样保留（前缀缓存靠它保住），只替换其后的过期读。
+fn send_view(s: &mut AgentSession) -> Vec<crate::capabilities::llm::api::Msg> {
+    let computed = freshness_now(s);
+    s.set_freshness_stats(computed.as_ref().map(|(_, stats)| *stats));
+    match computed {
+        Some((view, _)) => view,
+        None => s.dialogue.clone(),
     }
-    let Some(tools) = s.tools.as_ref() else {
-        return msgs;
-    };
-    let Some(ws) = tools.workspace.as_ref() else {
-        return msgs;
-    };
+}
+
+/// 目的：算这一次的发送视图与替换统计；None = 不做替换（开关关 / 没有工作区 / 判定失败）。
+fn freshness_now(
+    s: &AgentSession,
+) -> Option<(
+    Vec<crate::capabilities::llm::api::Msg>,
+    crate::capabilities::conversation::session::api::FreshnessStats,
+)> {
+    if !s.context_freshness() || s.reads().is_empty() {
+        return None;
+    }
+    let tools = s.tools.as_ref()?;
+    let ws = tools.workspace.as_ref()?;
     let reads: Vec<&crate::capabilities::conversation::session::api::ReadAt> =
         s.reads().iter().collect();
     let queries: Vec<crate::capabilities::workspace::api::ReadQuery> = reads
@@ -447,26 +458,35 @@ fn send_view(s: &AgentSession) -> Vec<crate::capabilities::llm::api::Msg> {
             blob: r.fact.blob.clone(),
             from: r.fact.from,
             to: r.fact.to,
-            // `worktree` 记的是读发生在哪个沙箱（空 = 主副本）。
+            // worktree 记的是读发生在哪个沙箱（空 = 主副本）。
             sandbox: !r.fact.worktree.is_empty(),
         })
         .collect();
     if queries.is_empty() {
-        return msgs;
+        return None;
     }
-    let Ok(stale) = ws.work_stale_reads(
-        &tools.face.sandbox.work_name,
-        &tools.face.sandbox.agent,
-        &queries,
-    ) else {
-        return msgs;
-    };
+    let stale = ws
+        .work_stale_reads(
+            &tools.face.sandbox.work_name,
+            &tools.face.sandbox.agent,
+            &queries,
+        )
+        .ok()?;
     let judged: Vec<(
         &crate::capabilities::conversation::session::api::ReadAt,
         bool,
     )> = reads.into_iter().zip(stale).collect();
-    msgs = crate::capabilities::conversation::session::api::freshness_view(&msgs, &judged);
-    msgs
+    // 保底按**字符**算（与压缩估算同一口径：4 字符 ≈ 1 token）。
+    let total_chars: usize = s.dialogue.iter().map(|m| m.content.chars().count()).sum();
+    let keep_percent = s.freshness_keep_percent();
+    let keep_chars = total_chars * keep_percent as usize / 100;
+    let (view, mut stats) = crate::capabilities::conversation::session::api::freshness_view(
+        &s.dialogue,
+        &judged,
+        keep_chars,
+    );
+    stats.keep_percent = keep_percent;
+    Some((view, stats))
 }
 
 /// 以现有对话跑一次工具循环；流式时逐片外送短暂 Delta（信封正文不外流，避免糊屏）。

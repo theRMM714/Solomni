@@ -232,34 +232,7 @@ function openToolsMenu(chip, s) {
       label: '保留 ' + (keep > 0 ? '至少 ' + keep + '% 窗口' : '只留摘要') + ' · 总结模型 ' + model,
       disabled: true,
     },
-    { sep: true },
-    {
-      label: '过期内容换成占位符' + (s.context_freshness ? '（已开）' : '（关）'),
-      icon: s.context_freshness ? 'check' : 'box',
-      disabled: !!blocked,
-      reason: blocked,
-      onClick: () => switchContextFreshness(s.sid, !s.context_freshness),
-    },
-    {
-      label: workCopy.freshnessOff.label,
-      reason: workCopy.freshnessOff.reason,
-      disabled: true,
-    },
   ]);
-}
-
-/* 切换过期内容替换：写工作根 meta，整棵子树共享；后端拒绝时原样显示原因。 */
-async function switchContextFreshness(sid, on) {
-  const s = state.sessions.get(sid);
-  if (!s) return;
-  if (app.isBusy(s)) { ui.toast('warn', '会话正在生成：先停止再切换'); return; }
-  try {
-    await api('POST', actionUrl('set_context_freshness'), { session_id: sid, on: !!on });
-    await refreshState();
-    ui.toast('ok', on ? '过期内容：已改为占位符' : '过期内容：保持原样');
-  } catch (e) {
-    ui.toast('err', e.message || String(e));
-  }
 }
 
 function openWorkCard(s, anchor) {
@@ -319,5 +292,5 @@ export function mount(root, deps) {
   ({ doc, state, api, ui, app } = deps);
   btn = ui.btn;
   Object.defineProperty(root, "shellCardOpen", { get: () => shellCardOpen, set: (v) => { shellCardOpen = v; }, configurable: true, enumerable: true });
-  Object.assign(root, { loadWork, popoverBox, popoverRow, popoverNote, shellCardSig, fillShellCard, paintShellCard, openShellCard, openContextCard, compactNow, openToolsMenu, switchContextFreshness, openWorkCard });
+  Object.assign(root, { loadWork, popoverBox, popoverRow, popoverNote, shellCardSig, fillShellCard, paintShellCard, openShellCard, openContextCard, compactNow, openToolsMenu, openWorkCard });
 }

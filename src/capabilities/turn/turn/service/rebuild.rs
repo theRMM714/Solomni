@@ -66,6 +66,12 @@ impl Turn {
         let roster = self.modules.roster();
         // 打开 / 重建时按 meta 刷新布局投影（会话目录可能被复制或迁移；meta 是权威）。
         let work = work_root_of(self.history.as_ref(), meta)?;
+        // 过期清理开关与保底都是**工作根**的会话级事实：子会话沿根继承，自己 meta 里那份不作准。
+        let root_meta = self.history.meta(&work)?;
+        let freshness = (
+            root_meta.context_freshness,
+            root_meta.freshness_keep_percent,
+        );
         let binding = self.workspace_binding_of(meta, probe)?;
         self.workspace.bind(&work, binding.as_deref())?;
         if binding.is_some() {
@@ -204,7 +210,8 @@ impl Turn {
                     reply_seq: crate::capabilities::conversation::session::api::max_reply(events),
                     context: (window, percent, keep_percent),
                     model: a.model.clone().or_else(|| registry.core_model()),
-                    freshness: meta.context_freshness,
+                    freshness: freshness.0,
+                    freshness_keep_percent: freshness.1,
                     reads: replay_reads(events),
                     usage: crate::capabilities::conversation::session::api::last_usage(events),
                 };
@@ -230,7 +237,8 @@ impl Turn {
                 s.set_reply_seq(crate::capabilities::conversation::session::api::max_reply(
                     events,
                 ));
-                s.set_context_freshness(meta.context_freshness);
+                s.set_context_freshness(freshness.0);
+                s.set_freshness_keep_percent(freshness.1);
                 for (body, fact) in replay_reads(events) {
                     s.note_read_at(body, fact);
                 }
@@ -543,6 +551,7 @@ impl Turn {
             context: (window, percent, keep_percent),
             model: registry.core_model(),
             freshness: meta.context_freshness,
+            freshness_keep_percent: meta.freshness_keep_percent,
         };
         Ok(
             crate::capabilities::conversation::session::api::proxy_session(
