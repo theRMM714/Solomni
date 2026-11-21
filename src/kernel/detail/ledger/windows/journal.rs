@@ -4,7 +4,7 @@
 //! 联动：windows.rs 的 prepare_fence 逐条调用；台账事务只罩「读—改—写」（store.rs 的 with_ledger），
 //!   慢的整树 ACL 写在锁外——同进程并发调用不因 ACL 写互相排队。
 
-use super::super::super::Owner;
+use super::super::Owner;
 use super::super::*;
 use std::path::Path;
 use windows_sys::Win32::Security::PSID;

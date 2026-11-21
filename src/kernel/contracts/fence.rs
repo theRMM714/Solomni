@@ -7,6 +7,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// 目的：围栏装不上时守门进程的退出码——工具执行据此如实报错，不静默。
+/// 约束：这是**守门进程协议的**退出码（守门进程返它，调用方按它判失败），改它等于改协议。
+pub const FENCE_FAILED: i32 = 111;
+
 /// 目的：守门进程执行时的全局沙箱要求——机制装不上时是降级还是拒绝。
 /// 约束：`allow_degraded` 只来自本进程的启动问答；不落盘。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

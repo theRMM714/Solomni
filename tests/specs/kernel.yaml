@@ -8,8 +8,8 @@ title: 内核（地基，不是业务单元）
 mutation:
   schedule: weekly
   files:
-    - src/kernel/detail/confine/paths.rs
-    - src/kernel/detail/confine/ledger.rs
+    - src/kernel/detail/launch.rs
+    - src/kernel/detail/ledger.rs
     - src/kernel/detail/unpack.rs
     - src/kernel/domain/path.rs
 cases:

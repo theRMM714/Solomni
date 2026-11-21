@@ -4,7 +4,7 @@
 //! 不管：某条授权该不该建立或撤销（journal.rs / release.rs 按归属与活性决定），也不管 ACL 怎么读写（acl.rs）。
 //! 联动：windows.rs 的 prepare_fence 与守门进程都经 lock_ledger 拿事务；内存视图 Ledger/LedgerEntry 在 confine/ledger.rs。
 
-use super::super::super::Owner;
+use super::super::Owner;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;

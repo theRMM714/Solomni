@@ -195,7 +195,7 @@ struct PlannedFinalize {
 /// 参数：sid = Some 时只动该 SID 的条目（强制释放）；None 时只动带此归属的条目（按租约释放）。
 fn plan_release(
     rec: &mut GrantRecord,
-    owner: &super::super::super::Owner,
+    owner: &super::super::Owner,
     sid: Option<&str>,
 ) -> Vec<PlannedFinalize> {
     let mut picked: Vec<(String, String, bool)> = Vec::new();
@@ -347,7 +347,7 @@ pub fn release_by_lease(home: &Path, lease: &str) -> Result<(), String> {
         return Err("按会话释放需要一个租约（空租约不留归属）".to_string());
     }
     let me = current_owner();
-    let owner = super::super::super::Owner {
+    let owner = super::super::Owner {
         pid: me.pid,
         start: me.start,
         lease: lease.to_string(),

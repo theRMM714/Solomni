@@ -3,11 +3,15 @@
 //! 不管：端口定义（在 `ports`）；任何领域语义；配置从哪来（调用方传参）。
 //! 联动：端口在 `src/kernel/ports.rs`；构造它们的唯一位置是入口层的组合根。
 
+pub mod acl;
 pub mod confine;
+pub mod container;
 pub mod file_log;
 pub mod fs_meta;
 pub mod host_probe;
 pub mod i18n;
+pub mod launch;
+pub mod ledger;
 pub mod lock;
 pub mod locus;
 pub mod outbound;

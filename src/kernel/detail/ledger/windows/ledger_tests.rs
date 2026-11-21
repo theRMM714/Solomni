@@ -4,8 +4,13 @@
 //! 联动：机制在 confine/windows.rs 与 ledger.rs；夹具复用 `tests` 模块的探针助手。
 
 use super::super::Owner;
-use super::tests::{acl_round_trip, discard, expect_granted, product_sid};
 use super::*;
+use crate::kernel::detail::acl::*;
+use crate::kernel::detail::confine::windows::tests::{
+    acl_round_trip, discard, expect_granted, product_sid,
+};
+use crate::kernel::detail::confine::windows::{is_machine_target, prepare_fence};
+use std::path::{Path, PathBuf};
 
 /// 【台账契约】写前先落盘：快照与授权摘要都要能在 ACL 改动前读回；收尾按快照整体还原。
 #[test]

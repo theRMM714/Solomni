@@ -10,6 +10,8 @@ const path = require("path");
 const { rel } = require("../../lib/fsutil.js");
 
 // 模块级 #[cfg(test)] mod tests 不是生产依赖边，剔除；#[cfg(test)] 加在函数上的保留。
+// 只剔**内联块**（`mod tests { … }`）：`mod tests;` 是另一个文件，块尾在别的文件里，
+// 按「扫到下一个行首 }」会让它吞掉本文件后面所有生产代码，依赖边静默消失。
 function stripTestModules(text) {
   const lines = text.split(/\r?\n/);
   const out = [];
@@ -17,7 +19,7 @@ function stripTestModules(text) {
     if (/^\s*#\[cfg\(test\)\]\s*$/.test(lines[i])) {
       let j = i + 1;
       while (j < lines.length && lines[j].trim() === "") j++;
-      if (j < lines.length && /^\s*(pub\s+)?mod\s+\w+/.test(lines[j])) {
+      if (j < lines.length && /^\s*(pub(\s*\([^)]*\))?\s+)?mod\s+\w+\s*\{\s*$/.test(lines[j])) {
         let k = j;
         while (k < lines.length && !/^\}/.test(lines[k])) k++;
         i = k;

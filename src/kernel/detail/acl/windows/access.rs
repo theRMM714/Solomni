@@ -3,8 +3,8 @@
 //! 不管：实际授权与撤权（grant.rs）、授权后的核对（verify.rs）。
 //! 联动：prepare_fence 在授权前用 can_write_dacl 预检；预检与真实授权同一把尺子。
 
-use super::super::*;
 use super::scan::is_sid_text;
+use super::*;
 use std::path::Path;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, LocalFree};
 use windows_sys::Win32::Security::Authorization::GetNamedSecurityInfoW;

@@ -6,6 +6,7 @@
 "use strict";
 
 const { mask: rustMask } = require("./rust-mask.js");
+const { stripTestModules } = require("../gates/structure/dependency.js");
 const { parseMechanismsText } = require("./mechanisms.js");
 const { parseEntryTiersText } = require("./entry-tiers.js");
 const { parseInboundText } = require("./presentation.js");
@@ -193,6 +194,18 @@ function gateParserSelfTest(root) {
   eq("rustMask 抹掉行注释与普通/raw 字符串里的记号", /ureq|std::fs/.test(rustMasked), false);
   eq("rustMask 处理可嵌套块注释且在正确深度收尾", rustMasked.includes("let c ="), true);
   eq("rustMask 抹掉字符字面量", rustMasked.includes("'a'"), false);
+  eq(
+    "stripTestModules 不吞掉 \`mod tests;\` 之后的生产代码",
+    stripTestModules("mod a;\n#[cfg(test)]\nmod tests;\nconst RIGHTS: u32 = 1;\n").includes("RIGHTS"),
+    true,
+  );
+  eq(
+    "stripTestModules 剔除内联 \`mod tests { … }\` 里的记号",
+    /secret_marker/.test(
+      stripTestModules("mod a;\n#[cfg(test)]\nmod tests {\n    use crate::secret_marker::X;\n}\nconst RIGHTS: u32 = 1;\n"),
+    ),
+    false,
+  );
   eq("rustMask 不把生命周期 't 当字符字面量吞掉后续代码", rustMasked.includes("-> &'t str { x }"), true);
   eq(
     "rustMask 保留长度与换行数",

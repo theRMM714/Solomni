@@ -10,11 +10,11 @@ use super::*;
 fn internet_client_capability_is_only_built_when_net_is_true() {
     let _fence = crate::tests::fence_acl_guard();
     assert!(
-        super::super::container::internet_client_sid(false)
+        crate::kernel::detail::container::internet_client_sid(false)
             .expect("net=false 不该失败")
             .is_none()
     );
-    let sid = super::super::container::internet_client_sid(true)
+    let sid = crate::kernel::detail::container::internet_client_sid(true)
         .expect("建 internetClient 能力 SID")
         .expect("net=true 应该有一个能力");
     assert!(!sid.is_empty(), "能力 SID 不该是空字节");

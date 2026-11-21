@@ -70,12 +70,27 @@ function parseMechanisms(root) {
   return parseMechanismsText(fs.readFileSync(file, "utf8"));
 }
 
+/** 测试专属模块：`#[cfg(test)] mod x;` 指的兄弟文件是测试代码，不是生产依赖边。 */
+function testOnlyFiles(files) {
+  const out = new Set();
+  for (const f of files) {
+    const text = fs.readFileSync(f, "utf8");
+    for (const m of text.matchAll(/#\[cfg\(test\)\]\s*mod\s+(\w+)\s*;/g)) {
+      const cand = path.join(f.replace(/\.rs$/, ""), m[1] + ".rs");
+      if (fs.existsSync(cand)) out.add(cand);
+    }
+  }
+  return out;
+}
+
 /** 依赖边：机制 A 的文件引用了 crate::kernel::<分区>::<机制>（剔除注释与测试模块）。
  *  同一对机制只记首个命中文件与引用处数；跟 kernel 其它机制的边才算机制边。 */
 function edgesOf(root, mechs) {
   const edges = new Map();
+  const testOnly = testOnlyFiles([...mechs.values()].flat());
   for (const [mech, files] of mechs) {
     for (const f of files) {
+      if (testOnly.has(f)) continue;
       const text = mask(stripTestModules(fs.readFileSync(f, "utf8")));
       const add = (to) => {
         if (to === mech || !mechs.has(to)) return;
@@ -162,7 +177,7 @@ function writeTable(root) {
   const layers = recompute(root);
   const file = path.join(root, TABLE);
   const head = fs.existsSync(file)
-    ? fs.readFileSync(file, "utf8").split(/\r?\n/).filter((l) => /^#/.test(l))
+    ? fs.readFileSync(file, "utf8").split(/\r?\n/).filter((l) => /^#/.test(l) && !/^#\s*第\s*\d+\s*层/.test(l))
     : [];
   const rows = [...layers].sort((x, y) => x[1] - y[1] || x[0].localeCompare(y[0]));
   const body = [];

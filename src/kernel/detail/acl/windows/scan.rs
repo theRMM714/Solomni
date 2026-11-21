@@ -3,8 +3,8 @@
 //! 不管：ACE 布局与身份口径（ace.rs）、写权限项（grant.rs）、写后核对（verify.rs）。
 //! 联动：windows/record 的清单与收尾经 acl.rs 读现值；verify.rs 用同一处读数口径做写后核对。
 
-use super::super::*;
 use super::ace::{ACCESS_ALLOWED_ACE_TYPE, ACE_FIXED_LEN};
+use super::*;
 use std::ffi::c_void;
 use std::path::Path;
 use windows_sys::Win32::Foundation::LocalFree;

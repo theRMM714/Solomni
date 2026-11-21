@@ -71,46 +71,49 @@
 | `src/kernel/detail/view_drive_lifecycle.rs` | 视图盘生命周期门面：分配、清扫、释放与路径编解码；按平台选中 `src/kernel/detail/view_drive_lifecycle/{windows,unix}.rs` |
 | `src/kernel/detail/view_drive_lifecycle/windows.rs` | 视图盘生命周期的 Windows 后端：逃生口、真分配与释放、控制台终止（Ctrl+C / 关窗 / 注销 / 关机）时的退出清理 |
 | `src/kernel/detail/view_drive_lifecycle/unix.rs` | 视图盘生命周期的非 Windows 后端：不分配、编解码恒 `None` |
-| `src/kernel/detail/confine.rs` | 围栏机制门面：平台后端选择与重导出；本机能力与本次实际（`effective_paths`）的判据、自检（`verify`）与 `FenceHost` 释放 |
+| `src/kernel/detail/confine.rs` | 围栏机制门面：平台后端选择与重导出；本机能力与本次实际（`effective_paths`）的判据、自检（`verify`）与 `FenceHost` 释放（台账动作在 `src/kernel/detail/ledger.rs`） |
 | `src/kernel/detail/confine/job.rs` | 守门进程的围栏作业：`FenceJob` 的 JSON 形态、启动命令（`launcher`）与执行转交（`run_fenced`）；策略由调用方传入 |
-| `src/kernel/detail/confine/admin.rs` | 围栏台账与管理动作的平台分派：授权释放、对账、按条处置、机器级预授与清理 |
-| `src/kernel/detail/confine/admin/windows.rs` | `admin` 的 Windows 后端：把动作转交给 `src/kernel/detail/confine/windows/` 的真实实现 |
-| `src/kernel/detail/confine/admin/other.rs` | `admin` 的非 Windows 后端：空报告、零计数与如实降级 |
-| `src/kernel/detail/confine/ledger.rs` | 围栏授权台账的形状与公开入口：`Owner` / `Ledger` / `ReconcileReport`；平台动作经 `admin.rs` 分派 |
-| `src/kernel/detail/confine/paths.rs` | 围栏的路径与环境工具（门面）：PATH / PATHEXT 解析、安装目录上溯、`shell_command` 与 `fence_env`；平台分支在 `src/kernel/detail/confine/paths/{windows,unix}.rs` |
-| `src/kernel/detail/confine/paths/windows.rs` | `paths` 的 Windows 后端：真身解析、重解析点判定、node 开关、程序名改写与 `cmd` shell |
-| `src/kernel/detail/confine/paths/unix.rs` | `paths` 的非 Windows 后端：执行位、链接与 `sh` shell |
-| `src/kernel/detail/confine/prep.rs` | 围栏准备与清理（门面）：`FencePrep` / `FenceStep`、机器级预授与清理；Windows 实现在 `src/kernel/detail/confine/prep/windows.rs` |
-| `src/kernel/detail/confine/prep/windows.rs` | `prep` 的 Windows 后端：围栏授权准备与按次回收 |
+| `src/kernel/detail/confine/prep.rs` | 围栏准备与机器级预授（门面）：`FencePrep` / `FenceStep` 的成败记录与步骤计时；机器级预授按平台经 `src/kernel/detail/confine/prep/windows.rs` / `src/kernel/detail/confine/prep/other.rs` 转交 |
+| `src/kernel/detail/confine/prep/windows.rs` | `prep` 的 Windows 后端：围栏授权准备、按次回收与机器级预授的转交 |
+| `src/kernel/detail/confine/prep/other.rs` | `prep` 的非 Windows 后端：没有机器级预授时如实返回未支持，退役为空操作 |
 | `src/kernel/detail/confine/tests.rs` | 围栏机制的单元测试：环境注入、安装目录上溯、Windows 程序名改写、作业 JSON、解释器解析、node realpath 与租约归属 |
 | `src/kernel/detail/confine/linux.rs` | Linux 围栏后端：Landlock 强制可达范围（`spec.rw` 读写、运行基线只读、其余拒绝），seccomp 在 `net=false` 时拒绝非本地 socket；机制不可用时如实降级 |
 | `src/kernel/detail/confine/macos.rs` | macOS 围栏后端：生成 seatbelt profile（默认拒绝，再逐条放行运行基线与 `spec.rw`；按 `net` 放行 `network-outbound` / 拒绝）交 `sandbox_init` 装上，装不上如实降级 |
 | `src/kernel/detail/confine/other.rs` | 其他平台后端：如实降级——只保证超时与整棵进程树终止，绝不作有文件系统围栏的假装 |
-| `src/kernel/detail/confine/windows/` | Windows 围栏后端目录：入口与策略派发在 `windows.rs`（容器 cwd 走 `src/kernel/detail/view_drive.rs` 的视图盘写法，祖先授权不再需要），DACL 授权在 `acl.rs`、机器级一次性预授在 `machine.rs`、授权台账与撤权在 `record/`、容器身份与作业对象在 `container.rs`、真机探针在 `tests.rs` |
-| `src/kernel/detail/confine/windows.rs` | Windows 围栏后端入口：按 agent 派生 AppContainer SID、逐条授权可达范围，再用 `STARTUPINFOEX` 在容器与作业对象里起工具（`net` 决定是否授 internetClient） |
+| `src/kernel/detail/confine/windows.rs` | Windows 围栏后端入口：按 agent 派生 AppContainer SID 并编排授权（逐条写 ACL 在 `acl`、容器内启动在 `container`、写台账在 `ledger`），产出 `FencePrep` 与围栏执行 |
 | `src/kernel/detail/confine/windows/machine.rs` | Windows 机器级一次性预授：落点清单（产品根 `(OI)(CI)` 读属性、`.tools` / `runtimes` 递归只读）、只读缺项与幂等执行，逐条计时；旧全应用包机器级授权的退役（先授后撤、浅路径先撤、逐条台账事务） |
-| `src/kernel/detail/confine/windows/acl.rs` | Windows 安全描述符操作的入口：`ace` / `grant` / `label` / `target` / `scan` / `verify` / `access` 七个职责子模块与内联单测 `tests` 的声明，并向 `windows.rs` 重导出同一个调用面 |
-| `src/kernel/detail/confine/windows/acl/ace.rs` | ACE 布局与身份：类型常量、`AceParts` / `AceView` / `DaclScan` / `AceEntry`、`ace_parts` 偏移算法、GUID 文本、`expand_generics` / `rights_covered` |
-| `src/kernel/detail/confine/windows/acl/grant.rs` | 授权写入与撤销：`grant_one` / `grant_one_object_ace` / `write_ace` / `revoke_one` |
-| `src/kernel/detail/confine/windows/acl/label.rs` | 强制完整性标签：`integrity_label` 读数（`LABEL_SECURITY_INFORMATION`，免提权）、`parse_label_sacl` 纯解析、`blocking_integrity_rid` 挡写判据与 `integrity_name` 级别名 |
-| `src/kernel/detail/confine/windows/acl/target.rs` | 授权落点清单：`GrantTarget` / `rw_part` / `grant_targets`、可信执行基座与系统基线 SID |
-| `src/kernel/detail/confine/windows/acl/scan.rs` | 读 DACL 与还原：`acl_scan` / `acl_entries` / `permission_entries` / `lost_entries` / `sd_bytes` / `restore_sd` / `orphan_package_aces` |
-| `src/kernel/detail/confine/windows/acl/verify.rs` | 写后核对与在场判断：`grant_verified` / `restore_after_failed_write` / `has_*_ace_for` / `inheritable_flags_ok` |
-| `src/kernel/detail/confine/windows/acl/access.rs` | 写 DACL 的资格预检：`owner_is_current_user` / `can_write_dacl` / `current_user_sid` 与模拟令牌、句柄与内存收尾 |
-| `src/kernel/detail/confine/windows/acl/tests.rs` | ACL 纯逻辑单测：ACE 布局解析、身份判等、继承位、通用位展开与覆盖、完整性标签解析与挡写判据 |
-| `src/kernel/detail/confine/windows/ledger_tests.rs` | 台账一族真机用例：快照先落盘、写后核对、按条处置、启动对账与孤儿回收（`#[cfg(test)] mod ledger_tests;` 指向） |
-| `src/kernel/detail/confine/windows/record.rs` | Windows 授权台账的入口：`store` / `liveness` / `journal` / `sweep` / `release` / `catalog` / `reconcile` / `paths` / `sid` 九个职责的子模块声明，并向 Windows 后端入口 `windows.rs` 重导出同一个调用面 |
-| `src/kernel/detail/confine/windows/record/store.rs` | 台账的盘上格式与互斥：`GrantRecord` / `SnapshotEntry` / `GrantEntry` / `ProfileEntry`、单一锁文件与进程内 `LEDGER_MUTEX`、锁内 `load_record` / `save_record` 与备份轮转 |
-| `src/kernel/detail/confine/windows/record/liveness.rs` | 归属者的活性：`current_owner`、进程创建时间与存活探测（`Liveness` / `OwnersState` / `owners_state` / `owner_liveness`） |
-| `src/kernel/detail/confine/windows/record/journal.rs` | 授权的建立：写前快照与按条记账（`journal_add_profile` / `journal_claim_grant` / `journal_release_grant` / `journal_add_snapshot` / `grant_one_journaled` / `journal_claim_machine` / `grant_machine_journaled` / `combine`） |
-| `src/kernel/detail/confine/windows/record/sweep.rs` | 清扫：容器 profile 与孤儿 ACE（`record_profile` / `sweep_profiles` / `delete_profile` / `sweep_orphan_aces` / `sweep_dir_down`） |
-| `src/kernel/detail/confine/windows/record/release.rs` | 撤销与释放：按条撤销（`revoke_one_text`）、围栏释放（`release_fence` / `release_by_lease`，锁内摘归属、锁外撤 ACL 的两阶段）、默认清理（`clean`，保留机器级）与全量清理（`clean_all`） |
-| `src/kernel/detail/confine/windows/record/catalog.rs` | 按条处置的读写面：`acl_facts` / `catalog` / `restore_one` / `revoke_grant` / `remove_profile_one` |
-| `src/kernel/detail/confine/windows/record/reconcile.rs` | 启动对账：`reconcile` 按归属与活性收掉上一轮运行留下的授权、快照与容器 profile |
-| `src/kernel/detail/confine/windows/record/paths.rs` | 台账与围栏的路径判据：产品根（`product_root`）与根内包含（`inside_root`） |
-| `src/kernel/detail/confine/windows/record/sid.rs` | SID 的文本与二进制互转（`sid_to_string` / `sid_from_string`） |
-| `src/kernel/detail/confine/windows/container.rs` | Windows 容器围栏的启动面：AppContainer 档案与 SID、本产品能力 SID（`solomni.fence.baseline` → `S-1-15-3-*`，profile 与令牌两处都声明）、`net` 对应的 internetClient 能力、UTF-16 转换、system shell 与 kill-on-close 作业对象 |
 | `src/kernel/detail/confine/windows/tests.rs` | Windows 围栏真机探针的父模块：共享夹具（`expect_granted` / `dump_aces` / `acl_round_trip` / `discard` / `container_diag` / `node_runs`）与 `container` / `grant` / `workspace` 三个用例族子模块声明 |
 | `src/kernel/detail/confine/windows/tests/container.rs` | 容器内真机往返用例族：叶子读得到写得到、父目录内容列不到、模块只读、绝对路径程序、按次临时目录与并发隔离 |
 | `src/kernel/detail/confine/windows/tests/grant.rs` | 围栏授权用例族：落点清单与 STAT 祖先、权限位覆盖、写后核对、台账归属与撤销、失败回滚、完整性标签挡写 |
 | `src/kernel/detail/confine/windows/tests/workspace.rs` | 视图盘用例：容器 cwd 落在映射盘符 |
+| `src/kernel/detail/container.rs` | 容器身份与容器内启动的门面：只有 Windows 有实现（`src/kernel/detail/container/windows.rs`），其余平台为空模块 |
+| `src/kernel/detail/container/windows.rs` | Windows 容器围栏的启动面：AppContainer 档案与 SID、本产品能力 SID（`solomni.fence.baseline` → `S-1-15-3-*`，profile 与令牌两处都声明）、`net` 对应的 internetClient 能力、UTF-16 转换、system shell 与 kill-on-close 作业对象、容器内启动 |
+| `src/kernel/detail/launch.rs` | 命令启动形状（门面）：PATH / PATHEXT 解析、安装目录上溯、`shell_command` 与 `fence_env`；平台分支在 `src/kernel/detail/launch/windows.rs` / `src/kernel/detail/launch/unix.rs` |
+| `src/kernel/detail/launch/windows.rs` | `launch` 的 Windows 后端：真身解析、重解析点判定、node 开关、程序名改写与 `cmd` shell |
+| `src/kernel/detail/launch/unix.rs` | `launch` 的非 Windows 后端：执行位、链接与 `sh` shell |
+| `src/kernel/detail/ledger.rs` | 围栏授权台账的形状与公开入口：`Owner` / `Ledger` / `ReconcileReport`；台账动作经 `src/kernel/detail/ledger/admin.rs` 分派，盘上格式在 `src/kernel/detail/ledger/windows.rs` |
+| `src/kernel/detail/ledger/admin.rs` | 台账动作的平台分派：授权释放、对账、按条处置与全量回收（机器级预授在 `confine` 的 `prep.rs`） |
+| `src/kernel/detail/ledger/admin/windows.rs` | `admin` 的 Windows 后端：把台账动作转交给 `src/kernel/detail/ledger/windows/` 与容器身份的真实实现 |
+| `src/kernel/detail/ledger/admin/other.rs` | `admin` 的非 Windows 后端：空报告、零计数与如实降级 |
+| `src/kernel/detail/ledger/windows.rs` | Windows 授权台账的入口：`store` / `liveness` / `journal` / `sweep` / `release` / `catalog` / `reconcile` / `paths` 八个职责的子模块声明，并向台账门面重导出同一个调用面 |
+| `src/kernel/detail/ledger/windows/store.rs` | 台账的盘上格式与互斥：`GrantRecord` / `SnapshotEntry` / `GrantEntry` / `ProfileEntry`、单一锁文件与进程内 `LEDGER_MUTEX`、锁内 `load_record` / `save_record` 与备份轮转 |
+| `src/kernel/detail/ledger/windows/liveness.rs` | 归属者的活性：`current_owner`、进程创建时间与存活探测（`Liveness` / `OwnersState` / `owners_state` / `owner_liveness`） |
+| `src/kernel/detail/ledger/windows/journal.rs` | 授权的建立：写前快照与按条记账（`journal_add_profile` / `journal_claim_grant` / `journal_release_grant` / `journal_add_snapshot` / `grant_one_journaled` / `journal_claim_machine` / `grant_machine_journaled` / `combine`） |
+| `src/kernel/detail/ledger/windows/sweep.rs` | 清扫：容器 profile 与孤儿 ACE（`record_profile` / `sweep_profiles` / `delete_profile` / `sweep_orphan_aces` / `sweep_dir_down`） |
+| `src/kernel/detail/ledger/windows/release.rs` | 撤销与释放：按条撤销（`revoke_one_text`）、围栏释放（`release_fence` / `release_by_lease`，锁内摘归属、锁外撤 ACL 的两阶段）、默认清理（`clean`，保留机器级）与全量清理（`clean_all`） |
+| `src/kernel/detail/ledger/windows/catalog.rs` | 按条处置的读写面：`acl_facts` / `catalog` / `restore_one` / `revoke_grant` / `remove_profile_one` |
+| `src/kernel/detail/ledger/windows/reconcile.rs` | 启动对账：`reconcile` 按归属与活性收掉上一轮运行留下的授权、快照与容器 profile |
+| `src/kernel/detail/ledger/windows/paths.rs` | 台账与围栏的路径判据：产品根（`product_root`）与根内包含（`inside_root`） |
+| `src/kernel/detail/ledger/windows/ledger_tests.rs` | 台账一族真机用例：快照先落盘、写后核对、按条处置、启动对账与孤儿回收（`#[cfg(test)] mod ledger_tests;` 指向；夹具复用 `confine` 的探针助手） |
+| `src/kernel/detail/acl.rs` | ACL 机制门面：按平台选中 `src/kernel/detail/acl/windows.rs` 或 `src/kernel/detail/acl/other.rs`；非 Windows 只答解释器目录可用 |
+| `src/kernel/detail/acl/windows.rs` | `acl` 的 Windows 后端：`ace` / `grant` / `label` / `target` / `scan` / `verify` / `access` / `sid` 子模块声明与统一重导出；权限位常量、`TreeSetNamedSecurityInfoW` 声明与解释器目录基线判据也在这里 |
+| `src/kernel/detail/acl/other.rs` | `acl` 的非 Windows 后端：没有 DACL 可写，`interpreter_dir_usable` 恒放行 |
+| `src/kernel/detail/acl/windows/ace.rs` | ACE 布局与身份：类型常量、`AceParts` / `AceView` / `DaclScan` / `AceEntry`、`ace_parts` 偏移算法、GUID 文本、`expand_generics` / `rights_covered` |
+| `src/kernel/detail/acl/windows/grant.rs` | 授权写入与撤销：`grant_one` / `grant_one_object_ace` / `write_ace` / `revoke_one` |
+| `src/kernel/detail/acl/windows/label.rs` | 强制完整性标签：`integrity_label` 读数（`LABEL_SECURITY_INFORMATION`，免提权）、`parse_label_sacl` 纯解析、`blocking_integrity_rid` 挡写判据与 `integrity_name` 级别名 |
+| `src/kernel/detail/acl/windows/target.rs` | 授权落点清单：`GrantTarget` / `rw_part` / `grant_targets`、可信执行基座与系统基线 SID（解释器目录由调用方经 `launch` 解析后传入） |
+| `src/kernel/detail/acl/windows/scan.rs` | 读 DACL 与还原：`acl_scan` / `acl_entries` / `permission_entries` / `lost_entries` / `sd_bytes` / `restore_sd` / `orphan_package_aces` |
+| `src/kernel/detail/acl/windows/verify.rs` | 写后核对与在场判断：`grant_verified` / `restore_after_failed_write` / `has_*_ace_for` / `inheritable_flags_ok` |
+| `src/kernel/detail/acl/windows/access.rs` | 写 DACL 的资格预检：`owner_is_current_user` / `can_write_dacl` / `current_user_sid` 与模拟令牌、句柄与内存收尾 |
+| `src/kernel/detail/acl/windows/sid.rs` | SID 的文本与二进制互转（`sid_to_string` / `sid_from_string`）；ACL 与台账共用同一份解析 |
+| `src/kernel/detail/acl/windows/tests.rs` | ACL 纯逻辑单测：ACE 布局解析、身份判等、继承位、通用位展开与覆盖、完整性标签解析与挡写判据 |

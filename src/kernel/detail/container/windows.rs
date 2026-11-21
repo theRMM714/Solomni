@@ -1,9 +1,9 @@
 //! 目的：Windows 容器围栏的启动面——AppContainer 档案与 SID、UTF-16 转换、system shell、kill-on-close job 对象。
 //! 管：在容器里拉进程这一层（Windows 独有：Linux/macOS 是「先装规则再 exec」）。
-//! 不管：授权与撤销（在 acl.rs / record/）、策略（在 confine::prepare_fence）。
-//! 联动：由 windows.rs 调用；失败如实返回而非假装成功。
+//! 不管：授权与撤销（在 acl）、台账（在 ledger）、环境与程序名改写（在 launch）、策略（在 confine::prepare_fence）。
+//! 联动：由 confine 的 Windows 后端（prepare_fence / run_fenced）调用；失败如实返回而非假装成功。
 
-use super::FENCE_FAILED;
+use crate::kernel::contracts::fence::FENCE_FAILED;
 use crate::kernel::contracts::fence::FenceSpec;
 use std::ffi::c_void;
 use std::os::windows::ffi::OsStrExt;
@@ -32,8 +32,9 @@ use windows_sys::Win32::System::Threading::{
     WaitForSingleObject,
 };
 
-/// 文件对象（SetNamedSecurityInfoW / GetNamedSecurityInfoW 的对象类型）。
-use super::*;
+/// 目的：本程序建的容器 profile 前缀（`container_name` 生成的就是它；`--fence-clean` 按它扫整族）。
+pub(crate) const PROFILE_PREFIX: &str = "Solomni.Agent.";
+
 /// 目的：容器名：**按"会话 + agent + 受保护根集合"派生**（reach 指纹）——同一会话里不同 scope 的调用
 ///   根集合不同 → 不同 SID（窄调用看不到宽调用的根）；同一 reach 的后续调用复用同一个 SID 与已有 ACE。
 ///   工具链/运行包是可信执行基座（授给 baseline），不在指纹里承担 scope 含义；net 是令牌能力，也不进指纹。
@@ -289,7 +290,7 @@ pub(crate) fn internet_client_sid(enabled: bool) -> Result<Option<Vec<u8>>, Stri
 /// 目的：把工具进程放进容器里跑：按 `net` 授/不授 `internetClient`，stdio 用外层给的那三个句柄；环境用运行期白名单显式给出。
 pub(crate) fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Result<i32, String> {
     // 环境块显式给（见 fence_env）：子进程拿到的就是白名单本身，不靠"守门进程恰好继承了什么"。
-    let env = super::super::fence_env(spec, command);
+    let env = crate::kernel::detail::launch::fence_env(spec, command);
     // 视图盘只给 cwd == 私有沙箱的调用（shell）用：映射根一级即可，根外祖先链不必再授 ACE，程序名也译视图写法。
     // 模块工具 cwd 是模块根，沿用宿主 cwd 与宿主程序名——译成视图写法会把相对程序名算成跨卷绝对路径。
     let view = crate::kernel::detail::view_drive::active_shell_view(spec);
@@ -300,10 +301,10 @@ pub(crate) fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Re
     // 程序名改写成相对 cwd 的路径：AppContainer 里绝对路径的程序会被拒（真机：同一文件用绝对路径报
     // Access denied，用 `..\` 相对路径正常）。裸名不碰——交给 cmd 按容器里的 PATH 解析。
     let command = match &view {
-        Some(v) => super::super::view_program_command(command, v),
+        Some(v) => crate::kernel::detail::launch::view_program_command(command, v),
         None => command.to_string(),
     };
-    let command = &super::super::container_program_command(&command, &cwd);
+    let command = &crate::kernel::detail::launch::container_program_command(&command, &cwd);
     let mut block: Vec<u16> = Vec::new();
     for (k, v) in env {
         block.extend(k.encode_wide());
@@ -371,7 +372,7 @@ pub(crate) fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Re
     let shell = format!(
         "\"{}\" /C {}",
         shell_exe.display(),
-        super::super::windows_program_separators(command)
+        crate::kernel::detail::launch::windows_program_separators(command)
     );
     let mut cmdline: Vec<u16> = std::ffi::OsStr::new(&shell)
         .encode_wide()
