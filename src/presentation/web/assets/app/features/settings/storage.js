@@ -70,7 +70,7 @@ function renderStorage(box, report, refresh) {
   bar.appendChild(gc);
   const clear = btn('清空全部缓存', 'btn');
   clear.onclick = async () => {
-    if (!(await ui.confirmBox('清空全部缓存', '会清空构建缓存卷、下载缓存、过期可写层与可清理日志；会话与虚拟根不动。', '清空'))) return;
+    if (!(await ui.confirmBox('清空全部缓存', settingsCopy.storageClearAll.detail, '清空'))) return;
     try {
       for (const kind of ['build-cache', 'download-cache', 'overlays', 'logs']) {
         await api('POST', '/api/storage/clean', { kind, confirm: true });
@@ -98,14 +98,21 @@ function renderStorage(box, report, refresh) {
     catHead.appendChild(title);
     catHead.appendChild(size);
     catHead.appendChild(note);
-    if (['download-cache', 'overlays', 'logs'].includes(cat.id) && (cat.items || []).length) {
+    const items = cat.items || [];
+    // 可清理项：后端标了 active / cleanable=false 的不进“整类”（当前运行日志就属于这种）。
+    const cleanables = items.filter((i) => i.cleanable !== false && !i.active);
+    if (['download-cache', 'overlays', 'logs'].includes(cat.id) && cleanables.length) {
       const clearOne = btn('清理整类', 'link-btn danger');
-      clearOne.onclick = () => cleanStorage(cat.id, null, null, refresh);
+      clearOne.onclick = () => cleanStorage(cat.id, null, null, refresh, {
+        removable: cleanables.length,
+        active: items.length - cleanables.length,
+      });
       catHead.appendChild(clearOne);
     }
     catEl.appendChild(catHead);
     if (cat.id === 'logs') {
-      note.textContent += ' · 共 ' + (cat.items || []).length + ' 份';
+      const guarded = items.length - cleanables.length;
+      note.textContent += ' · 共 ' + items.length + ' 份' + (guarded ? '（运行中 ' + guarded + ' 份受保护）' : '');
       box.appendChild(catEl);
       continue;
     }
@@ -150,9 +157,14 @@ function renderStorage(box, report, refresh) {
   }
 }
 
-async function cleanStorage(kind, id, module, refresh) {
+async function cleanStorage(kind, id, module, refresh, counts) {
   const names = { 'build-cache': '构建缓存', 'download-cache': '下载缓存', overlays: '可写层', logs: '日志', compact: '压缩' };
-  if (!(await ui.confirmBox('清理' + (names[kind] || kind), '确认清理：' + (id || '整类') + '？', '清理'))) return;
+  const detail = kind === 'logs' && counts
+    ? (counts.active
+      ? settingsCopy.storageLogClean.detail.replace('{n}', counts.removable).replace('{keep}', counts.active)
+      : settingsCopy.storageLogClean.detailAll.replace('{n}', counts.removable))
+    : '确认清理：' + (id || '整类') + '？';
+  if (!(await ui.confirmBox('清理' + (names[kind] || kind), detail, '清理'))) return;
   try {
     const r = await api('POST', '/api/storage/clean', { kind, id: id || null, module: module || null, confirm: true });
     if (r.result && r.result.started) {
@@ -160,7 +172,15 @@ async function cleanStorage(kind, id, module, refresh) {
     } else if (module) {
       ui.toast('ok', '已排队：下次构建前回收 ' + module);
     } else {
-      ui.toast('ok', '完成；释放 ' + app.fmtBytes((r.result && r.result.report && r.result.report.freedBytes) || 0));
+      const report = (r.result && r.result.report) || {};
+      const n = (report.actions || []).length;
+      if (!n) {
+        ui.toast('warn', '没有可清理的内容');
+      } else if (kind === 'logs') {
+        ui.toast('ok', '已清理 ' + n + ' 份日志；释放 ' + app.fmtBytes(report.freedBytes || 0));
+      } else {
+        ui.toast('ok', '完成；释放 ' + app.fmtBytes(report.freedBytes || 0));
+      }
     }
     await refresh();
   } catch (e) { ui.toast('err', '清理失败：' + e.message); }

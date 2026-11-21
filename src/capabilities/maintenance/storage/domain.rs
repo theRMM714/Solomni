@@ -54,8 +54,15 @@ pub fn plan(
                 let keep_recent = 50usize;
                 for (idx, item) in logs.iter().enumerate() {
                     let aged = item.last_used.map(|t| t < log_cutoff).unwrap_or(false);
-                    if (aged && policy.log_keep_days > 0) || idx + keep_recent < logs.len() {
-                        add(&mut out, &mut seen, cat, item, "超过日志保留期限");
+                    let by_age = aged && policy.log_keep_days > 0;
+                    let by_count = idx + keep_recent < logs.len();
+                    if by_age || by_count {
+                        let reason = if by_age {
+                            "超过日志保留期限"
+                        } else {
+                            "超出最近份数保留"
+                        };
+                        add(&mut out, &mut seen, cat, item, reason);
                     }
                 }
             }
@@ -238,5 +245,32 @@ mod tests {
         let plan = plan(&r, policy, 200_000, None);
         assert_eq!(plan.len(), 1);
         assert_eq!(plan[0].category, "download-cache");
+    }
+
+    /// 目的：日志自动回收只留最近 50 份，理由按“份数”如实标注而不是“保留期限”。
+    #[test]
+    fn plan_keeps_the_most_recent_fifty_logs() {
+        // 最旧的一份标成运行中：按份数本该被回收，也要被跳过。
+        let items: Vec<SpaceItem> = (0..60)
+            .map(|i| item(&format!("{:02}.log", i), 1, 1_000 + i, i == 0))
+            .collect();
+        let cat = SpaceCategory {
+            id: "logs".to_string(),
+            label: "日志".to_string(),
+            bytes: 60,
+            items,
+            auto_evictable: true,
+            note: String::new(),
+        };
+        let r = report(vec![cat]);
+        let policy = StoragePolicy {
+            cap_bytes: 10_000,
+            ..StoragePolicy::default()
+        };
+        let plan = plan(&r, policy, 200_000, None);
+        assert_eq!(plan.len(), 9, "活动日志不进入自动候选");
+        assert_eq!(plan.first().map(|c| c.id.as_str()), Some("01.log"));
+        assert!(plan.iter().all(|c| c.id != "00.log"));
+        assert!(plan.iter().all(|c| c.reason == "超出最近份数保留"));
     }
 }

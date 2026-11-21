@@ -18,12 +18,14 @@ use super::{guests, paths, qemu, scan, space};
 /// 目的：按产品根盘点空间事实。
 pub struct DiskSurvey {
     root: PathBuf,
+    /// 目的：当前进程正在写的日志文件；盘点时标为受保护，清理不删。
+    active_log: Option<PathBuf>,
 }
 
 impl DiskSurvey {
-    /// 目的：组合根专用——取产品根。
-    pub fn new(root: PathBuf) -> DiskSurvey {
-        DiskSurvey { root }
+    /// 目的：组合根专用——取产品根与正在写的日志（没有就是 None）。
+    pub fn new(root: PathBuf, active_log: Option<PathBuf>) -> DiskSurvey {
+        DiskSurvey { root, active_log }
     }
 }
 
@@ -33,11 +35,17 @@ impl SpaceSurvey for DiskSurvey {
         // 一次盘点只取一次时间：分类里的"距今多久"与回收摘要用同一个刻度。
         let now = crate::kernel::detail::procs::now_ts();
         let qemu = qemu::find(root);
+        // 日志项只按文件名比对：logs/ 是固定落点，名字相同就是同一份。
+        let active_log = self
+            .active_log
+            .as_deref()
+            .and_then(Path::file_name)
+            .and_then(|n| n.to_str());
         let mut categories = vec![
             build(root, qemu.as_deref()),
             download(root),
             overlays(root, qemu.as_deref(), now),
-            logs(root),
+            logs(root, active_log),
         ];
         if full {
             categories.push(guest_bases(root));
@@ -180,22 +188,37 @@ fn overlays(root: &Path, qemu: Option<&Path>, now: u64) -> SpaceCategory {
     )
 }
 
-fn logs(root: &Path) -> SpaceCategory {
+fn logs(root: &Path, active_log: Option<&str>) -> SpaceCategory {
     let items = scan::files_with_ext(&paths::log_dir(root), "log")
         .into_iter()
-        .map(|p| SpaceItem {
-            id: scan::name_of(&p),
-            label: format!("日志 · {}", scan::name_of(&p)),
-            bytes: scan::bytes(&p),
-            virtual_bytes: None,
-            last_used: scan::modified(&p),
-            active: false,
-            detail: "运行日志".to_string(),
-            modules: Vec::new(),
-            cleanable: true,
+        .map(|p| {
+            let name = scan::name_of(&p);
+            let active = active_log == Some(name.as_str());
+            SpaceItem {
+                id: name.clone(),
+                label: format!("日志 · {}", name),
+                bytes: scan::bytes(&p),
+                virtual_bytes: None,
+                last_used: scan::modified(&p),
+                active,
+                detail: if active {
+                    "当前运行的日志，清理时保留"
+                } else {
+                    "运行日志"
+                }
+                .to_string(),
+                modules: Vec::new(),
+                cleanable: !active,
+            }
         })
         .collect();
-    category(CAT_LOGS, "日志", items, true, "按保留天数与最近份数回收")
+    category(
+        CAT_LOGS,
+        "日志",
+        items,
+        true,
+        "按保留天数与最近份数；手动清理保留当前运行日志",
+    )
 }
 
 fn guest_bases(root: &Path) -> SpaceCategory {

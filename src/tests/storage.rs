@@ -7,13 +7,23 @@ use crate::capabilities::maintenance::storage::api::{
     CleanKind, CleanOutcome, CleanRequest, StoragePolicy,
 };
 
-/// 目的：用组合根装一个存储能力（隔离根 + 假补齐面）。用例只经能力面断言可观察结果。
-fn service(root: &std::path::Path) -> impl crate::capabilities::maintenance::storage::api::Storage {
+/// 目的：用组合根装一个存储能力（隔离根 + 假补齐面 + 可指定的运行日志）。用例只经能力面断言可观察结果。
+fn service_with_active(
+    root: &std::path::Path,
+    active_log: Option<std::path::PathBuf>,
+) -> impl crate::capabilities::maintenance::storage::api::Storage {
     crate::entry::assembly::storage(
         root,
         crate::tests::doubles::test_provision(),
         StoragePolicy::default(),
+        std::sync::Arc::new(crate::kernel::ports::NoopLog),
+        active_log,
     )
+}
+
+/// 目的：不需要模拟运行日志时的简写。
+fn service(root: &std::path::Path) -> impl crate::capabilities::maintenance::storage::api::Storage {
+    service_with_active(root, None)
 }
 
 /// 目的：未接入时显式清理如实拒绝；确认标志缺失也拒绝。
@@ -114,6 +124,73 @@ fn active_volume_is_protected_and_module_cleanup_is_queued() {
     }
     let text = std::fs::read_to_string(cache.join("busy.purge")).unwrap();
     assert_eq!(text.trim(), "indexer");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：手动“清理整类”日志是全清——历史日志删完，只留当前进程正在写的那一份。
+#[test]
+fn clean_logs_deletes_all_but_the_active_file() {
+    use crate::capabilities::maintenance::storage::api::Storage;
+    let root = crate::tests::scratch("storage-logs-clean");
+    let logs = root.join("logs");
+    std::fs::create_dir_all(&logs).unwrap();
+    std::fs::write(logs.join("old.log"), b"old").unwrap();
+    std::fs::write(logs.join("mid.log"), b"mid").unwrap();
+    std::fs::write(logs.join("active.log"), b"live").unwrap();
+    let svc = service_with_active(&root, Some(logs.join("active.log")));
+
+    let r = svc.report().unwrap();
+    let cat = r.categories.iter().find(|c| c.id == "logs").unwrap();
+    assert_eq!(cat.items.len(), 3);
+    let active = cat.items.iter().find(|i| i.id == "active.log").unwrap();
+    assert!(active.active, "运行中的日志要标为 active");
+    assert!(!active.cleanable, "运行中的日志不可清理");
+
+    let req = CleanRequest {
+        kind: CleanKind::Logs,
+        id: None,
+        module: None,
+        confirm: true,
+    };
+    let CleanOutcome::Report(report) = svc.clean(&req).unwrap() else {
+        panic!("手动清理是同步回执")
+    };
+    assert_eq!(report.actions.len(), 2, "两份历史日志都要删");
+    assert_eq!(report.freed_bytes, 6);
+    assert!(logs.join("active.log").exists(), "运行中的日志要留下");
+    assert!(!logs.join("old.log").exists());
+    assert!(!logs.join("mid.log").exists());
+
+    // 只剩运行中的那一份：再清一次没有候选，如实回 0，不假装成功。
+    let CleanOutcome::Report(again) = svc.clean(&req).unwrap() else {
+        panic!("手动清理是同步回执")
+    };
+    assert!(again.actions.is_empty());
+    assert_eq!(again.freed_bytes, 0);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：没有运行中的日志时，手动清理把 logs 下全部日志删光。
+#[test]
+fn clean_logs_without_a_running_file_deletes_everything() {
+    use crate::capabilities::maintenance::storage::api::Storage;
+    let root = crate::tests::scratch("storage-logs-all");
+    let logs = root.join("logs");
+    std::fs::create_dir_all(&logs).unwrap();
+    std::fs::write(logs.join("a.log"), b"1234567890").unwrap();
+    let svc = service(&root);
+    let req = CleanRequest {
+        kind: CleanKind::Logs,
+        id: None,
+        module: None,
+        confirm: true,
+    };
+    let CleanOutcome::Report(report) = svc.clean(&req).unwrap() else {
+        panic!("手动清理是同步回执")
+    };
+    assert_eq!(report.actions.len(), 1);
+    assert_eq!(report.freed_bytes, 10);
+    assert!(!logs.join("a.log").exists());
     let _ = std::fs::remove_dir_all(&root);
 }
 
