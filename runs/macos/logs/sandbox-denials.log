@@ -1,0 +1,200 @@
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:27.122 E  nsattributedstringagent[2058:265c] [com.apple.CFPasteboard:general] WebContent[6912] Failed to set up CFPasteboardRef 'Apple CFPasteboard general'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:27.127 E  nsattributedstringagent[2058:265c] [com.apple.CFPasteboard:general] WebContent[6912] Failed to set up CFPasteboardRef 'Apple CFPasteboard general'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:27.137 Df launchd[1:2842] [gui/501 [100002]:] denied lookup: name = com.apple.distributed_notifications@Uv3, requestor = com.apple.WebKi[6912], error = 159: Sandbox restriction
+2026-11-21 15:09:27.176 Df launchd[1:411f] [system:] denied lookup: name = com.apple.tccd.system, flags = 0x8, requestor = com.apple.WebKi[6912], error = 159: Sandbox restriction
+2026-11-21 15:09:27.318 E  kernel[0:5d5c] [com.apple.sandbox.reporting:violation] Sandbox: com.apple.WebKit.WebContent(6912) deny(1) iokit-get-properties iokit-class:IOService property:syscfg-vmpv-data
+2026-11-21 15:09:27.338 Df launchd[1:2842] [gui/501 [100002]:] denied lookup: name = com.apple.CoreServices.coreservicesd, flags = 0x9, requestor = com.apple.WebKi[6912], error = 159: Sandbox restriction
+2026-11-21 15:09:27.342 Df launchd[1:411f] [gui/501 [100002]:] denied lookup: name = com.apple.DiskArbitration.diskarbitrationd, flags = 0x9, requestor = com.apple.WebKi[6912], error = 159: Sandbox restriction
+2026-11-21 15:09:27.956 Df launchd[1:2842] [gui/501 [100002]:] denied lookup: name = com.apple.windowserver.active, flags = 0x9, requestor = com.apple.WebKi[6912], error = 159: Sandbox restriction
+2026-11-21 15:09:28.180 E  kernel[0:b22] [com.apple.sandbox.reporting:violation] Sandbox: softwareupdated(107) deny(1) system-fsctl (_IO "J" 104)
+2026-11-21 15:09:30.940 E  kernel[0:5d84] [com.apple.sandbox.reporting:violation] 2 duplicate reports for Sandbox: softwareupdated(107) deny(1) system-fsctl (_IO "J" 104)
+2026-11-21 15:09:30.940 E  kernel[0:5d84] [com.apple.sandbox.reporting:violation] Sandbox: mobileassetd(198) deny(1) file-read-data /Library/Preferences/com.apple.networkextension.uuidcache.plist
+2026-11-21 15:09:36.392 E  kernel[0:6109] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7234) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-inside/solomni-seatbelt-selfcheck-7231
+2026-11-21 15:09:36.392 E  kernel[0:6108] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7235) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-module/solomni-seatbelt-selfcheck-7230
+2026-11-21 15:09:36.417 E  kernel[0:616c] [com.apple.sandbox.reporting:violation] Sandbox: sh(7329) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.417 E  kernel[0:616f] [com.apple.sandbox.reporting:violation] Sandbox: sh(7332) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.419 E  kernel[0:6170] [com.apple.sandbox.reporting:violation] Sandbox: bash(7329) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.420 E  kernel[0:6170] [com.apple.sandbox.reporting:violation] Sandbox: bash(7329) deny(1) file-read-data /dev/tty
+2026-11-21 15:09:36.420 E  kernel[0:6171] [com.apple.sandbox.reporting:violation] Sandbox: bash(7332) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.420 E  kernel[0:6171] [com.apple.sandbox.reporting:violation] Sandbox: bash(7332) deny(1) file-read-data /dev/tty
+2026-11-21 15:09:36.445 E  kernel[0:617a] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7338) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-inside/solomni-seatbelt-selfcheck-7336
+2026-11-21 15:09:36.448 E  kernel[0:617b] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7339) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-module/solomni-seatbelt-selfcheck-7337
+2026-11-21 15:09:36.461 E  kernel[0:617d] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7341) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-net/solomni-seatbelt-selfcheck-7340
+2026-11-21 15:09:36.465 E  kernel[0:61aa] [com.apple.sandbox.reporting:violation] Sandbox: sh(7386) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.469 E  kernel[0:61ad] [com.apple.sandbox.reporting:violation] Sandbox: sh(7389) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.470 E  kernel[0:61ae] [com.apple.sandbox.reporting:violation] Sandbox: bash(7386) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.471 E  kernel[0:61ae] [com.apple.sandbox.reporting:violation] Sandbox: bash(7386) deny(1) file-read-data /dev/tty
+2026-11-21 15:09:36.477 E  kernel[0:61af] [com.apple.sandbox.reporting:violation] Sandbox: bash(7389) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.478 E  kernel[0:61af] [com.apple.sandbox.reporting:violation] Sandbox: bash(7389) deny(1) file-read-data /dev/tty
+2026-11-21 15:09:36.479 E  kernel[0:61af] [com.apple.sandbox.reporting:violation] Sandbox: bash(7389) deny(1) file-write-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-module/script.py
+2026-11-21 15:09:36.500 E  kernel[0:61cc] [com.apple.sandbox.reporting:violation] Sandbox: sh(7418) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.502 E  kernel[0:61cd] [com.apple.sandbox.reporting:violation] Sandbox: bash(7418) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.502 E  kernel[0:61cd] [com.apple.sandbox.reporting:violation] Sandbox: bash(7418) deny(1) file-read-data /dev/tty
+2026-11-21 15:09:36.508 E  kernel[0:61cf] [com.apple.sandbox.reporting:violation] Sandbox: curl(7418) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.508 E  kernel[0:61c6] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7412) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-inside/solomni-seatbelt-selfcheck-7401
+2026-11-21 15:09:36.512 E  kernel[0:61ce] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7419) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-module/solomni-seatbelt-selfcheck-7406
+2026-11-21 15:09:36.521 E  kernel[0:5c39] [com.apple.sandbox.reporting:violation] Sandbox: curl(7418) deny(1) user-preference-read kcfpreferencesanyapplication
+2026-11-21 15:09:36.523 E  kernel[0:61cf] [com.apple.sandbox.reporting:violation] 4 duplicate reports for Sandbox: curl(7418) deny(1) user-preference-read kcfpreferencesanyapplication
+2026-11-21 15:09:36.523 E  kernel[0:61cf] [com.apple.sandbox.reporting:violation] Sandbox: curl(7418) deny(1) network-outbound remote:*:49293
+2026-11-21 15:09:36.528 E  kernel[0:6202] [com.apple.sandbox.reporting:violation] Sandbox: sh(7467) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.529 E  kernel[0:6203] [com.apple.sandbox.reporting:violation] Sandbox: sh(7468) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.531 E  kernel[0:6204] [com.apple.sandbox.reporting:violation] Sandbox: bash(7467) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.532 E  kernel[0:6204] [com.apple.sandbox.reporting:violation] Sandbox: bash(7467) deny(1) file-read-data /dev/tty
+2026-11-21 15:09:36.532 E  kernel[0:6205] [com.apple.sandbox.reporting:violation] Sandbox: bash(7468) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.533 E  kernel[0:6205] [com.apple.sandbox.reporting:violation] Sandbox: bash(7468) deny(1) file-read-data /dev/tty
+2026-11-21 15:09:36.539 E  kernel[0:6208] [com.apple.sandbox.reporting:violation] Sandbox: cat(7468) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.539 E  kernel[0:6207] [com.apple.sandbox.reporting:violation] Sandbox: cat(7467) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.540 E  kernel[0:6207] [com.apple.sandbox.reporting:violation] Sandbox: cat(7467) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-outside/secret.txt
+2026-11-21 15:09:36.562 E  kernel[0:620c] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7472) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-net/solomni-seatbelt-selfcheck-7469
+2026-11-21 15:09:36.577 E  kernel[0:620f] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7475) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-ro-inside/solomni-seatbelt-selfcheck-7474
+2026-11-21 15:09:36.583 E  kernel[0:6228] [com.apple.sandbox.reporting:violation] Sandbox: sh(7500) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.584 E  kernel[0:6210] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7476) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-module/solomni-seatbelt-selfcheck-7473
+2026-11-21 15:09:36.586 E  kernel[0:6229] [com.apple.sandbox.reporting:violation] Sandbox: bash(7500) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.587 E  kernel[0:6229] [com.apple.sandbox.reporting:violation] Sandbox: bash(7500) deny(1) file-read-data /dev/tty
+2026-11-21 15:09:36.592 E  kernel[0:6242] [com.apple.sandbox.reporting:violation] Sandbox: sh(7524) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.592 E  kernel[0:6239] [com.apple.sandbox.reporting:violation] Sandbox: curl(7500) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.593 E  kernel[0:6243] [com.apple.sandbox.reporting:violation] Sandbox: bash(7524) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.594 E  kernel[0:6243] [com.apple.sandbox.reporting:violation] Sandbox: bash(7524) deny(1) file-read-data /dev/tty
+2026-11-21 15:09:36.599 E  kernel[0:625b] [com.apple.sandbox.reporting:violation] Sandbox: sh(7548) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.599 E  kernel[0:625c] [com.apple.sandbox.reporting:violation] Sandbox: cat(7524) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.600 E  kernel[0:5c8f] [com.apple.sandbox.reporting:violation] Sandbox: curl(7500) deny(1) user-preference-read kcfpreferencesanyapplication
+2026-11-21 15:09:36.604 E  kernel[0:625f] [com.apple.sandbox.reporting:violation] 4 duplicate reports for Sandbox: curl(7500) deny(1) user-preference-read kcfpreferencesanyapplication
+2026-11-21 15:09:36.604 E  kernel[0:625f] [com.apple.sandbox.reporting:violation] Sandbox: bash(7548) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.605 E  kernel[0:625f] [com.apple.sandbox.reporting:violation] Sandbox: bash(7548) deny(1) file-read-data /dev/tty
+2026-11-21 15:09:36.630 E  kernel[0:6269] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7555) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-ro-inside/solomni-seatbelt-selfcheck-7552
+2026-11-21 15:09:36.634 E  kernel[0:626a] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7556) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/shared-area-sandbox/solomni-seatbelt-selfcheck-7553
+2026-11-21 15:09:36.642 E  kernel[0:626b] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7557) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-verify/solomni-seatbelt-selfcheck-7554
+2026-11-21 15:09:36.681 E  kernel[0:629e] [com.apple.sandbox.reporting:violation] Sandbox: sh(7603) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.685 E  kernel[0:62a6] [com.apple.sandbox.reporting:violation] Sandbox: bash(7603) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.686 E  kernel[0:62a6] [com.apple.sandbox.reporting:violation] Sandbox: bash(7603) deny(1) file-read-data /dev/tty
+2026-11-21 15:09:36.696 E  kernel[0:62ab] [com.apple.sandbox.reporting:violation] Sandbox: sh(7609) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.700 E  kernel[0:62ac] [com.apple.sandbox.reporting:violation] Sandbox: bash(7609) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.700 E  kernel[0:62ac] [com.apple.sandbox.reporting:violation] Sandbox: bash(7609) deny(1) file-read-data /dev/tty
+2026-11-21 15:09:36.707 E  kernel[0:62ac] [com.apple.sandbox.reporting:violation] Sandbox: bash(7609) deny(1) file-write-create /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-ro-shared/should-not-exist.txt
+2026-11-21 15:09:36.729 E  kernel[0:62b3] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7614) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/shared-area-sandbox/solomni-seatbelt-selfcheck-7611
+2026-11-21 15:09:36.741 E  kernel[0:62b4] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7615) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-ro-inside/solomni-seatbelt-selfcheck-7613
+2026-11-21 15:09:36.759 E  kernel[0:62d3] [com.apple.sandbox.reporting:violation] Sandbox: sh(7647) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.760 E  kernel[0:62e4] [com.apple.sandbox.reporting:violation] Sandbox: sh(7663) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.762 E  kernel[0:62e6] [com.apple.sandbox.reporting:violation] Sandbox: bash(7663) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.762 E  kernel[0:62e5] [com.apple.sandbox.reporting:violation] Sandbox: bash(7647) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.762 E  kernel[0:62e6] [com.apple.sandbox.reporting:violation] Sandbox: bash(7663) deny(1) file-read-data /dev/tty
+2026-11-21 15:09:36.763 E  kernel[0:62e5] [com.apple.sandbox.reporting:violation] Sandbox: bash(7647) deny(1) file-read-data /dev/tty
+2026-11-21 15:09:36.765 E  kernel[0:62e5] [com.apple.sandbox.reporting:violation] Sandbox: bash(7647) deny(1) file-write-create /Users/runner/work/Solomni/Solomni/target/test-scratch/shared-area-work/pwn.txt
+2026-11-21 15:09:36.796 E  kernel[0:631d] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7715) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/shared-area-sandbox/solomni-seatbelt-selfcheck-7712
+2026-11-21 15:09:36.816 E  kernel[0:636a] [com.apple.sandbox.reporting:violation] Sandbox: sh(7788) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.817 E  kernel[0:636e] [com.apple.sandbox.reporting:violation] Sandbox: bash(7788) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.818 E  kernel[0:636e] [com.apple.sandbox.reporting:violation] Sandbox: bash(7788) deny(1) file-read-data /dev/tty
+2026-11-21 15:09:36.824 E  kernel[0:638b] [com.apple.sandbox.reporting:violation] Sandbox: cat(7788) deny(1) file-read-data /dev/dtracehelper
+2026-11-21 15:09:36.825 E  kernel[0:638b] [com.apple.sandbox.reporting:violation] Sandbox: cat(7788) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/shared-area-work/planted.txt
+2026-11-21 15:09:40.818 E  kernel[0:5741] [com.apple.sandbox.reporting:violation] Sandbox: mobileassetd(198) deny(1) file-read-data /Library/Preferences/com.apple.networkextension.uuidcache.plist
+2026-11-21 15:09:41.767 E  kernel[0:155c] [com.apple.sandbox.reporting:violation] Sandbox: AuthenticationServicesAgent(7860) deny(1) mach-lookup com.apple.AuthenticationServices.AutoFill
+2026-11-21 15:09:41.767 Df launchd[1:155c] [gui/501 [100002]:] denied lookup: name = com.apple.AuthenticationServices.AutoFill, requestor = AuthenticationS[7860], error = 159: Sandbox restriction
+2026-11-21 15:09:42.661 E  kernel[0:2842] [com.apple.sandbox.reporting:violation] Sandbox: AuthenticationServicesAgent(7860) deny(1) mach-lookup com.apple.pasteboard.1
+2026-11-21 15:09:42.661 Df launchd[1:2842] [gui/501 [100002]:] denied lookup: name = com.apple.pasteboard.1, requestor = AuthenticationS[7860], error = 159: Sandbox restriction
+2026-11-21 15:09:42.662 E  AuthenticationServicesAgent[7860:6458] [com.apple.CFPasteboard:general] Connection to 'pboard' server had an error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:42.662 E  AuthenticationServicesAgent[7860:6436] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'Apple CFPasteboard general'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:42.663 E  AuthenticationServicesAgent[7860:6436] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'Apple CFPasteboard general'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:42.666 E  kernel[0:155c] [com.apple.sandbox.reporting:violation] Sandbox: AuthenticationServicesAgent(7860) deny(1) mach-lookup com.apple.tccd.system
+2026-11-21 15:09:42.666 Df launchd[1:155c] [system:] denied lookup: name = com.apple.tccd.system, flags = 0x8, requestor = AuthenticationS[7860], error = 159: Sandbox restriction
+2026-11-21 15:09:42.668 E  kernel[0:2842] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: AuthenticationServicesAgent(7860) deny(1) mach-lookup com.apple.tccd.system
+2026-11-21 15:09:42.668 E  kernel[0:2842] [com.apple.sandbox.reporting:violation] Sandbox: AuthenticationServicesAgent(7860) deny(1) mach-lookup com.apple.windowserver.active
+2026-11-21 15:09:42.668 Df launchd[1:2842] [gui/501 [100002]:] denied lookup: name = com.apple.windowserver.active, flags = 0x9, requestor = AuthenticationS[7860], error = 159: Sandbox restriction
+2026-11-21 15:09:42.670 E  kernel[0:155c] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: AuthenticationServicesAgent(7860) deny(1) mach-lookup com.apple.windowserver.active
+2026-11-21 15:09:42.670 E  kernel[0:155c] [com.apple.sandbox.reporting:violation] Sandbox: AuthenticationServicesAgent(7860) deny(1) mach-lookup com.apple.DiskArbitration.diskarbitrationd
+2026-11-21 15:09:42.670 Df launchd[1:155c] [gui/501 [100002]:] denied lookup: name = com.apple.DiskArbitration.diskarbitrationd, flags = 0x9, requestor = AuthenticationS[7860], error = 159: Sandbox restriction
+2026-11-21 15:09:43.179 E  kernel[0:6436] [com.apple.sandbox.reporting:violation] Sandbox: AuthenticationServicesAgent(7860) deny(1) iokit-open-user-client AppleNVMeEANUC
+2026-11-21 15:09:43.180 E  kernel[0:5cb6] [com.apple.sandbox.reporting:violation] Sandbox: AuthenticationServicesAgent(7860) deny(1) user-preference-read com.apple.universalaccess
+2026-11-21 15:09:43.186 E  kernel[0:411f] [com.apple.sandbox.reporting:violation] 6 duplicate reports for Sandbox: AuthenticationServicesAgent(7860) deny(1) user-preference-read com.apple.universalaccess
+2026-11-21 15:09:43.186 E  kernel[0:411f] [com.apple.sandbox.reporting:violation] Sandbox: AuthenticationServicesAgent(7860) deny(1) mach-lookup com.apple.dock.server
+2026-11-21 15:09:43.186 Df launchd[1:411f] [gui/501 [100002]:] denied lookup: name = com.apple.dock.server, flags = 0x1, requestor = AuthenticationS[7860], error = 159: Sandbox restriction
+2026-11-21 15:09:43.248 E  kernel[0:411f] [com.apple.sandbox.reporting:violation] Sandbox: AuthenticationServicesAgent(7860) deny(1) mach-lookup com.apple.windowserver.active
+2026-11-21 15:09:43.248 Df launchd[1:411f] [gui/501 [100002]:] denied lookup: name = com.apple.windowserver.active, flags = 0x9, requestor = AuthenticationS[7860], error = 159: Sandbox restriction
+2026-11-21 15:09:43.249 E  AuthenticationServicesAgent[7860:6436] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'DefaultAsciiKeyboardLayoutPasteboard'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:43.249 E  kernel[0:6436] [com.apple.sandbox.reporting:violation] 2 duplicate reports for Sandbox: AuthenticationServicesAgent(7860) deny(1) mach-lookup com.apple.windowserver.active
+2026-11-21 15:09:43.249 E  kernel[0:6436] [com.apple.sandbox.reporting:violation] Sandbox: AuthenticationServicesAgent(7860) deny(1) user-preference-read com.apple.hitoolbox
+2026-11-21 15:09:43.273 E  AuthenticationServicesAgent[7860:6436] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'DefaultAsciiKeyboardLayoutPasteboard'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:43.274 E  AuthenticationServicesAgent[7860:6436] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'AppleIntlFileCacheModificationDatePasteboard'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:43.275 E  kernel[0:411f] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: AuthenticationServicesAgent(7860) deny(1) user-preference-read com.apple.hitoolbox
+2026-11-21 15:09:43.275 E  kernel[0:411f] [com.apple.sandbox.reporting:violation] Sandbox: AuthenticationServicesAgent(7860) deny(1) mach-lookup com.apple.DiskArbitration.diskarbitrationd
+2026-11-21 15:09:43.275 Df launchd[1:411f] [gui/501 [100002]:] denied lookup: name = com.apple.DiskArbitration.diskarbitrationd, flags = 0x9, requestor = AuthenticationS[7860], error = 159: Sandbox restriction
+2026-11-21 15:09:43.415 E  AuthenticationServicesAgent[7860:6436] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'AppleIntlFileCacheModificationDatePasteboard'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:43.415 E  AuthenticationServicesAgent[7860:6436] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'AppleIntlFileCacheModificationDatePasteboard'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:43.415 E  kernel[0:6436] [com.apple.sandbox.reporting:violation] Sandbox: AuthenticationServicesAgent(7860) deny(1) file-read-data /Library/Keyboard Layouts
+2026-11-21 15:09:43.415 E  AuthenticationServicesAgent[7860:6436] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'AppleIntlFileCacheModificationDatePasteboard'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:43.416 E  AuthenticationServicesAgent[7860:6436] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'AppleIntlFileCacheModificationDatePasteboard'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:43.416 E  AuthenticationServicesAgent[7860:6436] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'AppleIntlFileCacheModificationDatePasteboard'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:43.416 E  AuthenticationServicesAgent[7860:6436] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'AppleIntlFileCacheModificationDatePasteboard'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:43.416 E  kernel[0:6436] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: AuthenticationServicesAgent(7860) deny(1) file-read-data /Library/Keyboard Layouts
+2026-11-21 15:09:43.416 E  kernel[0:6436] [com.apple.sandbox.reporting:violation] Sandbox: AuthenticationServicesAgent(7860) deny(1) file-read-data /Users/runner/Library/Keyboard Layouts
+2026-11-21 15:09:43.416 E  AuthenticationServicesAgent[7860:6436] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'AppleIntlFileCacheModificationDatePasteboard'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:43.416 E  AuthenticationServicesAgent[7860:6436] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'AppleIntlFileCacheModificationDatePasteboard'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:43.416 E  kernel[0:6436] [com.apple.sandbox.reporting:violation] 2 duplicate reports for Sandbox: AuthenticationServicesAgent(7860) deny(1) file-read-data /Users/runner/Library/Keyboard Layouts
+2026-11-21 15:09:43.416 E  kernel[0:6436] [com.apple.sandbox.reporting:violation] Sandbox: AuthenticationServicesAgent(7860) deny(1) file-read-data /Library/Input Methods
+2026-11-21 15:09:43.416 E  AuthenticationServicesAgent[7860:6436] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'AppleIntlFileCacheModificationDatePasteboard'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:43.416 E  AuthenticationServicesAgent[7860:6436] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'AppleIntlFileCacheModificationDatePasteboard'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:43.416 E  kernel[0:6436] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: AuthenticationServicesAgent(7860) deny(1) file-read-data /Library/Input Methods
+2026-11-21 15:09:43.416 E  kernel[0:6436] [com.apple.sandbox.reporting:violation] Sandbox: AuthenticationServicesAgent(7860) deny(1) file-read-data /Users/runner/Library/Input Methods
+2026-11-21 15:09:43.416 E  AuthenticationServicesAgent[7860:6436] [com.apple.CFPasteboard:general] Failed to set up CFPasteboardRef 'AppleIntlFileCacheModificationDatePasteboard'. Error: <dictionary: 0x1f05120d0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f0512210> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-11-21 15:09:44.899 Df log[8412:6884] [com.apple.log:] log run noninteractively, parent: 8402 (sudo), args: 'log' 'show' '--last' '10m' '--style' 'compact' '--predicate' 'eventMessage CONTAINS "Sandbox"'
+2026-11-21 15:09:44.901 E  kernel[0:6457] [com.apple.sandbox.reporting:violation] 2 duplicate reports for Sandbox: AuthenticationServicesAgent(7860) deny(1) file-read-data /Users/runner/Library/Input Methods
+2026-11-21 15:09:44.901 E  kernel[0:6457] [com.apple.sandbox.reporting:violation] Sandbox: AuthenticationServicesAgent(7860) deny(1) file-write-create /Users/runner/Library/HTTPStorages/com.apple.AuthenticationServicesCore.AuthenticationServicesAgent
