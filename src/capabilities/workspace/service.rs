@@ -564,6 +564,42 @@ impl WorkspaceService {
         }
     }
 
+    /// 目的：给"先读后改"门禁取一份快照：哪些路径受管、沙箱当前内容、以及该 agent 的基线版本。
+    /// 约束：只读版本库与沙箱，不写任何东西；受管 = 主线 head 树 ∪ 该 agent 工作线 head 树。
+    pub(super) fn work_gate_info(
+        &self,
+        work: &str,
+        agent: &str,
+        paths: &[String],
+    ) -> Result<Vec<crate::capabilities::workspace::api::PathGateInfo>, String> {
+        let (_, store, sandbox) = self.agent_roots(work, agent)?;
+        let (_, main) = self.head_tree(&store)?;
+        let (_, line) = self.work_tree(&store, agent)?;
+        let mut out = Vec::with_capacity(paths.len());
+        for raw in paths {
+            let rel = clean_rel(raw)?;
+            let base = line.get(&rel).or_else(|| main.get(&rel)).map(|hash| {
+                crate::capabilities::workspace::api::GateFile {
+                    hash: hash.clone(),
+                    size: None,
+                }
+            });
+            let current = self.store.scan_under(&sandbox, &rel, None)?.map(|v| {
+                crate::capabilities::workspace::api::GateFile {
+                    hash: v.hash,
+                    size: Some(v.size),
+                }
+            });
+            out.push(crate::capabilities::workspace::api::PathGateInfo {
+                path: rel.clone(),
+                tracked: line.contains_key(&rel) || main.contains_key(&rel),
+                current,
+                base,
+            });
+        }
+        Ok(out)
+    }
+
     /// 读 head 的整棵树；空仓库 = 空树。
     fn head_tree(&self, store: &std::path::Path) -> Result<(Option<u64>, Tree), String> {
         let Some(id) = self.store.head(store)? else {

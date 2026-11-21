@@ -6,7 +6,7 @@
 pub use crate::capabilities::workspace::domain::asset::{
     FileVersion, MAX_ASSET_BYTES, VERSION_TEXT_LIMIT, media_hint,
 };
-pub use crate::capabilities::workspace::domain::hash::content_hash;
+pub use crate::capabilities::workspace::domain::hash::{Sha256, content_hash};
 pub use crate::capabilities::workspace::domain::readfact::ReadFact;
 /// 目的：`work_*` 工具的名字、取参与回执拼装——`tools` 与 `turn` 只从这里取，不碰 domain。
 #[allow(unused_imports)]
@@ -37,6 +37,29 @@ pub use crate::capabilities::workspace::service::roots::{policy, product_root, r
 /// 目的：`work_*` 工具执行者——`turn` 装配工具面时按角色面发放的工具 id 现取。
 #[allow(unused_imports)]
 pub use crate::capabilities::workspace::service::work_tools::{WorkHandler, work_handlers};
+
+/// 目的：写入门禁用的一份版本身份：只关心"这份内容是不是同一份"，不返回正文。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct GateFile {
+    /// 目的：整份内容的 SHA-256（与 `ReadFact.blob` / `Change.hash` 同源）。
+    pub hash: String,
+    /// 目的：文件字节数；来自对象树的基线版本可能没有大小（门禁只用 hash）。
+    pub size: Option<u64>,
+}
+
+/// 目的：一次写入门禁查询的结果：路径是否受管、当前内容与基线版本各是什么。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathGateInfo {
+    /// 目的：工作树内的相对路径（斜杠分隔）。
+    pub path: String,
+    /// 目的：主线 head 树或该 agent 工作线 head 树里有这个路径（受管）。
+    /// 约束：受管才要求观察；新建 / 构建产物 / scratch 不受门禁。
+    pub tracked: bool,
+    /// 目的：沙箱当前内容的版本；文件不存在（含已删除）= None。
+    pub current: Option<GateFile>,
+    /// 目的：受管版本的基线：优先该 agent 工作线 head，其次主线 head；都没有 = None。
+    pub base: Option<GateFile>,
+}
 
 /// 目的：一条待判定的读取（一次 `read` 读到的行区间 + 当时的整份指纹）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -316,6 +339,15 @@ pub trait Workspace: Send + Sync {
         time: i64,
         line: u64,
     ) -> Result<AdoptReport, String>;
+    /// **写入门禁**：一批路径的受管状态、当前版本与基线版本；只读，不返回正文。
+    /// 约束：只做快照；P0 不在同一次锁内完成"检查 + 写入"（P2 由 `SysIo::mutate` 收口）。
+    fn work_gate_info(
+        &self,
+        work: &str,
+        agent: &str,
+        paths: &[String],
+    ) -> Result<Vec<PathGateInfo>, String>;
+
     /// **读取是否过期**：一批读取事实（工作树、路径、行区间、当时的指纹）逐个判定。
     /// 返回：与 `queries` 同序的布尔值；true = 读过的行在主副本里已经变了（这段内容该被替换成占位符）。
     /// 约束：判据是**内容**不是时间——路径没了算过期；指纹相同算不过期；指纹不同才比行区间。

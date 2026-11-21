@@ -17,6 +17,7 @@
 | `src/capabilities/conversation/session/service/engine/decls.rs` | 工具声明面的值类型：`WireTools` / `Decls` / `ToolDecls`（`round` 与 `tools` 共用一份） |
 | `src/capabilities/conversation/session/service/engine/io.rs` | 回合 IO 与结论：`TurnIo`（调用参数 / 裁决队 / 提问端口）与 `MemberTurn` / `CompactedTurn` |
 | `src/capabilities/conversation/session/service/engine/round.rs` | 轮循环与行构造：请求装配 `assemble`、`converse_with`、`build_round_lines`（唯一构造函数）、轮 / 回复词汇 |
+| `src/capabilities/conversation/session/service/engine/fence.rs` | 成员回合的写入门禁发布口与不透明写者采纳：`work_commit` 拒绝未读受管路径、`shell` / 模块工具落地后按批前观察事实生成有界回执 |
 | `src/capabilities/conversation/session/service/engine/tools.rs` | 成员回合的工具循环：声明面 → 放行 → 并发调度 → 执行 → 回填 |
 | `src/capabilities/conversation/session/service/assemble.rs` | 一席的装配：能力面 `SessionPorts`、取来的本席事实（`MemberSpec` / `SingleSpec` 与逐字段拷来的 `MemberEnvParts`）、成员工具面的装配，以及三种在世形态的整场入口（`single_session` / `rebuild_single` / `proxy_session`） |
 | `src/capabilities/conversation/session/service/verify.rs` | 核实用例环境：按 `VerifySpec` 装配一个只读核实用例 `CoreVerify`（角色面、放行名单、围栏）；调用方给沙箱，本单元不取事实 |

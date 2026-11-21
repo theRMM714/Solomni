@@ -53,6 +53,7 @@ pub(crate) fn run_builtin(
         &test_systools().tools,
         io,
         &mut obs,
+        None,
         name,
         args_json,
     )

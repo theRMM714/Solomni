@@ -99,6 +99,14 @@ impl Workspace for WorkspaceService {
     ) -> Result<Vec<bool>, String> {
         WorkspaceService::work_stale_reads(self, work, agent, queries)
     }
+    fn work_gate_info(
+        &self,
+        work: &str,
+        agent: &str,
+        paths: &[String],
+    ) -> Result<Vec<crate::capabilities::workspace::api::PathGateInfo>, String> {
+        WorkspaceService::work_gate_info(self, work, agent, paths)
+    }
     fn work_sync(
         &self,
         work: &str,

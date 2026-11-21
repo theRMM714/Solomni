@@ -13,7 +13,7 @@ const TPL_DIR = path.join(ROOT, "docs", "templates");
 const CFG = JSON.parse(fs.readFileSync(path.join(TPL_DIR, "index.json"), "utf8"));
 const LEAD_MAX = 150;
 const MODAL = /(必须|不得|禁止|只允许|只能|一律|零容忍)/;
-const SKIP_DIRS = new Set(["target", ".git", "node_modules", ".tools", ".home", ".vm", "dependencies", "logs", "session", "runtimes", "platform", "demo", "modules", "tests"]);
+const SKIP_DIRS = new Set(["target", ".git", "node_modules", ".tools", ".home", ".vm", ".tmp", "dependencies", "logs", "session", "runtimes", "platform", "demo", "modules", "tests"]);
 
 const esc = (s) => s.replace(/[.*+?^$()|[\]\\]/g, "\\$&");
 const stripNum = (s) => s.trim().replace(/^[一二三四五六七八九十百零〇]+[、.．]\s*/, "").replace(/^\d+[、.．]\s*/, "");

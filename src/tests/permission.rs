@@ -163,6 +163,37 @@ fn fence_spec_scopes_module_dirs_and_userdata() {
     assert!(!call.net, "workspace 没有 network reach");
 }
 
+/// 目的：外部工作区的共享根不是可写入面——shell 的 external 围栏不含它，内置工具也不能写它。
+/// 约束：外部磁盘的改动由 work_sync 采纳；work_adopt_sandbox 对它返回空是预期，不是门禁例外。
+#[test]
+fn external_shared_root_is_not_a_shell_write_surface() {
+    use crate::capabilities::workspace::api::Place;
+    use crate::kernel::api::fence::FenceSpec;
+    let external = abs(&["external", "proj"]);
+    let mut sb = test_sandbox("a1", &[]);
+    sb.shared = external.clone();
+    sb.permissions = pset(ProfileId::Workspace);
+    let session = FenceSpec::for_session(&sb, &[], false);
+    assert!(!session.rw.contains(&external), "共享根永不被直接写");
+    let call = FenceSpec::for_call(
+        &sb,
+        &ReachSet::from([
+            Reach::Private,
+            Reach::ModuleRead,
+            Reach::HostRead,
+            Reach::Network,
+        ]),
+        None,
+        &session,
+    );
+    assert!(
+        !call.rw.contains(&external),
+        "external 调用围栏不含共享根：{:?}",
+        call.rw
+    );
+    assert!(!sb.can_write(&Place::Shared, &external.join("note.md")));
+}
+
 /// 写决策被拒时，即使 reach 里有私有区也不授写：围栏与工作区判据同源，不各自组合。
 #[test]
 fn deny_write_decision_withholds_private_rw() {

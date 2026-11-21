@@ -6,6 +6,129 @@
 use super::super::prelude::*;
 use super::support::*;
 
+/// 目的：门禁快照只回答三件事——是否受管、基线版本、当前版本。
+#[test]
+pub(crate) fn work_gate_info_distinguishes_tracked_base_and_current() {
+    use crate::capabilities::workspace::api::content_hash;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.work_commit_user("w", "base.md", b"base\n", 1, 0)
+        .unwrap();
+    let base_hash = content_hash(b"base\n");
+    let info = |path: &str| {
+        ws.work_gate_info("w", "a", &[path.to_string()])
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
+    };
+
+    // 主线有、沙箱还没有：受管，当前内容不存在（写之前得先 work_pull）。
+    let it = info("base.md");
+    assert!(it.tracked);
+    assert_eq!(
+        it.base.as_ref().map(|f| f.hash.clone()),
+        Some(base_hash.clone())
+    );
+    assert!(it.current.is_none());
+
+    // 拉进沙箱后：当前版本就是主线这一版。
+    ws.work_pull("w", "a", &["base.md".to_string()]).unwrap();
+    let it = info("base.md");
+    assert_eq!(it.current.as_ref().map(|f| f.hash.clone()), Some(base_hash));
+
+    // 沙箱里新建但还没提交：当前存在、不受管。
+    let sb = sandbox_of(&ws, "w", "a");
+    store.write_under(&sb, "draft.md", b"draft\n").unwrap();
+    let it = info("draft.md");
+    assert!(!it.tracked);
+    assert!(it.current.is_some());
+    assert!(it.base.is_none());
+
+    // 自动存档只进 agent 的存档线，不算受管：下次写同一个 scratch 文件不受门禁拦。
+    ws.work_commit_auto("w", "a", "s", &commit_req(&["draft.md"], &[], "草稿", 2))
+        .unwrap()
+        .expect("应当记一次存档");
+    let it = info("draft.md");
+    assert!(!it.tracked, "存档线不是发布线，不应把 scratch 变成受管");
+    assert!(it.base.is_none());
+
+    // 显式提交进工作线后才受管，基线取工作线这一版。
+    ws.work_commit("w", "a", "s", &commit_req(&["draft.md"], &[], "草稿", 3))
+        .unwrap();
+    let it = info("draft.md");
+    assert!(it.tracked);
+    assert_eq!(
+        it.base.as_ref().map(|f| f.hash.clone()),
+        Some(content_hash(b"draft\n"))
+    );
+    assert_eq!(
+        it.current.as_ref().map(|f| f.hash.clone()),
+        Some(content_hash(b"draft\n"))
+    );
+}
+
+/// 目的：会话门禁只认"当前版本的观察"，且 untracked 一律放行。
+#[test]
+pub(crate) fn session_gate_rejects_unobserved_and_stale_tracked_paths() {
+    use crate::capabilities::tools::api::SessionWriteGate;
+    use crate::capabilities::tools::api::{
+        Coverage, GateFault, LineRange, Need, ObservationFact, ObservationSource, WriteGate,
+    };
+    use crate::capabilities::workspace::api::content_hash;
+
+    let (ws, _dirs, _store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.work_commit_user("w", "base.md", b"one\ntwo\n", 1, 0)
+        .unwrap();
+    let version = content_hash(b"one\ntwo\n");
+    let fact = |version: String, coverage: Coverage| ObservationFact {
+        reply: 1,
+        path: "base.md".to_string(),
+        worktree: "a".to_string(),
+        version,
+        coverage,
+        total_lines: 2,
+        source: ObservationSource::Read,
+    };
+    let check = |facts: &[ObservationFact], path: &str, need: Need| {
+        let gate = SessionWriteGate {
+            workspace: ws.as_ref(),
+            work: "w",
+            agent: "a",
+            facts,
+            worktree: "a",
+        };
+        gate.check(path, need, None)
+    };
+
+    assert_eq!(
+        check(&[], "base.md", Need::Observed),
+        Err(GateFault::NotObserved)
+    );
+    let full = [fact(version.clone(), Coverage::Full)];
+    assert_eq!(check(&full, "base.md", Need::Full), Ok(()));
+    let partial = [fact(
+        version.clone(),
+        Coverage::Ranges(vec![LineRange::new(1, 1)]),
+    )];
+    assert_eq!(
+        check(&partial, "base.md", Need::Full),
+        Err(GateFault::NotFull { total: 2 })
+    );
+    assert_eq!(check(&partial, "base.md", Need::Observed), Ok(()));
+    let stale = [fact(content_hash(b"older\n"), Coverage::Full)];
+    assert!(matches!(
+        check(&stale, "base.md", Need::Observed),
+        Err(GateFault::Stale { .. })
+    ));
+    assert_eq!(
+        check(&[], "scratch.md", Need::Full),
+        Ok(()),
+        "untracked 不受门禁限制"
+    );
+}
+
 /// 目的：过期判定按内容——指纹相同不过期，改到读过的行才过期。
 #[test]
 pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {

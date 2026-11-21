@@ -162,6 +162,7 @@ impl ToolExec for ToolsService {
         sb: &crate::capabilities::workspace::api::Sandbox,
         builtin_tools: &ToolBook,
         observations: Observations,
+        gate: Option<&dyn crate::capabilities::tools::api::WriteGate>,
         name: &str,
         args_json: &str,
     ) -> Recorded {
@@ -172,6 +173,7 @@ impl ToolExec for ToolsService {
                 builtin_tools,
                 self.io.as_ref(),
                 &mut observations,
+                gate,
                 name,
                 args_json,
             ),

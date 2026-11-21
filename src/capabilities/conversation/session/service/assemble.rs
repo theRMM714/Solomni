@@ -22,7 +22,7 @@ use crate::capabilities::llm::api::{Channel, Llm, Msg, ToolMode};
 use crate::capabilities::permission::api::CallScope;
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::residents::api::ResidentOps;
-use crate::capabilities::tools::api::{Observations, ToolExec, Tools, tool_notes};
+use crate::capabilities::tools::api::{ObservationFact, Observations, ToolExec, Tools, tool_notes};
 use crate::capabilities::vm::api::{GuestOs, Vm};
 use crate::capabilities::workspace::api::{ReadFact, Sandbox, Workspace};
 use crate::kernel::api::fence::FenceSpec;
@@ -136,6 +136,8 @@ pub struct RebuildSpec<'a> {
     pub freshness_keep_percent: u8,
     /// 目的：读台账（正文 + 读事实），重建后与实时一致。
     pub reads: Vec<(String, ReadFact)>,
+    /// 目的：观察账本（写门禁的授权证据），重建后与实时一致。
+    pub observations: Vec<ObservationFact>,
     /// 目的：最近一次调用的用量（状态栏与压缩判定读它）。
     pub usage: Option<ContextUsage>,
 }
@@ -295,6 +297,7 @@ pub fn rebuild_single(ports: &SessionPorts, spec: RebuildSpec<'_>) -> AgentSessi
     let chat = ports.llm.member_channel(&spec.channel, &id);
     let mut tools = member_tools(ports, &spec.member);
     tools.reply_seq = spec.reply_seq;
+    tools.observations.restore_facts(spec.observations);
     let mut s = AgentSession::restore(
         &id,
         spec.params,

@@ -3,11 +3,32 @@
 //! 不管：纯规则（参数校验、回执文案、观察账本、`ToolOutcome`）在 `domain/systool.rs`。
 //! 联动：引 `ports` 的 `SysIo` 做 IO；`domain/` 不引 `ports`（见 docs/architecture/boundaries.md 的「三分法」）。
 
+use crate::capabilities::tools::api::{
+    Coverage, GateFile, LineRange, Need, ObservationFact, ObservationSource,
+};
 use crate::capabilities::tools::domain::systool::*;
 use crate::capabilities::tools::ports::SysIo;
 use crate::capabilities::workspace::api::{Place, Sandbox};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+/// 目的：把门禁拒绝同时写进 output 与结构化说明（稳定错误码供 UI / 模型分流）。
+fn gate_note(
+    fault: &crate::capabilities::tools::api::GateFault,
+    path: &str,
+) -> crate::kernel::api::note::Note {
+    crate::kernel::api::note::Note::new(fault.code(), crate::kernel::api::note::Severity::Error)
+        .arg("path", path)
+}
+
+fn gate_fail(
+    fault: &crate::capabilities::tools::api::GateFault,
+    path: &str,
+) -> crate::kernel::api::types::ToolOutcome {
+    let mut out = fail(fault.message(path));
+    out.push_note(gate_note(fault, path));
+    out
+}
+
 /// 目的：执行一次内置工具调用（`args_json` = 模型信封里的 args 对象）。
 /// 约束：顺序是解析 JSON → 认工具 → 按声明校验参数 → 补缺省 → 寻址（内置工具一律需要一个 path）。
 pub fn execute(
@@ -15,6 +36,7 @@ pub fn execute(
     book: &crate::capabilities::tools::api::ToolBook,
     io: &dyn SysIo,
     obs: &mut Observations,
+    gate: Option<&dyn crate::capabilities::tools::api::WriteGate>,
     name: &str,
     args_json: &str,
 ) -> ToolOutcome {
@@ -24,7 +46,7 @@ pub fn execute(
             return fail(format!("未知的内置工具：{}", name));
         }
         return match name {
-            PATCH => apply_patch(sb, io, obs, args_json),
+            PATCH => apply_patch(sb, io, obs, gate, args_json),
             other => fail(format!("未知的内置工具：{}", other)),
         };
     }
@@ -84,12 +106,95 @@ pub fn execute(
     }
     match name {
         READ => read(sb, &place, io, obs, &args, &spec, &path),
-        WRITE => write(io, obs, &args, &spec, &path),
-        EDIT => edit(io, obs, &args, &spec, &path),
+        WRITE => write(
+            gate,
+            io,
+            obs,
+            &args,
+            &spec,
+            &path,
+            &Origin::of(sb, &place, &path),
+        ),
+        EDIT => edit(
+            gate,
+            io,
+            obs,
+            &args,
+            &spec,
+            &path,
+            &Origin::of(sb, &place, &path),
+        ),
         LIST => list(io, &spec, &path),
         SEARCH => search(io, &args, &spec, &path),
         other => fail(format!("未知的内置工具：{}", other)),
     }
+}
+
+/// 目的：一条绝对路径在工作树内的相对写法（斜杠分隔）；拿不到根或不在根内 = None。
+fn rel_of(sb: &Sandbox, place: &Place, path: &Path) -> Option<String> {
+    let root = sb.root_of(place)?;
+    let rel = path.strip_prefix(root).ok()?;
+    Some(crate::kernel::api::path::slash(rel))
+}
+
+/// 目的：观察事实里记哪个工作树：共享区为空串，其余记 agent 名。
+fn worktree_of(sb: &Sandbox, place: &Place) -> String {
+    if matches!(place, Place::Shared) {
+        String::new()
+    } else {
+        sb.agent.clone()
+    }
+}
+
+/// 目的：一条路径在观察账本里的坐标（工作树相对路径 + 工作树名）；拿不到相对写法就没有坐标。
+struct Origin {
+    rel: Option<String>,
+    worktree: String,
+}
+
+impl Origin {
+    fn of(sb: &Sandbox, place: &Place, path: &Path) -> Origin {
+        Origin {
+            rel: rel_of(sb, place, path),
+            worktree: worktree_of(sb, place),
+        }
+    }
+}
+
+/// 目的：记一条观察事实；路径拿不到相对写法就不记（宁可多要求一次读，也不记错路径）。
+fn observe(
+    obs: &mut Observations,
+    origin: &Origin,
+    version: String,
+    coverage: Coverage,
+    total_lines: usize,
+    source: ObservationSource,
+) {
+    let Some(rel) = origin.rel.as_ref() else {
+        return;
+    };
+    obs.note_fact(ObservationFact {
+        reply: obs.reply(),
+        path: rel.clone(),
+        worktree: origin.worktree.clone(),
+        version,
+        coverage,
+        total_lines: total_lines as u32,
+        source,
+    });
+}
+
+/// 目的：把"哪几行被改过"折成观察覆盖：单处 = 一个区间，多处 = 多区间。
+fn coverage_of_changes(lines: &[(u32, u32)]) -> Coverage {
+    if lines.is_empty() {
+        return Coverage::Ranges(Vec::new());
+    }
+    Coverage::Ranges(
+        lines
+            .iter()
+            .map(|(from, to)| LineRange::new(*from, *to))
+            .collect(),
+    )
 }
 
 /// list：列目录（名字 / 是否目录 / 字节数，按名字排序）。
@@ -264,8 +369,10 @@ fn read(
     let mut body: Vec<String> = Vec::new();
     let mut used = 0usize;
     let mut to = offset - 1;
+    let mut line_cut = false;
     for (i, line) in lines.iter().enumerate().skip(offset - 1).take(limit) {
         let (text, cut) = truncate_chars(line, MAX_READ_LINE_CHARS);
+        line_cut |= cut;
         let mut row = format!("{}: {}", i + 1, text);
         if cut {
             row.push_str(&format!(
@@ -282,33 +389,46 @@ fn read(
         to = i + 1;
         body.push(row);
     }
-    // 记账：只有"从头到尾、没有截断、没有编码损失"的一次读取才算见过全文。
-    let complete = !got.cut && !got.lossy && offset == 1 && to == total;
+    // 记账：只有"从头到尾、每一行都完整、没有编码损失"的一次读取才算见过全文。
+    // 单行被 MAX_READ_LINE_CHARS 截断时，模型看到的是省略号，不是那一行的原文。
+    let complete = !got.cut && !got.lossy && !line_cut && offset == 1 && to == total;
     let why = if got.lossy {
         "文件含非法 UTF-8 字节，读到的不是全部原文".to_string()
     } else if got.cut {
         "文件超过单次读取上限，只读到开头部分".to_string()
+    } else if line_cut {
+        "有单行超过显示上限被截断，读到的不是全部原文".to_string()
     } else {
         format!("只读了第 {}-{} 行（共 {} 行）", offset, to, total)
     };
     obs.note_read(path, complete, why, hash);
     // 读取事实：只有"整份原文都读到了"才记——半份内容没法与后续版本按行对齐，
     // 拿它判过期只会误导模型（宁可让它多读一次）。
-    if complete
-        && let Some(root) = sb.root_of(place)
-        && let Ok(rel) = path.strip_prefix(root)
-    {
+    if complete && let Some(rel) = rel_of(sb, place, path) {
         obs.note_read_fact(crate::capabilities::workspace::api::ReadFact {
-            worktree: if matches!(place, Place::Shared) {
-                String::new()
-            } else {
-                sb.agent.clone()
-            },
-            path: crate::kernel::api::path::slash(rel),
+            worktree: worktree_of(sb, place),
+            path: rel,
             from: offset as u64,
             to: to as u64,
             blob: crate::capabilities::workspace::api::content_hash(got.text.as_bytes()),
         });
+    }
+    // 观察事实：完整读 = 全文；分段读 = 读到的行区间。机制截断、单行截断、编码损失都不记
+    //（模型看到的不是原文，拿去授权改写会覆盖掉自己没看见的字节）。
+    if !got.cut && !got.lossy && !line_cut {
+        let coverage = if complete {
+            Coverage::Full
+        } else {
+            Coverage::Ranges(vec![LineRange::new(offset as u32, to as u32)])
+        };
+        observe(
+            obs,
+            &Origin::of(sb, place, path),
+            got.hash.clone(),
+            coverage,
+            total,
+            ObservationSource::Read,
+        );
     }
     let mut out = header(body.join("\n"));
     let tail = if got.cut {
@@ -340,29 +460,59 @@ fn read(
 /// write：整份写入（同名文件被整份覆盖）。
 /// 覆盖已存在的文件必须先有"完整读过、且读后没被改过"的证据——否则拒绝，并让模型改用 edit。
 fn write(
+    gate: Option<&dyn crate::capabilities::tools::api::WriteGate>,
     io: &dyn SysIo,
     obs: &mut Observations,
     args: &serde_json::Value,
     spec: &str,
     path: &Path,
+    origin: &Origin,
 ) -> ToolOutcome {
     let content = args
         .get("content")
         .and_then(|c| c.as_str())
         .unwrap_or_default();
-    match io.read(path) {
-        // 读不到 = 还没有这个文件（新建不需要读过什么）；机制层的真实错误由下面的 write 如实报出。
-        Err(_) => {}
-        Ok(got) => {
-            if let Err(why) = overwrite_check(obs, spec, path, &got.text) {
-                return fail(why);
-            }
+    let current = match io.fingerprint(path) {
+        // 读不到 = 还没有这个文件；机制层的真实错误由下面的 write 如实报出。
+        Err(_) => {
+            return fail(format!(
+                "{} 现在读不到，无法判断是不是要覆盖已有内容；这次没有写盘。",
+                spec
+            ));
+        }
+        Ok(Some(hash)) => Some(GateFile { hash, size: None }),
+        Ok(None) => None,
+    };
+    if let Some(gate) = gate {
+        let Some(rel) = origin.rel.as_deref() else {
+            return fail(format!(
+                "找不到 {} 在工作树里的相对路径；这次没有写盘。",
+                spec
+            ));
+        };
+        if let Err(fault) = gate.check(rel, Need::Full, current.as_ref()) {
+            return gate_fail(&fault, spec);
+        }
+    } else if current.is_some() {
+        // 直调兜底（旧测试）：没有会话门禁时仍按本次会话的读账本判。
+        if let Ok(got) = io.read(path)
+            && let Err(why) = overwrite_check(obs, spec, path, &got.text)
+        {
+            return fail(why);
         }
     }
     if let Err(e) = io.write(path, content) {
         return fail(e);
     }
     obs.note_written(path, fnv1a(content));
+    observe(
+        obs,
+        origin,
+        crate::capabilities::workspace::api::content_hash(content.as_bytes()),
+        Coverage::Full,
+        content.lines().count(),
+        ObservationSource::Write,
+    );
     ToolOutcome::new(
         true,
         format!(
@@ -376,11 +526,13 @@ fn write(
 /// edit：按字面替换一处（默认要求唯一命中）。证据是 old_string 本身——它就是要改的那段原文，不需要先读过。
 /// 被截断或含非法 UTF-8 的文件一律不改（改写会把没读到的部分或原始字节一起弄丢）。
 fn edit(
+    gate: Option<&dyn crate::capabilities::tools::api::WriteGate>,
     io: &dyn SysIo,
     obs: &mut Observations,
     args: &serde_json::Value,
     spec: &str,
     path: &Path,
+    origin: &Origin,
 ) -> ToolOutcome {
     let old = args
         .get("old_string")
@@ -415,6 +567,22 @@ fn edit(
             spec
         ));
     }
+    if let Some(gate) = gate {
+        let Some(rel) = origin.rel.as_deref() else {
+            return fail(format!(
+                "找不到 {} 在工作树里的相对路径；这次没有写盘。",
+                spec
+            ));
+        };
+        let need = if all { Need::Full } else { Need::Observed };
+        let current = GateFile {
+            hash: got.hash.clone(),
+            size: Some(got.bytes as u64),
+        };
+        if let Err(fault) = gate.check(rel, need, Some(&current)) {
+            return gate_fail(&fault, spec);
+        }
+    }
     let hay = got.text;
     let hits = find_all(&hay, old);
     if hits.is_empty() {
@@ -436,19 +604,41 @@ fn edit(
             lines.join("、")
         ));
     }
-    let (out, n) = if all {
-        (hay.replace(old, new), hits.len())
-    } else {
-        let at = hits[0];
-        (
-            format!("{}{}{}", &hay[..at], new, &hay[at + old.len()..]),
-            1,
-        )
-    };
+    // 逐处替换并记下"新版本里哪几行是这次改出来的"：后续 edit 的锚点与门禁都靠它。
+    let chosen: Vec<usize> = if all { hits.clone() } else { vec![hits[0]] };
+    let mut out = String::new();
+    let mut last = 0usize;
+    let mut changed: Vec<(u32, u32)> = Vec::new();
+    for at in &chosen {
+        out.push_str(&hay[last..*at]);
+        let start = line_of(&out, out.len()) as u32;
+        out.push_str(new);
+        let end = start + new.matches('\n').count() as u32;
+        changed.push((start, end));
+        last = at + old.len();
+    }
+    out.push_str(&hay[last..]);
+    let n = chosen.len();
+    let total_lines = out.lines().count();
+    let changed: Vec<(u32, u32)> = changed
+        .into_iter()
+        .map(|(from, to)| {
+            let from = from.min(total_lines.max(1) as u32);
+            (from, to.min(total_lines.max(1) as u32).max(from))
+        })
+        .collect();
     if let Err(e) = io.write(path, &out) {
         return fail(e);
     }
-    obs.note_written(path, fnv1a(&out));
+    obs.note_touched(path);
+    observe(
+        obs,
+        origin,
+        crate::capabilities::workspace::api::content_hash(out.as_bytes()),
+        coverage_of_changes(&changed),
+        total_lines,
+        ObservationSource::Edit,
+    );
     ToolOutcome::new(
         true,
         format!(
@@ -530,7 +720,13 @@ fn search(io: &dyn SysIo, args: &serde_json::Value, spec: &str, path: &Path) -> 
 /// patch：把一段**自由格式**的补丁应用到一处或多处文件（信封之后原样跟补丁文本，不走 JSON）。
 /// 原子性：先解析 + 寻址 + 读入 + 在内存里算出全部新内容；任何一块不成立就**一个文件都不写**，
 /// 回执点名第几块、为什么。同一个文件被多块改到时，后一块看到前一块的结果。
-fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str) -> ToolOutcome {
+fn apply_patch(
+    sb: &Sandbox,
+    io: &dyn SysIo,
+    obs: &mut Observations,
+    gate: Option<&dyn crate::capabilities::tools::api::WriteGate>,
+    body: &str,
+) -> ToolOutcome {
     use crate::capabilities::tools::domain::patch::Block;
     let blocks = match crate::capabilities::tools::domain::patch::parse(body) {
         Ok(b) => b,
@@ -539,6 +735,9 @@ fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str)
     // 首次出现的顺序 = 写盘顺序（同一路径只写一次）
     let mut order: Vec<PathBuf> = Vec::new();
     let mut pending: BTreeMap<PathBuf, String> = BTreeMap::new();
+    let mut coverage: BTreeMap<PathBuf, Coverage> = BTreeMap::new();
+    let mut sources: BTreeMap<PathBuf, ObservationSource> = BTreeMap::new();
+    let mut places: BTreeMap<PathBuf, Place> = BTreeMap::new();
     let mut lines: Vec<String> = Vec::new();
     for (i, b) in blocks.iter().enumerate() {
         let n = i + 1;
@@ -557,17 +756,48 @@ fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str)
             return fail(block_fault(n, e));
         }
         // 同一个文件被前面的块改过：以后面算出来的内容为准（不能回到盘上的旧内容）
-        let source: Option<(String, bool, bool)> = match pending.get(&path) {
-            Some(t) => Some((t.clone(), false, false)),
+        let source: Option<(String, bool, bool, String)> = match pending.get(&path) {
+            Some(t) => Some((
+                t.clone(),
+                false,
+                false,
+                crate::capabilities::workspace::api::content_hash(t.as_bytes()),
+            )),
             None => match io.read(&path) {
-                Ok(g) => Some((g.text, g.cut, g.lossy)),
+                Ok(g) => Some((g.text, g.cut, g.lossy, g.hash)),
                 Err(_) => None,
             },
         };
+        // 每个路径只在第一块过门禁：同一份补丁里后面的块看到的是前面算出来的内容。
+        if !order.contains(&path)
+            && let Some(gate) = gate
+        {
+            let Some(rel) = rel_of(sb, &place, &path) else {
+                return fail(block_fault(
+                    n,
+                    format!("找不到 {} 在工作树里的相对路径", spec),
+                ));
+            };
+            let need = match b {
+                Block::Add { .. } => Need::Full,
+                Block::Update { .. } => Need::Observed,
+            };
+            let current = source.as_ref().map(|(_, _, _, hash)| GateFile {
+                hash: hash.clone(),
+                size: None,
+            });
+            if let Err(fault) = gate.check(&rel, need, current.as_ref()) {
+                let mut out = fail(block_fault(n, fault.message(&spec)));
+                out.push_note(gate_note(&fault, &spec));
+                return out;
+            }
+        }
         match b {
             Block::Add { content, .. } => match &source {
-                Some((cur, _, _)) => {
-                    if let Err(why) = overwrite_check(obs, &spec, &path, cur) {
+                Some((cur, _, _, _)) => {
+                    if gate.is_none()
+                        && let Err(why) = overwrite_check(obs, &spec, &path, cur)
+                    {
                         return fail(block_fault(n, why));
                     }
                     lines.push(format!(
@@ -587,7 +817,7 @@ fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str)
                 }
             },
             Block::Update { edits, .. } => {
-                let Some((cur, cut, lossy)) = source else {
+                let Some((cur, cut, lossy, _)) = source else {
                     let why = format!(
                         "{} 不存在：Update 只能改已有文件，新建请用 *** Add File:",
                         spec
@@ -609,9 +839,24 @@ fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str)
                     );
                     return fail(block_fault(n, why));
                 }
-                match crate::capabilities::tools::domain::patch::apply_edits(&cur, edits) {
-                    Ok(new) => {
+                match crate::capabilities::tools::domain::patch::apply_edits_tracked(&cur, edits) {
+                    Ok((new, ranges)) => {
                         lines.push(format!("- 更新 {}（替换 {} 处）", spec, edits.len()));
+                        if !matches!(coverage.get(&path), Some(Coverage::Full)) {
+                            let mut all = match coverage.get(&path) {
+                                Some(Coverage::Ranges(v)) => v.clone(),
+                                _ => Vec::new(),
+                            };
+                            all.extend(
+                                ranges
+                                    .iter()
+                                    .map(|(from, to)| LineRange::new(*from as u32, *to as u32)),
+                            );
+                            coverage.insert(path.clone(), Coverage::Ranges(all));
+                        }
+                        sources
+                            .entry(path.clone())
+                            .or_insert(ObservationSource::PatchUpdate);
                         pending.insert(path.clone(), new);
                     }
                     Err((k, f)) => {
@@ -624,6 +869,11 @@ fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str)
                 }
             }
         }
+        if matches!(b, Block::Add { .. }) {
+            coverage.insert(path.clone(), Coverage::Full);
+            sources.insert(path.clone(), ObservationSource::PatchAdd);
+        }
+        places.insert(path.clone(), place);
         if !order.contains(&path) {
             order.push(path.clone());
         }
@@ -638,7 +888,23 @@ fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str)
                 e
             ));
         }
-        obs.note_written(path, fnv1a(content));
+        match sources.get(path) {
+            Some(ObservationSource::PatchAdd) => obs.note_written(path, fnv1a(content)),
+            _ => obs.note_touched(path),
+        }
+        let coverage = coverage.get(path).cloned().unwrap_or(Coverage::Full);
+        let origin = Origin::of(sb, places.get(path).expect("刚刚记下落点"), path);
+        observe(
+            obs,
+            &origin,
+            crate::capabilities::workspace::api::content_hash(content.as_bytes()),
+            coverage,
+            content.lines().count(),
+            sources
+                .get(path)
+                .copied()
+                .unwrap_or(ObservationSource::PatchUpdate),
+        );
     }
     ToolOutcome::new(
         true,

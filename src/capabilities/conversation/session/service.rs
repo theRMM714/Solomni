@@ -283,6 +283,7 @@ pub fn core_operation(
                     call_id: c.id.clone(),
                     reply: 0,
                     read: None,
+                    observations: Vec::new(),
                     shell: None,
                 },
                 &done.raw,
@@ -315,6 +316,7 @@ pub fn core_operation(
                     call_id: String::new(),
                     reply: 0,
                     read: None,
+                    observations: Vec::new(),
                     shell: None,
                 },
                 &done.raw,
@@ -380,6 +382,7 @@ pub fn core_operation(
                 call_id,
                 reply: 0,
                 read: None,
+                observations: Vec::new(),
                 shell: None,
             };
             // 核心"先核实"这一步也如实推出去（用户看得到它在读什么、查什么）。
