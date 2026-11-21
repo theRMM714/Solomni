@@ -8,6 +8,7 @@
 
 use super::{Capability, FENCE_FAILED, FenceVerdict, shell_command};
 use crate::kernel::contracts::fence::FenceSpec;
+use crate::kernel::detail::launch::interpreter_dirs;
 use std::ffi::CString;
 use std::os::raw::c_int;
 use std::os::unix::process::CommandExt;
@@ -574,7 +575,7 @@ fn install_rules(spec: &FenceSpec, command: &str) -> Result<(), String> {
         }
     }
     // 命令里解释器的安装目录也要只读放行：否则解释器装在 /usr 之外（pyenv、homebrew、自装）时，工具在围栏里起不来。
-    for dir in super::interpreter_dirs(command) {
+    for dir in interpreter_dirs(command) {
         wanted.push((dir, RO_ALL));
     }
     for (path, access) in &wanted {

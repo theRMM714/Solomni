@@ -33,20 +33,31 @@ fn admin_actions_degrade_without_acl_support() {
     let home = root.join(".home");
     let _ = std::fs::create_dir_all(&home);
 
-    assert!(super::reconcile(&home).note.contains("不留权限项"));
-    assert!(super::ledger(&home).entries.is_empty());
-    assert!(super::restore_one(&home, &root).is_err());
-    assert!(super::revoke_grant(&home, "S-1-0-0", &root).is_err());
-    assert!(super::remove_profile_one(&home, "x").is_err());
-    assert_eq!(super::sweep_orphan_aces(&root).unwrap(), 0);
+    assert!(
+        crate::kernel::detail::ledger::reconcile(&home)
+            .note
+            .contains("不留权限项")
+    );
+    assert!(
+        crate::kernel::detail::ledger::ledger(&home)
+            .entries
+            .is_empty()
+    );
+    assert!(crate::kernel::detail::ledger::restore_one(&home, &root).is_err());
+    assert!(crate::kernel::detail::ledger::revoke_grant(&home, "S-1-0-0", &root).is_err());
+    assert!(crate::kernel::detail::ledger::remove_profile_one(&home, "x").is_err());
+    assert_eq!(
+        crate::kernel::detail::ledger::sweep_orphan_aces(&root).unwrap(),
+        0
+    );
     assert!(super::machine_missing(&root).is_err());
     assert!(super::machine_ensure(&root, &home, &mut |_| {}).is_err());
     super::retire_legacy_machine_grants(&home, &mut |_| {}).unwrap();
     assert_eq!(
-        super::clean_all(&home).unwrap(),
+        crate::kernel::detail::ledger::clean_all(&home).unwrap(),
         "本平台的围栏不留权限项，无需清理"
     );
-    assert_eq!(super::sweep_profiles().unwrap(), 0);
+    assert_eq!(crate::kernel::detail::ledger::sweep_profiles().unwrap(), 0);
 
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -729,10 +740,23 @@ fn reconcile_summary_reports_every_outcome_without_silent_success() {
     #[cfg(not(windows))]
     {
         let home = std::path::Path::new("unused");
-        assert!(reconcile(home).summary().contains("本平台"));
-        assert!(ledger(home).note.contains("本平台"));
-        assert!(restore_one(home, std::path::Path::new("a")).is_err());
-        assert!(revoke_grant(home, "S-1", std::path::Path::new("a")).is_err());
-        assert!(remove_profile_one(home, "p").is_err());
+        assert!(
+            crate::kernel::detail::ledger::reconcile(home)
+                .summary()
+                .contains("本平台")
+        );
+        assert!(
+            crate::kernel::detail::ledger::ledger(home)
+                .note
+                .contains("本平台")
+        );
+        assert!(
+            crate::kernel::detail::ledger::restore_one(home, std::path::Path::new("a")).is_err()
+        );
+        assert!(
+            crate::kernel::detail::ledger::revoke_grant(home, "S-1", std::path::Path::new("a"))
+                .is_err()
+        );
+        assert!(crate::kernel::detail::ledger::remove_profile_one(home, "p").is_err());
     }
 }

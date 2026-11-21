@@ -6,9 +6,7 @@
 use crate::kernel::api::locus::locus_of;
 use crate::kernel::api::locus::place_contains;
 #[cfg(windows)]
-use crate::kernel::api::path::is_unc;
-use crate::kernel::api::path::native;
-use crate::kernel::api::path::unc_parts;
+use crate::kernel::api::path::{is_unc, native, unc_parts};
 
 /// 目的：native 还原两种有普通形态的 verbatim 前缀，UNC 不能被剥成相对路径。
 #[cfg(windows)]
