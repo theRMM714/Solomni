@@ -22,6 +22,7 @@ const S = {
   dependency: require("./structure/dependency.js"),
   layers: require("./structure/layers.js"),
   kernelMechanisms: require("./structure/kernel-mechanisms.js"),
+  presentationInbound: require("./structure/presentation-inbound.js"),
   graph: require("./structure/graph.js"),
   values: require("./structure/values.js"),
   capability: require("./structure/capability.js"),
@@ -88,6 +89,18 @@ const GATES = [
     inputs: ["docs/kernel/mechanisms.yaml", "src/kernel/**/*.rs"],
     run: (root, ctx) => {
       const r = S.kernelMechanisms.kernelMechanisms(root);
+      ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
+      return r.problems;
+    },
+  },
+  {
+    id: "structure/presentation-inbound",
+    lane: "structure",
+    step: "T0 结构审查",
+    kind: "text",
+    inputs: ["docs/presentation/inbound.yaml", "src/presentation/**/*.rs"],
+    run: (root, ctx) => {
+      const r = S.presentationInbound.presentationInbound(root);
       ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
       return r.problems;
     },
@@ -209,6 +222,7 @@ const LANE_ORDER = {
     "structure/dependency",
     "structure/layers",
     "structure/kernel-mechanisms",
+    "structure/presentation-inbound",
     "structure/values",
     "structure/graph",
     "structure/module-files",

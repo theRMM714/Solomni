@@ -7,6 +7,7 @@
 
 const { mask: rustMask } = require("./rust-mask.js");
 const { parseMechanismsText } = require("./mechanisms.js");
+const { parseInboundText } = require("./presentation.js");
 
 /** 词法归一：统一分隔符、去掉 \\?\ 扩展前缀、收掉 '.' 与 '..' 段。 */
 function normPath(s) {
@@ -206,6 +207,26 @@ function gateParserSelfTest(root) {
   eq("parseMechanismsText 报重复归层", /归了两次层/.test(parseMechanismsText("ports: 1\nports: 2\n").problems.join()), true);
   eq("parseMechanismsText 报行号与格式", /第 2 行/.test(parseMechanismsText("ports: 1\ndetail/procs: 零\n").problems.join()), true);
   eq("parseMechanismsText 报机制名不合规", /不合规/.test(parseMechanismsText("Detail/Procs: 0\n").problems.join()), true);
+  eq(
+    "parseInboundText 读「路径: 单元…」并跳过注释",
+    parseInboundText("# 头\nsrc/presentation/cli.rs: catalog/registry tools # 行尾\n").faces.get("src/presentation/cli.rs"),
+    ["catalog/registry", "tools"]
+  );
+  eq(
+    "parseInboundText 报路径不合规",
+    /路径必须形如/.test(parseInboundText("docs/presentation/cli.rs: tools\n").problems.join()),
+    true
+  );
+  eq(
+    "parseInboundText 报单元名不合规",
+    /单元名不合规/.test(parseInboundText("src/presentation/cli.rs: Tools\n").problems.join()),
+    true
+  );
+  eq(
+    "parseInboundText 报重复登记",
+    /出现了两次/.test(parseInboundText("src/presentation/cli.rs: tools\nsrc/presentation/cli.rs: work\n").problems.join()),
+    true
+  );
   return bad;
 }
 
