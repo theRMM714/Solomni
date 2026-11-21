@@ -42,6 +42,27 @@ export function ctxPercent(ctx) {
   return (Number(ctx.total_tokens || 0) / Number(ctx.window)) * 100;
 }
 
+/// 一位小数去掉尾部的 .0：10.0K 写成 10K，1.20M 写成 1.2M。
+function trimZero(s) {
+  return s.indexOf('.') < 0 ? s : s.replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+}
+
+/** tokens 的短写：1000 起用 K、100 万起用 M（一位小数），卡片与状态栏共用。 */
+export function fmtTokens(n) {
+  const v = Math.max(0, Math.round(Number(n) || 0));
+  if (v < 1000) return String(v);
+  if (v < 1000000) return trimZero((v / 1000).toFixed(1)) + 'K';
+  return trimZero((v / 1000000).toFixed(2)) + 'M';
+}
+
+/** 缓存命中率：命中读 / 输入总量（Anthropic 与 OpenAI 两种口径归一后 prompt 都含命中部分）。 */
+export function cacheHitPercent(read, prompt) {
+  const total = Number(prompt || 0);
+  const hit = Number(read || 0);
+  if (!(total > 0) || !(hit >= 0)) return null;
+  return Math.max(0, Math.min(100, (hit / total) * 100));
+}
+
 export function fmtDuration(sec) {
   const s = Math.max(0, Math.floor(Number(sec) || 0));
   if (s < 60) return s + ' 秒';

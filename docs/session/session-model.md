@@ -109,7 +109,7 @@ session/<工作名>/
 
 - **上下文用量是独立事件**：`usage` 记录最近一次模型调用的 prompt / completion / total、当时的窗口与"精确还是估算"。
 - 它**不落成转录行、不进模型上下文**，随会话流水落盘（刷新/重建可恢复）；`line` 是这次调用产出第一行的行号，回档折叠到它之前时这条用量随之失效。`SessionView.context` 是同一份事实的快照，**只给有持续对话的 `Session::Single`**（single / proxy / 协作的 agent 子会话）；协作主会话 `Session::Collab` 没有这个字段。
-- **累计花费是 meta 事实**：`SessionMeta.usage_totals`（calls / prompt / completion / cache_read / cache_creation）跨回合、跨压缩累加供应商**精确报回**的用量——每次模型调用都记，压缩调用也记；字符估算不进账，回档不清零（花出去的钱退不回来）。`SessionView.usage_totals` 是同一份事实的快照，面板的「累计输入 / 累计输出」读它；「已用 / 占用」仍跟随当前发送视图。
+- **累计花费是 meta 事实**：`SessionMeta.usage_totals`（calls / prompt / completion / cache_read / cache_creation）跨回合、跨压缩累加供应商**精确报回**的用量——每次模型调用都记，压缩调用也记；字符估算不进账，回档不清零（花出去的钱退不回来）。`SessionView.usage_totals` 是同一份事实的快照，面板的「累计输入 / 输出」与「缓存（累计）读 · 命中率」读它；「已用 / 占用」仍跟随当前发送视图。
 - **shell 状态也是快照**：`SessionView.shell` 取该会话最近一次 shell 的运行槽（命令、scope、cwd（本环境写法：本机档是宿主路径，虚拟机档是 guest 内路径）、起止、耗时、退出码、状态 `status` 与回执预览；`status` 取 `exit` / `timeout` / `stopped` / `signal`，None = 运行中 / 未执行 / 没跑成），由工具循环写、状态栏读；它只服务界面，不进模型上下文，也不替代转录里的 shell 工具行。**重建 / 回放按转录派生**：`last_shell(events)` 取最后一条带命令、带结构化事实的 shell 工具行（`tool.shell`：cwd / 耗时毫秒 / 围栏准备 / 退出码 / 状态 / 是否截断），不解析回执正文——标 `historical`、不伪造起止时间；回档折叠掉的行不参与派生。`/api/history` 在响应里带同一份快照，前端本地没有时才填。首次按会话授权的外部工作区，其围栏授权等待计入这条回执的总耗时（粒度见「外部工作区绑定」的 `workspace.grant`）。
 - **裁决卡与回答是例外**：`DecisionCard` / `DecisionAnswer` 按上表落盘（单 agent 与协作会话都留、系统会话不留）——"用户答过什么"是会话的事实，重启后卡与答案都要在（见"请用户裁决"一节）。
 

@@ -266,7 +266,7 @@ prompts/
 - 工具面**按回合按身份注入**（总表不进提示词）；越权调用如实拒绝并落工具行；悬空引用由装配期 `problems()` 挡下。
 - 核心操作与执行席回报都从**工具参数**取载荷。
 - 代理会话复用**通用成员循环**（没有「代理专用」分支）；工具动作经队列桥回核心线程执行。
-- 呈现面：Web 建工作向导含代理形态，会话状态栏显示上下文用量与共享区提交；CLI 有 `resident` / `secret` / `work` 入口。链的流程见 [task-chain.md](../collab/task-chain.md)。
+- 呈现面：Web 建工作向导含代理形态，会话状态栏显示上下文用量与共享区提交；上下文卡片的累计行读 meta 的 `usage_totals`；「过期内容换成占位符」与保底在创建向导与会话配置里设（动作 `set_context_freshness`）；CLI 有 `resident` / `secret` / `work` 入口。链的流程见 [task-chain.md](../collab/task-chain.md)。
 
 ## 十二、联动
 

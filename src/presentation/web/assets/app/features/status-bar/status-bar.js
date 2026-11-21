@@ -5,7 +5,7 @@
 
 import { PERMISSION_LABELS, PERMISSION_ORDER, thinkingLabel } from '../../stores/settings.js';
 import { ctxChipClass, shellAbnormal, shellRunning, shellSecs, statusPrintOf } from './print.js';
-import { ctxPercent, fmtDuration, fmtInt, timeAgo } from '../../core/format.js';
+import { fmtDuration, fmtTokens, timeAgo } from '../../core/format.js';
 
 let g, doc, state, api, ui, app;
 let icon;
@@ -266,13 +266,15 @@ function syncStatusbar(s) {
   // 协作主会话没有一条持续发给模型的对话：不显示上下文 chip（不伪造数字）。
   if (s.mode !== 'collab') {
     const c = s.context;
-    const pct = ctxPercent(c);
+    // 窗口登记为 0 = 本轮没拿到窗口：按后端 128K 兜底算占用，与卡片同一份口径。
+    const win = Number((c && c.window) || 0) || 128000;
+    const pct = c ? Math.min(100, (Number(c.total_tokens || 0) / win) * 100) : null;
     const label = c
-      ? (c.exact ? '' : '≈') + fmtInt(c.total_tokens) + ' tok · ' + (pct == null ? '—' : pct.toFixed(1) + '%')
+      ? (c.exact ? '' : '≈') + fmtTokens(c.total_tokens) + ' tok · ' + pct.toFixed(1) + '%'
       : '上下文 —';
     const tip = c
       ? '上下文：' + (c.exact ? '供应商 usage（精确）' : '按字符估算') +
-        '；' + fmtInt(c.total_tokens) + ' / ' + fmtInt(c.window) + ' tokens'
+        '；' + fmtTokens(c.total_tokens) + ' / ' + fmtTokens(win) + ' tokens'
       : '已经有模型调用后显示上下文用量';
     const chip = ui.statusChip({
       icon: 'chart',

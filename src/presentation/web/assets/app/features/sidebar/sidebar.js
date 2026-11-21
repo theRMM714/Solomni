@@ -254,6 +254,7 @@ async function openHistory(name) {
       activating: false, continue_action: null,
       context: null, shell: r.shell || null, work: null, workAt: 0, workDirty: false, workError: '',
       permission_profile: '', permission_label: '', thinking: null, context_freshness: false,
+      usage_totals: null, freshness_keep_percent: 80, freshness_stats: null,
       permission_narrowed: false, permission_parent: null,
       done: true, awaiting: null, readonly: true, fold: {}, scroll: {},
     };
@@ -261,6 +262,11 @@ async function openHistory(name) {
     s.workspace = (hist && hist.workspace) || null;
     s.workspace_missing = !!(hist && hist.workspace_missing);
     s.run = (hist && hist.run) || 'active';
+    // 历史回放也显示累计花费：累计量、开关与保底都是落盘事实（meta），不是运行态。
+    const meta = r.meta || {};
+    s.usage_totals = meta.usage_totals || null;
+    s.context_freshness = !!meta.context_freshness;
+    s.freshness_keep_percent = meta.freshness_keep_percent == null ? 80 : Number(meta.freshness_keep_percent);
     s.hydrated = true;
     // 合流：盘上转录 + 事件台尾巴一次给全；水位 = 合流时的头部（之后的实时批次照收）。
     if (typeof r.head === 'number') s.floor = r.head;

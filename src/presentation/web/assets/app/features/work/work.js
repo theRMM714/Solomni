@@ -150,16 +150,29 @@ function openShellCard(s, anchor) {
   paintShellCard();
 }
 
+/* 过期占位符这一次做了什么：judged 是参与判定的过期读数，skipped = 省下的量不够付缓存失效。 */
+function freshnessNote(stats) {
+  if (!stats || !stats.judged) return workCopy.freshnessIdle;
+  if (stats.skipped) return '本次判定 ' + stats.judged + ' 处：省下的量不够付一次缓存失效，没有替换。';
+  return '本次替换 ' + stats.replaced + ' 处 · 省 ≈' + app.fmtTokens(stats.saved_tokens) + ' tokens。';
+}
+
 function openContextCard(s, anchor) {
   const box = popoverBox('上下文用量');
   const c = s.context;
-  if (!c) {
+  const u = s.usage_totals;
+  const on = !!s.context_freshness;
+  const keepPct = Number(s.freshness_keep_percent == null ? 80 : s.freshness_keep_percent);
+  if (!c && !(u && u.calls)) {
     box.appendChild(popoverNote(workCopy.noContext));
     ui.popover(anchor, box, { label: '上下文用量' });
     return;
   }
-  const pct = app.ctxPercent(c);
   const at = Number((state.settings && state.settings.compact_at_percent) || 0);
+  // 窗口登记为 0 = 本轮没拿到窗口：自动压缩按后端的 128K 兜底算，这里显示同一份事实。
+  const win = Number((c && c.window) || 0) || 128000;
+  const used = Number((c && c.total_tokens) || 0);
+  const pct = c ? Math.min(100, (used / win) * 100) : null;
   if (pct != null) {
     const bar = doc.createElement('div');
     bar.className = 'ctx-bar';
@@ -176,30 +189,46 @@ function openContextCard(s, anchor) {
     }
     box.appendChild(bar);
   }
-  box.appendChild(popoverRow('已用', app.fmtInt(c.total_tokens) + ' tokens'));
-  box.appendChild(popoverRow('窗口', app.fmtInt(c.window) + ' tokens'));
+  box.appendChild(popoverRow('已用', c ? app.fmtTokens(used) + ' tokens' : '—'));
+  box.appendChild(popoverRow(
+    '窗口',
+    c && c.window ? app.fmtTokens(c.window) + ' tokens' : app.fmtTokens(win) + ' tokens（兜底）',
+  ));
   box.appendChild(popoverRow('占用', pct == null ? '—' : pct.toFixed(1) + '%'));
-  box.appendChild(popoverRow('上次输入 / 输出', app.fmtInt(c.prompt_tokens) + ' / ' + app.fmtInt(c.completion_tokens)));
-  if (c.cache_read != null || c.cache_creation != null) {
-    box.appendChild(popoverRow(
-      '缓存读 / 写',
-      (c.cache_read == null ? '—' : app.fmtInt(c.cache_read)) + ' / ' +
-        (c.cache_creation == null ? '—' : app.fmtInt(c.cache_creation)),
-    ));
+  if (u && u.calls) {
+    box.appendChild(popoverRow('累计输入 / 输出', app.fmtTokens(u.prompt) + ' / ' + app.fmtTokens(u.completion)));
+    // 缓存是**累计花费**的一部分：读/写都进 meta，命中率按累计读 / 累计输入算。
+    const hit = app.cacheHitPercent(u.cache_read, u.prompt);
+    const cache = ['读 ' + app.fmtTokens(u.cache_read)];
+    if (hit != null) cache.push('命中 ' + Math.round(hit) + '%');
+    if (Number(u.cache_creation) > 0) cache.push('写 ' + app.fmtTokens(u.cache_creation));
+    box.appendChild(popoverRow('缓存（累计）', cache.join(' · ')));
+    box.appendChild(popoverNote('共 ' + app.fmtInt(u.calls) + ' 次模型调用（含压缩）；回档不清零。'));
+  } else {
+    box.appendChild(popoverRow('累计输入 / 输出', '—'));
+    box.appendChild(popoverNote(workCopy.noTotals));
   }
-  box.appendChild(popoverRow('自动压缩', at > 0 ? at + '%' : '已关闭'));
+  box.appendChild(popoverRow('过期占位符', on ? '开 · 保底 ' + keepPct + '%' : '关'));
+  if (on) box.appendChild(popoverNote(freshnessNote(s.freshness_stats)));
+  // 压缩的三项是**全局设置**：收成一条可点的小字，点进设置中心，不再占三行。
   const keep = Number((state.settings && state.settings.compact_keep_percent) || 0);
-  box.appendChild(popoverRow('压缩保留', keep > 0 ? '至少 ' + keep + '% 窗口' : '只留摘要'));
-  box.appendChild(
-    popoverRow('总结模型', (state.settings && state.settings.compact_model) || '默认（会话同模型）'),
-  );
-  const badge = doc.createElement('span');
-  badge.className = 'badge-soft ' + (c.exact ? 'ok' : 'warn');
-  badge.textContent = c.exact ? '供应商 usage（精确）' : '按字符估算';
-  box.appendChild(badge);
-  box.appendChild(popoverNote(c.exact
-    ? '数字来自供应商返回的 usage；工具结果回灌的瞬间可能略小于下一请求。'
-    : '供应商没回 usage：按对话字符 ÷ 4 估算，只作参考。'));
+  const link = doc.createElement('div');
+  link.className = 'popover-note popover-link';
+  link.textContent = '压缩：' + (at > 0 ? at + '% 触发' : '已关闭') + ' · ' +
+    (keep > 0 ? '至少保留 ' + keep + '% 窗口' : '只留摘要') + ' · 总结模型 ' +
+    ((state.settings && state.settings.compact_model) || '默认（会话同模型）');
+  link.title = '点开设置中心「生成与上下文」改这三项';
+  link.onclick = () => { ui.closePopover(); app.openSettingsHub('generate'); };
+  box.appendChild(link);
+  if (c) {
+    const badge = doc.createElement('span');
+    badge.className = 'badge-soft ' + (c.exact ? 'ok' : 'warn');
+    badge.textContent = c.exact ? '供应商 usage（精确）' : '按字符估算';
+    box.appendChild(badge);
+    box.appendChild(popoverNote(c.exact
+      ? '数字来自供应商返回的 usage；工具结果回灌的瞬间可能略小于下一请求。'
+      : '供应商没回 usage：按对话字符 ÷ 4 估算，只作参考。'));
+  }
   ui.popover(anchor, box, { label: '上下文用量' });
 }
 

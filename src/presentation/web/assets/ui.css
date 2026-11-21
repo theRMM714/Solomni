@@ -217,6 +217,8 @@ select.field-input { cursor: pointer; }
 .popover-row .k { color: var(--color-text-dim); }
 .popover-row .v { text-align: right; font-variant-numeric: tabular-nums; word-break: break-word; }
 .popover-note { margin-top: var(--sp-2); font-size: var(--fs-s); color: var(--color-text-dim); line-height: var(--lh-base); }
+/* 收成一行、可点进设置中心的说明（如压缩三项）：颜色与指针表明它是入口。 */
+.popover-link { color: var(--color-accent); cursor: pointer; text-decoration: underline; }
 .popover-foot { display: flex; gap: var(--sp-2); justify-content: flex-end; margin-top: var(--sp-3); flex-wrap: wrap; }
 .ctx-bar {
   position: relative; height: 6px; margin: var(--sp-2) 0 var(--sp-1);

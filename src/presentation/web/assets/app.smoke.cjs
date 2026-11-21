@@ -932,6 +932,46 @@ setTimeout(async () => {
       if (!tabLadder) loadErrors.push('标签梯级检查：' + JSON.stringify(r));
     } catch (e) { loadErrors.push('标签梯级检查失败：' + e.message); }
   }
+  // **上下文卡片**：只留总量（累计输入/输出 + 缓存读与命中率），后三行压缩设置收成一行可点小字；
+  // 窗口没登记时按 128K 兜底算占用（后端同一兜底）；过期占位符给出本次替换条数与省下的量。
+  let ctxCard = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () {" +
+          " const s = { sid: 'cx', context: { total_tokens: 11229, window: 0, prompt_tokens: 20000, completion_tokens: 1200, cache_read: 18000, cache_creation: 0, exact: true }," +
+          "   usage_totals: { calls: 3, prompt: 20000, completion: 1200, cache_read: 18000, cache_creation: 0 }," +
+          "   context_freshness: true, freshness_keep_percent: 80," +
+          "   freshness_stats: { judged: 5, replaced: 3, saved_tokens: 4200, skipped: false } };" +
+          " openContextCard(s, {});" +
+          " const root = document.querySelector('#menu-root');" +
+          " const pop = root.children[root.children.length - 1];" +
+          " const box = pop.children[0];" +
+          " const text = []; const links = [];" +
+          " (function walk(n) {" +
+          "   if (String(n.className || '').indexOf('popover-link') >= 0) links.push(n);" +
+          "   for (const c of (n.children || [])) walk(c);" +
+          "   if (!(n.children || []).length && n.textContent) text.push(String(n.textContent));" +
+          " })(box);" +
+          " return { all: text.join(' | '), links: links.length," +
+          "   linkIsFn: !!(links[0] && typeof links[0].onclick === 'function')," +
+          "   linkTitle: links[0] ? String(links[0].title) : '' };" +
+          "})()",
+        sandbox
+      );
+      ctxCard = /已用 \| 11\.2K tokens/.test(r.all) &&
+        /窗口 \| 128K tokens（兜底）/.test(r.all) &&
+        /占用 \| 8\.8%/.test(r.all) &&
+        /累计输入 \/ 输出 \| 20K \/ 1\.2K/.test(r.all) &&
+        /缓存（累计） \| 读 18K · 命中 90%/.test(r.all) &&
+        /共 3 次模型调用/.test(r.all) &&
+        /过期占位符 \| 开 · 保底 80%/.test(r.all) &&
+        /本次替换 3 处 · 省 ≈4\.2K tokens/.test(r.all) &&
+        /压缩：70% 触发 · 至少保留 15% 窗口/.test(r.all) &&
+        r.links === 1 && r.linkIsFn && r.linkTitle.indexOf('设置中心') >= 0;
+      if (!ctxCard) loadErrors.push('上下文卡片检查：' + JSON.stringify(r));
+    } catch (e) { loadErrors.push('上下文卡片检查失败：' + e.message); }
+  }
   // **状态栏**：single / proxy 有上下文 chip，协作主会话没有；提交 chip 都在。
   let statusBarRules = false;
   if (!loadErrors.length) {
@@ -987,8 +1027,9 @@ setTimeout(async () => {
           "})()",
         sandbox
       );
-      const singleOk = r.single.length === 3 && /18,432/.test(r.single[0]) && /14\.4%/.test(r.single[0]) && /工具/.test(r.single[1]) && /#7/.test(r.single[2]);
-      const proxyOk = r.proxy.length === 3 && /1,000/.test(r.proxy[0]) && /10\.0%/.test(r.proxy[0]) && /工具/.test(r.proxy[1]);
+      // 上下文 chip 用 K/M 短写（18.4K / 1K），百分比保留一位。
+      const singleOk = r.single.length === 3 && /18\.4K tok/.test(r.single[0]) && /14\.4%/.test(r.single[0]) && /工具/.test(r.single[1]) && /#7/.test(r.single[2]);
+      const proxyOk = r.proxy.length === 3 && /1K tok/.test(r.proxy[0]) && /10\.0%/.test(r.proxy[0]) && /工具/.test(r.proxy[1]);
       const collabOk = r.collab.length === 2 && /工具/.test(r.collab[0]) && /#7/.test(r.collab[1]);
       const shellOk = r.withShell.length === 4 && r.withShell.some((t) => /shell 退出码 0/.test(t));
       const timeoutOk = r.withTimeout.length === 4 && r.withTimeout.some((t) => /shell 超时 · 30 秒/.test(t));

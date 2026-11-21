@@ -57,6 +57,7 @@ function newSession(v, h) {
     activating: false,
     done: !!(h && h.done), awaiting: null, fold: {}, scroll: {},
     context: v.context || null,
+    usage_totals: v.usage_totals || null,
     shell: v.shell || null,
     work: null, workAt: 0, workDirty: false, workError: '',
     readonly: false, hydrated: false, buffer: [],
@@ -83,6 +84,7 @@ function align(state, cur, v) {
   cur.permission_narrowed = !!v.permission_narrowed;
   cur.permission_parent = v.permission_parent || null;
   if (v.context !== undefined) cur.context = v.context || null;
+  if (v.usage_totals !== undefined) cur.usage_totals = v.usage_totals || null;
   // 活动会话以服务端运行槽为准（null = 被回档截掉）；历史回放保留 /api/history 的派生值。
   if (!cur.readonly && v.shell !== undefined) cur.shell = v.shell || null;
   // 运行态只对账、不覆盖：有实时知识时快照更旧，迟到的轮询不能把已收尾的回合标回「在跑」。
