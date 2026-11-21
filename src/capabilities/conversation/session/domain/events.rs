@@ -266,10 +266,6 @@ pub struct ToolCallView {
     /// 目的：这次调用属于哪一次模型回复（= 该回复第一行的稳定 id）：重建按它分组，回档按它原子截断。
     #[serde(default)]
     pub reply: u64,
-    /// 目的：这次调用若是一次 `read`，它读到了哪个工作树的哪几行、当时的整份指纹。
-    /// 约束：只有"整份原文都读到"的读取才有；发送视图据此判定这段内容过期没有（见 `ReadFact`）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub read: Option<crate::capabilities::workspace::api::ReadFact>,
     /// 目的：这次调用产生的观察事实（读过 / 写过 / 改过哪些行、当时整份版本）；发送视图据此判写入门禁。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observations: Vec<crate::capabilities::tools::api::ObservationFact>,

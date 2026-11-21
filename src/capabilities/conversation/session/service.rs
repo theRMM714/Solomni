@@ -282,7 +282,6 @@ pub fn core_operation(
                     output: head_chars(&payload.to_string(), 400),
                     call_id: c.id.clone(),
                     reply: 0,
-                    read: None,
                     observations: Vec::new(),
                     shell: None,
                 },
@@ -315,7 +314,6 @@ pub fn core_operation(
                     output: head_chars(&payload.to_string(), 400),
                     call_id: String::new(),
                     reply: 0,
-                    read: None,
                     observations: Vec::new(),
                     shell: None,
                 },
@@ -381,7 +379,6 @@ pub fn core_operation(
                 output: out.output,
                 call_id,
                 reply: 0,
-                read: None,
                 observations: Vec::new(),
                 shell: None,
             };

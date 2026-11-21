@@ -282,11 +282,11 @@ fn replay_reads(
             >(t.clone()) else {
                 continue;
             };
-            if let Some(fact) = c.read.clone() {
-                out.push((
-                    crate::capabilities::conversation::session::api::tool_result_body(&c),
-                    fact,
-                ));
+            let body = crate::capabilities::conversation::session::api::tool_result_body(&c);
+            for fact in &c.observations {
+                if let Some(read) = fact.read_fact() {
+                    out.push((body.clone(), read));
+                }
             }
         }
     }
@@ -317,11 +317,10 @@ fn replay_observations(
             >(t.clone()) else {
                 continue;
             };
-            out.extend(
-                c.observations
-                    .into_iter()
-                    .filter(|f| f.reply >= compacted_upto),
-            );
+            out.extend(c.observations.into_iter().filter(|f| {
+                f.schema == crate::capabilities::tools::api::OBSERVATION_FORMAT
+                    && f.reply >= compacted_upto
+            }));
         }
     }
     out
@@ -615,6 +614,7 @@ mod tests {
                     "output": "",
                     "reply": reply,
                     "observations": [{
+                        "schema": 1,
                         "reply": reply,
                         "path": path,
                         "worktree": "a",

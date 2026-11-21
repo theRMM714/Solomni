@@ -22,7 +22,7 @@ pub use crate::capabilities::tools::domain::systool::{
 };
 
 pub use crate::capabilities::workspace::api::GateFile;
-use crate::capabilities::workspace::api::Workspace;
+use crate::capabilities::workspace::api::{ReadFact, Workspace};
 
 /// 目的：一个从 1 开始、闭区间的行范围。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -134,9 +134,15 @@ pub enum ObservationSource {
     Diff,
 }
 
+/// 目的：观察事实的持久化格式版本；与代码不符的事实一律降级为“没有观察”（失败关闭）。
+pub const OBSERVATION_FORMAT: u32 = 1;
+
 /// 目的：一条观察事实——某个路径的某个整份版本，被看过哪些行。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ObservationFact {
+    /// 目的：持久化格式版本；旧转录/损坏数据缺省为 0，门禁不认。
+    #[serde(default)]
+    pub schema: u32,
     /// 目的：这条观察来自哪一次模型回复（= 该回复第一行的行 id）；压缩按它丢弃失效观察。
     pub reply: u64,
     /// 目的：工作树内的相对路径（斜杠分隔）。
@@ -151,6 +157,26 @@ pub struct ObservationFact {
     pub total_lines: u32,
     /// 目的：这条事实由哪种操作产生（诊断与显示）。
     pub source: ObservationSource,
+}
+
+impl ObservationFact {
+    /// 目的：完整读过某版本时，把它还原成 freshness 用的读取事实；分段读不产生。
+    /// 约束：from/to 覆盖整份；blob 与版本是同一指纹。
+    pub fn read_fact(&self) -> Option<ReadFact> {
+        if self.schema != OBSERVATION_FORMAT
+            || self.source != ObservationSource::Read
+            || !matches!(self.coverage, Coverage::Full)
+        {
+            return None;
+        }
+        Some(ReadFact {
+            worktree: self.worktree.clone(),
+            path: self.path.clone(),
+            from: 1,
+            to: u64::from(self.total_lines),
+            blob: self.version.clone(),
+        })
+    }
 }
 
 /// 目的：写入门禁要求观察到的程度。
@@ -215,11 +241,33 @@ impl GateFault {
     }
 }
 
+/// 目的：一条待判定的写入；`current` 是即将被替换/覆盖的磁盘版本。
+#[derive(Clone, Copy)]
+pub struct GateItem<'a> {
+    /// 目的：工作树内的相对路径。
+    pub path: &'a str,
+    /// 目的：这次写入要求观察到什么程度。
+    pub need: Need,
+    /// 目的：即将被覆盖的磁盘版本；None = 文件不存在（或调用方没取到）。
+    pub current: Option<&'a GateFile>,
+}
+
 /// 目的：写入门禁端口；None = 不做门禁（内部写、直调测试）。
 /// 约束：current = 即将被替换/覆盖的磁盘版本；None = 文件不存在。
 pub trait WriteGate: Send + Sync {
     /// 目的：判断账本是否足以支撑这次写入；`current` 是即将被覆盖的磁盘版本。
     fn check(&self, path: &str, need: Need, current: Option<&GateFile>) -> Result<(), GateFault>;
+
+    /// 目的：一次判定多条写入（同一批补丁只取一次工作区快照）；返回第一条失败的序号与原因。
+    /// 约束：默认逐条调用 `check`；实现方可以合并快照，但不能改变单条的判定语义。
+    fn check_many(&self, items: &[GateItem<'_>]) -> Result<(), (usize, GateFault)> {
+        for (i, item) in items.iter().enumerate() {
+            if let Err(f) = self.check(item.path, item.need, item.current) {
+                return Err((i, f));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// 目的：一次工具调用用的只读门禁——按路径向工作区取快照，再对账本里的观察事实。
@@ -235,20 +283,19 @@ pub struct SessionWriteGate<'a> {
     pub facts: &'a [ObservationFact],
     /// 目的：这些事实属于哪棵工作树（空 = 主副本）。
     pub worktree: &'a str,
+    /// 目的：拒绝时记审计日志（只记路径、需求、观察/当前版本，不记文件内容）。
+    pub log: Option<&'a dyn crate::kernel::ports::Log>,
 }
 
-impl WriteGate for SessionWriteGate<'_> {
-    fn check(&self, path: &str, need: Need, current: Option<&GateFile>) -> Result<(), GateFault> {
-        let infos = self
-            .workspace
-            .work_gate_info(self.work, self.agent, &[path.to_string()])
-            .map_err(GateFault::Unavailable)?;
-        let Some(info) = infos.first() else {
-            return Err(GateFault::Unavailable(format!(
-                "拿不到 {} 的追踪状态",
-                path
-            )));
-        };
+impl SessionWriteGate<'_> {
+    /// 目的：按快照判定一条写入；不做 I/O，也不记日志。
+    fn judge(
+        &self,
+        path: &str,
+        need: Need,
+        current: Option<&GateFile>,
+        info: &crate::capabilities::workspace::api::PathGateInfo,
+    ) -> Result<(), GateFault> {
         if !info.tracked {
             return Ok(());
         }
@@ -259,7 +306,9 @@ impl WriteGate for SessionWriteGate<'_> {
         let mine: Vec<&ObservationFact> = self
             .facts
             .iter()
-            .filter(|f| f.path == path && f.worktree == self.worktree)
+            .filter(|f| {
+                f.schema == OBSERVATION_FORMAT && f.path == path && f.worktree == self.worktree
+            })
             .collect();
         let same: Vec<&&ObservationFact> =
             mine.iter().filter(|f| f.version == target.hash).collect();
@@ -283,6 +332,96 @@ impl WriteGate for SessionWriteGate<'_> {
             Need::Full if coverage.covers_all(total) => Ok(()),
             Need::Full => Err(GateFault::NotFull { total }),
         }
+    }
+
+    /// 目的：快照里这条路径当前显示给审计的版本（优先调用方给的，其次磁盘当前，最后基线）。
+    fn shown_version(
+        &self,
+        current: Option<&GateFile>,
+        info: &crate::capabilities::workspace::api::PathGateInfo,
+    ) -> Option<String> {
+        current
+            .or(info.current.as_ref())
+            .or(info.base.as_ref())
+            .map(|f| f.hash.clone())
+    }
+
+    /// 目的：拒绝写入时留一条可追溯的审计记录；只记路径、需求与版本，不记文件内容。
+    fn audit(&self, path: &str, need: Need, fault: &GateFault, current: Option<&str>) {
+        let Some(log) = self.log else {
+            return;
+        };
+        let (observed, current) = match fault {
+            GateFault::Stale { observed, current } => {
+                (Some(observed.as_str()), Some(current.as_str()))
+            }
+            _ => (None, current),
+        };
+        let msg = format!(
+            "拒绝写入 {}（需要 {:?}）：{}；观察版本 {}；当前版本 {}",
+            path,
+            need,
+            fault.code(),
+            observed.unwrap_or("无"),
+            current.unwrap_or("无")
+        );
+        log.warn("tools::write_gate", &msg);
+    }
+
+    /// 目的：一次取齐多条路径的快照，避免同一批补丁逐路径重复读版本树。
+    fn snapshot(
+        &self,
+        paths: &[String],
+    ) -> Result<Vec<crate::capabilities::workspace::api::PathGateInfo>, GateFault> {
+        self.workspace
+            .work_gate_info(self.work, self.agent, paths)
+            .map_err(GateFault::Unavailable)
+    }
+}
+
+impl WriteGate for SessionWriteGate<'_> {
+    fn check(&self, path: &str, need: Need, current: Option<&GateFile>) -> Result<(), GateFault> {
+        let infos = self.snapshot(&[path.to_string()])?;
+        let Some(info) = infos.first() else {
+            let fault = GateFault::Unavailable(format!("拿不到 {} 的追踪状态", path));
+            self.audit(path, need, &fault, None);
+            return Err(fault);
+        };
+        let shown = self.shown_version(current, info);
+        match self.judge(path, need, current, info) {
+            Ok(()) => Ok(()),
+            Err(fault) => {
+                self.audit(path, need, &fault, shown.as_deref());
+                Err(fault)
+            }
+        }
+    }
+
+    fn check_many(&self, items: &[GateItem<'_>]) -> Result<(), (usize, GateFault)> {
+        if items.is_empty() {
+            return Ok(());
+        }
+        let paths: Vec<String> = items.iter().map(|i| i.path.to_string()).collect();
+        let infos = match self.snapshot(&paths) {
+            Ok(v) => v,
+            Err(fault) => {
+                self.audit(items[0].path, items[0].need, &fault, None);
+                return Err((0, fault));
+            }
+        };
+        for (i, item) in items.iter().enumerate() {
+            let Some(info) = infos.get(i) else {
+                let fault = GateFault::Unavailable(format!("拿不到 {} 的追踪状态", item.path));
+                self.audit(item.path, item.need, &fault, None);
+                return Err((i, fault));
+            };
+            let shown = self.shown_version(item.current, info);
+            if let Err(fault) = self.judge(item.path, item.need, item.current, info) {
+                self.audit(item.path, item.need, &fault, shown.as_deref());
+                return Err((i, fault));
+            }
+        }
+        Ok(())
     }
 }
 

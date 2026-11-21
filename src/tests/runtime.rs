@@ -1118,7 +1118,13 @@ pub(crate) fn read_facts_rebuild_identically_to_live() {
         "正文用于在发送视图里定位消息：{}",
         live[0].body
     );
-    assert!(tool_views(&events)[0].read.is_some(), "工具行要带上读事实");
+    assert!(
+        tool_views(&events)[0]
+            .observations
+            .iter()
+            .any(|f| f.read_fact().is_some()),
+        "工具行要带上读事实"
+    );
 
     // 开关打开会丢掉内存会话：下一次访问按转录重建（回放必须与实时同一份台账）。
     core.set_context_freshness(&sid, true, None)

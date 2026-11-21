@@ -10,7 +10,6 @@ use crate::capabilities::conversation::session::domain::tools::MemberTools;
 use crate::capabilities::llm::api::ToolInvoke;
 use crate::capabilities::permission::api::{CallScope, Decision, Effect, Reach, ReachSet};
 use crate::capabilities::tools::api::{Observations, SessionWriteGate, ShellFacts, ToolSchema};
-use crate::capabilities::workspace::api::ReadFact;
 use crate::kernel::api::types::ToolOutcome;
 
 /// 目的：分支执行体的结果形态，在 CallDone 前多带一份观察账本副本（并发批次按原序合并）。
@@ -18,7 +17,6 @@ pub(crate) type BranchDone = (
     String,
     ToolOutcome,
     Observations,
-    Option<ReadFact>,
     Vec<crate::capabilities::tools::api::ObservationFact>,
     Option<ShellFacts>,
 );
@@ -41,11 +39,10 @@ pub(crate) fn run_one(
     args_json: &str,
     ctl: &CallCtl<'_>,
 ) -> CallDone {
-    let (label, outcome, branch, read, facts, shell) =
-        run_branch(ctx, module, name, args_json, ctl);
+    let (label, outcome, branch, facts, shell) = run_branch(ctx, module, name, args_json, ctl);
     // 串行：分支的副本就是"这次调用之后"的账本，直接接管（与逐个记账等价）。
     ctx.observations = branch;
-    (label, outcome, read, facts, shell)
+    (label, outcome, facts, shell)
 }
 
 /// 目的：一次调用的执行体（**不碰本成员的账本**）：分支各持账本副本，由调用方按原始顺序合并/接管。
@@ -68,8 +65,6 @@ pub(crate) fn run_branch(
     let mut branch = ctx.observations.clone();
     branch.set_reply(ctx.reply_seq);
     let facts_before = branch.facts().len();
-    // 这一趟若是一次完整的 read：它读到了哪几行、当时的指纹（挂到工具行上，发送视图据此判过期）。
-    let mut read: Option<ReadFact> = None;
     // 这一趟若是一次 shell：执行层当场算好的结构化事实（耗时 / 围栏准备 / 退出码 / 状态 / 截断）。
     let mut shell: Option<ShellFacts> = None;
     let (label, outcome) = if !face_has(ctx, module, name) {
@@ -84,6 +79,7 @@ pub(crate) fn run_branch(
             agent: &ctx.face.sandbox.agent,
             facts: &facts,
             worktree: &ctx.face.sandbox.agent,
+            log: Some(ctx.log.as_ref()),
         });
         let done = ctx.tools.run_builtin(
             &ctx.face.sandbox,
@@ -98,8 +94,6 @@ pub(crate) fn run_branch(
         let mut outcome = done.outcome;
         branch = done.observations;
         commit_writes(ctx, &mut branch, &mut outcome);
-        // read 只产生一条事实（一次调用只读一个路径）；没读到整份原文时是 None。
-        read = branch.take_reads().into_iter().next();
         (String::new(), outcome)
     } else if crate::capabilities::tools::api::is_exec(name) {
         let (outcome, facts) = run_shell(ctx, name, args_json, *ask, grant, cancel, *budget);
@@ -140,7 +134,7 @@ pub(crate) fn run_branch(
     } else {
         Vec::new()
     };
-    (label, outcome, branch, read, facts, shell)
+    (label, outcome, branch, facts, shell)
 }
 
 /// 目的：写工具落地后**自动提交**——路径取自这次调用真正写过的文件（观察账本的分支副本，见 Observations::take_written）。
@@ -423,7 +417,6 @@ pub(crate) fn run_batch(
                 (
                     module.clone().unwrap_or_default(),
                     ToolOutcome::new(false, why.clone()),
-                    None,
                     Vec::new(),
                     None,
                 )
@@ -444,7 +437,7 @@ pub(crate) fn run_batch(
         let grant = match &grants[i] {
             Ok(g) => g.clone(),
             Err(why) => {
-                done[i] = Some((label, deny(&ctx.face, why.clone()), None, Vec::new(), None));
+                done[i] = Some((label, deny(&ctx.face, why.clone()), Vec::new(), None));
                 i += 1;
                 continue;
             }
@@ -454,7 +447,7 @@ pub(crate) fn run_batch(
                 "当前档位「{}」不允许这次调用。",
                 ctx.face.sandbox.permissions.profile.label()
             );
-            done[i] = Some((label, refuse(why), None, Vec::new(), None));
+            done[i] = Some((label, refuse(why), Vec::new(), None));
             i += 1;
             continue;
         }
@@ -483,7 +476,7 @@ pub(crate) fn run_batch(
             let Some(gate) = confirms.as_deref_mut() else {
                 let why = "这次调用需要用户确认，但当前没有可回答的前端；按拒绝处理，未执行。"
                     .to_string();
-                done[i] = Some((label, refuse(why), None, Vec::new(), None));
+                done[i] = Some((label, refuse(why), Vec::new(), None));
                 i += 1;
                 continue;
             };
@@ -519,7 +512,7 @@ pub(crate) fn run_batch(
                 let why =
                     "用户没有放行这次工具调用：它没有执行。请换一种做法，或请用户调整会话权限。"
                         .to_string();
-                (label, refuse(why), None, Vec::new(), None)
+                (label, refuse(why), Vec::new(), None)
             });
             i += 1;
             continue;
@@ -565,9 +558,9 @@ pub(crate) fn run_batch(
                     .map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
                     .collect()
             });
-            for (k, (label, outcome, branch, read, facts, shell)) in batch.into_iter().enumerate() {
+            for (k, (label, outcome, branch, facts, shell)) in batch.into_iter().enumerate() {
                 ctx.observations.absorb(&branch);
-                done[i + k] = Some((label, outcome, read, facts, shell));
+                done[i + k] = Some((label, outcome, facts, shell));
             }
             i = j;
         } else {
@@ -590,7 +583,7 @@ pub(crate) fn run_batch(
     super::fence::adopt_sandbox(ctx, plan, &mut done, &gate_facts);
     // 每一次调用都留一条**同形状的审计记录**（与呈现层的动作记录同一处格式化）：可查、可对账。
     for ((module, tool, _args), slot) in plan.iter().zip(done.iter()) {
-        if let Some((_label, outcome, _read, _facts, _shell)) = slot {
+        if let Some((_label, outcome, _facts, _shell)) = slot {
             let name = match module {
                 Some(m) => format!("{}.{}", m, tool),
                 None => tool.clone(),

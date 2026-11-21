@@ -5,14 +5,12 @@
 
 use crate::capabilities::conversation::session::domain::tools::MemberTools;
 use crate::capabilities::tools::api::{ObservationFact, SessionWriteGate, ShellFacts, WriteGate};
-use crate::capabilities::workspace::api::ReadFact;
 use crate::kernel::api::types::ToolOutcome;
 
-/// 目的：一次调用的结果形态（标签，结果，读事实，观察事实，shell 结构化事实），只为把签名读短。
+/// 目的：一次调用的结果形态（标签，结果，观察事实，shell 结构化事实），只为把签名读短。
 pub(crate) type CallDone = (
     String,
     ToolOutcome,
-    Option<ReadFact>,
     Vec<ObservationFact>,
     Option<ShellFacts>,
 );
@@ -63,6 +61,7 @@ pub(super) fn commit_refusal(
         agent: &ctx.face.sandbox.agent,
         facts,
         worktree: &ctx.face.sandbox.agent,
+        log: Some(ctx.log.as_ref()),
     };
     for info in &infos {
         if !info.tracked {
@@ -115,7 +114,7 @@ pub(super) fn adopt_sandbox(
         if module.is_none() && !crate::capabilities::tools::api::is_exec(tool) {
             continue;
         }
-        if matches!(&done[i], Some((_, o, _, _, _)) if o.ok) {
+        if matches!(&done[i], Some((_, o, _, _)) if o.ok) {
             last = Some(i);
         }
     }
@@ -137,7 +136,7 @@ pub(super) fn adopt_sandbox(
         Ok(report) => adopt_note(ctx, &report, facts),
         Err(e) => format!("\n\n[沙箱改动未存档] 这些文件没有记进存档：{}", e),
     };
-    if let Some((_, outcome, _, _, _)) = &mut done[i] {
+    if let Some((_, outcome, _, _)) = &mut done[i] {
         outcome.output.push_str(&note);
     }
 }

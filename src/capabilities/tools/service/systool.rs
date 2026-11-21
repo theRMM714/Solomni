@@ -4,7 +4,7 @@
 //! 联动：引 `ports` 的 `SysIo` 做 IO；`domain/` 不引 `ports`（见 docs/architecture/boundaries.md 的「三分法」）。
 
 use crate::capabilities::tools::api::{
-    Coverage, GateFile, LineRange, Need, ObservationFact, ObservationSource,
+    Coverage, GateFile, GateItem, LineRange, Need, ObservationFact, ObservationSource,
 };
 use crate::capabilities::tools::domain::systool::*;
 use crate::capabilities::tools::ports::{Expect, Mutation, SysIo, WriteFault, WriteOp};
@@ -209,6 +209,7 @@ fn observe(
         return;
     };
     obs.note_fact(ObservationFact {
+        schema: crate::capabilities::tools::api::OBSERVATION_FORMAT,
         reply: obs.reply(),
         path: rel.clone(),
         worktree: origin.worktree.clone(),
@@ -452,17 +453,6 @@ fn read(
         format!("只读了第 {}-{} 行（共 {} 行）", offset, to, total)
     };
     obs.note_read(path, complete, why, hash);
-    // 读取事实：只有"整份原文都读到了"才记——半份内容没法与后续版本按行对齐，
-    // 拿它判过期只会误导模型（宁可让它多读一次）。
-    if complete && let Some(rel) = rel_of(sb, place, path) {
-        obs.note_read_fact(crate::capabilities::workspace::api::ReadFact {
-            worktree: worktree_of(sb, place),
-            path: rel,
-            from: offset as u64,
-            to: to as u64,
-            blob: page.hash.clone(),
-        });
-    }
     // 观察事实：完整读 = 全文；分段读 = 读到的行区间。单行截断、编码损失都不记
     //（模型看到的不是原文，拿去授权改写会覆盖掉自己没看见的字节）。
     if !page.lossy && !line_cut {
@@ -792,6 +782,8 @@ fn apply_patch(
     let mut places: BTreeMap<PathBuf, Place> = BTreeMap::new();
     // 每个路径的磁盘基线：事务提交时在锁内再比一次（不能拿补丁算出的新内容当期望）。
     let mut expects: BTreeMap<PathBuf, Expect> = BTreeMap::new();
+    // 门禁检查攒到全部块解析完再一次性做：一批补丁只取一次工作区快照。
+    let mut checks: Vec<(usize, String, String, Need, Option<GateFile>)> = Vec::new();
     let mut lines: Vec<String> = Vec::new();
     for (i, b) in blocks.iter().enumerate() {
         let n = i + 1;
@@ -845,10 +837,8 @@ fn apply_patch(
             };
             expects.insert(path.clone(), expect);
         }
-        // 每个路径只在第一块过门禁：同一份补丁里后面的块看到的是前面算出来的内容。
-        if !order.contains(&path)
-            && let Some(gate) = gate
-        {
+        // 每个路径只在第一块登记门禁：同一份补丁里后面的块看到的是前面算出来的内容。
+        if !order.contains(&path) && gate.is_some() {
             let Some(rel) = rel_of(sb, &place, &path) else {
                 return fail(block_fault(
                     n,
@@ -863,11 +853,7 @@ fn apply_patch(
                 hash: hash.clone(),
                 size: None,
             });
-            if let Err(fault) = gate.check(&rel, need, current.as_ref()) {
-                let mut out = fail(block_fault(n, fault.message(&spec)));
-                out.push_note(gate_note(&fault, &spec));
-                return out;
-            }
+            checks.push((n, spec.clone(), rel, need, current));
         }
         match b {
             Block::Add { content, .. } => match &source {
@@ -953,6 +939,25 @@ fn apply_patch(
         places.insert(path.clone(), place);
         if !order.contains(&path) {
             order.push(path.clone());
+        }
+    }
+    // 写入前一次性过门禁：整批只取一次快照；任一路径不成立就一个文件都不写。
+    if let Some(gate) = gate
+        && !checks.is_empty()
+    {
+        let items: Vec<GateItem<'_>> = checks
+            .iter()
+            .map(|(_, _, rel, need, current)| GateItem {
+                path: rel.as_str(),
+                need: *need,
+                current: current.as_ref(),
+            })
+            .collect();
+        if let Err((k, fault)) = gate.check_many(&items) {
+            let (n, spec, _, _, _) = &checks[k];
+            let mut out = fail(block_fault(*n, fault.message(spec)));
+            out.push_note(gate_note(&fault, spec));
+            return out;
         }
     }
     // 全部就绪 → 一个事务写盘：任一文件失败，已发布的文件按原字节回滚。

@@ -243,7 +243,10 @@ fn fs_sys_io_reads_utf8_flags_lossy_and_truncation_and_creates_parents() {
     assert!(r.lossy, "含非法字节必须如实标注 lossy（本程序不猜编码）");
     assert!(r.text.starts_with('A'), "{}", r.text);
 
-    let small = FsSysIo { max_read_bytes: 3 };
+    let small = FsSysIo {
+        max_read_bytes: 3,
+        ..FsSysIo::default()
+    };
     let cut = small.read(&f).expect("截断读取成功");
     assert!(cut.cut, "超出上限要如实标注 cut");
     assert_eq!(cut.bytes, "你好，世界".len(), "bytes 仍是整个文件的字节数");
@@ -299,7 +302,10 @@ fn fs_sys_io_read_page_reads_a_late_window_and_counts_the_whole_file() {
     assert_eq!(tail.total_lines, 12_000);
 
     // 选中字节到单次上限就收手：window_cut 如实标注，行数仍然数完。
-    let small = FsSysIo { max_read_bytes: 6 };
+    let small = FsSysIo {
+        max_read_bytes: 6,
+        ..FsSysIo::default()
+    };
     let w = root.join("window.txt");
     std::fs::write(&w, "aaa\nbbb\nccc\n").expect("造窗口文件");
     let page = small.read_page(&w, 1, 3).expect("窗口读");
@@ -308,7 +314,10 @@ fn fs_sys_io_read_page_reads_a_late_window_and_counts_the_whole_file() {
     assert_eq!(page.total_lines, 3);
 
     // 单行超过上限：只取前缀，line_cut 如实标注。
-    let narrow = FsSysIo { max_read_bytes: 2 };
+    let narrow = FsSysIo {
+        max_read_bytes: 2,
+        ..FsSysIo::default()
+    };
     let page = narrow.read_page(&w, 1, 1).expect("窄窗口读");
     assert_eq!(page.text, "aa");
     assert!(page.line_cut, "{page:?}");
@@ -593,4 +602,47 @@ fn fs_history_nests_children_inside_their_parent_dir() {
     assert!(!root.join("p").exists());
     assert!(h.load("p--甲--乙").is_err(), "整棵子树随父一起消失");
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：写路径的跨进程锁由锁目录承载——同路径第二个实例拿不到锁就报 FS_LOCKED，放锁后可重试。
+#[test]
+fn fs_sys_io_write_lock_is_cross_instance_and_releases() {
+    use crate::capabilities::workspace::api::content_hash;
+
+    let root = scratch("fs-sysio-lock");
+    let path = root.join("a.txt");
+    std::fs::write(&path, "a").expect("造文件");
+    let io = FsSysIo::with_lock_dir(root.join("locks"));
+    let held = io
+        .hold_lock_for_test(&path)
+        .expect("拿锁成功")
+        .expect("配置了锁目录就应有锁文件");
+
+    let mut tight = FsSysIo::with_lock_dir(root.join("locks"));
+    tight.lock_wait = std::time::Duration::from_millis(50);
+    let version = content_hash(b"a");
+    let err = tight
+        .mutate(
+            &path,
+            &crate::capabilities::tools::ports::Expect::Version(version.clone()),
+            crate::capabilities::tools::ports::Mutation::Replace("b".to_string()),
+        )
+        .expect_err("另一个实例还持锁时必须失败");
+    assert_eq!(err.code, "FS_LOCKED", "{}", err.message);
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "a",
+        "被挡住时不能写"
+    );
+
+    drop(held);
+    let receipt = tight
+        .mutate(
+            &path,
+            &crate::capabilities::tools::ports::Expect::Version(version),
+            crate::capabilities::tools::ports::Mutation::Replace("b".to_string()),
+        )
+        .expect("放锁后应能写");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "b");
+    assert_eq!(receipt.total_lines, 1);
 }

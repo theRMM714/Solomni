@@ -397,7 +397,7 @@ fn main() {
     )
     .with_mode(std::sync::Arc::clone(&sandbox_mode));
     // 内置文件工具：纯 Rust 直接读写，不经过外部进程（编码问题不进本程序）。
-    let io = capabilities::tools::detail::FsSysIo::default();
+    let io = capabilities::tools::detail::FsSysIo::with_lock_dir(home.join("locks"));
     // **工具能力**：三张表由加载器读进来，三个出站端口（外部执行 / 内置读写 / 围栏释放）
     // 只由它的 service 持有（R12）。装配期就挡下"悬空引用 / 缺能力"。
     let fence_host: Arc<dyn kernel::ports::FenceHost + Send + Sync> =
