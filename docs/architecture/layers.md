@@ -84,7 +84,7 @@
 - 声明层号 == 重算层号、层号连续、目录全覆盖 → `node tests/gates/structure/layers.js`。
 - kernel 机制：登记双向对账、同层互依赖、声明层号 == 重算层号、机制成环、内核内部绕道 `api` 面 → `node tests/gates/structure/kernel-mechanisms.js`。
 - 入口分段：登记双向对账、同段互依赖、向上依赖、压不住依赖、成环、`src/entry.rs` 只放 mod 声明 → `node tests/gates/structure/entry-tiers.js`。
-- 结构图与层表渲染 → `node tests/gates/structure/graph.js`、`node tests/docs-sync.mjs`。
+- 结构图与层表渲染 → `node tests/gates/structure/graph.js`：每次跑门禁把四张登记表画成仓库根 `Structure.html`（全景 + 能力 / kernel 机制 / 入口 / 屏面四视图；点节点下钻到文件、点文件看四槽；永远 pass 只回执），以及 `node tests/docs-sync.mjs`。
 
 ## 路由
 - 业务边界判据、硬要求 R1–R20 与 T0 判据清单：[boundaries.md](boundaries.md)
