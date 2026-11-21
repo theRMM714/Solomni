@@ -44,6 +44,8 @@ export function shellSecs(sh) {
 export function statusPrintOf(s) {
   const c = s && s.context;
   const w = s && s.work;
+  const u = s && s.usage_totals;
+  const st = s && s.freshness_stats;
   return JSON.stringify([
     s && s.sid, c && c.prompt_tokens, c && c.completion_tokens, c && c.total_tokens,
     c && c.window, c && c.exact, w && w.head && w.head.id, w && w.total, w && w.error,
@@ -56,6 +58,9 @@ export function statusPrintOf(s) {
     s && s.permission_parent,
     s && s.thinking ? [s.thinking.level, s.thinking.default_level, s.thinking.label, (s.thinking.options || []).length] : 0,
     s && s.context_freshness ? 1 : 0,
+    s && s.freshness_keep_percent == null ? 80 : s.freshness_keep_percent,
+    u ? [u.calls, u.prompt, u.completion, u.cache_read, u.cache_creation] : 0,
+    st ? [st.judged, st.replaced, st.saved_tokens, st.skipped ? 1 : 0] : 0,
     s && s.shell ? [
       s.shell.command, s.shell.scope, s.shell.cwd, s.shell.started_at, s.shell.finished_at,
       s.shell.elapsed_secs, s.shell.ok, s.shell.exit_code, (s.shell.output || '').length,
