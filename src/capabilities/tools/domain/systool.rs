@@ -29,6 +29,9 @@ pub const MAX_READ_CHARS: usize =
     crate::capabilities::tools::domain::budget::MAX_RESULT_CHARS - 2_000;
 /// 目的：回执里单行的字符上限（长行截断，避免一行吃掉整个上下文）。
 pub const MAX_READ_LINE_CHARS: usize = 2_000;
+/// 目的：单次 read 最多返回的行数；也是 `limit` 的缺省值与上限（与 systools/tools.yaml 一致）。
+/// 约束：机制层按这个窗口取行，但会扫完整份文件统计行数与版本——>1MB 的文件也能直接读后半段。
+pub const MAX_READ_LINES: usize = 2_000;
 /// 目的：单次 search 回传的命中行数上限（超出如实截断；命中总数照实报）。
 pub const MAX_SEARCH_HITS: usize = 200;
 /// 目的：单条命中行回传的字符上限（长行截断，避免一行吃掉整个上下文）。
@@ -410,8 +413,11 @@ pub(crate) fn overwrite_check(
     path: &Path,
     current: &str,
 ) -> Result<(), String> {
+    // 读账本的指纹与 read 回执同口径：按 `lines()` 去掉行尾换行与末尾 `\r` 再连回去。
+    // 不这样做，末尾换行或 CRLF 的差异会被当成"读后又被改过"。
+    let normalized = current.lines().collect::<Vec<_>>().join("\n");
     match obs.known(path) {
-        Some(seen) if seen == fnv1a(current) => Ok(()),
+        Some(seen) if seen == fnv1a(&normalized) => Ok(()),
         Some(_) => Err(format!(
             "{} 在你读过之后又被改动过（内容与当时不同）：请重新 read 一遍再决定怎么写，不要凭记忆覆盖。",
             spec

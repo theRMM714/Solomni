@@ -390,6 +390,34 @@ pub(crate) fn builtin_read_range_numbers_lines_and_points_at_the_next_offset() {
     );
 }
 
+/// 目的：read 按 offset/limit 取窗口，行号与总行数按整份文件算——不要求从第 1 行开始读。
+#[test]
+pub(crate) fn builtin_read_window_uses_absolute_line_numbers_and_reports_the_total() {
+    let io = InMemorySysIo::new();
+    let sb = test_sandbox("a1", &[]);
+    let text: String = (1..=3_000).map(|i| format!("l{i}\n")).collect();
+    io.seed(&["demo", "work", "many.txt"], &text);
+    let path = s(&["demo", "work", "many.txt"]);
+    let out = run_builtin(
+        &sb,
+        &io,
+        "read",
+        &format!("{{\"path\":\"{}\",\"offset\":2500,\"limit\":2}}", path),
+    );
+    assert!(out.ok, "{}", out.output);
+    assert!(
+        out.output.contains("2500: l2500") && out.output.contains("2501: l2501"),
+        "{}",
+        out.output
+    );
+    assert!(
+        out.output
+            .contains("已显示第 2500-2501 行，共 3000 行；继续读用 offset=2502"),
+        "{}",
+        out.output
+    );
+}
+
 /// 目的：delete 默认只删文件；目录必须 recursive；共享区与模块目录整体拒绝；路径先校验再动盘。
 #[test]
 pub(crate) fn builtin_delete_only_sandbox_files_and_honours_recursive() {
@@ -466,7 +494,7 @@ pub(crate) fn builtin_arg_mistakes_are_named_and_the_signature_comes_back() {
         big.output
     );
     assert!(
-        big.output.contains("read\n读取文本文件（UTF-8）。"),
+        big.output.contains("read\n按行窗口读取文本文件（UTF-8）"),
         "失败要把工具签名发回去：{}",
         big.output
     );

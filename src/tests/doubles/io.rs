@@ -118,6 +118,44 @@ impl SysIo for InMemorySysIo {
         })
     }
 
+    fn read_page(
+        &self,
+        path: &std::path::Path,
+        offset: u32,
+        limit: u32,
+    ) -> Result<crate::capabilities::tools::ports::FilePage, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        let key = path.to_string_lossy().into_owned();
+        self.enter(&key);
+        let text = self
+            .files
+            .lock()
+            .expect("锁")
+            .get(&key)
+            .cloned()
+            .ok_or_else(|| format!("读取失败：{} 不存在", key))?;
+        let lines: Vec<&str> = text.lines().collect();
+        let total = lines.len() as u32;
+        let offset = offset.max(1);
+        let selected: Vec<&str> = lines
+            .iter()
+            .skip((offset - 1) as usize)
+            .take(limit.max(1) as usize)
+            .copied()
+            .collect();
+        Ok(crate::capabilities::tools::ports::FilePage {
+            text: selected.join("\n"),
+            bytes: text.len(),
+            lossy: self.lossy,
+            window_cut: false,
+            line_cut: false,
+            hash: crate::capabilities::workspace::api::content_hash(text.as_bytes()),
+            total_lines: total,
+        })
+    }
+
     fn fingerprint(&self, path: &std::path::Path) -> Result<Option<String>, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());

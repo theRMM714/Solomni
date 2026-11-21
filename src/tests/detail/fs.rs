@@ -269,6 +269,67 @@ fn fs_sys_io_reads_utf8_flags_lossy_and_truncation_and_creates_parents() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// 目的：按行窗口读时只取请求区间，但行数与版本覆盖整份文件——超过 1MB 也能直接读后半段。
+#[test]
+fn fs_sys_io_read_page_reads_a_late_window_and_counts_the_whole_file() {
+    let root = scratch("fs-sysio-page");
+    let big = root.join("big.txt");
+    let line = format!("{}\n", "a".repeat(100));
+    let text = line.repeat(12_000);
+    assert!(text.len() > 1_000_000, "样本要超过旧的 1MB 前缀上限");
+    std::fs::write(&big, &text).expect("造大文件");
+
+    let io = FsSysIo::default();
+    let page = io.read_page(&big, 11_000, 2).expect("读后半段");
+    assert_eq!(page.total_lines, 12_000, "行数按整份文件统计");
+    assert_eq!(
+        page.text,
+        format!("{}\n{}", "a".repeat(100), "a".repeat(100))
+    );
+    assert_eq!(page.bytes, text.len());
+    assert_eq!(
+        page.hash,
+        crate::capabilities::workspace::api::content_hash(text.as_bytes()),
+        "版本仍是整份文件"
+    );
+    assert!(!page.lossy && !page.line_cut && !page.window_cut);
+
+    let tail = io.read_page(&big, 12_000, 5).expect("读末行");
+    assert_eq!(tail.text, "a".repeat(100));
+    assert_eq!(tail.total_lines, 12_000);
+
+    // 选中字节到单次上限就收手：window_cut 如实标注，行数仍然数完。
+    let small = FsSysIo { max_read_bytes: 6 };
+    let w = root.join("window.txt");
+    std::fs::write(&w, "aaa\nbbb\nccc\n").expect("造窗口文件");
+    let page = small.read_page(&w, 1, 3).expect("窗口读");
+    assert_eq!(page.text, "aaa\nbbb");
+    assert!(page.window_cut && !page.line_cut, "{page:?}");
+    assert_eq!(page.total_lines, 3);
+
+    // 单行超过上限：只取前缀，line_cut 如实标注。
+    let narrow = FsSysIo { max_read_bytes: 2 };
+    let page = narrow.read_page(&w, 1, 1).expect("窄窗口读");
+    assert_eq!(page.text, "aa");
+    assert!(page.line_cut, "{page:?}");
+    assert_eq!(page.total_lines, 3);
+
+    // 开头的空行也是选中行；CRLF 的 \r 去掉，与 str::lines() 同口径。
+    let blanks = root.join("blanks.txt");
+    std::fs::write(&blanks, "\n\nx\n").expect("造空行文件");
+    let page = io.read_page(&blanks, 1, 2).expect("读开头的空行");
+    assert_eq!(page.text, "\n");
+    assert_eq!(page.total_lines, 3);
+
+    let crlf = root.join("crlf.txt");
+    std::fs::write(&crlf, "a\r\nb\r\n").expect("造 CRLF 文件");
+    let page = io.read_page(&crlf, 1, 2).expect("读 CRLF");
+    assert_eq!(page.text, "a\nb");
+    assert_eq!(page.total_lines, 2);
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// 写盘是 CAS：版本对不上就不写；新建不覆盖；编辑在锁内重新找锚点。
 #[test]
 fn fs_sys_io_mutate_is_compare_and_swap_and_edit_rechecks_the_anchor() {

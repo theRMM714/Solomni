@@ -25,6 +25,27 @@ pub struct FileRead {
     pub hash: String,
 }
 
+/// 目的：一次按行窗口的读取：只取请求区间，但按整份文件统计行数与版本。
+/// 约束：`text` 里的行与 `str::lines()` 同口径（不含行尾换行，末尾 `\r` 去掉）；
+///   `window_cut` 表示还没取到 `limit` 就被单次字节上限截住，`line_cut` 表示某行本身太长只取了前缀。
+#[derive(Debug)]
+pub struct FilePage {
+    /// 目的：选中的行，按 `\n` 连接。
+    pub text: String,
+    /// 目的：文件原始字节数（不是选中行的大小）。
+    pub bytes: usize,
+    /// 目的：选中的行里含非法 UTF-8 字节（按替换字符呈现）。
+    pub lossy: bool,
+    /// 目的：选中行的字节数到了单次上限，窗口提前结束。
+    pub window_cut: bool,
+    /// 目的：选中的某一行本身超过单次上限，只取了前缀。
+    pub line_cut: bool,
+    /// 目的：**整份**原始字节的 SHA-256。
+    pub hash: String,
+    /// 目的：整份文件的行数（与 `read` 的 `lines()` 同口径）。
+    pub total_lines: u32,
+}
+
 /// 目的：目录里的一项（列目录用；大小只对文件有意义，目录恒为 0）。
 pub struct DirEntry {
     pub name: String,
@@ -171,6 +192,14 @@ impl std::fmt::Display for WriteFault {
 ///   读严格按 UTF-8 解码，非法字节如实标注；写一律 UTF-8；列目录只报名字/类型/大小。
 pub trait SysIo: Send + Sync {
     fn read(&self, path: &std::path::Path) -> Result<FileRead, String>;
+    /// 目的：按行窗口读取：只把 `offset` 起的 `limit` 行取回，同时给出整份行数与版本。
+    /// 约束：`offset` 从 1 数起；实现必须流式扫完整份文件来统计行数与哈希，不能把前缀当全文。
+    fn read_page(
+        &self,
+        path: &std::path::Path,
+        offset: u32,
+        limit: u32,
+    ) -> Result<FilePage, String>;
     /// 目的：整份文件的 SHA-256；不存在 = Ok(None)，其它错误如实报。
     /// 约束：按原始字节流式算，不经过 UTF-8 解码；不用于判断目录。
     fn fingerprint(&self, path: &std::path::Path) -> Result<Option<String>, String>;
