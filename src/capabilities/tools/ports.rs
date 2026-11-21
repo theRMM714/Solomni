@@ -204,7 +204,7 @@ pub trait SysIo: Send + Sync {
     /// 约束：按原始字节流式算，不经过 UTF-8 解码；不用于判断目录。
     fn fingerprint(&self, path: &std::path::Path) -> Result<Option<String>, String>;
     /// 目的：锁内读当前版本 → 校验 `expect` → 应用 `mutation` → 原子替换。
-    /// 约束：检查与写盘在同一把进程内按路径锁里；版本不符时不写盘。
+    /// 约束：检查与写盘在同一把路径锁里（实现可跨进程）；版本不符时不写盘。
     fn mutate(
         &self,
         path: &std::path::Path,

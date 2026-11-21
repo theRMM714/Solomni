@@ -343,15 +343,13 @@ fn run_rounds(
             break;
         }
         s.cur_reply = round.reply;
-        // 读台账：一条读事实跟着它那条工具结果消息的正文走（发送视图据此判过期）。
-        for v in &views {
-            if let Some(c) = v.tool.as_ref()
-                && let Some(fact) = c.read.clone()
-            {
-                s.note_read_at(
-                    crate::capabilities::conversation::session::api::tool_result_body(c),
-                    fact,
-                );
+        // 读台账：完整读的观察事实跟着它那条工具结果消息的正文走（发送视图据此判过期）。
+        for c in views.iter().filter_map(|v| v.tool.as_ref()) {
+            let body = crate::capabilities::conversation::session::api::tool_result_body(c);
+            for fact in &c.observations {
+                if let Some(read) = fact.read_fact() {
+                    s.note_read_at(body.clone(), read);
+                }
             }
         }
         let has_line = !round.text.trim().is_empty() || !round.reasoning.trim().is_empty();

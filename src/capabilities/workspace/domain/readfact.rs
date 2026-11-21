@@ -3,7 +3,7 @@
 //!   只记"读的时候"的样子，不记"过期"这个状态——过期是派生的。
 //! 不管：过期怎么判（domain/freshness.rs 的算法 + workspace 服务的 work_stale_reads）；
 //!   占位符怎么换（collab 服务 driver.rs 的 send_view）。
-//! 联动：随 ToolCallView.read 落进转录行；重建时由 runtime 的 replay_reads 装回读台账。
+//! 联动：由完整读的 ObservationFact 派生；重建时从 ToolCallView.observations 装回读台账。
 
 /// 目的：一条读取事实（由内置 `read` 产生，随工具行保存）。
 /// 约束：`blob` 是整份内容的指纹（内容寻址对象库的键）；读到的不是完整原文时不产生事实——

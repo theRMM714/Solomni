@@ -574,7 +574,7 @@ pub(crate) fn exhausted_budget_skips_the_whole_batch() {
         events += 1
     });
     assert_eq!(done.len(), 2, "每个调用都要有回执");
-    for (_, outcome, _, _, _) in &done {
+    for (_, outcome, _, _) in &done {
         assert!(!outcome.ok);
         assert!(
             outcome.output.contains("上下文剩余不足") && outcome.output.contains("没有执行"),

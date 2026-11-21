@@ -83,6 +83,7 @@ pub(crate) fn session_gate_rejects_unobserved_and_stale_tracked_paths() {
         .unwrap();
     let version = content_hash(b"one\ntwo\n");
     let fact = |version: String, coverage: Coverage| ObservationFact {
+        schema: crate::capabilities::tools::api::OBSERVATION_FORMAT,
         reply: 1,
         path: "base.md".to_string(),
         worktree: "a".to_string(),
@@ -98,6 +99,7 @@ pub(crate) fn session_gate_rejects_unobserved_and_stale_tracked_paths() {
             agent: "a",
             facts,
             worktree: "a",
+            log: None,
         };
         gate.check(path, need, None)
     };
@@ -122,6 +124,13 @@ pub(crate) fn session_gate_rejects_unobserved_and_stale_tracked_paths() {
         check(&stale, "base.md", Need::Observed),
         Err(GateFault::Stale { .. })
     ));
+    let mut legacy = fact(version.clone(), Coverage::Full);
+    legacy.schema = 0;
+    assert_eq!(
+        check(&[legacy], "base.md", Need::Observed),
+        Err(GateFault::NotObserved),
+        "格式版本不认的事实要降级为没有观察"
+    );
     assert_eq!(
         check(&[], "scratch.md", Need::Full),
         Ok(()),
@@ -175,6 +184,7 @@ pub(crate) fn session_gate_rejects_unobserved_and_stale_tracked_paths() {
         agent: "a",
         facts: &after_edit,
         worktree: "a",
+        log: None,
     };
     assert_eq!(
         gate.check("base.md", Need::Full, Some(&edited)),
@@ -203,6 +213,7 @@ pub(crate) fn compaction_drops_read_authorization() {
     ws.work_commit_user("w", "base.md", b"one\ntwo\n", 1, 0)
         .unwrap();
     let fact = ObservationFact {
+        schema: crate::capabilities::tools::api::OBSERVATION_FORMAT,
         reply: 10,
         path: "base.md".to_string(),
         worktree: "a".to_string(),
@@ -222,6 +233,7 @@ pub(crate) fn compaction_drops_read_authorization() {
         agent: "a",
         facts: obs.facts(),
         worktree: "a",
+        log: None,
     };
     assert_eq!(
         gate.check("base.md", Need::Full, None),

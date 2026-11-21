@@ -24,6 +24,9 @@ cases:
   - id: cargo/tests::workspace::external
     tier: T1
     note: 外部工作区
+  - id: cargo/tests::workspace::gate
+    tier: T1
+    note: 先读后改门禁（审计与批量）
   - id: cargo/tests::workspace::resolve
     tier: T1
     note: 路径解析与虚拟根

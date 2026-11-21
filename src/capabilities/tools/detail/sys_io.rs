@@ -8,6 +8,7 @@ use crate::capabilities::tools::ports::{
     DirEntry, Expect, FilePage, FileRead, Mutation, SysIo, WriteFault, WriteOp, WriteReceipt,
 };
 use crate::capabilities::workspace::api::{Sha256, content_hash};
+use crate::kernel::api::lock::lock_within;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::io::{Read, Write};
@@ -16,6 +17,7 @@ use std::sync::{
     Arc, Mutex, MutexGuard, OnceLock,
     atomic::{AtomicU64, Ordering},
 };
+use std::time::Duration;
 
 /// 目的：流式算整份原始字节的 SHA-256；内存只保留一个块。
 fn hash_file(path: &Path) -> Result<String, String> {
@@ -370,16 +372,75 @@ impl PageScan {
 }
 
 pub struct FsSysIo {
-    /// 目的：单次读取的字节上限（超出只读开头部分，如实标注）。
+    /// 目的：单页收集的字节缓冲上限（只影响一次读最多收集多少内容，不是模型可见额度）。
     pub max_read_bytes: usize,
+    /// 目的：跨进程文件锁的落点；None 只用进程内锁（测试与无产品根的场景）。
+    pub lock_dir: Option<PathBuf>,
+    /// 目的：拿不到跨进程锁时的有界等待。
+    pub lock_wait: Duration,
 }
 
 impl Default for FsSysIo {
     fn default() -> FsSysIo {
         FsSysIo {
             max_read_bytes: 1_000_000,
+            lock_dir: None,
+            lock_wait: Duration::from_secs(10),
         }
     }
+}
+
+impl FsSysIo {
+    /// 目的：带产品锁目录构造，写路径按文件路径跨进程互斥。
+    pub fn with_lock_dir(lock_dir: PathBuf) -> FsSysIo {
+        FsSysIo {
+            lock_dir: Some(lock_dir),
+            ..FsSysIo::default()
+        }
+    }
+
+    /// 目的：拿到保护 path 的跨进程锁；未配置锁目录 = Ok(None)。
+    fn lock_path(&self, path: &Path) -> Result<Option<std::fs::File>, WriteFault> {
+        let Some(dir) = &self.lock_dir else {
+            return Ok(None);
+        };
+        std::fs::create_dir_all(dir).map_err(|e| {
+            WriteFault::new(
+                "FS_LOCKED",
+                format!("创建锁目录失败（{}）：{}", dir.display(), e),
+            )
+        })?;
+        let mut key = lock_key(path).to_string_lossy().into_owned();
+        if crate::kernel::api::platform::HOST_PATH_CASE_INSENSITIVE {
+            key = key.to_lowercase();
+        }
+        let name = format!("file-{}.lock", content_hash(key.as_bytes()));
+        let lock = dir.join(name);
+        lock_within(&lock, self.lock_wait, "文件写入")
+            .map(Some)
+            .map_err(|e| WriteFault::new("FS_LOCKED", format!("{}：{}", path.display(), e)))
+    }
+
+    /// 目的：测试用——直接持有某路径的跨进程锁，验证第二个实例会被挡下。
+    #[cfg(test)]
+    pub(crate) fn hold_lock_for_test(
+        &self,
+        path: &Path,
+    ) -> Result<Option<std::fs::File>, WriteFault> {
+        self.lock_path(path)
+    }
+}
+
+/// 目的：把路径归一成锁键——存在取真实路径，不存在取真实父目录加文件名，再退回原路径。
+/// 约束：同一文件经不同符号链接路径访问时应落到同一把锁。
+fn lock_key(path: &Path) -> PathBuf {
+    path.canonicalize()
+        .ok()
+        .or_else(|| {
+            let parent = path.parent()?.canonicalize().ok()?;
+            Some(parent.join(path.file_name()?))
+        })
+        .unwrap_or_else(|| path.to_path_buf())
 }
 
 impl SysIo for FsSysIo {
@@ -490,8 +551,12 @@ impl SysIo for FsSysIo {
         expect: &Expect,
         mutation: Mutation,
     ) -> Result<WriteReceipt, WriteFault> {
-        let lock = path_lock(path);
-        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        // 跨进程锁优先；未配置锁目录时退回进程内锁，两者不同时持有，避免同进程二次加锁。
+        let lock = self.lock_dir.is_none().then(|| path_lock(path));
+        let _guard = lock
+            .as_ref()
+            .map(|lock| lock.lock().unwrap_or_else(|e| e.into_inner()));
+        let _file = self.lock_path(path)?;
         let current = read_bytes(path)?;
         let version = current.as_deref().map(content_hash);
         check_expect(path, expect, current.as_deref(), version.as_deref())?;
@@ -528,11 +593,26 @@ impl SysIo for FsSysIo {
         // 按路径排序取锁，避免两个事务交叉加锁死锁；执行顺序仍按 ops 原顺序。
         let mut order: Vec<usize> = (0..ops.len()).collect();
         order.sort_by(|&a, &b| ops[a].path.cmp(&ops[b].path));
-        let locks: Vec<Arc<Mutex<()>>> = order.iter().map(|&i| path_lock(&ops[i].path)).collect();
+        let locks: Vec<Arc<Mutex<()>>> = if self.lock_dir.is_some() {
+            Vec::new()
+        } else {
+            order.iter().map(|&i| path_lock(&ops[i].path)).collect()
+        };
         let _guards: Vec<MutexGuard<'_, ()>> = locks
             .iter()
             .map(|lock| lock.lock().unwrap_or_else(|e| e.into_inner()))
             .collect();
+        // 同一顺序拿跨进程锁，两个事务不会交叉等待。
+        let mut _files: Vec<std::fs::File> = Vec::new();
+        if self.lock_dir.is_some() {
+            for &i in &order {
+                match self.lock_path(&ops[i].path) {
+                    Ok(Some(file)) => _files.push(file),
+                    Ok(None) => {}
+                    Err(fault) => return Err(fault),
+                }
+            }
+        }
 
         struct Staged {
             path: PathBuf,
@@ -628,6 +708,11 @@ impl SysIo for FsSysIo {
     }
 
     fn delete(&self, path: &Path, recursive: bool) -> Result<(), String> {
+        let lock = self.lock_dir.is_none().then(|| path_lock(path));
+        let _guard = lock
+            .as_ref()
+            .map(|lock| lock.lock().unwrap_or_else(|e| e.into_inner()));
+        let _file = self.lock_path(path).map_err(|fault| fault.message)?;
         let meta = std::fs::symlink_metadata(path)
             .map_err(|e| format!("看 {} 失败：{}", path.display(), e))?;
         if meta.file_type().is_symlink() {
