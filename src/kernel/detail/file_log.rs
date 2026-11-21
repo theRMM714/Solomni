@@ -1,5 +1,5 @@
 //! 目的：文件日志适配器——kernel `Log` 端口的落盘实现。
-//! 管：每次运行在 `logs/` 下按时间戳建一个文件、逐行追加；进程内全局共享同一个句柄。
+//! 管：每次运行在 `logs/` 下按时间戳建一个文件、逐行追加；进程内全局共享同一个句柄，并对外给出路径。
 //! 不管：什么时候记、记什么级别（调用方决定）；日志轮转与归档。
 //! 联动：端口在 `src/kernel/ports.rs`；由入口层的组合根构造（`src/entry/`）。
 
@@ -12,6 +12,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct FileLog {
     file: Mutex<File>,
+    /// 目的：本次运行的日志文件路径；清理日志时用它把这一份排除。
+    path: PathBuf,
     /// 构造说明（进程参数），写在构造调用方，不占字段。
     _origin: String,
 }
@@ -44,8 +46,14 @@ impl FileLog {
         let _ = writeln!(file, "=== {}（{}）===", origin, path.display());
         Ok(FileLog {
             file: Mutex::new(file),
+            path,
             _origin: String::new(),
         })
+    }
+
+    /// 目的：本次运行的日志文件路径。
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
     }
 
     fn write(&self, level: &str, at: &str, msg: &str) {

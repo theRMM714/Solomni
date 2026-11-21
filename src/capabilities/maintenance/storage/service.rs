@@ -298,7 +298,6 @@ impl Storage for StorageService {
             None => return Err("另一个回收正在跑，稍后重试".to_string()),
         };
         let before = self.scan(false);
-        let now = before.generated_at;
         let mut actions: Vec<GcAction> = Vec::new();
         match req.kind {
             CleanKind::BuildCache => {
@@ -391,13 +390,10 @@ impl Storage for StorageService {
                 }
             }
             CleanKind::Logs => {
-                let keep = self.policy().log_keep_days;
+                // 手动“清理整类”就是清空：删 logs/ 下全部日志，只留当前进程正在写的那一份
+                // （它的句柄还开着，删掉只会在下一次写时把内容写进一个已删除的文件）。
                 for item in items_of(&before.categories, CAT_LOGS) {
-                    let old = item
-                        .last_used
-                        .map(|t| now.saturating_sub(t) > keep.saturating_mul(86_400))
-                        .unwrap_or(false);
-                    if keep > 0 && !old {
+                    if item.active || !item.cleanable {
                         continue;
                     }
                     self.reclaim.remove(CAT_LOGS, &item.id)?;
@@ -406,7 +402,7 @@ impl Storage for StorageService {
                         id: item.id.clone(),
                         label: item.label,
                         bytes: item.bytes,
-                        reason: "手动清理日志".to_string(),
+                        reason: "手动清空日志（保留当前运行日志）".to_string(),
                         applied: true,
                         ..GcAction::default()
                     });

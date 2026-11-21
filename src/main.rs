@@ -124,9 +124,14 @@ fn main() {
     }
 
     // 组合根：唯一允许 new 具体适配器的地方（依赖注入）。
+    // 记下本次运行的日志文件：存储清理要把它排除，不能删掉正在写的这一份。
+    let mut active_log: Option<std::path::PathBuf> = None;
     let log: std::sync::Arc<dyn kernel::ports::Log + Send + Sync> =
         match kernel::detail::FileLog::new(&root, "Solomni 运行日志") {
-            Ok(l) => std::sync::Arc::new(l),
+            Ok(l) => {
+                active_log = Some(l.path().to_path_buf());
+                std::sync::Arc::new(l)
+            }
             Err(e) => {
                 eprintln!("[日志系统异常] {}（进程继续，日志降级为 stderr）", e);
                 std::sync::Arc::new(kernel::ports::NoopLog)
@@ -526,23 +531,16 @@ fn main() {
     let provision: Arc<dyn capabilities::provision::api::Provision + Send + Sync> =
         Arc::new(entry::assembly::provision_with_guest_vm(&root));
     // **存储空间**：回收策略来自 settings；构建与呈现层共用同一份。
-    // 存储的三个端口各一个适配器：盘点（只读）、回收（锁与删除）、guest 存活（进程台账）。
-    let storage_service = Arc::new(
-        capabilities::maintenance::storage::service::StorageService::new(
-            Arc::clone(&provision),
-            Arc::new(
-                capabilities::maintenance::storage::detail::survey::DiskSurvey::new(root.clone()),
-            ),
-            Arc::new(
-                capabilities::maintenance::storage::detail::reclaim::DiskReclaim::new(root.clone()),
-            ),
-            Arc::new(capabilities::maintenance::storage::detail::guests::ProcessGuests::new(&root)),
-            std::sync::Arc::clone(&log),
-            capabilities::maintenance::storage::api::StoragePolicy::from(
-                &registry.app_settings().storage,
-            ),
+    // 装配与探针同一份（entry::assembly），真日志端口与正在写的日志由这里注入。
+    let storage_service = Arc::new(entry::assembly::storage(
+        &root,
+        Arc::clone(&provision),
+        capabilities::maintenance::storage::api::StoragePolicy::from(
+            &registry.app_settings().storage,
         ),
-    );
+        std::sync::Arc::clone(&log),
+        active_log,
+    ));
     let storage: Arc<dyn capabilities::maintenance::storage::api::Storage + Send + Sync> =
         storage_service.clone();
     // **构建能力**：创建会话前补编模块产物（本机档宿主、虚拟机档 guest）；执行器与 `--build` 同一条路——

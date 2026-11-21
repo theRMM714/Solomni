@@ -107,7 +107,7 @@
 | `storage.cache_keep_days` | 整数 | 否 | `30` | 超过多久未使用可回收（天）；0 = 不按龄 |
 | `storage.build_volume_gib` | 整数 | 否 | `16` | 新构建缓存卷的虚拟大小（GiB）；现有卷不自动缩 |
 | `storage.min_free_gib` | 整数 | 否 | `2` | 宿主剩余低于它先回收；回收后仍低才拒绝构建 |
-| `storage.log_keep_days` | 整数 | 否 | `14` | 日志保留天数（另保留最近 50 份） |
+| `storage.log_keep_days` | 整数 | 否 | `14` | 自动回收的日志保留天数（另保留最近 50 份） |
 | `llm_timeout_secs` | 整数 | 否 | `300` | 单次模型调用的总预算（秒），全局通用 |
 | `compact_at_percent` | 整数 | 否 | `70` | 上下文用到模型窗口的百分之多少就自动压一次（0 = 关） |
 | `compact_keep_percent` | 整数 | 否 | `15` | 压缩时至少保留最近多少内容（占模型窗口 %；0 = 只留摘要） |

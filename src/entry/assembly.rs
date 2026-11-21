@@ -4,7 +4,7 @@
 //! 联动：消费者是 `src/main.rs`、`src/presentation/cli/boot.rs` 与测试；契约见 ARCHITECTURE.md 的「根」。
 
 use crate::kernel::api::layout;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::capabilities::catalog::packages::api::BaseFacts;
@@ -107,16 +107,20 @@ pub(crate) fn settings_store(
 }
 
 /// 目的：用给定补齐面装一份存储能力（不另装核心）。
+/// 参数：`log` = 日志端口；`active_log` = 当前进程正在写的日志路径（没有就 None），盘点时标为受保护。
 pub(crate) fn storage(
     root: &Path,
     provision: Arc<dyn Provision + Send + Sync>,
     policy: StoragePolicy,
+    log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
+    active_log: Option<PathBuf>,
 ) -> StorageService {
     StorageService::new(
         provision,
         Arc::new(
             crate::capabilities::maintenance::storage::detail::survey::DiskSurvey::new(
                 root.to_path_buf(),
+                active_log,
             ),
         ),
         Arc::new(
@@ -127,7 +131,7 @@ pub(crate) fn storage(
         Arc::new(
             crate::capabilities::maintenance::storage::detail::guests::ProcessGuests::new(root),
         ),
-        Arc::new(crate::kernel::ports::NoopLog),
+        log,
         policy,
     )
 }
@@ -186,6 +190,8 @@ pub(crate) fn build_service(root: &Path) -> Result<BuildsService, String> {
             root,
             Arc::clone(&provision),
             StoragePolicy::default(),
+            Arc::new(crate::kernel::ports::NoopLog),
+            None,
         ));
     let runner: Arc<dyn crate::kernel::ports::ProcessRunner + Send + Sync> =
         Arc::new(build_runner(root)?);
@@ -268,7 +274,13 @@ pub(crate) struct SystemPorts {
 pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, String> {
     let provision: Arc<dyn Provision + Send + Sync> = Arc::new(provision_with_guest_vm(root));
     let storage: Arc<dyn crate::capabilities::maintenance::storage::api::Storage + Send + Sync> =
-        Arc::new(storage(root, Arc::clone(&provision), storage_policy(root)));
+        Arc::new(storage(
+            root,
+            Arc::clone(&provision),
+            storage_policy(root),
+            Arc::new(crate::kernel::ports::NoopLog),
+            None,
+        ));
     let builds: Arc<dyn crate::capabilities::maintenance::builds::api::Builds + Send + Sync> =
         Arc::new(build_service(root)?);
     let workspace: Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> = Arc::new(
