@@ -253,7 +253,7 @@ impl Core {
                 crate::capabilities::work::api::ProxySeed {
                     name,
                     granted_at,
-                    tier: crate::kernel::api::Tier::Host,
+                    tier: crate::kernel::api::types::Tier::Host,
                     guest: None,
                     profile: crate::capabilities::permission::api::ProfileId::AllReach,
                     workspace: None,

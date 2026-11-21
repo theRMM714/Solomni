@@ -176,7 +176,7 @@ pub(crate) fn single_work(
         task: None,
         delegate: false,
         permission: None,
-        tier: crate::kernel::api::Tier::Host,
+        tier: crate::kernel::api::types::Tier::Host,
         guest: None,
         workspace: None,
     }

@@ -1,7 +1,7 @@
 # 单元地图 · kernel
 
 > 定位：kernel（地基库）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-13｜依据：`src/kernel/api.rs`
+> 效力：契约｜核对：2026-11-21｜依据：`src/kernel/api.rs`、`docs/kernel/mechanisms.yaml`
 
 > 本文是 **kernel** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -13,7 +13,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/kernel.rs` | 地基库的入口与公开面：`contracts` / `api` / `ports` / `domain` / `detail` 五个子模块的形状声明 |
-| `src/kernel/api.rs` | 地基库的对外面：共享形状（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Note` / `Severity` / `codes` / `Ask` / `RunOutcome` / `FenceSpec` / `FencePart` / `FenceBlocked` / 默认预算）、回执说明的渲染与词表（`i18n`）与纯机制（命令队列 `Actor`、`slash` 的对外写法、路径写法 `native` / `is_unc` / `unc_parts`、落点身份 `locus_of` / `place_contains` / `is_network_path`、生成中作业的取消表 `JobRegistry`）的重导出 |
+| `src/kernel/api.rs` | 地基库对外面的入口：只声明 `api/` 下的面模块。面按**对外概念**切（`fence` / `note` / `run` / `types` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `path` / `platform`），每个面只做重导出、不定义条目；能力与装配层经 `api::<面>` 取用，内核内部直取所属机制（见 [README](README.md) 的「六、对外面」） |
 | `src/kernel/ports.rs` | 全项目共享的机制端口：`Log` / `PathCodec` / `AskUser` / `ToolHandler` / `HostProbe` / `ProcessRunner` / `SessionHost` / `FenceHost` / `FenceGate` / `UserPath` 的 trait 定义与它们的纯数据形态（含 `ShellRun` 的 `gate`、用户 PATH 的 `PathValue`） |
 | `src/kernel/contracts.rs` | 跨层共享形状的入口：`fence` / `note` / `run` / `types` 四个子模块声明 |
 | `src/kernel/contracts/types.rs` | 跨层共享的形状（纯数据）：`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` / `JobState` 与默认预算、能力名文法 |

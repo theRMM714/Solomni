@@ -11,7 +11,7 @@ use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::conversation::session::api::{
     AgentSession, Decisions, Gates, ShellSlot, decisions,
 };
-use crate::kernel::api::SessionId;
+use crate::kernel::api::types::SessionId;
 
 /// 目的：一份在世会话的两种形态：单 agent（含代理会话与子会话）与协作会话。
 /// 约束：两变体大小差得远（协作带整份讨论状态），装箱只换来一次间接寻址、却把「会话本体可直接移动」改掉，

@@ -31,7 +31,7 @@ pub(crate) fn build(
             .map(|d| root.join(&d.probe).to_string_lossy().into_owned())
     };
     let qemu = installed_at("vm.qemu.");
-    let share_tool = installed_at(if crate::kernel::api::IS_WINDOWS {
+    let share_tool = installed_at(if crate::kernel::api::platform::IS_WINDOWS {
         "vm.smbd."
     } else {
         "vm.virtiofsd."

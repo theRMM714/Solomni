@@ -212,7 +212,7 @@ impl SessionParams {
                     Some(g.dialect()),
                 ),
             )),
-            None => crate::kernel::api::view_codec().or_else(|| {
+            None => crate::kernel::api::view_drive::view_codec().or_else(|| {
                 Some(
                     std::sync::Arc::new(crate::capabilities::vm::api::PathBridge::for_session(
                         std::env::consts::OS,
@@ -268,8 +268,8 @@ pub(crate) fn env_path(
     path: &std::path::Path,
 ) -> String {
     match view {
-        Some(codec) => crate::kernel::api::slash(std::path::Path::new(&codec.to_view(path))),
-        None => crate::kernel::api::slash(std::path::Path::new(&bridge.to_guest(path))),
+        Some(codec) => crate::kernel::api::path::slash(std::path::Path::new(&codec.to_view(path))),
+        None => crate::kernel::api::path::slash(std::path::Path::new(&bridge.to_guest(path))),
     }
 }
 
@@ -282,7 +282,7 @@ pub fn env_block(
     // 路径按**这场会话的环境**渲染：本机档 = 视图盘打开时的视图写法（宿主路径由路径码翻译），否则宿主拼法；
     // 虚拟机档 = guest 拼法（与挂载、命令装配同一座桥）。
     let view = if p.guest.is_none() {
-        crate::kernel::api::view_codec()
+        crate::kernel::api::view_drive::view_codec()
     } else {
         None
     };

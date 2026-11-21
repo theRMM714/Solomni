@@ -3,7 +3,7 @@
 //! 不管：清单怎么解析、怎么下载（在 service）。
 //! 联动：`presentation::faces::Faces.provision` 持它；Web 的 setup 路由与 CLI 探针都经它；runtime 的"选虚拟机"经 `guest_bases` 取候选。
 
-use crate::kernel::api::JobState;
+use crate::kernel::api::types::JobState;
 use serde::Serialize;
 
 /// 目的：一条长驻子进程（`--doctor` 与界面"现在在跑什么"）：它是产品亲手起的，还是上次留下的。

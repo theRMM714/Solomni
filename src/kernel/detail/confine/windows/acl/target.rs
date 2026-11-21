@@ -4,7 +4,7 @@
 //! 联动：windows.rs 的 prepare_fence 用这份清单逐条授权；解释器目录口径与 confine.rs 共用。
 
 use super::super::*;
-use crate::kernel::api::layout;
+use crate::kernel::domain::layout;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;

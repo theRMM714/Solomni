@@ -243,7 +243,7 @@ impl Work {
             &work,
             &name,
             bytes,
-            crate::kernel::api::unix_seconds(),
+            crate::kernel::api::procs::unix_seconds(),
             line,
         )?;
         Ok(true)
@@ -279,7 +279,7 @@ impl Work {
                 name: a.name.clone(),
                 root: sandboxes
                     .for_agent(&a.name)
-                    .map(|s| crate::kernel::api::slash(&s.private))
+                    .map(|s| crate::kernel::api::path::slash(&s.private))
                     .unwrap_or_default(),
             });
         }
@@ -287,7 +287,7 @@ impl Work {
             work: files.work,
             agents,
             roots: FilesRootsView {
-                work: crate::kernel::api::slash(&sandboxes.shared),
+                work: crate::kernel::api::path::slash(&sandboxes.shared),
                 agents: agent_roots,
             },
             usage,

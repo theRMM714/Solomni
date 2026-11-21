@@ -4,7 +4,7 @@
 //! 联动：与 `src/kernel/detail/process.rs` 同模块，`#[cfg(test)] mod tests;` 指到这里。
 
 use super::*;
-use crate::kernel::api::FenceSpec;
+use crate::kernel::contracts::fence::FenceSpec;
 use crate::kernel::domain::receipt::STDERR_HEADER;
 // 测试夹具按 &Path 收参（clippy 的 ptr_arg）：Path 显式写在测试模块里，
 // 顶层只按需导入 PathBuf——否则顶层会多出一次"只被 glob 用到"的导入。
@@ -125,7 +125,8 @@ fn receipt_markers_are_structured_codes() {
 /// 全局沙箱要求：机制不可用且未同意降级时拒绝；同意降级后放行；"允许联网"不需要网络围栏。
 #[test]
 fn sandbox_mode_refuses_missing_requirements_until_degraded() {
-    use crate::kernel::api::{SandboxMode, SandboxRequirements};
+    use crate::kernel::domain::fence::SandboxMode;
+    use crate::kernel::domain::fence::SandboxRequirements;
     let spec = FenceSpec {
         agent: "a".to_string(),
         lease: String::new(),
@@ -539,8 +540,11 @@ impl RecordingAsk {
 
 #[cfg(windows)]
 impl crate::kernel::ports::AskUser for RecordingAsk {
-    fn ask(&self, ask: &crate::kernel::api::Ask) -> crate::kernel::api::AskOutcome {
-        use crate::kernel::api::AskOutcome;
+    fn ask(
+        &self,
+        ask: &crate::kernel::contracts::types::Ask,
+    ) -> crate::kernel::contracts::types::AskOutcome {
+        use crate::kernel::contracts::types::AskOutcome;
         self.asked
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -572,7 +576,7 @@ fn unwritable_interpreter_dir_never_silently_runs_unfenced() {
     let _fence = crate::tests::fence_acl_guard();
     use crate::capabilities::tools::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
     use crate::capabilities::tools::service::fence::ToolFenceGate;
-    use crate::kernel::api::FencePart;
+    use crate::kernel::contracts::fence::FencePart;
     if !fence_live() {
         eprintln!("[探针] 未开启真机围栏测试：本探针要写本机权限项，已跳过；要真跑加 --fence-live");
         return;

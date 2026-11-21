@@ -3,7 +3,8 @@
 //! 不管：台账条目的形状与对账细节（在 ledger.rs）、平台实现（在平台后端）。
 //! 联动：由 `confine.rs` 门面与 `process.rs` 的围栏执行消费；Windows 授权细节在 `windows/`。
 
-use crate::kernel::api::{FenceBlocked, FencePart};
+use crate::kernel::contracts::fence::FenceBlocked;
+use crate::kernel::contracts::fence::FencePart;
 
 #[cfg(windows)]
 mod windows;

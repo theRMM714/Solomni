@@ -7,7 +7,7 @@ use crate::capabilities::catalog::modules::api::Module;
 use crate::capabilities::catalog::packages::domain::manifest::{
     KIND_SYSTEM, Library, PackageManifest, Target, conflicts,
 };
-use crate::kernel::api::ExecSpec;
+use crate::kernel::api::types::ExecSpec;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};

@@ -15,7 +15,8 @@ use crate::capabilities::turn::env::api::{
     MemberFacts, SandboxesFacts, host_read_roots, member, network_allowed, permissions, sandboxes,
 };
 use crate::capabilities::workspace::api::{Sandbox, WorkRoots};
-use crate::kernel::api::{ExecSpec, Tier};
+use crate::kernel::api::types::ExecSpec;
+use crate::kernel::api::types::Tier;
 use crate::tests::doubles::module_of;
 use std::collections::BTreeMap;
 use std::ffi::OsString;

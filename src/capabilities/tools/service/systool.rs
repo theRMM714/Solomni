@@ -304,7 +304,7 @@ fn read(
             } else {
                 sb.agent.clone()
             },
-            path: crate::kernel::api::slash(rel),
+            path: crate::kernel::api::path::slash(rel),
             from: offset as u64,
             to: to as u64,
             blob: crate::capabilities::workspace::api::content_hash(got.text.as_bytes()),

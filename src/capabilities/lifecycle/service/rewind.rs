@@ -67,7 +67,7 @@ impl Lifecycle {
             // 行锚取“下一条转录行”：这条同步发生在这次回档之后，回档点不该停在它上面。
             self.workspace.work_sync_tracked(
                 &work,
-                crate::kernel::api::unix_seconds(),
+                crate::kernel::api::procs::unix_seconds(),
                 crate::capabilities::workspace::api::CommitAnchor {
                     agent: String::new(),
                     session: sid.to_string(),

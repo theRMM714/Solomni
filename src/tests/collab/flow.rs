@@ -319,7 +319,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
             mode: crate::capabilities::llm::api::ToolMode::Envelope,
             role: "orchestrator".to_string(),
             modules: BTreeMap::new(),
-            tier: crate::kernel::api::Tier::Host,
+            tier: crate::kernel::api::types::Tier::Host,
             guest_lease: String::new(),
             sandbox: sb.clone(),
             tools_this_turn: test_prompts()
@@ -327,7 +327,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
                 .to_string(),
             builtin_tools: test_systools().tools,
             unavailable: BTreeMap::new(),
-            fence: crate::kernel::api::FenceSpec::for_session(&sb, &[], false),
+            fence: crate::kernel::api::fence::FenceSpec::for_session(&sb, &[], false),
             module_env: Default::default(),
             runtime_path: None,
             runtime_roots: Vec::new(),

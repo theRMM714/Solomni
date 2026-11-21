@@ -4,7 +4,7 @@
 //! 联动：撤销经 acl.rs 的 revoke_one / restore_sd；盘上格式与锁在 store.rs；入口是 --fence-clean 与 confine.rs 的 release_by_lease。
 
 use super::super::*;
-use crate::kernel::api::FenceSpec;
+use crate::kernel::contracts::fence::FenceSpec;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use windows_sys::Win32::Security::Isolation::DeleteAppContainerProfile;

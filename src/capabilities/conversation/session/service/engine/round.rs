@@ -12,7 +12,7 @@ use crate::capabilities::conversation::session::domain::tools::MemberTools;
 use crate::capabilities::llm::api::{self as envelope, Verb};
 use crate::capabilities::llm::api::{Chat, Chunk, CompleteOpts, Msg};
 use crate::capabilities::tools::api::{cap_result, continuation_for};
-use crate::kernel::api::ToolOutcome;
+use crate::kernel::api::types::ToolOutcome;
 
 /// 目的：一次工具调用的产出：调用视图 + 它压进历史的消息。
 pub struct ToolRun {
@@ -428,7 +428,7 @@ pub fn converse_with(
                 module: String::new(),
                 name: c.name.clone(),
                 ok: false,
-                severity: crate::kernel::api::Severity::Error,
+                severity: crate::kernel::api::note::Severity::Error,
                 notes: Vec::new(),
                 args: c.args_json.clone(),
                 output: format!(
@@ -588,7 +588,7 @@ pub fn converse_with(
                             module: inv.module.clone().unwrap_or_default(),
                             name: inv.name.clone(),
                             ok: false,
-                            severity: crate::kernel::api::Severity::Error,
+                            severity: crate::kernel::api::note::Severity::Error,
                             notes: Vec::new(),
                             args: inv.args_json.clone(),
                             output: "这条通道用**原生工具调用**：正文里的 JSON 信封不会被当成调用执行。需要工具时请直接发起工具调用（一次可以发起多个）。".to_string(),
@@ -648,7 +648,7 @@ pub fn converse_with(
                     module: inv.module.clone().unwrap_or_default(),
                     name: inv.name.clone(),
                     ok: false,
-                    severity: crate::kernel::api::Severity::Error,
+                    severity: crate::kernel::api::note::Severity::Error,
                     notes: Vec::new(),
                     args: inv.args_json.clone(),
                     output: why,

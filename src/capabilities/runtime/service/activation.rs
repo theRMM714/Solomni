@@ -13,7 +13,7 @@ impl Handle {
     pub(crate) fn ensure_built(
         &self,
         ids: &[String],
-        tier: crate::kernel::api::Tier,
+        tier: crate::kernel::api::types::Tier,
         guest: Option<&str>,
     ) -> Result<(), String> {
         use crate::capabilities::maintenance::builds::api::Target;
@@ -21,12 +21,14 @@ impl Handle {
             return Ok(());
         }
         let target = match tier {
-            crate::kernel::api::Tier::Host => Target::Host,
-            crate::kernel::api::Tier::Vm => match guest.map(str::trim).filter(|g| !g.is_empty()) {
-                Some(g) => Target::Guest(g.to_string()),
-                // 虚拟根没给：准备段会如实拒绝（这里不猜默认值）。
-                None => return Ok(()),
-            },
+            crate::kernel::api::types::Tier::Host => Target::Host,
+            crate::kernel::api::types::Tier::Vm => {
+                match guest.map(str::trim).filter(|g| !g.is_empty()) {
+                    Some(g) => Target::Guest(g.to_string()),
+                    // 虚拟根没给：准备段会如实拒绝（这里不猜默认值）。
+                    None => return Ok(()),
+                }
+            }
         };
         let roster = self.modules.roster();
         let net = self.call(|core| {

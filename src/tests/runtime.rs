@@ -219,7 +219,8 @@ fn assert_two_stable_mounts(
     let spec = specs.first().expect("起过一次 guest");
     let hosts: Vec<std::path::PathBuf> = spec.mounts.iter().map(|m| m.host.clone()).collect();
     let session_root = product.join("session").join(work_name);
-    let external = crate::kernel::api::native(&external.canonicalize().expect("规范化外部根"));
+    let external =
+        crate::kernel::api::path::native(&external.canonicalize().expect("规范化外部根"));
     assert!(
         hosts.contains(&session_root),
         "会话树根（私沙 + .work 的父目录）要单独挂：{:?}",
@@ -263,7 +264,7 @@ pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
     let (meta, _) = core.lifecycle.history_open(&sid).expect("会话");
     assert_eq!(
         meta.workspace.as_ref().map(|b| b.root.clone()),
-        Some(crate::kernel::api::native(
+        Some(crate::kernel::api::path::native(
             &external.canonicalize().expect("规范化外部路径")
         )),
         "绑定写进根会话 meta（规范化绝对路径）"
@@ -274,7 +275,7 @@ pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
         .expect("加载复检要过（绑定没被手改）");
     assert_eq!(
         binding,
-        Some(crate::kernel::api::native(
+        Some(crate::kernel::api::path::native(
             &external.canonicalize().expect("规范化外部路径")
         )),
         "复检返回的绑定根要与 meta 一致"
@@ -292,7 +293,7 @@ pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
 #[test]
 pub(crate) fn workspace_policy_splits_network_roots_by_tier() {
     use crate::capabilities::workspace::api::policy;
-    use crate::kernel::api::Tier;
+    use crate::kernel::api::types::Tier;
     use std::path::Path;
     use std::time::{Duration, Instant};
 
@@ -317,7 +318,7 @@ pub(crate) fn workspace_policy_splits_network_roots_by_tier() {
 #[test]
 pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
     use crate::capabilities::workspace::api::{product_root, recheck};
-    use crate::kernel::api::Tier;
+    use crate::kernel::api::types::Tier;
 
     let root = crate::tests::scratch("recheck-cross");
     let product = root.join("product");
@@ -340,7 +341,7 @@ pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
 #[test]
 pub(crate) fn loaded_binding_is_rechecked_against_the_tier() {
     use crate::capabilities::workspace::api::{product_root, recheck};
-    use crate::kernel::api::Tier;
+    use crate::kernel::api::types::Tier;
     use std::path::Path;
 
     let probe = crate::kernel::detail::HostProbeAdapter;

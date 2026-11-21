@@ -31,7 +31,7 @@ use crate::capabilities::tools::ports::SystoolsSource;
 use crate::capabilities::tools::ports::{FileRead, SysIo};
 use crate::capabilities::workspace::domain::asset::{AssetScanner, FileVersion};
 use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
-use crate::kernel::api::Tier;
+use crate::kernel::api::types::Tier;
 use crate::kernel::ports::ProcessRunner;
 use std::collections::BTreeMap;
 use std::path::PathBuf;

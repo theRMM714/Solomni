@@ -7,7 +7,7 @@ use super::UNFENCED_GUEST_RUN_SECS;
 use super::seed::SeedServer;
 use crate::capabilities::vm::domain::guest::{GuestAccess, GuestRun, OutputLimit};
 use crate::capabilities::vm::ports::{GuestChannel, GuestVm};
-use crate::kernel::api::ToolOutcome;
+use crate::kernel::api::types::ToolOutcome;
 use crate::kernel::detail::procs::ProcessBook;
 use crate::kernel::domain::receipt::{ShellEnd, shell_receipt};
 use std::io::{BufRead, BufReader, Write};

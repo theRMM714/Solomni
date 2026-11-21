@@ -5,7 +5,7 @@
 
 use super::FENCE_FLAG;
 use super::backend;
-use crate::kernel::api::FenceSpec;
+use crate::kernel::contracts::fence::FenceSpec;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -21,7 +21,7 @@ pub struct FenceJob {
     ///   没有台账的调用方（探针）给 `None`：那类 profile 由 `--fence-clean` 的前缀清扫兜底。
     pub home: Option<PathBuf>,
     /// 目的：全局沙箱要求与“本进程是否已同意降级”——机制装不上时据此拒绝或降级。
-    pub policy: crate::kernel::api::FenceRunPolicy,
+    pub policy: crate::kernel::contracts::fence::FenceRunPolicy,
 }
 
 impl FenceJob {
@@ -58,7 +58,7 @@ impl FenceJob {
             home: Option<PathBuf>,
             /// 缺省 = 旧探针/旧调用方：按“允许降级”处理（不改变既有降级路径的语义）。
             #[serde(default)]
-            policy: crate::kernel::api::FenceRunPolicy,
+            policy: crate::kernel::contracts::fence::FenceRunPolicy,
         }
         serde_json::from_str::<Raw>(text)
             .map(|raw| FenceJob {

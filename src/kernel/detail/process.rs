@@ -3,8 +3,9 @@
 //! 不管：命令行与可达范围的策略（由调用方派生后传入）；命令来自 module.yaml，JSON 参数走 stdin（不进命令行）。
 //! 联动：围栏机制在 confine；ProcessRunner 端口形状见 src/kernel/ports.rs。
 
-use crate::kernel::api::{FenceSpec, RunOutcome};
+use crate::kernel::contracts::fence::FenceSpec;
 use crate::kernel::contracts::note::{Note, Severity, codes, severity_of};
+use crate::kernel::contracts::run::RunOutcome;
 use crate::kernel::detail::confine;
 use crate::kernel::ports::{FenceGate, ProcessRunner};
 use std::path::PathBuf;
@@ -64,7 +65,7 @@ pub struct ProcTools {
     /// 目的：单次工具执行的超时（到时连根杀掉整棵树，ok = false）。
     pub timeout: Duration,
     /// 目的：全局沙箱要求与本进程是否已同意降级。
-    pub mode: std::sync::Arc<crate::kernel::api::SandboxMode>,
+    pub mode: std::sync::Arc<crate::kernel::domain::fence::SandboxMode>,
     /// 目的：平台侧状态——Windows 持有私有区、写权限开关与 PowerShell 覆盖；其余平台为空。
     platform: platform::State,
 }
@@ -79,13 +80,16 @@ impl ProcTools {
         ProcTools {
             exe,
             timeout: Duration::from_secs(30),
-            mode: std::sync::Arc::new(crate::kernel::api::SandboxMode::permissive()),
+            mode: std::sync::Arc::new(crate::kernel::domain::fence::SandboxMode::permissive()),
             platform: platform::State::new(home, write_allowed),
         }
     }
 
     /// 目的：组合根注入全局沙箱模式；缺省是“无要求”的测试替身。
-    pub fn with_mode(mut self, mode: std::sync::Arc<crate::kernel::api::SandboxMode>) -> ProcTools {
+    pub fn with_mode(
+        mut self,
+        mode: std::sync::Arc<crate::kernel::domain::fence::SandboxMode>,
+    ) -> ProcTools {
         self.mode = mode;
         self
     }
@@ -194,13 +198,13 @@ impl ProcTools {
             return RunOutcome::failed(why);
         }
         let policy = if plan.strict {
-            crate::kernel::api::FenceRunPolicy {
+            crate::kernel::contracts::fence::FenceRunPolicy {
                 require_fs: true,
                 require_net: true,
                 allow_degraded: false,
             }
         } else {
-            crate::kernel::api::FenceRunPolicy {
+            crate::kernel::contracts::fence::FenceRunPolicy {
                 require_fs: self.mode.requirements.filesystem,
                 require_net: self.mode.requirements.network,
                 allow_degraded: self.mode.degraded(),

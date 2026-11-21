@@ -38,13 +38,13 @@ impl HostFs for RealHost {
     }
 
     fn make_executable(&self, path: &Path) {
-        crate::kernel::api::make_executable(path);
+        crate::kernel::api::fs_meta::make_executable(path);
     }
 }
 
 /// 目的：建软链（平台机制由 kernel 的 `fs_meta` 后端提供；Windows 如实报不支持）。
 pub(crate) fn symlink(target: &str, link: &Path) -> std::io::Result<()> {
-    crate::kernel::api::symlink(target, link)
+    crate::kernel::api::fs_meta::symlink(target, link)
 }
 
 /// 目的：跑一个外部工具并判成功；失败给一句人话。
@@ -60,11 +60,11 @@ pub(crate) fn run_tool(cmd: &mut std::process::Command, name: &str) -> Result<()
 
 /// 目的：写一个可执行脚本并给执行位（unix 0755；别的平台只写文件）。
 pub(crate) fn write_exe(path: &Path, body: &str) -> Result<(), String> {
-    crate::kernel::api::write_executable(path, body)
+    crate::kernel::api::fs_meta::write_executable(path, body)
         .map_err(|e| format!("写 {} 失败：{}", path.display(), e))
 }
 
 /// 目的：给已落盘的可执行文件补齐执行位（解归档丢过权限位的安装靠它自愈）；不是文件就什么都不做。
 pub(crate) fn ensure_executable(path: &Path) {
-    crate::kernel::api::ensure_executable(path);
+    crate::kernel::api::fs_meta::ensure_executable(path);
 }

@@ -6,7 +6,7 @@
 use crate::capabilities::catalog::packages::api::{KIND_SYSTEM, PlannedPackage};
 use crate::capabilities::vm::domain::exec::ExecPlan;
 use crate::capabilities::vm::domain::paths::{PathBridge, PathDialect};
-use crate::kernel::api::FenceSpec;
+use crate::kernel::api::fence::FenceSpec;
 use crate::kernel::api::layout;
 use crate::kernel::ports::HostProbe;
 use serde::Deserialize;
@@ -31,7 +31,7 @@ impl GuestArch {
 
     /// 目的：本机能虚拟化的架构（x86_64 → amd64；aarch64 → arm64）。
     pub fn host() -> GuestArch {
-        if crate::kernel::api::HOST_ARCH == "aarch64" {
+        if crate::kernel::api::platform::HOST_ARCH == "aarch64" {
             GuestArch::Arm64
         } else {
             GuestArch::Amd64

@@ -4,7 +4,8 @@
 //! 联动：`ToolsService` 持它并作为 `FenceGate` 传给 `ProcessRunner`；kernel 只原样转交裁决结果。
 
 use crate::capabilities::tools::domain::fence::{OPT_FENCE_UNFENCED, fence_ask};
-use crate::kernel::api::{AskOutcome, FenceBlocked};
+use crate::kernel::api::fence::FenceBlocked;
+use crate::kernel::api::types::AskOutcome;
 use crate::kernel::ports::{FenceCase, FenceGate, FenceVerdict, ask_user};
 
 /// 目的：工具层的围栏裁决——把"必要落点授不上"按用户裁决变成"无围栏跑一次"或"不执行"。

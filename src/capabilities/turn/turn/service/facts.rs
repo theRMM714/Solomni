@@ -20,7 +20,7 @@ use crate::capabilities::permission::api::PermissionSet;
 use crate::capabilities::turn::turn::service::session::Turn;
 use crate::capabilities::vm::api::GuestOs;
 use crate::capabilities::workspace::api::{Sandbox, Sandboxes};
-use crate::kernel::api::Tier;
+use crate::kernel::api::types::Tier;
 use crate::kernel::ports::HostProbe;
 
 /// 目的：一席事实的取用：沙箱、权限、工具面入参与上下文预算。

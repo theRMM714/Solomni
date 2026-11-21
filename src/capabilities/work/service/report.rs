@@ -14,14 +14,14 @@ impl Work {
         &self,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
-        tier: crate::kernel::api::Tier,
+        tier: crate::kernel::api::types::Tier,
     ) -> RuntimeReport {
         self.runtime_report_for(
             registry,
             probe,
-            &crate::kernel::api::ExecSpec {
+            &crate::kernel::api::types::ExecSpec {
                 tier,
-                ..crate::kernel::api::ExecSpec::default()
+                ..crate::kernel::api::types::ExecSpec::default()
             },
         )
     }
@@ -31,13 +31,13 @@ impl Work {
         &self,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
-        spec: &crate::kernel::api::ExecSpec,
+        spec: &crate::kernel::api::types::ExecSpec,
     ) -> RuntimeReport {
         let roster = self.modules.roster();
         let lib = self.packages.library();
         let guest_runtimes =
             crate::capabilities::vm::api::guest_runtimes_of(&self.root, probe, spec);
-        let vm = spec.tier == crate::kernel::api::Tier::Vm;
+        let vm = spec.tier == crate::kernel::api::types::Tier::Vm;
         let (diagnoses, mut missing, available) = if vm {
             let diagnoses = pkgs::diagnoses(&roster.modules, &lib, spec, &guest_runtimes)
                 .into_iter()
@@ -172,7 +172,7 @@ impl Work {
             &self.packages.library(),
             &self.packages.base(),
             probe,
-            &crate::kernel::api::ExecSpec::default(),
+            &crate::kernel::api::types::ExecSpec::default(),
             modules,
             pkgs::PinPolicy::First,
         )

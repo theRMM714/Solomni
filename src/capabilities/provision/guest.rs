@@ -280,7 +280,7 @@ pub(crate) fn install_guest_runtime(
         );
         let install_out = vm.guest_run(&lease, &sh(&install_cmd));
         // 失败回执同时带索引与安装两段；判据仍是安装命令（索引段沿用本地缓存也算成功）。
-        let apt_out = crate::kernel::api::ToolOutcome::new(
+        let apt_out = crate::kernel::api::types::ToolOutcome::new(
             install_out.ok,
             format!("{}\n{}", index_out.output, install_out.output),
         );
@@ -293,7 +293,7 @@ pub(crate) fn install_guest_runtime(
         let node_run = if apt_out.ok {
             vm.guest_run(&lease, &sh(&node_script))
         } else {
-            crate::kernel::api::ToolOutcome::new(false, apt_out.output.clone())
+            crate::kernel::api::types::ToolOutcome::new(false, apt_out.output.clone())
         };
         on_line("自证 python / node / C-C++…");
         let node_ok = node_run.ok
@@ -311,7 +311,7 @@ pub(crate) fn install_guest_runtime(
         let wrapper_run = if apt_out.ok {
             vm.guest_run(&lease, &sh(wrapper_cmd))
         } else {
-            crate::kernel::api::ToolOutcome::new(false, apt_out.output.clone())
+            crate::kernel::api::types::ToolOutcome::new(false, apt_out.output.clone())
         };
         let cc_run = vm.guest_run(
             &lease,

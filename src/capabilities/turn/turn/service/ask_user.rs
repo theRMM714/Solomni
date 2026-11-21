@@ -5,7 +5,8 @@
 //!   「请用户裁决」；队列本体在 `capabilities/session/domain/decisions.rs`，本实现由宿主在生成线程上现造。
 
 use crate::capabilities::conversation::session::api::{Gates, Pending, SessionEvent, SlotWake};
-use crate::kernel::api::{Ask, AskOutcome};
+use crate::kernel::api::types::Ask;
+use crate::kernel::api::types::AskOutcome;
 use crate::kernel::ports::AskUser;
 use std::sync::Arc;
 

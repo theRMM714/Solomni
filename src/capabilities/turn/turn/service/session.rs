@@ -20,7 +20,7 @@ use crate::capabilities::turn::turn::api::Session;
 use crate::capabilities::turn::turn::service::state::TurnState;
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::workspace::api::Workspace;
-use crate::kernel::api::SessionId;
+use crate::kernel::api::types::SessionId;
 use crate::kernel::ports::Log;
 
 /// 目的：会话本体：在世表与运行态（`TurnState`）连同装配一席要用的能力面，一处持有。

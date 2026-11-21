@@ -11,7 +11,7 @@ impl Work {
     pub(crate) fn activation_build_request(
         &self,
         sid: &str,
-    ) -> Result<(Vec<String>, crate::kernel::api::Tier, Option<String>), String> {
+    ) -> Result<(Vec<String>, crate::kernel::api::types::Tier, Option<String>), String> {
         let meta = self.history.meta(sid)?;
         Ok((
             meta.modules.clone(),

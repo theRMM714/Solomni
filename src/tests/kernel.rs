@@ -3,9 +3,12 @@
 //! 不管：工作区绑定策略（`src/tests/workspace/`）与虚拟机档挂载（`src/tests/vm/`）。
 //! 联动：职责与契约见 docs/kernel/unit-map.md 与 ARCHITECTURE.md。
 
+use crate::kernel::api::locus::locus_of;
+use crate::kernel::api::locus::place_contains;
 #[cfg(windows)]
-use crate::kernel::api::{is_unc, native, unc_parts};
-use crate::kernel::api::{locus_of, place_contains};
+use crate::kernel::api::path::is_unc;
+use crate::kernel::api::path::native;
+use crate::kernel::api::path::unc_parts;
 
 /// 目的：native 还原两种有普通形态的 verbatim 前缀，UNC 不能被剥成相对路径。
 #[cfg(windows)]
@@ -85,7 +88,7 @@ pub(crate) fn locus_identifies_hardlinks_as_the_same_place() {
 #[cfg(windows)]
 #[test]
 pub(crate) fn network_paths_are_recognised_on_windows() {
-    use crate::kernel::api::is_network_path;
+    use crate::kernel::api::locus::is_network_path;
     use std::path::Path;
     assert!(is_network_path(Path::new(r"\\server\share\dir")));
     assert!(is_network_path(Path::new(r"//server/share")));
@@ -96,7 +99,7 @@ pub(crate) fn network_paths_are_recognised_on_windows() {
 /// 目的：命令按提交顺序逐条执行，状态只被工作线程碰（克隆句柄看到同一份状态）。
 #[test]
 pub(crate) fn actor_commands_run_in_order_on_one_shared_state() {
-    use crate::kernel::api::Actor;
+    use crate::kernel::api::actor::Actor;
     use crate::kernel::ports::NoopLog;
     use std::sync::Arc;
     let actor = Actor::spawn(
@@ -122,7 +125,7 @@ pub(crate) fn actor_commands_run_in_order_on_one_shared_state() {
 /// 目的：一条命令 panic 不带走核心：后续命令照常执行。
 #[test]
 pub(crate) fn actor_survives_a_panicking_command() {
-    use crate::kernel::api::Actor;
+    use crate::kernel::api::actor::Actor;
     use crate::kernel::ports::NoopLog;
     use std::sync::Arc;
     let actor = Actor::spawn("t-actor-panic", "test::actor", Arc::new(NoopLog), 0u32)

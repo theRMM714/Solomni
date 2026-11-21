@@ -3,7 +3,7 @@
 //! 不管：命令队列与核心状态（正因如此它才能立刻生效）；谁算一个作业（调用方定）。
 //! 联动：由核心持有并驱动（`src/capabilities/runtime/api/handle.rs`）；它与会话的裁决队各管一半——这里管取消生成，那里管等用户。
 
-use crate::kernel::api::SessionId;
+use crate::kernel::contracts::types::SessionId;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

@@ -27,7 +27,7 @@ pub struct ProcessSessions {
     /// 目的：平台侧状态——Windows 持有产品私有区与写权限开关；其余平台为空。
     platform: platform::State,
     /// 目的：全局沙箱要求与本进程是否已同意降级。
-    mode: std::sync::Arc<crate::kernel::api::SandboxMode>,
+    mode: std::sync::Arc<crate::kernel::domain::fence::SandboxMode>,
 }
 
 impl ProcessSessions {
@@ -44,12 +44,15 @@ impl ProcessSessions {
             exe,
             book,
             platform: platform::State::new(home, write_allowed),
-            mode: std::sync::Arc::new(crate::kernel::api::SandboxMode::permissive()),
+            mode: std::sync::Arc::new(crate::kernel::domain::fence::SandboxMode::permissive()),
         }
     }
 
     /// 目的：组合根注入全局沙箱模式；缺省是“无要求”的测试替身。
-    pub fn with_mode(mut self, mode: std::sync::Arc<crate::kernel::api::SandboxMode>) -> Self {
+    pub fn with_mode(
+        mut self,
+        mode: std::sync::Arc<crate::kernel::domain::fence::SandboxMode>,
+    ) -> Self {
         self.mode = mode;
         self
     }
@@ -145,7 +148,7 @@ impl SessionHost for ProcessSessions {
             spec: spec.fence.clone(),
             prepared,
             home,
-            policy: crate::kernel::api::FenceRunPolicy {
+            policy: crate::kernel::contracts::fence::FenceRunPolicy {
                 require_fs: self.mode.requirements.filesystem,
                 require_net: self.mode.requirements.network,
                 allow_degraded: self.mode.degraded(),

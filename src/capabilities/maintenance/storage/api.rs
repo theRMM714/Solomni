@@ -3,7 +3,7 @@
 //! 不管：怎么扫描（service/detail）、怎么删（service）；工作对象回收仍在 workspace。
 //! 联动：`presentation::faces::Faces.storage` 持它；Web / CLI / builds 经这里拿事实与动作。
 
-use crate::kernel::api::JobState;
+use crate::kernel::api::types::JobState;
 use serde::{Deserialize, Serialize};
 
 /// 目的：空间分类 id——盘点产出、策略排序与删除三处共用的线格式。

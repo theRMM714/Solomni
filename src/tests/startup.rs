@@ -8,7 +8,7 @@ use crate::capabilities::catalog::registry::api::SandboxEnforceLevel::BestEffort
 #[cfg(windows)]
 use crate::capabilities::catalog::registry::api::SandboxEnforceLevel::Require;
 use crate::capabilities::catalog::registry::ports::SettingsStore;
-use crate::kernel::api::SandboxRequirements;
+use crate::kernel::api::fence::SandboxRequirements;
 use crate::kernel::detail::confine::Capability;
 use crate::{GateOutcome, MissingCause, MissingPart};
 use std::collections::BTreeMap;

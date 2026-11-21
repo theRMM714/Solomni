@@ -69,7 +69,7 @@ pub trait ToolExec: Send + Sync {
     fn run_module(
         &self,
         module: &str,
-        fence: &crate::kernel::api::FenceSpec,
+        fence: &crate::kernel::api::fence::FenceSpec,
         command: &str,
         args_json: &str,
         env: &[(String, String)],
@@ -94,7 +94,7 @@ pub trait ToolExec: Send + Sync {
     ) -> Recorded;
 
     /// 一次调用的收尾：撤它自己的 ACE、删按次容器 profile 与临时目录（调用方只提出请求，不碰任何 ACL）。
-    fn release_call(&self, spec: &crate::kernel::api::FenceSpec) -> Result<(), String>;
+    fn release_call(&self, spec: &crate::kernel::api::fence::FenceSpec) -> Result<(), String>;
 
     /// 按会话租约撤销：该会话的授权与 profile 由核心在改配 / 删除时统一回收。
     fn release_by_lease(&self, lease: &str) -> Result<(), String>;

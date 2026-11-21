@@ -5,13 +5,13 @@
 //! 联动：`runtime` 建会话走 `resolve`、加载复检走 `recheck`（都经 `workspace::api`）；两者共用一个 `policy`，手改 meta
 //!   也过不去；规范化、元数据与可写探测都走 `HostProbe`。
 
-use crate::kernel::api::Tier;
+use crate::kernel::api::types::Tier;
 use crate::kernel::ports::HostProbe;
 use std::path::{Path, PathBuf};
 
 /// 目的：把产品根规范化成判定用的写法（规范化失败时退回原样）。
 pub fn product_root(root: &Path, probe: &dyn HostProbe) -> PathBuf {
-    crate::kernel::api::native(
+    crate::kernel::api::path::native(
         &probe
             .canonicalize(root)
             .unwrap_or_else(|_| root.to_path_buf()),
@@ -25,11 +25,11 @@ pub fn policy(path: &Path, tier: Tier) -> Result<(), String> {
     if !path.is_absolute() {
         return Err(format!("工作区必须是绝对路径：{}", path.display()));
     }
-    if tier == Tier::Host && crate::kernel::api::is_network_path(path) {
+    if tier == Tier::Host && crate::kernel::api::locus::is_network_path(path) {
         return Err(host_network(path));
     }
-    if crate::kernel::api::is_unc(path)
-        && let Some((_, _, rest)) = crate::kernel::api::unc_parts(path)
+    if crate::kernel::api::path::is_unc(path)
+        && let Some((_, _, rest)) = crate::kernel::api::path::unc_parts(path)
         && rest.as_os_str().is_empty()
     {
         return Err(format!(
@@ -59,7 +59,7 @@ pub fn resolve(
     probe: &dyn HostProbe,
 ) -> Result<PathBuf, String> {
     policy(raw, tier)?;
-    let root = crate::kernel::api::native(
+    let root = crate::kernel::api::path::native(
         &probe
             .canonicalize(raw)
             .map_err(|e| format!("工作区不可达：{}（{}）", raw.display(), e))?,
@@ -106,8 +106,8 @@ fn host_network(path: &Path) -> String {
 /// 目的：外部根与产品根互不包含——文本一次，落点身份再一次（UNC 别名、映射盘、8.3 短名都骗不过身份）。
 fn check_bounds(root: &Path, product: &Path) -> Result<(), String> {
     let text = root == product || product.starts_with(root) || root.starts_with(product);
-    let place = crate::kernel::api::place_contains(root, product)
-        || crate::kernel::api::place_contains(product, root);
+    let place = crate::kernel::api::locus::place_contains(root, product)
+        || crate::kernel::api::locus::place_contains(product, root);
     if text || place {
         return Err("工作区不能与产品目录互相包含（会越过会话 / 模块 / 配置的边界）".to_string());
     }

@@ -43,7 +43,7 @@ impl crate::kernel::ports::FenceHost for RecordingFence {
         Ok(())
     }
 
-    fn release_call(&self, spec: &crate::kernel::api::FenceSpec) -> Result<(), String> {
+    fn release_call(&self, spec: &crate::kernel::api::fence::FenceSpec) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -179,7 +179,7 @@ pub(crate) fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
         task: None,
         delegate: false,
         permission: None,
-        tier: crate::kernel::api::Tier::Host,
+        tier: crate::kernel::api::types::Tier::Host,
         guest: None,
         workspace: None,
     }
@@ -219,7 +219,7 @@ pub(crate) fn test_provision_with_root(
         fn processes(&self) -> Result<Vec<crate::capabilities::provision::api::ProcInfo>, String> {
             Ok(Vec::new())
         }
-        fn job(&self) -> crate::kernel::api::JobState {
+        fn job(&self) -> crate::kernel::api::types::JobState {
             Default::default()
         }
         fn start(&self, _ids: Vec<String>) -> Result<(), String> {

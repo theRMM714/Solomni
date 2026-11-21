@@ -7,7 +7,7 @@ use super::super::doubles::module_of;
 use super::super::{single_work, slow_ops};
 use super::support::spawn;
 use crate::capabilities::runtime::api::Output;
-use crate::kernel::api::Tier;
+use crate::kernel::api::types::Tier;
 use crate::presentation::faces::Faces;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;

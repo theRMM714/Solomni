@@ -8,7 +8,7 @@ use std::path::Path;
 
 /// 目的：一次性预授：没能力就如实说缺口（不算失败），有能力就逐条写并退役旧授权。
 pub(crate) fn grant(root: &Path, on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
-    if !crate::kernel::api::HAS_EXTERNAL_ACL_STEP {
+    if !crate::kernel::api::platform::HAS_EXTERNAL_ACL_STEP {
         on_line("本平台没有机器级 ACL 预授（已登记缺口）：围栏的权限模型不写 ACL");
         return Ok(());
     }

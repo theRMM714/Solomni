@@ -25,7 +25,8 @@ use crate::capabilities::residents::api::ResidentOps;
 use crate::capabilities::tools::api::{Observations, ToolExec, Tools, tool_notes};
 use crate::capabilities::vm::api::{GuestOs, Vm};
 use crate::capabilities::workspace::api::{ReadFact, Sandbox, Workspace};
-use crate::kernel::api::{FenceSpec, Tier};
+use crate::kernel::api::fence::FenceSpec;
+use crate::kernel::api::types::Tier;
 use crate::kernel::ports::Log;
 
 /// 目的：装配一场会话要用的能力面（组合根注入的同一批端口）。

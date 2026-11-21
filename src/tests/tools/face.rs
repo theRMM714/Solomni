@@ -449,7 +449,7 @@ pub(crate) fn module_tools_are_concurrent_only_when_declared() {
 ///    （保护模块自己的 userdata），声明了 parallel 的只读调用仍可并发。
 #[test]
 pub(crate) fn module_lease_serializes_exclusive_calls_but_allows_parallel_readers() {
-    use crate::kernel::api::FenceSpec;
+    use crate::kernel::api::fence::FenceSpec;
     fn exercise(runner: Arc<ParallelRunner>, parallel: bool) {
         let svc = test_tools_svc_with(
             Arc::clone(&runner) as Arc<dyn ProcessRunner>,
@@ -537,7 +537,7 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
             task: None,
             delegate: false,
             permission: None,
-            tier: crate::kernel::api::Tier::Host,
+            tier: crate::kernel::api::types::Tier::Host,
             guest: None,
             workspace: None,
         })

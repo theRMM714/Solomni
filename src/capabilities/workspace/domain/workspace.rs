@@ -6,7 +6,7 @@
 
 use crate::capabilities::permission::api::{PermissionSet, Reach};
 use crate::capabilities::prompt::api::RefRoots;
-use crate::kernel::api::slash;
+use crate::kernel::api::path::slash;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};

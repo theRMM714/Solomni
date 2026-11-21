@@ -205,7 +205,7 @@ impl VirtioFsGuard {
                 book.forget(c.id());
             }
             // 先杀整个进程组（含 sandbox 下 fork 出的守护进程），再收尸。
-            crate::kernel::api::kill_tree(&mut c);
+            crate::kernel::api::process::kill_tree(&mut c);
         }
         for p in self.paths.drain(..) {
             let _ = std::fs::remove_file(&p);

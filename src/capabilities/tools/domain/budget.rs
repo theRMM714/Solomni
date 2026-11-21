@@ -3,7 +3,9 @@
 //! 不管：各工具自己的分页（在 tools 的 systool）与分页文案；上下文压缩（在 session）。
 //! 联动：tools 的 service 与 conversation 的引擎都调 cap_result；细则见 docs/tools/tools-and-roles.md。
 
-use crate::kernel::api::{Note, ToolOutcome, codes};
+use crate::kernel::api::note::Note;
+use crate::kernel::api::note::codes;
+use crate::kernel::api::types::ToolOutcome;
 
 /// 目的：单次工具结果回执的字符上限（约 4k tokens）。
 /// 约束：超出按 head+tail 截断（开头约 1/4、结尾约 3/4），只加**一组**说明，报告实际保留字符数与续读办法。
@@ -113,7 +115,7 @@ fn cut_tail(text: &str, start: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kernel::api::Severity;
+    use crate::kernel::api::note::Severity;
 
     fn outcome(text: String) -> ToolOutcome {
         ToolOutcome::new(true, text)

@@ -19,7 +19,7 @@ use crate::capabilities::catalog::registry::api::AgentView;
 use crate::capabilities::catalog::registry::api::RegistryOps;
 use crate::capabilities::catalog::registry::api::{AppSettings, ModelView, ProviderView};
 use crate::capabilities::conversation::session::api::{HistoryOps, HistoryView, Mode, SessionMeta};
-use crate::kernel::api::Tier;
+use crate::kernel::api::types::Tier;
 use crate::presentation::web::routes::{self, ROUTES};
 use crate::presentation::web::{self, FenceInfo};
 use serde_json::json;
@@ -124,7 +124,7 @@ impl crate::capabilities::maintenance::storage::api::Storage for FakeStorage {
             ),
         )
     }
-    fn job(&self) -> crate::kernel::api::JobState {
+    fn job(&self) -> crate::kernel::api::types::JobState {
         Default::default()
     }
     fn set_policy(&self, _policy: crate::capabilities::maintenance::storage::api::StoragePolicy) {}
@@ -161,7 +161,7 @@ impl crate::capabilities::provision::api::Provision for FakeProvision {
     fn processes(&self) -> Result<Vec<crate::capabilities::provision::api::ProcInfo>, String> {
         self.guard().map(|_| Vec::new())
     }
-    fn job(&self) -> crate::kernel::api::JobState {
+    fn job(&self) -> crate::kernel::api::types::JobState {
         Default::default()
     }
     fn start(&self, _ids: Vec<String>) -> Result<(), String> {
@@ -266,7 +266,7 @@ fn meta(name: &str) -> SessionMeta {
         task: None,
         ts: 1,
         agents: Vec::new(),
-        exec: crate::kernel::api::ExecSpec::default(),
+        exec: crate::kernel::api::types::ExecSpec::default(),
         sandbox: Default::default(),
         parent: None,
         node: None,

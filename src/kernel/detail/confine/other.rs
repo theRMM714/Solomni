@@ -4,7 +4,7 @@
 //! 联动：能力等级由启动报告如实给出；调用方见 confine.rs。
 
 use super::{Capability, FENCE_FAILED, FenceVerdict, shell_command};
-use crate::kernel::api::FenceSpec;
+use crate::kernel::contracts::fence::FenceSpec;
 
 pub fn capability() -> Capability {
     Capability {
@@ -33,7 +33,7 @@ pub fn run_fenced(
     _prepared: bool,
     _home: Option<&std::path::Path>,
     command: &str,
-    policy: &crate::kernel::api::FenceRunPolicy,
+    policy: &crate::kernel::contracts::fence::FenceRunPolicy,
 ) -> i32 {
     if (policy.require_fs || (policy.require_net && !spec.net)) && !policy.allow_degraded {
         eprintln!("[围栏] 本平台没有接入文件系统/网络围栏：按全局策略拒绝执行");

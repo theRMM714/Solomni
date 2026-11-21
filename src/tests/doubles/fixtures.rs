@@ -46,7 +46,7 @@ pub(crate) fn run_builtin(
     io: &dyn crate::capabilities::tools::ports::SysIo,
     name: &str,
     args_json: &str,
-) -> crate::kernel::api::ToolOutcome {
+) -> crate::kernel::api::types::ToolOutcome {
     let mut obs = crate::capabilities::tools::api::Observations::default();
     crate::capabilities::tools::service::systool::execute(
         sb,

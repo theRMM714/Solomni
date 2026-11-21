@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 
 use super::prelude::*;
-use crate::kernel::api::RunOutcome;
+use crate::kernel::api::run::RunOutcome;
 
 mod chat;
 mod events;

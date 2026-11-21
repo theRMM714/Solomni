@@ -4,8 +4,8 @@
 //! 联动：授权与撤销由外层进程做（见 confine::prepare_fence），守门进程只按同一个名字派生同一个 SID；机制不可用时一律如实降级。
 
 use super::{Capability, FENCE_FAILED, FencePrep, FenceStep, FenceVerdict, shell_command};
-use crate::kernel::api::FencePart;
-use crate::kernel::api::FenceSpec;
+use crate::kernel::contracts::fence::FencePart;
+use crate::kernel::contracts::fence::FenceSpec;
 use std::ffi::c_void;
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -532,7 +532,7 @@ pub fn run_fenced(
     prepared: bool,
     home: Option<&Path>,
     command: &str,
-    policy: &crate::kernel::api::FenceRunPolicy,
+    policy: &crate::kernel::contracts::fence::FenceRunPolicy,
 ) -> i32 {
     if let Err(e) = join_kill_on_close_job(MAX_PROCESSES) {
         eprintln!("[围栏] 进程树围栏安装失败：{}", e);

@@ -111,14 +111,14 @@ impl Handle {
             return Err(arg_fault_text(&full, &schema, &fault));
         }
         let work = work.map(std::path::PathBuf::from);
-        let mut fence = crate::kernel::api::FenceSpec::standalone(
+        let mut fence = crate::kernel::api::fence::FenceSpec::standalone(
             &module.root,
             work.as_deref(),
             module.has_userdata,
         );
         fence.net = self.settings()?.sandbox.policy.network;
         // 独立调用没有会话：给唯一 lease，跑完按它收尾（Windows 上才有独立的容器身份）。
-        fence.lease = crate::kernel::api::call_lease(&fence.agent);
+        fence.lease = crate::kernel::api::fence::call_lease(&fence.agent);
         fence.ro_tree.extend(host_plan.roots.iter().cloned());
         fence.ro_tree.sort();
         fence.ro_tree.dedup();

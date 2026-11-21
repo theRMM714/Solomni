@@ -35,7 +35,8 @@ use crate::capabilities::work::api::{
     WorkMode, WorkOpened, WorkSpec,
 };
 use crate::capabilities::workspace::api::{MAX_ASSET_BYTES, Workspace};
-use crate::kernel::api::{JobRegistry, Tier};
+use crate::kernel::api::jobs::JobRegistry;
+use crate::kernel::api::types::Tier;
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
