@@ -73,11 +73,17 @@
 - 跨机制的常设例外只有 `ports`（R12）：全项目共享的出站端口面，由各机制实现，不参与「谁依赖谁」的业务推导；它自己只依赖共享形状。
 - 机制表只说机制与层号，不替代逐文件职责：[unit-map.md](../kernel/unit-map.md) 仍由 `tests/gates/structure/map.js` 双向比对。
 
+## 六、入口内部的段（第三张表）
+- 入口也按依赖排段，不止「最外层、什么都不许依赖我」这一条：`docs/entry/layers.yaml` 一行一个**模块**（`src/entry` 下的文件名/目录名，编排根单列成 `main`；`src/entry.rs` 只放 mod 声明，不参与分层），四段——值层（`root` / `toolchains` / `probes`）→ 判定层（`startup` / `portable`）→ 装配层（`assembly` / `web` / `args`）→ 编排层（`main`）（`tests/gates/structure/entry-tiers.js`）。
+- 规则与上面两张表同一条：**同段不许互相依赖，只能向下**，因此不可能成环（成环也显式报环路径）。另外声明段号必须压住它的全部依赖——两条都由 `tests/gates/structure/entry-tiers.js` 判，权威表 `docs/entry/layers.yaml`。
+- 与前两张表的一个刻意差别：段号表达**启动阶段职责**，不是按依赖重算的最小层。`startup` 在入口内没有依赖，声明第 1 段是为了让它排在值层之后、装配之前；这类「比依赖深度松」的声明不算错（只有压不住依赖才失败）。kernel 机制表要的是事实缓存，写宽就失败。
+
 ## 检查
 - 分层与依赖方向 → T0 结构审查的 apiOnly / apiPorts / domainPorts / foreignImpl / coreCycles / reverse / presentation / layers 判据（`tests/gates/structure/dependency.js`、`tests/gates/structure/layers.js`；清单 `node run-tests.js --list`）。
 - 呈现层「每屏许取哪几个能力的 ::api」→ `structure/presentation-inbound`（`tests/gates/structure/presentation-inbound.js`，权威清单 `docs/presentation/inbound.yaml`）：清单外的取用报外溢、清单里没用到的报过期，呈现层内部只许取根、兄弟文件不得互相引用。
 - 声明层号 == 重算层号、层号连续、目录全覆盖 → `node tests/gates/structure/layers.js`。
 - kernel 机制：登记双向对账、同层互依赖、声明层号 == 重算层号、机制成环 → `node tests/gates/structure/kernel-mechanisms.js`。
+- 入口分段：登记双向对账、同段互依赖、向上依赖、压不住依赖、成环、`src/entry.rs` 只放 mod 声明 → `node tests/gates/structure/entry-tiers.js`。
 - 结构图与层表渲染 → `node tests/gates/structure/graph.js`、`node tests/docs-sync.mjs`。
 
 ## 路由

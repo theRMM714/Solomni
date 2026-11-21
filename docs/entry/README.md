@@ -1,7 +1,7 @@
 # entry（根：启动、组合根与探针）
 
 > 定位：根——启动程序、组合根、内部协议探针、围栏守门进程与长驻子进程守门进程；依赖图最外层，不是业务层。
-> 效力：规范｜核对：2026-11-15｜依据：`src/main.rs`
+> 效力：规范｜核对：2026-11-21｜依据：`src/main.rs`、`docs/entry/layers.yaml`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -77,6 +77,16 @@
   - `--doctor` 的 `processes` 字段列出账上每一条（`pid` / `alive` / `purpose` / `owner` / `since` / `orphanRisk` / `guardNote`）；`orphanRisk` 为真 = 父死子亡没挂上（核心被强杀会留下它），`guardNote` 是原因。覆盖范围见 [kernel 的「长驻子进程的账与回收」](../kernel/README.md)。
   - Web 经 `GET /api/processes` 读同一份（`Provision::processes`）；响应形状以 [contracts.md](../presentation/contracts.md) 为准。
 
+## 三、入口内部分层（`layers.yaml`）
+
+- 唯一权威：[`layers.yaml`](layers.yaml)，一行一条「模块: 层号」；模块名＝`src/entry` 下的文件名/目录名（目录算一个模块），编排根单列成 `main`（`src/main.rs`）。`src/entry.rs` 只是 mod 声明，不参与分层——混进代码就失败。
+- 四段（数字大＝更靠上、更晚接进流程）：**值层**（`root` / `toolchains` / `probes`：只读事实与纯值）→ **判定层**（`startup` / `portable`：只决定能不能开工）→ **装配层**（`assembly` / `web` / `args`：把端口接成能力面、把面袋交给呈现层）→ **编排层**（`main`：只串流程）。
+- 判据（T0 的 `structure/entry-tiers`，与 [kernel 机制表](../kernel/README.md) 同构）：① 盘上的模块必须在表里、表里的模块必须在盘上；② 依赖边的目标段必须**严格更低**——同段互相依赖与向上依赖都失败，因此不可能成环；③ 声明段号必须压住它的全部依赖（压不住失败）。
+- 段是**启动阶段职责**，不是依赖深度的副作用：比依赖深度松不算错（例如 `startup` 没有入口内依赖，声明第 1 段是为了让它排在值层之后、装配之前）。这一点与 kernel 机制表不同——那张表的层号是按依赖重算的事实缓存，写宽就失败。
+- 不在本表：`src/guard/`（围栏守门与长驻子进程守门进程）——它们是入口拉起的**独立子进程**，不是启动流程的一段，依赖方向由 `tests/gates/structure/dependency.js` 的跨单元规则管。
+- 只回执不判红：扇出（数字说明一处装配了多少模块）。
+- 检查与重算提示：`node dev.js run -- node tests/gates/structure/entry-tiers.js`。
+
 ## 改动本单元时必须同步
 
 - 便携维护（`--setup`）的行为一改 → 同步 `docs/system/`（实现在 system 能力）、本页的启动期对账说明（`src/entry/portable.rs`）、[docs/permission/README.md](../permission/README.md) 与 `tests/gaps.yaml` 的平台缺口。
@@ -84,10 +94,12 @@
 - 新增或改产品命令 → 改 `systools/commands.yaml`；执行分派在 `src/presentation/cli/boot.rs`（启动相，经 `system` 能力）与 `src/presentation/cli.rs`（转录相），一致性由 `src/tests/commands.rs` 锁死。
 - 路由目录的机器比对在 `src/tests/routes.rs` ↔ [docs/presentation/contracts.md](../presentation/contracts.md)。
 - 启动对账或进程账字段一改 → 同步 [kernel 的「长驻子进程的账与回收」](../kernel/README.md) 与本页的呈现说明。
+- 新增 / 删除 / 移动 `src/entry/` 下的文件或改内部依赖 → 同步 [`layers.yaml`](layers.yaml) 与 [`unit-map.md`](unit-map.md)：前者按模块归段（同段不许互相依赖），后者逐文件对账。
 - 测试缺口：本单元**不是业务能力**，没有独立的缺口账；缺口记在 `tests/gaps.yaml`；格式见 [docs/testing/gaps-acceptance.md](../testing/gaps-acceptance.md) 的「缺口账」。
 
 ## 本目录
 
 | 文件 | 内容 |
 | --- | --- |
+| [`layers.yaml`](layers.yaml) | 入口内部的段号（唯一权威；T0 的 `structure/entry-tiers` 双向比对） |
 | [`unit-map.md`](unit-map.md) | 逐文件职责（T0 与磁盘双向比对） |

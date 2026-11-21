@@ -23,6 +23,7 @@ const S = {
   layers: require("./structure/layers.js"),
   kernelMechanisms: require("./structure/kernel-mechanisms.js"),
   presentationInbound: require("./structure/presentation-inbound.js"),
+  entryTiers: require("./structure/entry-tiers.js"),
   graph: require("./structure/graph.js"),
   values: require("./structure/values.js"),
   capability: require("./structure/capability.js"),
@@ -101,6 +102,18 @@ const GATES = [
     inputs: ["docs/presentation/inbound.yaml", "src/presentation/**/*.rs"],
     run: (root, ctx) => {
       const r = S.presentationInbound.presentationInbound(root);
+      ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
+      return r.problems;
+    },
+  },
+  {
+    id: "structure/entry-tiers",
+    lane: "structure",
+    step: "T0 结构审查",
+    kind: "text",
+    inputs: ["docs/entry/layers.yaml", "src/entry/**/*.rs", "src/entry.rs", "src/main.rs"],
+    run: (root, ctx) => {
+      const r = S.entryTiers.entryTiers(root);
       ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
       return r.problems;
     },
@@ -223,6 +236,7 @@ const LANE_ORDER = {
     "structure/layers",
     "structure/kernel-mechanisms",
     "structure/presentation-inbound",
+    "structure/entry-tiers",
     "structure/values",
     "structure/graph",
     "structure/module-files",

@@ -7,6 +7,7 @@
 
 const { mask: rustMask } = require("./rust-mask.js");
 const { parseMechanismsText } = require("./mechanisms.js");
+const { parseEntryTiersText } = require("./entry-tiers.js");
 const { parseInboundText } = require("./presentation.js");
 
 /** 词法归一：统一分隔符、去掉 \\?\ 扩展前缀、收掉 '.' 与 '..' 段。 */
@@ -227,6 +228,14 @@ function gateParserSelfTest(root) {
     /出现了两次/.test(parseInboundText("src/presentation/cli.rs: tools\nsrc/presentation/cli.rs: work\n").problems.join()),
     true
   );
+  eq(
+    "parseEntryTiersText 读「模块: 层号」并跳过注释",
+    [...parseEntryTiersText("# 头\n\nroot: 0\nmain: 3  # 编排根\n").tiers],
+    [["root", 0], ["main", 3]],
+  );
+  eq("parseEntryTiersText 报行号与格式", /入口分层表第 2 行/.test(parseEntryTiersText("root: 0\nmain: 高\n").problems.join()), true);
+  eq("parseEntryTiersText 报模块名不合规", /模块名不合规/.test(parseEntryTiersText("src/entry/args: 1\n").problems.join()), true);
+  eq("parseEntryTiersText 报重复归层", /归了两次层/.test(parseEntryTiersText("root: 0\nroot: 1\n").problems.join()), true);
   return bad;
 }
 
