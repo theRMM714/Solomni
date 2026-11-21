@@ -3,6 +3,10 @@
 //! 不管：`domain` / `ports` 的内部实现；`HistoryOps` 的队列代理实现（在 `runtime`）。
 //! 联动：呈现层经 runtime 的队列代理调 `HistoryOps`；别的能力经 `History` 造会话、追流水、读元信息、删会话。
 
+/// 目的：测试直调工具批执行器；生产路径只经会话引擎，不从这里取。
+#[cfg(test)]
+pub(crate) use crate::capabilities::conversation::session::service::engine::tools::run_batch;
+
 pub use crate::capabilities::conversation::session::domain::decisions::{
     Answered, Decisions, GateTicket, Gates, SlotWake, decisions, issued_in,
 };

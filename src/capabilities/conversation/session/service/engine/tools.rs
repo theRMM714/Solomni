@@ -29,6 +29,7 @@ pub(crate) struct CallCtl<'a> {
     pub grant: &'a CallGrant,
     pub cancel: &'a std::sync::atomic::AtomicBool,
     pub gate_facts: &'a [crate::capabilities::tools::api::ObservationFact],
+    pub budget: crate::capabilities::tools::api::ResultBudget,
 }
 
 /// 目的：执行一次工具调用：内置优先；外部工具按模块走（模块为空时由 dispatch_external 如实报错）。
@@ -62,6 +63,7 @@ pub(crate) fn run_branch(
         grant,
         cancel,
         gate_facts,
+        budget,
     } = ctl;
     let mut branch = ctx.observations.clone();
     branch.set_reply(ctx.reply_seq);
@@ -89,6 +91,7 @@ pub(crate) fn run_branch(
             branch,
             gate.as_ref()
                 .map(|g| g as &dyn crate::capabilities::tools::api::WriteGate),
+            *budget,
             name,
             args_json,
         );
@@ -99,7 +102,7 @@ pub(crate) fn run_branch(
         read = branch.take_reads().into_iter().next();
         (String::new(), outcome)
     } else if crate::capabilities::tools::api::is_exec(name) {
-        let (outcome, facts) = run_shell(ctx, name, args_json, *ask, grant, cancel);
+        let (outcome, facts) = run_shell(ctx, name, args_json, *ask, grant, cancel, *budget);
         shell = facts;
         (String::new(), outcome)
     } else if let Some(h) = handler_for(ctx, name) {
@@ -123,8 +126,15 @@ pub(crate) fn run_branch(
             body: String::new(),
             lead: String::new(),
         };
-        dispatch_external(ctx, &inv, *ask, grant)
+        dispatch_external(ctx, &inv, *ask, grant, *budget)
     };
+    // 统一兜底：无论内置、shell、模块还是核心自有工具，回执进上下文前都按这一批的预算收口。
+    let mut outcome = outcome;
+    crate::capabilities::tools::api::cap_result_with(
+        &mut outcome,
+        crate::capabilities::tools::api::continuation_for(module.unwrap_or(""), name),
+        *budget,
+    );
     let facts = if branch.facts().len() > facts_before {
         branch.facts()[facts_before..].to_vec()
     } else {
@@ -401,8 +411,25 @@ pub(crate) fn run_batch(
     mut confirms: Option<&mut ConfirmGate<'_>>,
     ask: Option<&dyn crate::kernel::ports::AskUser>,
     cancel: &std::sync::atomic::AtomicBool,
+    budget: crate::capabilities::tools::api::ResultBudget,
     sink: &mut dyn FnMut(SessionEvent),
 ) -> Vec<CallDone> {
+    // 预检：剩余上下文连一条最小回执都放不下时，整批都不执行——避免 shell 已经产生副作用却看不到输出。
+    if budget.exhausted() {
+        let why = "上下文剩余不足：这次调用没有执行；请先压缩会话，再重试。".to_string();
+        return plan
+            .iter()
+            .map(|(module, _tool, _args)| {
+                (
+                    module.clone().unwrap_or_default(),
+                    ToolOutcome::new(false, why.clone()),
+                    None,
+                    Vec::new(),
+                    None,
+                )
+            })
+            .collect();
+    }
     let mut done: Vec<Option<CallDone>> = (0..plan.len()).map(|_| None).collect();
     let grants: Vec<Result<CallGrant, String>> = plan
         .iter()
@@ -447,6 +474,7 @@ pub(crate) fn run_batch(
                         grant: &grant,
                         cancel,
                         gate_facts: &gate_facts,
+                        budget,
                     },
                 ));
                 i += 1;
@@ -484,6 +512,7 @@ pub(crate) fn run_batch(
                         grant: &grant,
                         cancel,
                         gate_facts: &gate_facts,
+                        budget,
                     },
                 )
             } else {
@@ -525,6 +554,7 @@ pub(crate) fn run_batch(
                                     grant: &g,
                                     cancel,
                                     gate_facts: &facts,
+                                    budget,
                                 },
                             )
                         })
@@ -551,6 +581,7 @@ pub(crate) fn run_batch(
                     grant: &grant,
                     cancel,
                     gate_facts: &gate_facts,
+                    budget,
                 },
             ));
             i += 1;
@@ -711,6 +742,7 @@ pub(crate) fn run_shell(
     ask: Option<&dyn crate::kernel::ports::AskUser>,
     grant: &CallGrant,
     cancel: &std::sync::atomic::AtomicBool,
+    budget: crate::capabilities::tools::api::ResultBudget,
 ) -> (ToolOutcome, Option<ShellFacts>) {
     use crate::capabilities::tools::api;
     let Some(schema) = ctx.face.builtin_tools.get(name) else {
@@ -790,7 +822,7 @@ pub(crate) fn run_shell(
             ask,
             gate: None,
         };
-        let outcome = ctx.tools.run_shell(&run);
+        let outcome = ctx.tools.run_shell(&run, budget);
         // 同一次执行的值只取一次（读即清）：这里没取到就说明这次没写本机权限项。
         fence_prep = crate::kernel::api::process::take_fence_prep();
         outcome
@@ -833,6 +865,7 @@ pub(crate) fn dispatch_external(
     inv: &ToolInvoke,
     ask: Option<&dyn crate::kernel::ports::AskUser>,
     grant: &CallGrant,
+    budget: crate::capabilities::tools::api::ResultBudget,
 ) -> (String, ToolOutcome) {
     let module = match inv.module.as_deref() {
         Some(m) => m.to_string(),
@@ -961,6 +994,7 @@ pub(crate) fn dispatch_external(
                     ctx.face.runtime_path.as_deref(),
                     mt.parallel.contains(&inv.name),
                     ask,
+                    budget,
                 )
             };
             (module, outcome)

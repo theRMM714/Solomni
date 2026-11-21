@@ -114,6 +114,8 @@ pub mod codes {
     pub const RESULT_TRUNCATED_COMMAND: &str = "result.truncated.command";
     /// 目的：截断后怎么接着取——文件类（能按 offset/limit 续读）。
     pub const RESULT_TRUNCATED_READ: &str = "result.truncated.read";
+    /// 目的：本批预算按剩余上下文收紧过，截断后要继续就得先压缩会话（`limit` = 本次字符上限）。
+    pub const RESULT_TRUNCATED_CONTEXT: &str = "result.truncated.context";
     /// 目的：三档分级的中文标签（CLI 归成「成功 / 警告 / 失败」时用；界面用图标与颜色）。
     pub const LABEL_OK: &str = "cli.ok";
     /// 目的：见 `LABEL_OK`。
@@ -136,6 +138,7 @@ pub mod codes {
         RESULT_TRUNCATED,
         RESULT_TRUNCATED_COMMAND,
         RESULT_TRUNCATED_READ,
+        RESULT_TRUNCATED_CONTEXT,
         LABEL_OK,
         LABEL_WARNING,
         LABEL_ERROR,
