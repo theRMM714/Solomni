@@ -33,7 +33,7 @@ use crate::capabilities::workspace::domain::asset::{AssetScanner, FileVersion};
 use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
 use crate::kernel::api::types::Tier;
 use crate::kernel::ports::ProcessRunner;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

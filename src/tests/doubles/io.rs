@@ -10,6 +10,7 @@ impl InMemorySysIo {
         InMemorySysIo {
             files: Mutex::new(BTreeMap::new()),
             fail: None,
+            fail_paths: Mutex::new(BTreeSet::new()),
             lossy: false,
             cut: false,
             active: AtomicUsize::new(0),
@@ -30,6 +31,23 @@ impl InMemorySysIo {
     pub(crate) fn fail_with(mut self, msg: &str) -> InMemorySysIo {
         self.fail = Some(msg.to_string());
         self
+    }
+
+    /// 目的：只让某个路径写失败（事务的"第 N 个失败"用例）。
+    pub(crate) fn fail_on(&self, parts: &[&str]) {
+        self.fail_paths.lock().expect("锁").insert(p(parts));
+    }
+
+    fn failure_for(&self, path: &std::path::Path) -> Option<String> {
+        if let Some(m) = &self.fail {
+            return Some(m.clone());
+        }
+        let key = path.to_string_lossy().into_owned();
+        self.fail_paths
+            .lock()
+            .expect("锁")
+            .contains(&key)
+            .then(|| "磁盘故障".to_string())
     }
 
     /// 目的：让每次读取慢一点：并发（峰值 > 1）与串行（峰值恒为 1）因此可观测。
@@ -192,15 +210,148 @@ impl SysIo for InMemorySysIo {
         Ok(())
     }
 
-    fn write(&self, path: &std::path::Path, content: &str) -> Result<(), String> {
-        if let Some(m) = &self.fail {
-            return Err(m.clone());
+    fn mutate(
+        &self,
+        path: &std::path::Path,
+        expect: &crate::capabilities::tools::ports::Expect,
+        mutation: crate::capabilities::tools::ports::Mutation,
+    ) -> Result<
+        crate::capabilities::tools::ports::WriteReceipt,
+        crate::capabilities::tools::ports::WriteFault,
+    > {
+        use crate::capabilities::tools::ports::{WriteFault, WriteReceipt};
+        if let Some(m) = self.failure_for(path) {
+            return Err(WriteFault::io(path, &m));
         }
-        self.files
-            .lock()
-            .expect("锁")
-            .insert(path.to_string_lossy().into_owned(), content.to_string());
-        Ok(())
+        let key = path.to_string_lossy().into_owned();
+        let mut files = self.files.lock().expect("锁");
+        let current = files.get(&key).cloned();
+        check_memory_expect(path, expect, current.as_deref())?;
+        let (text, changed, replaced) = memory_mutation(path, current.as_deref(), mutation)?;
+        let version = crate::capabilities::workspace::api::content_hash(text.as_bytes());
+        let total_lines = text.lines().count() as u32;
+        files.insert(key, text);
+        Ok(WriteReceipt {
+            version,
+            total_lines,
+            changed,
+            replaced,
+        })
+    }
+
+    fn transact(
+        &self,
+        ops: Vec<crate::capabilities::tools::ports::WriteOp>,
+    ) -> Result<
+        Vec<crate::capabilities::tools::ports::WriteReceipt>,
+        crate::capabilities::tools::ports::WriteFault,
+    > {
+        use crate::capabilities::tools::ports::{WriteFault, WriteReceipt};
+        let mut files = self.files.lock().expect("锁");
+        let mut next = files.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        let mut receipts: Vec<WriteReceipt> = Vec::with_capacity(ops.len());
+        for op in ops {
+            if let Some(m) = self.failure_for(&op.path) {
+                return Err(WriteFault::io(&op.path, &m));
+            }
+            let key = op.path.to_string_lossy().into_owned();
+            if !seen.insert(key.clone()) {
+                return Err(WriteFault::new(
+                    "FS_DUPLICATE_PATH",
+                    format!("同一个路径在一次事务里出现了两次：{}；没有写盘。", key),
+                ));
+            }
+            let current = next.get(&key).cloned();
+            check_memory_expect(&op.path, &op.expect, current.as_deref())?;
+            let (text, changed, replaced) =
+                memory_mutation(&op.path, current.as_deref(), op.mutation)?;
+            let version = crate::capabilities::workspace::api::content_hash(text.as_bytes());
+            let total_lines = text.lines().count() as u32;
+            next.insert(key, text);
+            receipts.push(WriteReceipt {
+                version,
+                total_lines,
+                changed,
+                replaced,
+            });
+        }
+        *files = next;
+        Ok(receipts)
+    }
+}
+
+/// 目的：内存替身的 CAS 校验（与 `FsSysIo` 同一语义）。
+fn check_memory_expect(
+    path: &std::path::Path,
+    expect: &crate::capabilities::tools::ports::Expect,
+    current: Option<&str>,
+) -> Result<(), crate::capabilities::tools::ports::WriteFault> {
+    use crate::capabilities::tools::ports::{Expect, WriteFault};
+    match expect {
+        Expect::Absent => {
+            if current.is_some() {
+                return Err(WriteFault::already_exists(path));
+            }
+        }
+        Expect::Version(want) => match current {
+            None => return Err(WriteFault::missing(path)),
+            Some(text) => {
+                let now = crate::capabilities::workspace::api::content_hash(text.as_bytes());
+                if &now != want {
+                    return Err(WriteFault::stale(path, want, &now));
+                }
+            }
+        },
+    }
+    Ok(())
+}
+
+/// 目的：内存替身的变换（与 `FsSysIo` 同一语义）。
+fn memory_mutation(
+    path: &std::path::Path,
+    current: Option<&str>,
+    mutation: crate::capabilities::tools::ports::Mutation,
+) -> Result<
+    (
+        String,
+        Vec<crate::capabilities::tools::api::LineRange>,
+        usize,
+    ),
+    crate::capabilities::tools::ports::WriteFault,
+> {
+    use crate::capabilities::tools::api::LineRange;
+    use crate::capabilities::tools::domain::systool::{LiteralFault, apply_literal_edit};
+    use crate::capabilities::tools::ports::{Mutation, WriteFault};
+    match mutation {
+        Mutation::Replace(text) => {
+            let total = text.lines().count() as u32;
+            let changed = if total == 0 {
+                Vec::new()
+            } else {
+                vec![LineRange::new(1, total)]
+            };
+            Ok((text, changed, 0))
+        }
+        Mutation::Edit { old, new, all } => {
+            let Some(hay) = current else {
+                return Err(WriteFault::missing(path));
+            };
+            match apply_literal_edit(hay, &old, &new, all) {
+                Ok((out, changed, n)) => Ok((
+                    out,
+                    changed
+                        .into_iter()
+                        .map(|(from, to)| LineRange::new(from, to))
+                        .collect(),
+                    n,
+                )),
+                Err(LiteralFault::NotFound) => Err(WriteFault::anchor_not_found(path)),
+                Err(LiteralFault::Ambiguous { lines }) => {
+                    Err(WriteFault::anchor_ambiguous(path, lines.len()))
+                }
+            }
+        }
     }
 }
 

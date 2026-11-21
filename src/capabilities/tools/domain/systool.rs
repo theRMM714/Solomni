@@ -327,6 +327,60 @@ pub(crate) fn find_all(hay: &str, needle: &str) -> Vec<usize> {
     out
 }
 
+/// 目的：字面替换不成立的原因（机制层在锁内复算时用；文案由调用方决定）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LiteralFault {
+    /// 目的：一处也没找到。
+    NotFound,
+    /// 目的：命中多处，而这次要求唯一；附带每处所在行号。
+    Ambiguous { lines: Vec<usize> },
+}
+
+/// 目的：字面替换的结果：新内容、改动行区间（1 起）、替换处数。
+pub(crate) type LiteralEdit = (String, Vec<(u32, u32)>, usize);
+
+/// 目的：按字面替换并算出新内容里被改到的行区间；`all=false` 要求恰好一处命中。
+/// 约束：返回的行区间已 clamp 到新内容行数、排序并合并；`old` 为空一律视为找不到。
+pub(crate) fn apply_literal_edit(
+    hay: &str,
+    old: &str,
+    new: &str,
+    all: bool,
+) -> Result<LiteralEdit, LiteralFault> {
+    let hits = find_all(hay, old);
+    if hits.is_empty() {
+        return Err(LiteralFault::NotFound);
+    }
+    if hits.len() > 1 && !all {
+        return Err(LiteralFault::Ambiguous {
+            lines: hits.iter().map(|i| line_of(hay, *i)).collect(),
+        });
+    }
+    let chosen: Vec<usize> = if all { hits.clone() } else { vec![hits[0]] };
+    let mut out = String::with_capacity(hay.len() + new.len());
+    let mut last = 0usize;
+    let mut changed: Vec<(u32, u32)> = Vec::new();
+    for at in &chosen {
+        out.push_str(&hay[last..*at]);
+        let start = line_of(&out, out.len()) as u32;
+        out.push_str(new);
+        let end = start + new.matches('\n').count() as u32;
+        changed.push((start, end));
+        last = at + old.len();
+    }
+    out.push_str(&hay[last..]);
+    let total_lines = out.lines().count();
+    let changed: Vec<(u32, u32)> = changed
+        .into_iter()
+        .map(|(from, to)| {
+            let from = from.min(total_lines.max(1) as u32);
+            (from, to.min(total_lines.max(1) as u32).max(from))
+        })
+        .collect();
+    let n = chosen.len();
+    Ok((out, changed, n))
+}
+
 /// 目的："是不是只差空白"：按行比较（每行内空白折叠）。命中则给（行号, 该行原文）——模型据此改对缩进。
 pub(crate) fn near_match(hay: &str, old: &str) -> Option<(usize, String)> {
     fn flat(line: &str) -> String {

@@ -3,7 +3,9 @@
 //! 不管：外部进程执行与围栏授权释放——那是 kernel 共享的 `ProcessRunner` / `FenceHost`。
 //! 联动：由 `service.rs` 持有（R12）；kernel 端口见 `src/kernel/ports.rs`。
 
+use crate::capabilities::tools::api::LineRange;
 use crate::capabilities::tools::domain::roles::SystemTools;
+use std::path::{Path, PathBuf};
 
 /// 目的：工具总表、角色表与名字表的加载端口：读 `systools/tools.yaml` + `systools/roles.yaml` + `systools/names.yaml`（机制在适配层）。
 pub trait SystoolsSource {
@@ -30,6 +32,141 @@ pub struct DirEntry {
     pub bytes: u64,
 }
 
+/// 目的：一次写入对磁盘现状的期望——拿它做写时 CAS，检查与写盘在同一把锁里。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Expect {
+    /// 目的：这个路径必须还不存在（新建文件）。
+    Absent,
+    /// 目的：这个路径的整份内容必须仍是这个 SHA-256。
+    Version(String),
+}
+
+/// 目的：一次写入要做的变换；机制层按当前内容重新执行，不直接信任调用方算好的结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Mutation {
+    /// 目的：整份替换成这段文本。
+    Replace(String),
+    /// 目的：按字面替换；`all=false` 时要求恰好一处命中。
+    Edit { old: String, new: String, all: bool },
+}
+
+/// 目的：事务里的一项写入。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriteOp {
+    /// 目的：要写的真实路径。
+    pub path: PathBuf,
+    /// 目的：写之前的磁盘版本期望。
+    pub expect: Expect,
+    /// 目的：写什么。
+    pub mutation: Mutation,
+}
+
+/// 目的：一次成功写入的回执：新版本、逻辑行数、改动行区间与替换处数。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriteReceipt {
+    /// 目的：写后整份内容的 SHA-256。
+    pub version: String,
+    /// 目的：写后逻辑行数（与 read 的 `lines()` 同口径）。
+    pub total_lines: u32,
+    /// 目的：本次改动落到新版本里的行区间（1 起、闭区间、已合并）。
+    pub changed: Vec<LineRange>,
+    /// 目的：字面替换的命中处数；整份替换恒为 0。
+    pub replaced: usize,
+}
+
+/// 目的：写盘失败的稳定形状：错误码给模型/UI 分流，文案直接回给模型。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriteFault {
+    /// 目的：稳定错误码（FS_STALE_VERSION / FS_ALREADY_EXISTS 等）。
+    pub code: &'static str,
+    /// 目的：给模型看的中文说明。
+    pub message: String,
+}
+
+impl WriteFault {
+    /// 目的：按错误码与文案造一个写盘失败。
+    pub fn new(code: &'static str, message: String) -> WriteFault {
+        WriteFault { code, message }
+    }
+
+    /// 目的：磁盘上的版本已经不是调用方以为的那一份。
+    pub fn stale(path: &Path, expected: &str, current: &str) -> WriteFault {
+        WriteFault::new(
+            "FS_STALE_VERSION",
+            format!(
+                "{} 在你读过之后又被改动过（内容与当时不同：期望 {}，现在是 {}）：请重新 read 一遍再决定怎么写，不要凭记忆覆盖。",
+                path.display(),
+                expected,
+                current
+            ),
+        )
+    }
+
+    /// 目的：想新建的路径已经存在（别的写者抢先建成）。
+    pub fn already_exists(path: &Path) -> WriteFault {
+        WriteFault::new(
+            "FS_ALREADY_EXISTS",
+            format!(
+                "{} 在写入前已经存在（别的写者抢先建成）：这次没有覆盖它，请重新 read 后再决定。",
+                path.display()
+            ),
+        )
+    }
+
+    /// 目的：期望改已有文件，但文件已经不在了。
+    pub fn missing(path: &Path) -> WriteFault {
+        WriteFault::new(
+            "FS_NOT_FOUND",
+            format!("{} 在写入前已经不存在：这次没有写盘。", path.display()),
+        )
+    }
+
+    /// 目的：按字面找不到要替换的原文。
+    pub fn anchor_not_found(path: &Path) -> WriteFault {
+        WriteFault::new(
+            "FS_ANCHOR_NOT_FOUND",
+            format!(
+                "{} 里找不到 old_string（按字面匹配）；文件在读取之后可能已被改动，请重读后再改。",
+                path.display()
+            ),
+        )
+    }
+
+    /// 目的：按字面命中多处，而这次要求唯一。
+    pub fn anchor_ambiguous(path: &Path, hits: usize) -> WriteFault {
+        WriteFault::new(
+            "FS_ANCHOR_AMBIGUOUS",
+            format!(
+                "{} 里 old_string 命中 {} 处，而这次要求唯一：补足上下文，或改用整份替换。",
+                path.display(),
+                hits
+            ),
+        )
+    }
+
+    /// 目的：文件不是合法 UTF-8，不能按文本改写。
+    pub fn invalid_utf8(path: &Path) -> WriteFault {
+        WriteFault::new(
+            "FS_INVALID_UTF8",
+            format!(
+                "{} 含非法 UTF-8 字节，本程序不猜编码：改写会把整份文件重写成 UTF-8，所以没有写盘。",
+                path.display()
+            ),
+        )
+    }
+
+    /// 目的：其它机制错误。
+    pub fn io(path: &Path, why: impl std::fmt::Display) -> WriteFault {
+        WriteFault::new("FS_IO", format!("{} 写盘失败：{}", path.display(), why))
+    }
+}
+
+impl std::fmt::Display for WriteFault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}] {}", self.code, self.message)
+    }
+}
+
 /// 目的：内置文件工具的读写端口：机制在适配层，放行/寻址/越界在本能力。
 ///   读严格按 UTF-8 解码，非法字节如实标注；写一律 UTF-8；列目录只报名字/类型/大小。
 pub trait SysIo: Send + Sync {
@@ -37,7 +174,17 @@ pub trait SysIo: Send + Sync {
     /// 目的：整份文件的 SHA-256；不存在 = Ok(None)，其它错误如实报。
     /// 约束：按原始字节流式算，不经过 UTF-8 解码；不用于判断目录。
     fn fingerprint(&self, path: &std::path::Path) -> Result<Option<String>, String>;
-    fn write(&self, path: &std::path::Path, content: &str) -> Result<(), String>;
+    /// 目的：锁内读当前版本 → 校验 `expect` → 应用 `mutation` → 原子替换。
+    /// 约束：检查与写盘在同一把进程内按路径锁里；版本不符时不写盘。
+    fn mutate(
+        &self,
+        path: &std::path::Path,
+        expect: &Expect,
+        mutation: Mutation,
+    ) -> Result<WriteReceipt, WriteFault>;
+    /// 目的：一组跨文件写入：全部校验、全部暂存，发布失败时把已发布的按逆序回滚。
+    /// 约束：同一路径只允许出现一次；空事务直接成功。
+    fn transact(&self, ops: Vec<WriteOp>) -> Result<Vec<WriteReceipt>, WriteFault>;
     /// 列一个目录（按名字排序）。路径不是目录时如实报错——调用方据此把 read 的失败引导到 list。
     fn list(&self, path: &std::path::Path) -> Result<Vec<DirEntry>, String>;
     /// 校验 `path` 的真实落点仍在 `root` 之内：词法上的根内路径可能是符号链接 / junction，

@@ -381,7 +381,12 @@ fn sys_io_double_reads_writes_and_propagates_failure() {
     assert_eq!(r.text, "内容");
     assert_eq!(r.bytes, "内容".len(), "bytes 是原始字节数，不是字符数");
     assert!(!r.lossy && !r.cut, "替身不做解码猜测，也不截断");
-    io.write(&f, "改写").expect("写成功");
+    io.mutate(
+        &f,
+        &crate::capabilities::tools::ports::Expect::Version(r.hash.clone()),
+        crate::capabilities::tools::ports::Mutation::Replace("改写".to_string()),
+    )
+    .expect("写成功");
     assert_eq!(
         io.get(&["w", "note.txt"]).as_deref(),
         Some("改写"),
@@ -397,7 +402,101 @@ fn sys_io_double_reads_writes_and_propagates_failure() {
 
     let bad = InMemorySysIo::new().fail_with("磁盘故障");
     assert_eq!(bad.read(&f).err().expect("应当失败"), "磁盘故障");
-    assert_eq!(bad.write(&f, "x").unwrap_err(), "磁盘故障");
+    let fault = bad
+        .mutate(
+            &f,
+            &crate::capabilities::tools::ports::Expect::Absent,
+            crate::capabilities::tools::ports::Mutation::Replace("x".to_string()),
+        )
+        .unwrap_err();
+    assert_eq!(fault.code, "FS_IO");
+    assert!(fault.message.contains("磁盘故障"), "{}", fault.message);
+}
+
+#[test]
+fn sys_io_double_mutate_enforces_expectations_and_transact_is_all_or_nothing() {
+    use crate::capabilities::tools::api::LineRange;
+    use crate::capabilities::tools::ports::{Expect, Mutation, WriteOp};
+
+    let io = InMemorySysIo::new();
+    let f = abs(&["w", "note.txt"]);
+    io.seed(&["w", "note.txt"], "一\n二\n");
+    let before = io.read(&f).expect("读成功");
+    let receipt = io
+        .mutate(
+            &f,
+            &Expect::Version(before.hash.clone()),
+            Mutation::Edit {
+                old: "二".to_string(),
+                new: "贰".to_string(),
+                all: false,
+            },
+        )
+        .expect("编辑成功");
+    assert_eq!(io.get(&["w", "note.txt"]).as_deref(), Some("一\n贰\n"));
+    assert_eq!(receipt.changed, vec![LineRange::new(2, 2)]);
+    assert_eq!(receipt.replaced, 1);
+
+    // 版本已变时再写：锁内版本比较失败，内容保持不动。
+    let stale = io
+        .mutate(
+            &f,
+            &Expect::Version(before.hash),
+            Mutation::Replace("覆盖".to_string()),
+        )
+        .unwrap_err();
+    assert_eq!(stale.code, "FS_STALE_VERSION");
+    assert_eq!(io.get(&["w", "note.txt"]).as_deref(), Some("一\n贰\n"));
+
+    // 新建语义：已存在就不再覆盖。
+    let exists = io
+        .mutate(&f, &Expect::Absent, Mutation::Replace("覆盖".to_string()))
+        .unwrap_err();
+    assert_eq!(exists.code, "FS_ALREADY_EXISTS");
+
+    // 事务：第 2 个路径失败时，第 1 个也不能留下。
+    let a = abs(&["w", "a.txt"]);
+    let b = abs(&["w", "b.txt"]);
+    io.fail_on(&["w", "b.txt"]);
+    let err = io
+        .transact(vec![
+            WriteOp {
+                path: a.clone(),
+                expect: Expect::Absent,
+                mutation: Mutation::Replace("甲".to_string()),
+            },
+            WriteOp {
+                path: b.clone(),
+                expect: Expect::Absent,
+                mutation: Mutation::Replace("乙".to_string()),
+            },
+        ])
+        .unwrap_err();
+    assert_eq!(err.code, "FS_IO");
+    assert_eq!(io.get(&["w", "a.txt"]), None, "事务失败不能留下半个结果");
+    assert_eq!(io.get(&["w", "b.txt"]), None);
+}
+
+#[test]
+fn sys_io_double_transact_rejects_the_same_path_twice() {
+    use crate::capabilities::tools::ports::{Expect, Mutation, WriteOp};
+    let io = InMemorySysIo::new();
+    let f = abs(&["w", "same.txt"]);
+    let err = io
+        .transact(vec![
+            WriteOp {
+                path: f.clone(),
+                expect: Expect::Absent,
+                mutation: Mutation::Replace("一".to_string()),
+            },
+            WriteOp {
+                path: f,
+                expect: Expect::Absent,
+                mutation: Mutation::Replace("二".to_string()),
+            },
+        ])
+        .unwrap_err();
+    assert_eq!(err.code, "FS_DUPLICATE_PATH");
 }
 
 // ---------- HistoryStore ----------
