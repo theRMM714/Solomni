@@ -805,6 +805,8 @@ impl WorkStore for InMemoryWorkStore {
 pub(crate) struct InMemorySysIo {
     pub(crate) files: Mutex<BTreeMap<String, String>>,
     pub(crate) fail: Option<String>,
+    // 只在指定路径上失败：事务用例据此让"第 2 个文件"失败，验证前面的不会被留下。
+    pub(crate) fail_paths: Mutex<BTreeSet<String>>,
     // 读取标注：模拟"超过单次上限"与"含非法 UTF-8"的文件（工具必须如实标注，而不是照改）。
     pub(crate) lossy: bool,
     pub(crate) cut: bool,

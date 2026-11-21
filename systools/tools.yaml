@@ -29,7 +29,7 @@ tools:
   write:
     capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
-    desc: 整份写入文本文件（UTF-8）：文件不存在则新建；已存在则整份覆盖。受管文件（主线或你的工作线里的路径）**要求你当前上下文里仍能完整看到它这一版**（读过、或你刚刚整份写过）；读后它又被改过会被拒绝，先重读。新建或未受管文件不要求先读；只改一处请用 edit。
+    desc: 整份写入文本文件（UTF-8）：文件不存在则新建；已存在则整份覆盖。受管文件（主线或你的工作线里的路径）**要求你当前上下文里仍能完整看到它这一版**（读过、或你刚刚整份写过）；读后它又被改过会被拒绝（FS_STALE_VERSION），先重读。新建或未受管文件不要求先读；只改一处请用 edit。
     params:
       path:
         type: string
@@ -42,7 +42,7 @@ tools:
   edit:
     capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
-    desc: 对已存在的文本文件做一处精确替换（按字面匹配，不动别处）。受管文件要求你当前上下文里有它这一版；replace_all 要求看过全文。
+    desc: 对已存在的文本文件做一处精确替换（按字面匹配，不动别处）。受管文件要求你当前上下文里有它这一版；replace_all 要求看过全文。落盘前会在锁内按读到的版本再核一次，并对当前内容重新定位锚点：版本变了返回 FS_STALE_VERSION，锚点不存在/不唯一返回 FS_ANCHOR_NOT_FOUND / FS_ANCHOR_AMBIGUOUS。
     params:
       path:
         type: string
@@ -63,7 +63,7 @@ tools:
   patch:
     capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
-    desc: 用一段**自由格式**的补丁文本改文件（信封之后原样跟补丁；大段内容不要塞进 JSON）。语法见 patch_guide；删除文件用 delete，不要写 *** Delete File。
+    desc: 用一段**自由格式**的补丁文本改文件（信封之后原样跟补丁；大段内容不要塞进 JSON）。多文件改动走一个写盘事务：先全部校验/暂存，再发布；任一文件失败就整体回滚，不会留下"前面已写"。语法见 patch_guide；删除文件用 delete，不要写 *** Delete File。
   delete:
     capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致

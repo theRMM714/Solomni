@@ -226,7 +226,12 @@ fn fs_sys_io_reads_utf8_flags_lossy_and_truncation_and_creates_parents() {
     let root = scratch("fs-sysio");
     let f = root.join("deep").join("note.txt");
     let io = FsSysIo::default();
-    io.write(&f, "你好，世界").expect("写要自动建父目录");
+    io.mutate(
+        &f,
+        &crate::capabilities::tools::ports::Expect::Absent,
+        crate::capabilities::tools::ports::Mutation::Replace("你好，世界".to_string()),
+    )
+    .expect("写要自动建父目录");
     let r = io.read(&f).expect("读回");
     assert_eq!(r.text, "你好，世界");
     assert_eq!(r.bytes, "你好，世界".len(), "bytes 是文件原始字节数");
@@ -261,6 +266,167 @@ fn fs_sys_io_reads_utf8_flags_lossy_and_truncation_and_creates_parents() {
             .contains("读取失败"),
         "缺文件要如实报错"
     );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 写盘是 CAS：版本对不上就不写；新建不覆盖；编辑在锁内重新找锚点。
+#[test]
+fn fs_sys_io_mutate_is_compare_and_swap_and_edit_rechecks_the_anchor() {
+    use crate::capabilities::tools::api::LineRange;
+    use crate::capabilities::tools::ports::{Expect, Mutation};
+
+    let root = scratch("fs-sysio-mutate");
+    let io = FsSysIo::default();
+    let f = root.join("note.txt");
+    let first = io
+        .mutate(
+            &f,
+            &Expect::Absent,
+            Mutation::Replace("一\n二\n".to_string()),
+        )
+        .expect("新建成功");
+    assert_eq!(first.total_lines, 2);
+    assert_eq!(first.changed, vec![LineRange::new(1, 2)]);
+
+    // 版本已变时再写：拒绝，且不覆盖对方写入的内容。
+    std::fs::write(&f, "外部改过\n").expect("模拟外部改动");
+    let stale = io
+        .mutate(
+            &f,
+            &Expect::Version(first.version.clone()),
+            Mutation::Replace("覆盖".to_string()),
+        )
+        .unwrap_err();
+    assert_eq!(stale.code, "FS_STALE_VERSION");
+    assert_eq!(
+        std::fs::read_to_string(&f).expect("读回"),
+        "外部改过\n",
+        "版本不符时一个字都不能写"
+    );
+
+    let exists = io
+        .mutate(&f, &Expect::Absent, Mutation::Replace("覆盖".to_string()))
+        .unwrap_err();
+    assert_eq!(exists.code, "FS_ALREADY_EXISTS");
+
+    let current = io.fingerprint(&f).expect("取版本").expect("文件在");
+    let edited = io
+        .mutate(
+            &f,
+            &Expect::Version(current),
+            Mutation::Edit {
+                old: "外部".to_string(),
+                new: "改后".to_string(),
+                all: false,
+            },
+        )
+        .expect("编辑成功");
+    assert_eq!(std::fs::read_to_string(&f).expect("读回"), "改后改过\n");
+    assert_eq!(edited.changed, vec![LineRange::new(1, 1)]);
+    assert_eq!(edited.replaced, 1);
+
+    let missing = io
+        .mutate(
+            &f,
+            &Expect::Version(edited.version.clone()),
+            Mutation::Edit {
+                old: "不存在的锚点".to_string(),
+                new: "x".to_string(),
+                all: false,
+            },
+        )
+        .unwrap_err();
+    assert_eq!(missing.code, "FS_ANCHOR_NOT_FOUND");
+    assert_eq!(std::fs::read_to_string(&f).expect("读回"), "改后改过\n");
+
+    // 落盘后不留临时文件。
+    let names: Vec<String> = std::fs::read_dir(&root)
+        .expect("列目录")
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        names.iter().all(|n| !n.contains(".solomni-")),
+        "临时文件必须清理：{:?}",
+        names
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 事务：先全部校验/暂存，再发布；后面失败时前面的文件不能留下。
+#[test]
+fn fs_sys_io_transact_commits_together_or_not_at_all() {
+    use crate::capabilities::tools::ports::{Expect, Mutation, WriteOp};
+
+    let root = scratch("fs-sysio-transact");
+    let io = FsSysIo::default();
+    let a = root.join("a.txt");
+    let b = root.join("b.txt");
+    let receipts = io
+        .transact(vec![
+            WriteOp {
+                path: a.clone(),
+                expect: Expect::Absent,
+                mutation: Mutation::Replace("甲".to_string()),
+            },
+            WriteOp {
+                path: b.clone(),
+                expect: Expect::Absent,
+                mutation: Mutation::Replace("乙".to_string()),
+            },
+        ])
+        .expect("事务成功");
+    assert_eq!(receipts.len(), 2);
+    assert_eq!(std::fs::read_to_string(&a).expect("读回"), "甲");
+    assert_eq!(std::fs::read_to_string(&b).expect("读回"), "乙");
+
+    // 同一路径出现两次：整笔拒绝，不猜哪次算数。
+    let dup = io
+        .transact(vec![
+            WriteOp {
+                path: a.clone(),
+                expect: Expect::Absent,
+                mutation: Mutation::Replace("一".to_string()),
+            },
+            WriteOp {
+                path: a.clone(),
+                expect: Expect::Absent,
+                mutation: Mutation::Replace("二".to_string()),
+            },
+        ])
+        .unwrap_err();
+    assert_eq!(dup.code, "FS_DUPLICATE_PATH");
+
+    // 第 2 个路径的父级是个文件：校验阶段就失败，第 1 个不能先写出去。
+    let blocker = root.join("blocker");
+    std::fs::write(&blocker, "占位").expect("造父级文件");
+    let c = root.join("c.txt");
+    let d = blocker.join("d.txt");
+    let err = io
+        .transact(vec![
+            WriteOp {
+                path: c.clone(),
+                expect: Expect::Absent,
+                mutation: Mutation::Replace("丙".to_string()),
+            },
+            WriteOp {
+                path: d,
+                expect: Expect::Absent,
+                mutation: Mutation::Replace("丁".to_string()),
+            },
+        ])
+        .unwrap_err();
+    assert_eq!(err.code, "FS_IO");
+    assert!(!c.exists(), "事务失败不能留下第 1 个文件");
+
+    // 回滚原语：有备份就写回，没有备份就删掉。
+    crate::capabilities::tools::detail::sys_io::rollback(&a, Some("备份".as_bytes()))
+        .expect("写回备份内容");
+    assert_eq!(std::fs::read_to_string(&a).expect("读回"), "备份");
+    std::fs::write(&c, "新").expect("造新文件");
+    crate::capabilities::tools::detail::sys_io::rollback(&c, None).expect("删掉新文件");
+    assert!(!c.exists());
+
     let _ = std::fs::remove_dir_all(&root);
 }
 

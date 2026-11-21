@@ -132,6 +132,55 @@ pub(crate) fn a_failing_patch_block_writes_nothing_at_all() {
 }
 
 #[test]
+pub(crate) fn a_patch_whose_second_file_fails_writes_neither() {
+    // 事务在第 2 个文件失败：第 1 个也不能留下（不是"前面的已经写入"）。
+    let first = s(&["w", "m0", "a.txt"]);
+    let second = s(&["w", "m0", "b.txt"]);
+    let body = format!(
+        "*** Add File: {}\n甲\n*** End File\n*** Add File: {}\n乙\n*** End File\n",
+        first, second
+    );
+    let raw = format!("{{\"type\":\"tool\",\"name\":\"patch\"}}\n{}", body);
+    let io = Arc::new(InMemorySysIo::new());
+    io.fail_on(&["w", "m0", "b.txt"]);
+    let mut member = BTreeMap::new();
+    member.insert(
+        "m0".to_string(),
+        vec![raw, "{\"type\":\"say\",\"text\":\"知道了\"}".to_string()],
+    );
+    let mut core = core_with_io_gateway(
+        vec![module_of("m0")],
+        gw(member, vec!["[]".into()]),
+        Arc::clone(&io),
+    );
+    let sid = core
+        .create_work(work("w", WorkMode::Single, &["m0"]))
+        .unwrap()
+        .sid;
+    let events = with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "加两个文件",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
+    let views = tool_views(&events);
+    assert!(!views[0].ok, "{}", views[0].output);
+    assert!(
+        views[0].output.contains("没有任何文件被写入"),
+        "{}",
+        views[0].output
+    );
+    assert_eq!(io.get(&["w", "m0", "a.txt"]), None, "第 1 个也不许留");
+    assert_eq!(io.get(&["w", "m0", "b.txt"]), None);
+}
+
+#[test]
 pub(crate) fn a_patch_without_end_marker_is_refused_with_the_line() {
     // 少了 End File：不能猜哪里是结尾（否则补丁后面那句话会被写进文件）
     let target = s(&["w", "m0", "out.md"]);

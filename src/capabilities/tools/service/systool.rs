@@ -7,7 +7,7 @@ use crate::capabilities::tools::api::{
     Coverage, GateFile, LineRange, Need, ObservationFact, ObservationSource,
 };
 use crate::capabilities::tools::domain::systool::*;
-use crate::capabilities::tools::ports::SysIo;
+use crate::capabilities::tools::ports::{Expect, Mutation, SysIo, WriteFault, WriteOp};
 use crate::capabilities::workspace::api::{Place, Sandbox};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -26,6 +26,16 @@ fn gate_fail(
 ) -> crate::kernel::api::types::ToolOutcome {
     let mut out = fail(fault.message(path));
     out.push_note(gate_note(fault, path));
+    out
+}
+
+/// 目的：把写盘失败同时写进 output 与结构化说明（稳定错误码供 UI / 模型分流）。
+fn write_fail(fault: &WriteFault, spec: &str) -> crate::kernel::api::types::ToolOutcome {
+    let mut out = fail(format!("[{}] {}", fault.code, fault.message));
+    out.push_note(
+        crate::kernel::api::note::Note::new(fault.code, crate::kernel::api::note::Severity::Error)
+            .arg("path", spec),
+    );
     out
 }
 
@@ -182,16 +192,6 @@ fn observe(
         total_lines: total_lines as u32,
         source,
     });
-}
-
-/// 目的：把"哪几行被改过"折成观察覆盖：单处 = 一个区间，多处 = 多区间。
-fn coverage_of_changes(lines: &[(u32, u32)]) -> Coverage {
-    if lines.is_empty() {
-        return Coverage::Ranges(Vec::new());
-    }
-    Coverage::Ranges(crate::capabilities::tools::api::normalize_ranges(
-        lines.iter().map(|(from, to)| LineRange::new(*from, *to)),
-    ))
 }
 
 /// list：列目录（名字 / 是否目录 / 字节数，按名字排序）。
@@ -498,16 +498,22 @@ fn write(
             return fail(why);
         }
     }
-    if let Err(e) = io.write(path, content) {
-        return fail(e);
-    }
+    // 期望版本在锁内再核一次：检查与落盘之间被别人改过就整份拒绝，而不是覆盖回去。
+    let expect = match current.as_ref() {
+        Some(file) => Expect::Version(file.hash.clone()),
+        None => Expect::Absent,
+    };
+    let receipt = match io.mutate(path, &expect, Mutation::Replace(content.to_string())) {
+        Ok(receipt) => receipt,
+        Err(fault) => return write_fail(&fault, spec),
+    };
     obs.note_written(path, fnv1a(content));
     observe(
         obs,
         origin,
-        crate::capabilities::workspace::api::content_hash(content.as_bytes()),
+        receipt.version,
         Coverage::Full,
-        content.lines().count(),
+        receipt.total_lines as usize,
         ObservationSource::Write,
     );
     ToolOutcome::new(
@@ -580,6 +586,7 @@ fn edit(
             return gate_fail(&fault, spec);
         }
     }
+    let version = got.hash;
     let hay = got.text;
     let hits = find_all(&hay, old);
     if hits.is_empty() {
@@ -601,48 +608,30 @@ fn edit(
             lines.join("、")
         ));
     }
-    // 逐处替换并记下"新版本里哪几行是这次改出来的"：后续 edit 的锚点与门禁都靠它。
-    let chosen: Vec<usize> = if all { hits.clone() } else { vec![hits[0]] };
-    let mut out = String::new();
-    let mut last = 0usize;
-    let mut changed: Vec<(u32, u32)> = Vec::new();
-    for at in &chosen {
-        out.push_str(&hay[last..*at]);
-        let start = line_of(&out, out.len()) as u32;
-        out.push_str(new);
-        let end = start + new.matches('\n').count() as u32;
-        changed.push((start, end));
-        last = at + old.len();
-    }
-    out.push_str(&hay[last..]);
-    let n = chosen.len();
-    let total_lines = out.lines().count();
-    let changed: Vec<(u32, u32)> = changed
-        .into_iter()
-        .map(|(from, to)| {
-            let from = from.min(total_lines.max(1) as u32);
-            (from, to.min(total_lines.max(1) as u32).max(from))
-        })
-        .collect();
-    if let Err(e) = io.write(path, &out) {
-        return fail(e);
-    }
+    // 落盘交给 SysIo：锁内按"读到的那个版本"再校验，锚点也在同一份内容上重新定位。
+    let mutation = Mutation::Edit {
+        old: old.to_string(),
+        new: new.to_string(),
+        all,
+    };
+    let receipt = match io.mutate(path, &Expect::Version(version), mutation) {
+        Ok(receipt) => receipt,
+        Err(fault) => return write_fail(&fault, spec),
+    };
     obs.note_touched(path);
     observe(
         obs,
         origin,
-        crate::capabilities::workspace::api::content_hash(out.as_bytes()),
-        coverage_of_changes(&changed),
-        total_lines,
+        receipt.version,
+        Coverage::Ranges(receipt.changed),
+        receipt.total_lines as usize,
         ObservationSource::Edit,
     );
     ToolOutcome::new(
         true,
         format!(
             "[edit] 已改 {}（替换 {} 处；该文件现 {} 行）",
-            spec,
-            n,
-            out.lines().count()
+            spec, receipt.replaced, receipt.total_lines
         ),
     )
 }
@@ -735,6 +724,8 @@ fn apply_patch(
     let mut coverage: BTreeMap<PathBuf, Coverage> = BTreeMap::new();
     let mut sources: BTreeMap<PathBuf, ObservationSource> = BTreeMap::new();
     let mut places: BTreeMap<PathBuf, Place> = BTreeMap::new();
+    // 每个路径的磁盘基线：事务提交时在锁内再比一次（不能拿补丁算出的新内容当期望）。
+    let mut expects: BTreeMap<PathBuf, Expect> = BTreeMap::new();
     let mut lines: Vec<String> = Vec::new();
     for (i, b) in blocks.iter().enumerate() {
         let n = i + 1;
@@ -762,9 +753,32 @@ fn apply_patch(
             )),
             None => match io.read(&path) {
                 Ok(g) => Some((g.text, g.cut, g.lossy, g.hash)),
-                Err(_) => None,
+                Err(e) => match io.fingerprint(&path) {
+                    // 确实不存在：Add 才是新建。
+                    Ok(None) => None,
+                    // 文件在、但这次读不出来：不能当新建，否则后面的整份覆盖会把没读到的内容弄丢。
+                    Ok(Some(_)) => {
+                        return fail(block_fault(
+                            n,
+                            format!("读取 {} 失败，且它确实存在：{}；这次没有写盘。", spec, e),
+                        ));
+                    }
+                    Err(f) => {
+                        return fail(block_fault(
+                            n,
+                            format!("读取 {} 失败，也无法确认它是否存在：{}；{}", spec, e, f),
+                        ));
+                    }
+                },
             },
         };
+        if !order.contains(&path) {
+            let expect = match &source {
+                Some((_, _, _, hash)) => Expect::Version(hash.clone()),
+                None => Expect::Absent,
+            };
+            expects.insert(path.clone(), expect);
+        }
         // 每个路径只在第一块过门禁：同一份补丁里后面的块看到的是前面算出来的内容。
         if !order.contains(&path)
             && let Some(gate) = gate
@@ -875,16 +889,26 @@ fn apply_patch(
             order.push(path.clone());
         }
     }
-    // 全部就绪 → 写盘（一个文件只写一次）
-    for (i, path) in order.iter().enumerate() {
-        let content = pending.get(path).expect("刚刚算好");
-        if let Err(e) = io.write(path, content) {
+    // 全部就绪 → 一个事务写盘：任一文件失败，已发布的文件按原字节回滚。
+    let ops: Vec<WriteOp> = order
+        .iter()
+        .map(|path| WriteOp {
+            path: path.clone(),
+            expect: expects.remove(path).unwrap_or(Expect::Absent),
+            mutation: Mutation::Replace(pending.get(path).expect("刚刚算好").clone()),
+        })
+        .collect();
+    let receipts = match io.transact(ops) {
+        Ok(receipts) => receipts,
+        Err(fault) => {
             return fail(format!(
-                "[patch] 写第 {} 个文件失败：{}（它前面的文件已经写入，它后面的没有）",
-                i + 1,
-                e
+                "[patch] 写盘事务失败，**没有任何文件被写入**（已回滚）：{}",
+                fault.message
             ));
         }
+    };
+    for (path, receipt) in order.iter().zip(receipts) {
+        let content = pending.get(path).expect("刚刚算好");
         match sources.get(path) {
             Some(ObservationSource::PatchAdd) => obs.note_written(path, fnv1a(content)),
             _ => obs.note_touched(path),
@@ -894,9 +918,9 @@ fn apply_patch(
         observe(
             obs,
             &origin,
-            crate::capabilities::workspace::api::content_hash(content.as_bytes()),
+            receipt.version,
             coverage,
-            content.lines().count(),
+            receipt.total_lines as usize,
             sources
                 .get(path)
                 .copied()
