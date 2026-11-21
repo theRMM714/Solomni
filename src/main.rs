@@ -48,17 +48,17 @@ fn early_exit(flags: &presentation::cli::argv::Flags) -> Option<i32> {
 
 /// 目的：分配本实例的视图盘。返回「真的分配了」——真才在退出时释放。
 fn view_drive_begin(root: &Path, home: &Path) -> bool {
-    kernel::api::view_drive_begin(root, home)
+    kernel::api::view_drive::view_drive_begin(root, home)
 }
 
 /// 目的：只清扫视图盘的崩溃残留（不分配盘符）：每次启动都跑一遍，别让死登记与残留映射越积越多。
 fn view_drive_sweep(home: &Path) {
-    let _ = kernel::api::view_drive_sweep(home);
+    let _ = kernel::api::view_drive::view_drive_sweep(home);
 }
 
 /// 目的：退出时注销本进程的视图盘登记（最后一个使用者才真撤映射）。
 fn view_drive_release(home: &Path) {
-    kernel::api::view_drive_release(home);
+    kernel::api::view_drive::view_drive_release(home);
 }
 
 fn main() {
@@ -263,7 +263,7 @@ fn main() {
         fence_write_env.as_deref(),
         sandbox_cfg.policy.windows.write_acl,
     );
-    let requirements = kernel::api::SandboxRequirements {
+    let requirements = kernel::api::fence::SandboxRequirements {
         filesystem: sandbox_cfg.policy.enforce.filesystem
             == capabilities::catalog::registry::api::SandboxEnforceLevel::Require,
         network: sandbox_cfg.policy.enforce.network
@@ -274,10 +274,10 @@ fn main() {
         env_whitelist: sandbox_cfg.policy.enforce.env_whitelist
             == capabilities::catalog::registry::api::SandboxEnforceLevel::Require,
     };
-    let sandbox_mode = Arc::new(kernel::api::SandboxMode::new(
+    let sandbox_mode = Arc::new(kernel::api::fence::SandboxMode::new(
         requirements,
-        fence_cap.fs && (!kernel::api::HAS_EXTERNAL_ACL_STEP || authorized),
-        fence_cap.net && (!kernel::api::HAS_EXTERNAL_ACL_STEP || authorized),
+        fence_cap.fs && (!kernel::api::platform::HAS_EXTERNAL_ACL_STEP || authorized),
+        fence_cap.net && (!kernel::api::platform::HAS_EXTERNAL_ACL_STEP || authorized),
         fence_cap.tree,
         true,
         sandbox_cfg.policy.on_unavailable
@@ -797,7 +797,7 @@ mod prelude_tests {
         view_drive_sweep(&home);
         view_drive_release(&home);
         assert!(
-            kernel::api::view_codec().is_none(),
+            kernel::api::view_drive::view_codec().is_none(),
             "没有视图盘就没有编码器"
         );
     }

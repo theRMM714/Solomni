@@ -7,7 +7,8 @@
 #[test]
 pub(crate) fn a_guest_without_supported_clients_is_rejected_before_boot() {
     use crate::capabilities::vm::api::tier_readiness;
-    use crate::kernel::api::{ExecSpec as VmSpec, Tier};
+    use crate::kernel::api::types::ExecSpec as VmSpec;
+    use crate::kernel::api::types::Tier;
     let root = crate::tests::scratch("vm-guest-share-readiness");
     let probe = crate::kernel::detail::HostProbeAdapter;
     let arch = if cfg!(target_arch = "aarch64") {

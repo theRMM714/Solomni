@@ -118,7 +118,7 @@ pub(crate) fn attempt_with_tools(
         url,
         key,
         &body.to_string(),
-        crate::kernel::api::DEFAULT_LLM_TIMEOUT_SECS,
+        crate::kernel::api::types::DEFAULT_LLM_TIMEOUT_SECS,
         None,
     )
 }
@@ -138,7 +138,7 @@ pub(crate) fn attempt_raw(
         url,
         key,
         &body,
-        crate::kernel::api::DEFAULT_LLM_TIMEOUT_SECS,
+        crate::kernel::api::types::DEFAULT_LLM_TIMEOUT_SECS,
         None,
     )
 }

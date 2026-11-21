@@ -9,7 +9,7 @@ use crate::capabilities::vm::api::{
     package_setup_scripts, resolve_guest,
 };
 use crate::capabilities::workspace::api::Sandboxes;
-use crate::kernel::api::FenceSpec;
+use crate::kernel::api::fence::FenceSpec;
 use crate::kernel::ports::{HostProbe, Log};
 use std::path::PathBuf;
 use std::sync::Arc;

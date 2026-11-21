@@ -45,7 +45,7 @@ use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::conversation::session::api::{
     AgentSession, DecisionQueue, Gates, Persister, SessionEvent, SessionMeta,
 };
-use crate::kernel::api::SessionId;
+use crate::kernel::api::types::SessionId;
 use crate::kernel::ports::{AskUser, HostProbe};
 
 /// 目的：一次生成的输出方式：流式逐片，还是只要最终结果。

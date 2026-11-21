@@ -5,7 +5,7 @@
 //! 联动：装不上时如实降级（打印说明后照常执行）；降级原因分「本机 ABI 失效」（环境结论）与「profile 被拒」（写错，探针硬失败）。
 
 use super::{Capability, FENCE_FAILED, FenceVerdict, shell_command};
-use crate::kernel::api::FenceSpec;
+use crate::kernel::contracts::fence::FenceSpec;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::path::Path;
@@ -112,7 +112,7 @@ pub fn run_fenced(
     _prepared: bool,
     _home: Option<&std::path::Path>,
     command: &str,
-    policy: &crate::kernel::api::FenceRunPolicy,
+    policy: &crate::kernel::contracts::fence::FenceRunPolicy,
 ) -> i32 {
     if let Err(e) = install(spec, command) {
         let required = policy.require_fs || (policy.require_net && !spec.net);

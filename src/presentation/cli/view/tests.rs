@@ -54,9 +54,9 @@ fn tool(module: &str, ok: bool, args: &str) -> ToolCallView {
         name: "ls".into(),
         ok,
         severity: if ok {
-            crate::kernel::api::Severity::Info
+            crate::kernel::api::note::Severity::Info
         } else {
-            crate::kernel::api::Severity::Error
+            crate::kernel::api::note::Severity::Error
         },
         args: args.into(),
         output: String::new(),

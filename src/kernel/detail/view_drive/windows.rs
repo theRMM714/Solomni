@@ -234,7 +234,7 @@ fn lock_view_within(home: &Path, wait: std::time::Duration) -> Result<ViewGuard,
         .map_err(|_| "视图盘记录进程内锁已被毒化".to_string())?;
     std::fs::create_dir_all(home).map_err(|e| format!("建私有区失败：{}", e))?;
     // 跨进程那半是内核的文件锁契约；等多久是本模块自己的策略。
-    let file = crate::kernel::api::lock_within(&lock_path(home), wait, "视图盘记录")?;
+    let file = crate::kernel::detail::lock::lock_within(&lock_path(home), wait, "视图盘记录")?;
     Ok(ViewGuard {
         _proc: proc,
         _file: file,

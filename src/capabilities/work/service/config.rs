@@ -67,7 +67,7 @@ impl Work {
             ),
             pins: meta.exec.pins.clone(),
             runtime: self.runtime_report_for(registry, probe, &meta.exec),
-            runtimes_dir: crate::kernel::api::slash(&self.packages.runtimes_dir()),
+            runtimes_dir: crate::kernel::api::path::slash(&self.packages.runtimes_dir()),
             tier_ready: readiness.ready(),
             tier_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
             // 虚拟机档能不能选**与当前档位无关**：本机档会话也要如实告诉用户 vm 现在不可用（界面据此禁用）。
@@ -190,11 +190,11 @@ impl Work {
         }
         // 档位：与「开始」同一把尺子——虚拟机档的选型不成立（多版本未定版 / 定版不存在 / 路径冲突）如实拒绝。
         let tier = match edit.tier.as_str() {
-            "host" => crate::kernel::api::Tier::Host,
-            "vm" => crate::kernel::api::Tier::Vm,
+            "host" => crate::kernel::api::types::Tier::Host,
+            "vm" => crate::kernel::api::types::Tier::Vm,
             other => return Err(format!("未知执行档位：{}（只认 host / vm）", other)),
         };
-        let spec = crate::kernel::api::ExecSpec {
+        let spec = crate::kernel::api::types::ExecSpec {
             tier,
             guest: edit.guest.clone(),
             pins: edit.pins.clone(),
@@ -207,8 +207,8 @@ impl Work {
         }
         // 承载校验：前置条件不具备时**不允许改入虚拟机档**（用户环境问题，不是选型问题）；界面上的"能不能选"由
         // SessionConfig 的 tier_ready 说同一件事。已在虚拟机档上的会话只校验它自己那几项（基础根等），不拦模块/模型/定版/网络。
-        let staying_vm =
-            meta.exec.tier == crate::kernel::api::Tier::Vm && tier == crate::kernel::api::Tier::Vm;
+        let staying_vm = meta.exec.tier == crate::kernel::api::types::Tier::Vm
+            && tier == crate::kernel::api::types::Tier::Vm;
         if staying_vm {
             // 留在 vm 档：只校验用户这次填的基础根（填错路径就是填错路径），
             // 不拿"本机能不能提供 vm 档"去拦一条已经存在的会话。
@@ -315,8 +315,8 @@ impl Work {
                 new_children.push(cm);
             }
         }
-        let was_vm = meta.exec.tier == crate::kernel::api::Tier::Vm;
-        let is_vm = new_meta.exec.tier == crate::kernel::api::Tier::Vm;
+        let was_vm = meta.exec.tier == crate::kernel::api::types::Tier::Vm;
+        let is_vm = new_meta.exec.tier == crate::kernel::api::types::Tier::Vm;
         // 共享 guest 的装配按整棵树算：把这次的新值覆盖到作用域根的子树上，再出计划与沙箱。
         let (lease, tree, tree_plan) = if is_vm {
             let (lease, scope_meta) = guest_scope(self.history.as_ref(), &new_meta)?
@@ -481,7 +481,7 @@ impl Work {
     ) {
         let ev = serde_json::json!({
             "type": "config",
-            "ts": crate::kernel::api::unix_seconds(),
+            "ts": crate::kernel::api::procs::unix_seconds(),
             "mode": meta.mode,
             "tier": meta.exec.tier.as_str(),
             "guest": meta.exec.guest,

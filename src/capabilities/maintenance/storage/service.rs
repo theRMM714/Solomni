@@ -10,7 +10,7 @@ use crate::capabilities::maintenance::storage::api::{
 use crate::capabilities::maintenance::storage::domain::{self, safe_id};
 use crate::capabilities::maintenance::storage::ports::{GuestLiveness, SpaceReclaim, SpaceSurvey};
 use crate::capabilities::provision::api::Provision;
-use crate::kernel::api::JobState;
+use crate::kernel::api::types::JobState;
 use crate::kernel::ports::Log;
 use std::sync::{Arc, Mutex};
 

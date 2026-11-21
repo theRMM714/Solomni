@@ -31,22 +31,22 @@ pub trait Vm: Send + Sync {
     /// 按规格拉起会话级 guest（同一租约重复拉起 = 先销毁旧的）。
     fn guest_start(&self, spec: &GuestSpec) -> Result<(), String>;
     /// 在该租约的 guest 里跑一次工具（没有这个 guest = 如实失败）。
-    fn guest_run(&self, lease: &str, run: &GuestRun) -> crate::kernel::api::ToolOutcome;
+    fn guest_run(&self, lease: &str, run: &GuestRun) -> crate::kernel::api::types::ToolOutcome;
     /// 目的：按某个 agent 的围栏在 guest 里跑一次工具；通道不支持围栏就如实失败。
     fn guest_run_fenced(
         &self,
         lease: &str,
         run: &GuestRun,
-        fence: &crate::kernel::api::FenceSpec,
-    ) -> crate::kernel::api::ToolOutcome;
+        fence: &crate::kernel::api::fence::FenceSpec,
+    ) -> crate::kernel::api::types::ToolOutcome;
     /// 目的：在 guest 里跑一次可取消的围栏执行；默认退回 `guest_run_fenced`（测试 / 其它引擎）。
     fn guest_run_fenced_cancellable(
         &self,
         lease: &str,
         run: &GuestRun,
-        fence: &crate::kernel::api::FenceSpec,
+        fence: &crate::kernel::api::fence::FenceSpec,
         _cancel: Option<&std::sync::atomic::AtomicBool>,
-    ) -> crate::kernel::api::ToolOutcome {
+    ) -> crate::kernel::api::types::ToolOutcome {
         self.guest_run_fenced(lease, run, fence)
     }
     /// 目的：把模块声明的相对入口复制进 guest 本地并给执行位（共享盘不承载执行位：cifs 的合成权限位没有 x）。

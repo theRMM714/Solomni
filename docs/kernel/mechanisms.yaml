@@ -11,6 +11,14 @@
 #
 # 这份表由 T0 结构审查的 structure/kernel-mechanisms 与磁盘双向比对。
 # 第 0 层
+# 第 1 层
+# 第 2 层
+# 第 3 层
+# 第 4 层
+# 第 5 层
+# 第 6 层
+# 第 7 层
+# 第 0 层
 contracts/fence: 0
 contracts/note: 0
 detail/fs_meta: 0
@@ -18,7 +26,6 @@ detail/lock: 0
 detail/outbound: 0
 detail/procs: 0
 detail/unpack: 0
-domain/jobs: 0
 domain/layout: 0
 domain/name: 0
 domain/path: 0
@@ -35,6 +42,7 @@ domain/receipt: 1
 contracts/types: 2
 
 # 第 3 层
+domain/jobs: 3
 ports: 3
 
 # 第 4 层

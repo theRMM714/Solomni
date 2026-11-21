@@ -57,7 +57,7 @@ fn collect_files(root: &Path, out: &mut Vec<String>, prefix: &str) {
 /// 目的：路径本身是不是链接 / 联接（不跟随）。用量统计只数它本身，不递归进去。
 ///   跟随会重复计数（链接与真身各算一次），自指链接还会成环；`symlink_metadata` 只看链接本身。
 fn is_link(path: &Path) -> bool {
-    crate::kernel::api::is_link(path)
+    crate::kernel::api::fs_meta::is_link(path)
 }
 
 /// 递归累加一个区的文件数与字节（目录不计；链接按一个文件计、不跟随；单个文件 stat 失败按 0 计，不因此挡下整次统计）。
@@ -119,7 +119,7 @@ impl FsWorkspace {
         let mark = self.mark_path(session);
         match std::fs::read_to_string(&mark) {
             Ok(text) => {
-                let root = crate::kernel::api::native(&PathBuf::from(text.trim()));
+                let root = crate::kernel::api::path::native(&PathBuf::from(text.trim()));
                 if !root.is_absolute() {
                     return Err(format!("工作区绑定不是绝对路径：{}", root.display()));
                 }
@@ -159,7 +159,7 @@ impl Workdirs for FsWorkspace {
             .map_err(|e| format!("工作区不可达：{}（{}）", shared.display(), e))?;
         // 锁放在产品侧（.home/locks），不写用户目录；键按**落点身份**——同一物理目录的 UNC 写法、
         // 映射盘写法与盘符写法因此共用一把锁（取不到文件 id 时退回规范化文本）。
-        let key = crate::kernel::api::locus_of(&canonical)
+        let key = crate::kernel::api::locus::locus_of(&canonical)
             .map(|l| l.key())
             .unwrap_or_else(|_| canonical.to_string_lossy().into_owned());
         let product = self.sessions.parent().unwrap_or(&self.sessions);
@@ -167,8 +167,11 @@ impl Workdirs for FsWorkspace {
         std::fs::create_dir_all(&dir).map_err(|e| format!("建工作区锁目录失败：{}", e))?;
         let hash = crate::capabilities::workspace::domain::hash::content_hash(key.as_bytes());
         let path = dir.join(format!("workspace-{}.lock", hash));
-        let file =
-            crate::kernel::api::lock_within(&path, std::time::Duration::from_secs(10), "工作区")?;
+        let file = crate::kernel::api::lock::lock_within(
+            &path,
+            std::time::Duration::from_secs(10),
+            "工作区",
+        )?;
         Ok(Some(file))
     }
 
@@ -181,7 +184,7 @@ impl Workdirs for FsWorkspace {
                 if !p.is_absolute() {
                     return Err(format!("工作区根不是绝对路径：{}", p.display()));
                 }
-                let p = crate::kernel::api::native(p);
+                let p = crate::kernel::api::path::native(p);
                 std::fs::write(&mark, p.to_string_lossy().as_bytes())
                     .map_err(|e| format!("写工作区绑定失败（{}）：{}", mark.display(), e))
             }

@@ -72,7 +72,7 @@ impl Turn {
             // 旧会话首次启用：补一次初始导入（有 head 时无操作）。
             if let Err(e) = self
                 .workspace
-                .work_import_root(&work, crate::kernel::api::unix_seconds())
+                .work_import_root(&work, crate::kernel::api::procs::unix_seconds())
             {
                 self.log.warn(
                     "turn::rebuild_session",
@@ -155,7 +155,7 @@ impl Turn {
                 // 身份与角色**同一把尺子**（重建与实时不能各写一份，见 Core::role_of）：
                 // 协作派生的成员 / 节点 = executor（拿得到回报工具）；其余单 agent 工作 = solo。
                 let role = role_of(self.history.as_ref(), meta)?;
-                let host_plan = if meta.exec.tier == crate::kernel::api::Tier::Host {
+                let host_plan = if meta.exec.tier == crate::kernel::api::types::Tier::Host {
                     crate::capabilities::vm::api::host_plan_for(
                         &self.packages.library(),
                         &self.packages.base(),
@@ -510,7 +510,7 @@ impl Turn {
             permissions: self.permissions_for(registry, meta)?,
             // 代理发言席自己住在宿主上（文件工具也跑在宿主），不需要 guest 翻译；
             // 但视图盘打开时仍要同一个视图写法，否则环境块渲染视图路径、寻址却按宿主根判越界。
-            path_codec: crate::kernel::api::view_codec(),
+            path_codec: crate::kernel::api::view_drive::view_codec(),
         };
         let tool_mode = registry.tool_mode(None);
         // 身份是**角色提示词**（core_proxy），不是某个 agent 的模块能力包：
@@ -523,7 +523,7 @@ impl Turn {
             unavailable: BTreeMap::new(),
             mode: tool_mode,
             role: "core_proxy",
-            tier: crate::kernel::api::Tier::Host,
+            tier: crate::kernel::api::types::Tier::Host,
             guest_lease: String::new(),
             shell: self.shell_slot(&sb.session),
             env: self.member_env(
@@ -531,7 +531,7 @@ impl Turn {
                 &[],
                 &sb,
                 crate::capabilities::turn::env::api::network_allowed(registry.app()),
-                crate::kernel::api::Tier::Host,
+                crate::kernel::api::types::Tier::Host,
                 &crate::capabilities::catalog::packages::api::PackagePlan::default(),
             ),
         };

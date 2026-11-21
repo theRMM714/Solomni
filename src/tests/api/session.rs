@@ -285,7 +285,7 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
             task: None,
             delegate: false,
             permission: None,
-            tier: crate::kernel::api::Tier::Host,
+            tier: crate::kernel::api::types::Tier::Host,
             guest: None,
             workspace: None,
         })

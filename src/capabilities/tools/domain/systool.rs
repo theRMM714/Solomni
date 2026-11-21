@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// 目的：一次工具执行结果的形状：**归 kernel 共享**——内置、模块与核心自有工具同一形状（R6）。
-pub use crate::kernel::api::ToolOutcome;
+pub use crate::kernel::api::types::ToolOutcome;
 
 pub const READ: &str = "read";
 pub const WRITE: &str = "write";
@@ -114,8 +114,10 @@ pub fn tool_notes(
     // 翻译器与 env_block 同源（沙箱的 path_codec）——两份提示词各用一套路径会把模型带偏。
     let view = |path: &std::path::Path| -> String {
         match sb.path_codec.as_ref() {
-            Some(codec) => crate::kernel::api::slash(std::path::Path::new(&codec.to_view(path))),
-            None => crate::kernel::api::slash(path),
+            Some(codec) => {
+                crate::kernel::api::path::slash(std::path::Path::new(&codec.to_view(path)))
+            }
+            None => crate::kernel::api::path::slash(path),
         }
     };
     ToolNotes {

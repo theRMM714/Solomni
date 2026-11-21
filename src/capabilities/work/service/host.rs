@@ -34,7 +34,7 @@ impl Work {
     /// 目的：本平台共享档要用的外部工具路径（Windows = smbd；其余 = virtiofsd）；都不在场给 None。
     /// 约束：组合选择与就绪检测共用这一份，避免"说要验 A、实际跑 B"。
     pub(crate) fn share_tool_path(&self, registry: &dyn Registry) -> Option<String> {
-        if crate::kernel::api::IS_WINDOWS {
+        if crate::kernel::api::platform::IS_WINDOWS {
             self.smbd_path(registry)
         } else {
             self.virtiofsd_path(registry)

@@ -68,7 +68,7 @@
 ## 五、kernel 内部的机制分层（第二张表）
 - 地基库内部也是依赖图，不是一坨平的文件：内部按**机制**切，一个机制管一种机制——`contracts/<名>`（共享形状）、`domain/<名>`（纯逻辑）、`detail/<名>`（实现）、`ports`（全项目共享的出站面）。机制对机制**只许严格向下**，同层互依赖一律判红（`docs/kernel/mechanisms.yaml`、`tests/gates/structure/kernel-mechanisms.js`）。
 - 两张表粒度不同，别混：`layers.yaml` 一行一个**能力**（判据是有自己的业务用例 + ≥2 调用方）；`mechanisms.yaml` 一行一个**机制**（没有业务词、没有用户可见后果）。机制不因调用方多就升格成能力（判据见 [boundaries.md](boundaries.md)）。
-- 判据四条与能力层同口径，但环要显式报出：① 盘上每个机制都要在表里归层，表里的机制也要在盘上；② 依赖边只许从高层指向低层；③ 声明层号 == 按现有依赖重算的层号；④ 机制之间不许成环——成环时只报环路径，不拿层号糊过去。
+- 判据五条与能力层同口径，但环要显式报出：① 盘上每个机制都要在表里归层，表里的机制也要在盘上；② 依赖边只许从高层指向低层；③ 声明层号 == 按现有依赖重算的层号；④ 机制之间不许成环——成环时只报环路径，不拿层号糊过去；⑤ 内核内部只走机制路径，`src/kernel` 下（除 `api/` 面自身）出现 `kernel::api` 判红（面是给外面的，绕道面会让机制边隐形）。
 - 层号同样是事实的缓存：动过一条边就 `node tests/gates/structure/kernel-mechanisms.js --write` 重算全表，把「这个机制为什么抬高」留在 diff 里；不想抬层就消掉那条边。
 - 跨机制的常设例外只有 `ports`（R12）：全项目共享的出站端口面，由各机制实现，不参与「谁依赖谁」的业务推导；它自己只依赖共享形状。
 - 机制表只说机制与层号，不替代逐文件职责：[unit-map.md](../kernel/unit-map.md) 仍由 `tests/gates/structure/map.js` 双向比对。
@@ -82,7 +82,7 @@
 - 分层与依赖方向 → T0 结构审查的 apiOnly / apiPorts / domainPorts / foreignImpl / coreCycles / reverse / presentation / layers 判据（`tests/gates/structure/dependency.js`、`tests/gates/structure/layers.js`；清单 `node run-tests.js --list`）。
 - 呈现层「每屏许取哪几个能力的 ::api」→ `structure/presentation-inbound`（`tests/gates/structure/presentation-inbound.js`，权威清单 `docs/presentation/inbound.yaml`）：清单外的取用报外溢、清单里没用到的报过期，呈现层内部只许取根、兄弟文件不得互相引用。
 - 声明层号 == 重算层号、层号连续、目录全覆盖 → `node tests/gates/structure/layers.js`。
-- kernel 机制：登记双向对账、同层互依赖、声明层号 == 重算层号、机制成环 → `node tests/gates/structure/kernel-mechanisms.js`。
+- kernel 机制：登记双向对账、同层互依赖、声明层号 == 重算层号、机制成环、内核内部绕道 `api` 面 → `node tests/gates/structure/kernel-mechanisms.js`。
 - 入口分段：登记双向对账、同段互依赖、向上依赖、压不住依赖、成环、`src/entry.rs` 只放 mod 声明 → `node tests/gates/structure/entry-tiers.js`。
 - 结构图与层表渲染 → `node tests/gates/structure/graph.js`、`node tests/docs-sync.mjs`。
 

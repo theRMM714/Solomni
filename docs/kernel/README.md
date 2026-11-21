@@ -18,7 +18,7 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api`（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Note` / `Severity` / `codes` / `Ask` / `AskOutcome` / `RunOutcome` / `FenceSpec` / `FencePart` / `FenceBlocked` / `DEFAULT_LLM_TIMEOUT_SECS` / `valid_capability` / `slash` / `JobRegistry` / `i18n`）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`FenceHost`、`FenceGate`、`UserPath`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执与回执说明）、`domain`（路径书写、取消表、沙箱模式、回执装配）、`detail`（`file_log`、`host_probe`、`outbound`、`unpack`、`user_path`、`process`、`procs`、`session`、`i18n`、`confine`：门面 + `job` / `ledger` / `paths` / `prep`）。
+- 入站面：`api`（按对外概念分文件：`fence` / `note` / `run` / `types` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `path` / `platform`——见「六、对外面」）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`FenceHost`、`FenceGate`、`UserPath`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执与回执说明）、`domain`（路径书写、取消表、沙箱模式、回执装配）、`detail`（`file_log`、`host_probe`、`outbound`、`unpack`、`user_path`、`process`、`procs`、`session`、`i18n`、`confine`：门面 + `job` / `ledger` / `paths` / `prep`）。
 - `AskUser` 是「需要用户裁决的机制请用户裁决」的**唯一**入口（`src/kernel/ports.rs`），工具执行层与围栏用它。
   - 形状：`ask(问题) -> 选项 id`，**阻塞**。
   - `halt(为什么)` = 停会话 + 落警告；调用方只在有可回答前端时用它，没有前端按 fail-closed 收场。
@@ -156,6 +156,16 @@
 - 当前 28 个机制、8 层，读到顶的顺序是 `detail/confine`（5）→ `detail/process`（6）→ `detail/session`（7）：越往上越是装配别人的机制。
 - 动过一条边就 `node tests/gates/structure/kernel-mechanisms.js --write` 重算全表；不想抬层就消掉那条边。层级理由写在 diff 里，不在散文里。
 - 粒度区别：能力（`layers.yaml`）按业务用例切、可以互相调用对方的 `api`；机制（本表）没有业务语义、只许单向。机制不因调用方多就升格成能力。
+- 第五条判据：内核内部只走机制路径，不经 `api` 面（见「六、对外面」）。
+
+## 六、对外面（`api/`）
+
+- 一个文件一个**对外概念**：`src/kernel/api.rs` 只声明模块，条目在各面文件里重导出。面是能力与装配层取形状与机制的唯一入口（`crate::kernel::api::<面>::<条目>`）。
+- **内核内部不经此面**：机制之间直取所属机制（`crate::kernel::contracts|domain|detail::<机制>::…`）。判据是 `tests/gates/structure/kernel-mechanisms.js` 的第五条——`src/kernel` 下（除 `api/` 面自身）出现 `kernel::api` 就判红。
+  - 理由一：面是给外面的形状，不是内部捷径；内部绕道面会让面与实现互相牵制（改一个条目的归属要连着改面）。
+  - 理由二：绕道 `api` 的依赖在机制表里是**隐形**的（`api` 不是机制，边扫不到）；直取机制后机制边才如实，层号才是事实。
+- 同名机制合成一面：`contracts/fence` 与 `domain/fence` 都在 `api::fence`（描述符与沙箱策略是同一个对外概念）；模块型条目整模块重导出，保住 `api::layout::home(…)` / `api::i18n::render(…)` 的书写。
+- 新增一个对外条目：先落进所属机制，再在对应面里重导出；**新开一个面**要同步 `docs/kernel/unit-map.md` 与本页。眼下没有外部调用方的条目用 `#[allow(unused_imports)]` 显式放行并写理由，不从出口删掉——出口少一个，契约就悄悄漂了。
 
 ## 改动本单元时必须同步
 

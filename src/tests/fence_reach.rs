@@ -6,7 +6,7 @@
 #[cfg(unix)]
 #[test]
 fn fence_reach_for_external_harness() {
-    use crate::kernel::api::FenceSpec;
+    use crate::kernel::api::fence::FenceSpec;
     use crate::kernel::detail::confine;
     use crate::kernel::detail::process::ProcTools;
     use crate::kernel::ports::ProcessRunner;

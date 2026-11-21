@@ -18,7 +18,7 @@ use crate::capabilities::provision::service::*;
 use crate::capabilities::provision::service::{
     run as run_pipeline, verify_cached as verify_cached_pinned,
 };
-use crate::kernel::api::JobState;
+use crate::kernel::api::types::JobState;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;

@@ -4,7 +4,7 @@
 //! 不管：策略（哪些根可达、放不放网）——由 runtime 派生后经命令行传入。
 //! 联动：能力不足时如实上报（capability），降级而非崩溃——绝不静默假装有围栏。
 
-use crate::kernel::api::FenceSpec;
+use crate::kernel::contracts::fence::FenceSpec;
 use std::path::PathBuf;
 
 #[cfg(target_os = "linux")]

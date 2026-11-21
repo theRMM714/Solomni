@@ -39,11 +39,11 @@ pub(crate) struct MissingPart {
 
 /// 目的：把“要求但没满足”的项按原因拆开。授权只影响 Windows 的路径级围栏； Linux / macOS 的围栏在守门进程里自足，未授权不等于无围栏。
 pub(crate) fn missing_parts(
-    requirements: &crate::kernel::api::SandboxRequirements,
+    requirements: &crate::kernel::api::fence::SandboxRequirements,
     cap: &crate::kernel::detail::confine::Capability,
     authorized: bool,
 ) -> Vec<MissingPart> {
-    let paths_ok = !crate::kernel::api::HAS_EXTERNAL_ACL_STEP || authorized;
+    let paths_ok = !crate::kernel::api::platform::HAS_EXTERNAL_ACL_STEP || authorized;
     let mut out = Vec::new();
     if requirements.filesystem {
         if !cap.fs {
@@ -173,7 +173,7 @@ pub(crate) fn maybe_onboard_windows<R: BufRead, W: Write>(
         .iter()
         .any(|p| p.cause == MissingCause::Unauthorized);
     let has_unsupported = missing.iter().any(|p| p.cause == MissingCause::Unsupported);
-    if !crate::kernel::api::HAS_EXTERNAL_ACL_STEP
+    if !crate::kernel::api::platform::HAS_EXTERNAL_ACL_STEP
         || !needs_authorization
         || has_unsupported
         || settings_exists
@@ -317,7 +317,7 @@ pub(crate) struct FenceReport {
     pub(crate) write_allowed: bool,
     pub(crate) fs: bool,
     pub(crate) net: bool,
-    pub(crate) sandbox_mode: std::sync::Arc<crate::kernel::api::SandboxMode>,
+    pub(crate) sandbox_mode: std::sync::Arc<crate::kernel::api::fence::SandboxMode>,
 }
 
 impl FenceReport {
@@ -325,7 +325,7 @@ impl FenceReport {
     pub(crate) fn new(
         cap: crate::kernel::detail::confine::Capability,
         write_allowed: bool,
-        sandbox_mode: std::sync::Arc<crate::kernel::api::SandboxMode>,
+        sandbox_mode: std::sync::Arc<crate::kernel::api::fence::SandboxMode>,
     ) -> Self {
         let (fs, net) = cap.effective_paths(write_allowed);
         Self {
@@ -340,7 +340,7 @@ impl FenceReport {
 
 /// 目的：本次授权状态的人类可读标签——Unix 没有外层写 ACL 这一步，不能显示成"未授权"。
 pub(crate) fn fence_auth_label(write_allowed: bool) -> &'static str {
-    if !crate::kernel::api::HAS_EXTERNAL_ACL_STEP {
+    if !crate::kernel::api::platform::HAS_EXTERNAL_ACL_STEP {
         return "不适用";
     }
     if write_allowed {
@@ -352,7 +352,7 @@ pub(crate) fn fence_auth_label(write_allowed: bool) -> &'static str {
 
 /// 目的：本次授权影响的说明——只讲 Windows 的目录 ACL，避免让 Unix 读者以为还有一步授权没做。
 pub(crate) fn fence_auth_note(write_allowed: bool) -> &'static str {
-    if !crate::kernel::api::HAS_EXTERNAL_ACL_STEP {
+    if !crate::kernel::api::platform::HAS_EXTERNAL_ACL_STEP {
         return "sandbox.policy.windows.write_acl 只影响 Windows 的目录 ACL；本平台围栏在守门进程里自足，与授权无关";
     }
     if write_allowed {

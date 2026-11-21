@@ -7,7 +7,7 @@
 //! 联动：system 能力的便携维护（detail/setup/fence.rs）与启动首次授权共用 machine_ensure；状态查询与 --setup=status 共用 machine_missing。
 
 use super::*;
-use crate::kernel::api::layout;
+use crate::kernel::domain::layout;
 use std::time::Instant;
 
 /// 目的：一个机器级落点：路径 + 权限位 + 递归/继承 + 给用户看的这一环叫什么。

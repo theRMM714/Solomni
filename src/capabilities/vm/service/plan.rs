@@ -12,7 +12,8 @@ use std::sync::Arc;
 use crate::capabilities::catalog::modules::api::Module;
 use crate::capabilities::catalog::packages::api as pkgs;
 use crate::capabilities::catalog::packages::api::{BaseFacts, Library, PackagePlan, PinPolicy};
-use crate::kernel::api::{ExecSpec, Tier};
+use crate::kernel::api::types::ExecSpec;
+use crate::kernel::api::types::Tier;
 use crate::kernel::ports::{HostProbe, PathCodec};
 
 /// 目的：这次会话的 guest 镜像（本机档或选定虚拟根判不出来 = None）——平台名与 guest OS 都从它派生。
@@ -54,7 +55,7 @@ pub fn path_codec_of(
     spec: &ExecSpec,
 ) -> Option<Arc<dyn PathCodec>> {
     let Some(guest) = guest_os_of(root, probe, spec) else {
-        return crate::kernel::api::view_codec();
+        return crate::kernel::api::view_drive::view_codec();
     };
     Some(Arc::new(
         crate::capabilities::vm::api::PathBridge::for_session(

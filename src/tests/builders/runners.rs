@@ -11,7 +11,7 @@ pub(crate) struct SilentRunner;
 impl ProcessRunner for SilentRunner {
     fn run(
         &self,
-        _fence: &crate::kernel::api::FenceSpec,
+        _fence: &crate::kernel::api::fence::FenceSpec,
         _command: &str,
         _args: &str,
         _env: &[(String, String)],
@@ -62,7 +62,7 @@ impl EnvRecordingRunner {
 impl ProcessRunner for EnvRecordingRunner {
     fn run(
         &self,
-        _fence: &crate::kernel::api::FenceSpec,
+        _fence: &crate::kernel::api::fence::FenceSpec,
         _command: &str,
         args_json: &str,
         env: &[(String, String)],
@@ -90,7 +90,7 @@ impl ProcessRunner for EnvRecordingRunner {
 impl ProcessRunner for RecordingRunner {
     fn run(
         &self,
-        fence: &crate::kernel::api::FenceSpec,
+        fence: &crate::kernel::api::fence::FenceSpec,
         command: &str,
         args_json: &str,
         _env: &[(String, String)],
@@ -121,7 +121,7 @@ impl ProcessRunner for RecordingRunner {
 /// 目的：一次 shell 调用的事实记录（脚本、围栏、超时、取消旗、是否按次临时 profile、PATH）。
 pub(crate) struct ShellRecord {
     /// 目的：这次调用的围栏。
-    pub(crate) fence: crate::kernel::api::FenceSpec,
+    pub(crate) fence: crate::kernel::api::fence::FenceSpec,
     /// 目的：脚本原文。
     pub(crate) script: String,
     /// 目的：按次超时。
@@ -157,7 +157,7 @@ impl ShellRunner {
 impl ProcessRunner for ShellRunner {
     fn run(
         &self,
-        _fence: &crate::kernel::api::FenceSpec,
+        _fence: &crate::kernel::api::fence::FenceSpec,
         _command: &str,
         _args: &str,
         _env: &[(String, String)],
@@ -208,7 +208,7 @@ impl ParallelRunner {
 impl ProcessRunner for ParallelRunner {
     fn run(
         &self,
-        _fence: &crate::kernel::api::FenceSpec,
+        _fence: &crate::kernel::api::fence::FenceSpec,
         command: &str,
         args_json: &str,
         _env: &[(String, String)],
@@ -252,7 +252,7 @@ impl AskingRunner {
 impl ProcessRunner for AskingRunner {
     fn run(
         &self,
-        fence: &crate::kernel::api::FenceSpec,
+        fence: &crate::kernel::api::fence::FenceSpec,
         command: &str,
         args_json: &str,
         _env: &[(String, String)],
@@ -267,7 +267,7 @@ impl ProcessRunner for AskingRunner {
                 "这一趟没有可回答的前端：这次调用没有执行".to_string(),
             );
         };
-        let request = crate::kernel::api::Ask {
+        let request = crate::kernel::api::types::Ask {
             role: "tools".to_string(),
             name: fence.agent.clone(),
             title: "围栏的这一环装不上，这次调用怎么跑？".to_string(),

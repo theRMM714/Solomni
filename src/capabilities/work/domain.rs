@@ -36,7 +36,7 @@ pub(crate) fn session_started(events: &[serde_json::Value]) -> bool {
 }
 
 /// 目的：工作名即将来的落盘目录名——非空、不含路径分隔符与 Windows 非法字符、不是保留名。
-///   规则本身是内核的名字契约（`kernel::api::validate_dir_name`），这里只补主语。
+///   规则本身是内核的名字契约（`kernel::api::name::validate_dir_name`），这里只补主语。
 pub(crate) fn validate_work_name(name: &str) -> Result<(), String> {
-    crate::kernel::api::validate_dir_name(name, "工作名")
+    crate::kernel::api::name::validate_dir_name(name, "工作名")
 }

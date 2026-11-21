@@ -1,7 +1,7 @@
 //! 目的：运行时的核心手柄（Handle）——命令队列这一侧的唯一入口：呈现层经 entry/faces 拿它拆面。
 //! 管：起线程（spawn）、投递命令（call）、事件台发布与提示、交互前端开关，以及回合宿主端口 TurnHost 的实现。
 //! 不管：长步骤编排（在 activation / rewind）、动作分发（在 action）、代理入站桥（在 bridge）。
-//! 联动：kernel::api::Actor 是机制壳；回合引擎在下层 turn，它要的宿主能力由本文件实现。
+//! 联动：kernel::api::actor::Actor 是机制壳；回合引擎在下层 turn，它要的宿主能力由本文件实现。
 
 use super::*;
 
@@ -9,7 +9,7 @@ use super::*;
 #[derive(Clone)]
 pub struct Handle {
     /// 目的：命令队列：核心状态只在它自己那条线程上被执行（机制壳在 `src/kernel/domain/actor.rs`）。
-    pub(super) actor: crate::kernel::api::Actor<Core>,
+    pub(super) actor: crate::kernel::api::actor::Actor<Core>,
     pub(super) jobs: Arc<JobRegistry>,
     /// 目的：有没有"能作答"的交互前端（Web 在服务时打开）：打开才把工具级确认接进裁决队。
     ///  纯终端同步生成不打开，避免生成线程空等一个没人回答的问题。
@@ -48,7 +48,7 @@ impl Handle {
         let modules = core.modules_handle();
         let builds = core.builds_handle();
         // 队列与线程是纯机制：起线程、逐条执行、接住 panic 都在 kernel 的壳里。
-        let actor = crate::kernel::api::Actor::spawn(
+        let actor = crate::kernel::api::actor::Actor::spawn(
             "solomni-core",
             "runtime::api",
             Arc::clone(&worker_log),

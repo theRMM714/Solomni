@@ -1,45 +1,23 @@
-//! 目的：地基库的对外面——共享形状与纯机制的出口。
-//! 管：共享形状（`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / 默认预算 / 围栏描述符 / `RunOutcome`）与纯机制（命令队列 `Actor`、当前时间戳 `unix_seconds`、`slash` 的对外书写形式、`native` 的前缀还原、落点身份与网络路径判定、本地文件戳、围栏准备的耗时交棒、生成中作业的取消表 `JobRegistry`）。
-//! 不管：这些形状与机制自身的实现（在 `contracts/` 与 `detail/`）；机制端口的定义（在 `ports`）。
-//! 联动：消费方是核心（`src/capabilities/runtime/api/`）与各能力；端口见 `src/kernel/ports.rs`。
+//! 目的：地基库的对外面——按「对外概念」分文件，一个文件一个面；能力只经这里取形状与机制。
+//! 管：十八个面的模块声明（`fence` / `note` / `run` / `types` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `path` / `platform`）。
+//! 不管：任何条目的实现（在 `contracts/`、`domain/`、`detail/`）；也不给内核内部用——内核内部直接取所属机制，绕道本面由 `structure/kernel-mechanisms` 拦住。
+//! 联动：消费方是核心（`src/capabilities/runtime/api/`）与各能力；面的取舍见 `docs/kernel/README.md`「对外面」。
 
-pub use crate::kernel::contracts::fence::{FenceBlocked, FencePart, FenceRunPolicy, FenceSpec};
-pub use crate::kernel::contracts::note::{Note, Severity, codes};
-pub use crate::kernel::contracts::run::RunOutcome;
-pub use crate::kernel::contracts::types::{
-    Ask, AskOutcome, DEFAULT_LLM_TIMEOUT_SECS, ExecSpec, JobState, SessionId, Tier, ToolOutcome,
-    valid_capability,
-};
-pub use crate::kernel::detail::fs_meta::{
-    ensure_executable, file_footprint, is_link, make_executable, make_executable_checked,
-    restrict_private_file, symlink, sync_dir, write_executable,
-};
-pub use crate::kernel::detail::host_probe::{FileStamp, file_stamp};
-// 文案目录的出口：会话、界面与 CLI 都按稳定码取文本，不各自复制词表。
-pub use crate::kernel::detail::i18n;
-pub use crate::kernel::detail::locus::{is_network_path, locus_of, place_contains};
-pub(crate) use crate::kernel::detail::process::kill_tree;
-pub use crate::kernel::detail::process::{FenceTiming, take_fence_prep};
-pub use crate::kernel::detail::procs::unix_seconds;
-// 视图盘是内核对外契约的一部分：装配层与守门进程按需取用，bin crate 内暂时不会每个都调用到。
-// 对未用到的重导出显式放行，不把它们从出口删掉——出口少一个，契约就悄悄漂了。
-pub use crate::kernel::detail::lock::lock_within;
-#[cfg(windows)]
-#[allow(unused_imports)]
-pub use crate::kernel::detail::view_drive::{
-    ViewDrive, active_view, attach_view_drive, ensure_view_drive, host_of, release_view_drive,
-    sweep_view_drive, view_of,
-};
-pub use crate::kernel::detail::view_drive_lifecycle::{
-    begin as view_drive_begin, codec as view_codec, release as view_drive_release,
-    sweep as view_drive_sweep,
-};
-pub use crate::kernel::domain::actor::Actor;
-pub use crate::kernel::domain::fence::{SandboxMode, SandboxRequirements, call_lease};
-pub use crate::kernel::domain::jobs::JobRegistry;
-pub use crate::kernel::domain::layout;
-pub use crate::kernel::domain::name::{dedup_suffix, validate_dir_name};
-pub use crate::kernel::domain::path::{is_unc, native, slash, unc_parts};
-pub use crate::kernel::domain::platform::{
-    EXE_SUFFIX, HAS_EXTERNAL_ACL_STEP, HOST_ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, host_path_eq,
-};
+pub mod actor;
+pub mod fence;
+pub mod fs_meta;
+pub mod host_probe;
+pub mod i18n;
+pub mod jobs;
+pub mod layout;
+pub mod lock;
+pub mod locus;
+pub mod name;
+pub mod note;
+pub mod path;
+pub mod platform;
+pub mod process;
+pub mod procs;
+pub mod run;
+pub mod types;
+pub mod view_drive;

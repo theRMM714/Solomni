@@ -4,7 +4,7 @@
 //! 联动：由 `src/kernel/detail/confine/prep.rs` 按平台选中。
 
 use super::FencePrep;
-use crate::kernel::api::FenceSpec;
+use crate::kernel::contracts::fence::FenceSpec;
 use crate::kernel::detail::confine::windows as backend;
 
 /// 目的：把围栏要用的授权一次性做好（写目录 ACL）。

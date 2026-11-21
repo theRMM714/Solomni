@@ -21,11 +21,11 @@ const UNFENCED_GUEST_RUN_SECS: u64 = 1800;
 /// 约束：**只用硬件加速，不退回软件模拟（TCG）**：软件模拟慢到没有可用性（实测同一台 guest 慢 2–5 倍，
 ///   共享挂载在慢启动里间歇失败），静默回退会把"这台机器没有加速"伪装成"虚拟机档时好时坏"。
 pub fn accelerators() -> Option<&'static str> {
-    if crate::kernel::api::IS_WINDOWS {
+    if crate::kernel::api::platform::IS_WINDOWS {
         Some("accel=whpx")
-    } else if crate::kernel::api::IS_MACOS {
+    } else if crate::kernel::api::platform::IS_MACOS {
         Some("accel=hvf")
-    } else if crate::kernel::api::IS_LINUX {
+    } else if crate::kernel::api::platform::IS_LINUX {
         Some("accel=kvm")
     } else {
         None
@@ -515,7 +515,7 @@ fn backing_format(base: &Path) -> &'static str {
 
 /// 目的：同目录的 qemu-img 可执行文件名（便携包里与 qemu-system-* 并排）。
 fn qemu_img_for(engine_exe: &str) -> String {
-    let name = format!("qemu-img{}", crate::kernel::api::EXE_SUFFIX);
+    let name = format!("qemu-img{}", crate::kernel::api::platform::EXE_SUFFIX);
     match Path::new(engine_exe).parent() {
         Some(dir) if !dir.as_os_str().is_empty() => dir.join(name).to_string_lossy().into_owned(),
         _ => name.to_string(),

@@ -7,7 +7,8 @@
 use crate::capabilities::permission::api::CallScope;
 use crate::capabilities::tools::domain::schema::ToolSchema;
 use crate::capabilities::tools::domain::systool::{SHELL, arg_fault_text};
-use crate::kernel::api::{Note, codes};
+use crate::kernel::api::note::Note;
+use crate::kernel::api::note::codes;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -267,7 +268,7 @@ params:
         );
         assert_eq!(
             note.severity,
-            crate::kernel::api::Severity::Info,
+            crate::kernel::api::note::Severity::Info,
             "这只是建议，不是失败定性"
         );
         assert!(shared_exec_note("tools/build deploy", denied).is_some());

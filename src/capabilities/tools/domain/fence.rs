@@ -5,7 +5,9 @@
 
 use crate::capabilities::permission::api::{Reach, ReachSet};
 use crate::capabilities::workspace::api::Sandbox;
-use crate::kernel::api::{Ask, FenceBlocked, FenceSpec};
+use crate::kernel::api::fence::FenceBlocked;
+use crate::kernel::api::fence::FenceSpec;
+use crate::kernel::api::types::Ask;
 use std::path::{Path, PathBuf};
 
 impl FenceSpec {

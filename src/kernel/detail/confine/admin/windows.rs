@@ -5,7 +5,7 @@
 
 use super::super::ledger::{Ledger, ReconcileReport};
 use super::super::windows;
-use crate::kernel::api::FenceSpec;
+use crate::kernel::contracts::fence::FenceSpec;
 use std::path::Path;
 
 /// 目的：按会话租约撤 ACE、删 profile。

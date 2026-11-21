@@ -11,7 +11,7 @@ use crate::capabilities::maintenance::builds::api::Built;
 use crate::capabilities::maintenance::storage::api::{CleanOutcome, GcReport, Storage};
 use crate::capabilities::provision::api::Provision;
 use crate::capabilities::workspace::api::WorkGcReport;
-pub use crate::kernel::api::JobState;
+pub use crate::kernel::api::types::JobState;
 
 /// 目的：基础工具链 profile——与清单 toolchain 条目同一组（自检与启动报告共用）。
 pub const TOOLCHAIN_PROFILE: [&str; 3] = ["python", "node", "cc"];

@@ -252,14 +252,14 @@ pub struct ToolCallView {
     pub ok: bool,
     /// 目的：回执的轻重（info / warning / error）——界面按它上色，不看正文猜。
     #[serde(default)]
-    pub severity: crate::kernel::api::Severity,
+    pub severity: crate::kernel::api::note::Severity,
     /// 目的：模型给的参数 JSON 原文。
     pub args: String,
     /// 目的：进程/工具给的原始输出（不含按语言渲染的句子）。
     pub output: String,
     /// 目的：回执说明——稳定码 + 参数 + 轻重；呈现层按语言渲染，模型通道由核心渲染。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub notes: Vec<crate::kernel::api::Note>,
+    pub notes: Vec<crate::kernel::api::note::Note>,
     /// 目的：供应商给的调用 id：重建时靠它把结果消息与助手消息里的调用对上（手写信封通道为空）。
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub call_id: String,
@@ -600,7 +600,7 @@ pub enum Pending {
     /// 装箱：它比其它变体大得多，而这一关本来就只挂几条（不值得让整队每个格子都变宽）。
     // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
     #[allow(dead_code)]
-    ToolAsk(Box<crate::kernel::api::Ask>),
+    ToolAsk(Box<crate::kernel::api::types::Ask>),
     /// 工具级确认（`ask` 粒度命中）：这一席的这次调用**在执行前**等用户放行。
     /// 它是**等在工作线程上**的那一类——发起方（工具循环）阻塞等回答，不点不继续。
     ToolApproval {

@@ -126,7 +126,7 @@ fn sandbox_places_follow_the_permission_set() {
 /// 围栏派生：共享区不进任何围栏；私有沙箱进 rw；模块目录只读、userdata 只给模块写 reach。
 #[test]
 fn fence_spec_scopes_module_dirs_and_userdata() {
-    use crate::kernel::api::FenceSpec;
+    use crate::kernel::api::fence::FenceSpec;
     let mut sb = test_sandbox("a1", &[]);
     let module = abs(&["mods", "data"]);
     sb.modules.insert("data".to_string(), module.clone());
@@ -166,7 +166,7 @@ fn fence_spec_scopes_module_dirs_and_userdata() {
 /// 写决策被拒时，即使 reach 里有私有区也不授写：围栏与工作区判据同源，不各自组合。
 #[test]
 fn deny_write_decision_withholds_private_rw() {
-    use crate::kernel::api::FenceSpec;
+    use crate::kernel::api::fence::FenceSpec;
     let mut sb = test_sandbox("a1", &[]);
     sb.permissions = pset(ProfileId::View);
     assert!(

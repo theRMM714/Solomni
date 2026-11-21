@@ -7,7 +7,7 @@
 //! 联动：机制不可用时（老内核、规则被内核拒、seccomp 不可用）如实降级并打印说明；能力等级在启动报告里已如实告知。
 
 use super::{Capability, FENCE_FAILED, FenceVerdict, shell_command};
-use crate::kernel::api::FenceSpec;
+use crate::kernel::contracts::fence::FenceSpec;
 use std::ffi::CString;
 use std::os::raw::c_int;
 use std::os::unix::process::CommandExt;
@@ -432,7 +432,7 @@ pub fn run_fenced(
     _prepared: bool,
     _home: Option<&std::path::Path>,
     command: &str,
-    policy: &crate::kernel::api::FenceRunPolicy,
+    policy: &crate::kernel::contracts::fence::FenceRunPolicy,
 ) -> i32 {
     // 文件系统与网络**独立**收口：一项装不上不该把另一项也丢掉。
     let fs = install_filesystem(spec, command);

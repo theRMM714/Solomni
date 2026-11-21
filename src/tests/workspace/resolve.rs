@@ -524,7 +524,7 @@ pub(crate) fn work_gc_keeps_index_and_commit_objects_and_removes_the_rest() {
 /// 目的：只读共享区：读得到、写不进；写自己的沙箱照旧；围栏也不含主副本。这是"agent 绕不过 pull/commit 直接写共享区"的工具层证据，围栏层的证据由三平台探针给。
 #[test]
 pub(crate) fn read_only_shared_refuses_builtin_writes_and_leaves_the_fence() {
-    use crate::kernel::api::FenceSpec;
+    use crate::kernel::api::fence::FenceSpec;
     let sb = test_sandbox_readonly("a", &[]);
     let io = InMemorySysIo::new();
     io.seed(&["demo", "work", "note.txt"], "内容");

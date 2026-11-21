@@ -66,7 +66,7 @@ pub(crate) fn member_with_tools(
                 mode: crate::capabilities::llm::api::ToolMode::Envelope,
                 role: "solo".to_string(),
                 modules,
-                tier: crate::kernel::api::Tier::Host,
+                tier: crate::kernel::api::types::Tier::Host,
                 guest_lease: String::new(),
                 sandbox: test_sandbox("m0", &[]),
                 tools_this_turn: test_prompts()
@@ -74,7 +74,7 @@ pub(crate) fn member_with_tools(
                     .to_string(),
                 builtin_tools: test_systools().tools,
                 unavailable: BTreeMap::new(),
-                fence: crate::kernel::api::FenceSpec::for_session(
+                fence: crate::kernel::api::fence::FenceSpec::for_session(
                     &test_sandbox("m0", &[]),
                     &[],
                     false,

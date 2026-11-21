@@ -4,7 +4,7 @@
 //! 联动：由 `ledger.rs` / `prep.rs` / `confine.rs` 调用。
 
 use super::ledger::{Ledger, ReconcileReport};
-use crate::kernel::api::FenceSpec;
+use crate::kernel::contracts::fence::FenceSpec;
 use std::path::Path;
 
 #[cfg(windows)]

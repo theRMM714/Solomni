@@ -86,7 +86,7 @@ impl Tools for ToolsService {
 }
 
 /// 目的：宿主执行端口的回执（跑没跑、输出是什么、有哪些说明）转成工具面回执。
-fn host_outcome(out: crate::kernel::api::RunOutcome) -> ToolOutcome {
+fn host_outcome(out: crate::kernel::api::run::RunOutcome) -> ToolOutcome {
     ToolOutcome::from(out)
 }
 
@@ -100,7 +100,7 @@ impl ToolExec for ToolsService {
     fn run_module(
         &self,
         module: &str,
-        fence: &crate::kernel::api::FenceSpec,
+        fence: &crate::kernel::api::fence::FenceSpec,
         command: &str,
         args_json: &str,
         env: &[(String, String)],
@@ -183,7 +183,7 @@ impl ToolExec for ToolsService {
         }
     }
 
-    fn release_call(&self, spec: &crate::kernel::api::FenceSpec) -> Result<(), String> {
+    fn release_call(&self, spec: &crate::kernel::api::fence::FenceSpec) -> Result<(), String> {
         self.fence.release_call(spec)
     }
 

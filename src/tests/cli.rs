@@ -6,7 +6,7 @@
 use super::doubles::module_of;
 use super::ops_with;
 use super::prelude::*;
-use crate::kernel::api::Tier;
+use crate::kernel::api::types::Tier;
 use crate::presentation::cli;
 
 /// 模块工具名两种写法都收：`<模块id>.<工具名>` 与完整的 `module.<模块id>.<工具名>`。

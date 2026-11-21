@@ -4,7 +4,7 @@
 //! 联动：由 windows.rs 调用；失败如实返回而非假装成功。
 
 use super::FENCE_FAILED;
-use crate::kernel::api::FenceSpec;
+use crate::kernel::contracts::fence::FenceSpec;
 use std::ffi::c_void;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};

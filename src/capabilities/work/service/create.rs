@@ -104,7 +104,7 @@ impl Work {
         &self,
         probe: &dyn HostProbe,
         raw: Option<&std::path::Path>,
-        tier: crate::kernel::api::Tier,
+        tier: crate::kernel::api::types::Tier,
         parent: Option<&str>,
     ) -> Result<Option<crate::capabilities::conversation::session::api::WorkspaceBinding>, String>
     {
@@ -167,7 +167,7 @@ impl Work {
                 host,
                 ProxySeed {
                     name: &spec.name,
-                    granted_at: crate::kernel::api::unix_seconds(),
+                    granted_at: crate::kernel::api::procs::unix_seconds(),
                     tier: spec.tier,
                     guest: spec.guest.as_deref(),
                     profile: spec
@@ -266,7 +266,7 @@ impl Work {
             delegate,
             modules: module_ids.clone(),
             task: spec.task.clone(),
-            ts: crate::kernel::api::unix_seconds(),
+            ts: crate::kernel::api::procs::unix_seconds(),
             agents: metas.clone(),
             // 编排归属（代理建的子工作 = Some(父)）；节点子会话由 spawn_sub_session 另建。
             parent: parent.map(|s| s.to_string()),
@@ -276,10 +276,10 @@ impl Work {
             // 顶层来自**用户在创建向导里的选择**（默认 = 设置里的档位）。承载不了由下面如实拒绝。
             exec: match parent {
                 Some(p) => self.history.meta(p)?.exec,
-                None => crate::kernel::api::ExecSpec {
+                None => crate::kernel::api::types::ExecSpec {
                     tier: spec.tier,
                     guest: spec.guest.clone(),
-                    ..crate::kernel::api::ExecSpec::default()
+                    ..crate::kernel::api::types::ExecSpec::default()
                 },
             },
             // 绑定只写在工作根上；子会话沿 parent 链继承，不复制一份。
@@ -324,7 +324,7 @@ impl Work {
             // 首次绑定：把工作区现有文件导入成初始提交，agent 立刻就能 pull；失败不挡建会话。
             if let Err(e) = self
                 .workspace
-                .work_import_root(&root, crate::kernel::api::unix_seconds())
+                .work_import_root(&root, crate::kernel::api::procs::unix_seconds())
             {
                 self.log
                     .warn("work::create_work", &format!("工作区初始导入失败：{}", e));
@@ -339,7 +339,7 @@ impl Work {
             .filter(|m| module_ids.iter().any(|id| id == &m.manifest.id))
             .cloned()
             .collect();
-        if meta.exec.tier == crate::kernel::api::Tier::Vm {
+        if meta.exec.tier == crate::kernel::api::types::Tier::Vm {
             let guest_runtimes =
                 crate::capabilities::vm::api::guest_runtimes_of(&self.root, host, &meta.exec);
             for (id, caps) in pkgs::absent(&session_modules, &self.packages.library()) {
@@ -391,7 +391,7 @@ impl Work {
             None
         };
         // 代拟名单还没确认：沙箱/模块都不知道，先不起 guest；第一次真正生成前 ensure_guest 再起。
-        let boot = if meta.exec.tier == crate::kernel::api::Tier::Vm
+        let boot = if meta.exec.tier == crate::kernel::api::types::Tier::Vm
             && !(meta.delegate && meta.agents.is_empty())
         {
             // 共享 guest：按整棵树装配（proxy 子工作都进代理根那一台），租约取作用域根。
@@ -513,7 +513,7 @@ impl Work {
                 );
                 let guest =
                     crate::capabilities::vm::api::guest_os_of(&self.root, probe, &meta.exec);
-                let host_plan = if meta.exec.tier == crate::kernel::api::Tier::Host {
+                let host_plan = if meta.exec.tier == crate::kernel::api::types::Tier::Host {
                     crate::capabilities::vm::api::host_plan_for(
                         &self.packages.library(),
                         &self.packages.base(),
@@ -724,7 +724,7 @@ impl Work {
             delegate: false,
             modules: Vec::new(),
             task: None,
-            ts: crate::kernel::api::unix_seconds(),
+            ts: crate::kernel::api::procs::unix_seconds(),
             agents: Vec::new(),
             exec,
             sandbox: crate::capabilities::permission::api::SessionSandbox {
@@ -748,7 +748,7 @@ impl Work {
         if workspace.is_some()
             && let Err(e) = self
                 .workspace
-                .work_import_root(name, crate::kernel::api::unix_seconds())
+                .work_import_root(name, crate::kernel::api::procs::unix_seconds())
         {
             self.log
                 .warn("work::create_proxy", &format!("工作区初始导入失败：{}", e));

@@ -173,7 +173,7 @@ pub(crate) fn install_appimage(
     dest: &Path,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
-    crate::kernel::api::make_executable_checked(archive)
+    crate::kernel::api::fs_meta::make_executable_checked(archive)
         .map_err(|e| format!("给 {} 加执行位失败：{}", archive.display(), e))?;
     // 解到安装目录里（同一文件系统，随后原地搬移，避免跨设备 rename）。
     let _ = fs::remove_dir_all(dest.join("AppDir"));

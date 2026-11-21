@@ -17,7 +17,8 @@ use crate::capabilities::provision::api::Provision;
 use crate::capabilities::vm::api::{
     self as vm, ExecPlan, GuestOs, GuestRun, GuestSpec, MissingEntry, Vm,
 };
-use crate::kernel::api::{FenceSpec, Tier};
+use crate::kernel::api::fence::FenceSpec;
+use crate::kernel::api::types::Tier;
 use crate::kernel::ports::{FenceGate, FenceHost, HostProbe, Log, ProcessRunner};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -231,7 +232,7 @@ impl BuildsService {
         let agent = format!("build:{}", module.manifest.id);
         let fence = FenceSpec {
             agent: agent.clone(),
-            lease: crate::kernel::api::call_lease(&agent),
+            lease: crate::kernel::api::fence::call_lease(&agent),
             rw: vec![module.root.clone(), place.state],
             ro: self.toolchain_roots.clone(),
             ro_tree: plan.roots.clone(),
@@ -504,7 +505,7 @@ impl BuildsService {
             &product_entries(&job.module),
         );
         let name = |what: &str, why: String| module_why(&id, total, format!("{}{}", what, why));
-        let step = |what: &str, out: crate::kernel::api::ToolOutcome| {
+        let step = |what: &str, out: crate::kernel::api::types::ToolOutcome| {
             if out.ok {
                 Ok(())
             } else {
@@ -577,7 +578,7 @@ impl BuildsService {
         lease: &str,
         script: &str,
         timeout_secs: u64,
-    ) -> crate::kernel::api::ToolOutcome {
+    ) -> crate::kernel::api::types::ToolOutcome {
         self.vm.guest_run(
             lease,
             &GuestRun {

@@ -347,7 +347,7 @@ pub struct AppSettings {
     pub thinking: ThinkingCatalog,
     /// 目的：默认执行档位：新建会话未单独选定时用它（本机 = 在宿主上跑；虚拟机 = 整台 guest）。
     #[serde(default)]
-    pub tier: crate::kernel::api::Tier,
+    pub tier: crate::kernel::api::types::Tier,
     /// 目的：全局沙箱策略与会话默认权限。
     #[serde(default)]
     pub sandbox: SandboxSettings,
@@ -420,7 +420,7 @@ fn default_compact_keep_percent() -> u8 {
 }
 
 fn default_llm_timeout_secs() -> u64 {
-    crate::kernel::api::DEFAULT_LLM_TIMEOUT_SECS
+    crate::kernel::api::types::DEFAULT_LLM_TIMEOUT_SECS
 }
 
 fn default_true() -> bool {
@@ -433,14 +433,14 @@ impl Default for AppSettings {
             streaming: true,
             show_reasoning: true,
             thinking: ThinkingCatalog::default(),
-            tier: crate::kernel::api::Tier::Host,
+            tier: crate::kernel::api::types::Tier::Host,
             sandbox: SandboxSettings::default(),
             qemu_path: String::new(),
             virtiofsd_path: String::new(),
             smbd_path: String::new(),
             max_guests: 2,
             storage: StorageSettings::default(),
-            llm_timeout_secs: crate::kernel::api::DEFAULT_LLM_TIMEOUT_SECS,
+            llm_timeout_secs: crate::kernel::api::types::DEFAULT_LLM_TIMEOUT_SECS,
             compact_at_percent: 70,
             compact_keep_percent: 15,
             compact_model: String::new(),
@@ -547,7 +547,7 @@ pub fn validate_sandbox_settings(s: &SandboxSettings) -> Result<(), String> {
 /// 目的：Windows 上 `require` 文件系统/网络围栏与“不授权写 ACL”互斥——这组配置永远满足不了。
 /// 约束：只在 Windows 上判定；Linux / macOS 的围栏在守门进程里自足，`write_acl` 不参与。
 pub fn validate_sandbox_authorization(p: &SandboxPolicy) -> Result<(), String> {
-    if crate::kernel::api::HAS_EXTERNAL_ACL_STEP {
+    if crate::kernel::api::platform::HAS_EXTERNAL_ACL_STEP {
         let fs_required = p.enforce.filesystem == SandboxEnforceLevel::Require;
         let net_required = p.enforce.network == SandboxEnforceLevel::Require && !p.network;
         if (fs_required || net_required) && !p.windows.write_acl {

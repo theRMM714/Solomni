@@ -9,7 +9,7 @@ use crate::capabilities::workspace::api as dw;
 use crate::capabilities::workspace::api::{
     CommitRequest, DiffRequest, ResetRequest, ResolveRequest, ResolveTake, Sandbox, Workspace,
 };
-use crate::kernel::api::ToolOutcome;
+use crate::kernel::api::types::ToolOutcome;
 use crate::kernel::ports::ToolHandler;
 use std::sync::Arc;
 
@@ -105,7 +105,7 @@ impl WorkHandler {
         match self.workspace.work_sync(
             &self.work,
             &paths,
-            crate::kernel::api::unix_seconds(),
+            crate::kernel::api::procs::unix_seconds(),
             anchor,
         ) {
             Ok(r) => outcome(true, dw::render_sync(&r)),
@@ -150,7 +150,7 @@ impl WorkHandler {
             paths,
             deletes,
             message,
-            time: crate::kernel::api::unix_seconds(),
+            time: crate::kernel::api::procs::unix_seconds(),
             line,
         };
         match self.workspace.work_commit(&self.work, agent, session, &req) {
@@ -173,7 +173,7 @@ impl WorkHandler {
         }
         let req = dw::PushRequest {
             message: dw::str_arg(args, "message").unwrap_or_default(),
-            time: crate::kernel::api::unix_seconds(),
+            time: crate::kernel::api::procs::unix_seconds(),
             line,
         };
         match self.workspace.work_push(&self.work, agent, session, &req) {

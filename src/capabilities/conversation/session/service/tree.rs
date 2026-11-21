@@ -5,7 +5,7 @@
 
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::conversation::session::api::{History, HistoryView, Mode, SessionMeta};
-use crate::kernel::api::Tier;
+use crate::kernel::api::types::Tier;
 
 /// 目的：整张名单的扁平模块清单（保序去重）：同一模块被多个 agent 共用时只出现一次。
 pub fn flat_modules(agents: &[AgentMeta]) -> Vec<String> {

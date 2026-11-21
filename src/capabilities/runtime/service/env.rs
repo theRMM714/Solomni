@@ -13,7 +13,7 @@ impl Core {
         sid: &str,
     ) -> Result<crate::capabilities::work::api::GuestDiagnose, String> {
         let meta = self.history.meta(sid)?;
-        if meta.exec.tier != crate::kernel::api::Tier::Vm {
+        if meta.exec.tier != crate::kernel::api::types::Tier::Vm {
             return Err("这条会话是本机档，没有 guest 可诊断".to_string());
         }
         match crate::capabilities::conversation::session::api::guest_scope(

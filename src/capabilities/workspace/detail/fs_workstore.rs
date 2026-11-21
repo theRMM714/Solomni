@@ -67,7 +67,7 @@ fn rename_temp(tmp: &Path, path: &Path) -> Result<(), String> {
     }
     // Unix 上 rename 的目录项也要刷一次，才能在掉电后稳定；其它平台由 fs_meta 后端空操作。
     if let Some(dir) = path.parent() {
-        crate::kernel::api::sync_dir(dir);
+        crate::kernel::api::fs_meta::sync_dir(dir);
     }
     Ok(())
 }
@@ -169,10 +169,10 @@ fn read_json<T: DeserializeOwned>(path: &Path, what: &str) -> Result<Option<T>, 
 }
 
 /// 目的：拿住该工作的跨进程文件锁；有界等待，拿不到就如实报错。
-/// 联动：协议是内核的文件锁契约（`kernel::api::lock_within`），这里只定路径与等待上限。
+/// 联动：协议是内核的文件锁契约（`kernel::api::lock::lock_within`），这里只定路径与等待上限。
 fn lock_store(store: &Path) -> Result<File, String> {
     std::fs::create_dir_all(store).map_err(|e| format!("建版本库目录失败：{}", e))?;
-    crate::kernel::api::lock_within(
+    crate::kernel::api::lock::lock_within(
         &store.join("lock"),
         std::time::Duration::from_secs(10),
         "版本库",

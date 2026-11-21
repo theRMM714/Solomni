@@ -442,7 +442,7 @@ fn portable_hooks_pass_quietly_without_an_acl_step() {
 
     // 只读对账：非 Windows 一律按已就绪放行（没有要预授的落点），不打印任何东西。
     let ready = crate::entry::portable::fence_hint(&root);
-    if !crate::kernel::api::HAS_EXTERNAL_ACL_STEP {
+    if !crate::kernel::api::platform::HAS_EXTERNAL_ACL_STEP {
         assert!(ready, "无 ACL 一步的平台不该提示缺项");
     }
 
@@ -450,7 +450,7 @@ fn portable_hooks_pass_quietly_without_an_acl_step() {
     crate::entry::portable::ensure_after_authorize(&root);
 
     // 端口自身不静默成功：非 Windows 上没有机器级落点，如实报不可用。
-    if !crate::kernel::api::HAS_EXTERNAL_ACL_STEP {
+    if !crate::kernel::api::platform::HAS_EXTERNAL_ACL_STEP {
         let err = SetupHost::new(&root)
             .fence_missing()
             .expect_err("非 Windows 没有机器级落点");

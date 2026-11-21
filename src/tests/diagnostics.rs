@@ -91,7 +91,7 @@ fn startup_fence_report_and_doctor_share_the_same_capability() {
     let report = crate::FenceReport::new(
         cap.clone(),
         false,
-        std::sync::Arc::new(crate::kernel::api::SandboxMode::permissive()),
+        std::sync::Arc::new(crate::kernel::api::fence::SandboxMode::permissive()),
     );
     let root = crate::tests::scratch("fence-report");
     let system = crate::entry::assembly::system(&root, &Default::default()).expect("装系统能力");

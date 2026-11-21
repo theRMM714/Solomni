@@ -37,7 +37,7 @@ pub use crate::kernel::ports::ProcessRunner;
 pub use crate::capabilities::catalog::modules::api::Module;
 
 pub use crate::capabilities::vm::api::{self as exec};
-pub use crate::kernel::api::ExecSpec;
+pub use crate::kernel::api::types::ExecSpec;
 
 pub use crate::capabilities::catalog::modules::ports::ModuleSource;
 pub use crate::capabilities::workspace::ports::Workdirs;
@@ -54,7 +54,7 @@ pub use crate::capabilities::conversation::session::api::{
 
 pub(crate) use crate::capabilities::runtime::service::Core;
 
-pub use crate::kernel::api::Tier;
+pub use crate::kernel::api::types::Tier;
 
 pub use std::collections::{BTreeMap, BTreeSet};
 

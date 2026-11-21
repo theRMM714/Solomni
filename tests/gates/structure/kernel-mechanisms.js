@@ -5,7 +5,9 @@
  * 判据：① src/kernel 下的每个机制必须在表里归层，表里的机制也必须在盘上——登记不许留静默空洞；
  *       ② 依赖边的目标层必须严格小于来源层（同层与向上都失败）——「同层禁止互相依赖」在这里落地；
  *       ③ 声明层号必须等于按现有依赖重算的层号——表是事实的缓存，不是可以写宽的意图；
- *       ④ 机制之间不许成环——重算前先找环并报出环路径（成环时不再谈层号）。
+ *       ④ 机制之间不许成环——重算前先找环并报出环路径（成环时不再谈层号）；
+ *       ⑤ 内核内部只走机制路径——src/kernel 下（除 api/ 面自身）不许出现 `crate::kernel::api`，
+ *          对外面只留给能力与装配层；内核绕道面会让面与实现互相牵制。
  * ③ 的含义：动了一条边就重算全表（node tests/gates/structure/kernel-mechanisms.js --write 重算写回），
  * 让「这个机制为什么抬高」留在 diff 里；不想抬层就只能消掉那条边。
  * 只回执不判红：扇出（数字说明一个机制在替多少个机制装配）。
@@ -96,6 +98,22 @@ function edgesOf(root, mechs) {
   return edges;
 }
 
+/** 内核内部绕道对外面的地方：src/kernel 下（除 api/ 面自身）出现 kernel::api。
+ *  对外面是给能力与装配层用的；内核内部直取所属机制，面才不会被实现反向绑住。 */
+function apiFaceRefs(root, mechs) {
+  const hits = [];
+  const files = [...new Set([...mechs.values()].flat())];
+  const barrel = path.join(root, "src", "kernel.rs");
+  if (fs.existsSync(barrel)) files.push(barrel);
+  for (const f of files) {
+    const text = mask(fs.readFileSync(f, "utf8"));
+    text.split(/\r?\n/).forEach((raw, i) => {
+      if (/kernel::api\b/.test(raw)) hits.push({ file: f, line: i + 1 });
+    });
+  }
+  return hits;
+}
+
 /** 按当前依赖重算层号：A 依赖 B 则 A 至少比 B 高一层；叶子为 0。
  *  成环时把环路径收进 cycles 并停止抬层——环不是层号问题，不能靠数字糊过去。 */
 function layersOf(mechs, edges) {
@@ -169,6 +187,13 @@ function kernelMechanisms(root) {
   for (const mech of [...tiers.keys()].sort()) if (!mechs.has(mech)) problems.push("机制分层：" + TABLE + " 里的 " + mech + " 在 src/kernel 下没有对应文件");
   if (problems.length) return { problems, notes: [] };
 
+  for (const hit of apiFaceRefs(root, mechs)) {
+    problems.push(
+      "机制分层：" + hit.file.slice(root.length + 1).replace(/\\/g, "/") + " 第 " + hit.line +
+        " 行绕道内核对外面 kernel::api——内核内部直取所属机制（crate::kernel::contracts|domain|detail::<机制>）",
+    );
+  }
+
   const edges = edgesOf(root, mechs);
   const { layers: need, cycles } = layersOf(mechs, edges);
   if (cycles.length) {
@@ -212,7 +237,7 @@ function kernelMechanisms(root) {
   return { problems, notes };
 }
 
-module.exports = { kernelMechanisms, layersOf, mechanismsOf, edgesOf, parseMechanisms, recompute, writeTable, mechanismOf };
+module.exports = { kernelMechanisms, layersOf, mechanismsOf, edgesOf, apiFaceRefs, parseMechanisms, recompute, writeTable, mechanismOf };
 
 /** 命令行：打印机制表与按依赖重算的层号；--write 把重算结果写回机制表。 */
 if (require.main === module) {

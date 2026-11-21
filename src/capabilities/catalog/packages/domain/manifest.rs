@@ -122,7 +122,7 @@ pub fn host_platform() -> Option<&'static str> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlatformDir<'a> {
     /// 目的：None = 两档通用；Some = 只服务那一档。
-    pub tier: Option<crate::kernel::api::Tier>,
+    pub tier: Option<crate::kernel::api::types::Tier>,
     /// 目的：平台名（os-arch）。
     pub platform: &'a str,
 }
@@ -131,9 +131,9 @@ pub struct PlatformDir<'a> {
 /// 约束：不认的子目录当普通内容，不是平台目录。
 pub fn platform_dir(name: &str) -> Option<PlatformDir<'_>> {
     let (tier, rest) = if let Some(rest) = name.strip_prefix("host-") {
-        (Some(crate::kernel::api::Tier::Host), rest)
+        (Some(crate::kernel::api::types::Tier::Host), rest)
     } else if let Some(rest) = name.strip_prefix("guest-") {
-        (Some(crate::kernel::api::Tier::Vm), rest)
+        (Some(crate::kernel::api::types::Tier::Vm), rest)
     } else {
         (None, name)
     };
@@ -276,7 +276,7 @@ impl Library {
 
 /// 目的：清单校验（纯逻辑；由 Library::build 调用）：非法 = 拒收并说明原因，不纠正。
 pub fn check_manifest(m: &PackageManifest) -> Result<(), String> {
-    if !crate::kernel::api::valid_capability(&m.id) {
+    if !crate::kernel::api::types::valid_capability(&m.id) {
         return Err(
             "id 不合法（只允许小写字母、数字、- _ .，且以字母或数字开头，长度 1..=64）".to_string(),
         );
@@ -323,7 +323,7 @@ pub fn check_manifest(m: &PackageManifest) -> Result<(), String> {
         }
     }
     for r in &m.requires {
-        if !crate::kernel::api::valid_capability(r) {
+        if !crate::kernel::api::types::valid_capability(r) {
             return Err(format!("requires 里的能力名不合法：{}", r));
         }
         if r == &m.id {

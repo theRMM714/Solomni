@@ -13,7 +13,7 @@ use crate::capabilities::system::api::{
     toolchain_json, toolchain_lines,
 };
 use crate::capabilities::workspace::api::WorkGcReport;
-use crate::kernel::api::JobState;
+use crate::kernel::api::types::JobState;
 use crate::presentation::cli::boot;
 
 /// 目的：合成一份系统维护面——每条命令要的分支由字段决定，用例不碰磁盘也不起进程。

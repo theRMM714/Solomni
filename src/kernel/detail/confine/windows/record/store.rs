@@ -137,7 +137,11 @@ pub(crate) fn lock_ledger(home: &Path) -> Result<LedgerGuard, String> {
         .map_err(|_| "台账进程内锁已被毒化".to_string())?;
     std::fs::create_dir_all(home).map_err(|e| format!("建私有区失败：{}", e))?;
     // 跨进程那半是内核的文件锁契约；等多久是台账自己的策略。
-    let file = crate::kernel::api::lock_within(&lock_path(home), Duration::from_secs(60), "台账")?;
+    let file = crate::kernel::detail::lock::lock_within(
+        &lock_path(home),
+        Duration::from_secs(60),
+        "台账",
+    )?;
     Ok(LedgerGuard {
         _proc: proc,
         _file: file,

@@ -35,7 +35,7 @@ use crate::capabilities::tools::ports::SysIo;
 use crate::capabilities::tools::ports::SystoolsSource;
 use crate::capabilities::workspace::detail::fs_workspace::FsWorkspace;
 use crate::capabilities::workspace::ports::Workdirs;
-use crate::kernel::api::ExecSpec;
+use crate::kernel::api::types::ExecSpec;
 use crate::kernel::detail::file_log::FileLog;
 use crate::kernel::ports::{Log, NoopLog};
 use std::io::{Read, Write};

@@ -448,7 +448,7 @@ pub(crate) fn create_session_action(
 mod tests {
     use super::*;
     use crate::capabilities::conversation::session::api::Pending;
-    use crate::kernel::api::Ask;
+    use crate::kernel::api::types::Ask;
 
     /// 目的：用生产那一条派生造卡（工具层那一类：三段话与选项原样来自发起方）。
     fn card(title: &str, body: &str, detail: &str, options: &[(&str, &str)]) -> DecisionCard {

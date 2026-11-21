@@ -32,7 +32,7 @@ pub struct SessionMeta {
     pub agents: Vec<AgentMeta>,
     /// 目的：执行档位与运行包选型（exec 段；缺字段按默认 = 本机档读回）。
     #[serde(default)]
-    pub exec: crate::kernel::api::ExecSpec,
+    pub exec: crate::kernel::api::types::ExecSpec,
     /// 目的：共享区主副本绑定的外部工作区根；`None` = 产品内的 `session/<名>/work`。
     /// 约束：只写在工作根上（子会话沿 `parent` 继承同一个根），创建后不可改。
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -142,7 +142,7 @@ pub struct HistoryView {
     /// 目的：这条会话记的执行档位与选型（meta.yaml 的 exec 段；缺字段按默认 = 本机档读回）。
     ///   列表视图据此提示"环境已变"——**不拦打开**，记录是用户的。
     #[serde(default)]
-    pub exec: crate::kernel::api::ExecSpec,
+    pub exec: crate::kernel::api::types::ExecSpec,
     /// 目的：谁编排的（子会话 = 父会话名）：侧栏据此把子会话缩进挂在父会话下。
     #[serde(default)]
     pub parent: Option<String>,

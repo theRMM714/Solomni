@@ -3,7 +3,7 @@
 //! 不管：围栏授权与台账、平台容器生命周期。
 //! 联动：由 `prep.rs`、`process.rs` 与 `entry/toolchains.rs` 消费。
 
-use crate::kernel::api::FenceSpec;
+use crate::kernel::contracts::fence::FenceSpec;
 use std::ffi::OsString;
 use std::process::Command;
 

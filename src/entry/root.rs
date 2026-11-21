@@ -21,7 +21,7 @@ pub fn resolve_root(raw: &std::path::Path) -> (PathBuf, Option<String>) {
         }
         Err(e) => match std::fs::canonicalize(raw) {
             Ok(p) => (
-                crate::kernel::api::native(&p),
+                crate::kernel::api::path::native(&p),
                 Some(format!(
                     "取不到当前目录（{}）：改用 canonicalize 规范化产品根",
                     e

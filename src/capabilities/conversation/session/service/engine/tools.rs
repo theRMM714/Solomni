@@ -10,7 +10,7 @@ use crate::capabilities::llm::api::ToolInvoke;
 use crate::capabilities::permission::api::{CallScope, Decision, Effect, Reach, ReachSet};
 use crate::capabilities::tools::api::{Observations, ShellFacts, ToolSchema};
 use crate::capabilities::workspace::api::ReadFact;
-use crate::kernel::api::ToolOutcome;
+use crate::kernel::api::types::ToolOutcome;
 
 /// 目的：一次调用的结果形态（标签，结果，读事实，shell 结构化事实），只为把签名读短。
 pub(crate) type CallDone = (String, ToolOutcome, Option<ReadFact>, Option<ShellFacts>);
@@ -121,7 +121,7 @@ pub(crate) fn commit_writes(
     let rel = |abs: &std::path::PathBuf| -> Option<String> {
         abs.strip_prefix(&ctx.face.sandbox.private)
             .ok()
-            .map(crate::kernel::api::slash)
+            .map(crate::kernel::api::path::slash)
     };
     let mut paths: Vec<String> = written.iter().filter_map(rel).collect();
     let mut deletes: Vec<String> = removed.iter().filter_map(rel).collect();
@@ -733,7 +733,7 @@ pub(crate) fn run_shell(
             None,
         );
     }
-    let mut fence = crate::kernel::api::FenceSpec::for_call(
+    let mut fence = crate::kernel::api::fence::FenceSpec::for_call(
         &ctx.face.sandbox,
         &grant.reach,
         None,
@@ -745,7 +745,7 @@ pub(crate) fn run_shell(
     fence.ro_tree.dedup();
     // 容器身份按"会话 + agent + 受保护根集合"派生（见 container_name）：scope 不同 → 根集合不同 → 不同 SID；
     // 同一 reach 的后续调用复用 SID 与 ACL。生命周期归会话，调用结束不释放。
-    if ctx.face.tier == crate::kernel::api::Tier::Vm && ctx.face.guest_lease.is_empty() {
+    if ctx.face.tier == crate::kernel::api::types::Tier::Vm && ctx.face.guest_lease.is_empty() {
         return (
             ToolOutcome::new(
                 false,
@@ -770,8 +770,8 @@ pub(crate) fn run_shell(
         slot.start(&call.script, scope, &cwd_view);
     }
     // 本机档的围栏准备耗时由 ProcessRunner 同线程交棒（见 kernel 的 take_fence_prep）；虚拟机档没有本机 ACL 准备，这里恒为 None。
-    let mut fence_prep: Option<crate::kernel::api::FenceTiming> = None;
-    let mut outcome = if ctx.face.tier == crate::kernel::api::Tier::Vm {
+    let mut fence_prep: Option<crate::kernel::api::process::FenceTiming> = None;
+    let mut outcome = if ctx.face.tier == crate::kernel::api::types::Tier::Vm {
         let run = crate::capabilities::vm::api::GuestRun {
             command: call.script.clone(),
             args_json: String::new(),
@@ -794,7 +794,7 @@ pub(crate) fn run_shell(
         };
         let outcome = ctx.tools.run_shell(&run);
         // 同一次执行的值只取一次（读即清）：这里没取到就说明这次没写本机权限项。
-        fence_prep = crate::kernel::api::take_fence_prep();
+        fence_prep = crate::kernel::api::process::take_fence_prep();
         outcome
     };
     // 共享区不承载执行位：相对路径脚本被直接执行（EACCES）时，补一条"用解释器跑"的说明。
@@ -906,14 +906,14 @@ pub(crate) fn dispatch_external(
                 .unwrap_or(&[]);
             // 每次调用按生效 reach 派生围栏：sh 与模块工具同一把尺子，不再用会话并集围栏执行。
             // 容器身份 = 会话 + agent + 受保护根集合（见 container_name）；租约就是会话 id，调用结束不释放。
-            let fence = crate::kernel::api::FenceSpec::for_call(
+            let fence = crate::kernel::api::fence::FenceSpec::for_call(
                 &ctx.face.sandbox,
                 &grant.reach,
                 Some(&module),
                 &ctx.face.fence,
             )
             .at(&mt.root);
-            let outcome = if ctx.face.tier == crate::kernel::api::Tier::Vm {
+            let outcome = if ctx.face.tier == crate::kernel::api::types::Tier::Vm {
                 // 虚拟机档：命令送进这个会话的 guest；per-call 断网由 guest helper 落实。
                 if ctx.face.guest_lease.is_empty() {
                     return (

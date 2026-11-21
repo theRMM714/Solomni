@@ -5,7 +5,7 @@
 
 use crate::capabilities::residents::detail::McpAdapter;
 use crate::capabilities::residents::ports::{LaunchSpec, ServiceAdapter};
-use crate::kernel::api::FenceSpec;
+use crate::kernel::api::fence::FenceSpec;
 use crate::kernel::ports::SessionHost;
 use crate::tests::doubles::{RecordingLog, ScriptedHost};
 use serde_json::json;

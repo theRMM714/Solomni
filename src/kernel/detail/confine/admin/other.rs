@@ -4,7 +4,7 @@
 //! 联动：由 `src/kernel/detail/confine/admin.rs` 在非 Windows 目标选中。
 
 use super::super::ledger::{Ledger, ReconcileReport};
-use crate::kernel::api::FenceSpec;
+use crate::kernel::contracts::fence::FenceSpec;
 use std::path::Path;
 
 /// 目的：非 Windows 没有持久授权，释放为空操作。

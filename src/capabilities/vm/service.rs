@@ -12,7 +12,9 @@ use crate::capabilities::vm::domain::guest::{
     self as guest, GuestMount, GuestOs, GuestRun, GuestSpec, OutputLimit,
 };
 use crate::capabilities::vm::ports::{GuestVm, ShareBackend, ShareGuard, VmEngine};
-use crate::kernel::api::{FileStamp, ToolOutcome, file_stamp};
+use crate::kernel::api::host_probe::FileStamp;
+use crate::kernel::api::host_probe::file_stamp;
+use crate::kernel::api::types::ToolOutcome;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -77,7 +79,7 @@ impl VmService {
         &self,
         lease: &str,
         run: &GuestRun,
-        fence: Option<&crate::kernel::api::FenceSpec>,
+        fence: Option<&crate::kernel::api::fence::FenceSpec>,
         cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> ToolOutcome {
         let entry = match self.guests.lock() {
@@ -185,7 +187,7 @@ impl Vm for VmService {
         &self,
         lease: &str,
         run: &GuestRun,
-        fence: &crate::kernel::api::FenceSpec,
+        fence: &crate::kernel::api::fence::FenceSpec,
     ) -> ToolOutcome {
         self.run_guest(lease, run, Some(fence), None)
     }
@@ -194,7 +196,7 @@ impl Vm for VmService {
         &self,
         lease: &str,
         run: &GuestRun,
-        fence: &crate::kernel::api::FenceSpec,
+        fence: &crate::kernel::api::fence::FenceSpec,
         cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> ToolOutcome {
         self.run_guest(lease, run, Some(fence), cancel)

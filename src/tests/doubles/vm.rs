@@ -13,8 +13,8 @@ pub(crate) struct FakeEngine {
     pub boot_delay: Option<std::time::Duration>,
     pub boot_error: Option<String>,
     pub fenced_output: Option<String>,
-    pub fenced_result: Option<crate::kernel::api::ToolOutcome>,
-    pub exec_result: Option<crate::kernel::api::ToolOutcome>,
+    pub fenced_result: Option<crate::kernel::api::types::ToolOutcome>,
+    pub exec_result: Option<crate::kernel::api::types::ToolOutcome>,
     // 每次 `boot()` 收到的 `GuestSpec` 快照（含 `mounts`；失败尝试也记——"试过哪个计划"同样是事实）。
     pub specs: Arc<Mutex<Vec<crate::capabilities::vm::domain::guest::GuestSpec>>>,
 }
@@ -267,9 +267,9 @@ struct FakeChannel {
     /// 目的：围栏执行的预设输出（None = 恒 `fake-guest`）：诊断用例给它一份 helper 形状的 JSON。
     fenced_output: Option<String>,
     /// 目的：围栏执行的完整预设结果（None = 按 fenced_output 造成功回包）：诊断失败分支用。
-    fenced_result: Option<crate::kernel::api::ToolOutcome>,
+    fenced_result: Option<crate::kernel::api::types::ToolOutcome>,
     /// 目的：裸执行的完整预设结果（None = 恒 `fake-guest` 成功）：诊断预检分支用。
-    exec_result: Option<crate::kernel::api::ToolOutcome>,
+    exec_result: Option<crate::kernel::api::types::ToolOutcome>,
 }
 
 impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
@@ -281,21 +281,21 @@ impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
     fn exec(
         &mut self,
         run: &crate::capabilities::vm::domain::guest::GuestRun,
-    ) -> crate::kernel::api::ToolOutcome {
+    ) -> crate::kernel::api::types::ToolOutcome {
         self.calls
             .lock()
             .expect("锁")
             .push(format!("run:{}:{}", self.lease, run.command));
-        self.exec_result
-            .clone()
-            .unwrap_or_else(|| crate::kernel::api::ToolOutcome::new(true, "fake-guest".to_string()))
+        self.exec_result.clone().unwrap_or_else(|| {
+            crate::kernel::api::types::ToolOutcome::new(true, "fake-guest".to_string())
+        })
     }
 
     fn exec_fenced(
         &mut self,
         _run: &crate::capabilities::vm::domain::guest::GuestRun,
         access: &crate::capabilities::vm::domain::guest::GuestAccess,
-    ) -> crate::kernel::api::ToolOutcome {
+    ) -> crate::kernel::api::types::ToolOutcome {
         // 记录形状沿用既有前缀（既有用例按 `fenced:<租约>:<agent>:<cwd>:<rw>` 断言），
         // 后面再追加只读根与诊断标记——诊断用例据此断言「走的是只读系统允许集」。
         self.calls.lock().expect("锁").push(format!(
@@ -314,7 +314,7 @@ impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
             .fenced_output
             .clone()
             .unwrap_or_else(|| "fake-guest".to_string());
-        crate::kernel::api::ToolOutcome::new(true, output)
+        crate::kernel::api::types::ToolOutcome::new(true, output)
     }
 }
 
@@ -348,7 +348,7 @@ pub(crate) struct RecordingVm {
     // 每个租约启动时装载的运行包（判定新子会话要不要重建）。
     pub packages: Mutex<std::collections::BTreeMap<String, Vec<String>>>,
     // fenced 执行的返回值覆盖（None = 恒成功）；超时 / 停止回执的成员侧断言用。
-    pub fenced_result: Mutex<Option<crate::kernel::api::ToolOutcome>>,
+    pub fenced_result: Mutex<Option<crate::kernel::api::types::ToolOutcome>>,
 }
 
 impl crate::capabilities::vm::api::Vm for RecordingVm {
@@ -364,17 +364,17 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
         &self,
         _lease: &str,
         run: &crate::capabilities::vm::domain::guest::GuestRun,
-    ) -> crate::kernel::api::ToolOutcome {
+    ) -> crate::kernel::api::types::ToolOutcome {
         self.runs.lock().expect("锁").push(run.command.clone());
-        crate::kernel::api::ToolOutcome::new(true, "guest".to_string())
+        crate::kernel::api::types::ToolOutcome::new(true, "guest".to_string())
     }
 
     fn guest_run_fenced(
         &self,
         _lease: &str,
         run: &crate::capabilities::vm::domain::guest::GuestRun,
-        _fence: &crate::kernel::api::FenceSpec,
-    ) -> crate::kernel::api::ToolOutcome {
+        _fence: &crate::kernel::api::fence::FenceSpec,
+    ) -> crate::kernel::api::types::ToolOutcome {
         self.runs
             .lock()
             .expect("锁")
@@ -385,7 +385,7 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
             run.output_limit,
         ));
         self.fenced_result.lock().expect("锁").clone().unwrap_or(
-            crate::kernel::api::ToolOutcome::new(true, "guest".to_string()),
+            crate::kernel::api::types::ToolOutcome::new(true, "guest".to_string()),
         )
     }
 
