@@ -6,6 +6,7 @@
 mod archive;
 mod config;
 mod external;
+mod filter;
 mod gate;
 mod resolve;
 mod support;

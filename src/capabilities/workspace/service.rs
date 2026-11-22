@@ -8,6 +8,7 @@ use crate::capabilities::workspace::api::{
 };
 use crate::capabilities::workspace::domain::freshness::lines_changed;
 use crate::capabilities::workspace::domain::hash::{content_hash, is_content_hash};
+use crate::capabilities::workspace::domain::path_filter;
 use crate::capabilities::workspace::domain::workstore::{
     Commit, CommitAnchor, CommitLine, Conflict, ConflictAt, Index, LocalTakeVerdict, Pending,
     PendingIndex, PullVerdict, Ref, RefKind, Source, StatusState, Tree, Unchanged, backup_rel,
@@ -54,16 +55,6 @@ fn deltas_tree(base: &Tree, changes: &[Change], depth: u32) -> Option<Tree> {
         }
     }
     Some(tree)
-}
-
-/// 首次导入时忽略的目录（VCS 元数据与依赖缓存；用户仍可之后显式 work_sync）。
-fn import_ignored(rel: &str) -> bool {
-    rel.split('/').any(|seg| {
-        matches!(
-            seg,
-            ".git" | ".svn" | ".hg" | "node_modules" | "target" | "__pycache__" | ".venv" | "venv"
-        )
-    })
 }
 
 /// 一次 status 里主副本路径清单的上限（超出如实标注截断，不假装列全）。
@@ -115,6 +106,15 @@ impl WorkspaceService {
     fn work_roots(&self, work: &str) -> Result<(PathBuf, PathBuf), String> {
         let roots = self.dirs.roots(work, &[])?;
         Ok((roots.shared, roots.store))
+    }
+
+    /// 目的：一个工作的内容面过滤规则原文（版本库目录里的 `.workignore`）。
+    /// 约束：文件缺失时退回种子——未准备 / 旧会话与新建会话看到同一份名单，不因缺文件而放开过滤。
+    fn work_rules(&self, store: &Path) -> Result<String, String> {
+        Ok(self
+            .store
+            .read_text(&store.join(path_filter::WORKIGNORE))?
+            .unwrap_or_else(|| path_filter::WORKIGNORE_SEED.to_string()))
     }
 
     /// 目的：工作区磁盘上一条相对路径的实际内容指纹（不存在 = None）。

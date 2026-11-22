@@ -362,7 +362,18 @@ impl WorkspaceService {
         self.recover_locked(work, &shared, &store)?;
         let (head_id, tree) = self.head_tree(&store)?;
         // 文件集合 = 工作区磁盘全部文件 + 当前 head；这样“磁盘新增”和“外部删除”都能被展开。
-        let disk_files: BTreeSet<String> = self.store.list(&shared)?.into_iter().collect();
+        // 磁盘这一侧按 `.workignore` 取内容；显式点名的单个文件仍并入（规则只管“发现”，不管“点名叫”）。
+        let rules = self.work_rules(&store)?;
+        let mut disk_files: BTreeSet<String> = self
+            .store
+            .list_visible(&shared, Some(&rules))?
+            .into_iter()
+            .collect();
+        for p in paths {
+            if self.store.stat_under(&shared, p)?.is_some() {
+                disk_files.insert(p.clone());
+            }
+        }
         let available: BTreeSet<String> = tree
             .keys()
             .cloned()
@@ -464,10 +475,8 @@ impl WorkspaceService {
         }
         let mut paths: Vec<String> = Vec::new();
         let mut total: u64 = 0;
-        for rel in self.store.list(&shared)? {
-            if import_ignored(&rel) {
-                continue;
-            }
+        let rules = self.work_rules(&store)?;
+        for rel in self.store.list_visible(&shared, Some(&rules))? {
             let size = self.store.stat_under(&shared, &rel)?.unwrap_or(0);
             if size > self.max_asset_bytes {
                 continue;

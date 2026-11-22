@@ -5,6 +5,8 @@
 
 use super::*;
 use crate::capabilities::conversation::session::api::Mode;
+use crate::capabilities::workspace::api::{ChangeKind, CommitAnchor, WORKIGNORE, WORKIGNORE_SEED};
+use crate::tests::doubles::test_workspace_store;
 
 fn meta(name: &str) -> SessionMeta {
     SessionMeta {
@@ -645,4 +647,134 @@ fn fs_sys_io_write_lock_is_cross_instance_and_releases() {
         .expect("放锁后应能写");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "b");
     assert_eq!(receipt.total_lines, 1);
+}
+
+/// 目的：准备会话时播种 `.workignore`，且**不覆盖**用户已改的规则；规则落在版本库目录里、不进共享区。
+#[test]
+fn fs_workspace_prepare_seeds_workignore_once() {
+    let root = scratch("fs-workignore-seed");
+    let sessions = root.join("session");
+    let ws = FsWorkspace::new(sessions.clone());
+    ws.prepare("w", &["a".to_string()]).expect("建目录");
+
+    let rules = sessions.join("w").join(".work").join(WORKIGNORE);
+    assert_eq!(
+        std::fs::read_to_string(&rules).expect("种子要落地"),
+        WORKIGNORE_SEED,
+        "初始规则就是常量这一份"
+    );
+    assert!(
+        !sessions.join("w").join("work").join(WORKIGNORE).exists(),
+        "规则不进共享区：它属于版本库目录"
+    );
+
+    std::fs::write(&rules, "*.log\n").expect("用户改规则");
+    ws.prepare("w", &["a".to_string()]).expect("再次准备");
+    assert_eq!(
+        std::fs::read_to_string(&rules).expect("读回"),
+        "*.log\n",
+        "已存在的规则不被种子覆盖"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：`list_visible` 按规则剪枝，`list` 仍列全部——内容面只差"发现"这一步，语义只有一份。
+#[test]
+fn fs_work_store_lists_visible_files_by_rules() {
+    let root = scratch("fs-list-visible");
+    let shared = root.join("work");
+    for rel in [
+        "README.md",
+        "src/main.rs",
+        "node_modules/pkg/index.js",
+        "build/out.o",
+        ".git/config",
+    ] {
+        let p = shared.join(rel);
+        std::fs::create_dir_all(p.parent().expect("父目录")).expect("造目录");
+        std::fs::write(&p, rel).expect("造文件");
+    }
+
+    let store = FsWorkStore::new();
+    assert_eq!(
+        store.list(&shared).expect("列全部"),
+        vec![
+            ".git/config".to_string(),
+            "README.md".to_string(),
+            "build/out.o".to_string(),
+            "node_modules/pkg/index.js".to_string(),
+            "src/main.rs".to_string(),
+        ],
+        "不过滤时列全，排序稳定"
+    );
+    assert_eq!(
+        store
+            .list_visible(&shared, Some("node_modules\n.git\nbuild/\n"))
+            .expect("按规则列"),
+        vec!["README.md".to_string(), "src/main.rs".to_string()],
+        "被忽略目录整棵剪掉"
+    );
+    assert_eq!(
+        store.list_visible(&shared, None).expect("无规则"),
+        store.list(&shared).expect("列全部"),
+        "None 与不过滤等价"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：首次绑定外部工作区时只导入**算内容**的文件；显式点名的路径不受规则限制（同 `git add -f`）。
+#[test]
+fn work_import_root_respects_workignore_and_still_takes_explicit_paths() {
+    let root = scratch("fs-import-workignore");
+    let sessions = root.join("session");
+    let external = root.join("project");
+    for rel in ["README.md", "src/a.txt", "node_modules/x.js", ".git/config"] {
+        let p = external.join(rel);
+        std::fs::create_dir_all(p.parent().expect("父目录")).expect("造目录");
+        std::fs::write(&p, rel).expect("造文件");
+    }
+
+    let ws = test_workspace_store(
+        Arc::new(FsWorkspace::new(sessions.clone())),
+        Arc::new(FsWorkStore::new()),
+    );
+    ws.bind("w", Some(&external)).expect("绑定外部工作区");
+    ws.prepare("w", &["a".to_string()]).expect("准备");
+    ws.work_import_root("w", 7).expect("初始导入");
+
+    let mut tree = ws.work_status("w", "a", &[]).expect("读状态").tree;
+    tree.sort();
+    assert_eq!(
+        tree,
+        vec!["README.md".to_string(), "src/a.txt".to_string()],
+        "被规则忽略的目录不进初始提交"
+    );
+
+    // 显式点名：规则之后仍能提交被忽略目录里的某个文件。
+    let late = external.join("node_modules").join("late.js");
+    std::fs::write(&late, "late").expect("造后加文件");
+    let report = ws
+        .work_sync(
+            "w",
+            &["node_modules/late.js".to_string()],
+            8,
+            CommitAnchor {
+                agent: "a".to_string(),
+                session: "w".to_string(),
+                line: 1,
+            },
+        )
+        .expect("显式点名同步");
+    assert_eq!(
+        report.changes.len(),
+        1,
+        "只有点名的那一条被采纳：{:?}",
+        report.changes
+    );
+    assert_eq!(report.changes[0].path, "node_modules/late.js");
+    assert!(
+        report.changes[0].kind == ChangeKind::Add,
+        "新文件按新增处理"
+    );
+    let _ = std::fs::remove_dir_all(&root);
 }

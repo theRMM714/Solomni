@@ -371,6 +371,41 @@ fn work_store_double_streams_assets_and_rejects_oversize_or_mismatch() {
     assert_eq!(bad.stat_object(&store, "h").unwrap_err(), "版本库不可用");
 }
 
+/// 目的：版本库替身与真实适配器同一份过滤契约：`list_visible` 按 `.workignore` 剪枝，`read_text` 缺文件给 None。
+#[test]
+fn work_store_double_lists_visible_files_and_reads_small_text() {
+    use crate::capabilities::workspace::ports::WorkStore;
+    let s = InMemoryWorkStore::new();
+    let root = abs(&["w", "work"]);
+    for rel in ["README.md", "src/main.rs", "node_modules/pkg/index.js"] {
+        s.write_under(&root, rel, rel.as_bytes()).unwrap();
+    }
+
+    assert_eq!(s.list(&root).unwrap().len(), 3, "不过滤时列全");
+    assert_eq!(
+        s.list_visible(&root, Some("node_modules\n")).unwrap(),
+        vec!["README.md".to_string(), "src/main.rs".to_string()],
+        "按规则剪掉被忽略的目录"
+    );
+    assert_eq!(
+        s.list_visible(&root, None).unwrap().len(),
+        3,
+        "None 与不过滤等价"
+    );
+    assert!(
+        !s.list_visible(&root, Some("[z-a]\n"))
+            .unwrap_err()
+            .is_empty(),
+        "非法规则要如实报错，不静默忽略"
+    );
+
+    let rules = abs(&["w", ".work", ".workignore"]);
+    assert_eq!(s.read_text(&rules).unwrap(), None, "缺文件给 None");
+    s.write_under(&abs(&["w", ".work"]), ".workignore", b"target\n")
+        .unwrap();
+    assert_eq!(s.read_text(&rules).unwrap().as_deref(), Some("target\n"));
+}
+
 // ---------- SysIo ----------
 #[test]
 fn sys_io_double_reads_writes_and_propagates_failure() {
