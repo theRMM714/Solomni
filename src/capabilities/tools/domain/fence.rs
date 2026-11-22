@@ -19,7 +19,7 @@ impl FencePlan {
             lease: sb.session.clone(),
             home: sb.private.clone(),
             cwd: PathBuf::new(),
-            net: base.net,
+            net: base.net.clone(),
             grants: base
                 .paths(Access::Read, Reach::Dir)
                 .into_iter()

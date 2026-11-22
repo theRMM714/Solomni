@@ -97,17 +97,22 @@ impl Grant {
         }
     }
 }
-
 /// 目的：出站网络的意图（全局 `sandbox.policy.network` 与会话权限的合成结果）。
-/// 约束：Windows 只放行公网出站，不授 private network / loopback；
+/// 约束：Windows 只放行公网出站，不授 private network / loopback；要连宿主回环只能显式要 `Local`（由中继落实）；
 ///   Linux 的 `Off` 用 seccomp 拒绝非本地 socket（`Public` 不装网络过滤器）；macOS 放行 `network-outbound`。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum NetPolicy {
     /// 断网。
     #[default]
     Off,
     /// 放行公网出站。
     Public,
+    /// **只**放行这些宿主回环端口的出站（容器里表现为 `127.0.0.1:<端口>` 可连，其余照旧不可达）。
+    /// 约束：只在 Windows 有落实（容器内中继 + 宿主侧按端口校验）；Unix 两平台如实降级并在能力说明里讲清。
+    Local {
+        /// 要放行的宿主回环端口（容器侧绑同名端口，只在这份清单里的端口会被宿主真正 dial）。
+        ports: Vec<u16>,
+    },
 }
 
 impl From<bool> for NetPolicy {
@@ -126,9 +131,22 @@ impl NetPolicy {
         }
     }
 
-    /// 目的：要不要放行出站网络。
+    /// 目的：要不要放行**公网**出站（`Local` 不算：它只碰宿主回环，不碰公网）。
     pub fn on(&self) -> bool {
         matches!(self, NetPolicy::Public)
+    }
+
+    /// 目的：这次要放的宿主回环端口；`None` = 不是 `Local` 档。
+    pub fn local_ports(&self) -> Option<&[u16]> {
+        match self {
+            NetPolicy::Local { ports } => Some(ports),
+            _ => None,
+        }
+    }
+
+    /// 目的：是不是 `Local` 档（容器侧要起中继）。
+    pub fn is_local(&self) -> bool {
+        matches!(self, NetPolicy::Local { .. })
     }
 }
 

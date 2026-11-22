@@ -587,6 +587,22 @@ pub(crate) fn run_shell(
         crate::kernel::api::fence::FencePlan::for_call(&ctx.face.sandbox, None, &ctx.face.fence)
             .at(&ctx.face.sandbox.private);
     fence.extend_read_tree(ctx.face.runtime_roots.iter().cloned());
+    // 要连宿主回环时才换网络档：容器侧起中继、按端口放行（宿主侧还会拒产品自己的端口）。
+    if !call.local_ports.is_empty() {
+        if ctx.face.tier == crate::kernel::api::types::Tier::Vm {
+            return (
+                ToolOutcome::new(
+                    false,
+                    "local_ports 只在本机档生效：虚拟机档的 guest 回环是它自己的，不映射到宿主端口；这次调用没有执行。"
+                        .to_string(),
+                ),
+                None,
+            );
+        }
+        fence.net = crate::kernel::api::fence::NetPolicy::Local {
+            ports: call.local_ports.clone(),
+        };
+    }
     // 容器身份按"会话 + agent + 受保护根集合"派生（见 container_name）：同一会话的 shell 共用 SID 与 ACL。
     // 生命周期归会话，调用结束不释放。
     if ctx.face.tier == crate::kernel::api::types::Tier::Vm && ctx.face.guest_lease.is_empty() {

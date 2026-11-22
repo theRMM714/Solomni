@@ -70,6 +70,35 @@ pub fn job_json_net(rw: &[PathBuf], cwd: &Path, prepared: bool, net: bool) -> St
     plan_json(cwd, net, grants, &format!(",\"prepared\":{}", prepared))
 }
 
+/// 目的：回环中继档的守门进程入参：`net` 是 `Local { ports }`——容器里只放行这几个宿主本机端口。
+///   约束：真跑中继要先用 `prepare_fence` 把授权写进本机（含本产品可执行文件那一条），再给 `prepared = true`。
+pub fn job_json_local(
+    rw: &[PathBuf],
+    cwd: &Path,
+    prepared: bool,
+    product_home: Option<&Path>,
+    ports: &[u16],
+) -> String {
+    let grants: Vec<String> = rw.iter().map(|p| grant_json(p, "Write", "Tree")).collect();
+    let ports = ports
+        .iter()
+        .map(|p| p.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let home = match product_home {
+        Some(h) => format!(",\"product_home\":\"{}\"", esc(h)),
+        None => String::new(),
+    };
+    format!(
+        "{{\"agent\":\"probe\",\"cwd\":\"{}\",\"grants\":[{}],\"net\":{{\"Local\":{{\"ports\":[{}]}}}}{},\"prepared\":{}}}",
+        esc(cwd),
+        grants.join(","),
+        ports,
+        home,
+        prepared
+    )
+}
+
 /// 目的：带 `FenceRunPolicy` 的守门进程入参——验“要求强制但机制不可用”时的拒绝路径。
 /// 约束：缺省探针只测降级，主动要求 `allow_degraded=false` 才能钉住 fail-closed。
 pub fn job_json_net_policy(
@@ -190,6 +219,40 @@ pub fn run_launcher_env(
         String::from_utf8_lossy(&out.stdout).into_owned(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
     )
+}
+
+/// 目的：预写围栏授权（`--fence-prepare`）：只把授权写进本机，不执行命令。
+///   为什么探针需要它：容器里要跑**本产品自己的**中继进程，而它那条单文件只读授权只能由授权这一步写下；
+///   真实会话里这是外层工具进程做的事，探针没有那层，所以直接调同一个入口。
+/// 返回：（退出码, stdout, stderr）；0 = 必要落点全授上。
+pub fn prepare_fence(spec: &str, command: &str) -> (Option<i32>, String, String) {
+    let out = Command::new(bin())
+        .arg("--fence-prepare")
+        .arg(spec)
+        .arg("--")
+        .arg(command)
+        .output()
+        .expect("预写围栏授权");
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// 目的：按台账整体收尾（授权与容器 profile 都撤掉）：夹具根 = 产品根，台账落在它的 `.home/`。
+pub fn fence_clean(root: &Path) {
+    let out = Command::new(bin())
+        .arg("--fence-clean")
+        .arg("--root")
+        .arg(root)
+        .output()
+        .expect("收尾围栏台账");
+    eprintln!(
+        "[探针] 围栏收尾：{}{}",
+        String::from_utf8_lossy(&out.stdout).trim(),
+        String::from_utf8_lossy(&out.stderr).trim()
+    );
 }
 
 /// 目的：本环境是否不允许容器围栏（探针据此如实跳过——依据是环境结论，不是被测代码的成功与否）。

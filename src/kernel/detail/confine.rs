@@ -77,6 +77,10 @@ pub(crate) trait Confine: Sync {
     /// 目的：本次实际生效的路径级围栏（文件系统, 断网）。
     fn effective_paths(&self, fs: bool, net: bool, write_allowed: bool) -> (bool, bool);
 
+    /// 目的：本平台能不能把 `NetPolicy::Local` 落成「只放行清单里的端口」（回环中继）。
+    ///   不能的平台在守门进程里**拒绝执行**，不降级成回环全通（那会把产品端口一起送出去）。
+    fn local_relay(&self) -> bool;
+
     /// 目的：装围栏 → 跑命令 → 返回退出码。
     fn run(
         &self,

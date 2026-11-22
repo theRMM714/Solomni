@@ -83,6 +83,19 @@ pub(crate) fn grant_targets(plan: &FencePlan, root: Option<&Path>) -> Vec<GrantT
         };
         leaves.push(leaf(&grant.path, rights, recursive, part));
     }
+    // 回环中继档：中继进程就是本产品自己的可执行文件，要在容器里跑起来 → 单文件只读（不递归、不继承）。
+    // 只给这一个文件，不给它所处的目录树：能执行不等于能替换自己。父目录的读属性由下面的父目录补全顺带拿到。
+    if plan.net.is_local()
+        && let Ok(exe) = std::env::current_exe()
+    {
+        leaves.push(GrantTarget {
+            path: exe,
+            rights: RIGHTS_RO,
+            recursive: false,
+            inherit: false,
+            part: FencePart::Relay,
+        });
+    }
     // 父目录：只读属性、不递归、不继承（带 (OI)(CI) 的 ACE 会传播，撤权断链就污染整棵子树）；shell 的 cwd = home 时
     // 要逐级补祖先的 FILE_READ_ATTRIBUTES，这条链是机器级授权（授给本产品能力 SID、跨会话复用、对账不回收）。
     let deep = !plan.home.as_os_str().is_empty() && plan.cwd == plan.home;

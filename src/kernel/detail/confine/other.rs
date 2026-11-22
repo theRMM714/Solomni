@@ -63,6 +63,11 @@ impl super::Confine for Backend {
     fn effective_paths(&self, fs: bool, net: bool, write_allowed: bool) -> (bool, bool) {
         effective_paths(fs, net, write_allowed)
     }
+    /// 目的：本平台没有回环中继：`Local` 由守门进程拒绝。
+    fn local_relay(&self) -> bool {
+        false
+    }
+
     fn run(
         &self,
         plan: &FencePlan,

@@ -32,6 +32,8 @@
 - 两档只差一个开关：`PermissionSet { profile }`，`allows_network()` 是它唯一的行为。
 - 全局 `sandbox.policy.network` 是硬上限：`online` 档在它关闭时仍然不能出站（`FencePlan.net = global_net && permissions.allows_network()`）。
 - 档位名不描述「能读哪里」——没有那样的档位，也没有逐工具决定。
+- `FencePlan.net` 还有第三态 `Local { ports }`：它**不是档位**，而是一次调用的显式例外——`shell` 的 `local_ports` 让容器里的 `127.0.0.2:<端口>` 经中继到达宿主的 `127.0.0.1:<端口>`，清单外连不上，产品自己监听的端口一律拒（判据是「监听者落在本产品进程树里」，不靠端口表：`src/kernel/detail/container/windows/relay.rs`）。
+- 只有 Windows 后端把 `Local` 落得下去（`Confine::local_relay` → `true`）；其它平台给了 `local_ports` 就在守门进程里拒绝执行，**不**降级成回环全通（那等于把宿主回环上的产品端口一起送出去，`src/kernel/detail/confine/job.rs`）。
 
 ## 二、固定授予（不经权限判定）
 
@@ -50,7 +52,7 @@
 
 ## 四、执行落点恒为私有沙箱
 
-- shell 的每次调用都用同一套授予：cwd = 私有沙箱，私有沙箱 rw；模块目录、基础 / 项目工具链、主机只读根 ro；`net` = 全局开关与档位求交。**调用参数里没有范围旋钮**，也没有第二条「外部落点」的路。
+- shell 的每次调用都用同一套授予：cwd = 私有沙箱，私有沙箱 rw；模块目录、基础 / 项目工具链、主机只读根 ro；`net` = 全局开关与档位求交（显式给 `local_ports` 时改成只放行那几个本机回环端口，见「一」的第三态）。**调用参数里没有范围旋钮**，也没有第二条「外部落点」的路。
 - 要够到沙箱外的东西只有一条路：先 `work_pull` 拉进沙箱；共享区主副本永不进围栏，模块 `userdata` 不可写，模块 secrets 不注入。
 - 围栏装不上就拒绝（`allow_degraded=false`），不回退到无围栏执行。
 - 没有工具级确认队列：不存在 `ask` / `allow_turn` / 工具卡；需要人确认的是核心自己的关卡（建会话、验收、定版），不是权限判定。

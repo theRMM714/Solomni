@@ -5,6 +5,33 @@
 
 use crate::kernel::detail::confine::windows as backend;
 
+/// 目的：`--fence-prepare`：把这份计划要的本机授权写进本机——真实会话里由外层工具进程做的是同一件事，
+///   这个入口让它能分两步做（先授权、再执行），探针与手工排查用它。
+/// 返回：0 = 必要落点全授上；111 = 有关键落点授不上（逐条已打到 stderr）。
+pub fn prepare_entry(job: &crate::kernel::detail::confine::FenceJob, command: &str) -> i32 {
+    let failed = crate::kernel::detail::confine::FENCE_FAILED;
+    let Some(home) = job.product_home.as_deref() else {
+        eprintln!(
+            "[围栏] --fence-prepare 要 product_home（台账与容器临时目录的落点）：这次没写任何权限项"
+        );
+        return failed;
+    };
+    let prep = backend::prepare_fence(&job.plan, command, home);
+    for note in &prep.notes {
+        eprintln!("[围栏] {}", note);
+    }
+    match &prep.blocked {
+        None => {
+            println!("granted");
+            0
+        }
+        Some(blocked) => {
+            eprintln!("[围栏] {}", blocked.line());
+            failed
+        }
+    }
+}
+
 /// 目的：默认回收：按台账撤掉按次 / 会话权限项与容器 profile，保留机器级授权（仅测试用）。
 #[cfg(test)]
 pub fn clean(home: &std::path::Path) -> Result<String, String> {
