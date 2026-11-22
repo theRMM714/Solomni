@@ -30,6 +30,7 @@ import { mount as mountStatusBar } from './features/status-bar/status-bar.js';
 import { mount as mountComposer } from './features/composer/composer.js';
 import { mount as mountTranscript } from './features/transcript/transcript.js';
 import { mount as mountActions } from './features/actions/actions.js';
+import { mount as mountActionsPage } from './features/actions/page.js';
 import { mount as mountWork } from './features/work/work.js';
 import { mount as mountCommits } from './features/work/commits.js';
 import { mount as mountShell, start } from './features/shell/shell.js';
@@ -42,7 +43,7 @@ const MOUNTS = [
   mountSettingsPages, mountSettingsRuntime, mountSettingsStorage, mountSettingsHub,
   mountAgents, mountFiles, mountSetup, mountModules,
   mountSidebar, mountWizard, mountSessionConfig, mountTabs, mountStatusBar, mountComposer,
-  mountTranscript, mountActions, mountWork, mountCommits, mountShell,
+  mountTranscript, mountActions, mountActionsPage, mountWork, mountCommits, mountShell,
 ];
 
 /** 本次装配的共享对象；冒烟用它取 state / api / ui。 */

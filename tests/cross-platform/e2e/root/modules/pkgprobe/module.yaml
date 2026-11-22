@@ -1,4 +1,5 @@
 id: pkgprobe
+version: 0.1.0
 brief: 本机运行包夹具
 system: 用法：调用 echo 看回执
 runtimes: [pkgprobe]

@@ -187,7 +187,7 @@ fn core_commands_match_cli_dispatch() {
             op.id
         );
         assert!(
-            catalog::complete(&op.id).contains(&op.id),
+            catalog::complete(&format!("/{}", op.id)).contains(&format!("/{}", op.id)),
             "补全里没有 {}",
             op.id
         );

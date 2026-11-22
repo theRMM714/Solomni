@@ -58,7 +58,8 @@ pub fn run(
         if line.is_empty() {
             continue;
         }
-        // 一行输入的归属（命令 / 模块工具 / 都不认识）只在 shell 里判定一次，命令行也走同一处。
+        // 前缀即类型：/ 开头是命令（与命令行同一处判定），其余都是消息（顶层没有会话就开一条核心代理）。
+        // // 转义成字面的一个斜杠（消息本身以斜杠开头时才用得上）。
         let opts = shell::Opts {
             json: false,
             help: false,
@@ -66,7 +67,23 @@ pub fn run(
             interactive: true,
             web_port: web_default_port,
         };
-        match shell::run_line(&faces, system, &line, &opts) {
+        let outcome = if let Some(literal) = line.strip_prefix("//") {
+            proxy_flow(&faces, system, Some(literal.to_string()), &opts)
+        } else if let Some(command) = line.strip_prefix('/') {
+            let command = command.trim();
+            if command.is_empty() {
+                term::line(&term::ink(
+                    theme::Ink::Dim,
+                    "[提示] / 后面写命令（/help 看全部命令）",
+                ));
+                continue;
+            }
+            shell::run_line(&faces, system, command, &opts)
+        } else {
+            // 顶层没有会话：纯文本直接开一条核心代理会话，这句话就是第一句。
+            proxy_flow(&faces, system, Some(line.clone()), &opts)
+        };
+        match outcome {
             shell::Outcome::Done(_) => continue,
             shell::Outcome::Web(port) => return CliExit::Web(port),
             shell::Outcome::Exit => break,
@@ -291,13 +308,13 @@ mod tests {
     fn repl_runs_boot_commands_from_the_prompt() {
         let (handle, faces) = crate::tests::ops_with(vec![], vec![]);
         let system = crate::tests::boot::Fake::default();
-        term::feed(&["--setup bogus", "--gc", "n", "--gc", "y", "exit"]);
+        term::feed(&["/--setup bogus", "/--gc", "n", "/--gc", "y", "/exit"]);
         let (exit, _) = term::capture(|| run(faces, 49181, true, false, &system));
         assert!(matches!(exit, CliExit::Exit), "exit 之后才离开转录中心");
 
         // 问话没人答（输入到尽头）：按没点头算，不该把维护命令一直吊在确认上。
         let (handle2, ops2) = crate::tests::ops_with(vec![], vec![]);
-        term::feed(&["--gc"]);
+        term::feed(&["/--gc"]);
         let (exit, _) = term::capture(|| run(ops2, 49181, true, false, &system));
         assert!(matches!(exit, CliExit::Exit));
         drop(handle2);
@@ -309,11 +326,26 @@ mod tests {
     fn repl_dispatches_lines_through_the_shared_shell() {
         let (handle, faces) = crate::tests::ops_with(vec![], vec![]);
         let system = crate::tests::boot::Fake::default();
-        term::feed(&["version", "modules", "nope", "exit"]);
+        term::feed(&["/version", "/modules", "nope", "/exit"]);
         let (exit, _) = term::capture(|| run(faces, 49181, true, false, &system));
         assert!(
             matches!(exit, CliExit::Exit),
             "未知命令只让那一行退 2，不结束转录中心"
+        );
+        drop(handle);
+    }
+
+    /// 目的：前缀即类型——裸文本开一条核心代理会话，空行不离开，// 把斜杠还给消息，/leave 回顶层。
+    #[test]
+    fn bare_text_starts_a_proxy_session_and_double_slash_escapes() {
+        let (handle, faces) = crate::tests::ops_with(vec![], vec![]);
+        let system = crate::tests::boot::Fake::default();
+        term::feed(&["你好", "", "//这一句以斜杠开头", "/leave", "/exit"]);
+        let (exit, lines) = term::capture(|| run(faces, 49181, true, false, &system));
+        assert!(matches!(exit, CliExit::Exit), "只有 /exit 离开进程");
+        assert!(
+            lines.iter().any(|l| l.contains("空行不发送任何东西")),
+            "空行只是提示，不再结束会话：{lines:?}"
         );
         drop(handle);
     }

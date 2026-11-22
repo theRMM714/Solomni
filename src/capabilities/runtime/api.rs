@@ -99,12 +99,44 @@ pub struct ActionCall {
 }
 
 /// 目的：目录里一条参数的呈现形态（前端与 CLI 照它生成输入，不硬编码参数名）。
+/// 约束：这里只是**同一份声明**的投影——表单的缺省值、上下界、枚举与位置序号都从声明来。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ActionParamView {
     pub name: String,
     pub ty: String,
     pub required: bool,
     pub desc: String,
+    /// 目的：缺省值（表单留空时用）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<serde_json::Value>,
+    /// 目的：数值下界 / 上界（含）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+    /// 目的：可选值清单（枚举）：前端该渲染成下拉而不是自由输入。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub values: Option<Vec<String>>,
+    /// 目的：位置参数序号（1 起）：没有就用具名输入。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub positional: Option<u32>,
+}
+
+impl ActionParamView {
+    /// 目的：从参数声明投影出一份呈现形态（两个目录入口共用，避免字段各写一遍）。
+    pub fn of(name: &str, p: &crate::capabilities::catalog::modules::api::Param) -> Self {
+        ActionParamView {
+            name: name.to_string(),
+            ty: p.ty.name().to_string(),
+            required: p.required,
+            desc: p.desc.clone(),
+            default: p.default.clone(),
+            min: p.min,
+            max: p.max,
+            values: p.values.clone(),
+            positional: p.positional,
+        }
+    }
 }
 
 /// 目的：动作目录里的一条——**这个调用者此刻能做什么**。前端据此渲染，不写第二份动作清单。

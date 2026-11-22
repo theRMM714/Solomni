@@ -61,6 +61,7 @@ function openSettingsHub(page) {
       },
       agents: (pane, ctx) => agentsPage(ctx),
       modules: (pane, ctx) => app.modulesPage(ctx),
+      actions: (pane, ctx) => app.actionsPage(ctx),
     };
     const settingsIds = new Set(['generate', 'sandbox', 'permissions', 'resources', 'storage']);
 

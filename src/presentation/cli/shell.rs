@@ -165,7 +165,7 @@ fn run_op(faces: &Faces, system: &dyn System, op: &Op, tail: &[&str], opts: &Opt
     };
     match op.executor {
         Executor::System => Outcome::Done(run_system(faces, system, op, tail, opts)),
-        Executor::Core => dispatch(faces, op, &args, opts.json),
+        Executor::Core => dispatch(faces, system, op, &args, opts),
         Executor::Ui => dispatch_ui(faces, op, &args, opts),
     }
 }
@@ -180,20 +180,19 @@ fn run_system(faces: &Faces, system: &dyn System, op: &Op, tail: &[&str], opts: 
 }
 
 /// 目的：转录相命令的业务分派：参数已经按声明校验过，这里只按名字装调用。
-fn dispatch(faces: &Faces, op: &Op, args: &Value, json: bool) -> Outcome {
-    let code = match op.id.as_str() {
-        "single" => {
-            single_flow(faces, args);
-            0
-        }
+/// 约束：会话流（单 agent / 协作 / 代理）自己要进提示符，返回的是离开时的去向；其余命令跑完就回。
+fn dispatch(faces: &Faces, system: &dyn System, op: &Op, args: &Value, opts: &Opts) -> Outcome {
+    match op.id.as_str() {
+        "single" => return single_flow(faces, system, args, opts),
         "collab" => {
             collab_flow(faces, args);
-            0
+            return Outcome::Done(0);
         }
-        "proxy" => {
-            proxy_flow(faces);
-            0
-        }
+        "proxy" => return proxy_flow(faces, system, None, opts),
+        _ => {}
+    }
+    let json = opts.json;
+    let code = match op.id.as_str() {
         "provider" => provider_flow(faces, args, json),
         "model" => model_flow(faces, args, json),
         "core" => core_flow(faces, args, json),

@@ -304,8 +304,16 @@ fn catalog_drives_help_completion_and_suggestions() {
     assert!(cli::catalog::detail("/help").is_some(), "别名也认");
     assert!(cli::catalog::detail("nope").is_none());
 
-    assert_eq!(cli::catalog::complete("he"), vec!["help"]);
-    assert!(cli::catalog::complete("").contains(&"web".to_string()));
+    // 补全只对命令生效：候选带前导斜杠，写消息时一个候选都不给。
+    assert_eq!(cli::catalog::complete("/he"), vec!["/help"]);
+    assert!(cli::catalog::complete("/").contains(&"/web".to_string()));
+    assert!(cli::catalog::complete("he").is_empty(), "消息文本不给候选");
+    assert!(cli::catalog::complete("").is_empty());
+    assert_eq!(
+        cli::catalog::complete("/single --a"),
+        vec!["--agents=".to_string()],
+        "参数补全来自声明，旗语不带斜杠"
+    );
     assert_eq!(cli::catalog::suggest("singel"), Some("single".to_string()));
     assert_eq!(cli::catalog::suggest("zzz"), None);
 }
