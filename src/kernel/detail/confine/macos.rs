@@ -263,19 +263,9 @@ fn profile_text(spec: &FencePlan, command: &str) -> String {
         out.push_str("(allow file-write* (literal \"/dev/null\"))\n");
     }
     let mut rw_paths: Vec<String> = Vec::new();
-    // 写授予（含私有沙箱）：读写整棵子树。
-    let mut writes: Vec<String> = Vec::new();
-    if !spec.home.as_os_str().is_empty() {
-        writes.push(spec.home.to_string_lossy().replace('\\', "/"));
-    }
-    for grant in &spec.grants {
-        if grant.access == Access::Write && !grant.path.as_os_str().is_empty() {
-            writes.push(grant.path.to_string_lossy().replace('\\', "/"));
-        }
-    }
-    writes.sort();
-    writes.dedup();
-    for path in writes {
+    // 写授予（私有沙箱 home 隐含的那条 + 计划里的写授予）：读写整棵子树。
+    for path in spec.write_roots() {
+        let path = path.to_string_lossy().replace('\\', "/");
         rw_paths.push(path.clone());
         out.push_str(&format!(
             "(allow file-read* file-write* (subpath \"{}\"))\n",

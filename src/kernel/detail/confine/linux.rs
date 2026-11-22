@@ -539,21 +539,16 @@ fn install_rules(spec: &FencePlan, command: &str) -> Result<(), String> {
     // 后续 add_rule 要 open 的路径可能已打不开（会被误报成「规则被拒绝」）；先算清楚再装。
     let mut wanted: Vec<(PathBuf, u64)> = Vec::new();
     let allowed_rw = mask_for(abi, RW_ALL);
-    // 私有沙箱：工具进程的 HOME / TEMP 在这里，整棵子树读写。
-    if !spec.home.as_os_str().is_empty() {
-        wanted.push((spec.home.clone(), allowed_rw));
+    // 写授予（私有沙箱 home 隐含的那条 + 计划里的写授予）整棵子树读写：工具进程的 HOME / TEMP 在这里。
+    for path in spec.write_roots() {
+        wanted.push((path, allowed_rw));
     }
-    // 其余授予照意图逐条落实：写授予给读写位，读授予**一个写位都不给**。
+    // 读授予**一个写位都不给**。
     // Landlock 只有子树粒度（path-beneath），所以 Dir 与 Tree 在这里同价——按 Tree 落实，如实放宽（见 `Reach`）。
     for grant in &spec.grants {
-        if grant.path.as_os_str().is_empty() {
-            continue;
+        if grant.access == Access::Read && !grant.path.as_os_str().is_empty() {
+            wanted.push((grant.path.clone(), RO_ALL));
         }
-        let access = match grant.access {
-            Access::Write => allowed_rw,
-            Access::Read => RO_ALL,
-        };
-        wanted.push((grant.path.clone(), access));
     }
     for p in READ_ONLY_BASELINE {
         if WRITABLE_BASELINE.contains(p) {
