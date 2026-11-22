@@ -7,9 +7,9 @@ use super::*;
 use crate::capabilities::workspace::api::{
     AdoptReport, ArchiveReport, CommitDetail, CommitFileView, CommitReport, CommitRequest,
     DeleteReport, DiffReport, DiffRequest, LostReport, PullReport, PushReport, PushRequest,
-    ReadQuery, ResetReport, ResetRequest, ResolveReport, ResolveRequest, RestoreLostReport,
-    StatusReport, SyncReport, VersionView, WorkFiles, WorkGcReport, WorkLog, WorkRoots, WorkUsage,
-    Workspace,
+    ReadQuery, ReadVerdict, ResetReport, ResetRequest, ResolveReport, ResolveRequest,
+    RestoreLostReport, StatusReport, SyncReport, VersionView, WorkFiles, WorkGcReport, WorkLog,
+    WorkRoots, WorkUsage, Workspace,
 };
 
 impl Workspace for WorkspaceService {
@@ -91,13 +91,13 @@ impl Workspace for WorkspaceService {
     ) -> Result<AdoptReport, String> {
         WorkspaceService::work_adopt_sandbox(self, work, agent, session, time, line)
     }
-    fn work_stale_reads(
+    fn judge_reads(
         &self,
         work: &str,
         agent: &str,
         queries: &[ReadQuery],
-    ) -> Result<Vec<bool>, String> {
-        WorkspaceService::work_stale_reads(self, work, agent, queries)
+    ) -> Result<Vec<ReadVerdict>, String> {
+        WorkspaceService::judge_reads(self, work, agent, queries)
     }
     fn work_gate_info(
         &self,

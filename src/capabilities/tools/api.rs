@@ -160,22 +160,35 @@ pub struct ObservationFact {
 }
 
 impl ObservationFact {
-    /// 目的：完整读过某版本时，把它还原成 freshness 用的读取事实；分段读不产生。
-    /// 约束：from/to 覆盖整份；blob 与版本是同一指纹。
-    pub fn read_fact(&self) -> Option<ReadFact> {
-        if self.schema != OBSERVATION_FORMAT
-            || self.source != ObservationSource::Read
-            || !matches!(self.coverage, Coverage::Full)
-        {
-            return None;
+    /// 目的：把这条观察还原成 freshness 用的读取事实：整份读 = 一条，分段读 = 每段一条。
+    /// 约束：from/to 只落在该版本确实有内容的行上（空文件、越界段不产生）；blob 与版本同一指纹。
+    pub fn read_facts(&self) -> Vec<ReadFact> {
+        if self.schema != OBSERVATION_FORMAT || self.source != ObservationSource::Read {
+            return Vec::new();
         }
-        Some(ReadFact {
-            worktree: self.worktree.clone(),
-            path: self.path.clone(),
-            from: 1,
-            to: u64::from(self.total_lines),
-            blob: self.version.clone(),
-        })
+        let total = u64::from(self.total_lines);
+        let mut out = Vec::new();
+        let mut push = |from: u64, to: u64| {
+            if total == 0 || from == 0 || from > to || from > total {
+                return;
+            }
+            out.push(ReadFact {
+                worktree: self.worktree.clone(),
+                path: self.path.clone(),
+                from,
+                to: to.min(total),
+                blob: self.version.clone(),
+            });
+        };
+        match &self.coverage {
+            Coverage::Full => push(1, total),
+            Coverage::Ranges(ranges) => {
+                for r in ranges {
+                    push(u64::from(r.from), u64::from(r.to));
+                }
+            }
+        }
+        out
     }
 }
 

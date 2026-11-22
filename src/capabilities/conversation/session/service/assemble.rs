@@ -134,8 +134,8 @@ pub struct RebuildSpec<'a> {
     pub freshness: bool,
     /// 目的：过期内容保底百分比（0 = 不保底；与开关一样从工作根 meta 取）。
     pub freshness_keep_percent: u8,
-    /// 目的：读台账（正文 + 读事实），重建后与实时一致。
-    pub reads: Vec<(String, ReadFact)>,
+    /// 目的：读台账（回复 id + 正文 + 读事实），重建后与实时一致。
+    pub reads: Vec<(u64, String, ReadFact)>,
     /// 目的：观察账本（写门禁的授权证据），重建后与实时一致。
     pub observations: Vec<ObservationFact>,
     /// 目的：最近一次调用的用量（状态栏与压缩判定读它）。
@@ -319,8 +319,8 @@ pub fn rebuild_single(ports: &SessionPorts, spec: RebuildSpec<'_>) -> AgentSessi
         &ports.compact,
         Some((spec.freshness, spec.freshness_keep_percent)),
     );
-    for (body, fact) in spec.reads {
-        s.note_read_at(body, fact);
+    for (reply, body, fact) in spec.reads {
+        s.note_read_at(body, reply, fact);
     }
     s.set_last_usage(spec.usage);
     s

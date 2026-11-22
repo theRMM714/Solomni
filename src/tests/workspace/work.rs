@@ -242,10 +242,10 @@ pub(crate) fn compaction_drops_read_authorization() {
     );
 }
 
-/// 目的：过期判定按内容——指纹相同不过期，改到读过的行才过期。
+/// 目的：判决按内容——指纹相同 = SameVersion，行号移位但内容还在 = Shifted，改到读过的行 = Changed。
 #[test]
-pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
-    use crate::capabilities::workspace::api::{ReadQuery, content_hash};
+pub(crate) fn judge_reads_separates_shifted_from_changed() {
+    use crate::capabilities::workspace::api::{ReadQuery, ReadVerdict, content_hash};
     let (ws, _dirs, _store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     let v1 = b"a\nb\nc\n";
@@ -259,18 +259,17 @@ pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
     };
     let old = content_hash(v1);
 
-    // 内容与读的时候完全一样：不过期。
+    // 内容与读的时候完全一样：SameVersion。
     assert_eq!(
-        ws.work_stale_reads("w", "a", &[q(1, 3, old.clone())])
-            .unwrap(),
-        vec![false]
+        ws.judge_reads("w", "a", &[q(1, 3, old.clone())]).unwrap(),
+        vec![ReadVerdict::SameVersion]
     );
 
-    // 只改第 3 行：读 1-2 不受影响，读 3-3 过期。
+    // 只改第 3 行：读 1-2 内容还在但版本变了 = Shifted，读 3-3 = Changed。
     ws.work_commit_user("w", "note.md", b"a\nb\nC\n", 2, 0)
         .unwrap();
     assert_eq!(
-        ws.work_stale_reads(
+        ws.judge_reads(
             "w",
             "a",
             &[
@@ -280,23 +279,26 @@ pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
             ]
         )
         .unwrap(),
-        vec![false, true, false],
-        "区间不与改动相交 = 那次读仍然可信"
+        vec![
+            ReadVerdict::Shifted,
+            ReadVerdict::Changed,
+            ReadVerdict::Shifted
+        ],
+        "区间不与改动相交 = 那次读仍然可信（只是行号可能移位）"
     );
 
-    // 文件头插一行：行号全移了，但读过的那几行一个字没变 → 不算过期。
+    // 文件头插一行：行号全移了，但读过的那几行一个字没变 → Shifted，不是过期。
     ws.work_commit_user("w", "note.md", b"zero\na\nb\nC\n", 3, 0)
         .unwrap();
     assert_eq!(
-        ws.work_stale_reads("w", "a", &[q(1, 2, old.clone())])
-            .unwrap(),
-        vec![false]
+        ws.judge_reads("w", "a", &[q(1, 2, old.clone())]).unwrap(),
+        vec![ReadVerdict::Shifted]
     );
 
-    // 文件被删：读过的东西不在了。
+    // 文件被删：读过的东西不在了（这里先提交、还没推送，所以内容仍在 = SameVersion）。
     ws.work_commit_user("w", "gone.md", b"x\n", 4, 0).unwrap();
     assert_eq!(
-        ws.work_stale_reads(
+        ws.judge_reads(
             "w",
             "a",
             &[ReadQuery {
@@ -308,7 +310,7 @@ pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
             }]
         )
         .unwrap(),
-        vec![false]
+        vec![ReadVerdict::SameVersion]
     );
     ws.work_pull("w", "a", &["gone.md".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
@@ -318,7 +320,7 @@ pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
         .unwrap()
         .expect("应当记一次存档");
     assert_eq!(
-        ws.work_stale_reads(
+        ws.judge_reads(
             "w",
             "a",
             &[ReadQuery {
@@ -330,7 +332,7 @@ pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
             }]
         )
         .unwrap(),
-        vec![false]
+        vec![ReadVerdict::SameVersion]
     );
     // 发布之后共享区才真的没有这个文件——读过它内容的上下文立刻过期。
     crate::capabilities::workspace::ports::WorkStore::remove_under(&*_store, &sb, "gone.md")
@@ -340,7 +342,7 @@ pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
     // 工作线提交只是本地提交：共享区要到推送后才真的没有这个文件。
     push(&ws, "w", "a", "删", 6, 6).unwrap();
     assert_eq!(
-        ws.work_stale_reads(
+        ws.judge_reads(
             "w",
             "a",
             &[ReadQuery {
@@ -352,14 +354,14 @@ pub(crate) fn work_stale_reads_judges_by_content_not_by_clock() {
             }]
         )
         .unwrap(),
-        vec![true]
+        vec![ReadVerdict::Changed]
     );
 }
 
 /// 目的：沙箱里的读按沙箱当前内容判——主副本改了不影响它，沙箱自己改了才过期。
 #[test]
-pub(crate) fn work_stale_reads_follows_the_sandbox_copy() {
-    use crate::capabilities::workspace::api::{ReadQuery, content_hash};
+pub(crate) fn judge_reads_follow_the_sandbox_copy() {
+    use crate::capabilities::workspace::api::{ReadQuery, ReadVerdict, content_hash};
     use crate::capabilities::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
@@ -378,30 +380,30 @@ pub(crate) fn work_stale_reads_follows_the_sandbox_copy() {
         sandbox: true,
     };
     assert_eq!(
-        ws.work_stale_reads("w", "a", &[q(1, 3)]).unwrap(),
-        vec![false]
+        ws.judge_reads("w", "a", &[q(1, 3)]).unwrap(),
+        vec![ReadVerdict::SameVersion]
     );
     // 主副本里另有一份同名文件、内容不同：沙箱的读不该被它影响。
     ws.work_commit_user("w", "draft.md", b"main\n", 1, 0)
         .unwrap();
     assert_eq!(
-        ws.work_stale_reads("w", "a", &[q(1, 3)]).unwrap(),
-        vec![false],
+        ws.judge_reads("w", "a", &[q(1, 3)]).unwrap(),
+        vec![ReadVerdict::SameVersion],
         "主副本变了不代表沙箱里的读过期"
     );
-    // 沙箱里只改第 2 行：读 1-1 不受影响，读 2-2 过期。
+    // 沙箱里只改第 2 行：读 1-1 内容还在 = Shifted，读 2-2 = Changed。
     store
         .write_under(&sb, "draft.md", b"one\nTWO\nthree\n")
         .unwrap();
     assert_eq!(
-        ws.work_stale_reads("w", "a", &[q(1, 1), q(2, 2)]).unwrap(),
-        vec![false, true]
+        ws.judge_reads("w", "a", &[q(1, 1), q(2, 2)]).unwrap(),
+        vec![ReadVerdict::Shifted, ReadVerdict::Changed]
     );
     // 沙箱里删掉：读过的东西不在了。
     store.remove_under(&sb, "draft.md").unwrap();
     assert_eq!(
-        ws.work_stale_reads("w", "a", &[q(1, 3)]).unwrap(),
-        vec![true]
+        ws.judge_reads("w", "a", &[q(1, 3)]).unwrap(),
+        vec![ReadVerdict::Changed]
     );
 }
 

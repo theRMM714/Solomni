@@ -347,8 +347,8 @@ fn run_rounds(
         for c in views.iter().filter_map(|v| v.tool.as_ref()) {
             let body = crate::capabilities::conversation::session::api::tool_result_body(c);
             for fact in &c.observations {
-                if let Some(read) = fact.read_fact() {
-                    s.note_read_at(body.clone(), read);
+                for read in fact.read_facts() {
+                    s.note_read_at(body.clone(), fact.reply, read);
                 }
             }
         }
@@ -463,13 +463,17 @@ fn freshness_now(
     if queries.is_empty() {
         return None;
     }
-    let stale = ws
-        .work_stale_reads(
+    // 占位符策略：只有内容真变了（Changed）才换；版本变了但那段内容还在（Shifted）照旧供着。
+    let stale: Vec<bool> = ws
+        .judge_reads(
             &tools.face.sandbox.work_name,
             &tools.face.sandbox.agent,
             &queries,
         )
-        .ok()?;
+        .ok()?
+        .into_iter()
+        .map(|v| v.is_stale())
+        .collect();
     let judged: Vec<(
         &crate::capabilities::conversation::session::api::ReadAt,
         bool,

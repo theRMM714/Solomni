@@ -53,6 +53,59 @@ pub(crate) fn coverage_union_requires_every_line() {
     );
 }
 
+/// 目的：读事实的派生——整份读一条，分段读每段一条；越界段、空文件与非读来源不产生。
+#[test]
+pub(crate) fn read_facts_cover_full_reads_and_every_segment() {
+    use crate::capabilities::tools::api::{OBSERVATION_FORMAT, ObservationFact, ObservationSource};
+    let fact = |coverage: Coverage, total: u32| ObservationFact {
+        schema: OBSERVATION_FORMAT,
+        reply: 7,
+        path: "note.md".to_string(),
+        worktree: "a".to_string(),
+        version: "v".to_string(),
+        coverage,
+        total_lines: total,
+        source: ObservationSource::Read,
+    };
+
+    let full = fact(Coverage::Full, 10).read_facts();
+    assert_eq!(full.len(), 1, "整份读只派生一条");
+    assert_eq!((full[0].from, full[0].to), (1, 10));
+    assert_eq!(full[0].blob, "v", "指纹就是版本");
+
+    let ranges = fact(
+        Coverage::Ranges(vec![LineRange::new(1, 50), LineRange::new(60, 400)]),
+        400,
+    )
+    .read_facts();
+    assert_eq!(
+        ranges.iter().map(|r| (r.from, r.to)).collect::<Vec<_>>(),
+        vec![(1, 50), (60, 400)],
+        "分段读每段派生一条，大文件照样被照看"
+    );
+
+    let clamped = fact(Coverage::Ranges(vec![LineRange::new(90, 120)]), 100).read_facts();
+    assert_eq!(
+        (clamped[0].from, clamped[0].to),
+        (90, 100),
+        "末行按总行数截断"
+    );
+    assert!(
+        fact(Coverage::Ranges(vec![LineRange::new(101, 120)]), 100)
+            .read_facts()
+            .is_empty(),
+        "整段都在文件外：没有内容要保护"
+    );
+    assert!(
+        fact(Coverage::Full, 0).read_facts().is_empty(),
+        "空文件不产生读事实"
+    );
+
+    let mut wrote = fact(Coverage::Full, 10);
+    wrote.source = ObservationSource::Write;
+    assert!(wrote.read_facts().is_empty(), "写来源不能当成读过");
+}
+
 /// 目的：单行被显示上限截断时，读到的不是原文，不能成为"全文观察"。
 #[test]
 pub(crate) fn read_with_a_truncated_line_is_not_full() {
