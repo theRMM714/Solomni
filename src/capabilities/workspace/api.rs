@@ -269,7 +269,12 @@ pub trait Workspace: Send + Sync {
     /// **过滤名单**：读写本工作的 `.workignore`（`op` = list / add / remove）。
     /// 约束：规则只决定**哪些路径算工作区内容**（首次导入、状态里的未跟踪清单、提交展开与 grep）；
     ///   显式点名的单个文件照样可读写，已跟踪的文件不会因为新规则消失。只动版本库目录，不碰 `.gitignore`。
-    fn work_ignore(&self, work: &str, op: &str, patterns: &[String]) -> Result<IgnoreReport, String>;
+    fn work_ignore(
+        &self,
+        work: &str,
+        op: &str,
+        patterns: &[String],
+    ) -> Result<IgnoreReport, String>;
     /// 目的：把该工作未完成的版本库事务重放到一致状态；没有待恢复事务 = 无操作。
     fn work_recover(&self, work: &str) -> Result<(), String>;
     /// 目的：回收该工作中不再可达的内容对象；apply=false 只统计不删除。

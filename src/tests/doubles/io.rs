@@ -272,7 +272,10 @@ impl SysIo for InMemorySysIo {
             )?),
             _ => None,
         };
-        let base = root.to_string_lossy().trim_end_matches(['/', '\\']).to_string();
+        let base = root
+            .to_string_lossy()
+            .trim_end_matches(['/', '\\'])
+            .to_string();
         let prefix = format!("{}{}", base, std::path::MAIN_SEPARATOR);
         let files = self.files.lock().expect("锁");
         let mut out: Vec<WalkEntry> = Vec::new();

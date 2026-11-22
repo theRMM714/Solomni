@@ -45,7 +45,8 @@ pub const MAX_GREP_CONTEXT: usize = 10;
 /// 目的：一次目录递归最多扫多少个文件（再多就如实提示缩小范围）。
 pub const MAX_GREP_FILES: usize = 5_000;
 /// 目的：grep 回执正文的字符上限（`max` 条 × 单行上限之后仍要落在结果预算内）。
-pub const MAX_GREP_CHARS: usize = crate::capabilities::tools::domain::budget::MAX_RESULT_CHARS - 2_000;
+pub const MAX_GREP_CHARS: usize =
+    crate::capabilities::tools::domain::budget::MAX_RESULT_CHARS - 2_000;
 
 /// 目的：执行席的**回报**工具：不碰文件，只把"做完了什么"承载成一次工具调用。
 ///    为什么是工具而不是正文 JSON：回报会驱动核心（判节点完成），属于核心操作（见 tools-and-roles.md）。

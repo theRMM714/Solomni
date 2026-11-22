@@ -35,13 +35,14 @@ tools:
 - **工具卡**：本次判定为 `ask` 时进统一裁决队；选项 id 是 `allow` / `deny` / `allow_turn`。`allow_turn` 只对本轮后续 ask 生效，不改 reach、不落盘。
 - **`callers` 是授权判据**：`user` = 人经呈现层调用，其余是角色 id。它与角色表的（这个身份有什么）是**同一关系的两面**，由 `SystemTools::problems` 双向锁死——任何一边漏写 / 多写都是装配错误。
 - **列目录是"核实"的前提**：`read` 只读文件、`grep` 按模式找行，**没有 `list` 就确认不了"资料齐不齐"**；`read` 遇到目录会如实引导到 `list`。
+- **`grep` 的默认过滤是检索面口径**：目录递归时按 `.gitignore` + 版本库目录里的 `.workignore`、点号开头的隐藏文件、二进制（前 8 KiB 含 NUL）剪枝，不跟符号链接；`hidden` / `no_ignore` 是逃生口，显式给单个文件路径时不过滤。过滤名单只有一份，与「哪些文件算工作区内容」共用，维护入口是 `work_ignore`（见 [workspace](../workspace/README.md)）。
 - 参数不合法 → **如实拒绝并落工具行**。
 
 ```yaml
 roles:
   discussant:
     prompt: roles/discussant   # 提示词与工具面**同处声明**
-    tools: [say, agree, leave, ask, read, list, search]
+    tools: [say, agree, leave, ask, read, list, grep]
 ```
 
 - **角色 = 场景绑定的身份**：`discussant` 只存在于讨论阶段，`orchestrator` 只存在于任务链推进阶段；**不引入"阶段 → 工具"的第二张表**。

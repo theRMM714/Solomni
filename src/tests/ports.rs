@@ -478,7 +478,12 @@ fn sys_io_double_walks_by_rules_scans_lines_and_reads_small() {
         )
         .expect("遍历成功");
     let rels: Vec<&str> = walked.iter().map(|e| e.rel.as_str()).collect();
-    assert_eq!(rels, vec!["a.txt", "sub/b.txt"], "规则与隐藏文件都剪掉：{:?}", rels);
+    assert_eq!(
+        rels,
+        vec!["a.txt", "sub/b.txt"],
+        "规则与隐藏文件都剪掉：{:?}",
+        rels
+    );
     let all = io
         .walk(
             &root,
@@ -513,11 +518,15 @@ fn sys_io_double_walks_by_rules_scans_lines_and_reads_small() {
 
     io.seed(&["w", ".workignore"], "vendor/\n");
     assert_eq!(
-        io.read_small(&abs(&["w", ".workignore"])).expect("读成功").as_deref(),
+        io.read_small(&abs(&["w", ".workignore"]))
+            .expect("读成功")
+            .as_deref(),
         Some("vendor/\n")
     );
     assert!(
-        io.read_small(&abs(&["w", "nope.txt"])).expect("读成功").is_none(),
+        io.read_small(&abs(&["w", "nope.txt"]))
+            .expect("读成功")
+            .is_none(),
         "缺文件 = None，不是错误"
     );
 }

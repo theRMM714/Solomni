@@ -85,7 +85,11 @@ pub(crate) fn sandbox_listing_follows_workignore_but_named_files_still_count() {
     ws.prepare("w", &["a".to_string()]).unwrap();
     let sandbox = sandbox_of(&ws, "w", "a");
     store.seed(&sandbox, "src/main.rs", "fn main() {}\n");
-    store.seed(&sandbox, "node_modules/pkg/index.js", "module.exports = 1;\n");
+    store.seed(
+        &sandbox,
+        "node_modules/pkg/index.js",
+        "module.exports = 1;\n",
+    );
 
     let status = ws.work_status("w", "a", &[]).unwrap();
     let paths: Vec<&str> = status.entries.iter().map(|e| e.path.as_str()).collect();
@@ -116,7 +120,10 @@ pub(crate) fn sandbox_listing_follows_workignore_but_named_files_still_count() {
         )
         .unwrap();
     assert!(
-        report.changes.iter().any(|c| c.path == "node_modules/pkg/index.js"),
+        report
+            .changes
+            .iter()
+            .any(|c| c.path == "node_modules/pkg/index.js"),
         "{:?}",
         report.changes
     );

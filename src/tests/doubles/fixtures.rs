@@ -98,7 +98,11 @@ pub(crate) fn test_sandbox(
         modules_with_userdata: std::collections::BTreeSet::new(),
         permissions: Default::default(),
         path_codec: None,
-        filter_rules: abs(&["demo", ".work", crate::capabilities::workspace::api::WORKIGNORE]),
+        filter_rules: abs(&[
+            "demo",
+            ".work",
+            crate::capabilities::workspace::api::WORKIGNORE,
+        ]),
     }
 }
 

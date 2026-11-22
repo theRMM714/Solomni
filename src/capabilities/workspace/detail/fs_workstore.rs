@@ -180,7 +180,6 @@ fn lock_store(store: &Path) -> Result<File, String> {
     )
 }
 
-
 impl WorkStore for FsWorkStore {
     fn remove_under(&self, root: &Path, rel: &str) -> Result<(), String> {
         let path = safe_path(root, rel)?;

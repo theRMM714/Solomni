@@ -71,7 +71,11 @@ pub(crate) fn grep_walks_a_tree_and_prunes_ignore_hidden_and_binary() {
         "{}",
         out.output
     );
-    assert!(out.output.contains("[过滤]"), "要如实说这次没套过滤：{}", out.output);
+    assert!(
+        out.output.contains("[过滤]"),
+        "要如实说这次没套过滤：{}",
+        out.output
+    );
 }
 
 #[test]
@@ -132,7 +136,10 @@ pub(crate) fn grep_honors_glob_context_files_only_and_literal_mode() {
         &sb,
         &io,
         "grep",
-        &format!("{{\"path\":\"{}\",\"pattern\":\"a.b\"}}", s(&["demo", "a1", "re.txt"])),
+        &format!(
+            "{{\"path\":\"{}\",\"pattern\":\"a.b\"}}",
+            s(&["demo", "a1", "re.txt"])
+        ),
     );
     assert!(out.ok, "{}", out.output);
     assert!(out.output.contains("命中 2 行"), "{}", out.output);
@@ -183,7 +190,11 @@ pub(crate) fn grep_reports_bad_patterns_and_the_empty_result_hint() {
             dir
         ),
     );
-    assert!(!bad.ok && bad.output.contains("glob 不合法"), "{}", bad.output);
+    assert!(
+        !bad.ok && bad.output.contains("glob 不合法"),
+        "{}",
+        bad.output
+    );
 
     let none = run_builtin(
         &sb,
@@ -221,7 +232,11 @@ pub(crate) fn grep_stops_at_max_and_says_so() {
         ),
     );
     assert!(out.ok, "{}", out.output);
-    assert!(out.output.contains("命中 1 行 / 1 个文件"), "{}", out.output);
+    assert!(
+        out.output.contains("命中 1 行 / 1 个文件"),
+        "{}",
+        out.output
+    );
     assert!(
         out.output.contains("已达到 max=1 条上限"),
         "到上限要如实说：{}",

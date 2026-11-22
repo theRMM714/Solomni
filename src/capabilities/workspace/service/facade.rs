@@ -183,7 +183,12 @@ impl Workspace for WorkspaceService {
     ) -> Result<RestoreLostReport, String> {
         WorkspaceService::work_restore_lost(self, work, agent, path, expect_current)
     }
-    fn work_ignore(&self, work: &str, op: &str, patterns: &[String]) -> Result<IgnoreReport, String> {
+    fn work_ignore(
+        &self,
+        work: &str,
+        op: &str,
+        patterns: &[String],
+    ) -> Result<IgnoreReport, String> {
         WorkspaceService::work_ignore(self, work, op, patterns)
     }
     fn work_recover(&self, work: &str) -> Result<(), String> {

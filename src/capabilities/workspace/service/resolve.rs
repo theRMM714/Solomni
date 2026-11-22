@@ -54,7 +54,8 @@ impl WorkspaceService {
         self.recover_locked(work, &shared, &store)?;
         let (head_id, tree) = self.head_tree(&store)?;
         let mut index: Index = self.store.read_index(&store, agent)?;
-        let sandbox_files: BTreeSet<String> = self.sandbox_files(&store, &sandbox)?.into_iter().collect();
+        let sandbox_files: BTreeSet<String> =
+            self.sandbox_files(&store, &sandbox)?.into_iter().collect();
         let available: BTreeSet<String> = index
             .keys()
             .chain(tree.keys())

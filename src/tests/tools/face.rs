@@ -249,11 +249,7 @@ pub(crate) fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
         "{:?}",
         results[0]
     );
-    assert!(
-        results[1].content.contains(":2:第二行"),
-        "{:?}",
-        results[1]
-    );
+    assert!(results[1].content.contains(":2:第二行"), "{:?}", results[1]);
 }
 
 #[test]
