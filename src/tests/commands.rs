@@ -11,8 +11,11 @@ use std::sync::OnceLock;
 const BOOT: &str = include_str!("../presentation/cli/boot.rs");
 /// 入口的内部协议分派（这里不许再出现产品命令）。
 const ENTRY_ARGS: &str = include_str!("../entry/args.rs");
-/// 转录中心的分派实现（转录相命令的落点）。
-const CLI: &str = include_str!("../presentation/cli.rs");
+/// 转录中心的分派实现（转录相命令的落点：主循环与共用词法）。
+const CLI: &str = concat!(
+    include_str!("../presentation/cli.rs"),
+    include_str!("../presentation/cli/shell.rs")
+);
 
 /// 目的：内部协议旗语（不进命令表）：只给测试、探针与守门子进程用。
 const INTERNAL: &[&str] = &[
@@ -93,8 +96,8 @@ fn table_is_self_consistent() {
     );
     assert_eq!(
         phase(Phase::Core).len(),
-        16,
-        "转录相十六条（module 命令已删：模块工具走 <模块> 词）"
+        17,
+        "转录相十七条（module 命令已删：模块工具走 <模块> 词；modules 是清单）"
     );
     assert_eq!(groups(Phase::Boot), vec!["维护"]);
     let core = groups(Phase::Core);

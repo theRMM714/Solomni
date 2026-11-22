@@ -37,6 +37,7 @@ mod runtime;
 mod secrets;
 mod session;
 mod setup;
+mod shell;
 mod slate;
 mod startup;
 mod storage;

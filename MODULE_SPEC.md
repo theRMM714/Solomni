@@ -78,7 +78,7 @@ modules/<模块 id>/
 - 参数声明可选 `positional`（序号，1 起）、`rest`（吃光剩余位置词，只能有一个且不写序号）、`values`（枚举）。不写 `positional` 的参数只能用 `--名字 值` 给；`rest` 不写时多出来的位置词直接报错。声明是唯一事实：shell、TUI、Web 表单与模型看到的是同一份，用法串、补全与校验都由它派生（契约见 [工具与命令面](docs/tools/tools-and-roles.md)）。
 - 回注：stdout/stderr（截断后）作为 `[工具结果]` 消息发回 agent，继续生成直到最终答复；单轮里的工具调用没有次数上限。
 - 阶段：执行阶段与单 agent 会话里都能用；讨论阶段只发只读核实工具（`read` / `list` / `grep`），不给模块工具。
-- 独立入口：声明的 `tools`（与 `services`）就是模块不经 agent 可直接跑的入口——CLI `module <模块 id>.<工具名> [json]`、`resident …` 与 Web 的「模块与服务」面板走同一份动作目录；工具同时是动作表里的一条动作（id = `module.<模块 id>.<工具名>`）。
+- 独立入口：声明的 `tools`（与 `services`）就是模块不经 agent 可直接跑的入口——CLI 的 `solomni <模块 id> <工具名> [参数]`（`solomni <模块 id>` 看模块手册、`--help` 看工具参数）、`resident …` 与 Web 的模块面板走同一份动作目录；工具同时是动作表里的一条动作（id = `module.<模块 id>.<工具名>`）。
 - 直接调用仍按本模块 `params` 校验；可选 `workspace` 给一份工作目录（缺省 = 模块自己的 `userdata/`），围栏与 agent 会话同一口径。
 - 只写 `system`、不声明任何入口的模块在列表里如实标注「只能经 agent 使用」；没有额外的独立入口声明节——声明了哪个工具，就是能直跑哪个（动作表见 `docs/tools/tools-and-roles.md`）。
 - 模块工具的入参若会落到 `userdata/`，语义由模块作者校验；围栏只保证不越出 `userdata/`。

@@ -282,9 +282,10 @@ prompts/
 ## 十四、产品命令面
 
 - **命令表是命令面的唯一声明**：`systools/commands.yaml` 写每条产品命令的名字、别名、分组、`phase`（`boot` 装配核心前跑完退出 / `core` 转录中心里输入）、执行者（`core` / `system` / `ui`）、一句话说明、确认门槛与参数声明（与动作面同一种形状：类型、位置序号、可选值、缺省值）；表经 `src/capabilities/tools/domain/op.rs` 投影成 `Op` 书，手册、菜单、Tab 补全、未知命令建议与文本解析都是它的派生。
-- **与工具表同族**：两张表都是"声明在文本层的契约"，解析与校验只在 `src/capabilities/tools/domain/commands.rs` 一处（`CommandBook`）；命令面**不拥有行为**——执行由 `src/presentation/cli/boot.rs`（启动相，经 `system` 能力）与 `src/presentation/cli.rs`（转录相）分派。
+- **与工具表同族**：两张表都是"声明在文本层的契约"，读表在 `src/capabilities/tools/domain/commands.rs`（`CommandBook`），文本→JSON 的解析与校验只在 `src/capabilities/tools/domain/op.rs` 一处（`parse` / `usage` / `complete`）；命令面**不拥有行为**——执行者三分：`system` 交 `src/presentation/cli/boot.rs`（启动相，装配核心之前）、`core` 与 `ui` 交 `src/presentation/cli/shell.rs`（装配之后，命令行一次性调用与转录中心提示符共用同一条）。
 - **编译进二进制**：表用 `include_str!` 编进来，`solomni --help` 在任何目录下都可用，不依赖产品根上的 yaml 是否就位；这与运行时读盘的 `tools.yaml` 有意不同（命令是产品语法，不是用户策略）。
-- **覆盖门禁**：`src/tests/commands.rs` 双向比对——表里每条 `boot` 命令必须真在 `src/presentation/cli/boot.rs` 里有执行入口、每条 `core` 命令必须真在 `src/presentation/cli.rs` 里出现；`boot.rs` 用到的旗语必须在表里声明，`src/entry/args.rs` 只许留内部协议旗语。
+- **声明自洽在装配期硬失败**：相位与执行者必须配对（启动相只能 `system`，转录相不得 `system`）、位置序号唯一、`rest` 不再写序号、可选值只给字符串——任一条不成立，`src/main.rs` 的 `command_ops()` 逐条报错并退出 1，不靠测试阶段的字面量比对兜底。
+- **调用面不止命令**：模块工具与命令共用同一套词法与回执——`solomni <模块 id>` 是模块手册（版本、状态、`system` 原文、工具表），`solomni <模块 id> <工具名> --help` 是工具手册，`solomni modules` 是清单（含版本、启停与拒收原因）；`solomni <模块 id> --version` 是模块版本，工具没有自己的版本。模块工具的调用与 agent 侧同一个 `ActionCall`（id = `module.<模块 id>.<工具名>`）。
 - 内部协议旗语（守门子进程、探针、路由目录）**不进**命令面，只在 `src/presentation/cli/argv.rs` 的透明透传段里。
 
 ## 检查

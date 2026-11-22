@@ -5,8 +5,10 @@
 
 use super::*;
 use crate::presentation::faces::Faces;
+use serde_json::{Value, json};
 
-pub(super) fn single_flow(faces: &Faces, arg: &str) {
+/// 目的：单 agent 会话：点名的 agent 一起干同一件事，进转录提示符直到空行。
+pub(super) fn single_flow(faces: &Faces, args: &Value) {
     let views = match faces.registry.agents() {
         Ok(v) => v,
         Err(e) => {
@@ -20,13 +22,14 @@ pub(super) fn single_flow(faces: &Faces, arg: &str) {
     }
     // 点名 1 个 = 直接用该 agent（模块数不限）；点名多个 / 无参 = 全部。
     // **「多个并成一个临时组合」的组合语义由核心在建工作时收口**（前端只交点名结果）。
-    let picked: Vec<AgentMeta> = if arg.trim().is_empty() {
+    let names = text(args, "agents").unwrap_or_default();
+    let picked: Vec<AgentMeta> = if names.trim().is_empty() {
         views
             .iter()
             .map(crate::capabilities::catalog::registry::api::agent_meta)
             .collect()
     } else {
-        match pick_agents(faces, &split_names(arg)) {
+        match pick_agents(faces, &split_names(&names)) {
             Ok(l) => l,
             Err(e) => {
                 println!("[错误] {}", e);
@@ -126,8 +129,10 @@ pub(super) fn proxy_flow(faces: &Faces) {
     }
 }
 
-pub(super) fn collab_flow(faces: &Faces, arg: &str) {
-    let trimmed = arg.trim();
+/// 目的：协作会话：给需求、点名单（或让核心代拟），之后一律按裁决卡推进。
+pub(super) fn collab_flow(faces: &Faces, args: &Value) {
+    let names = text(args, "agents").unwrap_or_default();
+    let trimmed = names.trim();
     let delegate = trimmed.is_empty() || trimmed == "?";
     let task = prompt("需求>");
     // 代拟（无参或 ?）= 核心拟名单；点名 = 用登记处里的那几个 agent。
@@ -171,122 +176,230 @@ pub(super) fn collab_flow(faces: &Faces, arg: &str) {
     answer_gates(faces, &sid, &mut cursor);
 }
 
-pub(super) fn provider_flow(faces: &Faces, arg: &str) {
-    let mut it = arg.splitn(2, ' ');
-    let sub = it.next().unwrap_or("");
-    let rest = it.next().unwrap_or("").trim();
-    match sub {
-        "list" | "" => {
+/// 目的：供应商登记：列清单、登记（含只换密钥）、移除、按端点发现可用模型——写操作一律落动作面。
+pub(super) fn provider_flow(faces: &Faces, args: &Value, json: bool) -> i32 {
+    match text(args, "action").as_deref() {
+        None | Some("list") => {
             let views = match faces.registry.providers() {
                 Ok(v) => v,
                 Err(e) => {
                     println!("[错误] {}", e);
-                    return;
+                    return 1;
                 }
             };
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({ "providers": views }))
+                        .unwrap_or_default()
+                );
+                return 0;
+            }
             if views.is_empty() {
-                println!("（无供应商）用 provider add <id> <base_url> <api_key> 添加");
+                println!("（无供应商）用 provider add <id> <base_url> --api-key <key> 添加");
             }
             for p in &views {
                 println!("  {}", provider_line(p));
             }
+            0
         }
-        "add" | "key" => {
-            let w: Vec<&str> = rest.split_whitespace().collect();
-            if w.len() < 3 {
-                println!("[错误] 用法：provider add <id> <base_url> <api_key>");
-                return;
+        Some(action @ ("add" | "key")) => {
+            let Some(id) = text(args, "id") else {
+                println!(
+                    "[用法] provider {} <id> [--base-url <地址>] [--api-key <密钥>]",
+                    action
+                );
+                return 2;
+            };
+            // key = 只换密钥：端点沿用登记处里已有的那一条。
+            let base_url = match text(args, "base_url") {
+                Some(u) => u,
+                None => match faces
+                    .registry
+                    .providers()
+                    .ok()
+                    .and_then(|v| v.into_iter().find(|p| p.id == id))
+                {
+                    Some(p) => p.base_url,
+                    None => {
+                        println!(
+                            "[错误] 无此供应商：{}（先 provider add {} <地址> --api-key <密钥>）",
+                            id, id
+                        );
+                        return 1;
+                    }
+                },
+            };
+            let mut payload = json!({ "id": id, "base_url": base_url });
+            if let Some(key) = text(args, "api_key") {
+                payload["api_key"] = Value::String(key);
             }
-            match faces.registry.upsert_provider(w[0], w[1], w[2]) {
-                Ok(()) => println!("[登记] {} 已保存（0600）", w[0]),
-                Err(e) => println!("[错误] {}", e),
-            }
+            act_and_print(
+                faces,
+                ActionCall {
+                    id: "upsert_provider".to_string(),
+                    args: payload,
+                    caller: Caller::User,
+                    out: Output::Final,
+                },
+                json,
+            )
         }
-        "rm" => match faces.registry.remove_provider(rest) {
-            Ok(true) => println!("[移除] {}", rest),
-            Ok(false) => println!("[错误] 无此供应商：{}", rest),
-            Err(e) => println!("[错误] {}", e),
-        },
-        "discover" => match faces.registry.discover_models(rest) {
-            Ok(models) => println!("[发现] {}：{}", rest, models.join(" · ")),
-            Err(e) => println!("[错误] {}", e),
-        },
-        _ => println!("[错误] 用法：provider list|add|rm|discover …"),
+        Some("rm") => {
+            let Some(id) = text(args, "id") else {
+                println!("[用法] provider rm <id>");
+                return 2;
+            };
+            act_and_print(
+                faces,
+                ActionCall {
+                    id: "remove_provider".to_string(),
+                    args: json!({ "id": id }),
+                    caller: Caller::User,
+                    out: Output::Final,
+                },
+                json,
+            )
+        }
+        Some("discover") => {
+            let Some(id) = text(args, "id") else {
+                println!("[用法] provider discover <id>");
+                return 2;
+            };
+            act_and_print(
+                faces,
+                ActionCall {
+                    id: "discover_models".to_string(),
+                    args: json!({ "id": id }),
+                    caller: Caller::User,
+                    out: Output::Final,
+                },
+                json,
+            )
+        }
+        Some(other) => {
+            println!(
+                "[提示] 未知子命令 {}（list | add | key | rm | discover）",
+                other
+            );
+            2
+        }
     }
 }
 
-pub(super) fn model_flow(faces: &Faces, arg: &str) {
-    let mut it = arg.splitn(2, ' ');
-    let sub = it.next().unwrap_or("");
-    let rest = it.next().unwrap_or("").trim();
-    match sub {
-        "list" | "" => {
+/// 目的：模型登记：列清单（标出核心默认）、登记、移除——写操作一律落动作面。
+pub(super) fn model_flow(faces: &Faces, args: &Value, json: bool) -> i32 {
+    match text(args, "action").as_deref() {
+        None | Some("list") => {
             let views = match faces.registry.models() {
                 Ok(v) => v,
                 Err(e) => {
                     println!("[错误] {}", e);
-                    return;
+                    return 1;
                 }
             };
             let core = faces.registry.core_model().ok().flatten();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "models": views,
+                        "core": core,
+                    }))
+                    .unwrap_or_default()
+                );
+                return 0;
+            }
             if views.is_empty() {
                 println!(
-                    "（无模型）用 model add <id> <展示名> <实际模型串> <供应商id> [note] 添加"
+                    "（无模型）用 model add <id> <展示名> <实际模型串> <供应商id> [备注] 添加"
                 );
             }
             for m in &views {
                 println!("  {}", model_line(m, core.as_deref()));
             }
+            0
         }
-        "add" => {
-            let w: Vec<&str> = rest
-                .splitn(5, ' ')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .collect();
-            if w.len() < 4 {
-                println!("[错误] 用法：model add <id> <展示名> <实际模型串> <供应商id> [note]");
-                return;
-            }
-            let note = w.get(4).copied().unwrap_or("");
-            let draft = crate::capabilities::catalog::registry::api::ModelDraft {
-                id: w[0].to_string(),
-                name: w[1].to_string(),
-                api_model: w[2].to_string(),
-                provider: w[3].to_string(),
-                note: note.to_string(),
-                tools: Default::default(),
-                context: 0,
-                thinking: Default::default(),
+        Some("add") => {
+            let (Some(id), Some(name), Some(api_model), Some(provider)) = (
+                text(args, "id"),
+                text(args, "name"),
+                text(args, "api_model"),
+                text(args, "provider"),
+            ) else {
+                println!("[用法] model add <id> <展示名> <实际模型串> <供应商id> [备注]");
+                return 2;
             };
-            match faces.registry.upsert_model(draft) {
-                Ok(()) => println!("[登记] 模型 {}", w[0]),
-                Err(e) => println!("[错误] {}", e),
+            let mut payload = json!({
+                "id": id,
+                "name": name,
+                "api_model": api_model,
+                "provider": provider,
+            });
+            if let Some(note) = text(args, "note") {
+                payload["note"] = Value::String(note);
             }
+            act_and_print(
+                faces,
+                ActionCall {
+                    id: "upsert_model".to_string(),
+                    args: payload,
+                    caller: Caller::User,
+                    out: Output::Final,
+                },
+                json,
+            )
         }
-        "rm" => match faces.registry.remove_model(rest) {
-            Ok(true) => println!("[移除] 模型 {}", rest),
-            Ok(false) => println!("[错误] 无此模型：{}", rest),
-            Err(e) => println!("[错误] {}", e),
-        },
-        _ => println!("[错误] 用法：model list|add|rm …"),
+        Some("rm") => {
+            let Some(id) = text(args, "id") else {
+                println!("[用法] model rm <id>");
+                return 2;
+            };
+            act_and_print(
+                faces,
+                ActionCall {
+                    id: "remove_model".to_string(),
+                    args: json!({ "id": id }),
+                    caller: Caller::User,
+                    out: Output::Final,
+                },
+                json,
+            )
+        }
+        Some(other) => {
+            println!("[提示] 未知子命令 {}（list | add | rm）", other);
+            2
+        }
     }
 }
 
-pub(super) fn core_flow(faces: &Faces, arg: &str) {
-    if arg.is_empty() {
+/// 目的：核心默认模型：不带参数看当前，带参数切过去（切换落动作面）。
+pub(super) fn core_flow(faces: &Faces, args: &Value, json: bool) -> i32 {
+    let Some(model) = text(args, "model") else {
         let cur = faces.registry.core_model().ok().flatten();
-        println!(
-            "核心默认模型：{}",
-            cur.unwrap_or_else(|| "（未设定）".to_string())
-        );
-        return;
-    }
-    match faces.registry.set_core_model(arg) {
-        Ok(true) => println!("[核心默认] {}", arg),
-        Ok(false) => println!("[错误] 无此模型：{}", arg),
-        Err(e) => println!("[错误] {}", e),
-    }
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({ "core": cur })).unwrap_or_default()
+            );
+        } else {
+            println!(
+                "核心默认模型：{}",
+                cur.unwrap_or_else(|| "（未设定）".to_string())
+            );
+        }
+        return 0;
+    };
+    act_and_print(
+        faces,
+        ActionCall {
+            id: "set_core_model".to_string(),
+            args: json!({ "id": model }),
+            caller: Caller::User,
+            out: Output::Final,
+        },
+        json,
+    )
 }
 
 /// 目的：CLI 读输入读到尽头（EOF）时，把挂着的裁决按**停止 = 拒绝**收场——前端负责解开等待方。

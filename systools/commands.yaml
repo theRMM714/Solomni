@@ -121,8 +121,7 @@ commands:
         desc: 接口根地址（add）
       api_key:
         type: string
-        positional: 4
-        desc: 密钥（add；给 rm / key 时省略）
+        desc: 密钥（add / key；具名旗 --api-key，省略 = 保留原密钥）
 
   - name: model
     group: 注册处
@@ -190,7 +189,7 @@ commands:
         type: string
         positional: 4
         desc: 操作名（call 时）
-      json:
+      payload:
         type: string
         rest: true
         desc: 操作参数（call 时，整段 JSON；吃光操作名之后剩下的词）
@@ -199,7 +198,30 @@ commands:
     group: 后台
     phase: core
     executor: core
-    brief: 列密钥声明（值不回显）
+    brief: 密钥声明：列清单、置值、清除（值不回显）
+    params:
+      action:
+        type: string
+        positional: 1
+        values: [list, set, clear]
+        desc: 省略 = list
+      module:
+        type: string
+        positional: 2
+        desc: 模块 id（set / clear）
+      name:
+        type: string
+        positional: 3
+        desc: 字段名（set / clear）
+      value:
+        type: string
+        desc: 值（set；具名旗 --value，会留在 shell 历史里）
+
+  - name: modules
+    group: 模块
+    phase: core
+    executor: ui
+    brief: 模块清单：版本、启用状态与拒收原因
 
   - name: rescan
     group: 后台

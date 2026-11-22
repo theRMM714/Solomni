@@ -9,6 +9,7 @@ pub use crate::capabilities::tools::domain::budget::{
 pub use crate::capabilities::tools::domain::commands::{CommandBook, Phase};
 pub use crate::capabilities::tools::domain::op::{
     Executor, Op, OpBook, complete as complete_op, parse as parse_op, usage as op_usage,
+    usage_named,
 };
 pub use crate::capabilities::tools::domain::patch::{EditFault, Fault};
 pub use crate::capabilities::tools::domain::roles::{RoleTable, SystemTools, action_audit};

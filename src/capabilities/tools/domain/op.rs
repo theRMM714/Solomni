@@ -57,13 +57,6 @@ pub struct Op {
     pub json: Option<String>,
 }
 
-impl Op {
-    /// 目的：词法入口的写法（由声明派生，不手写）：`work <session> [log|show|restore] [rev]`。
-    pub fn usage(&self) -> String {
-        usage(self)
-    }
-}
-
 /// 目的：整本书：命令与动作**同一种形状**，按声明顺序排。
 #[derive(Debug, Clone, Default)]
 pub struct OpBook {
@@ -249,7 +242,12 @@ pub fn word_of(word: &str) -> String {
 
 /// 目的：由声明派生写法。位置参数在前（按序号），rest 次之，具名的在后；必填用 `<>`，可选与布尔用 `[]`。
 pub fn usage(op: &Op) -> String {
-    let mut out: Vec<String> = vec![op.id.clone()];
+    usage_named(op, &op.id)
+}
+
+/// 目的：换个词头写同一条声明（模块工具在命令行上叫 `render report`，动作 id 不是这个写法）。
+pub fn usage_named(op: &Op, head: &str) -> String {
+    let mut out: Vec<String> = vec![head.to_string()];
     let Some(params) = op.schema.params.as_ref() else {
         return out.join(" ");
     };
@@ -303,8 +301,8 @@ fn type_hint(p: &Param) -> String {
 /// 目的：把命令行词法解析成参数 JSON——**文本只是 JSON 的投影**。
 ///   词法规则（与手册、补全同源）：
 ///   R1 `--name` / `--name=值` / `--name 值` 等价；`--` 之后一律当位置参数；`--no-<布尔>` 取反；裸 `-` 是普通值。
-///   R2 全局修饰 `--json` / `--root` 由入口先摘走，不进这里；`--yes` 只对声明了确认门槛的命令收（R6），
-///   命令自己的参数前后位置无所谓。
+///   R2 全局修饰 `--root` 由入口先摘走，不进这里；`--json` 与 `--yes` 是呈现/确认修饰
+///   （`--yes` 只对声明了确认门槛的命令收，R6），命令自己的参数前后位置无所谓。
 ///   R3 位置参数按声明的 `positional` 序号取，声明了才允许不写旗语；rest 参数吃光剩下的词。
 ///   R4 布尔只认存在性：`--flag=值` 报错。
 ///   R5 缺值 / 未知 / 重复 / 类型不符 / 越界 / 枚举外与动作面共用同一套 `ArgFault`。
@@ -351,6 +349,17 @@ pub fn parse(op: &Op, words: &[&str]) -> Result<Value, ArgFault> {
                     return Err(ArgFault::Duplicate("yes".to_string()));
                 }
                 modifiers.insert("yes".to_string(), Value::Bool(true));
+                continue;
+            }
+            // R6：`--json` 同样是呈现修饰而不是参数：文本入口（TUI 行内）与启动旗语 `solomni --json` 同义。
+            if name == "json" {
+                if inline.is_some() {
+                    return Err(ArgFault::FlagNeedsValue(word.to_string()));
+                }
+                if modifiers.contains_key("json") {
+                    return Err(ArgFault::Duplicate("json".to_string()));
+                }
+                modifiers.insert("json".to_string(), Value::Bool(true));
                 continue;
             }
             // `--no-<布尔>` 取反：只对声明成布尔的参数成立。

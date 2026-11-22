@@ -3,9 +3,9 @@
 //! 不管：目录遍历（在 `detail/`）；身份块渲染（归 `session`）；模型/供应商偏好（会话级决定）。
 //! 联动：契约文档见 MODULE_SPEC.md；由 `detail/fs_modules.rs` 调校验、`api.rs` 对外重导出。
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 /// 目的：参数类型（只支持机器能判定的最小集合；不猜、不做隐式转换）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ParamType {
     String,
@@ -48,7 +48,7 @@ impl ParamType {
 }
 
 /// 目的：一个参数的声明。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Param {
     /// 目的：YAML 里的 `type`。
     #[serde(rename = "type")]

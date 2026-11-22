@@ -58,7 +58,7 @@ pub(crate) fn run_asked(
     let mut args = match parse_op(op, &words) {
         Ok(v) => v,
         Err(fault) => {
-            eprintln!("[用法] {}（{}）", fault_text(op, &fault), op.usage());
+            eprintln!("[用法] {}", fault_text(op, &fault));
             return 2;
         }
     };
