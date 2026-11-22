@@ -6,6 +6,7 @@
 mod dispatch;
 mod face;
 mod gate;
+mod grep;
 mod patch;
 mod run_loop;
 mod shell;

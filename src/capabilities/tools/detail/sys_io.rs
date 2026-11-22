@@ -5,9 +5,10 @@
 
 use crate::capabilities::tools::api::LineRange;
 use crate::capabilities::tools::ports::{
-    DirEntry, Expect, FilePage, FileRead, Mutation, SysIo, WriteFault, WriteOp, WriteReceipt,
+    DirEntry, Expect, FilePage, FileRead, MAX_SCAN_LINE_BYTES, Mutation, ScanSummary, SysIo,
+    WalkEntry, WalkOpts, WriteFault, WriteOp, WriteReceipt,
 };
-use crate::capabilities::workspace::api::{Sha256, content_hash};
+use crate::capabilities::workspace::api::{Rules, Sha256, content_hash};
 use crate::kernel::api::lock::lock_within;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
@@ -431,6 +432,74 @@ impl FsSysIo {
     }
 }
 
+/// 目的：前 8 KiB 里出现 NUL 就当二进制（与 rg / git 的判据同源）。
+fn probe_binary(head: &[u8]) -> bool {
+    head.contains(&0)
+}
+
+/// 目的：从流里读一行，最多 `cap` 字节；超出的部分读到换行前丢掉。
+/// 返回（是否读到内容, 是否被截断）。行尾的 \n 会留在 buffer 里，由调用方裁掉。
+fn read_capped_line<R: std::io::BufRead>(
+    reader: &mut R,
+    buf: &mut Vec<u8>,
+    cap: usize,
+) -> Result<(bool, bool), String> {
+    let mut got = false;
+    let mut cut = false;
+    loop {
+        let available = reader.fill_buf().map_err(|e| format!("读取失败：{}", e))?;
+        if available.is_empty() {
+            return Ok((got, cut));
+        }
+        let (take, done) = match available.iter().position(|b| *b == b'\n') {
+            Some(i) => (i + 1, true),
+            None => (available.len(), false),
+        };
+        let room = cap.saturating_sub(buf.len());
+        if take <= room {
+            buf.extend_from_slice(&available[..take]);
+        } else {
+            buf.extend_from_slice(&available[..room]);
+            cut = true;
+        }
+        reader.consume(take);
+        got = true;
+        if done {
+            return Ok((got, cut));
+        }
+        if cut {
+            // 已经到上限：把这一行剩下的字节读到换行为止，不进 buffer。
+            loop {
+                let rest = reader.fill_buf().map_err(|e| format!("读取失败：{}", e))?;
+                if rest.is_empty() {
+                    return Ok((got, cut));
+                }
+                let (n, end) = match rest.iter().position(|b| *b == b'\n') {
+                    Some(i) => (i + 1, true),
+                    None => (rest.len(), false),
+                };
+                reader.consume(n);
+                if end {
+                    return Ok((got, cut));
+                }
+            }
+        }
+    }
+}
+
+/// 目的：把一行字节裁成模型看的字符串：去掉行尾换行与回车，非法 UTF-8 按替换字符呈现。
+fn line_text(raw: &[u8], lossy: &mut bool) -> String {
+    let body = raw.strip_suffix(b"\n").unwrap_or(raw);
+    let body = body.strip_suffix(b"\r").unwrap_or(body);
+    match std::str::from_utf8(body) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            *lossy = true;
+            String::from_utf8_lossy(body).into_owned()
+        }
+    }
+}
+
 /// 目的：把路径归一成锁键——存在取真实路径，不存在取真实父目录加文件名，再退回原路径。
 /// 约束：同一文件经不同符号链接路径访问时应落到同一把锁。
 fn lock_key(path: &Path) -> PathBuf {
@@ -744,5 +813,113 @@ impl SysIo for FsSysIo {
         // 名字排序：回执稳定，模型两次列同一目录看到同样的顺序。
         out.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(out)
+    }
+
+    fn read_small(&self, path: &Path) -> Result<Option<String>, String> {
+        match std::fs::read(path) {
+            Ok(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).into_owned())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("读取失败（{}）：{}", path.display(), e)),
+        }
+    }
+
+    fn walk(
+        &self,
+        root: &Path,
+        rules: Option<&str>,
+        opts: WalkOpts,
+    ) -> Result<Vec<WalkEntry>, String> {
+        let meta = std::fs::metadata(root).map_err(|e| format!("读取失败：{}", e))?;
+        if !meta.is_dir() {
+            return Err(format!("不是目录：{}", root.display()));
+        }
+        let rules = match (opts.ignore, rules) {
+            (true, Some(text)) => Some(std::sync::Arc::new(Rules::compile(root, text)?)),
+            _ => None,
+        };
+        let mut builder = ignore::WalkBuilder::new(root);
+        builder
+            .hidden(!opts.hidden)
+            // 忽略文件与 .gitignore 同进同退；不读全局 ignore、不向上找父目录的规则：
+            // 一次遍历只看这棵树与这份工作区规则，结果与机器上的全局配置无关。
+            .ignore(opts.ignore)
+            .git_ignore(opts.ignore)
+            .git_exclude(opts.ignore)
+            .git_global(false)
+            .parents(false)
+            .require_git(false)
+            .follow_links(false)
+            .sort_by_file_path(|a, b| a.cmp(b));
+        if let Some(rules) = rules {
+            let base = root.to_path_buf();
+            builder.filter_entry(move |ent| {
+                let Ok(rel) = ent.path().strip_prefix(&base) else {
+                    return true;
+                };
+                if rel.as_os_str().is_empty() {
+                    return true;
+                }
+                let is_dir = ent.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                !rules.is_ignored(&crate::kernel::api::path::slash(rel), is_dir)
+            });
+        }
+        let mut out: Vec<WalkEntry> = Vec::new();
+        for item in builder.build() {
+            // 读不了的目录项直接跳过（遍历不因为一处权限问题整次失败）；文件清单里只留文件。
+            let Ok(ent) = item else { continue };
+            if ent.depth() == 0 {
+                continue;
+            }
+            if !ent.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                continue;
+            }
+            let rel = ent
+                .path()
+                .strip_prefix(root)
+                .map_err(|_| format!("遍历结果不在根内：{}", ent.path().display()))?;
+            out.push(WalkEntry {
+                rel: crate::kernel::api::path::slash(rel),
+                bytes: ent.metadata().map(|m| m.len()).unwrap_or(0),
+            });
+        }
+        out.sort_by(|a, b| a.rel.cmp(&b.rel));
+        Ok(out)
+    }
+
+    fn scan_lines(
+        &self,
+        path: &Path,
+        each: &mut dyn FnMut(u32, &str),
+    ) -> Result<ScanSummary, String> {
+        let mut file = std::fs::File::open(path).map_err(|e| format!("读取失败：{}", e))?;
+        let mut head = vec![0u8; 8 * 1024];
+        let n = file.read(&mut head).map_err(|e| format!("读取失败：{}", e))?;
+        head.truncate(n);
+        if probe_binary(&head) {
+            return Ok(ScanSummary {
+                binary: true,
+                ..ScanSummary::default()
+            });
+        }
+        // 已经读掉的头部接回流前：二进制判定不额外读第二遍，也不丢开头。
+        let mut reader = std::io::BufReader::with_capacity(
+            64 * 1024,
+            std::io::Cursor::new(head).chain(file),
+        );
+        let mut summary = ScanSummary::default();
+        let mut buf: Vec<u8> = Vec::new();
+        loop {
+            buf.clear();
+            let (got, cut) = read_capped_line(&mut reader, &mut buf, MAX_SCAN_LINE_BYTES)?;
+            if !got {
+                return Ok(summary);
+            }
+            summary.lines += 1;
+            if cut {
+                summary.long_lines += 1;
+            }
+            let text = line_text(&buf, &mut summary.lossy);
+            each(summary.lines as u32, &text);
+        }
     }
 }

@@ -61,6 +61,7 @@ fn sandbox() -> Sandbox {
         modules_with_userdata: Default::default(),
         permissions: PermissionDefaults::default().to_permission_set(),
         path_codec: None,
+        filter_rules: PathBuf::from(".work").join(".workignore"),
     }
 }
 

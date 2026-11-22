@@ -7,7 +7,7 @@
 ## 管什么 / 不管什么
 
 - 管：系统工具总表、角色表与名字表（`systools/` 三份），以及「按角色发放工具面 / 按表校验调用」的唯一判据。
-- 管：内置文件工具（read / list / write / edit / patch / delete / search）的执行编排与纯规则、工具参数契约、补丁通道。
+- 管：内置文件工具（read / list / write / edit / patch / delete / grep）的执行编排与纯规则、工具参数契约、补丁通道。
 - 管：执行类系统工具 `shell` 的参数 / scope 规则与派发；host 的拉起与围栏机制是 kernel 共享的 `ProcessRunner` / `confine`，VM 走 guest。
 - 管：模块工具进程的执行编排；拉起与围栏机制是 kernel 共享的 `ProcessRunner` / `confine`。
 - 管：围栏可达范围的派生（`src/capabilities/tools/domain/fence.rs` 的 `for_call` / `for_session` / `standalone`）。

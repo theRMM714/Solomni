@@ -262,7 +262,7 @@ pub(crate) fn tool_call_event_is_emitted_before_the_next_round() {
     mod_a
         .manifest
         .tools
-        .insert("grep".to_string(), decl("python tools/grep.py"));
+        .insert("scan".to_string(), decl("python tools/scan.py"));
     let runner = Arc::new(RecordingRunner {
         calls: Mutex::new(Vec::new()),
         out: "ok".into(),
@@ -441,11 +441,11 @@ pub(crate) fn tool_loop_runs_declared_tool() {
         abs(&["mods", "root"]),
         "工具进程工作目录 = 模块工作区（真实路径）"
     );
-    assert_eq!(calls[0].1, "python tools/grep.py", "命令来自模块清单");
+    assert_eq!(calls[0].1, "python tools/scan.py", "命令来自模块清单");
     assert!(calls[0].2.contains("keyword"), "参数以 JSON 原样送达");
     let trace = exec.traces.get("m0").expect("工具调用应入册");
     assert_eq!(trace.len(), 1);
-    assert_eq!(trace[0].name, "grep");
+    assert_eq!(trace[0].name, "scan");
     assert_eq!(trace[0].module, "m0", "信封省略 module 时按唯一模块兜底");
     assert!(
         trace[0].ok && trace[0].args.contains("keyword"),

@@ -248,6 +248,94 @@ impl SysIo for InMemorySysIo {
         Ok(())
     }
 
+    fn read_small(&self, path: &std::path::Path) -> Result<Option<String>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        let key = path.to_string_lossy().into_owned();
+        Ok(self.files.lock().expect("锁").get(&key).cloned())
+    }
+
+    fn walk(
+        &self,
+        root: &std::path::Path,
+        rules: Option<&str>,
+        opts: crate::capabilities::tools::ports::WalkOpts,
+    ) -> Result<Vec<crate::capabilities::tools::ports::WalkEntry>, String> {
+        use crate::capabilities::tools::ports::WalkEntry;
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        let compiled = match (opts.ignore, rules) {
+            (true, Some(text)) => Some(crate::capabilities::workspace::api::Rules::compile(
+                root, text,
+            )?),
+            _ => None,
+        };
+        let base = root.to_string_lossy().trim_end_matches(['/', '\\']).to_string();
+        let prefix = format!("{}{}", base, std::path::MAIN_SEPARATOR);
+        let files = self.files.lock().expect("锁");
+        let mut out: Vec<WalkEntry> = Vec::new();
+        for (key, text) in files.iter() {
+            let Some(rest) = key.strip_prefix(&prefix) else {
+                continue;
+            };
+            let rel = rest.replace(std::path::MAIN_SEPARATOR, "/");
+            if !opts.hidden && rel.split('/').any(|seg| seg.starts_with('.')) {
+                continue;
+            }
+            if compiled
+                .as_ref()
+                .is_some_and(|rules| rules.is_ignored(&rel, false))
+            {
+                continue;
+            }
+            out.push(WalkEntry {
+                rel,
+                bytes: text.len() as u64,
+            });
+        }
+        drop(files);
+        out.sort_by(|a, b| a.rel.cmp(&b.rel));
+        Ok(out)
+    }
+
+    fn scan_lines(
+        &self,
+        path: &std::path::Path,
+        each: &mut dyn FnMut(u32, &str),
+    ) -> Result<crate::capabilities::tools::ports::ScanSummary, String> {
+        use crate::capabilities::tools::ports::ScanSummary;
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        let key = path.to_string_lossy().into_owned();
+        let text = self
+            .files
+            .lock()
+            .expect("锁")
+            .get(&key)
+            .cloned()
+            .ok_or_else(|| format!("读取失败：{} 不存在", key))?;
+        // 内存替身按字节判二进制：与真实实现「前 8 KiB 含 NUL」同一条判据。
+        if text.as_bytes().iter().take(8 * 1024).any(|b| *b == 0) {
+            return Ok(ScanSummary {
+                binary: true,
+                ..ScanSummary::default()
+            });
+        }
+        self.enter(&key);
+        let mut summary = ScanSummary {
+            lossy: self.lossy,
+            ..ScanSummary::default()
+        };
+        for (i, line) in text.lines().enumerate() {
+            summary.lines += 1;
+            each(i as u32 + 1, line);
+        }
+        Ok(summary)
+    }
+
     fn mutate(
         &self,
         path: &std::path::Path,

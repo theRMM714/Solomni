@@ -459,6 +459,70 @@ fn sys_io_double_reads_writes_and_propagates_failure() {
 }
 
 #[test]
+fn sys_io_double_walks_by_rules_scans_lines_and_reads_small() {
+    use crate::capabilities::tools::ports::WalkOpts;
+    let io = InMemorySysIo::new();
+    io.seed(&["w", "a.txt"], "one\ntwo\n");
+    io.seed(&["w", "sub", "b.txt"], "x\n");
+    io.seed(&["w", "vendor", "skip.txt"], "y\n");
+    io.seed(&["w", ".hidden.txt"], "z\n");
+    let root = abs(&["w"]);
+    let walked = io
+        .walk(
+            &root,
+            Some("vendor/\n"),
+            WalkOpts {
+                hidden: false,
+                ignore: true,
+            },
+        )
+        .expect("遍历成功");
+    let rels: Vec<&str> = walked.iter().map(|e| e.rel.as_str()).collect();
+    assert_eq!(rels, vec!["a.txt", "sub/b.txt"], "规则与隐藏文件都剪掉：{:?}", rels);
+    let all = io
+        .walk(
+            &root,
+            None,
+            WalkOpts {
+                hidden: true,
+                ignore: false,
+            },
+        )
+        .expect("遍历成功");
+    assert_eq!(all.len(), 4, "关规则并放行隐藏：{}", all.len());
+
+    let mut seen: Vec<(u32, String)> = Vec::new();
+    let summary = io
+        .scan_lines(&abs(&["w", "a.txt"]), &mut |n, line| {
+            seen.push((n, line.to_string()));
+        })
+        .expect("扫描成功");
+    assert_eq!(summary.lines, 2, "行号从 1 数到 2");
+    assert!(!summary.binary && !summary.lossy);
+    assert_eq!(seen, vec![(1, "one".to_string()), (2, "two".to_string())]);
+
+    io.seed(&["w", "bin.dat"], "x\0y\n");
+    let mut called = 0;
+    let summary = io
+        .scan_lines(&abs(&["w", "bin.dat"]), &mut |_, _| {
+            called += 1;
+        })
+        .expect("扫描成功");
+    assert!(summary.binary, "含 NUL 判二进制");
+    assert_eq!(called, 0, "二进制不回调任何行");
+
+    io.seed(&["w", ".workignore"], "vendor/\n");
+    assert_eq!(
+        io.read_small(&abs(&["w", ".workignore"])).expect("读成功").as_deref(),
+        Some("vendor/\n")
+    );
+    assert!(
+        io.read_small(&abs(&["w", "nope.txt"])).expect("读成功").is_none(),
+        "缺文件 = None，不是错误"
+    );
+}
+
+#[test]
 fn sys_io_double_mutate_enforces_expectations_and_transact_is_all_or_nothing() {
     use crate::capabilities::tools::api::LineRange;
     use crate::capabilities::tools::ports::{Expect, Mutation, WriteOp};

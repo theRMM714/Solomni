@@ -1,5 +1,5 @@
 //! 目的：钉工具循环无调用上限，与内置工具「读过」的证据链。
-//! 管：清单参数声明与执行、拒绝未声明/书外工具、无调用上限、search 行号与大小写、直接会话文件工具、原生模式失败行、模块目录写拒绝、edit 范围与整读要求。
+//! 管：清单参数声明与执行、拒绝未声明/书外工具、无调用上限、grep 行号与大小写、直接会话文件工具、原生模式失败行、模块目录写拒绝、edit 范围与整读要求。
 //! 不管：工具面发放（face.rs）。
 //! 联动：src/capabilities/tools/、session 事实与账本。
 
@@ -88,7 +88,7 @@ pub(crate) fn tool_loop_has_no_call_cap() {
 }
 
 #[test]
-pub(crate) fn builtin_search_reports_line_numbers_and_respects_case() {
+pub(crate) fn builtin_grep_reports_line_numbers_and_respects_case() {
     let io = InMemorySysIo::new();
     let sb = test_sandbox("a1", &[]);
     io.seed(
@@ -100,18 +100,18 @@ pub(crate) fn builtin_search_reports_line_numbers_and_respects_case() {
     let out = run_builtin(
         &sb,
         &io,
-        "search",
-        &format!("{{\"path\":\"{}\",\"keyword\":\"alpha\"}}", path),
+        "grep",
+        &format!("{{\"path\":\"{}\",\"pattern\":\"alpha\"}}", path),
     );
     assert!(out.ok, "{}", out.output);
-    assert!(out.output.contains("3 | alpha 小写"), "{}", out.output);
+    assert!(out.output.contains(":3:alpha 小写"), "{}", out.output);
     assert!(
         !out.output.contains("第一行 Alpha"),
         "默认区分大小写：{}",
         out.output
     );
     assert!(
-        out.output.contains("命中 1 行 / 全文 3 行"),
+        out.output.contains("命中 1 行 / 1 个文件"),
         "{}",
         out.output
     );
@@ -119,19 +119,19 @@ pub(crate) fn builtin_search_reports_line_numbers_and_respects_case() {
     let out = run_builtin(
         &sb,
         &io,
-        "search",
+        "grep",
         &format!(
-            "{{\"path\":\"{}\",\"keyword\":\"alpha\",\"ignore_case\":true}}",
+            "{{\"path\":\"{}\",\"pattern\":\"alpha\",\"ignore_case\":true}}",
             path
         ),
     );
     assert!(
-        out.output.contains("1 | 第一行 Alpha") && out.output.contains("3 | alpha 小写"),
+        out.output.contains(":1:第一行 Alpha") && out.output.contains(":3:alpha 小写"),
         "{}",
         out.output
     );
     assert!(
-        out.output.contains("命中 2 行 / 全文 3 行"),
+        out.output.contains("命中 2 行 / 1 个文件"),
         "{}",
         out.output
     );
@@ -139,9 +139,9 @@ pub(crate) fn builtin_search_reports_line_numbers_and_respects_case() {
     let bad = run_builtin(
         &sb,
         &io,
-        "search",
+        "grep",
         &format!(
-            "{{\"path\":\"{}\",\"keyword\":\"x\"}}",
+            "{{\"path\":\"{}\",\"pattern\":\"x\"}}",
             s(&["outside", "f.txt"])
         ),
     );
@@ -562,7 +562,7 @@ pub(crate) fn exhausted_budget_skips_the_whole_batch() {
     let plan = vec![
         (
             Some("m0".to_string()),
-            "grep".to_string(),
+            "scan".to_string(),
             "{\"pattern\":\"x\"}".to_string(),
         ),
         (None, "read".to_string(), "{\"path\":\"a\"}".to_string()),
@@ -646,9 +646,9 @@ pub(crate) fn read_respects_the_batch_budget_and_records_only_what_it_shows() {
 pub(crate) fn module_and_service_params_share_one_header() {
     let mut m = module_of("m0");
     m.manifest.tools.insert(
-        "grep".to_string(),
+        "scan".to_string(),
         decl_with(
-            "python tools/grep.py",
+            "python tools/scan.py",
             "keyword: {type: string, required: true}\n",
         ),
     );
@@ -666,7 +666,7 @@ pub(crate) fn module_and_service_params_share_one_header() {
         "静态模块参数与服务参数只能共用一个标题：{}",
         block
     );
-    assert!(block.contains("m0.grep"), "{}", block);
+    assert!(block.contains("m0.scan"), "{}", block);
     assert!(block.contains("m0.svc.echo"), "{}", block);
     assert!(
         !block.contains("都没声明参数"),

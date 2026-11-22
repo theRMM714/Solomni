@@ -12,7 +12,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     let mut a = module_of("a");
     a.manifest
         .tools
-        .insert("grep".to_string(), decl("python tools/grep.py"));
+        .insert("scan".to_string(), decl("python tools/scan.py"));
     let mut core = core_with_pkgs(
         vec![a, module_of("b")],
         gw(BTreeMap::new(), vec!["[]".into()]),

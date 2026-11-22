@@ -266,7 +266,7 @@ async function main() {
   // 代理这一回合的工具面（systools/roles.yaml 的 core_proxy）：六个代理工具 + 只读核实。
   const FACE = [
     "catalog_agents", "create_session", "send_session_message", "observe_session",
-    "read_session_messages", "control_session", "read", "list", "search",
+    "read_session_messages", "control_session", "read", "list", "grep",
   ];
   ok(names.length > 0, "核心在代理会话里真的调了工具", names.join("、"));
   ok(names.every((n) => FACE.includes(n)), "只用它自己的工具面（模块工具一个也没发）", names.join("、"));

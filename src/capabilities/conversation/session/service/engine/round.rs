@@ -722,7 +722,7 @@ pub fn converse_with(
                         (t.module.clone(), t.name.clone(), args)
                     })
                     .collect();
-                // 内置工具（read/write/edit/search）优先且不属于任何模块；外部工具按模块定 cwd。
+                // 内置工具（read/write/edit/grep）优先且不属于任何模块；外部工具按模块定 cwd。
                 note_unauthorized(ctx, &plan, sink);
                 let budget = if user_stopped {
                     ResultBudget::full()

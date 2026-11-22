@@ -122,7 +122,7 @@ pub(crate) fn module_tools_may_not_take_builtin_names() {
         .is_ok(),
         "普通工具名可用"
     );
-    for name in ["read", "write", "search"] {
+    for name in ["read", "write", "grep"] {
         m.manifest
             .tools
             .insert(name.to_string(), decl("python tools/x.py"));

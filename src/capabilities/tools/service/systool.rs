@@ -1,4 +1,4 @@
-//! 目的：内置工具的**执行编排**——驱动 `SysIo` 读写盘上的文件（read / write / edit / patch / delete / list / search）。
+//! 目的：内置工具的**执行编排**——驱动 `SysIo` 读写盘上的文件（read / write / edit / patch / delete / list / grep）。
 //! 管：解析 JSON → 认工具 → 按声明校验参数 → 补缺省 → 寻址 → 调用 `domain` 的纯规则。
 //! 不管：纯规则（参数校验、回执文案、观察账本、`ToolOutcome`）在 `domain/systool.rs`。
 //! 联动：引 `ports` 的 `SysIo` 做 IO；`domain/` 不引 `ports`（见 docs/architecture/boundaries.md 的「三分法」）。
@@ -129,7 +129,7 @@ pub fn execute_with_budget(
         if !sb.can_write(&place, &path) {
             return fail(sb.write_refusal(&place, &path));
         }
-    } else if matches!(name, READ | LIST | SEARCH) && !sb.can_read(&place, &path) {
+    } else if matches!(name, READ | LIST | GREP) && !sb.can_read(&place, &path) {
         return fail(sb.read_refusal(&place, &path));
     }
     // 词法上在根内不等于真实落点在根内：符号链接 / junction 指向根外时一律拒绝。
@@ -160,7 +160,7 @@ pub fn execute_with_budget(
             &Origin::of(sb, &place, &path),
         ),
         LIST => list(io, &spec, &path),
-        SEARCH => search(io, &args, &spec, &path),
+        GREP => super::grep::run(sb, &place, io, budget, &args, &spec, &path),
         other => fail(format!("未知的内置工具：{}", other)),
     }
 }
@@ -690,73 +690,6 @@ fn edit(
             spec, receipt.replaced, receipt.total_lines
         ),
     )
-}
-
-/// search：逐行找关键词，返回带行号的命中行（命中总数与截断如实报）。
-fn search(io: &dyn SysIo, args: &serde_json::Value, spec: &str, path: &Path) -> ToolOutcome {
-    let keyword = args
-        .get("keyword")
-        .and_then(|k| k.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let ignore_case = args
-        .get("ignore_case")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let got = match io.read(path) {
-        Ok(g) => g,
-        Err(e) => return fail(e),
-    };
-    let needle = if ignore_case {
-        keyword.to_lowercase()
-    } else {
-        keyword.clone()
-    };
-    let mut hits: Vec<(usize, String)> = Vec::new();
-    let mut matched = 0usize;
-    let mut total = 0usize;
-    for (i, line) in got.text.lines().enumerate() {
-        total += 1;
-        let hay = if ignore_case {
-            line.to_lowercase()
-        } else {
-            line.to_string()
-        };
-        if hay.contains(&needle) {
-            matched += 1;
-            if hits.len() < MAX_SEARCH_HITS {
-                hits.push((i + 1, truncate_chars(line, MAX_SEARCH_LINE_CHARS).0));
-            }
-        }
-    }
-    let mode = if ignore_case {
-        "（忽略大小写）"
-    } else {
-        "（区分大小写）"
-    };
-    let mut out = format!("[search] {} 关键词「{}」{}", spec, keyword, mode);
-    if hits.is_empty() {
-        out.push_str("\n（没有命中行）");
-    }
-    for (n, line) in &hits {
-        out.push_str(&format!("\n{} | {}", n, line));
-    }
-    out.push_str(&format!("\n命中 {} 行 / 全文 {} 行", matched, total));
-    if matched > hits.len() {
-        out.push_str(&format!(
-            "\n[截断] 命中行超过 {} 行，仅列出前 {} 行。",
-            MAX_SEARCH_HITS, MAX_SEARCH_HITS
-        ));
-    }
-    if got.lossy {
-        out.push_str(
-            "\n[编码] 该文件含非法 UTF-8 字节，以上是按替换字符呈现的近似内容；本程序不猜编码。",
-        );
-    }
-    if got.cut {
-        out.push_str("\n[截断] 文件超过单次读取上限，只搜了开头部分。");
-    }
-    ToolOutcome::new(true, out)
 }
 
 /// patch：把一段**自由格式**的补丁应用到一处或多处文件（信封之后原样跟补丁文本，不走 JSON）。

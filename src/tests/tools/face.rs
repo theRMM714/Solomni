@@ -148,8 +148,8 @@ pub(crate) fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
                 },
                 ToolCall {
                     id: "c2".to_string(),
-                    name: "search".to_string(),
-                    args_json: format!("{{\"path\":\"{}\",\"keyword\":\"第二\"}}", note),
+                    name: "grep".to_string(),
+                    args_json: format!("{{\"path\":\"{}\",\"pattern\":\"第二\"}}", note),
                 },
             ]),
             NativeStep::Text("{\"type\":\"say\",\"text\":\"读完了\"}".to_string()),
@@ -169,7 +169,7 @@ pub(crate) fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
     let decls = declared.lock().expect("锁");
     let first = &decls[0];
     let names: Vec<&str> = first.iter().map(|(n, _)| n.as_str()).collect();
-    for want in ["read", "write", "edit", "patch", "search"] {
+    for want in ["read", "write", "edit", "patch", "grep"] {
         assert!(names.contains(&want), "没声明 {}：{:?}", want, names);
     }
     let patch = first
@@ -207,7 +207,7 @@ pub(crate) fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
         trace[0]
     );
     assert!(
-        trace[1].ok && trace[1].name == "search" && trace[1].output.contains("2 | 第二行"),
+        trace[1].ok && trace[1].name == "grep" && trace[1].output.contains(":2:第二行"),
         "{:?}",
         trace[1]
     );
@@ -231,7 +231,7 @@ pub(crate) fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
     assert_eq!(calls[0].name, "read");
     assert_eq!(calls[0].args_json, format!("{{\"path\":\"{}\"}}", note));
     assert_eq!(calls[1].id, "c2");
-    assert_eq!(calls[1].name, "search");
+    assert_eq!(calls[1].name, "grep");
     let results: Vec<&Msg> = second.iter().filter(|m| m.role == "tool").collect();
     assert_eq!(
         results.len(),
@@ -250,7 +250,7 @@ pub(crate) fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
         results[0]
     );
     assert!(
-        results[1].content.contains("2 | 第二行"),
+        results[1].content.contains(":2:第二行"),
         "{:?}",
         results[1]
     );
@@ -384,18 +384,18 @@ pub(crate) fn a_writing_call_is_a_barrier_and_sees_the_merged_ledger() {
 #[test]
 pub(crate) fn module_tools_are_concurrent_only_when_declared() {
     use crate::capabilities::llm::api::ToolCall;
-    /// 原生形态 + 模块 m0 声明外部工具 grep（线上名 m0_grep）；parallel 决定它是否可并发。
-    fn grep_member(runner: Arc<dyn ProcessRunner>, parallel: bool) -> WithTools {
+    /// 原生形态 + 模块 m0 声明外部工具 scan（线上名 m0_scan）；parallel 决定它是否可并发。
+    fn scan_member(runner: Arc<dyn ProcessRunner>, parallel: bool) -> WithTools {
         let steps = vec![
             NativeStep::Calls(vec![
                 ToolCall {
                     id: "c1".to_string(),
-                    name: "m0_grep".to_string(),
+                    name: "m0_scan".to_string(),
                     args_json: "{\"keyword\":\"甲\"}".to_string(),
                 },
                 ToolCall {
                     id: "c2".to_string(),
-                    name: "m0_grep".to_string(),
+                    name: "m0_scan".to_string(),
                     args_json: "{\"keyword\":\"乙\"}".to_string(),
                 },
             ]),
@@ -411,9 +411,9 @@ pub(crate) fn module_tools_are_concurrent_only_when_declared() {
         let t = m.tools.as_mut().expect("工具环境");
         let mt = t.face.modules.get_mut("m0").expect("模块");
         mt.commands
-            .insert("grep".to_string(), "python tools/grep.py".to_string());
+            .insert("scan".to_string(), "python tools/scan.py".to_string());
         if parallel {
-            mt.parallel.insert("grep".to_string());
+            mt.parallel.insert("scan".to_string());
         }
         t.tools = test_tools_svc_with(
             runner,
@@ -425,7 +425,7 @@ pub(crate) fn module_tools_are_concurrent_only_when_declared() {
     let prompts = test_prompts();
     // ① 声明 parallel：两个调用真的并发
     let runner = Arc::new(ParallelRunner::new(40));
-    let mut m = grep_member(Arc::clone(&runner) as Arc<dyn ProcessRunner>, true);
+    let mut m = scan_member(Arc::clone(&runner) as Arc<dyn ProcessRunner>, true);
     let exec = run_execution(std::slice::from_mut(&mut m), "任务", &prompts);
     let peak = runner.peak_concurrent();
     assert!(
@@ -436,7 +436,7 @@ pub(crate) fn module_tools_are_concurrent_only_when_declared() {
     assert_eq!(exec.traces.get("a").map(|t| t.len()), Some(2));
     // ② 没声明：同样两个调用逐个跑
     let runner = Arc::new(ParallelRunner::new(5));
-    let mut m = grep_member(Arc::clone(&runner) as Arc<dyn ProcessRunner>, false);
+    let mut m = scan_member(Arc::clone(&runner) as Arc<dyn ProcessRunner>, false);
     let _ = run_execution(std::slice::from_mut(&mut m), "任务", &prompts);
     assert_eq!(
         runner.peak_concurrent(),

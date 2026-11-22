@@ -5,6 +5,7 @@
 //! 联动：对外两个面 `Tools` 与 `ToolExec`（见 `api.rs`）；装配在 `main.rs`。
 
 pub mod fence;
+pub mod grep;
 pub mod systool;
 
 use self::fence::ToolFenceGate;

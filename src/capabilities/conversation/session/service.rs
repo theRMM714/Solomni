@@ -329,7 +329,7 @@ pub fn core_operation(
             }
             return Ok(payload);
         }
-        // 没有目标调用：看它请求的是不是**该角色拿得到的只读核实工具**（read / search）。
+        // 没有目标调用：看它请求的是不是**该角色拿得到的只读核实工具**（read / grep）。
         let calls: Vec<(String, String, String)> =
             if mode == crate::capabilities::llm::api::ToolMode::Native && !done.calls.is_empty() {
                 done.calls

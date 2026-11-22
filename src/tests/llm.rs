@@ -337,7 +337,7 @@ pub(crate) fn envelope_tool_parses_name_and_args() {
     let r = crate::capabilities::llm::api::parse(TOOL_CALL);
     assert_eq!(r.verb, crate::capabilities::llm::api::Verb::Tool);
     let inv = r.tools.first().cloned().expect("应有调用申请");
-    assert_eq!(inv.name, "grep");
+    assert_eq!(inv.name, "scan");
     assert!(
         inv.module.is_none(),
         "没写 module = None（单模块 agent 靠这个兜底）"
@@ -398,7 +398,7 @@ pub(crate) fn envelope_tool_parses_name_and_args() {
         "只剩信封 → text 空"
     );
     let prose = crate::capabilities::llm::api::parse(
-        "先看一眼。{\"type\":\"tool\",\"name\":\"grep\",\"args\":{}}后记",
+        "先看一眼。{\"type\":\"tool\",\"name\":\"scan\",\"args\":{}}后记",
     );
     assert_eq!(prose.text, "先看一眼。后记", "信封之外的正文进 text");
     assert!(
@@ -497,7 +497,7 @@ pub(crate) fn envelope_only_round_produces_only_a_tool_line() {
     mod_a
         .manifest
         .tools
-        .insert("grep".to_string(), decl("python tools/grep.py"));
+        .insert("scan".to_string(), decl("python tools/scan.py"));
     let runner = Arc::new(RecordingRunner {
         calls: Mutex::new(Vec::new()),
         out: "ok".into(),

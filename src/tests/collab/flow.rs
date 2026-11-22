@@ -223,7 +223,7 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
     );
     let mut mod_a = module_of("a");
     let mut manifest_tools = BTreeMap::new();
-    manifest_tools.insert("grep".to_string(), decl("python tools/grep.py"));
+    manifest_tools.insert("scan".to_string(), decl("python tools/scan.py"));
     mod_a.manifest.tools = manifest_tools;
     // 核心脚本：整理（方案）→ 验收（全过）。
     let mut core = core_with_runner(

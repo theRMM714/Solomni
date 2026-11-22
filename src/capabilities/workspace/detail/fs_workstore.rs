@@ -180,37 +180,6 @@ fn lock_store(store: &Path) -> Result<File, String> {
     )
 }
 
-/// 递归列文件（只列文件），相对路径用 / 分隔，稳定排序；给了规则就整棵剪掉被忽略的子树。
-fn collect(root: &Path, out: &mut Vec<String>, prefix: &str, rules: Option<&Rules>) {
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return;
-    };
-    let mut items: Vec<(String, PathBuf, bool)> = entries
-        .flatten()
-        .map(|e| {
-            let p = e.path();
-            let name = e.file_name().to_string_lossy().into_owned();
-            let is_dir = p.is_dir();
-            (name, p, is_dir)
-        })
-        .collect();
-    items.sort_by(|a, b| a.0.cmp(&b.0));
-    for (name, path, is_dir) in items {
-        let rel = if prefix.is_empty() {
-            name
-        } else {
-            format!("{}/{}", prefix, name)
-        };
-        if rules.is_some_and(|r| r.is_ignored(&rel, is_dir)) {
-            continue;
-        }
-        if is_dir {
-            collect(&path, out, &rel, rules);
-        } else {
-            out.push(rel);
-        }
-    }
-}
 
 impl WorkStore for FsWorkStore {
     fn remove_under(&self, root: &Path, rel: &str) -> Result<(), String> {
@@ -224,14 +193,14 @@ impl WorkStore for FsWorkStore {
 
     fn list(&self, root: &Path) -> Result<Vec<String>, String> {
         let mut out = Vec::new();
-        collect(root, &mut out, "", None);
+        super::walk::collect(root, &mut out, "", None, usize::MAX);
         Ok(out)
     }
 
     fn list_visible(&self, root: &Path, rules: Option<&str>) -> Result<Vec<String>, String> {
         let rules = Rules::compile(root, rules.unwrap_or(""))?;
         let mut out = Vec::new();
-        collect(root, &mut out, "", Some(&rules));
+        super::walk::collect(root, &mut out, "", Some(&rules), usize::MAX);
         Ok(out)
     }
 

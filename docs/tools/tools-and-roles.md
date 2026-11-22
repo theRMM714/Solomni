@@ -30,11 +30,11 @@ tools:
         desc: 要读取的路径（用【工作环境】的写法）
 ```
 
-- **`effect` / `reach` 决定收口，不按“系统 / 模块”一刀切**：`read` / `list` / `search` / `write` / `edit` / `patch` 虽都是系统工具，但碰文件系统，照样受权限档位与围栏约束；`say` / `agree` 这类 effect=none，不碰文件。
+- **`effect` / `reach` 决定收口，不按“系统 / 模块”一刀切**：`read` / `list` / `grep` / `write` / `edit` / `patch` 虽都是系统工具，但碰文件系统，照样受权限档位与围栏约束；`say` / `agree` 这类 effect=none，不碰文件。
 - **`scope`**：执行类工具可声明 per-call scope（sandbox / external）；当前只有 shell 声明它。
 - **工具卡**：本次判定为 `ask` 时进统一裁决队；选项 id 是 `allow` / `deny` / `allow_turn`。`allow_turn` 只对本轮后续 ask 生效，不改 reach、不落盘。
 - **`callers` 是授权判据**：`user` = 人经呈现层调用，其余是角色 id。它与角色表的（这个身份有什么）是**同一关系的两面**，由 `SystemTools::problems` 双向锁死——任何一边漏写 / 多写都是装配错误。
-- **列目录是"核实"的前提**：`read` 只读文件、`search` 要关键词，**没有 `list` 就确认不了"资料齐不齐"**；`read` 遇到目录会如实引导到 `list`。
+- **列目录是"核实"的前提**：`read` 只读文件、`grep` 按模式找行，**没有 `list` 就确认不了"资料齐不齐"**；`read` 遇到目录会如实引导到 `list`。
 - 参数不合法 → **如实拒绝并落工具行**。
 
 ```yaml
@@ -57,7 +57,7 @@ roles:
 - 越权防线分两段：**角色表**决定这个身份有哪些工具，**权限档位**决定其中哪些还能用（deny 的工具不发放，ask 的照常发放）；模块工具查**该成员有没有这个模块**（module 消歧）。两段缺一不可。
 
 - **注入口径（唯一）**：**总表不进提示词**。每回合由核心查"这一回合的身份能用的工具"：信封通道把说明与参数作为一条系统消息注入；原生通道由**声明槽**下发（名字 / 说明 / JSON Schema），不再重复文字清单，只保留 patch 这类声明表达不了的写法。
-- **回执预算（唯一）**：所有工具回执（read / search / list / shell / 模块工具 / 核心操作的只读核实）送回模型前受**两级预算**。第一级是单条静态上限 16k 字符（开头约 1/4、结尾约 3/4），超出时把正文换成「开头 + 结尾」。第二级按**本批**剩余上下文收紧：`ResultBudget` 取 `min(16k, (窗口 - 已用 - reserve) × 4 × 50% / 本批调用数)`，`reserve = min(2000 token, 窗口 / 10)`；算出的每条上限低于 1000 字符即视为上下文枯竭，**整批预检失败、任何工具都不执行**（避免 shell 已产生副作用却看不到回执）。只要没枯竭，生产者在生成回执时就按本批上限截断：read 只显示能放下的行，并只把实际显示的行记成观察事实；shell / 模块工具与核心操作的只读核实同受此限；会话层再用同一预算兜底，已按更大上限截过的回执允许二次收缩。截断加 `result.truncated`（原始字符数、实际保留数、本批上限）与 `result.truncated.context`（提示先压缩会话或分页读取）两条 `Note`；文件类续读给 read 的 offset/limit，执行类给「缩小命令输出 / 写到文件再 read」。实现唯一在 `src/capabilities/tools/domain/budget.rs`，本机与虚拟机档都经过它；read 的续读 offset、shell 的状态行 / 末行都在尾部，因此保留。
+- **回执预算（唯一）**：所有工具回执（read / grep / list / shell / 模块工具 / 核心操作的只读核实）送回模型前受**两级预算**。第一级是单条静态上限 16k 字符（开头约 1/4、结尾约 3/4），超出时把正文换成「开头 + 结尾」。第二级按**本批**剩余上下文收紧：`ResultBudget` 取 `min(16k, (窗口 - 已用 - reserve) × 4 × 50% / 本批调用数)`，`reserve = min(2000 token, 窗口 / 10)`；算出的每条上限低于 1000 字符即视为上下文枯竭，**整批预检失败、任何工具都不执行**（避免 shell 已产生副作用却看不到回执）。只要没枯竭，生产者在生成回执时就按本批上限截断：read 只显示能放下的行，并只把实际显示的行记成观察事实；shell / 模块工具与核心操作的只读核实同受此限；会话层再用同一预算兜底，已按更大上限截过的回执允许二次收缩。截断加 `result.truncated`（原始字符数、实际保留数、本批上限）与 `result.truncated.context`（提示先压缩会话或分页读取）两条 `Note`；文件类续读给 read 的 offset/limit，执行类给「缩小命令输出 / 写到文件再 read」。实现唯一在 `src/capabilities/tools/domain/budget.rs`，本机与虚拟机档都经过它；read 的续读 offset、shell 的状态行 / 末行都在尾部，因此保留。
 
 | 回合 | 这一份是什么 |
 | --- | --- |
@@ -157,7 +157,7 @@ roles:
 - **工具与载荷形状**在 `systools/tools.yaml`（`plan` / `node_verdict` / `checklist` / `slate` / `submit_report` …）。
 - **核心代理的工具面**（`core_proxy`，逐项见「角色与工具面」表）同样只从工具参数取载荷；外部动作经 `proxy::api` 的 `ProxyHost`（生产宿主是 `src/capabilities/runtime/service/bridge.rs` 的队列桥，见「边界」）。子会话**不把整份转录推给核心**：门与意外停止由机制送达，正文经 `read_session_messages` 倒查。
 - **载荷不合法 → 如实失败并中止这一步**（不猜、不回落正文 JSON）。
-- **核心可以先核实**：模型先请求 `read` / `search` 时，核心执行并把结果回灌，然后再要那一次核心操作调用；它用的是**只读**小环境（根 = 本次工作的共享区，只发声明里 `capability: fs-read` 的工具）。没有这条回路，模型一想核实就会被判"没有调用 X"而整步中断。
+- **核心可以先核实**：模型先请求 `read` / `grep` 时，核心执行并把结果回灌，然后再要那一次核心操作调用；它用的是**只读**小环境（根 = 本次工作的共享区，只发声明里 `capability: fs-read` 的工具）。没有这条回路，模型一想核实就会被判"没有调用 X"而整步中断。
 
 ## 七、路径模型：工具用本环境的写法
 
@@ -219,12 +219,12 @@ prompts/
 
 | 角色 | 何时 | 工具面（`systools/roles.yaml`） |
 | --- | --- | --- |
-| `discussant` | 讨论阶段 | `say` `agree` `leave` `ask` `read` `list` `search` |
-| `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `delete` `search` `shell` `work_pull` `work_commit` `work_push` `work_sync` `work_status` `work_versions` `work_diff` `work_resolve` `work_reset` `work_lost` `submit_report` + 该 agent 的模块工具 |
-| `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `delete` `search` `shell` `work_pull` `work_commit` `work_push` `work_sync` `work_status` `work_versions` `work_diff` `work_resolve` `work_reset` `work_lost` + 该 agent 的模块工具（**不发** `submit_report`） |
-| `planner` | 核心整理派发 | `read` `search` `plan` `slate` `verdict` |
-| `orchestrator` | 核心链中推进 | `read` `search` `node_verdict` `checklist` |
-| `core_proxy` | 核心代理（用户把决定权整块交给它，代用户决定） | `catalog_agents` `create_session` `send_session_message` `observe_session` `read_session_messages` `control_session` `read` `list` `search` `shell`（**不发**模块工具） |
+| `discussant` | 讨论阶段 | `say` `agree` `leave` `ask` `read` `list` `grep` |
+| `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `delete` `grep` `shell` `work_pull` `work_commit` `work_push` `work_sync` `work_status` `work_ignore` `work_versions` `work_diff` `work_resolve` `work_reset` `work_lost` `submit_report` + 该 agent 的模块工具 |
+| `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `delete` `grep` `shell` `work_pull` `work_commit` `work_push` `work_sync` `work_status` `work_ignore` `work_versions` `work_diff` `work_resolve` `work_reset` `work_lost` + 该 agent 的模块工具（**不发** `submit_report`） |
+| `planner` | 核心整理派发 | `read` `grep` `plan` `slate` `verdict` |
+| `orchestrator` | 核心链中推进 | `read` `grep` `node_verdict` `checklist` |
+| `core_proxy` | 核心代理（用户把决定权整块交给它，代用户决定） | `catalog_agents` `create_session` `send_session_message` `observe_session` `read_session_messages` `control_session` `read` `list` `grep` `shell`（**不发**模块工具） |
 
 - **验收不是独立角色**：它是 `orchestrator` 的一个工具 / 一步（"根据验收情况推进任务"本就是同一个循环）。
 
@@ -255,7 +255,7 @@ prompts/
 - **共享区是版本化工作区**：
 
 - 主副本 `work/` 对 agent 只读，agent 只写自己的沙箱（工作副本）。
-- `work_pull` / `work_commit` / `work_push` / `work_sync` / `work_status` / `work_versions` / `work_diff` / `work_resolve` / `work_reset` / `work_lost` 十个**核心自有工具**做同步、查看、差异比较、本地回退、三方比较、显式解决冲突、外部改动采纳与备份恢复。
+- `work_pull` / `work_commit` / `work_push` / `work_sync` / `work_status` / `work_ignore` / `work_versions` / `work_diff` / `work_resolve` / `work_reset` / `work_lost` 十一个**核心自有工具**做同步、查看、过滤名单维护、差异比较、本地回退、三方比较、显式解决冲突、外部改动采纳与备份恢复。
 - 冲突按文件级三方比较判定，**整体拒绝并逐条点名**，不做自动合并；文本可人工合并后用 `take=local`（带 `head`），图片 / 视频 / 二进制只能显式选边；删除型冲突（一边删、另一边改）只能选边或 `work_reset` 撤回那条提交，`work_pull` 不写这类文件（细则见 [workspace](../workspace/README.md) 与 [PRODUCT.md](../../PRODUCT.md)）。
 - `take=local` 在本地与基线一致时拒绝、主副本提交变化时拒绝；它只推进基线、不写沙箱——本地缺失时主线没改过该路径可 `work_commit` 的 `deletes` 发布删除，主线改过就只能 `take=upstream` 或 `work_reset`；`take=upstream` 覆盖/删除前备份到 `lost/<agent>/@<来源>/<原路径>`（`work_resolve` / `work_reset` / 回档 / 删除 / 留档各有来源），`work_lost` 按当前 hash 恢复：清单报原路径与备份位置，`path` 两种写法都收，同一路径多份备份必须点名一份，恢复一律写回原路径。
 - 文本、图片、视频与其它二进制都按字节处理；`work_versions` 给 hash、大小与扩展名媒体类型提示，文本预览最多 16 KiB；单文件超过 64 MiB 时提交 / 上传明确拒绝。

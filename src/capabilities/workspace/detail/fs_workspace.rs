@@ -24,38 +24,6 @@ const USAGE_TTL: Duration = Duration::from_secs(2);
 /// 它只是布局适配层的投影，权威在会话 meta 的 `workspace` 段。
 const ROOT_MARK: &str = ".work-root";
 
-/// 递归列文件（只列文件，不列目录）；相对路径统一用 / 分隔，逐层按名字排序保证稳定。
-fn collect_files(root: &Path, out: &mut Vec<String>, prefix: &str) {
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return;
-    };
-    let mut items: Vec<(String, PathBuf, bool)> = entries
-        .flatten()
-        .map(|e| {
-            let p = e.path();
-            let name = e.file_name().to_string_lossy().into_owned();
-            let is_dir = p.is_dir();
-            (name, p, is_dir)
-        })
-        .collect();
-    items.sort_by(|a, b| a.0.cmp(&b.0));
-    for (name, path, is_dir) in items {
-        if out.len() >= MAX_LISTED {
-            return;
-        }
-        let rel = if prefix.is_empty() {
-            name.clone()
-        } else {
-            format!("{}/{}", prefix, name)
-        };
-        if is_dir {
-            collect_files(&path, out, &rel);
-        } else {
-            out.push(rel);
-        }
-    }
-}
-
 /// 目的：路径本身是不是链接 / 联接（不跟随）。用量统计只数它本身，不递归进去。
 ///   跟随会重复计数（链接与真身各算一次），自指链接还会成环；`symlink_metadata` 只看链接本身。
 fn is_link(path: &Path) -> bool {
@@ -266,11 +234,11 @@ impl Workdirs for FsWorkspace {
     fn list(&self, session: &str, agents: &[String]) -> Result<WorkFiles, String> {
         let dir = self.session_dir(session);
         let mut work = Vec::new();
-        collect_files(&self.shared_root(session)?, &mut work, "");
+        super::walk::collect(&self.shared_root(session)?, &mut work, "", None, MAX_LISTED);
         let mut map = BTreeMap::new();
         for a in agents {
             let mut files = Vec::new();
-            collect_files(&dir.join(a), &mut files, "");
+            super::walk::collect(&dir.join(a), &mut files, "", None, MAX_LISTED);
             map.insert(a.clone(), files);
         }
         Ok(WorkFiles { work, agents: map })

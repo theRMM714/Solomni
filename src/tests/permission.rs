@@ -569,7 +569,7 @@ fn decision_door_queues_only_the_head_and_voids_waiters() {
     let tool = || Pending::ToolApproval {
         agent: "甲".to_string(),
         module: Some("m0".to_string()),
-        tool: "grep".to_string(),
+        tool: "scan".to_string(),
         args: "{}".to_string(),
     };
     let door = decisions().gate("t", 0);
@@ -681,7 +681,7 @@ fn tool_confirmation_rides_the_decision_channel() {
         let mut script: Vec<String> = Vec::new();
         for _ in 0..calls {
             script.push(
-                "{\"type\":\"tool\",\"module\":\"a\",\"name\":\"grep\",\"args\":{}}".to_string(),
+                "{\"type\":\"tool\",\"module\":\"a\",\"name\":\"scan\",\"args\":{}}".to_string(),
             );
         }
         script.push("{\"type\":\"say\",\"text\":\"做完了\"}".to_string());
@@ -691,7 +691,7 @@ fn tool_confirmation_rides_the_decision_channel() {
         a.root = abs(&["mods", "a"]);
         a.manifest
             .tools
-            .insert("grep".to_string(), decl("python tools/grep.py"));
+            .insert("scan".to_string(), decl("python tools/scan.py"));
         let handle = Handle::spawn(core_with_runner(
             vec![a],
             gw(member, vec!["[]".into()]),
@@ -723,7 +723,7 @@ fn tool_confirmation_rides_the_decision_channel() {
                     guest: None,
                     pins: BTreeMap::new(),
                     permission: Some(PermissionLayer {
-                        tools: BTreeMap::from([("a.grep".to_string(), Decision::Ask)]),
+                        tools: BTreeMap::from([("a.scan".to_string(), Decision::Ask)]),
                         ..Default::default()
                     }),
                 },
@@ -1178,7 +1178,7 @@ fn narrowing_never_widens_profile_reach_scope_or_decision() {
             write: Some(ScopeMode::None),
             deny: paths(&["docs/secret"]),
         }),
-        tools: std::collections::BTreeMap::from([("a.grep".to_string(), Decision::Ask)]),
+        tools: std::collections::BTreeMap::from([("a.scan".to_string(), Decision::Ask)]),
         ..Default::default()
     };
     let out = base.apply_root(&root).expect("根会话换档");
@@ -1187,7 +1187,7 @@ fn narrowing_never_widens_profile_reach_scope_or_decision() {
     assert_eq!(out.shared_read, ScopeMode::Paths(paths(&["docs"])));
     assert_eq!(out.shared_write, ScopeMode::None);
     assert!(out.deny.contains(&"docs/secret".to_string()));
-    assert_eq!(out.tools.get("a.grep"), Some(&Decision::Ask));
+    assert_eq!(out.tools.get("a.scan"), Some(&Decision::Ask));
 
     let too_wide = PermissionLayer {
         profile: Some(ProfileId::View),

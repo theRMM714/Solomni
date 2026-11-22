@@ -236,7 +236,7 @@ pub(crate) fn core_direct_tool_flow_injects_result_into_history() {
         ],
     );
     let mut manifest_tools = BTreeMap::new();
-    manifest_tools.insert("grep".to_string(), decl("python tools/grep.py"));
+    manifest_tools.insert("scan".to_string(), decl("python tools/scan.py"));
     let mut mod_a = module_of("a");
     mod_a.manifest.tools = manifest_tools;
     let mut core = core_with_runner(
@@ -274,7 +274,7 @@ pub(crate) fn core_direct_tool_flow_injects_result_into_history() {
         rows
     );
     assert!(
-        rows[1].1.contains("grep") && rows[1].1.contains("成功"),
+        rows[1].1.contains("scan") && rows[1].1.contains("成功"),
         "{:?}",
         rows[1]
     );
@@ -283,7 +283,7 @@ pub(crate) fn core_direct_tool_flow_injects_result_into_history() {
     let h = core.single_history(&sid).unwrap();
     assert!(
         h.iter()
-            .any(|m| m.role == "user" && m.content.contains("[工具结果] a.grep")),
+            .any(|m| m.role == "user" && m.content.contains("[工具结果] a.scan")),
         "工具结果必须回注上下文（标签带模块）：{:?}",
         h
     );
