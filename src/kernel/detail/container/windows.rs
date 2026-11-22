@@ -35,9 +35,9 @@ use windows_sys::Win32::System::Threading::{
 /// 目的：本程序建的容器 profile 前缀（`container_name` 生成的就是它；`--fence-clean` 按它扫整族）。
 pub(crate) const PROFILE_PREFIX: &str = "Solomni.Agent.";
 
-/// 目的：容器名：**按"会话 + agent + 受保护根集合"派生**（reach 指纹）——同一会话里不同 scope 的调用
-///   根集合不同 → 不同 SID（窄调用看不到宽调用的根）；同一 reach 的后续调用复用同一个 SID 与已有 ACE。
-///   工具链/运行包是可信执行基座（授给 baseline），不在指纹里承担 scope 含义；net 是令牌能力，也不进指纹。
+/// 目的：容器名：**按"会话 + agent + 受保护根集合"派生**（根集合指纹）——授予固定后同一 agent 的根集合恒定，
+///   于是同一 (会话, agent) 的后续调用复用同一个 SID 与已有 ACE；根集合仍进指纹，防止不同根集合共用一个身份。
+///   工具链/运行包是可信执行基座（授给 baseline），不在指纹里承担范围含义；net 是令牌能力，也不进指纹。
 ///   外层授权与守门进程各自能算出同一个 SID；其它平台行为不变（这个名字只用于 Windows 的容器身份与日志）。
 pub(crate) fn container_name(spec: &FenceSpec) -> String {
     // FNV-1a：只为把名字收敛成定长标识（不是安全用途），避免容器名里出现中文与路径。

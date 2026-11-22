@@ -62,7 +62,7 @@ export function statusPrintOf(s) {
     u ? [u.calls, u.prompt, u.completion, u.cache_read, u.cache_creation] : 0,
     st ? [st.judged, st.replaced, st.saved_tokens, st.skipped ? 1 : 0] : 0,
     s && s.shell ? [
-      s.shell.command, s.shell.scope, s.shell.cwd, s.shell.started_at, s.shell.finished_at,
+      s.shell.command, s.shell.cwd, s.shell.started_at, s.shell.finished_at,
       s.shell.elapsed_secs, s.shell.ok, s.shell.exit_code, (s.shell.output || '').length,
       s.shell.historical ? 1 : 0,
       shellRunning(s.shell) ? Math.floor(Date.now() / 1000) : 0,

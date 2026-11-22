@@ -228,19 +228,16 @@ http.createServer((req, res) => {
       if (!w) {
         content = JSON.stringify({ type: 'say', text: '没从系统提示词里取到共享区根（guest 写法）' });
       } else if (n === 0) {
-        // 工具在 guest 里读**外部工作区**的文件：shell 在 guest 内执行、围栏带 shared-read；
+        // 工具在 guest 里读**外部工作区**的文件：宿主侧的外部根按只读挂进 guest，
         // 挂载计划不对这里会 fail-closed（私沙不在挂载树时连 helper 都起不来），或读不到 marker。
-        // 说明：模块工具（exec 默认 reach）不含 shared-read，读共享区不是它的职责——这里用 shell 验。
         calls = call('call_ext_read', 'shell', {
           command: "cat '" + w + "/marker.txt'",
-          scope: 'external',
           timeout_secs: 30,
         });
       } else if (n === 1) {
         // 共享区对 agent 只读：往外部根写必须被拒（Landlock），且宿主外部目录不能出现这个文件。
         calls = call('call_ext_deny', 'shell', {
           command: "printf 'DENIED\\n' > '" + w + "/deny.txt' && printf 'DENIED\\n'",
-          scope: 'external',
           timeout_secs: 30,
         });
       } else if (n === 2) {

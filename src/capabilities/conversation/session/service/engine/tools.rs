@@ -293,7 +293,7 @@ fn schema_for(ctx: &MemberTools, module: Option<&str>, tool: &str) -> Option<Too
     }
 }
 
-/// 目的：执行前的预检——未知工具、非法的 shell 参数（命令长度 / scope / timeout）都在这里如实拒绝。
+/// 目的：执行前的预检——未知工具、非法的 shell 参数（命令长度 / timeout）都在这里如实拒绝。
 /// 约束：预检不过的调用不执行、不加进并发批；返回的 Err 就是回给模型的那句事实。
 fn check_call(
     ctx: &MemberTools,
@@ -307,7 +307,7 @@ fn check_call(
         None if !ctx.face.modules.is_empty() => module_schema(),
         None => return Err(format!("未知工具：{}", tool)),
     };
-    // shell 的语义校验（命令长度 / scope / timeout）放在执行前：非法命令不落进程。
+    // shell 的语义校验（命令长度 / timeout）放在执行前：非法命令不落进程。
     if crate::capabilities::tools::api::is_exec(tool) {
         crate::capabilities::tools::api::parse_shell(&schema, args_json)?;
     }
@@ -555,7 +555,7 @@ pub(crate) fn deny(face: &ToolFace, why: String) -> ToolOutcome {
 }
 
 /// 目的：执行一次 shell：按会话的固定授予派生围栏，host 走 ProcessRunner，VM 走 guest。
-/// 约束：scope 只决定"命令在哪个落点跑"，不参与授权；围栏恒为沙箱 rw + 模块目录只读 + 主机只读根。
+/// 约束：没有 scope 这类范围旋钮；围栏恒为沙箱 rw + 模块目录只读 + 主机只读根，网络按会话档位。
 pub(crate) fn run_shell(
     ctx: &MemberTools,
     name: &str,
@@ -608,7 +608,7 @@ pub(crate) fn run_shell(
     };
     let slot = ctx.shell_live.clone();
     if let Some(slot) = &slot {
-        slot.start(&call.script, call.scope.as_str(), &cwd_view);
+        slot.start(&call.script, &cwd_view);
     }
     // 本机档的围栏准备耗时由 ProcessRunner 同线程交棒（见 kernel 的 take_fence_prep）；虚拟机档没有本机 ACL 准备，这里恒为 None。
     let mut fence_prep: Option<crate::kernel::api::process::FenceTiming> = None;

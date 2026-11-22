@@ -23,6 +23,6 @@
 | `src/capabilities/tools/domain/commands.rs` | 产品命令面的纯数据形态（`Command` / `CommandBook` / `Phase`）：解析与自检 `systools/commands.yaml`，供手册、补全、未知命令建议与启动相解析共用；只管声明，不管执行 |
 | `src/capabilities/tools/domain/roles.rs` | 角色表与工具总表的纯数据形态（`RoleDecl` / `SystemTools`）：按角色组装工具面、装配期自检与动作审计格式化 |
 | `src/capabilities/tools/domain/fence.rs` | 围栏描述符的派生策略与裁决卡材料（`fence_ask` / 选项 id；描述符与落点判据在 `src/kernel/contracts/fence.rs`） |
-| `src/capabilities/tools/domain/shell.rs` | 执行类系统工具 shell 的纯规则：参数 / scope / timeout 解析、命令长度、失败回执的 scope 提示、回执解析（退出码 / 状态 / cwd·耗时） |
+| `src/capabilities/tools/domain/shell.rs` | 执行类系统工具 shell 的纯规则：参数 / timeout 解析、命令长度、共享区执行位提示、回执解析（退出码 / 状态 / cwd·耗时） |
 | `src/capabilities/tools/detail/sys_io.rs` | `SysIo` 端口的磁盘实现：纯 Rust 直接读写（严格 UTF-8、非法字节如实标注、写时建父目录）；按行窗口读流式扫完整份算行数与哈希；目录遍历走 `ignore::WalkBuilder`（不跟链接、按路径排序、规则剪枝），流式按行扫用 `BufReader` 且不受整份读上限约束；写盘在跨进程路径锁内做版本 CAS（锁目录由组合根注入，缺省退回进程内锁），临时文件 + 原子替换发布，`transact` 先校验/暂存再发布并在失败时回滚已发布文件 |
 | `src/capabilities/tools/detail/yaml_systools.rs` | `SystoolsSource` 的磁盘实现：读 `systools/tools.yaml`、`roles.yaml` 与 `names.yaml`（缺文件如实报装配错误） |

@@ -29,7 +29,6 @@ tools:
 ```
 
 - **授权面 = 角色面，工具声明不再决定能不能调**：`capability` 只是标签（说明与“核心先核实”筛选用），没有 `effect` / `reach` / `scope` 三键。档位只管出站网络，不逐工具裁剪。
-- **`scope`**：执行类工具可接受 per-call scope（sandbox / external）；当前只有 shell 接受它，且两条路都被允许——它选的是围栏铺到哪一层，不是权限高低。
 - **没有工具卡**：权限侧不产生 `ask`，因此没有 `allow` / `deny` / `allow_turn` 这套确认链路；需要人定夺的是核心各关卡（建会话、验收、定版）。
 - **`callers` 是授权判据**：`user` = 人经呈现层调用，其余是角色 id。它与角色表的（这个身份有什么）是**同一关系的两面**，由 `SystemTools::problems` 双向锁死——任何一边漏写 / 多写都是装配错误。
 - **列目录是"核实"的前提**：`read` 只读文件、`grep` 按模式找行，**没有 `list` 就确认不了"资料齐不齐"**；`read` 遇到目录会如实引导到 `list`。
@@ -123,9 +122,9 @@ roles:
 
 ## 五、执行类系统工具：shell
 
-- `systools/tools.yaml` 的 `shell` 是唯一声明 per-call `scope` 的系统工具；它不新建执行机制：host 走 kernel 的 `ProcessRunner`，VM 走 guest helper。
+- `systools/tools.yaml` 的 `shell` 是唯一的执行类系统工具，参数里没有任何范围旋钮；它不新建执行机制：host 走 kernel 的 `ProcessRunner`，VM 走 guest helper。
 
-- 参数：`command`（必填）、`scope`（sandbox / external，缺省 sandbox）、`timeout_secs`（缺省 120，最大 600；只约束命令子进程，从启动命令起算——Windows 首次为会话准备围栏（建容器、写 ACL）不计入，可能额外耗时，截止时间在 spawn 之后才起算，见 `src/kernel/detail/process.rs`）。cwd 固定私有沙箱；无交互 stdin / TTY；输出超限由回执预算统一收口（16k：约 4k 开头 + 约 12k 结尾，按完整行取整；单行超长时按字符切，见 `src/capabilities/tools/domain/budget.rs`）；命令上限 8000 字符。
+- 参数：`command`（必填）、`timeout_secs`（缺省 120，最大 600；只约束命令子进程，从启动命令起算——Windows 首次为会话准备围栏（建容器、写 ACL）不计入，可能额外耗时，截止时间在 spawn 之后才起算，见 `src/kernel/detail/process.rs`）。cwd 固定私有沙箱；无交互 stdin / TTY；输出超限由回执预算统一收口（16k：约 4k 开头 + 约 12k 结尾，按完整行取整；单行超长时按字符切，见 `src/capabilities/tools/domain/budget.rs`）；命令上限 8000 字符。
 - **别用 Unix 重定向惯用法**：Windows 宿主的 shell 是 PowerShell，`1>/dev/null` 会把 `/dev/null` 当成路径（实测报 `Could not find a part of the path ...`，其中盘符是视图盘）；丢弃输出写 `| Out-Null` 或 `1>$null` / `2>$null`。POSIX 宿主与 VM guest（`/bin/sh`）照旧可用 `>/dev/null`（围栏基线对该节点例外给写权，见本条末）。
 - **回执结构**（正文与结束说明由 `src/kernel/domain/receipt.rs` 装配，落点与耗时由工具层补；模型看到的文本由 `src/kernel/detail/i18n.rs` 按源语言渲染）：正文（stdout；有 stderr 时折成 `[stderr]` 段）在 `output`，结束状态与落点是 `Note`（稳定码 + 参数 + 轻重），模型通道把说明逐行接在正文后，于是看到：正文 / 空行 / 状态行 / 末行。末行是 `[shell] cwd <本环境写法> · 耗时 <N> 秒`，围栏准备 ≥1 秒时另起一行 `[shell] 围栏准备 <M> 秒（已含在耗时里）`（`N` 是整次调用墙钟，含围栏准备）：
   - 状态行四种：`[shell] 退出码 N`、`[shell] 超时（N 秒）：工具进程与它拉起的整棵进程树已被终止`、`[shell] 用户停止：工具进程与它拉起的整棵进程树已被终止`、`[shell] 退出码未知（被信号结束）`。
@@ -136,14 +135,14 @@ roles:
   - 超时与用户停止没有命令退出码（`src/capabilities/tools/domain/shell.rs` 的 `exit_code` 从说明里取，取不到就是 None），只用状态行表达，不伪造 124 / 143。
   - cwd 用本环境写法：本机档 = 视图盘打开时的视图写法（**视图写法目前只用于 shell（cwd == 私有沙箱）的容器 cwd 与程序名；模块工具沿用宿主 cwd，不参与视图盘收敛**）（如 `S:\session\<工作>\<agent>`，盘符按实例分配，别假设恒为 Z:；宿主路径由路径码翻译；`SOLOMNI_VIEW_DRIVE=0` 或视图盘不可用时回退宿主路径）；虚拟机档 = guest 内路径（路径桥，宿主 `D:\a\b` → `/solomni-host/d/a/b`，见 `src/capabilities/vm/domain/paths.rs`；UNC 外部根在 guest 里是 `/solomni-host/unc/<server>/<share>/…`，模型照此写法给路径即可）。
 - 回放只读结构化事实：`src/capabilities/conversation/session/domain/tools.rs` 的 `last_shell` 取最后一条带命令的 shell 工具行的 `shell` 事实（cwd / 耗时毫秒 / 围栏准备 / 退出码 / 状态 / 是否截断），不解析回执正文；没有结构化事实的行跳过。派生快照标 `historical`。
-- **scope 是执行落点，不是权限档**：sandbox 只给私有沙箱 + 基础 / 项目工具链只读（net=false）；external 在 sandbox 上再加模块目录 / 主机只读根 / 网络（共享区主副本不进容器：读 / 改先 `work_pull`）。两条路都被允许，档位只决定 net 能不能真放行。
-- profile：只有 offline / online 两档，差别只在出站；`online` 仍受全局 `sandbox.policy.network` 上限。sandbox 与 external 都要求围栏真强制（`allow_degraded=false`），装不上拒绝。
+- **授予固定，调用参数里没有范围旋钮**：每次调用的围栏都一样——私有沙箱 rw、模块目录 / 基础与项目工具链 / 主机只读根 ro、net 按会话档位（`offline` 恒 false）；共享区主副本永不进容器（读 / 改先 `work_pull`）。要够到沙箱外的东西，只有「先拉进沙箱」这一条路。
+- profile：只有 offline / online 两档，差别只在出站；`online` 仍受全局 `sandbox.policy.network` 上限。每次都要求围栏真强制（`allow_degraded=false`），装不上就拒绝。
 - 围栏：shell 的 `for_call` 另加 `runtime_roots`（项目内基础工具链 + 本 agent 模块运行包根）；`rw` 恒为私有沙箱（+ 有 `userdata` 的模块），`ro_tree` 恒为全部模块目录，没有按 reach 的分支。`runtime_roots` 这类**可信执行基座**在 Windows 上一次性授给**本产品的能力 SID**（`S-1-15-3-*`，见 [kernel/README.md](../kernel/README.md) 的「授权主体分两个」）、按机器级归属记台账（`scope=machine`、无归属，启动对账不回收）、不参与按次授权。shell 的容器 cwd 走视图盘（产品根映射成实例独占的盘符；模块工具仍用宿主 cwd），PowerShell 逐级解析只经过产品根内的层级，产品根之外的祖先不授；产品根上的一条 `(OI)(CI)` 读属性是机器级授权——授给同一个能力 SID、跨会话复用（对账时不回收），不再每次会话重写。容器身份按 `会话 + agent` 派生（不含根集合），授权按会话持有（调用结束不释放，会话改配/删除时回收）；一次性调用（构建/独立模块工具）各自唯一租约、跑完即撤。首次真写 ACL 前 stderr 提示一次（解释器目录 / 祖先链 / 受保护根 / 可信基座），完成后一条汇总；回执行文不变（仍只报总秒数）。
 - 平台：Linux / macOS 用 sh；Windows 用 PowerShell（pwsh 7 优先、5.1 回退；`pwsh` 是 Microsoft Store 的应用执行别名——0 字节重解析点——时不选它，那种文件在围栏里起不来，判据在 `src/kernel/detail/process/windows.rs` 的 `exe_fact`；`-File` 临时 .ps1，UTF-8 BOM；脚本先设 `$ErrorActionPreference = 'Stop'`，未处理的 cmdlet 错误中止并以非 0 结束，要容错就在脚本里显式 `-ErrorAction SilentlyContinue` 或 try/catch）；VM Linux guest 用 /bin/sh，helper 按 `timeout_secs` 杀树；host 停止经 QGA 给 helper 发 SIGTERM，立即杀整棵进程树。guest 通道产出与本机同形的正文与说明：超时 / 信号由 `src/capabilities/vm/detail/guest_helper.rs` 的机器标记（`solomni-guest-fence: timeout` / `solomni-guest-fence: signal`）表达、用户停止按宿主取消旗判定，由通道翻译成 `shell.timeout` / `shell.signal` 说明；cwd·耗时由工具层在通道返回后统一补（`src/capabilities/conversation/session/service/engine/tools.rs`）。围栏拒绝（helper 的 `solomni-guest-fence:` 诊断）没有结束说明——命令没有执行。
 - 围栏基线：本机 Linux / macOS 的只读运行基线**只对 `/dev/null` 例外给写权**（标准重定向要能丢弃输出，`>/dev/null` / `2>/dev/null` 不能用 EACCES 把脚本带偏）；guest helper 同一口径。其余 `/dev` 节点不放行（`src/kernel/detail/confine/linux.rs` 的 `WRITABLE_BASELINE`、`src/kernel/detail/confine/macos.rs` 的 profile、`src/capabilities/vm/detail/guest_helper.rs` 的基线）。
-- 状态：最近一次 shell 在会话状态栏出 chip（运行中；结束后按 `ShellLive.status` 分退出码 / 超时 / 停止 / 信号 + 耗时），点开看命令、scope、cwd、状态、退出码、耗时与回执预览；数据来自 `SessionView.shell`，不替代转录里的工具行。重建 / 回放的会话按转录派生（`historical`）：cwd 与耗时只读工具行的结构化事实，起止时间不伪造。
+- 状态：最近一次 shell 在会话状态栏出 chip（运行中；结束后按 `ShellLive.status` 分退出码 / 超时 / 停止 / 信号 + 耗时），点开看命令、cwd、状态、退出码、耗时与回执预览；数据来自 `SessionView.shell`，不替代转录里的工具行。重建 / 回放的会话按转录派生（`historical`）：cwd 与耗时只读工具行的结构化事实，起止时间不伪造。
 - 角色：executor / solo / core_proxy。代理的 shell 只做验收性核对，不替执行席产出；共享区主副本不进它的容器（要读先 work_pull），仍没有 work_pull / work_commit / work_push / work_sync / work_diff / work_reset / 模块工具。
-- 路径：shell 不接受模型给的 path 参数，**不适用** §七 的路径寻址表；边界是围栏。共享区内容先 work_pull 进沙箱；external 额外给模块目录、主机只读根与联网，共享区主副本不进容器。
+- 路径：shell 不接受模型给的 path 参数，**不适用** §七 的路径寻址表；边界是围栏。共享区内容先 work_pull 进沙箱；模块目录与主机只读根恒以只读进围栏，联网按会话档位，共享区主副本不进容器。
 - 隐私：shell 不注入模块 secrets；模块 `userdata` 不在它的 rw 里（只有模块工具进程能写）。
 
 ## 六、核心操作必须走工具调用
@@ -261,7 +260,7 @@ prompts/
 - 用户投喂是同一条提交路径里的**权威提交**（作者 = user）。
 - 用户可在 Web 会话状态栏或 CLI `work` 命令看提交历史、提交详情与文本预览，并把共享区非破坏性回滚到任一提交点；agent 侧仍只拿 `work_*` 工具，不给回滚入口。
 
-- 执行类系统工具 `shell` 对 executor / solo / core_proxy 发放：sandbox 只碰私有沙箱 + 基础 / 项目工具链只读；external 按档位 ask / allow；Windows 上按"会话 + agent + 根集合"派生容器身份（与模块工具同一口径）。
+- 执行类系统工具 `shell` 对 executor / solo / core_proxy 发放：授予固定（私有沙箱 rw、模块目录与基础 / 项目工具链、主机只读根 ro，网络按会话档位）；Windows 上按"会话 + agent + 根集合"派生容器身份（与模块工具同一口径）。
 - 工具面**按回合按身份注入**（总表不进提示词）；越权调用如实拒绝并落工具行；悬空引用由装配期 `problems()` 挡下。
 - 核心操作与执行席回报都从**工具参数**取载荷。
 - 代理会话复用**通用成员循环**（没有「代理专用」分支）；工具动作经队列桥回核心线程执行。

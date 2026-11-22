@@ -145,12 +145,10 @@ tools:
       返回非 0）。**降级错误等于放弃退出码**：用 `-ErrorAction Continue` / `SilentlyContinue`、把
       `$ErrorActionPreference` 改成 `Continue`、或在 try/catch 里吞掉错误，失败就只进 stderr、退出码照常是 0——
       要靠退出码判成败就别降级；要容错就在 try/catch 里自己判并 `exit 1`。
-      scope=sandbox（默认）：只能读写你的私有沙箱，另可只读系统与项目内基础工具链（python / node / cc 等）；
-      不碰共享区 / 模块目录 / 主机只读根，不联网。工作区内修改及以上档位直接执行；仅可查看档不发放。
-      scope=external：额外可读模块目录与你被授权的主机只读根，并按全局开关联网；
+      授予固定（参数里没有范围旋钮）：能读写你的私有沙箱；可只读模块目录、系统与项目内基础工具链
+      （python / node / cc 等）以及用户授权的主机只读根；网络按会话档位（离线不放行，联网档才出站）。
       共享区主副本不进容器（要读 / 要改先 work_pull 拉进沙箱，发布走 work_commit + work_push）；
-      模块目录仍只读，模块 userdata 不可写。外部可达档每次调用先问你，全可达档直接执行；
-      要访问沙箱外但档位不够时会被拒绝，需要用户先把会话档位调到外部可达或更高。
+      模块目录只读，模块 userdata 不可写。围栏装不上就直接拒绝，不回退到无围栏执行。
       命令超过 8000 字符时先把脚本用 write 写进沙箱再执行；timeout_secs 到点连根杀整棵进程树。
     params:
       command:
@@ -158,10 +156,6 @@ tools:
         required: true
         non_empty: true
         desc: 要执行的命令（本环境 shell 语法：Windows 是 PowerShell，Linux / macOS 是 sh；一条命令，不交互）
-      scope:
-        type: string
-        default: sandbox
-        desc: sandbox（只碰私有沙箱，默认）或 external（额外读模块目录 / 主机只读根 / 联网；共享区主副本要先 work_pull）
       timeout_secs:
         type: integer
         min: 1

@@ -1,6 +1,5 @@
-//! 目的：执行类系统工具 `shell` 的纯规则：参数契约、命令长度、scope / timeout 解析与回执说明的派生。
-//! 管：一次 shell 调用的入参到 `ShellCall` 的解析；命令过长 / scope 非法 / timeout 越界的事实与文案；
-//!   执行落点 `ExecScope`（私有沙箱内 / 沙箱内再加模块目录与主机只读根）；从回执说明（稳定码）与测量值派生结构化事实 `ShellFacts`。
+//! 目的：执行类系统工具 `shell` 的纯规则：参数契约、命令长度、timeout 解析与回执说明的派生。
+//! 管：一次 shell 调用的入参到 `ShellCall` 的解析；命令过长 / timeout 越界的事实与文案；从回执说明（稳定码）与测量值派生结构化事实 `ShellFacts`。
 //! 不管：进程拉起、围栏安装、guest 执行与输出截断（在 kernel 的 ProcessRunner / vm 的 guest）；围栏派生在 domain/fence.rs。
 //! 联动：由 collab 的成员循环在派发 `shell` 前调用；声明在 systools/tools.yaml，经 tools::api 导出。
 
@@ -14,49 +13,20 @@ use std::time::Duration;
 /// 目的：单条 shell 命令的字符上限；超过就要求模型先把脚本写进沙箱再执行（命令不拼进命令行）。
 pub const MAX_COMMAND_CHARS: usize = 8_000;
 
-/// 目的：执行落点——围栏覆盖到哪一层。它不是"权限高低"：两条路都被允许，模型按要做的事挑一条。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExecScope {
-    /// 目的：只碰私有沙箱（cwd 所在的工具链只读可见）。
-    Sandbox,
-    /// 目的：沙箱之外再加模块目录与主机只读根（私有沙箱仍保留；共享区主副本不进围栏）。
-    External,
-}
-
-impl ExecScope {
-    /// 目的：解析模型给的 scope 参数；省略 = sandbox。
-    pub fn from_request(raw: Option<&str>) -> Result<ExecScope, String> {
-        match raw.map(str::trim).filter(|s| !s.is_empty()) {
-            None | Some("sandbox") => Ok(ExecScope::Sandbox),
-            Some("external") => Ok(ExecScope::External),
-            Some(other) => Err(format!("scope 只认 sandbox / external，收到：{}", other)),
-        }
-    }
-
-    /// 目的：稳定取值（实况槽与回放都用它，不认文案）。
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ExecScope::Sandbox => "sandbox",
-            ExecScope::External => "external",
-        }
-    }
-}
-
-/// 目的：一次已校验的 shell 调用——脚本、执行落点与本次超时。
+/// 目的：一次已校验的 shell 调用——脚本与本次超时。授予是固定的（私有沙箱 rw、模块目录与主机只读根 ro、网络按档位），
+///   调用参数里没有任何范围旋钮：范围由围栏派生决定，不由模型挑。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShellCall {
     /// 目的：要执行的命令原文（模型写的本环境 shell 语法）。
     pub script: String,
-    /// 目的：执行落点；缺省 sandbox。
-    pub scope: ExecScope,
     /// 目的：本次执行的超时；到点连根杀整棵进程树。
     pub timeout: Duration,
 }
 
-/// 目的：按工具声明校验并解析一次 shell 调用；参数不符 / 命令过长 / scope 非法都如实报事实。
+/// 目的：按工具声明校验并解析一次 shell 调用；参数不符 / 命令过长都如实报事实。
 /// 参数：`schema` = systools/tools.yaml 里的 shell 声明；`args_json` = 模型给的参数对象。
-/// 返回：已补缺省（scope=sandbox、timeout_secs=120）的调用。
-/// 错误：参数不是 JSON、缺必填 / 类型不符、命令超过 `MAX_COMMAND_CHARS`、scope 不是 sandbox / external。
+/// 返回：已补缺省（timeout_secs=120）的调用。
+/// 错误：参数不是 JSON、缺必填 / 类型不符（含不认识的参数）、命令超过 `MAX_COMMAND_CHARS`。
 pub fn parse(schema: &ToolSchema, args_json: &str) -> Result<ShellCall, String> {
     let mut args: serde_json::Value =
         serde_json::from_str(args_json).map_err(|e| format!("参数不是合法 JSON：{}", e))?;
@@ -76,14 +46,12 @@ pub fn parse(schema: &ToolSchema, args_json: &str) -> Result<ShellCall, String> 
             count, MAX_COMMAND_CHARS
         ));
     }
-    let scope = ExecScope::from_request(args.get("scope").and_then(|v| v.as_str()))?;
     let secs = args
         .get("timeout_secs")
         .and_then(|v| v.as_u64())
         .unwrap_or(120);
     Ok(ShellCall {
         script,
-        scope,
         timeout: Duration::from_secs(secs),
     })
 }
@@ -248,7 +216,6 @@ mod tests {
 desc: shell
 params:
   command: { type: string, required: true, non_empty: true }
-  scope: { type: string, default: sandbox }
   timeout_secs: { type: integer, min: 1, max: 600, default: 120 }
 "#,
         )
@@ -256,27 +223,18 @@ params:
     }
 
     #[test]
-    fn parses_defaults_and_scope() {
+    fn parses_defaults() {
         let call = parse(&schema(), r#"{"command":"echo hi"}"#).expect("合法调用");
         assert_eq!(call.script, "echo hi");
-        assert_eq!(call.scope, ExecScope::Sandbox);
         assert_eq!(call.timeout, Duration::from_secs(120));
-        let call = parse(
-            &schema(),
-            r#"{"command":"echo hi","scope":"external","timeout_secs":5}"#,
-        )
-        .expect("合法调用");
-        assert_eq!(call.scope, ExecScope::External);
+        let call = parse(&schema(), r#"{"command":"echo hi","timeout_secs":5}"#).expect("合法调用");
         assert_eq!(call.timeout, Duration::from_secs(5));
     }
 
     #[test]
-    fn rejects_unknown_scope_and_overlong_command() {
-        assert!(
-            parse(&schema(), r#"{"command":"x","scope":"root"}"#)
-                .unwrap_err()
-                .contains("scope 只认")
-        );
+    fn rejects_range_knobs_and_overlong_command() {
+        // 授予固定：没有 scope 这类范围旋钮，不认识的参数按参数错误拒绝。
+        assert!(parse(&schema(), r#"{"command":"x","scope":"external"}"#).is_err());
         let long = "x".repeat(MAX_COMMAND_CHARS + 1);
         let err = parse(&schema(), &format!(r#"{{"command":"{}"}}"#, long)).unwrap_err();
         assert!(err.contains("命令太长"), "{}", err);

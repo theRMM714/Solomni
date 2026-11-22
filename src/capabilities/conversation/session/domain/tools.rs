@@ -8,13 +8,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// 目的：shell 最近一次运行的状态（前端状态栏卡片用）：命令、scope、起止、退出码与回执预览。
+/// 目的：shell 最近一次运行的状态（前端状态栏卡片用）：命令、起止、退出码与回执预览。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct ShellLive {
     /// 目的：命令原文。
     pub command: String,
-    /// 目的：本次 scope（sandbox / external）。
-    pub scope: String,
     /// 目的：cwd（私有沙箱）。
     pub cwd: String,
     /// 目的：开始时间（Unix 秒）。
@@ -48,11 +46,10 @@ pub struct ShellSlot(std::sync::Mutex<Option<ShellLive>>);
 
 impl ShellSlot {
     /// 目的：开始一次 shell：覆盖上一次的状态，等到 finish 才写结束时间 / 退出码。
-    pub fn start(&self, command: &str, scope: &str, cwd: &str) {
+    pub fn start(&self, command: &str, cwd: &str) {
         let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
         *g = Some(ShellLive {
             command: command.to_string(),
-            scope: scope.to_string(),
             cwd: cwd.to_string(),
             started_at: now_secs(),
             finished_at: None,
@@ -112,7 +109,7 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-/// 目的：从转录派生最近一次 shell 的状态（回放 / 重建用）：命令、scope、cwd、耗时、成败、退出码与回执预览。
+/// 目的：从转录派生最近一次 shell 的状态（回放 / 重建用）：命令、cwd、耗时、成败、退出码与回执预览。
 /// 约束：只读工具行的结构化字段（tool.name / tool.args / tool.shell / tool.output），不解析正文；
 ///   跳过回档折叠的行；参数里没有命令（调用没解析出来）或没有结构化事实的行跳过。
 pub fn last_shell(events: &[serde_json::Value]) -> Option<ShellLive> {
@@ -163,11 +160,6 @@ pub fn last_shell(events: &[serde_json::Value]) -> Option<ShellLive> {
             };
             found = Some(ShellLive {
                 command,
-                scope: args
-                    .get("scope")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("sandbox")
-                    .to_string(),
                 cwd: facts.cwd.clone(),
                 started_at: 0,
                 finished_at: None,
@@ -448,18 +440,17 @@ mod tests {
     }
 
     #[test]
-    fn last_shell_reads_command_scope_cwd_and_elapsed_from_the_tool_row() {
+    fn last_shell_reads_command_cwd_and_elapsed_from_the_tool_row() {
         let events = vec![transcript(json!([
             {"id": 0, "tool": {"name": "shell", "module": "", "ok": true,
              "args": r#"{"command":"first"}"#, "output": "x"}},
             {"id": 1, "tool": {"name": "shell", "module": "", "ok": true,
-             "args": r#"{"command":"npm test","scope":"external"}"#,
+             "args": r#"{"command":"npm test"}"#,
              "output": "ok",
              "shell": {"cwd": "/w/a", "elapsed_ms": 7_000, "exit_code": 0, "status": "exit"}}}
         ]))];
         let live = last_shell(&events).expect("要派生最后一条");
         assert_eq!(live.command, "npm test");
-        assert_eq!(live.scope, "external");
         assert_eq!(live.cwd, "/w/a");
         assert_eq!(live.elapsed_secs, Some(7));
         assert_eq!(live.exit_code, Some(0));
@@ -495,7 +486,7 @@ mod tests {
     fn last_shell_keeps_a_refused_attempt_as_an_attempt() {
         let events = vec![transcript(json!([
             {"id": 0, "tool": {"name": "shell", "module": "", "ok": false,
-             "args": r#"{"command":"cat ../x","scope":"external"}"#,
+             "args": r#"{"command":"cat ../x"}"#,
              "output": "",
              "shell": {"cwd": "/w", "elapsed_ms": 0}}}
         ]))];
@@ -511,7 +502,7 @@ mod tests {
     fn last_shell_reads_only_the_structured_facts() {
         let events = vec![transcript(json!([
             {"id": 0, "tool": {"name": "shell", "module": "", "ok": true,
-             "args": r#"{"command":"npm test","scope":"sandbox"}"#,
+             "args": r#"{"command":"npm test"}"#,
              "output": "ok",
              "shell": {"cwd": "/w/b", "elapsed_ms": 331_400,
                        "fence_prep_ms": 327_000, "exit_code": 0,
