@@ -309,3 +309,47 @@ fn broken_declarations_are_reported() {
     assert!(all.contains("位置序号 1 给了两个参数"), "{all}");
     assert!(all.contains("可选值清单"), "{all}");
 }
+/// 写法：必填的具名旗语不打方括号（缺了就是用法错误，不是可选项）。
+#[test]
+fn required_named_flags_lose_their_brackets() {
+    fn param(ty: ParamType, required: bool) -> Param {
+        Param {
+            ty,
+            required,
+            non_empty: false,
+            desc: String::new(),
+            default: None,
+            min: None,
+            max: None,
+            positional: None,
+            rest: false,
+            values: None,
+            optional_value: false,
+        }
+    }
+    let mut params: BTreeMap<String, Param> = BTreeMap::new();
+    params.insert("api-key".to_string(), param(ParamType::String, true));
+    params.insert("note".to_string(), param(ParamType::String, false));
+    params.insert("force".to_string(), param(ParamType::Boolean, false));
+    let op = Op {
+        id: "provider".to_string(),
+        aliases: Vec::new(),
+        group: "登记".to_string(),
+        brief: "供应商".to_string(),
+        phase: Phase::Core,
+        executor: Executor::Core,
+        confirm: false,
+        schema: ToolSchema {
+            desc: String::new(),
+            params: Some(params),
+            parallel: false,
+            capability: String::new(),
+            callers: Vec::new(),
+        },
+        json: None,
+    };
+    assert_eq!(
+        op_usage(&op),
+        "provider --api-key <string> [--force] [--note <string>]"
+    );
+}

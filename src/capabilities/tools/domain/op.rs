@@ -275,7 +275,11 @@ pub fn usage_named(op: &Op, head: &str) -> String {
                 format!("--{} {}", name, hint)
             }
         };
-        out.push(format!("[{}]", head));
+        if p.required && !p.optional_value {
+            out.push(head);
+        } else {
+            out.push(format!("[{}]", head));
+        }
     }
     out.join(" ")
 }

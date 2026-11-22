@@ -335,6 +335,31 @@ mod tests {
         drop(handle);
     }
 
+    /// 目的：单破折号的多字符词不是旗语——-help 要说清楚，而不是当成工具名或参数。
+    #[test]
+    fn single_dash_words_are_rejected_as_short_flags() {
+        let (handle, faces) = crate::tests::ops_with(vec![], vec![]);
+        let system = crate::tests::boot::Fake::default();
+        let opts = shell::Opts {
+            json: false,
+            help: false,
+            version: false,
+            interactive: true,
+            web_port: 49181,
+        };
+        let (code, lines) =
+            term::capture(
+                || match shell::run_line(&faces, &system, "work -help", &opts) {
+                    shell::Outcome::Done(code) => code,
+                    _ => -1,
+                },
+            );
+        assert_eq!(code, 2, "用法错误退 2");
+        // 提示走 stdout（终端里直接看到），这里只钉退出码。
+        let _ = lines;
+        drop(handle);
+    }
+
     /// 目的：前缀即类型——裸文本开一条核心代理会话，空行不离开，// 把斜杠还给消息，/leave 回顶层。
     #[test]
     fn bare_text_starts_a_proxy_session_and_double_slash_escapes() {
