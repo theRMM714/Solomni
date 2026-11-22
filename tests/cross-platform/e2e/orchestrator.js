@@ -299,6 +299,41 @@ function reclaimFixtureViewDrive() {
   return true;
 }
 
+/** 一次性命令的 stdout 契约：--json 的转录相命令只写结果，启动期诊断一律走 stderr。
+ *  这里在夹具上真跑一次 `--json modules`：解析整段 stdout 就是判据（多了任何一行诊断，JSON.parse 必失败）。 */
+function oneShotJsonIsPipeable() {
+  const { spawnSync } = require("child_process");
+  const r = spawnSync(BIN, ["--root", FIXTURE, "--json", "modules"], {
+    cwd: PRODUCT_ROOT,
+    encoding: "utf8",
+    timeout: 120000,
+    env: Object.assign({}, process.env, {
+      // 安全模式：不写本机 ACL，只验 stdout 与 stderr 的分工。
+      SOLOMNI_SANDBOX_DEGRADED: "1",
+      SOLOMNI_FENCE_WRITE: "0",
+    }),
+  });
+  const out = (r.stdout || "").trim();
+  const first = out.split(/\r?\n/, 1)[0] || "";
+  if (r.status !== 0) {
+    console.error("[e2e] --json modules 退出码 " + r.status + "（stdout 首行：" + first + "）");
+    return false;
+  }
+  let got = null;
+  try {
+    got = JSON.parse(out);
+  } catch (e) {
+    console.error("[e2e] --json modules 的 stdout 不是纯 JSON（首行：" + first + "）：" + e.message);
+    return false;
+  }
+  if (!Array.isArray(got.modules) || got.modules.length === 0) {
+    console.error("[e2e] --json modules 没给出模块清单");
+    return false;
+  }
+  console.log("[e2e] --json modules 的 stdout 是纯 JSON（" + got.modules.length + " 个模块）：管道可用");
+  return true;
+}
+
 async function main() {
   if (!fs.existsSync(BIN)) {
     console.error("[e2e] 找不到二进制（" + path.relative(PRODUCT_ROOT, BIN) + "）：先 cargo build");
@@ -362,6 +397,10 @@ async function main() {
   // indexer 是编译出来的：真工具链路要用它，所以这里**必须**构建成功（硬失败，不 env-skip）。
   // 与 modules/indexer/README.md 同一条命令；编译器版本打进日志，出问题时本地复现方便。
   if (!buildIndexer()) {
+    return 1;
+  }
+  // 一次性命令也要能被脚本消费：stdout 只有 JSON，启动期诊断全在 stderr。
+  if (!oneShotJsonIsPipeable()) {
     return 1;
   }
 

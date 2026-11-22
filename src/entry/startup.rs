@@ -94,14 +94,14 @@ pub(crate) fn missing_names(parts: &[MissingPart], cause: MissingCause) -> Strin
 /// 目的：启动报告先把「本机能力」与「本次实际」分开说清，再让启动门提问。
 pub(crate) fn print_fence_report(report: &FenceReport, read_only_roots: usize) {
     let usable = |ok: bool| if ok { "可用" } else { "不可用" };
-    println!(
+    eprintln!(
         "[围栏] 本机能力：文件系统={} 断网={} 进程树={}（{}）",
         usable(report.cap.fs),
         usable(report.cap.net),
         usable(report.cap.tree),
         report.cap.note
     );
-    println!(
+    eprintln!(
         "[围栏] 本次实际：文件系统={} 断网={} 进程树={}；容器授权={}；只读根={} 个（{}）",
         usable(report.fs),
         usable(report.net),

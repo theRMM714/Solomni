@@ -119,7 +119,7 @@ fn main() {
     let home = layout::home(&root);
     // 基础工具链：只写项目内 .tools；先应用 PATH，再跑诊断 / 构建 / 会话，模块工具与 build 因此都优先项目版本。
     let toolchains = entry::toolchains::apply(&root);
-    // 这些是人读的启动事实；--doctor / --provision 的 stdout 是机器可读 JSON，所以走 stderr。
+    // 启动期的人读事实（工具链 / 围栏 / 进程 / 便携 / 沙箱授权）一律走 stderr；stdout 只留给命令结果（--json 可整段进管道）。
     // 基础 profile 缺失时**每次启动**都报：项目内 / 宿主回退 / 宿主也没有，并给补全命令。
     let base = entry::toolchains::base_facts(&root);
     for line in capabilities::system::api::toolchain_lines(&base) {
@@ -202,7 +202,7 @@ fn main() {
     {
         let rep = kernel::detail::ledger::reconcile(&home);
         if rep.has_activity() {
-            println!("[围栏] 启动对账：{}", rep.summary());
+            eprintln!("[围栏] 启动对账：{}", rep.summary());
         }
         if !rep.errors.is_empty() {
             log.warn("main::fence_reconcile", &rep.summary());
@@ -213,7 +213,7 @@ fn main() {
     {
         let rep = book.reconcile();
         if rep.touched() {
-            println!(
+            eprintln!(
                 "[进程] 启动对账：清掉 {} 条已不在的登记，收掉 {} 个孤儿，仍有 {} 个在跑",
                 rep.dropped,
                 rep.killed,
@@ -230,7 +230,7 @@ fn main() {
             fence_cap.fs, fence_cap.net, fence_cap.tree, fence_cap.note
         ),
     );
-    println!("[围栏] {}", fence_cap.note);
+    eprintln!("[围栏] {}", fence_cap.note);
     let store = entry::assembly::settings_store(&root);
     let history = capabilities::conversation::session::detail::fs_history::FsHistory::new(
         root.join("session"),
@@ -330,7 +330,7 @@ fn main() {
 
     let missing = entry::startup::missing_parts(&requirements, &fence_cap, authorized);
     for part in &missing {
-        println!("[沙箱] {}：{}", part.name, part.cause.label());
+        eprintln!("[沙箱] {}：{}", part.name, part.cause.label());
     }
 
     // 测试/CI 的进程级注入：只认 '1' 降级、'0' 严格；其它值不作为覆盖。
@@ -347,7 +347,7 @@ fn main() {
     // 提问用完就把 stdin 锁放掉：后面的 CLI 还要从同一个 stdin 读命令。
     {
         let mut stdin = std::io::stdin().lock();
-        let mut stdout = std::io::stdout();
+        let mut stderr = std::io::stderr();
         if !missing.is_empty() {
             // 首次启动：没有 settings.yaml 时先给一次授权机会（只 Windows、只 TTY、无环境变量覆盖）。
             match entry::startup::maybe_onboard_windows(
@@ -359,10 +359,10 @@ fn main() {
                 &fence_cap,
                 &mut registry,
                 &mut stdin,
-                &mut stdout,
+                &mut stderr,
             ) {
                 Ok(true) => {
-                    println!(
+                    eprintln!(
                         "[沙箱] 已写入 .home/settings.yaml；启动器会把本进程整体重启（直接运行二进制时请重新启动）。"
                     );
                     // 首次授权那一趟顺手把机器级预授做掉：之后的会话不必再重写这批 ACL。
@@ -386,11 +386,11 @@ fn main() {
                 fence_write_env.as_deref(),
                 &mut registry,
                 &mut stdin,
-                &mut stdout,
+                &mut stderr,
             ) {
                 entry::startup::GateOutcome::Proceed => sandbox_mode.set_degraded(true),
                 entry::startup::GateOutcome::Restart => {
-                    println!(
+                    eprintln!(
                         "[沙箱] 已写入 .home/settings.yaml；启动器会把本进程整体重启（直接运行二进制时请重新启动）。"
                     );
                     std::process::exit(presentation::web::RESTART_EXIT_CODE);
@@ -404,7 +404,7 @@ fn main() {
         entry::portable::fence_hint(&root);
     }
     if sandbox_mode.degraded() {
-        println!("[沙箱] 本进程已降级：缺失的强制项按如实降级执行；重启后重新评估");
+        eprintln!("[沙箱] 本进程已降级：缺失的强制项按如实降级执行；重启后重新评估");
     }
     let prompt_source =
         capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
