@@ -181,7 +181,10 @@ fn member_env_merges_package_roots_once_and_only_host_tier_keeps_base_roots() {
     assert_eq!(host.module_env, module_vars);
     assert_eq!(
         host.fence
-            .ro_tree
+            .paths(
+                crate::kernel::api::fence::Access::Read,
+                crate::kernel::api::fence::Reach::Tree
+            )
             .iter()
             .filter(|p| p.ends_with("pkg-a"))
             .count(),

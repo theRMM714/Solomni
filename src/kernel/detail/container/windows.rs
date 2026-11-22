@@ -1,10 +1,9 @@
 //! 目的：Windows 容器围栏的启动面——AppContainer 档案与 SID、UTF-16 转换、system shell、kill-on-close job 对象。
 //! 管：在容器里拉进程这一层（Windows 独有：Linux/macOS 是「先装规则再 exec」）。
-//! 不管：授权与撤销（在 acl）、台账（在 ledger）、环境与程序名改写（在 launch）、策略（在 confine::prepare_fence）。
+//! 不管：授权与撤销（在 acl）、台账（在 ledger）、环境与程序名改写（在 launch）、策略（在 confine::windows::prepare_fence）。
 //! 联动：由 confine 的 Windows 后端（prepare_fence / run_fenced）调用；失败如实返回而非假装成功。
 
-use crate::kernel::contracts::fence::FENCE_FAILED;
-use crate::kernel::contracts::fence::FenceSpec;
+use crate::kernel::contracts::fence::{Access, FENCE_FAILED, FencePlan, Reach};
 use std::ffi::c_void;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -35,29 +34,44 @@ use windows_sys::Win32::System::Threading::{
 /// 目的：本程序建的容器 profile 前缀（`container_name` 生成的就是它；`--fence-clean` 按它扫整族）。
 pub(crate) const PROFILE_PREFIX: &str = "Solomni.Agent.";
 
-/// 目的：容器名：**按"会话 + agent + 受保护根集合"派生**（根集合指纹）——授予固定后同一 agent 的根集合恒定，
-///   于是同一 (会话, agent) 的后续调用复用同一个 SID 与已有 ACE；根集合仍进指纹，防止不同根集合共用一个身份。
+/// 目的：容器名：**按"会话 + agent + 授予清单"派生**（授予指纹）——授予固定后同一 agent 的清单恒定，
+///   于是同一 (会话, agent) 的后续调用复用同一个 SID 与已有 ACE；清单仍进指纹，防止不同授予集合共用一个身份。
 ///   工具链/运行包是可信执行基座（授给 baseline），不在指纹里承担范围含义；net 是令牌能力，也不进指纹。
 ///   外层授权与守门进程各自能算出同一个 SID；其它平台行为不变（这个名字只用于 Windows 的容器身份与日志）。
-pub(crate) fn container_name(spec: &FenceSpec) -> String {
+pub(crate) fn container_name(spec: &FencePlan) -> String {
     // FNV-1a：只为把名字收敛成定长标识（不是安全用途），避免容器名里出现中文与路径。
     // 字段值逐段喂入并补分隔符，避免 ("ab","c") 与 ("a","bc") 撞成同一个身份。
     let mut parts: Vec<String> = vec![
         spec.lease.clone(),
         spec.agent.clone(),
-        spec.private.to_string_lossy().into_owned(),
+        spec.home.to_string_lossy().into_owned(),
         spec.cwd.to_string_lossy().into_owned(),
     ];
-    for list in [&spec.rw, &spec.ro, &spec.ro_tree] {
-        let mut v: Vec<String> = list
-            .iter()
-            .map(|p| p.to_string_lossy().to_ascii_lowercase())
-            .collect();
-        v.sort();
-        v.dedup();
-        parts.extend(v);
-        parts.push("\u{1}".to_string());
-    }
+    // 每条授予按"访问档 + 落点形状 + 路径"喂入：只改访问档也要换身份，否则宽的那次授权会被窄的一次复用。
+    let mut grants: Vec<String> = spec
+        .grants
+        .iter()
+        .map(|g| {
+            let access = match g.access {
+                Access::Read => "r",
+                Access::Write => "w",
+            };
+            let reach = match g.reach {
+                Reach::Dir => "d",
+                Reach::Tree => "t",
+            };
+            format!(
+                "{}{}{}",
+                access,
+                reach,
+                g.path.to_string_lossy().to_ascii_lowercase()
+            )
+        })
+        .collect();
+    grants.sort();
+    grants.dedup();
+    parts.extend(grants);
+    parts.push("\u{1}".to_string());
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for part in &parts {
         for b in part.as_bytes() {
@@ -75,15 +89,15 @@ pub(crate) fn container_name(spec: &FenceSpec) -> String {
 /// 返回：`<私有沙箱>/Packages/<容器名>/AC/Temp`；私有沙箱为空（连 cwd 也没有）时 `None`——没有落点，不猜。
 /// 约束：`prepare_fence` 在授权前把它建出来。`GetTempPath2` **不读 TMP/TEMP**：容器里缺了它，
 ///   编译器这类程序连临时文件都写不了（真机：g++ 直接 abort）。
-pub(crate) fn container_temp_dir(spec: &FenceSpec) -> Option<PathBuf> {
+pub(crate) fn container_temp_dir(spec: &FencePlan) -> Option<PathBuf> {
     container_package_dir(spec).map(|dir| dir.join("AC").join("Temp"))
 }
 
 /// 目的：按次容器在私有沙箱里的**包目录**（`<私有沙箱>/Packages/<容器名>`）——临时目录的父级。
 /// 返回：私有沙箱为空（连 cwd 也没有）时 `None`。
 /// 约束：按次调用结束要连这份目录一起删（profile 被删后它就是空壳）；只在 release_call 里用。
-pub(crate) fn container_package_dir(spec: &FenceSpec) -> Option<PathBuf> {
-    let private = spec.private_or_cwd();
+pub(crate) fn container_package_dir(spec: &FencePlan) -> Option<PathBuf> {
+    let private = spec.home_or_cwd();
     if private.as_os_str().is_empty() {
         return None;
     }
@@ -288,7 +302,7 @@ pub(crate) fn internet_client_sid(enabled: bool) -> Result<Option<Vec<u8>>, Stri
 }
 
 /// 目的：把工具进程放进容器里跑：按 `net` 授/不授 `internetClient`，stdio 用外层给的那三个句柄；环境用运行期白名单显式给出。
-pub(crate) fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Result<i32, String> {
+pub(crate) fn run_in_container(sid: PSID, spec: &FencePlan, command: &str) -> Result<i32, String> {
     // 环境块显式给（见 fence_env）：子进程拿到的就是白名单本身，不靠"守门进程恰好继承了什么"。
     let env = crate::kernel::detail::launch::fence_env(spec, command);
     // 视图盘只给 cwd == 私有沙箱的调用（shell）用：映射根一级即可，根外祖先链不必再授 ACE，程序名也译视图写法。
@@ -316,7 +330,7 @@ pub(crate) fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Re
     // 能力数组：产品能力恒在（机器级只读 ACE 授给它，不是授给本机所有 AppContainer 应用）。
     // net=true 再加 internetClient（只公网出站，不授 privateNetworkClientServer、不做 loopback 豁免）；net=false 断网。
     let product = product_capability_sid()?;
-    let network_sid = internet_client_sid(spec.net)?;
+    let network_sid = internet_client_sid(spec.net.on())?;
     let mut attrs: Vec<SID_AND_ATTRIBUTES> = vec![SID_AND_ATTRIBUTES {
         Sid: product.as_ptr() as PSID,
         Attributes: SE_GROUP_ENABLED,

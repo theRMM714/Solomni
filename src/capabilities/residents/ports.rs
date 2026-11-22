@@ -20,7 +20,7 @@ pub struct LaunchSpec {
     /// 目的：本机档运行包的生效 PATH（由 packages 计划给出；没有包 = None）。
     pub path: Option<std::ffi::OsString>,
     /// 目的：起这个服务进程的围栏（可达范围 + 网络 + 会话租约）；机制由 kernel 的会话端口安装。
-    pub fence: crate::kernel::api::fence::FenceSpec,
+    pub fence: crate::kernel::api::fence::FencePlan,
 }
 
 /// 目的：一个已拉起的服务实例——适配器负责协议，manager 负责生命周期与串行调用。

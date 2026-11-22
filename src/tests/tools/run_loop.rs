@@ -762,7 +762,7 @@ pub(crate) fn read_in_the_same_batch_does_not_authorize_write() {
         sb.shared = abs(&["w", "work"]);
         sb.private = abs(&["w", "a"]);
         t.face.sandbox = sb.clone();
-        t.face.fence = crate::kernel::api::fence::FenceSpec::for_session(&sb, &[], false);
+        t.face.fence = crate::kernel::api::fence::FencePlan::for_session(&sb, &[], false);
         t.workspace = Some(ws);
     }
     let exec = run_execution(std::slice::from_mut(&mut m), "任务", &test_prompts());
@@ -818,7 +818,7 @@ pub(crate) fn work_commit_refuses_unobserved_tracked_changes() {
         sb.shared = abs(&["w", "work"]);
         sb.private = abs(&["w", "a"]);
         t.face.sandbox = sb.clone();
-        t.face.fence = crate::kernel::api::fence::FenceSpec::for_session(&sb, &[], false);
+        t.face.fence = crate::kernel::api::fence::FencePlan::for_session(&sb, &[], false);
         t.handlers = crate::capabilities::workspace::api::work_handlers(
             &ws,
             &sb,

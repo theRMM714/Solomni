@@ -55,15 +55,17 @@ fn view_drive_puts_the_container_cwd_on_the_mapped_letter() {
     };
     let _release = ReleaseOnDrop(home.clone());
 
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-view".to_string(),
         lease: String::new(),
-        private: private.clone(),
-        ro_tree: Vec::new(),
-        rw: vec![private.clone()],
         cwd: private.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: private.clone(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![private.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let container = container_name(&spec);
     if let Err(e) = ensure_profile(&container) {

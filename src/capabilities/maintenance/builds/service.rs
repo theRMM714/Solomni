@@ -17,7 +17,7 @@ use crate::capabilities::provision::api::Provision;
 use crate::capabilities::vm::api::{
     self as vm, ExecPlan, GuestOs, GuestRun, GuestSpec, MissingEntry, Vm,
 };
-use crate::kernel::api::fence::FenceSpec;
+use crate::kernel::api::fence::FencePlan;
 use crate::kernel::api::types::Tier;
 use crate::kernel::ports::{FenceGate, FenceHost, HostProbe, Log, ProcessRunner};
 use std::collections::BTreeMap;
@@ -230,15 +230,17 @@ impl BuildsService {
         let place = self.states.prepare_home(&module.manifest.id)?;
         // 构建也是一次调用：按次 lease → Windows 上独立容器身份，跑完自己的 profile/ACE 自己收。
         let agent = format!("build:{}", module.manifest.id);
-        let fence = FenceSpec {
+        let fence = FencePlan {
             agent: agent.clone(),
             lease: crate::kernel::api::fence::call_lease(&agent),
-            rw: vec![module.root.clone(), place.state],
-            ro: self.toolchain_roots.clone(),
-            ro_tree: plan.roots.clone(),
-            private: place.home,
             cwd: module.root.clone(),
-            net,
+            net: net.into(),
+            home: place.home,
+            grants: crate::kernel::contracts::fence::grants_of(
+                vec![module.root.clone(), place.state],
+                self.toolchain_roots.clone(),
+                plan.roots.clone(),
+            ),
         };
         self.log.info(
             "builds::host",
@@ -367,15 +369,13 @@ impl BuildsService {
         let mut rw: Vec<PathBuf> = plans.iter().map(|p| p.module.root.clone()).collect();
         rw.sort();
         rw.dedup();
-        let fence = FenceSpec {
+        let fence = FencePlan {
             agent: "build".to_string(),
             lease: lease.clone(),
-            rw,
-            ro: Vec::new(),
-            ro_tree: Vec::new(),
-            private: PathBuf::new(),
             cwd: PathBuf::new(),
-            net,
+            net: net.into(),
+            home: PathBuf::new(),
+            grants: crate::kernel::contracts::fence::grants_of(rw, Vec::new(), Vec::new()),
         };
         let plan = ExecPlan {
             tier: Tier::Vm,

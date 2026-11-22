@@ -3,7 +3,7 @@
 //! 不管：命令行与可达范围的策略（由调用方派生后传入）；命令来自 module.yaml，JSON 参数走 stdin（不进命令行）。
 //! 联动：围栏机制在 confine；ProcessRunner 端口形状见 src/kernel/ports.rs。
 
-use crate::kernel::contracts::fence::FenceSpec;
+use crate::kernel::contracts::fence::FencePlan;
 use crate::kernel::contracts::note::{Note, Severity, codes, severity_of};
 use crate::kernel::contracts::run::RunOutcome;
 use crate::kernel::detail::confine;
@@ -98,7 +98,7 @@ impl ProcTools {
 impl ProcessRunner for ProcTools {
     fn run(
         &self,
-        fence: &FenceSpec,
+        fence: &FencePlan,
         command: &str,
         args_json: &str,
         env: &[(String, String)],
@@ -139,7 +139,7 @@ struct RunPlan<'a> {
 /// 目的：一次执行交给平台后端的上下文——围栏准备与进程收尾只看这些事实。
 struct PrepareCtx<'a> {
     tools: &'a ProcTools,
-    fence: &'a FenceSpec,
+    fence: &'a FencePlan,
     command: &'a str,
     ask: Option<&'a dyn crate::kernel::ports::AskUser>,
     gate: Option<&'a dyn FenceGate>,
@@ -160,7 +160,7 @@ impl ProcTools {
     #[allow(clippy::too_many_arguments)]
     fn run_inner(
         &self,
-        fence: &FenceSpec,
+        fence: &FencePlan,
         command: &str,
         stdin_payload: &str,
         env: &[(String, String)],
@@ -211,9 +211,9 @@ impl ProcTools {
             }
         };
         let job = confine::FenceJob {
-            spec: fence.clone(),
+            plan: fence.clone(),
             prepared,
-            home,
+            product_home: home,
             policy,
         };
         let mut cmd = confine::launcher(&self.exe, &job, command);

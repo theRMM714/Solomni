@@ -1,6 +1,6 @@
 //! 目的：Linux guest 内的执行助手——把 host 侧翻好的 per-agent 允许集交给 Landlock，再执行命令。
 //! 管：助手脚本文本、装进 guest、在 boot 后确认它可执行；超时/退出杀整棵进程树、环境白名单与输出由同一份策略驱动。
-//! 不管：策略从哪里来（host 侧 FenceSpec）、guest 通道实现（qemu.rs）。
+//! 不管：策略从哪里来（host 侧 FencePlan）、guest 通道实现（qemu.rs）。
 //! 联动：qemu.rs 在挂载后调用 install；exec_fenced 用 `HELPER_PATH` 执行；诊断协议常量在 `domain/diagnose.rs`。
 
 use crate::capabilities::vm::domain::guest::GuestRun;

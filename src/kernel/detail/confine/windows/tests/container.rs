@@ -40,15 +40,17 @@ fn container_roundtrip_sees_leaf_but_not_parent_content() {
     std::fs::write(leaf.join("data.txt"), "x").expect("写探针文件");
     // 父目录里另放一个条目：容器应当**读不到**它（只读属性只够按名穿过，不够读内容）。
     std::fs::write(base.join("parent-secret.txt"), "PARENT-SECRET").expect("写父目录条目");
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-roundtrip".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![leaf.clone()],
         cwd: leaf.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![leaf.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let container = container_name(&spec);
     // 建不出 profile 分两种：环境不允许（如实跳过）与我们的步骤写错（响亮失败），分开处理。
@@ -172,15 +174,17 @@ fn container_roundtrip_keeps_module_read_only_and_peer_unreachable() {
     std::fs::create_dir_all(&peer).expect("建另一席的沙箱");
     std::fs::write(module.join("script.py"), "print(1)\n").expect("写模块脚本");
     std::fs::write(peer.join("secret.txt"), "PEER-SECRET").expect("写另一席的明文");
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-module".to_string(),
         lease: String::new(),
-        private: userdata.clone(),
-        ro_tree: vec![module.clone()],
-        rw: vec![userdata.clone()],
-        ro: Vec::new(),
         cwd: module.clone(),
-        net: false,
+        net: false.into(),
+        home: userdata.clone(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![userdata.clone()],
+            Vec::new(),
+            vec![module.clone()],
+        ),
     };
     let container = container_name(&spec);
     if let Err(e) = ensure_profile(&container) {
@@ -288,15 +292,17 @@ fn container_runs_a_node_module_tool_with_realpath_skipped() {
         "const helper = require('./helper.js'); const fs = require('fs'); fs.writeFileSync(process.argv[2], helper.marker);",
     )
     .expect("写主脚本");
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-node".to_string(),
         lease: String::new(),
-        rw: vec![userdata.clone()],
-        ro: Vec::new(),
-        ro_tree: vec![module.clone()],
-        private: userdata.clone(),
         cwd: module.clone(),
-        net: false,
+        net: false.into(),
+        home: userdata.clone(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![userdata.clone()],
+            Vec::new(),
+            vec![module.clone()],
+        ),
     };
     let container = container_name(&spec);
     if let Err(e) = ensure_profile(&container) {
@@ -412,15 +418,17 @@ fn container_runs_a_program_given_by_absolute_path() {
         .join("cmd.exe");
     std::fs::copy(&cmd_exe, c_leaf.join("cmd2.exe")).expect("拷到 cwd");
     std::fs::copy(&cmd_exe, d_leaf.join("cmd2.exe")).expect("拷到相邻目录");
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-exec".to_string(),
         lease: String::new(),
-        rw: vec![c_leaf.clone(), d_leaf.clone()],
-        ro: Vec::new(),
-        ro_tree: Vec::new(),
-        private: c_leaf.clone(),
         cwd: c_leaf.clone(),
-        net: false,
+        net: false.into(),
+        home: c_leaf.clone(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![c_leaf.clone(), d_leaf.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let container = container_name(&spec);
     if let Err(e) = ensure_profile(&container) {
@@ -537,15 +545,17 @@ tryHost(() => trySelf(() => process.exit(0)));
             );
         }
     });
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-loopback".to_string(),
         lease: String::new(),
-        private: leaf.clone(),
-        ro_tree: Vec::new(),
-        rw: vec![leaf.clone()],
         cwd: leaf.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: leaf.clone(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![leaf.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let container = container_name(&spec);
     if let Err(e) = ensure_profile(&container) {
@@ -652,15 +662,17 @@ setTimeout(() => { fs.writeFileSync('client.txt', 'TIMEOUT'); process.exit(0); }
     let probe = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("占一个空闲回环端口");
     let port = probe.local_addr().expect("取端口").port();
     drop(probe);
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-two-proc".to_string(),
         lease: String::new(),
-        private: leaf.clone(),
-        ro_tree: Vec::new(),
-        rw: vec![leaf.clone()],
         cwd: leaf.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: leaf.clone(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![leaf.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let container = container_name(&spec);
     if let Err(e) = ensure_profile(&container) {
@@ -727,15 +739,13 @@ setTimeout(() => { fs.writeFileSync('client.txt', 'TIMEOUT'); process.exit(0); }
 #[test]
 fn container_temp_dir_follows_gettemp2_layout() {
     let _fence = crate::tests::fence_acl_guard();
-    let mut spec = FenceSpec {
+    let mut spec = FencePlan {
         agent: "probe-temp".to_string(),
         lease: String::new(),
-        rw: Vec::new(),
-        ro: Vec::new(),
-        ro_tree: Vec::new(),
-        private: PathBuf::from("sandbox"),
         cwd: PathBuf::from("module"),
-        net: false,
+        net: false.into(),
+        home: PathBuf::from("sandbox"),
+        grants: crate::kernel::contracts::fence::grants_of(Vec::new(), Vec::new(), Vec::new()),
     };
     let dir = container_temp_dir(&spec).expect("私有沙箱在场");
     assert_eq!(
@@ -746,7 +756,7 @@ fn container_temp_dir_follows_gettemp2_layout() {
             .join("AC")
             .join("Temp")
     );
-    spec.private = PathBuf::new();
+    spec.home = PathBuf::new();
     assert!(
         container_temp_dir(&spec)
             .expect("退回工作目录")
@@ -787,15 +797,17 @@ fn container_has_a_writable_temp_dir() {
     let leaf = base.join("leaf");
     std::fs::create_dir_all(&sandbox).expect("建私有沙箱");
     std::fs::create_dir_all(&leaf).expect("建工作目录");
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-temp".to_string(),
         lease: String::new(),
-        rw: vec![sandbox.clone(), leaf.clone()],
-        ro: Vec::new(),
-        ro_tree: Vec::new(),
-        private: sandbox.clone(),
         cwd: leaf.clone(),
-        net: false,
+        net: false.into(),
+        home: sandbox.clone(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![sandbox.clone(), leaf.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let container = container_name(&spec);
     if let Err(e) = ensure_profile(&container) {
@@ -891,15 +903,17 @@ fn concurrent_calls_of_one_agent_are_isolated_and_released_independently() {
         return;
     }
     let home = base.join(".home");
-    let spec_of = |lease: &str, root: &Path, private: &Path| FenceSpec {
+    let spec_of = |lease: &str, root: &Path, home: &Path| FencePlan {
         agent: "probe-overlap".to_string(),
         lease: lease.to_string(),
-        private: private.to_path_buf(),
-        ro_tree: Vec::new(),
-        rw: vec![root.to_path_buf()],
+        home: home.to_path_buf(),
         cwd: root.to_path_buf(),
-        ro: Vec::new(),
-        net: false,
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![root.to_path_buf()],
+            Vec::new(),
+            Vec::new(),
+        ),
+        net: crate::kernel::contracts::fence::NetPolicy::Off,
     };
     // 同一会话的两个不同 reach（宽/窄）+ 另一个会话（对照：撤销互不影响）。
     let wide_spec = spec_of("session-x", &wide, &base.join("private-wide"));
@@ -1028,15 +1042,17 @@ fn one_shot_release_only_removes_its_own_grant_and_profile() {
         return;
     }
     let home = base.join(".home");
-    let spec_of = |lease: &str| FenceSpec {
+    let spec_of = |lease: &str| FencePlan {
         agent: "probe-per-call".to_string(),
         lease: lease.to_string(),
-        private: private.clone(),
-        ro_tree: Vec::new(),
-        rw: vec![target.clone()],
+        home: private.clone(),
         cwd: target.clone(),
-        ro: Vec::new(),
-        net: false,
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![target.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
+        net: crate::kernel::contracts::fence::NetPolicy::Off,
     };
     let s1 = spec_of("call-1");
     let s2 = spec_of("call-2");

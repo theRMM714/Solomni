@@ -33,8 +33,11 @@ pub(super) fn prepare(
 ) -> Result<(bool, Option<PathBuf>), String> {
     let mut prepared = false;
     if state.write_allowed.load(Ordering::Relaxed) {
-        let prep =
-            crate::kernel::detail::confine::prepare_fence(&spec.fence, &spec.command, &state.home);
+        let prep = crate::kernel::detail::confine::windows::prepare_fence(
+            &spec.fence,
+            &spec.command,
+            &state.home,
+        );
         // 可选落点授不上只记事实（不牵动这次拉起）。
         for n in &prep.notes {
             eprintln!("[围栏] {}（可选落点，本次照常执行）", n);

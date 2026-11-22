@@ -4,7 +4,7 @@
 //!   （在 `capabilities/tools/domain/fence.rs`）；平台机制（Landlock / seatbelt / AppContainer）在 `detail/confine`。
 //! 联动：由 `src/kernel/api.rs` 重导出；启动期能力探测与工具执行层消费它。
 
-use crate::kernel::contracts::fence::FenceSpec;
+use crate::kernel::contracts::fence::FencePlan;
 
 /// 目的：给**一次性调用**（构建 / 独立模块工具）生成唯一围栏租约；会话内的调用直接用会话 id 当租约。
 /// 约束：同一进程内单调递增 + pid；会话名只作可读前缀，不参与唯一性。
@@ -99,14 +99,14 @@ impl SandboxMode {
     }
 
     /// 目的：执行前检查——要求强制但机制（或 Windows 的本机授权）不可用时拒绝；已同意降级则放行。
-    /// 约束：`spec.net=true` 时不需要“网络围栏”来拦出站；只有要求断网时才检查。
-    pub fn check(&self, spec: &FenceSpec, prepared: bool) -> Result<(), String> {
+    /// 约束：`plan.net` 放行出站时不需要“网络围栏”来拦出站；只有要求断网时才检查。
+    pub fn check(&self, spec: &FencePlan, prepared: bool) -> Result<(), String> {
         let paths_effective = !crate::kernel::domain::platform::HAS_EXTERNAL_ACL_STEP || prepared;
         let mut missing: Vec<&'static str> = Vec::new();
         if self.requirements.filesystem && (!self.filesystem_ok || !paths_effective) {
             missing.push("文件系统围栏");
         }
-        if self.requirements.network && !spec.net && (!self.network_ok || !paths_effective) {
+        if self.requirements.network && !spec.net.on() && (!self.network_ok || !paths_effective) {
             missing.push("网络围栏");
         }
         if self.requirements.process_tree && !self.tree_ok {

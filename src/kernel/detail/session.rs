@@ -145,9 +145,9 @@ impl SessionHost for ProcessSessions {
             .check(&spec.fence, prepared)
             .map_err(|why| format!("服务起不来（沙箱要求未满足）：{}", why))?;
         let job = crate::kernel::detail::confine::FenceJob {
-            spec: spec.fence.clone(),
+            plan: spec.fence.clone(),
             prepared,
-            home,
+            product_home: home,
             policy: crate::kernel::contracts::fence::FenceRunPolicy {
                 require_fs: self.mode.requirements.filesystem,
                 require_net: self.mode.requirements.network,

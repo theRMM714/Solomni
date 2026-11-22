@@ -1,72 +1,63 @@
 //! 目的：从固定授予派生围栏描述符（策略在这里，机制与类型在 kernel）。
-//! 管：FenceSpec::for_call / for_session / standalone——把沙箱与模块事实变成可达范围；裁决卡材料（fence_ask 与选项 id）。
+//! 管：FencePlan::for_call / for_session / standalone——把沙箱与模块事实变成可达范围；裁决卡材料（fence_ask 与选项 id）。
 //! 不管：描述符自身的形状（在 kernel::contracts::fence）、裁决与回执文案（在 service/fence.rs）、平台机制（在 kernel::detail::confine）。
 //! 联动：经 tools::api 给成员循环与协调业务用；kernel 不反向依赖本模块。
 
 use crate::capabilities::workspace::api::Sandbox;
-use crate::kernel::api::fence::FenceBlocked;
-use crate::kernel::api::fence::FenceSpec;
+use crate::kernel::api::fence::{Access, FenceBlocked, FencePlan, Grant, NetPolicy, Reach};
 use crate::kernel::api::types::Ask;
 use std::path::{Path, PathBuf};
 
-impl FenceSpec {
+impl FencePlan {
     /// 目的：为**一次调用**派生围栏；base 是同一会话的 for_session 结果（提供主机只读根与全局断网事实）。
-    /// 约束：授予是固定的——沙箱恒 rw、模块目录恒递归只读、主机只读根恒 ro、共享区永不进 rw（提交走 work_commit）；
-    ///   唯一随调用变的是"这次调的是哪个模块"（该模块自己的 userdata 加进 rw）与全局网络开关。
-    pub fn for_call(sb: &Sandbox, module: Option<&str>, base: &FenceSpec) -> FenceSpec {
-        let mut rw: Vec<PathBuf> = vec![sb.private.clone()];
-        let mut ro: Vec<PathBuf> = base.ro.clone();
-        let mut ro_tree: Vec<PathBuf> = sb.modules.values().cloned().collect();
+    /// 约束：授予是固定的——私有沙箱恒可写（`home` 隐含）、模块目录恒递归只读、主机只读根恒单层只读、
+    ///   共享区永不进授予（提交走 work_commit）；唯一随调用变的是"这次调的是哪个模块"
+    ///   （该模块自己的 userdata 加进可写）与全局网络开关。
+    pub fn for_call(sb: &Sandbox, module: Option<&str>, base: &FencePlan) -> FencePlan {
+        let mut plan = FencePlan {
+            agent: sb.agent.clone(),
+            lease: sb.session.clone(),
+            home: sb.private.clone(),
+            cwd: PathBuf::new(),
+            net: base.net,
+            grants: base
+                .paths(Access::Read, Reach::Dir)
+                .into_iter()
+                .map(Grant::read)
+                .collect(),
+        };
+        plan.grants
+            .extend(sb.modules.values().map(Grant::read_tree));
         if let Some(id) = module
             && sb.modules_with_userdata.contains(id)
             && let Some(root) = sb.modules.get(id)
         {
-            rw.push(root.join("userdata"));
+            plan.grants.push(Grant::write_tree(root.join("userdata")));
         }
-        rw.sort();
-        rw.dedup();
-        ro.sort();
-        ro.dedup();
-        ro_tree.sort();
-        ro_tree.dedup();
-        FenceSpec {
-            agent: sb.agent.clone(),
-            lease: sb.session.clone(),
-            rw,
-            ro,
-            ro_tree,
-            private: sb.private.clone(),
-            cwd: PathBuf::new(),
-            net: base.net,
-        }
+        plan.normalize();
+        plan
     }
 
     /// 目的：为一个会话派生**并集围栏**——覆盖它可能签发过的全部落点，用于撤销持久授权与生命周期。
-    pub fn for_session(sb: &Sandbox, host_roots: &[PathBuf], global_net: bool) -> FenceSpec {
-        let mut rw: Vec<PathBuf> = vec![sb.private.clone()];
-        let mut ro: Vec<PathBuf> = host_roots.to_vec();
-        let mut ro_tree: Vec<PathBuf> = sb.modules.values().cloned().collect();
-        for id in &sb.modules_with_userdata {
-            if let Some(root) = sb.modules.get(id) {
-                rw.push(root.join("userdata"));
-            }
-        }
-        rw.sort();
-        rw.dedup();
-        ro.sort();
-        ro.dedup();
-        ro_tree.sort();
-        ro_tree.dedup();
-        FenceSpec {
+    pub fn for_session(sb: &Sandbox, host_roots: &[PathBuf], global_net: bool) -> FencePlan {
+        let mut plan = FencePlan {
             agent: sb.agent.clone(),
             lease: sb.session.clone(),
-            rw,
-            ro,
-            ro_tree,
-            private: sb.private.clone(),
+            home: sb.private.clone(),
             cwd: PathBuf::new(),
-            net: global_net && sb.permissions.allows_network(),
-        }
+            net: NetPolicy::from_flag(global_net && sb.permissions.allows_network()),
+            grants: host_roots.iter().cloned().map(Grant::read).collect(),
+        };
+        plan.grants
+            .extend(sb.modules.values().map(Grant::read_tree));
+        plan.grants.extend(
+            sb.modules_with_userdata
+                .iter()
+                .filter_map(|id| sb.modules.get(id))
+                .map(|root| Grant::write_tree(root.join("userdata"))),
+        );
+        plan.normalize();
+        plan
     }
 
     /// 目的：**无会话**（人直接跑一个模块工具 / 常驻服务）的围栏——模块目录递归只读 + 它自己的 userdata 可写。
@@ -75,32 +66,27 @@ impl FenceSpec {
         module_root: &Path,
         work_root: Option<&Path>,
         has_userdata: bool,
-    ) -> FenceSpec {
+    ) -> FencePlan {
         let userdata = module_root.join("userdata");
-        let private = match work_root {
+        let home = match work_root {
             Some(p) => p.to_path_buf(),
             None if has_userdata => userdata.clone(),
             None => PathBuf::new(),
         };
-        let mut rw: Vec<PathBuf> = Vec::new();
-        if !private.as_os_str().is_empty() {
-            rw.push(private.clone());
-        }
-        if has_userdata && private != userdata {
-            rw.push(userdata);
-        }
-        rw.sort();
-        rw.dedup();
-        FenceSpec {
+        let mut plan = FencePlan {
             agent: "user".to_string(),
             lease: String::new(),
-            rw,
-            ro: Vec::new(),
-            ro_tree: vec![module_root.to_path_buf()],
-            private,
+            home,
             cwd: module_root.to_path_buf(),
-            net: false,
+            net: NetPolicy::Off,
+            grants: vec![Grant::read_tree(module_root)],
+        };
+        // 有自己的 userdata 且它没被 `home` 覆盖时，单独授一份写（模块自己的数据目录）。
+        if has_userdata && plan.home != userdata {
+            plan.grants.push(Grant::write_tree(userdata));
         }
+        plan.normalize();
+        plan
     }
 }
 
@@ -127,7 +113,7 @@ pub fn fence_ask(block: &FenceBlocked, name: &str, unfenced_possible: bool) -> O
     Some(Ask {
         role: "tools".to_string(),
         name: name.to_string(),
-        title: format!("围栏的{}装不上，这次调用怎么跑？", block.part.label()),
+        title: format!("围栏的{}装不上，这次调用怎么跑？", block.what),
         body: "按规则不许悄悄按无围栏执行。要么这一轮破例跑一次（这次就没有容器那层强制），要么放弃这次调用。"
             .to_string(),
         detail: block.line(),

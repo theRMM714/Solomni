@@ -9,7 +9,7 @@ use crate::capabilities::vm::api::{
     package_setup_scripts, resolve_guest,
 };
 use crate::capabilities::workspace::api::Sandboxes;
-use crate::kernel::api::fence::FenceSpec;
+use crate::kernel::api::fence::FencePlan;
 use crate::kernel::ports::{HostProbe, Log};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -104,15 +104,17 @@ impl GuestBoot {
             rw.sort();
             rw.dedup();
         }
-        let fence = FenceSpec {
+        let fence = FencePlan {
             agent: String::new(),
             lease: lease.clone(),
-            rw,
-            ro: host_read_roots.clone(),
-            ro_tree,
-            private: PathBuf::new(),
             cwd: PathBuf::new(),
-            net,
+            net: net.into(),
+            home: PathBuf::new(),
+            grants: crate::kernel::contracts::fence::grants_of(
+                rw,
+                host_read_roots.clone(),
+                ro_tree,
+            ),
         };
         // 挂载点走那座桥：同方言时是宿主原路径，跨方言时是 guest 镜像根。
         let bridge = image.bridge();

@@ -21,7 +21,7 @@ use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::tools::ports::SysIo;
 use crate::capabilities::workspace::ports::Workdirs;
-use crate::kernel::api::fence::FenceSpec;
+use crate::kernel::api::fence::FencePlan;
 use crate::kernel::api::types::ExecSpec;
 use crate::kernel::ports::{FenceHost, ProcessRunner};
 use crate::kernel::ports::{Log, NoopLog};
@@ -29,16 +29,14 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-fn spec() -> FenceSpec {
-    FenceSpec {
+fn spec() -> FencePlan {
+    FencePlan {
         agent: "a".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: Vec::new(),
+        home: PathBuf::new(),
         cwd: PathBuf::from("mods").join("m0"),
-        ro: Vec::new(),
-        net: false,
+        net: (false).into(),
+        grants: crate::kernel::contracts::fence::grants_of(Vec::new(), Vec::new(), Vec::new()),
     }
 }
 

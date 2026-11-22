@@ -1,7 +1,7 @@
 //! 目的：向对象写授权与撤授权——授一条 ACE（标准 / 对象 ACE）或按 SID 撤掉已有 ACE。
 //! 管：grant_one / grant_one_object_ace / write_ace / revoke_one 与它们对 SetEntriesInAclW 的拼装。
 //! 不管：写后核对与失败回滚（verify.rs）、哪些落点要授（target.rs）。
-//! 联动：windows/record 的按条撤销经 acl.rs 调到这里；落点由 prepare_fence 的 FenceSpec 决定。
+//! 联动：windows/record 的按条撤销经 acl.rs 调到这里；落点由 prepare_fence 的 FencePlan 决定。
 
 use super::ace::{GUID_LEN, guid_from_bytes};
 use super::*;

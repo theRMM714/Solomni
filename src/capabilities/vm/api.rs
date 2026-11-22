@@ -37,14 +37,14 @@ pub trait Vm: Send + Sync {
         &self,
         lease: &str,
         run: &GuestRun,
-        fence: &crate::kernel::api::fence::FenceSpec,
+        fence: &crate::kernel::api::fence::FencePlan,
     ) -> crate::kernel::api::types::ToolOutcome;
     /// 目的：在 guest 里跑一次可取消的围栏执行；默认退回 `guest_run_fenced`（测试 / 其它引擎）。
     fn guest_run_fenced_cancellable(
         &self,
         lease: &str,
         run: &GuestRun,
-        fence: &crate::kernel::api::fence::FenceSpec,
+        fence: &crate::kernel::api::fence::FencePlan,
         _cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> crate::kernel::api::types::ToolOutcome {
         self.guest_run_fenced(lease, run, fence)

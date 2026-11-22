@@ -5,7 +5,7 @@
 
 use super::super::windows;
 use super::super::{Ledger, ReconcileReport};
-use crate::kernel::contracts::fence::FenceSpec;
+use crate::kernel::contracts::fence::FencePlan;
 use std::path::Path;
 
 /// 目的：按会话租约撤 ACE、删 profile。
@@ -14,7 +14,7 @@ pub(super) fn release_by_lease(home: &Path, lease: &str) -> Result<(), String> {
 }
 
 /// 目的：一次性调用的三步收尾各记错、合并返回。
-pub(super) fn release_call(spec: &FenceSpec, home: &Path) -> Result<(), String> {
+pub(super) fn release_call(spec: &FencePlan, home: &Path) -> Result<(), String> {
     let mut errors: Vec<String> = Vec::new();
     if let Err(e) = windows::release_fence(spec, home) {
         errors.push(e);

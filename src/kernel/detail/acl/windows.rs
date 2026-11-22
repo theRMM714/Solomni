@@ -1,8 +1,8 @@
 //! 目的：Windows 安全描述符操作——逐路径改 DACL（授予 / 撤销）、解析 ACE 与 SID、展开泛型掩码、读强制完整性标签。
 //! 管：ACE 布局与身份、授权落点清单、ACE 写入与撤销、DACL 读数与还原、写后核对与在场判断、写 DACL 的资格预检、
 //!   完整性标签读数与挡写判据、解释器目录的基线判据；权限位常量与 TreeSetNamedSecurityInfoW 声明也只在这里。
-//! 不管：围栏策略（哪些根、什么权限）——由调用方传入的 FenceSpec 决定；容器身份（在 `container`）；台账（在 `ledger`）。
-//! 联动：由 `confine::prepare_fence` 逐条授权、由 `ledger` 的收尾撤销；容器 SID 派生在 `container`，两处共用同一批权限位。
+//! 不管：围栏策略（哪些根、什么权限）——由调用方传入的 FencePlan 决定；容器身份（在 `container`）；台账（在 `ledger`）。
+//! 联动：由 `confine::windows::prepare_fence` 逐条授权、由 `ledger` 的收尾撤销；容器 SID 派生在 `container`，两处共用同一批权限位。
 
 use std::ffi::c_void;
 use std::path::Path;
@@ -12,6 +12,7 @@ mod access;
 mod ace;
 mod grant;
 mod label;
+mod part;
 mod scan;
 mod sid;
 mod target;
@@ -23,13 +24,14 @@ pub(crate) use access::*;
 pub(crate) use ace::*;
 pub(crate) use grant::*;
 pub(crate) use label::*;
+pub(crate) use part::*;
 pub(crate) use scan::*;
 pub(crate) use sid::*;
 pub(crate) use target::*;
 pub(crate) use verify::*;
 
-/// 目的：围栏描述符（`FenceSpec` / `FencePart`）——授权落点清单按它算，入参形状来自契约。
-pub(crate) use crate::kernel::contracts::fence::{FencePart, FenceSpec};
+/// 目的：围栏意图（`FencePlan` / `Access` / `Reach`）——授权落点清单按它算，入参形状来自契约。
+pub(crate) use crate::kernel::contracts::fence::{Access, FencePlan, Reach};
 /// 目的：容器身份（`container`）的那批符号——ACL 层要按它派生 SID、转 UTF-16、放行解释器基线。
 pub(crate) use crate::kernel::detail::container::*;
 

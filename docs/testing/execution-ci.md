@@ -168,7 +168,7 @@ node run-tests.js --fence-live
 - 读用户目录下的解释器被拒：doctor 报「没有 python」、L4 真工具场景报 python 不可达；
 - 拉子进程 / 抓管道受会话沙箱限制（Node 管道 stdio 被 EPERM、`status` 为 null）：把 stdout 重定向到文件再读（`stdio: ["ignore", fd, "ignore"]`），不要用管道。这一条与完整性标签是两件事。
 
-- **路径二：显式 Medium 及以上 + `NO_WRITE_UP` 落在容器的授写叶子上 → 容器写不进。** AppContainer 令牌恒为 Low，写 Medium 对象被完整性检查挡掉，Win32 给 `1314`（`0x80070522`，`A required privilege is not held by the client` / 「客户端没有所需的特权」）。**宿主进程是 Medium，所以内置文件工具照常能写**——「工具能写、shell 写不进」的不对称就是这条，不是 DACL 授权坏了。产品侧由 `prepare_fence` 授权后读标签如实报 `FencePart::IntegrityLabel`（`src/kernel/detail/acl/windows/label.rs`），不再报成功。
+- **路径二：显式 Medium 及以上 + `NO_WRITE_UP` 落在容器的授写叶子上 → 容器写不进。** AppContainer 令牌恒为 Low，写 Medium 对象被完整性检查挡掉，Win32 给 `1314`（`0x80070522`，`A required privilege is not held by the client` / 「客户端没有所需的特权」）。**宿主进程是 Medium，所以内置文件工具照常能写**——「工具能写、shell 写不进」的不对称就是这条，不是 DACL 授权坏了。产品侧由 `prepare_fence` 授权后读标签如实报「落点的完整性标签」这一环（`FencePart::IntegrityLabel`，`src/kernel/detail/acl/windows/label.rs`），不再报成功。
 
 - **判据（两条都要查）**：
 

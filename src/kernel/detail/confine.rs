@@ -1,31 +1,33 @@
 //! 目的：守门进程——把围栏装进工具进程，然后才跑模块声明的命令（实现 tools 的围栏策略）。
-//! 管：按平台把围栏（可读可写的根、断网、进程树围栏、资源上限）装好，并给出「本机能力」与
-//!   「本次实际」（effective_paths）的同一份判据；平台实现分文件 linux.rs / macos.rs / windows/ / other.rs。
+//! 管：把**意图**（FencePlan：哪些路径什么权限、网络开不开）交给平台后端去落成该平台的机制，
+//!   并给出「本机能力」与「本次实际」（effective_paths）的同一份判据。
+//!   平台差异全部收在 trait Confine 的四个实现里（linux.rs / macos.rs / windows.rs / other.rs）：
+//!   上层只认计划，不认 Landlock / seatbelt / AppContainer。
 //! 不管：策略（哪些根可达、放不放网）——由 runtime 派生后经命令行传入。
 //! 联动：能力不足时如实上报（capability），降级而非崩溃——绝不静默假装有围栏。
 
-use crate::kernel::contracts::fence::FenceSpec;
-use std::path::PathBuf;
+use crate::kernel::contracts::fence::{FencePlan, FenceRunPolicy};
+use std::path::{Path, PathBuf};
 
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-use linux as backend;
+use linux as platform;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
-use macos as backend;
+use macos as platform;
 #[cfg(windows)]
 pub(crate) mod windows;
 #[cfg(windows)]
-use windows as backend;
+use windows as platform;
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 mod other;
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-use other as backend;
+use other as platform;
 
 mod job;
-mod prep;
+pub(crate) mod prep;
 
 #[cfg(test)]
 mod tests;
@@ -60,16 +62,54 @@ pub(crate) fn selfcheck_forced_unavailable() -> bool {
     std::env::var_os(SELFCHECK_FAIL_FLAG).is_some()
 }
 
+/// 目的：本机后端——三平台各一个实现，上层只通过这个 trait 说话。
+/// 约束：实现只做**本平台机制的落成**，不判断该不该授予（那是策略层的事，计划里已经定死）；
+///   各自的独有步骤（Windows 的 ACL 授权、Linux 的 seccomp 规则）都留在实现内部，不出现在这里：
+///   「先写 ACL」只有 Windows 有，所以它是 Windows 后端自己的入口（`confine::windows::prepare_fence`），
+///   不占这个 trait 的位置；调用点都在 Windows 专用文件里，公共路径上没有平台分支。
+pub(crate) trait Confine: Sync {
+    /// 目的：本机能强制的围栏等级（启动报告用）。
+    fn capability(&self) -> Capability;
+
+    /// 目的：机制层自检（不写本机任何权限项）。
+    fn verify(&self, plan: &FencePlan, command: &str) -> FenceVerdict;
+
+    /// 目的：本次实际生效的路径级围栏（文件系统, 断网）。
+    fn effective_paths(&self, fs: bool, net: bool, write_allowed: bool) -> (bool, bool);
+
+    /// 目的：装围栏 → 跑命令 → 返回退出码。
+    fn run(
+        &self,
+        plan: &FencePlan,
+        prepared: Prepared,
+        command: &str,
+        policy: &FenceRunPolicy,
+    ) -> i32;
+}
+
+/// 目的：守门进程拿到的「外层已经把本机授权做完了吗」——授权是宿主侧动作，随这次执行交进来。
+pub(crate) struct Prepared<'a> {
+    /// 目的：外层是否成功写下了本机权限项（失败时按机制结论降级或拒绝）。
+    pub prepared: bool,
+    /// 目的：产品私有区（台账落点）；探针等没有台账的调用方给 None。
+    pub home: Option<&'a Path>,
+}
+
+/// 目的：本平台后端（静态单例：后端无状态，机制状态都在系统里）。
+pub(crate) fn backend() -> &'static dyn Confine {
+    &platform::Backend
+}
+
 /// 目的：本机能不能强制住这次执行的围栏（机制层自检，**不写本机任何权限项**）。
 ///   未授权时段靠它把「环境不允许」与「我们写错了」分开——后者绝不能被当成降级吞掉。
-pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
+pub fn verify(spec: &FencePlan, command: &str) -> FenceVerdict {
     if selfcheck_forced_unavailable() {
         return FenceVerdict::EnvUnavailable(format!(
             "{}（测试注入：按本机不允许处理）",
             SELFCHECK_FAIL_FLAG
         ));
     }
-    backend::verify(spec, command)
+    backend().verify(spec, command)
 }
 
 /// 目的：围栏授权释放的适配器（实现 kernel 共享的 FenceHost 端口）：runtime 只说「这个会话的围栏撤掉」。
@@ -93,7 +133,7 @@ impl crate::kernel::ports::FenceHost for FenceHostAdapter {
 
     /// 目的：一次**一次性调用**的收尾——撤它自己的 ACE、删它的按次 profile、删 `private/Packages/<名字>` 空壳。
     /// 约束：三步各自记错、合并返回；profile 删不掉时临时目录仍要尽力清（它只是宿主侧的空壳）。
-    fn release_call(&self, spec: &FenceSpec) -> Result<(), String> {
+    fn release_call(&self, spec: &FencePlan) -> Result<(), String> {
         crate::kernel::detail::ledger::release_call(spec, &self.home)
     }
 }
@@ -113,7 +153,7 @@ pub struct Capability {
 
 /// 目的：本机能力（装配期如实告知）。
 pub fn capability() -> Capability {
-    backend::capability()
+    backend().capability()
 }
 
 impl Capability {
@@ -121,7 +161,7 @@ impl Capability {
     ///   只有有「外层写 ACL」这一步的平台依赖授权；其余平台的围栏在守门进程里自足。
     ///   进程树围栏不受授权影响，调用方直接用 `Capability::tree`。
     pub fn effective_paths(&self, write_allowed: bool) -> (bool, bool) {
-        backend::effective_paths(self.fs, self.net, write_allowed)
+        backend().effective_paths(self.fs, self.net, write_allowed)
     }
 }
 
@@ -137,8 +177,6 @@ pub use prep::FencePrep;
 pub use prep::FenceStep;
 #[cfg(all(test, windows))]
 pub use prep::clean;
-#[cfg(windows)]
-pub use prep::prepare_fence;
 pub use prep::{machine_ensure, machine_missing, retire_legacy_machine_grants};
 
 pub(crate) use crate::kernel::detail::acl::interpreter_dir_usable;

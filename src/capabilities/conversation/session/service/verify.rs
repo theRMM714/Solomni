@@ -11,7 +11,7 @@ use crate::capabilities::llm::api::{Llm, ToolMode};
 use crate::capabilities::tools::api::{Observations, ToolBook, ToolExec, ToolNotes, Tools};
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::workspace::api::Sandbox;
-use crate::kernel::api::fence::FenceSpec;
+use crate::kernel::api::fence::FencePlan;
 use crate::kernel::api::types::Tier;
 use crate::kernel::ports::Log;
 
@@ -71,7 +71,7 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
             tools_this_turn: spec.tools_this_turn.to_string(),
             builtin_tools: book,
             unavailable: std::collections::BTreeMap::new(),
-            fence: FenceSpec::for_session(&sb, &[], spec.net),
+            fence: FencePlan::for_session(&sb, &[], spec.net),
             // 核心核实用的是只读内置工具，没有模块工具进程，也就没有注入项。
             module_env: Default::default(),
             runtime_path: None,

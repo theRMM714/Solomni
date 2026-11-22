@@ -105,7 +105,7 @@ impl ToolExec for ToolsService {
     fn run_module(
         &self,
         module: &str,
-        fence: &crate::kernel::api::fence::FenceSpec,
+        fence: &crate::kernel::api::fence::FencePlan,
         command: &str,
         args_json: &str,
         env: &[(String, String)],
@@ -201,7 +201,7 @@ impl ToolExec for ToolsService {
         }
     }
 
-    fn release_call(&self, spec: &crate::kernel::api::fence::FenceSpec) -> Result<(), String> {
+    fn release_call(&self, spec: &crate::kernel::api::fence::FencePlan) -> Result<(), String> {
         self.fence.release_call(spec)
     }
 

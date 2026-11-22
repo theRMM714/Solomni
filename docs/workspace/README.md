@@ -45,7 +45,7 @@
   - 提交记录带 `CommitAnchor(agent, session, line)`（会话不可省：同名 agent 在不同会话里行号都从 1 数，缺会话会串），回档据此按行精确定位；**没有锚的提交不参与选点**（外部同步与用户投喂都带锚，无锚 = 来历不明，不能被当成"留档点之前"）。留档引用 `refs/archive/<id>` 记 `target`（留档前的主线头）、`heads`（各 agent 自己的工作线头）、`saves`（各 agent 存档线头）与 `since`（留档时刻的下一个提交号）：恢复到档案头、工作线与存档线各回各的头，然后丢弃 `since` 及之后的提交，留档之后长出来的分叉一并作废。
   - 出站端口 `Workdirs` / **`WorkStore`**（版本库落盘：流式资产原语 + 跨根复制（备份 / 恢复）+ 内容寻址对象 + 提交记录 + 拉取基线 + 待恢复事务 + 提交号 + 跨进程锁 + 对象回收）**只由 `service.rs` 持有**（R12）。
 - 模块事实（含 `has_userdata`）由 `modules` 提供：沙箱把它收成 `modules_with_userdata` 一起注入，围栏派生据此决定派不派这条落点——domain 层不读盘。
-- 沙箱还带**会话 id**（`Sandbox.session`）：围栏把它当容器身份里的会话租约，配合 agent 与受保护根集合派生 SID（见 [docs/kernel/README.md](../kernel/README.md) 的「身份按 reach、生命周期按会话」）；授权按会话持有，会话结束统一回收。
+- 沙箱还带**会话 id**（`Sandbox.session`）：围栏把它当容器身份里的会话租约，配合 agent 与受保护根集合派生 SID（见 [docs/kernel/README.md](../kernel/README.md) 的「身份按会话与 agent、生命周期按会话」）；授权按会话持有，会话结束统一回收。
 - 虚拟机档的沙箱还带**路径翻译器**（`Sandbox.path_codec`，本机档为 None = 恒等）：系统工具寻址、模块工具在 guest 里执行、以及用户 `@` 引用的改写共用同一座桥，三处给的是同一种写法（见 [docs/tools/tools-and-roles.md](../tools/tools-and-roles.md) 的「路径模型」）。沙箱清单 `Sandboxes` 另存同一份 `codec`：协作的 `@` 改写发生在**名单确认之前**（那时 `list` 还是空的），由 `Sandboxes::ref_roots()` 取用。
 - 状态归属：共享区工作区（提交记录、拉取基线、待恢复事务、锁）由本单元持有；会话与沙箱清单由调用方传入。
 

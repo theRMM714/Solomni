@@ -30,7 +30,7 @@
 | `online` | 联网 | 是，且仍受全局 `sandbox.policy.network` 约束 |
 
 - 两档只差一个开关：`PermissionSet { profile }`，`allows_network()` 是它唯一的行为。
-- 全局 `sandbox.policy.network` 是硬上限：`online` 档在它关闭时仍然不能出站（`FenceSpec.net = global_net && permissions.allows_network()`）。
+- 全局 `sandbox.policy.network` 是硬上限：`online` 档在它关闭时仍然不能出站（`FencePlan.net = global_net && permissions.allows_network()`）。
 - 档位名不描述「能读哪里」——没有那样的档位，也没有逐工具决定。
 
 ## 二、固定授予（不经权限判定）
@@ -57,8 +57,8 @@
 
 ## 五、围栏派生
 
-- `FenceSpec::for_call(sandbox, module, base)`：`rw` = 私有沙箱（+ 该模块 `userdata`，若模块有）；`ro` = 主机只读根；`ro_tree` = 全部模块目录；`net` = 全局开关与档位求交。不再有按 reach 的分支。
-- `FenceSpec::for_session(sandbox, host_roots, global_net)`：同一套固定并集，只作会话 base；撤销走会话租约（`release_by_lease`）。
+- `FencePlan::for_call(sandbox, module, base)`：`home` = 私有沙箱（隐含一条写授予）；`grants` = 主机只读根（`Grant::read`）+ 全部模块目录（只读子树）+ 该模块 `userdata`（写子树，若模块有）；`net` = 全局开关与档位求交。不再有按 reach 的分支。
+- `FencePlan::for_session(sandbox, host_roots, global_net)`：同一套固定并集，只作会话 base；撤销走会话租约（`release_by_lease`）。
 - VM guest 的 per-call 断网由 guest helper 按策略里的 net 做 `unshare(CLONE_NEWNET)`；失败 fail-closed。
 - Windows 的容器身份 = `会话租约 + agent`（**不含可达根集合**）：同一 `(agent, shell)` 的调用复用 SID 与 ACL，档位切换不需要重写 DACL。
 
@@ -73,7 +73,7 @@
 
 - 只有两档，且两档只差网络（`profiles_are_two_tiers_that_differ_only_in_network`，`src/tests/permission.rs`）。
 - 根可换档、子只能收窄、空层不改生效态（`permission_set_root_and_narrowing_only_touch_the_tier`，`src/tests/permission.rs`）。
-- 围栏的固定并集：私有沙箱 + 该模块 `userdata` 进 rw、模块目录进 ro_tree、`net` 与全局开关求交（`fence_spec_grants_fixed_surfaces`）。
+- 围栏的固定并集：私有沙箱（`home`）+ 该模块 `userdata` 可写、模块目录只读子树、`net` 与全局开关求交（`fence_spec_grants_fixed_surfaces`）。
 - 共享区三态与黑名单：序列化、交集、收窄不放大（`shared_scope_narrowing_never_widens`、`shared_scope_serde_and_merge_edges`，`src/tests/permission.rs`）。
 - 工作工具的路径过滤跟着读范围走（`work_status_filters_paths_outside_read_scope`、`work_lost_is_scoped_by_read_permission`、`work_versions_and_resolve_are_scoped_by_read_permission`）；`write=none` 时提交 / 推送被拒（`no_write_scope_refuses_commit_and_push`）。
 - 工具面只由角色面决定，档位不裁剪（`profile_does_not_change_the_tool_face`，`src/tests/tools/shell.rs`）。
@@ -84,7 +84,7 @@
 
 - 改语义 → 本页 + `REGISTRY_SPEC.md`（settings 的 sandbox 段）+ `docs/session/session-model.md`（meta 的会话级 sandbox）。
 - 改共享区归属 → `docs/workspace/README.md`、`docs/tools/tools-and-roles.md` 的路径模型。
-- 改 `FenceSpec` 字段 → 三平台后端与跨平台字面量门禁（`src/kernel/contracts/fence.rs`）。
+- 改 `FencePlan` / `Grant` / `NetPolicy` 字段 → 三平台后端（`trait Confine` 的四个实现）与跨平台字面量门禁（`src/kernel/contracts/fence.rs`）。
 - 改档位 → `systools/tools.yaml`、`docs/tools/tools-and-roles.md`、Web 配置页与冒烟。
 
 ## 本目录

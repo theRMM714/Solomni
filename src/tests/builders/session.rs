@@ -74,7 +74,7 @@ pub(crate) fn member_with_tools(
                     .to_string(),
                 builtin_tools: test_systools().tools,
                 unavailable: BTreeMap::new(),
-                fence: crate::kernel::api::fence::FenceSpec::for_session(
+                fence: crate::kernel::api::fence::FencePlan::for_session(
                     &test_sandbox("m0", &[]),
                     &[],
                     false,

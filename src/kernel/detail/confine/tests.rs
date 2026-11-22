@@ -71,15 +71,17 @@ fn admin_actions_degrade_without_acl_support() {
 /// 这里只钉注入开关本身的语义。
 #[test]
 fn selfcheck_injection_switch_reports_env_unavailable() {
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "a".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![PathBuf::from("demo").join("work")],
         cwd: PathBuf::from("mods").join("m0"),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![PathBuf::from("demo").join("work")],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     // 运行期不该有这个开关（探针自己给守门进程带）。
     assert!(!selfcheck_forced_unavailable(), "运行期不该有这个开关");
@@ -237,44 +239,48 @@ fn view_program_command_translates_programs_inside_the_root() {
     assert_eq!(view_program_command("./x.exe", &view), "./x.exe");
 }
 
-/// 守门进程的入参是**扁平** JSON：FenceSpec 的字段同层再加一个 prepared；
+/// 守门进程的入参是**扁平** JSON：FencePlan 的字段同层再加一个 prepared；
 /// 缺字段一律报错（不默认成"有授权"——那会把容器送进一个读不到东西的环境）。
 #[test]
 fn fence_job_round_trips_and_rejects_incomplete_json() {
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "a".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![PathBuf::from("demo").join("work")],
         cwd: PathBuf::from("mods").join("m0"),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![PathBuf::from("demo").join("work")],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let job = FenceJob {
-        spec,
+        plan: spec,
         prepared: true,
-        home: Some(PathBuf::from("home")),
+        product_home: Some(PathBuf::from("home")),
         policy: Default::default(),
     };
     let text = job.to_json();
     assert!(text.contains("\"prepared\":true"), "{}", text);
     assert_eq!(FenceJob::from_json(&text).expect("回读守门进程入参"), job);
-    // 没有台账可落是合法形态（探针），所以 home 允许缺省；prepared 缺了才报错。
-    let bare = FenceSpec {
+    // 没有台账可落是合法形态（探针），所以 product_home 允许缺省；prepared 缺了才报错。
+    let bare = FencePlan {
         agent: "b".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![PathBuf::from("demo").join("work")],
         cwd: PathBuf::from("mods").join("m1"),
-        ro: Vec::new(),
-        net: true,
+        net: true.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![PathBuf::from("demo").join("work")],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let no_home = FenceJob {
-        spec: bare,
+        plan: bare,
         prepared: false,
-        home: None,
+        product_home: None,
         policy: Default::default(),
     };
     assert_eq!(
@@ -570,15 +576,13 @@ fn node_commands_get_the_realpath_skip_and_nothing_else_does() {
 /// 非 node 命令在三平台都不带解释器开关：那是 Windows 容器独有的补丁（另两个平台 realpath 正常）。
 #[test]
 fn non_node_commands_carry_no_interpreter_switch() {
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "a".to_string(),
         lease: String::new(),
-        rw: Vec::new(),
-        ro: Vec::new(),
-        ro_tree: Vec::new(),
-        private: PathBuf::new(),
         cwd: PathBuf::from("mods").join("m0"),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(Vec::new(), Vec::new(), Vec::new()),
     };
     let keys: Vec<String> = fence_env(&spec, "python tools/x.py")
         .into_iter()

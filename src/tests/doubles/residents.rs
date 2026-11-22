@@ -67,10 +67,10 @@ impl crate::capabilities::residents::ports::ServiceAdapter for FakeServiceAdapte
             .push(format!("start:{}", spec.name));
         self.envs.lock().expect("锁").extend(spec.env.clone());
         self.paths.lock().expect("锁").push(spec.path.clone());
-        self.roots
-            .lock()
-            .expect("锁")
-            .push(spec.fence.ro_tree.clone());
+        self.roots.lock().expect("锁").push(spec.fence.paths(
+            crate::kernel::api::fence::Access::Read,
+            crate::kernel::api::fence::Reach::Tree,
+        ));
         Ok((
             Box::new(FakeServiceInstance {
                 calls: Arc::clone(&self.calls),
@@ -272,7 +272,7 @@ pub(crate) fn member_with_service_tools(
                 .to_string(),
             builtin_tools: test_systools().tools,
             unavailable: BTreeMap::new(),
-            fence: crate::kernel::api::fence::FenceSpec::for_session(&sb, &[], false),
+            fence: crate::kernel::api::fence::FencePlan::for_session(&sb, &[], false),
             module_env: Default::default(),
             runtime_path: None,
             runtime_roots: Vec::new(),

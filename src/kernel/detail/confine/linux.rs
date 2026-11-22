@@ -1,13 +1,13 @@
 //! 目的：Linux 后端——Landlock（内核 5.13+）把「可达到哪些路径」变成内核强制，seccomp 把「能不能建网络 socket」变成内核强制；
 //!   两者都不需要 root、不需要额外二进制。
-//! 管：规则——spec.rw 的每个根读写与目录操作；运行基线（系统只读区）只读可执行；其余一律拒绝。
-//!   断网——`net=false` 时用 seccomp 拒绝非 AF_UNIX / AF_NETLINK socket（TCP / UDP / raw 都出不去），
-//!   `net=true` 不装网络过滤器（Linux 没有与 Windows / macOS 对等的入站限制，平台差异见 docs/kernel/README.md）。
+//! 管：规则——计划里的每条授予（写授予读写与目录操作、读授予只读）、运行基线（系统只读区）只读可执行；其余一律拒绝。
+//!   断网——`net=Off` 时用 seccomp 拒绝非 AF_UNIX / AF_NETLINK socket（TCP / UDP / raw 都出不去），
+//!   `net=Public` 不装网络过滤器（Linux 没有与 Windows / macOS 对等的入站限制，平台差异见 docs/kernel/README.md）。
 //! 不管：虚拟机档网络——由 QEMU 网卡决定。
 //! 联动：机制不可用时（老内核、规则被内核拒、seccomp 不可用）如实降级并打印说明；能力等级在启动报告里已如实告知。
 
 use super::{Capability, FENCE_FAILED, FenceVerdict, shell_command};
-use crate::kernel::contracts::fence::FenceSpec;
+use crate::kernel::contracts::fence::{Access, FencePlan};
 use crate::kernel::detail::launch::interpreter_dirs;
 use std::ffi::CString;
 use std::os::raw::c_int;
@@ -429,7 +429,7 @@ pub fn capability() -> Capability {
 /// 目的：`_prepared`（外层是否已完成本机授权）与 `_home`（容器 profile 的台账落点）只有 Windows 的容器围栏用得上：
 ///   Linux 的 Landlock 在守门进程里自足，也没有容器 profile 这一步。
 pub fn run_fenced(
-    spec: &FenceSpec,
+    spec: &FencePlan,
     _prepared: bool,
     _home: Option<&std::path::Path>,
     command: &str,
@@ -437,7 +437,7 @@ pub fn run_fenced(
 ) -> i32 {
     // 文件系统与网络**独立**收口：一项装不上不该把另一项也丢掉。
     let fs = install_filesystem(spec, command);
-    let net = if spec.net { Ok(()) } else { install_net() };
+    let net = if spec.net.on() { Ok(()) } else { install_net() };
     let fs_error = fs.as_ref().err();
     let net_error = net.as_ref().err();
     let required =
@@ -493,20 +493,20 @@ pub fn effective_paths(fs: bool, net: bool, _write_allowed: bool) -> (bool, bool
     (fs, net)
 }
 
-pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
+pub fn verify(spec: &FencePlan, command: &str) -> FenceVerdict {
     if !landlock_confines() {
         return FenceVerdict::EnvUnavailable(
             "本机 Landlock 不产生实际约束（内核不支持，或规则被内核拒绝）".to_string(),
         );
     }
-    if !spec.net && !network_confines() {
+    if !spec.net.on() && !network_confines() {
         return FenceVerdict::EnvUnavailable(
             "本机 seccomp 不产生实际约束（内核不支持或环境不允许）".to_string(),
         );
     }
     // 两条路都试一遍：自检说机制有效却装不上 = 我们写错了，如实归到 Broken。
     let fs = install_rules(spec, command);
-    let net = if spec.net { Ok(()) } else { install_net() };
+    let net = if spec.net.on() { Ok(()) } else { install_net() };
     match (fs, net) {
         (Ok(()), Ok(())) => FenceVerdict::Enforced,
         (Err(e), _) => FenceVerdict::Broken(e),
@@ -515,7 +515,7 @@ pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
 }
 
 /// 守门进程路径：装文件系统围栏（自检不过与规则装不上都如实降级照跑——能力等级已在启动报告里说过）。
-fn install_filesystem(spec: &FenceSpec, command: &str) -> Result<(), String> {
+fn install_filesystem(spec: &FencePlan, command: &str) -> Result<(), String> {
     if !landlock_confines() {
         return Err("本机 Landlock 不产生实际约束（内核不支持，或规则被内核拒绝）".to_string());
     }
@@ -523,7 +523,7 @@ fn install_filesystem(spec: &FenceSpec, command: &str) -> Result<(), String> {
 }
 
 /// 装规则（自检由调用方先做）：走到这里才失败 = 规则/安装步骤写错，一律带稳定标记。
-fn install_rules(spec: &FenceSpec, command: &str) -> Result<(), String> {
+fn install_rules(spec: &FencePlan, command: &str) -> Result<(), String> {
     let abi = abi_version().map_err(rules_rejected)?;
     let attr = RulesetAttr {
         handled_access_fs: mask_for(abi, RW_ALL | RO_ALL),
@@ -539,25 +539,21 @@ fn install_rules(spec: &FenceSpec, command: &str) -> Result<(), String> {
     // 后续 add_rule 要 open 的路径可能已打不开（会被误报成「规则被拒绝」）；先算清楚再装。
     let mut wanted: Vec<(PathBuf, u64)> = Vec::new();
     let allowed_rw = mask_for(abi, RW_ALL);
-    for root in &spec.rw {
-        wanted.push((root.clone(), allowed_rw));
+    // 私有沙箱：工具进程的 HOME / TEMP 在这里，整棵子树读写。
+    if !spec.home.as_os_str().is_empty() {
+        wanted.push((spec.home.clone(), allowed_rw));
     }
-    // 工作目录（模块根）：工具进程要能在里面起（读 + 执行），但**不因此获得写**——
-    // 模块目录对 agent 只读；写权只能来自 rw（私有沙箱与模块自己的 userdata）。
-    if !spec.cwd.as_os_str().is_empty() {
-        wanted.push((spec.cwd.clone(), RO_ALL));
-    }
-    // 用户显式授权的主机只读根（`sandbox.policy.host_read_roots`）：只给只读位，一个写位都不给。
-    for root in &spec.ro {
-        if !root.as_os_str().is_empty() {
-            wanted.push((root.clone(), RO_ALL));
+    // 其余授予照意图逐条落实：写授予给读写位，读授予**一个写位都不给**。
+    // Landlock 只有子树粒度（path-beneath），所以 Dir 与 Tree 在这里同价——按 Tree 落实，如实放宽（见 `Reach`）。
+    for grant in &spec.grants {
+        if grant.path.as_os_str().is_empty() {
+            continue;
         }
-    }
-    // 只读子树（模块目录对 agent 只读）：同为只读；与 ro 的分野只在 Windows 的递归位上。
-    for root in &spec.ro_tree {
-        if !root.as_os_str().is_empty() {
-            wanted.push((root.clone(), RO_ALL));
-        }
+        let access = match grant.access {
+            Access::Write => allowed_rw,
+            Access::Read => RO_ALL,
+        };
+        wanted.push((grant.path.clone(), access));
     }
     for p in READ_ONLY_BASELINE {
         if WRITABLE_BASELINE.contains(p) {
@@ -639,4 +635,30 @@ fn add_rule(ruleset_fd: i32, path: &Path, access: u64) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// 目的：本平台后端（Landlock 文件围栏 + seccomp 断网）。
+pub(crate) struct Backend;
+
+impl super::Confine for Backend {
+    fn capability(&self) -> super::Capability {
+        capability()
+    }
+
+    fn verify(&self, plan: &FencePlan, command: &str) -> super::FenceVerdict {
+        verify(plan, command)
+    }
+
+    fn effective_paths(&self, fs: bool, net: bool, write_allowed: bool) -> (bool, bool) {
+        effective_paths(fs, net, write_allowed)
+    }
+    fn run(
+        &self,
+        plan: &FencePlan,
+        prepared: super::Prepared,
+        command: &str,
+        policy: &crate::kernel::contracts::fence::FenceRunPolicy,
+    ) -> i32 {
+        run_fenced(plan, prepared.prepared, prepared.home, command, policy)
+    }
 }

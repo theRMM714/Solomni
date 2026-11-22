@@ -1,11 +1,10 @@
 //! 目的：Windows 后端——AppContainer（文件系统与网络围栏）+ Job Object（进程树围栏）。
 //! 管：按 agent 派生容器 SID，逐条授权可达范围（沙箱/模块目录/解释器目录），再用 STARTUPINFOEX 启动工具（按 net 授/不授 internetClient）。
 //! 不管：祖先目录不用授**穿过**（容器令牌自带 SeChangeNotifyPrivilege）；例外是 shell 的 cwd = private 时给祖先只读属性（PowerShell 解析 cwd 需要），不递归、不继承、不授内容。
-//! 联动：授权与撤销由外层进程做（见 confine::prepare_fence），守门进程只按同一个名字派生同一个 SID；机制不可用时一律如实降级。
+//! 联动：授权与撤销由外层进程做（见 confine::windows::prepare_fence），守门进程只按同一个名字派生同一个 SID；机制不可用时一律如实降级。
 
 use super::{Capability, FENCE_FAILED, FencePrep, FenceStep, FenceVerdict, shell_command};
-use crate::kernel::contracts::fence::FencePart;
-use crate::kernel::contracts::fence::FenceSpec;
+use crate::kernel::contracts::fence::FencePlan;
 use std::sync::OnceLock;
 use std::time::Instant;
 
@@ -18,6 +17,11 @@ pub(crate) use machine::*;
 pub(crate) mod tests;
 use std::path::{Path, PathBuf};
 use windows_sys::Win32::Security::PSID;
+
+/// 目的：把一个落点环节的失败如实记进这次准备（环节名与补法由 ACL 层的 `part.rs` 定，这里只转述）。
+fn record(prep: &mut FencePrep, part: FencePart, path: PathBuf, why: String) {
+    prep.fail(part.blocked(path, why), part.necessary());
+}
 
 /// 目的：一次工具执行最多这么多进程（含 shell 与它拉起的子进程）。
 pub(crate) const MAX_PROCESSES: u32 = 32;
@@ -148,7 +152,7 @@ fn print_slow_summary(prep: &FencePrep) {
 ///   容器数据边界按本次调用记（收尾可精确撤）；祖先链的只读属性、可信执行基座是**机器级**——授给本产品能力 SID、
 ///   跨会话复用（见 is_machine_target / is_trusted_base 与 record 的 GrantScope）。
 ///   台账锁只罩「读—改—写」（record/store.rs 的 with_ledger）：慢的 ACL 写在锁外，并发调用不互相排队。
-pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep {
+pub fn prepare_fence(spec: &FencePlan, command: &str, home: &Path) -> FencePrep {
     // 这一轮真正写下去的授权（用于如实打印足迹）。
     let mut written: Vec<(String, PathBuf, u32)> = Vec::new();
     let mut prep = FencePrep::default();
@@ -158,7 +162,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
     // 慢的 ACL 写不占锁——同进程并发调用不会因某一条 193 秒的整树重算互相排队。
     if let Err(e) = with_ledger(home, |_| Ok::<(), String>(())) {
         eprintln!("[围栏] 授权台账落盘失败：{}", e);
-        prep.fail(FencePart::Ledger, PathBuf::new(), e);
+        record(&mut prep, FencePart::Ledger, PathBuf::new(), e);
         return prep;
     }
     // 容器数据授权带本次会话的租约：同名 agent 的多个并发会话各持一份，释放时互不影响。
@@ -172,14 +176,14 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
         journal_add_profile(home, rec, &container, container_owner.clone())
     }) {
         eprintln!("[围栏] 授权台账落盘失败：{}", e);
-        prep.fail(FencePart::Ledger, PathBuf::new(), e);
+        record(&mut prep, FencePart::Ledger, PathBuf::new(), e);
         return prep;
     }
     // 基线都授给本产品的能力 SID（与 agent 无关）：已有**够用**的 ACE 就跳过，第一次之后不再重走整棵树。
     let base_owned = match product_capability_sid() {
         Ok(sid) => sid,
         Err(e) => {
-            prep.fail(FencePart::Interpreter, PathBuf::new(), e);
+            record(&mut prep, FencePart::Interpreter, PathBuf::new(), e);
             return prep;
         }
     };
@@ -200,7 +204,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
         // 预检即终局：这一条授权写不进去时，连尝试都不做——不产生"写一半/回滚"的状态。
         if let Err(why) = interpreter_dir_usable(&dir) {
             eprintln!("[围栏] 解释器目录不可授权（{}）：{}", dir.display(), why);
-            prep.fail(FencePart::Interpreter, dir, why);
+            record(&mut prep, FencePart::Interpreter, dir, why);
             continue;
         }
         let target = GrantTarget {
@@ -220,7 +224,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             Ok(false) => {}
             Err(e) => {
                 eprintln!("[围栏] 解释器目录授权未完成（{}）：{}", dir.display(), e);
-                prep.fail(FencePart::Interpreter, dir, e);
+                record(&mut prep, FencePart::Interpreter, dir, e);
             }
         }
     }
@@ -230,7 +234,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
         Ok(sid) => sid,
         Err(e) => {
             // 派生不出容器身份就谈不上围栏：必要的一环，如实收尾（不再动任何权限项）。
-            prep.fail(FencePart::ContainerIdentity, PathBuf::new(), e);
+            record(&mut prep, FencePart::ContainerIdentity, PathBuf::new(), e);
             return prep;
         }
     };
@@ -250,9 +254,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
     // 模块工具的 cwd 是模块根，不走视图盘；它本来就不算深叶（deep 只对 cwd == private 成立），只补一条直接父目录 STAT。
     let shell_view = crate::kernel::detail::view_drive::active_shell_view(spec).is_some();
     let plan_root = shell_view.then_some(root.as_path());
-    // shell 的 cwd == private：读写叶子已经覆盖 cwd，视图生效时不再重复加一条只读 cwd 叶子。
-    let cwd_leaf = !shell_view;
-    let todo = grant_targets(spec, plan_root, cwd_leaf);
+    let todo = grant_targets(spec, plan_root);
     // 本轮写下去的机器级授权条数（祖先链 + 可信基座；只用于在"已写权限"行后补一句去向说明）。
     let mut machine_written = 0usize;
     for target in todo {
@@ -279,7 +281,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
                 Ok(false) => {}
                 Err(e) => {
                     eprintln!("[围栏] 机器级授权未完成（{}）：{}", path.display(), e);
-                    prep.fail(target.part, target.path.clone(), e);
+                    record(&mut prep, target.part, target.path.clone(), e);
                 }
             }
             continue;
@@ -301,7 +303,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
                 Ok(false) => {}
                 Err(e) => {
                     eprintln!("[围栏] 可信基座授权未完成（{}）：{}", path.display(), e);
-                    prep.fail(target.part, target.path.clone(), e);
+                    record(&mut prep, target.part, target.path.clone(), e);
                 }
             }
             continue;
@@ -328,7 +330,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             Err(e) => {
                 // 按这一环的**必要性**分流：必要落点授不上要问用户（不许降级），可选落点只记事实。
                 eprintln!("[围栏] 授权未完成：{}", e);
-                prep.fail(target.part, target.path.clone(), e);
+                record(&mut prep, target.part, target.path.clone(), e);
             }
         }
     }
@@ -367,8 +369,8 @@ pub(crate) fn is_machine_target(target: &GrantTarget) -> bool {
 /// 约束：只读、不递归，只看**授写叶子本身**：写一个对象只对它做完整性检查，祖先只被穿过（不算写），
 ///   所以祖先带标签不挡叶子；叶子继承到的标签会出现在它自己的 SACL 里，读叶子就够。
 ///   命中按必要落点走 FencePrep::fail（裁决 / fail-closed），不静默报成功。
-fn check_integrity_labels(spec: &FenceSpec, prep: &mut FencePrep) {
-    for leaf in &spec.rw {
+fn check_integrity_labels(spec: &FencePlan, prep: &mut FencePrep) {
+    for leaf in &spec.write_roots() {
         if leaf.as_os_str().is_empty() || missing(leaf) {
             continue;
         }
@@ -380,12 +382,12 @@ fn check_integrity_labels(spec: &FenceSpec, prep: &mut FencePrep) {
                         integrity_name(rid)
                     );
                     eprintln!("[围栏] 完整性标签挡写（{}）：{}", leaf.display(), why);
-                    prep.fail(FencePart::IntegrityLabel, leaf.clone(), why);
+                    record(prep, FencePart::IntegrityLabel, leaf.clone(), why);
                 }
             }
             Err(e) => {
                 eprintln!("[围栏] 完整性标签读不出来（{}）：{}", leaf.display(), e);
-                prep.fail(FencePart::IntegrityLabel, leaf.clone(), e);
+                record(prep, FencePart::IntegrityLabel, leaf.clone(), e);
             }
         }
     }
@@ -403,12 +405,12 @@ pub fn effective_paths(fs: bool, net: bool, write_allowed: bool) -> (bool, bool)
     }
 }
 
-pub fn verify(spec: &FenceSpec, _command: &str) -> FenceVerdict {
+pub fn verify(spec: &FencePlan, _command: &str) -> FenceVerdict {
     let name = container_name(spec);
     if let Err(e) = ensure_profile(&name) {
         return FenceVerdict::EnvUnavailable(format!("容器 profile 建不起来：{}", e));
     }
-    if spec.net
+    if spec.net.on()
         && let Err(e) = internet_client_sid(true)
     {
         return FenceVerdict::Broken(format!("internetClient 能力建不起来：{}", e));
@@ -423,7 +425,7 @@ pub fn verify(spec: &FenceSpec, _command: &str) -> FenceVerdict {
 }
 
 pub fn run_fenced(
-    spec: &FenceSpec,
+    spec: &FencePlan,
     prepared: bool,
     home: Option<&Path>,
     command: &str,
@@ -479,9 +481,9 @@ pub fn run_fenced(
     match outcome {
         Ok(code) => code,
         Err(e) => {
-            // 容器起不来要如实说清；net=true 时不能退回无围栏（那样会连文件系统围栏一起丢掉），直接拒绝。
+            // 容器起不来要如实说清；net=Public 时不能退回无围栏（那样会连文件系统围栏一起丢掉），直接拒绝。
             eprintln!("[围栏] 容器围栏未生效（{}）", e);
-            if spec.net || strict {
+            if spec.net.on() || strict {
                 eprintln!(
                     "[围栏] 本次要求放行出站网络或强制围栏，但能力/容器授不上：拒绝执行（不按无围栏跑）"
                 );
@@ -495,12 +497,39 @@ pub fn run_fenced(
 
 /// 目的：无围栏执行：容器不可用（外层没授权、profile 建不起来、容器起不来）时的如实降级——
 ///   命令仍交系统 shell 解释、cwd 仍是模块根，只是少了容器那层强制（启动报告里已说明能力等级）。
-pub(crate) fn run_unfenced(spec: &FenceSpec, command: &str) -> i32 {
+pub(crate) fn run_unfenced(spec: &FencePlan, command: &str) -> i32 {
     match shell_command(command).current_dir(&spec.cwd).status() {
         Ok(s) => s.code().unwrap_or(FENCE_FAILED),
         Err(e) => {
             eprintln!("[围栏] 工具进程启动失败：{}", e);
             FENCE_FAILED
         }
+    }
+}
+
+/// 目的：本平台后端（AppContainer 容器围栏 + 目录 ACL 授权）。
+pub(crate) struct Backend;
+
+impl super::Confine for Backend {
+    fn capability(&self) -> super::Capability {
+        capability()
+    }
+
+    fn verify(&self, plan: &FencePlan, command: &str) -> super::FenceVerdict {
+        verify(plan, command)
+    }
+
+    fn effective_paths(&self, fs: bool, net: bool, write_allowed: bool) -> (bool, bool) {
+        effective_paths(fs, net, write_allowed)
+    }
+
+    fn run(
+        &self,
+        plan: &FencePlan,
+        prepared: super::Prepared,
+        command: &str,
+        policy: &crate::kernel::contracts::fence::FenceRunPolicy,
+    ) -> i32 {
+        run_fenced(plan, prepared.prepared, prepared.home, command, policy)
     }
 }

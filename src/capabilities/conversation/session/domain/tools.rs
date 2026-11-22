@@ -232,7 +232,7 @@ pub struct ToolFace {
     /// 目的：模块 id → 它缺的运行包能力（本档位下该模块的工具不执行；空表 = 都能执行）。
     pub unavailable: BTreeMap<String, Vec<String>>,
     /// 目的：本成员工具进程的围栏（可达范围 + 断网）：策略在 runtime 派生，机制在 ProcessRunner 适配层安装。
-    pub fence: crate::kernel::api::fence::FenceSpec,
+    pub fence: crate::kernel::api::fence::FencePlan,
     /// 目的：模块 id → 该模块隐私字段的注入项（env 名 → 值）；起进程时只走环境，不进命令行。
     pub module_env: std::collections::BTreeMap<String, Vec<(String, String)>>,
     /// 目的：本机档运行包的生效 PATH（由 packages 计划给出；虚拟机档 / 没有包 = None）。

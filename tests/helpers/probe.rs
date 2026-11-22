@@ -4,7 +4,7 @@
 //! 联动：tests/cross-platform/、tests/linux/、tests/macos/、tests/windows/、src/kernel/detail/confine/。
 #![allow(dead_code)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
@@ -29,89 +29,83 @@ pub fn scratch(name: &str) -> PathBuf {
     d
 }
 
-/// 目的：手写守门进程的入参 JSON（字段与 core/fence.rs 的 FenceSpec 同层，外加一个 prepared）：
+/// 目的：手写守门进程的入参 JSON（字段与 kernel/contracts/fence.rs 的 `FencePlan` 同层，外加 `prepared`）。
 ///   `prepared` = 外层是否已经把本机授权做完（只有 Windows 的容器围栏用得上）。
 ///   验容器机制传 true（ACL 授权是产品在真实会话里做的，探针不写本机权限项）；验协议与降级路径传 false
 ///   ——那正是未授权机器上的真实路径。
-pub fn job_json(rw: &[PathBuf], cwd: &PathBuf, prepared: bool) -> String {
+pub fn job_json(rw: &[PathBuf], cwd: &Path, prepared: bool) -> String {
     job_json_net(rw, cwd, prepared, false)
 }
 
-/// 目的：带网络开关的守门进程入参——net 为真时由平台机制放行出站（Windows internetClient / macOS network-outbound）。
-pub fn job_json_net(rw: &[PathBuf], cwd: &PathBuf, prepared: bool, net: bool) -> String {
-    let esc = |p: &PathBuf| p.to_string_lossy().replace('\\', "/");
-    let roots: Vec<String> = rw.iter().map(|p| format!("\"{}\"", esc(p))).collect();
+/// 目的：JSON 里的路径（反斜杠统一成正斜杠，免得转义出错）。
+fn esc(p: &Path) -> String {
+    p.to_string_lossy().replace('\\', "/")
+}
+
+/// 目的：一条授予的 JSON——`access` 只有 Read/Write，`reach` 只有 Dir/Tree。
+fn grant_json(path: &Path, access: &str, reach: &str) -> String {
     format!(
-        "{{\"agent\":\"probe\",\"rw\":[{}],\"ro\":[],\"cwd\":\"{}\",\"net\":{},\"prepared\":{},\"home\":null}}",
-        roots.join(","),
-        esc(cwd),
-        net,
-        prepared
+        "{{\"path\":\"{}\",\"access\":\"{}\",\"reach\":\"{}\"}}",
+        esc(path),
+        access,
+        reach
     )
+}
+
+/// 目的：`FencePlan` 的 JSON 骨架（探针固定 agent 名，不给私有沙箱：探针要的是授予本身）。
+fn plan_json(cwd: &Path, net: bool, grants: Vec<String>, tail: &str) -> String {
+    let net = if net { "Public" } else { "Off" };
+    format!(
+        "{{\"agent\":\"probe\",\"cwd\":\"{}\",\"grants\":[{}],\"net\":\"{}\"{}}}",
+        esc(cwd),
+        grants.join(","),
+        net,
+        tail
+    )
+}
+
+/// 目的：带网络开关的守门进程入参——net 为真时由平台机制放行出站（Windows internetClient / macOS network-outbound）。
+pub fn job_json_net(rw: &[PathBuf], cwd: &Path, prepared: bool, net: bool) -> String {
+    let grants: Vec<String> = rw.iter().map(|p| grant_json(p, "Write", "Tree")).collect();
+    plan_json(cwd, net, grants, &format!(",\"prepared\":{}", prepared))
 }
 
 /// 目的：带 `FenceRunPolicy` 的守门进程入参——验“要求强制但机制不可用”时的拒绝路径。
 /// 约束：缺省探针只测降级，主动要求 `allow_degraded=false` 才能钉住 fail-closed。
 pub fn job_json_net_policy(
     rw: &[PathBuf],
-    cwd: &PathBuf,
+    cwd: &Path,
     prepared: bool,
     net: bool,
     require_fs: bool,
     require_net: bool,
     allow_degraded: bool,
 ) -> String {
-    let esc = |p: &PathBuf| p.to_string_lossy().replace('\\', "/");
-    let roots: Vec<String> = rw.iter().map(|p| format!("\"{}\"", esc(p))).collect();
-    format!(
-        "{{\"agent\":\"probe\",\"rw\":[{}],\"ro\":[],\"cwd\":\"{}\",\"net\":{},\"prepared\":{},\"home\":null,\"policy\":{{\"require_fs\":{},\"require_net\":{},\"allow_degraded\":{}}}}}",
-        roots.join(","),
-        esc(cwd),
+    let grants: Vec<String> = rw.iter().map(|p| grant_json(p, "Write", "Tree")).collect();
+    plan_json(
+        cwd,
         net,
-        prepared,
-        require_fs,
-        require_net,
-        allow_degraded
+        grants,
+        &format!(
+            ",\"prepared\":{},\"policy\":{{\"require_fs\":{},\"require_net\":{},\"allow_degraded\":{}}}",
+            prepared, require_fs, require_net, allow_degraded
+        ),
     )
 }
 
-/// 目的：带**只读根**的守门进程入参（只读档的探针用）：`ro` 与 `rw` 同层，`prepared` 说明外层有没有做完本机授权。
+/// 目的：带**只读根**的守门进程入参（只读档的探针用）：`ro` 只授这一层（不递归），`prepared` 说明外层有没有做完本机授权。
 ///   只读根的授权只在 Windows 上需要写 ACE；unix 的机制在守门进程内自足，所以 prepared 传什么都行。
-pub fn job_json_ro(rw: &[PathBuf], ro: &[PathBuf], cwd: &PathBuf, prepared: bool) -> String {
-    let esc = |p: &PathBuf| p.to_string_lossy().replace('\\', "/");
-    let list = |ps: &[PathBuf]| -> String {
-        ps.iter()
-            .map(|p| format!("\"{}\"", esc(p)))
-            .collect::<Vec<_>>()
-            .join(",")
-    };
-    format!(
-        "{{\"agent\":\"probe\",\"rw\":[{}],\"ro\":[{}],\"cwd\":\"{}\",\"net\":false,\"prepared\":{},\"home\":null}}",
-        list(rw),
-        list(ro),
-        esc(cwd),
-        prepared
-    )
+pub fn job_json_ro(rw: &[PathBuf], ro: &[PathBuf], cwd: &Path, prepared: bool) -> String {
+    let mut grants: Vec<String> = rw.iter().map(|p| grant_json(p, "Write", "Tree")).collect();
+    grants.extend(ro.iter().map(|p| grant_json(p, "Read", "Dir")));
+    plan_json(cwd, false, grants, &format!(",\"prepared\":{}", prepared))
 }
 
-/// 目的：带**只读子树**（`ro_tree`）的守门进程入参：模块目录对 agent 只读时用它。
-///   `ro_tree` 是**递归只读**（与用户授权的 `ro` 分开：Windows 上前者递归、后者不递归）。
-pub fn job_json_tree(rw: &[PathBuf], ro_tree: &[PathBuf], cwd: &PathBuf, prepared: bool) -> String {
-    let esc = |p: &PathBuf| p.to_string_lossy().replace('\\', "/");
-    let list = |ps: &[PathBuf]| -> String {
-        ps.iter()
-            .map(|p| format!("\"{}\"", esc(p)))
-            .collect::<Vec<_>>()
-            .join(",")
-    };
-    format!(
-        "{{\"agent\":\"probe\",\"rw\":[{}],\"ro\":[],\"ro_tree\":[{}],\"private\":\"{}\",\"cwd\":\"{}\",\"net\":false,\"prepared\":{},\"home\":null}}",
-        list(rw),
-        list(ro_tree),
-        esc(cwd),
-        esc(cwd),
-        prepared
-    )
+/// 目的：带**只读子树**的守门进程入参：模块目录对 agent 只读时用它——整棵子树可读（`Read` + `Tree`）。
+pub fn job_json_tree(rw: &[PathBuf], ro_tree: &[PathBuf], cwd: &Path, prepared: bool) -> String {
+    let mut grants: Vec<String> = rw.iter().map(|p| grant_json(p, "Write", "Tree")).collect();
+    grants.extend(ro_tree.iter().map(|p| grant_json(p, "Read", "Tree")));
+    plan_json(cwd, false, grants, &format!(",\"prepared\":{}", prepared))
 }
 
 /// 目的：运行期交给工具进程的环境白名单：**问产品自己拿**（`--print-fence-env`），不在这里另抄一份（它随命令而变）。

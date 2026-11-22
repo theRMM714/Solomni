@@ -18,7 +18,7 @@ impl Log for NoopLog {
     fn error(&self, _at: &str, _msg: &str) {}
 }
 
-use crate::kernel::contracts::fence::{FenceBlocked, FenceSpec};
+use crate::kernel::contracts::fence::{FenceBlocked, FencePlan};
 use crate::kernel::contracts::run::RunOutcome;
 use crate::kernel::contracts::types::{Ask, AskOutcome, ToolOutcome};
 use std::path::{Path, PathBuf};
@@ -175,7 +175,7 @@ pub trait FenceGate: Send + Sync {
 /// 约束：脚本是**本环境 shell 语法**；命令的 stdin 不提供交互，脚本本身经 stdin（Unix）或临时文件（Windows）送达。
 pub struct ShellRun<'a> {
     /// 目的：这次执行的可达范围与网络。
-    pub fence: &'a FenceSpec,
+    pub fence: &'a FencePlan,
     /// 目的：要执行的命令原文（本环境 shell 语法）。
     pub script: &'a str,
     /// 目的：本次超时；到点连根杀整棵树。
@@ -202,7 +202,7 @@ pub trait ProcessRunner: Send + Sync {
     #[allow(clippy::too_many_arguments)]
     fn run(
         &self,
-        fence: &FenceSpec,
+        fence: &FencePlan,
         command: &str,
         args_json: &str,
         env: &[(String, String)],
@@ -219,7 +219,7 @@ pub trait ProcessRunner: Send + Sync {
 /// 目的：一个**长驻**外部进程会话的规格（起常驻服务用）：围栏 + 命令 + 注入项。
 /// 约束：只描述事实；管道、守门进程与杀树机制在 `SessionHost` 的实现里。
 pub struct SessionSpec {
-    pub fence: FenceSpec,
+    pub fence: FencePlan,
     pub command: String,
     pub env: Vec<(String, String)>,
     /// 目的：这一趟运行包的 PATH（本机档；`None` = 用围栏白名单里的 PATH）。
@@ -259,7 +259,7 @@ pub trait FenceHost: Send + Sync {
 
     /// 目的：撤销一次**一次性调用**（构建 / 独立调用）的围栏授权：撤 ACE、删按次 profile、删按次临时目录。
     /// 约束：默认空操作；会话内的调用**不**走它（授权按会话持有）。
-    fn release_call(&self, _spec: &FenceSpec) -> Result<(), String> {
+    fn release_call(&self, _spec: &FencePlan) -> Result<(), String> {
         Ok(())
     }
 }

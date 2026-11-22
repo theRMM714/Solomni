@@ -6,7 +6,7 @@
 use crate::capabilities::catalog::packages::api::{KIND_SYSTEM, PlannedPackage};
 use crate::capabilities::vm::domain::exec::ExecPlan;
 use crate::capabilities::vm::domain::paths::{PathBridge, PathDialect};
-use crate::kernel::api::fence::FenceSpec;
+use crate::kernel::api::fence::{Access, FencePlan, Reach};
 use crate::kernel::api::layout;
 use crate::kernel::ports::HostProbe;
 use serde::Deserialize;
@@ -200,7 +200,7 @@ pub struct GuestSpec {
 }
 
 /// 目的：一次 guest 执行要用的 per-agent 允许集（已是 guest 写法）。
-/// 约束：只由 host 侧从 FenceSpec 翻译而来；guest 内 helper 只认这份策略，失败一律 fail-closed。
+/// 约束：只由 host 侧从 FencePlan 翻译而来；guest 内 helper 只认这份策略，失败一律 fail-closed。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuestAccess {
     pub agent: String,
@@ -218,27 +218,35 @@ pub struct GuestAccess {
 
 impl GuestAccess {
     /// 目的：把某 agent 的围栏翻成 guest 路径。挂载表优先，跨方言才走镜像根。
-    pub fn from_fence(fence: &FenceSpec, os: GuestOs, mounts: &[GuestMount]) -> GuestAccess {
+    pub fn from_fence(fence: &FencePlan, os: GuestOs, mounts: &[GuestMount]) -> GuestAccess {
         let map = |paths: &[PathBuf]| -> Vec<String> {
             paths.iter().map(|p| to_guest_path(p, os, mounts)).collect()
         };
-        let ro_tree: Vec<PathBuf> = fence.ro_tree.clone();
+        // guest 侧只认"读 / 读写 + 递归与否"这套老口径：host 侧在这里把意图摊平
+        // （写授予 → rw，读授予按落点形状分到 ro_tree / ro；私有沙箱 → private）。
+        let mut rw: Vec<PathBuf> = fence.paths(Access::Write, Reach::Tree);
+        rw.extend(fence.paths(Access::Write, Reach::Dir));
+        if !fence.home.as_os_str().is_empty() {
+            rw.push(fence.home.clone());
+        }
+        rw.sort();
+        rw.dedup();
         GuestAccess {
             agent: fence.agent.clone(),
-            rw: map(&fence.rw),
-            ro: map(&fence.ro),
-            ro_tree: map(&ro_tree),
-            private: if fence.private.as_os_str().is_empty() {
+            rw: map(&rw),
+            ro: map(&fence.paths(Access::Read, Reach::Dir)),
+            ro_tree: map(&fence.paths(Access::Read, Reach::Tree)),
+            private: if fence.home.as_os_str().is_empty() {
                 String::new()
             } else {
-                to_guest_path(&fence.private, os, mounts)
+                to_guest_path(&fence.home, os, mounts)
             },
             cwd: if fence.cwd.as_os_str().is_empty() {
                 String::new()
             } else {
                 to_guest_path(&fence.cwd, os, mounts)
             },
-            net: fence.net,
+            net: fence.net.on(),
             // per-agent 围栏永远不是诊断模式；诊断走 service.rs 自己构造的只读系统允许集。
             diagnose: false,
         }
@@ -551,7 +559,7 @@ pub(crate) fn sh_quote(s: &str) -> String {
 
 /// 目的：把执行计划与围栏翻成 guest 挂载——prefix 包只读挂到 /<prefix>，围栏根按路径桥给的 guest 路径挂。
 /// 约束：围栏根走 PathBridge（同方言时就是宿主原路径，模块命令与参数里的真实路径因此仍然成立；跨方言时是镜像根）；system 叠层不做。
-pub fn mounts_from(plan: &ExecPlan, fence: &FenceSpec, bridge: &PathBridge) -> Vec<GuestMount> {
+pub fn mounts_from(plan: &ExecPlan, fence: &FencePlan, bridge: &PathBridge) -> Vec<GuestMount> {
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut out: Vec<GuestMount> = Vec::new();
     for p in &plan.packages {
@@ -573,23 +581,24 @@ pub fn mounts_from(plan: &ExecPlan, fence: &FenceSpec, bridge: &PathBridge) -> V
             read_only: true,
         });
     }
-    let roots: [(&[PathBuf], bool); 3] = [
-        (&fence.rw, false),
-        (&fence.ro, true),
-        (&fence.ro_tree, true),
-    ];
-    for (list, read_only) in roots {
-        for host in list {
-            let guest = bridge.to_guest(host);
-            if !seen.insert(guest.clone()) {
-                continue;
-            }
-            out.push(GuestMount {
-                host: host.clone(),
-                guest,
-                read_only,
-            });
+    // 围栏根：私有沙箱与写授予可写挂，读授予只读挂（意图里的 Dir / Tree 在挂载上没有区别）。
+    let mut roots: Vec<(&PathBuf, bool)> = Vec::with_capacity(fence.grants.len() + 1);
+    if !fence.home.as_os_str().is_empty() {
+        roots.push((&fence.home, false));
+    }
+    for grant in &fence.grants {
+        roots.push((&grant.path, grant.access == Access::Read));
+    }
+    for (host, read_only) in roots {
+        let guest = bridge.to_guest(host);
+        if !seen.insert(guest.clone()) {
+            continue;
         }
+        out.push(GuestMount {
+            host: host.clone(),
+            guest,
+            read_only,
+        });
     }
     out
 }

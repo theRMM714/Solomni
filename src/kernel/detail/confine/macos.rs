@@ -1,11 +1,12 @@
 //! 目的：macOS 后端——seatbelt（sandbox_init，私有且已弃用的 ABI）把「可达到哪些路径」变成内核强制。
-//! 管：生成 profile 文本——默认拒绝一切，再逐条放行运行基线（只读；/dev/null 例外：可写，供标准重定向丢弃输出）与 spec.rw（读写）；
-//!   网络按 spec.net：真 = 放行出站，假 = 拒绝。
-//! 不管：入站 / 局域网 / 回环的细分策略——本档只按 spec.net 放行出站。
+//! 管：生成 profile 文本——默认拒绝一切，再逐条放行运行基线（只读；/dev/null 例外：可写，供标准重定向丢弃输出）、
+//!   计划里的写授予（读写）与读授予（只读）；
+//!   网络按 `net`：`Public` = 放行出站，`Off` = 拒绝。
+//! 不管：入站 / 局域网 / 回环的细分策略——本档只按 `net` 放行出站。
 //! 联动：装不上时如实降级（打印说明后照常执行）；降级原因分「本机 ABI 失效」（环境结论）与「profile 被拒」（写错，探针硬失败）。
 
 use super::{Capability, FENCE_FAILED, FenceVerdict, shell_command};
-use crate::kernel::contracts::fence::FenceSpec;
+use crate::kernel::contracts::fence::{Access, FencePlan};
 use crate::kernel::detail::launch::interpreter_dirs;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
@@ -109,14 +110,14 @@ fn seatbelt_confines_probe() -> bool {
 /// 目的：`_prepared`（外层是否已完成本机授权）与 `_home`（容器 profile 的台账落点）只有 Windows 的容器围栏用得上：
 ///   macOS 的 seatbelt 在守门进程里自足，也没有容器 profile 这一步。
 pub fn run_fenced(
-    spec: &FenceSpec,
+    spec: &FencePlan,
     _prepared: bool,
     _home: Option<&std::path::Path>,
     command: &str,
     policy: &crate::kernel::contracts::fence::FenceRunPolicy,
 ) -> i32 {
     if let Err(e) = install(spec, command) {
-        let required = policy.require_fs || (policy.require_net && !spec.net);
+        let required = policy.require_fs || (policy.require_net && !spec.net.on());
         if required && !policy.allow_degraded {
             eprintln!(
                 "[围栏] 文件系统/网络围栏未生效（{}）：按全局策略拒绝执行",
@@ -158,7 +159,7 @@ pub fn effective_paths(fs: bool, net: bool, _write_allowed: bool) -> (bool, bool
     (fs, net)
 }
 
-pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
+pub fn verify(spec: &FencePlan, command: &str) -> FenceVerdict {
     if !seatbelt_confines() {
         return FenceVerdict::EnvUnavailable(
             "本机 sandbox_init 不产生实际约束（该私有 ABI 在新版 macOS 上已失效）".to_string(),
@@ -171,7 +172,7 @@ pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
 }
 
 /// 守门进程路径：装围栏（自检不过与 profile 被拒都如实降级照跑——能力等级已在启动报告里说过）。
-fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
+fn install(spec: &FencePlan, command: &str) -> Result<(), String> {
     if !seatbelt_confines() {
         return Err(
             "本机 sandbox_init 不产生实际约束（该私有 ABI 在新版 macOS 上已失效）".to_string(),
@@ -181,14 +182,21 @@ fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
 }
 
 /// 生成并装上 profile（自检由调用方先做）：走到这里才失败 = profile 写错，一律带稳定标记。
-fn install_profile(spec: &FenceSpec, command: &str) -> Result<(), String> {
+fn install_profile(spec: &FencePlan, command: &str) -> Result<(), String> {
     let profile = profile_text(spec, command);
     // 规则规模如实报一行：失败时（探针/端到端日志）能据此判断"是不是规则太宽/太窄"。
     eprintln!(
         "[围栏] seatbelt 规则 {} 条（默认拒绝；放行只读 {} 处、读写 {} 处）",
         profile.lines().count().saturating_sub(5),
-        spec.rw.len(),
-        spec.rw.len()
+        spec.grants
+            .iter()
+            .filter(|g| g.access == Access::Read)
+            .count(),
+        spec.grants
+            .iter()
+            .filter(|g| g.access == Access::Write)
+            .count()
+            + usize::from(!spec.home.as_os_str().is_empty())
     );
     // 排障开关：把解释器解析结果与完整 profile 打出来（探针打开它；正常运行不打，免得污染工具回执）。
     if std::env::var("SOLOMNI_FENCE_PROFILE").is_ok() {
@@ -222,7 +230,7 @@ fn install_profile(spec: &FenceSpec, command: &str) -> Result<(), String> {
 /// 生成 seatbelt profile：默认拒绝，再逐条放行（路径按 seatbelt 的字符串转义）。
 /// 只读范围 = 系统只读基线 + **命令里解释器的安装目录**（否则工具在围栏里起不来）；
 /// 另外给所有被放行路径的祖先目录放行"只读元数据"（路径解析要能按名穿过）。
-fn profile_text(spec: &FenceSpec, command: &str) -> String {
+fn profile_text(spec: &FencePlan, command: &str) -> String {
     // 取舍写在这里：`file-read-metadata` 全局放行（只 stat），因为路径解析本身需要它；内容读取（file-read-data）仍逐条放行。
     // 另外 file-map-executable 必须全局放行——dyld 要 mmap 可执行文件与动态库，逐路径列举覆盖不全。
     let mut out = String::from(
@@ -238,21 +246,12 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
     for dir in interpreter_dirs(command) {
         ro_paths.push(dir.to_string_lossy().replace('\\', "/"));
     }
-    // 用户显式授权的主机只读根（`sandbox.policy.host_read_roots`）：只放 `file-read*`，不碰 `file-write*`。
-    for root in &spec.ro {
-        if !root.as_os_str().is_empty() {
-            ro_paths.push(root.to_string_lossy().replace('\\', "/"));
+    // 读授予：只放 `file-read*`，一个写位都不给。seatbelt 的 subpath 天然递归，
+    // 所以 Dir 与 Tree 在这里同价——按 Tree 落实，如实放宽（见 `Reach`）。
+    for grant in &spec.grants {
+        if grant.access == Access::Read && !grant.path.as_os_str().is_empty() {
+            ro_paths.push(grant.path.to_string_lossy().replace('\\', "/"));
         }
-    }
-    // 只读子树（模块目录对 agent 只读）：seatbelt 的 subpath 天然递归，与 ro 同走只读。
-    for root in &spec.ro_tree {
-        if !root.as_os_str().is_empty() {
-            ro_paths.push(root.to_string_lossy().replace('\\', "/"));
-        }
-    }
-    // 工作目录（模块根）：工具进程要能在里面起（读），但**不因此获得写**。
-    if !spec.cwd.as_os_str().is_empty() {
-        ro_paths.push(spec.cwd.to_string_lossy().replace('\\', "/"));
     }
     ro_paths.sort();
     ro_paths.dedup();
@@ -264,8 +263,19 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
         out.push_str("(allow file-write* (literal \"/dev/null\"))\n");
     }
     let mut rw_paths: Vec<String> = Vec::new();
-    for root in &spec.rw {
-        let path = root.to_string_lossy().replace('\\', "/");
+    // 写授予（含私有沙箱）：读写整棵子树。
+    let mut writes: Vec<String> = Vec::new();
+    if !spec.home.as_os_str().is_empty() {
+        writes.push(spec.home.to_string_lossy().replace('\\', "/"));
+    }
+    for grant in &spec.grants {
+        if grant.access == Access::Write && !grant.path.as_os_str().is_empty() {
+            writes.push(grant.path.to_string_lossy().replace('\\', "/"));
+        }
+    }
+    writes.sort();
+    writes.dedup();
+    for path in writes {
         rw_paths.push(path.clone());
         out.push_str(&format!(
             "(allow file-read* file-write* (subpath \"{}\"))\n",
@@ -295,7 +305,7 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
             escape(m)
         ));
     }
-    if spec.net {
+    if spec.net.on() {
         // 只放行出站（DNS / HTTP 等客户端连接）；入站与绑定仍由 (deny default) 拒绝。
         out.push_str("(allow network-outbound)\n");
     } else {
@@ -307,4 +317,30 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
 /// seatbelt profile 里的字符串转义：反斜杠与引号。
 fn escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// 目的：本平台后端（seatbelt 文件与网络围栏）。
+pub(crate) struct Backend;
+
+impl super::Confine for Backend {
+    fn capability(&self) -> super::Capability {
+        capability()
+    }
+
+    fn verify(&self, plan: &FencePlan, command: &str) -> super::FenceVerdict {
+        verify(plan, command)
+    }
+
+    fn effective_paths(&self, fs: bool, net: bool, write_allowed: bool) -> (bool, bool) {
+        effective_paths(fs, net, write_allowed)
+    }
+    fn run(
+        &self,
+        plan: &FencePlan,
+        prepared: super::Prepared,
+        command: &str,
+        policy: &crate::kernel::contracts::fence::FenceRunPolicy,
+    ) -> i32 {
+        run_fenced(plan, prepared.prepared, prepared.home, command, policy)
+    }
 }

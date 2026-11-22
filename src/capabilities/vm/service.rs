@@ -79,7 +79,7 @@ impl VmService {
         &self,
         lease: &str,
         run: &GuestRun,
-        fence: Option<&crate::kernel::api::fence::FenceSpec>,
+        fence: Option<&crate::kernel::api::fence::FencePlan>,
         cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> ToolOutcome {
         let entry = match self.guests.lock() {
@@ -187,7 +187,7 @@ impl Vm for VmService {
         &self,
         lease: &str,
         run: &GuestRun,
-        fence: &crate::kernel::api::fence::FenceSpec,
+        fence: &crate::kernel::api::fence::FencePlan,
     ) -> ToolOutcome {
         self.run_guest(lease, run, Some(fence), None)
     }
@@ -196,7 +196,7 @@ impl Vm for VmService {
         &self,
         lease: &str,
         run: &GuestRun,
-        fence: &crate::kernel::api::fence::FenceSpec,
+        fence: &crate::kernel::api::fence::FencePlan,
         cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> ToolOutcome {
         self.run_guest(lease, run, Some(fence), cancel)
