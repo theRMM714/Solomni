@@ -465,6 +465,263 @@ fn container_runs_a_program_given_by_absolute_path() {
     discard(&base);
 }
 
+/// 【真机】容器里到底能不能用本机回环——分两种，结论决定「产品代跑 shell（net=local port=N）」是否成立：
+/// ① 连**宿主**上的 127.0.0.1 监听（产品端口形态）：AppContainer 不豁免时应当被拒；
+/// ② 容器进程**自己 bind** 127.0.0.1:0 再自连（中继挂在容器内回环上的形态）：成不成是本探针要答的问题。
+/// 两条都断言：① 破了是边界事故；② 不成立则「产品代跑 shell」的中继形态整个不成立（实测结论见下一条两进程探针）。
+/// 会创建 AppContainer profile 与写目录 ACL，只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑；本机没有 node 时如实跳过。
+#[test]
+fn container_loopback_probe_host_and_self() {
+    let _fence = crate::tests::fence_acl_guard();
+    if std::env::var("SOLOMNI_FENCE_LIVE")
+        .map(|v| v != "1")
+        .unwrap_or(true)
+    {
+        eprintln!(
+            "[探针] 未开启真机围栏测试：container_loopback_probe_host_and_self 会创建 AppContainer profile（改本机状态），已跳过；要真跑加 --fence-live"
+        );
+        return;
+    }
+    if !capability().fs {
+        eprintln!(
+            "[探针] 本机不允许改目录 ACL（{}）：回环探针跳过（不静默当作通过）",
+            capability().note
+        );
+        return;
+    }
+    if !node_runs() {
+        eprintln!("[探针] 本机没有能跑的 node：回环探针跳过（不静默当作通过）");
+        return;
+    }
+    let base = std::env::temp_dir().join(format!("solomni-loopback-probe-{}", std::process::id()));
+    let leaf = base.join("leaf");
+    std::fs::create_dir_all(&leaf).expect("建探针目录");
+    std::fs::write(
+        leaf.join("probe.js"),
+        r#"const net = require('net');
+const fs = require('fs');
+const hostPort = Number(process.argv[2]);
+const done = (k, v) => { fs.appendFileSync('loopback-probe.txt', k + '=' + v + '\n'); };
+function tryHost(next) {
+  const s = net.connect(hostPort, '127.0.0.1');
+  s.on('connect', () => { s.destroy(); done('host', 'CONNECTED'); next(); });
+  s.on('error', e => { done('host', 'ERR ' + e.code); next(); });
+  setTimeout(() => { done('host', 'TIMEOUT'); next(); }, 2000);
+}
+function trySelf(next) {
+  const srv = net.createServer(c => c.end('ok'));
+  srv.on('error', e => { done('self', 'LISTEN-ERR ' + e.code); next(); });
+  srv.listen(0, '127.0.0.1', () => {
+    const p = srv.address().port;
+    const s = net.connect(p, '127.0.0.1');
+    s.on('connect', () => { s.destroy(); srv.close(); done('self', 'CONNECTED'); next(); });
+    s.on('error', e => { srv.close(); done('self', 'ERR ' + e.code); next(); });
+    setTimeout(() => { try { srv.close(); } catch (e) {} done('self', 'TIMEOUT'); next(); }, 2000);
+  });
+}
+tryHost(() => trySelf(() => process.exit(0)));
+"#,
+    )
+    .expect("写探针脚本");
+    // 宿主侧的监听：容器应当连不到（这才叫边界）。
+    let host = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("占宿主回环端口");
+    let host_port = host.local_addr().expect("取宿主端口").port();
+    std::thread::spawn(move || {
+        for stream in host.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut buf = [0u8; 1024];
+            let _ = std::io::Read::read(&mut stream, &mut buf);
+            let _ = std::io::Write::write_all(
+                &mut stream,
+                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok",
+            );
+        }
+    });
+    let spec = FenceSpec {
+        agent: "probe-loopback".to_string(),
+        lease: String::new(),
+        private: leaf.clone(),
+        ro_tree: Vec::new(),
+        rw: vec![leaf.clone()],
+        cwd: leaf.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let container = container_name(&spec);
+    if let Err(e) = ensure_profile(&container) {
+        if e.contains(PROFILE_ENV_BLOCKED_MARK) {
+            eprintln!(
+                "[探针] 本环境不允许建 AppContainer profile（环境结论，如实跳过）：{}",
+                e
+            );
+            discard(&base);
+            return;
+        }
+        panic!("建容器 profile：{}", e);
+    }
+    let home = base.join("ledger");
+    let prep = prepare_fence(&spec, "node", &home);
+    if let Some(blocked) = &prep.blocked {
+        eprintln!(
+            "[探针] 本机给授权落点写不了权限（{}）：回环探针跳过（不静默当作通过）",
+            blocked.line()
+        );
+        clean(&home).ok();
+        delete_profile(&container);
+        discard(&base);
+        return;
+    }
+    let sid = container_sid(&container).expect("派生容器 SID");
+    let code = run_in_container(sid, &spec, &format!("node probe.js {}", host_port))
+        .expect("容器进程应当能启动");
+    let got = std::fs::read_to_string(leaf.join("loopback-probe.txt")).unwrap_or_default();
+    eprintln!("[探针] 回环结论（exit={code}）：{}", got.trim());
+    assert!(
+        got.contains("host=") && got.contains("self="),
+        "探针要把两个问题都跑出结论（exit={code}，拿到 {got:?}）"
+    );
+    assert!(
+        !got.contains("host=CONNECTED"),
+        "容器不该连得到宿主回环上的监听（产品端口就是它）：{got:?}"
+    );
+    assert!(
+        got.contains("self=CONNECTED"),
+        "容器要能在自己的回环上 bind 并自连（中继形态的前提）：{got:?}"
+    );
+    free_sid(sid);
+    release_fence(&spec, &home).expect("撤权应当成功");
+    clean(&home).expect("收尾应当成功");
+    assert!(delete_profile(&container), "探针的容器 profile 应当删得掉");
+    discard(&base);
+}
+
+/// 【真机】**同容器两进程**之间的回环：一个进程 bind 127.0.0.1 在听，另一个进程去连。
+/// 这是「产品代跑 shell（net=local port=N）」里中继的确切形态——中继与被代跑的命令是同一容器的两个进程。
+/// 单进程内的 bind+自连已经通（见上一条探针）；本条要答的是跨进程是否按同一条规则放行。
+/// 会创建 AppContainer profile 与写目录 ACL，只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑；本机没有 node 时如实跳过。
+#[test]
+fn container_two_processes_in_one_container_share_loopback() {
+    let _fence = crate::tests::fence_acl_guard();
+    if std::env::var("SOLOMNI_FENCE_LIVE")
+        .map(|v| v != "1")
+        .unwrap_or(true)
+    {
+        eprintln!(
+            "[探针] 未开启真机围栏测试：container_two_processes_in_one_container_share_loopback 会创建 AppContainer profile（改本机状态），已跳过；要真跑加 --fence-live"
+        );
+        return;
+    }
+    if !capability().fs {
+        eprintln!(
+            "[探针] 本机不允许改目录 ACL（{}）：两进程回环探针跳过（不静默当作通过）",
+            capability().note
+        );
+        return;
+    }
+    if !node_runs() {
+        eprintln!("[探针] 本机没有能跑的 node：两进程回环探针跳过（不静默当作通过）");
+        return;
+    }
+    let base = std::env::temp_dir().join(format!("solomni-two-proc-{}", std::process::id()));
+    let leaf = base.join("leaf");
+    std::fs::create_dir_all(&leaf).expect("建探针目录");
+    std::fs::write(
+        leaf.join("server.js"),
+        r#"const net = require('net');
+const fs = require('fs');
+const port = Number(process.argv[2]);
+process.on('uncaughtException', () => {});
+const srv = net.createServer(c => { c.end('ok'); setTimeout(() => { try { srv.close(); } catch (e) {} process.exit(0); }, 200); });
+srv.listen(port, '127.0.0.1', () => fs.writeFileSync('listening.txt', String(port)));
+setTimeout(() => process.exit(0), 20000);
+"#,
+    )
+    .expect("写监听脚本");
+    std::fs::write(
+        leaf.join("client.js"),
+        r#"const net = require('net');
+const fs = require('fs');
+const s = net.connect(Number(process.argv[2]), '127.0.0.1');
+s.on('connect', () => { s.destroy(); fs.writeFileSync('client.txt', 'CONNECTED'); process.exit(0); });
+s.on('error', e => { fs.writeFileSync('client.txt', 'ERR ' + e.code); process.exit(0); });
+setTimeout(() => { fs.writeFileSync('client.txt', 'TIMEOUT'); process.exit(0); }, 4000);
+"#,
+    )
+    .expect("写客户端脚本");
+    // 端口在宿主上取一个空着的：容器没有独立网络栈，回环就是宿主的回环。
+    let probe = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("占一个空闲回环端口");
+    let port = probe.local_addr().expect("取端口").port();
+    drop(probe);
+    let spec = FenceSpec {
+        agent: "probe-two-proc".to_string(),
+        lease: String::new(),
+        private: leaf.clone(),
+        ro_tree: Vec::new(),
+        rw: vec![leaf.clone()],
+        cwd: leaf.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let container = container_name(&spec);
+    if let Err(e) = ensure_profile(&container) {
+        if e.contains(PROFILE_ENV_BLOCKED_MARK) {
+            eprintln!(
+                "[探针] 本环境不允许建 AppContainer profile（环境结论，如实跳过）：{}",
+                e
+            );
+            discard(&base);
+            return;
+        }
+        panic!("建容器 profile：{}", e);
+    }
+    let home = base.join("ledger");
+    let prep = prepare_fence(&spec, "node", &home);
+    if let Some(blocked) = &prep.blocked {
+        eprintln!(
+            "[探针] 本机给授权落点写不了权限（{}）：两进程回环探针跳过（不静默当作通过）",
+            blocked.line()
+        );
+        clean(&home).ok();
+        delete_profile(&container);
+        discard(&base);
+        return;
+    }
+    let sid = container_sid(&container).expect("派生容器 SID");
+
+    // 监听进程先起：同一 SID 的另一个进程，按同一条网络隔离规则判定。
+    let sid_addr = sid as usize;
+    let bg_spec = spec.clone();
+    let bg_cmd = format!("node server.js {}", port);
+    let server = std::thread::spawn(move || run_in_container(sid_addr as PSID, &bg_spec, &bg_cmd));
+    let ready = leaf.join("listening.txt");
+    let mut waited = 0;
+    while !ready.exists() && waited < 8000 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        waited += 100;
+    }
+    assert!(
+        ready.exists(),
+        "监听进程要在容器里起来并写出标记文件（等了 {waited} ms）"
+    );
+    let code = run_in_container(sid, &spec, &format!("node client.js {}", port))
+        .expect("容器进程应当能启动");
+    let got = std::fs::read_to_string(leaf.join("client.txt")).unwrap_or_default();
+    eprintln!(
+        "[探针] 两进程同容器回环（client exit={code}）：{}",
+        got.trim()
+    );
+    let _ = server.join();
+    assert!(
+        got.contains("CONNECTED"),
+        "同容器两进程之间的回环应当连通（拿到 {got:?}）——这里是中继形态的可行性判据"
+    );
+    free_sid(sid);
+    release_fence(&spec, &home).expect("撤权应当成功");
+    clean(&home).expect("收尾应当成功");
+    assert!(delete_profile(&container), "探针的容器 profile 应当删得掉");
+    discard(&base);
+}
+
 /// 目的：容器临时目录按 AppContainer 的 `GetTempPath2` 布局给——`<私有沙箱>/Packages/<容器名>/AC/Temp`。
 /// 约束：私有沙箱为空时退回工作目录；两者都空就没有落点（返回 `None`，不猜）。
 #[test]
