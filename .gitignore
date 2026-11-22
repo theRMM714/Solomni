@@ -30,6 +30,9 @@
 /.tools/
 /.home/
 
+# ---- 本机 CLI 状态（gh 等工具按 XDG 把 state 写到这里；与产品无关，不入库）----
+/.local/
+
 # ---- 便携入口（--setup=path 生成的 shim，随机器而变，不入库）----
 /bin/
 
