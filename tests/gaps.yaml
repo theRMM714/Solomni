@@ -270,5 +270,53 @@
   blocked_by: |
     用户范围决定（英文放到之后统一做；本次只交付可切换形状与中文目录）
 
+- id: cli.one-shot-boot-side-effects
+  scope: global
+  level: T3
+  why: |
+    命令与模块工具已经和会话动作走同一条入口（`src/presentation/cli/shell.rs`），但转录相命令的分派点
+    （`src/main.rs` 的 `run`，在 `storage_service.start_auto()` 与 `residents_boot.start_enabled()` 之后）
+    仍然意味着**任何**一次性调用都要装配核心、起存储自动任务、按启用状态拉起全部常驻服务、分配视图盘。
+    实测 `solomni --json modules` 会拉起模块服务并写本机 ACL（`[围栏] 已写权限 1 处 … modules/<模块>`），
+    新根上第一次还要等「首次为受保护根补权限」；只读的 `modules` 与 `<模块> --help` 因此带副作用、变慢，
+    也不适合放进脚本或 CI 的频繁调用。
+  how: |
+    1) 在 `Op` 声明里加「是否需要常驻运行时」一档（`none` / `services`），默认 `none`；需要会话或服务的
+       命令（`single` / `collab` / `proxy` / `web` / `resident`）显式声明；
+    2) 分派点前移：一次性命令在 `residents_boot.start_enabled()` 与视图盘分配之前跑完并早退，仍装配核心与
+       `Faces`（命令要读登记处与模块清单），只是不拉起常驻服务；
+    3) e2e 补断言：真机围栏模式下跑 `--json modules` 与 `<模块> --help`，stderr 不含 `已写权限`，退出后
+       围栏台账与容器 profile 无新增（对账为 0）；
+    4) 同步 `docs/presentation/cli/README.md` 与 `docs/entry/README.md` 的启动顺序。
+  accept: |
+    `solomni --json modules` 与 `solomni <模块> --help` 不启动任何常驻服务、不写本机 ACL、不分配视图盘，
+    退出码与输出不变；需要运行时的命令行为不变；e2e 断言钉住；`node run-tests.js` 全绿。
+  blocked_by: |
+    本轮范围决定（先修 stdout 契约；声明字段与分派点前移属行为变更，另开任务）
+
+- id: cli.fresh-root-gate-text
+  scope: global
+  level: T3
+  why: |
+    新根没有 `.home/settings.yaml` 时 `sandbox.policy.windows.write_acl` 默认假：`--root <新目录>` 下
+    `require` 策略让缺失项非空，非 TTY 一律走 `src/entry/startup.rs` 的 `run_gate` 失败分支，只打
+    `[沙箱] 没有可回答的前端：不进入会话（fail-closed）。` 与一条 `[沙箱] 要启用：… write_acl: true，或设置 SOLOMNI_FENCE_WRITE=1`，
+    既不列缺的是哪几项，也没给可执行的命令；`--json` 下 stdout 是这几行诊断、没有 JSON。
+    结果是 CI 或脚本第一次在新根上跑只读命令（`modules` / `<模块> --help`）必然失败，且看不出该跑什么。
+  how: |
+    1) 失败分支按 `missing` 清单逐项列出缺项与影响（文件系统 / 网络 / 进程树），并把两条出路写成可复制命令
+       （`solomni --root <根> --setup=fence --yes` 与 `SOLOMNI_FENCE_WRITE=1`），与 `--setup status` 的
+       `missing` 用同一份事实；
+    2) 定策略：只读且不执行围栏内容的命令（`modules`、手册 / `--help`、`--version`）是否免围栏授权；
+       免则声明在 `Op` 上，并让 `src/main.rs` 在启动门前分派；
+    3) 用例：临时根 + 无 settings + 非 TTY → 退出码 1、stderr 含缺项与出路、stdout 为空；若采纳免授权，
+       则 `--json modules` 在该根上以 0 退出且 stdout 是纯 JSON；
+    4) 同步 `docs/entry/README.md` 的「启动门」与「首次启动」两节。
+  accept: |
+    新根、非 TTY 上失败时，stderr 逐条列出缺项与可执行出路、stdout 不含诊断；策略（免不免授权）有明确结论
+    与用例；`node run-tests.js` 全绿。
+  blocked_by: |
+    需要先定策略（只读命令是否免围栏授权），属行为变更；本轮只做 stdout 归位
+
 
 

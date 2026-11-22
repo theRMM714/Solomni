@@ -16,7 +16,7 @@
 - 管：命令与模块工具同一条入口（`src/presentation/cli/shell.rs`）——命令行一次性调用与转录中心提示符都先把词表落到声明上（`Op` 的 `parse`），再按执行者交给业务面；`modules` 是模块清单（版本、启停、拒收原因），`<模块>` 是模块手册（版本、状态、`system` 原文、工具表），`<模块> <工具> --help` 是工具手册，`<模块> --version` 是模块版本（工具没有自己的版本）。
 - 管：启动相命令的最后一公里——`--doctor` / `--provision` / `--gc` / `--storage` / `--work-gc` / `--build` / `--setup` 的操作数与回执排版（`src/presentation/cli/boot.rs`）；执行与确认门槛在 `system` 能力（见 [docs/system](../../system/README.md)）。`--setup` 的写入成果（`bin` shim、用户 PATH、围栏机器级预授）要新开终端才生效。
 - 管：启动相命令的**第二个入口**——同一条命令在终端转录中心的提示符里也能跑（`--doctor`、`--gc<空格>--category=logs`），跑完回提示符、不退出进程；缺 `--yes` 时就地一问（先给预览再问），有会话在跑时写操作只给预览、不执行；`--json` 与 `--root` 在这里没有意义（前者提示后忽略，后者报错、退出码 2）——歧义判据见 `src/presentation/cli.rs` 的 `run_boot`。
-- 管：机器回执——`--json` 让启动相命令只输出一段 JSON（字段逐命令写在 `systools/commands.yaml` 的 `json`，`solomni <命令> --help` 里给出同一份说明）；失败时 stderr 是一行 `{"error","code","domain"}`，退出码不变。
+- 管：机器回执——`--json` 让命令只输出一段 JSON。启动相命令的字段逐命令写在 `systools/commands.yaml` 的 `json`（`solomni <命令> --help` 里给出同一份说明），失败时 stderr 是一行 `{"error","code","domain"}`、退出码不变；转录相命令（`modules`、模块手册与工具、`work` …）按声明输出结构化 JSON。**启动期的诊断（工具链 / 围栏 / 进程 / 便携 / 沙箱授权）一律走 stderr**，stdout 只留命令结果，所以 `solomni --json …` 可以整段进管道与 `JSON.parse`。
 - 不管：不做业务判断、不持状态、不落盘；**永不接触端口对象，也拿不到 `Core` 本身**（`src/presentation/cli.rs`）；启动相命令的语义也不在这里——`boot.rs` 只把参数翻成能力调用。
 
 ## 入站契约与状态归属

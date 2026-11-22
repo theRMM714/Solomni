@@ -14,7 +14,7 @@ pub(crate) fn fence_hint(root: &Path) -> bool {
     fence_report(
         &SetupHost::new(root),
         crate::kernel::api::platform::HAS_EXTERNAL_ACL_STEP,
-        &|line| println!("{line}"),
+        &|line| eprintln!("{line}"),
         &|line| eprintln!("{line}"),
     )
 }
@@ -24,7 +24,7 @@ pub(crate) fn ensure_after_authorize(root: &Path) {
     ensure_grants(
         &SetupHost::new(root),
         crate::kernel::api::platform::HAS_EXTERNAL_ACL_STEP,
-        &|line| println!("{line}"),
+        &|line| eprintln!("{line}"),
         &|line| eprintln!("{line}"),
     );
 }
