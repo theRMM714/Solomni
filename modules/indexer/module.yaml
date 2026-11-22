@@ -1,4 +1,5 @@
 id: indexer
+version: 0.1.0
 brief: >-
   给语料建倒排索引、做毫秒级本地检索，顺带找近似重复。只吃 harvest 产出的 corpus.jsonl，
   全程本机计算，不联网、不采集、不写入知识库。

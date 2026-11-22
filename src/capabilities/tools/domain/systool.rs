@@ -511,6 +511,13 @@ pub fn arg_fault_text(name: &str, schema: &ToolSchema, fault: &ArgFault) -> Stri
         ArgFault::TooSmall { name, min } => format!("参数 {} 不能小于 {}", name, min),
         ArgFault::TooBig { name, max } => format!("参数 {} 不能大于 {}", name, max),
         ArgFault::Unknown(n) => format!("没有参数 {}", n),
+        ArgFault::NotInValues { name, values } => {
+            format!("参数 {} 只能是 {}", name, values.join(" / "))
+        }
+        ArgFault::UnknownFlag(f) => format!("没有旗语 {}", f),
+        ArgFault::FlagNeedsValue(f) => format!("旗语 {} 缺值", f),
+        ArgFault::Duplicate(n) => format!("参数 {} 给重了", n),
+        ArgFault::ExtraOperand(n) => format!("多了声明没接收的参数 {}", n),
     };
     let signature = format!("{}\n{}", name, schema.render_for_prompt());
     format!("{}。{}", why, signature)

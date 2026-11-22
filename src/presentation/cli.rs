@@ -9,7 +9,7 @@ use crate::capabilities::runtime::api::Output;
 use crate::capabilities::runtime::api::{Acted, ActionCall, Caller};
 use crate::capabilities::runtime::api::{DecisionCard, DecisionWaiter, SessionEvent, Tier};
 use crate::capabilities::system::api::System;
-use crate::capabilities::tools::api::Command;
+use crate::capabilities::tools::api::Op;
 use crate::presentation::faces::Faces;
 
 /// 目的：离开转录中心时的去向：退出，或转入 Web 转录中心（端口）。
@@ -59,8 +59,8 @@ pub fn run(
         let cmd = parts.next().unwrap_or("").to_ascii_lowercase();
         let arg = parts.next().unwrap_or("").trim().to_string();
         // 启动相命令（命令表里 `phase: boot` 的那些）：与命令行同一个执行入口，跑完回提示符。
-        if let Some(command) = catalog::boot(&cmd) {
-            run_boot(&faces, system, command, &arg);
+        if let Some(op) = catalog::boot(&cmd) {
+            run_boot(&faces, system, op, &arg);
             continue;
         }
         match cmd.as_str() {
@@ -109,10 +109,10 @@ pub fn run(
 }
 
 /// 目的：转录中心里跑一条启动相命令（`--doctor` / `--gc` / `--provision` …）：与命令行同一条执行路径。
-/// 参数：`command` 来自命令表，`tail` 是命令名之后的原文（与命令名之间只按空格切，不再做语法）。
+/// 参数：`op` 是命令表里那一条（决定收哪些旗语），`tail` 是命令名之后的原文（按空格切成词交给共享解析器）。
 /// 返回：这条命令的退出码——转录中心不因它退出。
 /// 约束：转录中心里 `--json` 没有意义（终端要人读），`--root` 只能在启动时给（这个进程的根已定）。
-pub(crate) fn run_boot(faces: &Faces, system: &dyn System, command: &Command, tail: &str) -> i32 {
+pub(crate) fn run_boot(faces: &Faces, system: &dyn System, op: &Op, tail: &str) -> i32 {
     let mut operands: Vec<String> = Vec::new();
     for word in tail.split_whitespace() {
         let name = word.split_once('=').map_or(word, |(n, _)| n);
@@ -136,7 +136,7 @@ pub(crate) fn run_boot(faces: &Faces, system: &dyn System, command: &Command, ta
     }
     let writes = !sessions_running(faces);
     let mut ask = TerminalAsk;
-    let code = boot::run_asked(&command.name, &operands, system, false, &mut ask, writes);
+    let code = boot::run_asked(op, &operands, system, false, &mut ask, writes);
     if code != 0 {
         term::line(&term::ink(
             theme::Ink::Dim,

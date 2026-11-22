@@ -91,7 +91,7 @@
 
 - 便携维护（`--setup`）的行为一改 → 同步 `docs/system/`（实现在 system 能力）、本页的启动期对账说明（`src/entry/portable.rs`）、[docs/permission/README.md](../permission/README.md) 与 `tests/gaps.yaml` 的平台缺口。
 - 新增端口 / 适配器 → 改 `src/entry/assembly.rs` 装配；新增探针或隐藏模式 → 同步本页、`docs/entry/unit-map.md` 与 [docs/testing/execution-ci.md](../testing/execution-ci.md)。
-- 新增或改产品命令 → 改 `systools/commands.yaml`；执行分派在 `src/presentation/cli/boot.rs`（启动相，经 `system` 能力）与 `src/presentation/cli.rs`（转录相），一致性由 `src/tests/commands.rs` 锁死。
+- 新增或改产品命令 → 改 `systools/commands.yaml`；操作数解析在 `src/capabilities/tools/domain/op.rs`（声明派生），执行分派在 `src/presentation/cli/boot.rs`（启动相，经 `system` 能力）与 `src/presentation/cli.rs`（转录相），一致性由 `src/tests/commands.rs` 锁死。
 - 路由目录的机器比对在 `src/tests/routes.rs` ↔ [docs/presentation/contracts.md](../presentation/contracts.md)。
 - 启动对账或进程账字段一改 → 同步 [kernel 的「长驻子进程的账与回收」](../kernel/README.md) 与本页的呈现说明。
 - 新增 / 删除 / 移动 `src/entry/` 下的文件或改内部依赖 → 同步 [`layers.yaml`](layers.yaml) 与 [`unit-map.md`](unit-map.md)：前者按模块归段（同段不许互相依赖），后者逐文件对账。

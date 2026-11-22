@@ -149,7 +149,7 @@ impl Work {
         }
         // 校验：模块与模型真实存在；同一模块可以跨 agent 共用（各自独立沙箱与工具面）。
         let roster = self.modules.roster();
-        let reserved = self.systools.reserved_names();
+        let reserved = self.systools.reserved_agents();
         let mut metas: Vec<AgentMeta> = Vec::new();
         for a in &edit.agents {
             crate::capabilities::catalog::registry::api::validate_name(&a.name)?;

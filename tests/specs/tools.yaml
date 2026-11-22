@@ -28,6 +28,9 @@ cases:
   - id: cargo/tests::tools::patch
     tier: T1
     note: 补丁工具
+  - id: cargo/tests::op
+    tier: T1
+    note: 命令契约：写法派生、词法等价、确认门槛、补全与自洽检查
   - id: cargo/tests::tools::run_loop
     tier: T1
     note: 工具循环

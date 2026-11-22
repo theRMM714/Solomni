@@ -1,4 +1,5 @@
 id: render
+version: 0.1.0
 brief: >-
   把 corpus.jsonl 渲染成一份自包含、可离线打开的 HTML 报告：含目录、大纲、统计与链接检查。
   只消费 harvest 的共享数据格式，不抓取、不改写语料。

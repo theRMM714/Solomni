@@ -5,8 +5,8 @@
 
 pub use crate::capabilities::catalog::modules::domain::module::{
     BuildDecl, Module, ModuleManifest, Param, ParamType, Roster, SecretDecl, ServiceDecl, ToolDecl,
-    check_build, check_runtimes, check_secrets, check_services, check_tools, entry_candidates,
-    listing, local_entry,
+    check_build, check_module_id, check_runtimes, check_secrets, check_services, check_tools,
+    check_version, entry_candidates, listing, local_entry,
 };
 
 /// 目的：模块公地的只读面（呈现层与消费方）——清单事实与启停有效值。

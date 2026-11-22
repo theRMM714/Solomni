@@ -1,6 +1,7 @@
 //! 目的：启动相命令的执行——把一次调用（命令名 + 操作数）翻成系统维护能力的一次调用，并打回执、给退出码。
-//! 管：操作数解析（--yes / --reset / --ensure / --category / --guest / --module 与裸词）、写操作的就地确认、回执排版（人读或 --json）、退出码。
-//! 不管：命令有哪些（在 systools/commands.yaml）、业务规则与确认门槛的判据（在 system 能力）、装配（在 entry::assembly）。
+//! 管：写操作的就地确认、回执排版（人读或 --json）、退出码。
+//! 不管：命令有哪些（在 systools/commands.yaml）、操作数怎么解析（旗语与位置参数由命令声明派生，见 `tools::domain::op`）、
+//!   业务规则与确认门槛的判据（在 system 能力）、装配（在 entry::assembly）。
 //! 联动：命令行由 main 调 `run`（没人可问，缺 --yes 只预览）；转录中心由 presentation::cli 调 `run_asked` 并接管确认；两端一致性由 src/tests/commands.rs 锁死。
 
 use serde_json::{Value, json};
@@ -10,6 +11,7 @@ use crate::capabilities::system::api::JobState;
 use crate::capabilities::system::api::{
     BuildRequest, EnsureRequest, Fault, GcRequest, ResetRequest, SetupMode, System, WorkGcRequest,
 };
+use crate::capabilities::tools::api::{ArgFault, Op, arg_fault_text, parse_op};
 
 /// 目的：写操作要人点头时，由谁来问——命令行上没人可问，转录中心里就地一问。
 /// 约束：返回 false 表示没有明确点头（空输入、No、读不到输入都算没点头）。
@@ -35,80 +37,99 @@ impl Ask for NeverAsk {
 }
 
 /// 目的：一次启动相命令的入口——回执已经打完，只差退出码。
-/// 参数：`json` 为真时回执改成一行 JSON（字段见 `systools/commands.yaml` 的 `json`）。
+/// 参数：`op` 是命令表里那一条（决定收哪些旗语、怎么校验）；`json` 为真时回执改成一行 JSON。
 /// 约束：命令行上没人可问，写操作缺 `--yes` 就只给预览（行为与只有命令行入口时一致）。
-pub(crate) fn run(command: &str, operands: &[String], system: &dyn System, json: bool) -> i32 {
-    run_asked(command, operands, system, json, &mut NeverAsk, true)
+pub(crate) fn run(op: &Op, operands: &[String], system: &dyn System, json: bool) -> i32 {
+    run_asked(op, operands, system, json, &mut NeverAsk, true)
 }
 
 /// 目的：一次启动相命令的完整入口——解析、确认、执行、回执。
 /// 参数：`ask` 用来就地确认写操作；`writes` 为假表示此刻不该写（有会话在跑），只给预览。
 /// 返回：0 成功；1 执行失败；2 用法或确认门槛不对。
 pub(crate) fn run_asked(
-    command: &str,
+    op: &Op,
     operands: &[String],
     system: &dyn System,
     json: bool,
     ask: &mut dyn Ask,
     writes: bool,
 ) -> i32 {
-    let mut args = match Args::parse(operands) {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("{}", e);
+    let words: Vec<&str> = operands.iter().map(String::as_str).collect();
+    let mut args = match parse_op(op, &words) {
+        Ok(v) => v,
+        Err(fault) => {
+            eprintln!("[用法] {}（{}）", fault_text(op, &fault), op.usage());
             return 2;
         }
     };
-    let json = json || args.json;
-    if needs_confirm(command, &args) {
+    if needs_confirm(op, &args) {
         if !writes {
             // 有会话在跑：写操作会让它的工作目录跟着变，只给预览。
-            eprintln!(
-                "[提示] 有会话正在跑：{} 这次只给预览，等它跑完再来",
-                command
-            );
-            args.yes = false;
-            return run_once(command, system, &args, json);
+            eprintln!("[提示] 有会话正在跑：{} 这次只给预览，等它跑完再来", op.id);
+            set_yes(&mut args, false);
+            return run_once(op, system, &args, json);
         }
-        if !args.yes {
+        if !yes(&args) {
             if !ask.anyone() {
                 // 命令行：没人可问，照旧跑一遍不带确认的版本（只预览 / 只报门槛）。
-                return run_once(command, system, &args, json);
+                return run_once(op, system, &args, json);
             }
             // 先跑一遍不带确认的版本：预览 / dry-run / 门槛提示就是这一遍的输出。
-            let _ = run_once(command, system, &args, json);
-            if !ask.confirm(&question(command, &args)) {
+            let _ = run_once(op, system, &args, json);
+            if !ask.confirm(&question(op, &args)) {
                 eprintln!("[提示] 已取消，没有执行（命令行里用 --yes 直接确认）");
                 return 0;
             }
-            args.yes = true;
+            set_yes(&mut args, true);
         }
     }
-    run_once(command, system, &args, json)
+    run_once(op, system, &args, json)
 }
 
-/// 目的：这条命令这次会不会写（写了才要确认）。
-fn needs_confirm(command: &str, args: &Args) -> bool {
-    match command {
-        "provision" => args.reset.is_some() || args.ensure.is_some(),
+/// 目的：一个参数的值（字符串形）：没给、或声明里没这个参数，都算没有。
+fn text(args: &Value, name: &str) -> Option<String> {
+    args.get(name).and_then(Value::as_str).map(str::to_string)
+}
+
+/// 目的：布尔参数（含确认门槛的 `yes`）：没给就是假。
+fn yes(args: &Value) -> bool {
+    args.get("yes").and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// 目的：改写确认门槛（有会话在跑时强制降级为预览）。
+fn set_yes(args: &mut Value, on: bool) {
+    if let Some(map) = args.as_object_mut() {
+        map.insert("yes".to_string(), Value::Bool(on));
+    }
+}
+
+/// 目的：参数错误的人话（与动作面同一套措辞，见 `tools::domain::systool`）。
+fn fault_text(op: &Op, fault: &ArgFault) -> String {
+    arg_fault_text(&op.id, &op.schema, fault)
+}
+
+/// 目的：这条命令这次会不会写（写了才要确认）——判据在命令自己身上，不在参数解析里。
+fn needs_confirm(op: &Op, args: &Value) -> bool {
+    match op.id.as_str() {
+        "provision" => text(args, "reset").is_some() || text(args, "ensure").is_some(),
         "gc" | "work-gc" => true,
         _ => false,
     }
 }
 
 /// 目的：确认问话——说清要动什么，不重复回执里已经打过的细节。
-fn question(command: &str, args: &Args) -> String {
-    match command {
-        "gc" => match args.category.as_deref() {
+fn question(op: &Op, args: &Value) -> String {
+    match op.id.as_str() {
+        "gc" => match text(args, "category") {
             Some(c) => format!("确认清理存储类别 {}？[y/N]", c),
             None => "确认按策略回收存储？[y/N]".to_string(),
         },
-        "work-gc" => match args.words.first() {
+        "work-gc" => match text(args, "work") {
             Some(w) => format!("确认回收工作 {} 里不可达的对象？[y/N]", w),
             None => "确认回收？[y/N]".to_string(),
         },
         // 会要求确认的写命令只有 gc / work-gc / provision，而 provision 的写只来自 --reset 或 --ensure。
-        _ => match args.reset.as_deref() {
+        _ => match text(args, "reset") {
             Some(guest) => format!("确认还原虚拟根 {}？会删掉它里面的状态并重建 [y/N]", guest),
             None => "确认从网络下载并补齐依赖？[y/N]".to_string(),
         },
@@ -116,8 +137,8 @@ fn question(command: &str, args: &Args) -> String {
 }
 
 /// 目的：按命令名分派到各命令的执行（已解析好操作数，确认与否已定）。
-fn run_once(command: &str, system: &dyn System, args: &Args, json: bool) -> i32 {
-    match command {
+fn run_once(op: &Op, system: &dyn System, args: &Value, json: bool) -> i32 {
+    match op.id.as_str() {
         "doctor" => {
             println!("{}", pretty(&system.doctor()));
             0
@@ -142,11 +163,11 @@ fn run_once(command: &str, system: &dyn System, args: &Args, json: bool) -> i32 
 }
 
 /// 目的：`--provision`：带 --reset 就还原虚拟根，带 --ensure 就补齐，都没有就报状态。
-fn provision(system: &dyn System, args: &Args, json: bool) -> i32 {
-    if let Some(guest) = args.reset.clone() {
+fn provision(system: &dyn System, args: &Value, json: bool) -> i32 {
+    if let Some(guest) = text(args, "reset") {
         let req = ResetRequest {
             guest: guest.clone(),
-            confirm: args.yes,
+            confirm: yes(args),
         };
         let mut lines: Vec<String> = Vec::new();
         let mut on_line = |line: &str| {
@@ -167,10 +188,10 @@ fn provision(system: &dyn System, args: &Args, json: bool) -> i32 {
             Err(f) => fail("[依赖补齐]", f, json),
         };
     }
-    if let Some(spec) = args.ensure.clone() {
+    if let Some(spec) = text(args, "ensure") {
         let req = EnsureRequest {
             spec: if spec.is_empty() { None } else { Some(spec) },
-            confirm: args.yes,
+            confirm: yes(args),
         };
         let mut lines: Vec<String> = Vec::new();
         let mut on_line = |line: &str| {
@@ -201,15 +222,15 @@ fn provision(system: &dyn System, args: &Args, json: bool) -> i32 {
 }
 
 /// 目的：`--gc`：给了类别就清那一类，否则按策略回收；缺 --yes 时只预览（退出码 2）。
-fn gc(system: &dyn System, args: &Args, json: bool) -> i32 {
-    if let Some(cat) = args.category.clone().filter(|_| !args.yes) {
+fn gc(system: &dyn System, args: &Value, json: bool) -> i32 {
+    if let Some(cat) = text(args, "category").filter(|_| !yes(args)) {
         return gc_preview(system, &cat, json);
     }
     let req = GcRequest {
-        kind: args.category.clone(),
-        guest: args.guest.clone(),
-        module: args.module.clone(),
-        confirm: args.yes,
+        kind: text(args, "category"),
+        guest: text(args, "guest"),
+        module: text(args, "module"),
+        confirm: yes(args),
     };
     match system.gc(req) {
         Ok(CleanOutcome::Report(report)) => {
@@ -302,14 +323,12 @@ fn wait_job(system: &dyn System, mut state: JobState, json: bool) -> i32 {
 }
 
 /// 目的：`--work-gc`：回收一个工作里不再可达的内容对象（缺 --yes 只预览）。
-fn work_gc(system: &dyn System, args: &Args, json: bool) -> i32 {
-    let Some(work) = args.words.first().cloned() else {
-        eprintln!("用法：solomni --work-gc <工作名> [--yes]");
-        return 2;
-    };
+fn work_gc(system: &dyn System, args: &Value, json: bool) -> i32 {
+    // 工作名在声明里是必填，parse 已经挡住缺参；这里只是取值。
+    let work = text(args, "work").unwrap_or_default();
     let req = WorkGcRequest {
         work,
-        confirm: args.yes,
+        confirm: yes(args),
     };
     match system.work_gc(req) {
         Ok(r) => {
@@ -356,8 +375,8 @@ fn work_gc(system: &dyn System, args: &Args, json: bool) -> i32 {
 
 /// 目的：`setup`：便携维护（PATH shim 与围栏机器级预授）——省略模式就只报状态。
 /// 约束：状态是只读回执，人读与 `--json` 打同一份 JSON；写入类模式的进度行带 `[便携]` 前缀。
-fn setup(system: &dyn System, args: &Args, json: bool) -> i32 {
-    let raw = args.words.first().cloned().unwrap_or_default();
+fn setup(system: &dyn System, args: &Value, json: bool) -> i32 {
+    let raw = text(args, "mode").unwrap_or_default();
     let Some(mode) = SetupMode::parse(&raw) else {
         return fail(
             "[便携]",
@@ -445,18 +464,17 @@ pub(crate) fn setup_lines(v: &Value) -> Vec<String> {
 }
 
 /// 目的：`--build`：在宿主或某个虚拟根里跑模块声明的构建。
-fn build(system: &dyn System, args: &Args, json: bool) -> i32 {
-    let Some(module) = args.words.first().cloned() else {
-        eprintln!("用法：solomni --build <模块 id> [--guest <虚拟根>]");
-        return 2;
-    };
-    if args.guest.as_deref().is_some_and(|g| g.trim().is_empty()) {
+fn build(system: &dyn System, args: &Value, json: bool) -> i32 {
+    // 模块 id 在声明里是必填，parse 已经挡住缺参；这里只是取值。
+    let module = text(args, "module").unwrap_or_default();
+    let guest = text(args, "guest");
+    if guest.as_deref().is_some_and(|g| g.trim().is_empty()) {
         eprintln!("[构建] --guest 要给虚拟根名（`.vm/guest/<名>`）");
         return 2;
     }
     let req = BuildRequest {
         module: module.clone(),
-        guest: args.guest.clone(),
+        guest,
     };
     match system.build(req) {
         Ok(b) if json => {
@@ -527,60 +545,4 @@ pub(crate) fn print_gc(r: &GcReport) {
         );
     }
     println!("[存储] 释放 {} 字节；仍超限={}", r.freed_bytes, r.over_cap);
-}
-
-/// 目的：启动相命令的操作数——跨命令修饰（--yes / --json）与命令自己的旗语分开收。
-#[derive(Debug, Default)]
-struct Args {
-    yes: bool,
-    /// 目的：机器回执（写在命令后面也算：`solomni --gc --json`）。
-    json: bool,
-    reset: Option<String>,
-    ensure: Option<String>,
-    category: Option<String>,
-    guest: Option<String>,
-    module: Option<String>,
-    /// 目的：不带旗语的取值（工作名 / 模块 id）。
-    words: Vec<String>,
-}
-
-impl Args {
-    /// 目的：解析启动相命令的操作数（`--flag=value` 与 `--flag value` 两种写法都认）。
-    fn parse(operands: &[String]) -> Result<Args, String> {
-        let mut args = Args::default();
-        let mut i = 0;
-        while i < operands.len() {
-            let raw = &operands[i];
-            let (name, inline) = match raw.split_once('=') {
-                Some((n, v)) => (n, Some(v.to_string())),
-                None => (raw.as_str(), None),
-            };
-            let take = |i: &mut usize| -> Option<String> {
-                if let Some(v) = inline.clone() {
-                    return Some(v);
-                }
-                let next = operands.get(*i + 1)?;
-                if next.starts_with('-') {
-                    return Some(String::new());
-                }
-                *i += 1;
-                Some(next.clone())
-            };
-            match name {
-                "--yes" => args.yes = true,
-                "--json" => args.json = true,
-                "--reset" => args.reset = take(&mut i),
-                "--ensure" => args.ensure = Some(take(&mut i).unwrap_or_default()),
-                "--category" => args.category = take(&mut i),
-                "--guest" => args.guest = take(&mut i),
-                "--module" => args.module = take(&mut i),
-                other if other.starts_with('-') => {
-                    return Err(format!("未知旗语 {}（--help 看全部）", other));
-                }
-                _ => args.words.push(raw.clone()),
-            }
-            i += 1;
-        }
-        Ok(args)
-    }
 }

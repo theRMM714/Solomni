@@ -106,6 +106,7 @@ pub(crate) fn module_of(id: &str) -> Module {
         manifest: ModuleManifest {
             build: None,
             id: id.to_string(),
+            version: "0.1.0".to_string(),
             brief: format!("{} 的能力", id),
             system: format!("用法：{}", id),
             enabled: true,

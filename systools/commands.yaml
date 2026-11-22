@@ -1,182 +1,342 @@
 # 目的：命令面——产品对外暴露的每一条命令的**唯一声明**（转录相 core 与启动相 boot 共用一张表）。
-# 管：命令名、别名、分组、写法（usage）、一句话说明、确认门槛、命令自己的旗语。
-# 不管：命令怎么执行（entry/args.rs 与 presentation/cli.rs 各自分派）、手册怎么排版（presentation/cli/catalog.rs）。
+# 管：命令名、别名、分组、一句话说明、确认门槛、参数契约（params）、执行者（executor）。
+# 不管：命令怎么执行（各执行者自己的入口）、手册怎么排版（presentation/cli 的目录渲染）。
 # 约束：名字与别名全局唯一；phase=boot 的命令用长旗语形式调用（--name），phase=core 的命令在转录中心里输入；
 #   清单顺序即手册顺序（分组按首次出现排序）。
-# 联动：解析与校验在 src/capabilities/tools/domain/commands.rs；覆盖门禁在 src/tests/commands.rs。
+#   params 与动作面（systools/tools.yaml）是**同一种形状**：位置序号（positional）、可选值（values）、
+#   类型、必填、缺省值都写在这里；写法、手册、补全与校验全部从它派生，不再手写位置参数字符串。
+#   executor 决定最后一步落在哪：core（走能力面 act）/ system（装配核心前就能跑）/ ui（纯界面动作）。
+# 联动：解析与校验在 src/capabilities/tools/domain/{commands,op}.rs；覆盖门禁在 src/tests/commands.rs。
 
 commands:
   # —— 转录相：在转录中心里输入 ——
   - name: single
     group: 会话
     phase: core
-    usage: "<agent名…>"
+    executor: core
     brief: 发起单 agent 会话，进入转录提示符
+    params:
+      agents:
+        type: string
+        rest: true
+        desc: agent 名（可给多个；省略 = 全部 agent）
 
   - name: collab
     group: 会话
     phase: core
-    usage: "<agent名…|?>"
+    executor: core
     brief: 多 agent 协作，由同一个主持人收口
+    params:
+      agents:
+        type: string
+        rest: true
+        desc: agent 名（省略或 ? = 由核心代拟名单）
 
   - name: proxy
     group: 会话
     phase: core
+    executor: core
     brief: 决定权整块交给核心（不看单席约束）
 
   - name: rewind
     group: 转录
     phase: core
-    usage: "<会话> archive|delete <行id> | restore <标记id>"
+    executor: core
     brief: 回档：留档、删除或恢复到某条标记
+    params:
+      session:
+        type: string
+        required: true
+        non_empty: true
+        positional: 1
+        desc: 会话 id
+      mode:
+        type: string
+        required: true
+        positional: 2
+        values: [archive, delete, restore]
+        desc: archive 留档 / delete 真截断 / restore 回到某条留档
+      id:
+        type: integer
+        required: true
+        min: 0
+        positional: 3
+        desc: 行 id（archive / delete）或留档标记 id（restore）
 
   - name: work
     group: 转录
     phase: core
-    usage: "<会话> log|show|restore <提交号> [--yes]"
+    executor: core
     brief: 共享区提交历史：看 head、看详情、非破坏性回滚
+    confirm: true
+    params:
+      session:
+        type: string
+        required: true
+        non_empty: true
+        positional: 1
+        desc: 会话 id
+      action:
+        type: string
+        positional: 2
+        default: log
+        values: [log, show, restore]
+        desc: 省略 = log（看 head）
+      rev:
+        type: integer
+        positional: 3
+        desc: 提交号（log 时是条数，show / restore 时是要看的那次）
 
   - name: diagnose
     group: 转录
     phase: core
-    usage: "<会话>"
+    executor: core
     brief: 只读诊断一条虚拟机档会话（进程 / CPU / 内存 / 挂载）
+    params:
+      session:
+        type: string
+        required: true
+        non_empty: true
+        positional: 1
+        desc: 会话 id
 
   - name: provider
     group: 注册处
     phase: core
-    usage: "list|add|rm|discover"
+    executor: core
     brief: 供应商登记与连通性测试
+    params:
+      action:
+        type: string
+        positional: 1
+        values: [list, add, key, rm, discover]
+        desc: 省略 = list
+      id:
+        type: string
+        positional: 2
+        desc: 供应商 id（add / key / rm）
+      base_url:
+        type: string
+        positional: 3
+        desc: 接口根地址（add）
+      api_key:
+        type: string
+        positional: 4
+        desc: 密钥（add；给 rm / key 时省略）
 
   - name: model
     group: 注册处
     phase: core
-    usage: "list|add|rm"
+    executor: core
     brief: 模型登记与默认模型切换
+    params:
+      action:
+        type: string
+        positional: 1
+        values: [list, add, rm]
+        desc: 省略 = list
+      id:
+        type: string
+        positional: 2
+        desc: 模型 id（add / rm）
+      name:
+        type: string
+        positional: 3
+        desc: 展示名（add）
+      api_model:
+        type: string
+        positional: 4
+        desc: 供应商侧的模型串（add）
+      provider:
+        type: string
+        positional: 5
+        desc: 供应商 id（add）
+      note:
+        type: string
+        rest: true
+        desc: 备注（add，可省略；吃光 provider 之后剩下的词）
 
   - name: core
     group: 注册处
     phase: core
-    usage: "<模型id>"
+    executor: core
     brief: 设置核心默认模型
-
-  - name: module
-    group: 模块
-    phase: core
-    usage: "<模块id.工具名> [json]"
-    brief: 不经 AI 直接调用模块工具（动作 id 来自动作目录）
+    params:
+      model:
+        type: string
+        positional: 1
+        desc: 模型 id（省略 = 显示当前核心模型）
 
   - name: resident
     group: 后台
     phase: core
-    usage: "list|start|stop|enable|disable|call <模块id> <服务名> [操作名] [json]"
+    executor: core
     brief: 常驻服务：列清单、启停、调用操作
+    params:
+      action:
+        type: string
+        positional: 1
+        values: [list, start, stop, enable, disable, call]
+        desc: 省略 = list
+      module:
+        type: string
+        positional: 2
+        desc: 模块 id
+      service:
+        type: string
+        positional: 3
+        desc: 服务名
+      op:
+        type: string
+        positional: 4
+        desc: 操作名（call 时）
+      json:
+        type: string
+        rest: true
+        desc: 操作参数（call 时，整段 JSON；吃光操作名之后剩下的词）
 
   - name: secret
     group: 后台
     phase: core
+    executor: core
     brief: 列密钥声明（值不回显）
 
   - name: rescan
     group: 后台
     phase: core
+    executor: ui
     brief: 重扫模块与能力注册表
 
   - name: web
     group: 界面
     phase: core
-    usage: "[端口]"
+    executor: ui
     brief: 转入 Web 转录中心（Ctrl+C 回到这里）
+    params:
+      port:
+        type: integer
+        positional: 1
+        min: 1
+        max: 65535
+        desc: 监听端口（省略 = 缺省端口）
 
   - name: help
     group: 系统
     phase: core
-    usage: "[命令|--all]"
+    executor: ui
     aliases: [/help, "?"]
     brief: 命令手册与旗语规范
+    params:
+      topic:
+        type: string
+        positional: 1
+        desc: 要看的那条命令（省略 = 全部）
+      all:
+        type: boolean
+        desc: 连启动相命令一起列出
 
   - name: version
     group: 系统
     phase: core
+    executor: ui
     brief: 版本与构建档位
 
   - name: exit
     group: 系统
     phase: core
+    executor: ui
     brief: 退出转录中心，回到系统 shell
 
   # —— 启动相：装配核心之前直接执行，跑完退出 ——
   - name: doctor
     group: 维护
     phase: boot
+    executor: system
     brief: 自检：这台机器能承载哪些能力与测试（JSON）
     json: '{"platform","arch","fence","externals","toolchains","processes","vmTier","storage"}'
 
   - name: provision
     group: 维护
     phase: boot
+    executor: system
     brief: 依赖补齐状态与执行（不带写旗语只报状态）
     json: '状态 {"platform","arch","missing","deps"}；补齐 {"ensured":true,"lines"}；还原 {"applied","freedBytes","actions"}'
     confirm: true
-    flags:
-      - name: "--reset"
-        value: "<guest>"
-        desc: 重置一个虚拟机档（写操作，需 --yes）
-      - name: "--ensure"
-        value: "[spec]"
-        desc: 按需补齐工具链（写操作，需 --yes）
+    params:
+      reset:
+        type: string
+        desc: 重置的虚拟机档名（写操作，需 --yes）
+      ensure:
+        type: string
+        optional_value: true
+        desc: 按需补齐的工具链规格（光写 --ensure = 清单全量；写操作，需 --yes）
 
   - name: work-gc
     group: 维护
     phase: boot
-    usage: "<工作名>"
+    executor: system
     brief: 显式回收一个不再可达的内容对象（默认 dry-run）
     json: '{"objects","bytes","reachableObjects","unreachableObjects","applied"}'
     confirm: true
-    flags:
-      - name: "--yes"
-        desc: 真的删（缺省只预览并给退出码 2）
+    params:
+      work:
+        type: string
+        required: true
+        non_empty: true
+        positional: 1
+        desc: 工作名
 
   - name: storage
     group: 维护
     phase: boot
+    executor: system
     brief: 存储空间报告（JSON）
     json: '{"managedBytes","categories","lastGc"}'
 
   - name: gc
     group: 维护
     phase: boot
-    usage: "[类别]"
+    executor: system
     brief: 回收内容对象与构建缓存（默认 dry-run）
     json: '{"applied","freedBytes","actions","skipped"}；后台作业起来时 {"job"}'
     confirm: true
-    flags:
-      - name: "--yes"
-        desc: 真的删（缺省只预览并给退出码 2）
-      - name: "--category"
-        value: "<类别>"
+    params:
+      category:
+        type: string
         desc: 只回收这一类
-      - name: "--guest"
-        value: "<guest>"
+      guest:
+        type: string
         desc: 限定一个虚拟机档
-      - name: "--module"
-        value: "<模块>"
+      module:
+        type: string
         desc: 限定一个模块的产物
 
   - name: build
     group: 维护
     phase: boot
-    usage: "<模块id>"
+    executor: system
     brief: 在目标环境里构建一个模块声明的产物
     json: '{"module","target","skipped","output"}'
-    flags:
-      - name: "--guest"
-        value: "<guest>"
+    params:
+      module:
+        type: string
+        required: true
+        non_empty: true
+        positional: 1
+        desc: 模块 id
+      guest:
+        type: string
         desc: 指定目标虚拟机档
 
   - name: setup
     group: 维护
     phase: boot
-    usage: "[path|unset|undo|status|fence|all]"
+    executor: system
     brief: 便携 PATH 与围栏预授（省略值 = status）
     json: '状态 {"platform","root","path","fence"}；写入类模式 {"mode","lines"}'
+    params:
+      mode:
+        type: string
+        positional: 1
+        values: [path, unset, undo, status, fence, all]
+        desc: 省略 = status

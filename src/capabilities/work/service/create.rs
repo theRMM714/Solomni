@@ -197,7 +197,7 @@ impl Work {
             spec.agents = vec![merge_into_one(&spec.agents, &spec.name)];
         }
         let roster = self.modules.roster();
-        let reserved = self.systools.reserved_names();
+        let reserved = self.systools.reserved_agents();
         // 校验 agent：名字合法、模块与模型真实存在；模块可跨 agent 共用（各自独立沙箱与工具面）
         for a in &spec.agents {
             crate::capabilities::catalog::registry::api::validate_name(&a.name)?;

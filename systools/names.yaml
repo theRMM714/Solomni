@@ -1,7 +1,10 @@
-# 系统侧名字表：`session/<工作>/` 下由布局固定占用的目录名。
-# agent 实例名不得占用这些名字（会与共享区 `work/` 或子会话容器 `children/` 撞路径）；
-# 目录布局一改，这里必须同步（见 docs/session/session-model.md 与 PRODUCT.md 的落盘布局）。
-reserved:
+# 系统侧名字表：两类保留名，都不在代码里硬编码。
+# agents：`session/<工作>/` 下由布局固定占用的目录名；agent 实例名不得占用（会与共享区 work/ 或子会话容器 children/ 撞路径）。
+# modules：模块 id 不得占用的词——模块 id 会成为动作 id 的前缀 `module.<模块>.<工具>`。
+#   产品命令名与别名在装配期由 Op 目录并进来，**不要**抄第二份；这里只写非命令类的占位词。
+# 布局一改，这里必须同步（见 docs/session/session-model.md 与 PRODUCT.md 的落盘布局）。
+
+agents:
   - work
   - children
   # 代理会话自己的私有沙箱（真实私沙，不与共享区混用）：agent 实例名不得占用。
@@ -10,3 +13,7 @@ reserved:
   - .work
   # 工作区绑定的布局投影（外部工作区根的绝对路径）；agent 实例名不得占用。
   - .work-root
+
+modules:
+  # 动作 id 的前缀词本身：模块叫 module 会让 `module.module.<工具>` 难以分辨。
+  - module
