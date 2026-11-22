@@ -118,7 +118,7 @@ pub fn active_view() -> Option<ViewDrive> {
 ///   相对路径会被算成跨卷绝对路径，容器里反而调不起来；而它本就不需要视图盘（祖先链只对
 ///   cwd == private 的深叶路径写）。
 /// 参数：spec —— 本次围栏的意图。
-/// 返回：视图盘生效且 spec.cwd 就是 spec.private 时给盘；否则 None（调用方回退真实路径）。
+/// 返回：视图盘生效且 spec.cwd 就是 spec.home 时给盘；否则 None（调用方回退真实路径）。
 pub(crate) fn active_shell_view(spec: &FencePlan) -> Option<ViewDrive> {
     if spec.home.as_os_str().is_empty() || spec.cwd != spec.home {
         return None;

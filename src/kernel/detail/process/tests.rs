@@ -842,7 +842,7 @@ fn real_shell_fence_denies_outside_paths_without_claiming_a_reason() {
     let secret = outside.join("secret.txt");
     std::fs::write(&secret, "SHELL-SECRET").expect("写 secret");
     let mut spec = spec_for(&inside);
-    spec.private = inside.clone();
+    spec.home = inside.clone();
     let tools = real_runner(exe, &inside, 30);
     let out = tools.run_shell(&crate::kernel::ports::ShellRun {
         fence: &spec,
