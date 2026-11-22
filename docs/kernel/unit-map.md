@@ -88,7 +88,7 @@
 | `src/kernel/detail/confine/windows/tests/workspace.rs` | 视图盘用例：容器 cwd 落在映射盘符 |
 | `src/kernel/detail/container.rs` | 容器身份与容器内启动的门面：只有 Windows 有实现（`src/kernel/detail/container/windows.rs`）；其余平台走 `src/kernel/detail/container/other.rs` 的如实拒绝 |
 | `src/kernel/detail/container/other.rs` | 容器能力的非 Windows 后端：回环中继入口如实拒绝（`FENCE_FAILED`），不假装有容器 |
-| `src/kernel/detail/container/windows/relay.rs` | Windows 回环中继：容器内 bind `127.0.0.2:<端口>`、宿主按端口清单 dial `127.0.0.1:<端口>`，两侧用继承的匿名管道传帧；端口白名单与「产品自己的端口」都在宿主侧判（后者按监听者 pid 是否落在本产品进程树，不靠端口表） |
+| `src/kernel/detail/container/windows/relay.rs` | Windows 回环中继：容器内 bind `127.0.0.2:<端口>`、宿主按端口清单 dial `127.0.0.1:<端口>`，两侧用继承的匿名管道传帧；端口白名单与「产品自己的端口」都在宿主侧判（后者按「监听者 pid 落在本产品进程树，或它跑的就是本产品这个可执行文件」判，不靠端口表） |
 | `src/kernel/detail/container/windows.rs` | Windows 容器围栏的启动面：AppContainer 档案与 SID、本产品能力 SID（`solomni.fence.baseline` → `S-1-15-3-*`，profile 与令牌两处都声明）、`net` 对应的 internetClient 能力、UTF-16 转换、system shell 与 kill-on-close 作业对象、容器内启动（`container_command` / `spawn_in_container` / `wait_and_reap` 三个零件，回环中继也复用） |
 | `src/kernel/detail/launch.rs` | 命令启动形状（门面）：PATH / PATHEXT 解析、安装目录上溯、`shell_command` 与 `fence_env`；平台分支在 `src/kernel/detail/launch/windows.rs` / `src/kernel/detail/launch/unix.rs` |
 | `src/kernel/detail/launch/windows.rs` | `launch` 的 Windows 后端：真身解析、重解析点判定、node 开关、程序名改写与 `cmd` shell |
