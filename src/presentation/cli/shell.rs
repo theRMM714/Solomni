@@ -108,7 +108,15 @@ pub(crate) fn run_words(
                     version = true;
                     continue;
                 }
-                _ => {}
+                _ => {
+                    if short_flag(word) {
+                        println!(
+                            "[用法] 没有旗语 {}（短旗只认 -h / -v）；要旗语请用一个短横，如 --help",
+                            word
+                        );
+                        return Outcome::Done(2);
+                    }
+                }
             }
         }
         rest.push(*word);
@@ -137,6 +145,14 @@ pub(crate) fn run_words(
         ),
     }
     Outcome::Done(2)
+}
+
+/// 目的：单破折号的多字符词不是旗语（R8：短旗只认 -h / -v）；负数之类的值照收。
+fn short_flag(word: &str) -> bool {
+    word.len() > 1
+        && word.starts_with('-')
+        && !word.starts_with("--")
+        && word.parse::<f64>().is_err()
 }
 
 /// 目的：命令目录里的一条：手册与版本先答（不需要参数写对），再解析参数、交给执行者。
