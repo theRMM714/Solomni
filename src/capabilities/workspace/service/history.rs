@@ -42,7 +42,7 @@ impl WorkspaceService {
             None => None,
         };
         let index: Index = self.store.read_index(&store, agent)?;
-        let sandbox_files: BTreeSet<String> = self.store.list(&sandbox)?.into_iter().collect();
+        let sandbox_files: BTreeSet<String> = self.sandbox_files(&store, &sandbox)?.into_iter().collect();
         // 候选路径：拉取基线、我的工作线、主线与沙箱的并集；状态只看「工作线 / 主线 / 沙箱」三方。
         let all: BTreeSet<String> = index
             .keys()
@@ -56,7 +56,7 @@ impl WorkspaceService {
         let (want, missing): (Vec<String>, Vec<String>) = if paths.is_empty() {
             (all.iter().cloned().collect(), Vec::new())
         } else {
-            expand_paths(paths, &available)
+            self.expand_forced(&sandbox, &available, paths)?
         };
         let external = if self.dirs.is_external(work) {
             let mut out = Vec::new();

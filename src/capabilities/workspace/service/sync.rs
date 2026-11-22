@@ -169,7 +169,7 @@ impl WorkspaceService {
         // 候选 = 受管路径 + 沙箱里的全部文件：新增 / 修改 / 删除都在这一遍里认出来。
         let mut all: BTreeSet<String> = index.keys().cloned().collect();
         all.extend(tree.keys().cloned());
-        all.extend(self.store.list(&sandbox)?);
+        all.extend(self.sandbox_files(&store, &sandbox)?);
         // AppContainer 私有存量不是用户内容：不进候选，也就不进 held / paths / deletes 回执；
         // 已发布进共享区的历史条目不会被自动删，要清用 work_commit 记删除再 work_push。
         all.retain(|rel| !appcontainer_ignored(rel));

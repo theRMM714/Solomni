@@ -243,6 +243,16 @@ impl WorkStore for FsWorkStore {
         }
     }
 
+    fn write_text(&self, path: &Path, text: &str) -> Result<(), String> {
+        if let Some(dir) = path.parent()
+            && !dir.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(dir)
+                .map_err(|e| format!("建目录失败（{}）：{}", dir.display(), e))?;
+        }
+        write_atomic(path, text.as_bytes())
+    }
+
     fn stat_under(&self, root: &Path, rel: &str) -> Result<Option<u64>, String> {
         let path = safe_path(root, rel)?;
         match std::fs::metadata(&path) {

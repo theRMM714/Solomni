@@ -10,15 +10,17 @@ pub use crate::capabilities::workspace::domain::freshness::ReadVerdict;
 pub use crate::capabilities::workspace::domain::hash::{Sha256, content_hash};
 /// 目的：工作区过滤的唯一名单与匹配规则——`tools` 的 grep 与内容面的导入 / 清单都只从这里取。
 #[allow(unused_imports)] // 入站面：规则类型给调用方与测试取用
-pub use crate::capabilities::workspace::domain::path_filter::{Rules, WORKIGNORE, WORKIGNORE_SEED};
+pub use crate::capabilities::workspace::domain::path_filter::{
+    MAX_RULE_BYTES, MAX_RULE_CHARS, MAX_RULE_LINES, Rules, WORKIGNORE, WORKIGNORE_SEED, check_rule,
+};
 pub use crate::capabilities::workspace::domain::readfact::ReadFact;
 /// 目的：`work_*` 工具的名字、取参与回执拼装——`tools` 与 `turn` 只从这里取，不碰 domain。
 #[allow(unused_imports)]
 pub use crate::capabilities::workspace::domain::work_tools::{
-    COMMIT, DIFF, LOST, PULL, PUSH, RESET, RESOLVE, STATUS, SYNC, VERSIONS, is_work_tool,
-    render_commit, render_diff, render_lost, render_pull, render_push, render_reset,
-    render_resolve, render_restore_lost, render_status, render_sync, render_versions, str_arg,
-    str_list,
+    COMMIT, DIFF, IGNORE, IgnoreReport, LOST, PULL, PUSH, RESET, RESOLVE, STATUS, SYNC, VERSIONS,
+    is_work_tool, render_commit, render_diff, render_ignore, render_lost, render_pull, render_push,
+    render_reset, render_resolve, render_restore_lost, render_status, render_sync, render_versions,
+    str_arg, str_list,
 };
 pub use crate::capabilities::workspace::domain::workspace::{
     AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage, safe_file_name,
@@ -264,6 +266,10 @@ pub trait Workspace: Send + Sync {
     /// 目的：首次绑定外部工作区时把工作区现有文件导入成初始提交（有上限、忽略 VCS / 依赖目录）。
     /// 约束：已有 head 时无操作；单文件超限 / 总上限截断时只导入可导入的部分。
     fn work_import_root(&self, work: &str, time: i64) -> Result<SyncReport, String>;
+    /// **过滤名单**：读写本工作的 `.workignore`（`op` = list / add / remove）。
+    /// 约束：规则只决定**哪些路径算工作区内容**（首次导入、状态里的未跟踪清单、提交展开与 grep）；
+    ///   显式点名的单个文件照样可读写，已跟踪的文件不会因为新规则消失。只动版本库目录，不碰 `.gitignore`。
+    fn work_ignore(&self, work: &str, op: &str, patterns: &[String]) -> Result<IgnoreReport, String>;
     /// 目的：把该工作未完成的版本库事务重放到一致状态；没有待恢复事务 = 无操作。
     fn work_recover(&self, work: &str) -> Result<(), String>;
     /// 目的：回收该工作中不再可达的内容对象；apply=false 只统计不删除。

@@ -8,6 +8,7 @@ mod config;
 mod external;
 mod filter;
 mod gate;
+mod ignore;
 mod resolve;
 mod support;
 mod work;

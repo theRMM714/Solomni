@@ -6,8 +6,8 @@
 use super::*;
 use crate::capabilities::workspace::api::{
     AdoptReport, ArchiveReport, CommitDetail, CommitFileView, CommitReport, CommitRequest,
-    DeleteReport, DiffReport, DiffRequest, LostReport, PullReport, PushReport, PushRequest,
-    ReadQuery, ReadVerdict, ResetReport, ResetRequest, ResolveReport, ResolveRequest,
+    DeleteReport, DiffReport, DiffRequest, IgnoreReport, LostReport, PullReport, PushReport,
+    PushRequest, ReadQuery, ReadVerdict, ResetReport, ResetRequest, ResolveReport, ResolveRequest,
     RestoreLostReport, StatusReport, SyncReport, VersionView, WorkFiles, WorkGcReport, WorkLog,
     WorkRoots, WorkUsage, Workspace,
 };
@@ -182,6 +182,9 @@ impl Workspace for WorkspaceService {
         expect_current: &str,
     ) -> Result<RestoreLostReport, String> {
         WorkspaceService::work_restore_lost(self, work, agent, path, expect_current)
+    }
+    fn work_ignore(&self, work: &str, op: &str, patterns: &[String]) -> Result<IgnoreReport, String> {
+        WorkspaceService::work_ignore(self, work, op, patterns)
     }
     fn work_recover(&self, work: &str) -> Result<(), String> {
         WorkspaceService::work_recover(self, work)

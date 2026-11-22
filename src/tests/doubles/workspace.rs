@@ -340,6 +340,17 @@ impl WorkStore for InMemoryWorkStore {
             .map(|b| String::from_utf8_lossy(b).into_owned()))
     }
 
+    fn write_text(&self, path: &std::path::Path, text: &str) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.files
+            .lock()
+            .expect("锁")
+            .insert(text_key(path), text.as_bytes().to_vec());
+        Ok(())
+    }
+
     fn stat_under(&self, root: &std::path::Path, rel: &str) -> Result<Option<u64>, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());

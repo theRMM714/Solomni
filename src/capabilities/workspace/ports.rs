@@ -52,6 +52,9 @@ pub trait WorkStore: Send + Sync {
     fn list_visible(&self, root: &Path, rules: Option<&str>) -> Result<Vec<String>, String>;
     /// 目的：读版本库目录里的一个小文本文件（过滤规则等）；不存在 = None。
     fn read_text(&self, path: &Path) -> Result<Option<String>, String>;
+    /// 目的：写版本库目录里的一个小文本文件（过滤规则等）：同目录临时文件 + rename，不留半个文件。
+    /// 约束：只给小文本（规则名单），内容由调用方拼好；父目录不存在时建出来。
+    fn write_text(&self, path: &Path, text: &str) -> Result<(), String>;
 
     /// 目的：读 root 下文件的大小；不存在 = None。
     /// 约束：只读元数据，不读内容；上限预检用它。
