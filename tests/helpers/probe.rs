@@ -248,8 +248,9 @@ pub fn fence_clean(root: &Path) {
         .arg(root)
         .output()
         .expect("收尾围栏台账");
+    // 行首不能是 [探针]：那是「环境跳过」的诚实标记，门禁会把它算成一条安全探针跳过（CI 不容忍）。
     eprintln!(
-        "[探针] 围栏收尾：{}{}",
+        "围栏收尾：{}{}",
         String::from_utf8_lossy(&out.stdout).trim(),
         String::from_utf8_lossy(&out.stderr).trim()
     );

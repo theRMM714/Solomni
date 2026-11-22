@@ -86,8 +86,10 @@ pub fn run_fenced(job: &FenceJob, command: &str) -> i32 {
     // 回环中继是平台能力：不支持的平台**拒绝执行**，不降级成回环全通——
     // 这些平台的 net=off 本来就放行本地回环，按 off 落下去会把宿主回环上的一切（含产品端口）一起送出去。
     if job.plan.net.is_local() && !backend().local_relay() {
+        let ports = job.plan.net.local_ports().map_or(0, <[u16]>::len);
         eprintln!(
-            "[围栏] 本平台还没有回环中继：local_ports 这次不成立，拒绝执行（不降级成回环全通）"
+            "[围栏] 本平台还没有回环中继：local_ports（{} 个端口）这次不成立，拒绝执行（不降级成回环全通）",
+            ports
         );
         return crate::kernel::contracts::fence::FENCE_FAILED;
     }
