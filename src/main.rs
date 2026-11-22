@@ -53,6 +53,11 @@ fn command_ops() -> &'static capabilities::tools::api::OpBook {
 
 /// 目的：装配核心之前就能回答的旗语：`--help`（含 `<命令> --help`）、`--version` 就地输出并给出退出码。
 fn early_exit(flags: &presentation::cli::argv::Flags) -> Option<i32> {
+    // 带位置词 = 命令行上点名了一条转录相命令或模块工具：参数怎么读要等装配（模块清单 / 动作目录）才能定，
+    // 所以 `solomni work --help` 这类写法不能在这里当成全局 --help 打手册。
+    if !flags.positionals.is_empty() {
+        return None;
+    }
     if let Some(topic) = &flags.help_topic {
         let text = presentation::cli::catalog::detail(topic)
             .unwrap_or_else(|| presentation::cli::catalog::help_text(flags.all));
@@ -767,6 +772,29 @@ fn main() {
 
     // 工具级确认要有地方被作答：网页有裁决卡，CLI 在生成中就地按选项答——两边都接上了。
     handle.allow_tool_cards();
+    // 命令行上点名了一条转录相命令或模块工具：与转录中心走同一处分派，跑完就退。
+    if !flags.positionals.is_empty() {
+        let opts = presentation::cli::shell::Opts {
+            json: flags.json,
+            help: flags.help,
+            version: flags.version,
+            interactive: false,
+            web_port: flags.port.unwrap_or(presentation::web::DEFAULT_PORT),
+        };
+        let words: Vec<&str> = flags.positionals.iter().map(String::as_str).collect();
+        let code = match presentation::cli::shell::run_words(&faces, &system, &words, &opts) {
+            presentation::cli::shell::Outcome::Done(code) => code,
+            presentation::cli::shell::Outcome::Web(port) => {
+                entry::web::serve_web(faces.clone(), port, &fence_report);
+                0
+            }
+            presentation::cli::shell::Outcome::Exit => 0,
+        };
+        if view_drive {
+            view_drive_release(&home);
+        }
+        std::process::exit(code);
+    }
     if web {
         entry::web::serve_web(
             faces,

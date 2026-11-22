@@ -16,7 +16,7 @@ fn book() -> &'static CommandBook {
 }
 
 /// 目的：命令表投影成的 op 书——手册、补全、解析与分派都只认这一份声明。
-fn ops() -> &'static OpBook {
+pub(crate) fn ops() -> &'static OpBook {
     static OPS: OnceLock<OpBook> = OnceLock::new();
     OPS.get_or_init(|| OpBook::from_commands(book()))
 }
@@ -169,7 +169,10 @@ pub(crate) fn detail(raw: &str) -> Option<String> {
 }
 
 /// 目的：一行旗语说明（名字、取值提示、说明），从参数声明派生。
-fn param_row(name: &str, p: &crate::capabilities::catalog::modules::api::Param) -> String {
+pub(crate) fn param_row(
+    name: &str,
+    p: &crate::capabilities::catalog::modules::api::Param,
+) -> String {
     let spec = if p.ty == ParamType::Boolean {
         format!("--{}", name)
     } else {

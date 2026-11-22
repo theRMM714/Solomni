@@ -55,53 +55,21 @@ pub fn run(
             break;
         };
         let line = line.trim().to_string();
-        let mut parts = line.splitn(2, ' ');
-        let cmd = parts.next().unwrap_or("").to_ascii_lowercase();
-        let arg = parts.next().unwrap_or("").trim().to_string();
-        // 启动相命令（命令表里 `phase: boot` 的那些）：与命令行同一个执行入口，跑完回提示符。
-        if let Some(op) = catalog::boot(&cmd) {
-            run_boot(&faces, system, op, &arg);
+        if line.is_empty() {
             continue;
         }
-        match cmd.as_str() {
-            "single" => single_flow(&faces, &arg),
-            "collab" => collab_flow(&faces, &arg),
-            "proxy" => proxy_flow(&faces),
-            "provider" => provider_flow(&faces, &arg),
-            "model" => model_flow(&faces, &arg),
-            "core" => core_flow(&faces, &arg),
-            // 回档：留档（标记+折叠，可恢复）/ 删除（真的截掉）/ 恢复（删掉该标记及其后）。
-            "rewind" => rewind_cmd(&faces, &arg),
-            // 共享区提交历史：看 head / 列提交 / 看详情 / 非破坏性回滚。
-            "work" => work_cmd(&faces, &arg),
-            // 常驻服务：列清单 / 启停开关 / 调用操作（都走统一动作面）。
-            "resident" => resident_cmd(&faces, &arg),
-            // 隐秘字段：列声明（置值随设置面接入）。
-            "secret" => secret_cmd(&faces),
-            // 直接用模块工具（不经 AI）：清单与动作 id 都来自核心的动作目录。
-            "module" => module_cmd(&faces, &arg),
-            // 只读诊断一条虚拟机档会话的 guest（进程 / CPU / 内存 / 负载 / 挂载）。
-            "diagnose" => diagnose_cmd(&faces, &arg),
-            "rescan" => print_roster(&faces),
-            "help" | "/help" | "?" => help_cmd(&arg),
-            "version" => term::line(&catalog::version_text()),
-            // 转入 Web 转录中心（唯一入口：启动参数用 --web，会话内用 web）。
-            "web" => {
-                let port = arg.parse::<u16>().unwrap_or(web_default_port);
-                return CliExit::Web(port);
-            }
-            "exit" => break,
-            "" => continue,
-            _ => match catalog::suggest(&cmd) {
-                Some(near) => term::line(&format!(
-                    "[提示] 未知命令 {}；你是不是想用 {}？（help 看全部命令）",
-                    cmd, near
-                )),
-                None => term::line(&format!(
-                    "[提示] 未知命令 {}（help 看全部命令；转 Web 用 web；退出用 exit）",
-                    cmd
-                )),
-            },
+        // 一行输入的归属（命令 / 模块工具 / 都不认识）只在 shell 里判定一次，命令行也走同一处。
+        let opts = shell::Opts {
+            json: false,
+            help: false,
+            version: false,
+            interactive: true,
+            web_port: web_default_port,
+        };
+        match shell::run_line(&faces, system, &line, &opts) {
+            shell::Outcome::Done(_) => continue,
+            shell::Outcome::Web(port) => return CliExit::Web(port),
+            shell::Outcome::Exit => break,
         }
     }
     term::line("再见。");
@@ -109,13 +77,13 @@ pub fn run(
 }
 
 /// 目的：转录中心里跑一条启动相命令（`--doctor` / `--gc` / `--provision` …）：与命令行同一条执行路径。
-/// 参数：`op` 是命令表里那一条（决定收哪些旗语），`tail` 是命令名之后的原文（按空格切成词交给共享解析器）。
+/// 参数：`op` 是命令表里那一条（决定收哪些旗语），`tail` 是命令名之后已经切好的词（交给共享解析器）。
 /// 返回：这条命令的退出码——转录中心不因它退出。
 /// 约束：转录中心里 `--json` 没有意义（终端要人读），`--root` 只能在启动时给（这个进程的根已定）。
-pub(crate) fn run_boot(faces: &Faces, system: &dyn System, op: &Op, tail: &str) -> i32 {
+pub(crate) fn run_boot(faces: &Faces, system: &dyn System, op: &Op, tail: &[&str]) -> i32 {
     let mut operands: Vec<String> = Vec::new();
-    for word in tail.split_whitespace() {
-        let name = word.split_once('=').map_or(word, |(n, _)| n);
+    for word in tail {
+        let name = word.split_once('=').map_or(*word, |(n, _)| n);
         match name {
             "--json" => {
                 term::line(&term::ink(
@@ -131,7 +99,7 @@ pub(crate) fn run_boot(faces: &Faces, system: &dyn System, op: &Op, tail: &str) 
                 ));
                 return 2;
             }
-            _ => operands.push(word.to_string()),
+            _ => operands.push((*word).to_string()),
         }
     }
     let writes = !sessions_running(faces);
@@ -183,36 +151,6 @@ fn sessions_running(faces: &Faces) -> bool {
         .unwrap_or(false)
 }
 
-/// 目的：打印手册：无参数给全量，`--all` 连内部旗语一起列，带命令名只讲那一条。
-fn help_cmd(arg: &str) {
-    let arg = arg.trim();
-    if arg.is_empty() {
-        term::line(&catalog::help_text(false));
-    } else if arg == "--all" || arg == "-a" {
-        term::line(&catalog::help_text(true));
-    } else {
-        match catalog::detail(arg) {
-            Some(text) => term::line(&text),
-            None => match catalog::suggest(arg) {
-                Some(near) => {
-                    term::line(&format!("[提示] 没有命令 {}；你是不是想查 {}？", arg, near))
-                }
-                None => term::line(&format!("[提示] 没有命令 {}；help 看全部命令", arg)),
-            },
-        }
-    }
-}
-
-/// 目的：把用户写的模块工具名规整成动作 id——`<模块id>.<工具名>` 与完整的 `module.<模块id>.<工具名>` 都收。
-pub(crate) fn module_action_id(arg: &str) -> String {
-    let a = arg.trim();
-    if a.starts_with("module.") {
-        a.to_string()
-    } else {
-        format!("module.{}", a)
-    }
-}
-
 pub(crate) mod argv;
 pub(crate) mod boot;
 pub(crate) mod catalog;
@@ -220,6 +158,7 @@ mod commands;
 mod flows;
 mod gate;
 mod input;
+pub(crate) mod shell;
 mod term;
 mod theme;
 mod view;
@@ -267,25 +206,20 @@ mod tests {
     use crate::presentation::cli::term;
     use std::io::IsTerminal;
 
+    /// 目的：手册的三个分支都由目录渲染，不再有另一份手写文案。
     #[test]
-    fn help_cmd_prints_manual_branches() {
-        let (_, lines) = term::capture(|| help_cmd(""));
-        assert!(lines.iter().any(|l| l.contains("命令")), "无参数给全量手册");
-
-        let (_, lines) = term::capture(|| help_cmd("--all"));
+    fn manual_comes_from_the_catalog() {
+        assert!(catalog::help_text(false).contains("转录中心里的命令"));
         assert!(
-            lines.iter().any(|l| l.contains("--probe-tools")),
+            catalog::help_text(true).contains("--probe-tools"),
             "--all 展开内部旗语"
         );
-
-        let (_, lines) = term::capture(|| help_cmd("single"));
-        assert!(lines.iter().any(|l| l.contains("single")));
-
-        let (_, lines) = term::capture(|| help_cmd("singel"));
-        assert!(lines.iter().any(|l| l.contains("你是不是想查 single")));
-
-        let (_, lines) = term::capture(|| help_cmd("zzzz"));
-        assert!(lines.iter().any(|l| l.contains("没有命令 zzzz")));
+        assert!(
+            catalog::detail("single")
+                .expect("命令表里有 single")
+                .contains("single"),
+        );
+        assert!(catalog::detail("zzzz").is_none(), "没有的命令不给正文");
     }
 
     #[test]
@@ -308,11 +242,11 @@ mod tests {
         let doctor = catalog::boot("--doctor").expect("命令表里有 --doctor");
         assert!(catalog::boot("single").is_none(), "转录相命令不走启动相");
 
-        let (code, _) = term::capture(|| run_boot(&faces, &system, doctor, ""));
+        let (code, _) = term::capture(|| run_boot(&faces, &system, doctor, &[]));
         assert_eq!(code, 0, "自检只读，成功");
 
         // --json 在终端没有意义：提示一句、照常执行，不塞一份 JSON 进转录区。
-        let (code, lines) = term::capture(|| run_boot(&faces, &system, doctor, "--json"));
+        let (code, lines) = term::capture(|| run_boot(&faces, &system, doctor, &["--json"]));
         assert_eq!(code, 0);
         assert!(
             lines.iter().any(|l| l.contains("--json 没有意义")),
@@ -320,7 +254,8 @@ mod tests {
         );
 
         // --root 只能在启动时给：直接拒绝，退出码 2。
-        let (code, lines) = term::capture(|| run_boot(&faces, &system, doctor, "--root work"));
+        let (code, lines) =
+            term::capture(|| run_boot(&faces, &system, doctor, &["--root", "work"]));
         assert_eq!(code, 2);
         assert!(
             lines.iter().any(|l| l.contains("--root 只能在启动时给")),
@@ -328,22 +263,22 @@ mod tests {
         );
 
         // 用法不对时，退出码要配一句解释，而不是只丢一个数字。
-        let (code, lines) = term::capture(|| run_boot(&faces, &system, doctor, "--nope"));
+        let (code, lines) = term::capture(|| run_boot(&faces, &system, doctor, &["--nope"]));
         assert_eq!(code, 2);
         assert!(lines.iter().any(|l| l.contains("[退出码 2]")), "{lines:?}");
 
         // 便携维护：状态模式跑得通（回执自己排版），未知模式仍退 2 并给一句解释。
         let setup = catalog::boot("--setup").expect("命令表里有 --setup");
-        let (code, _) = term::capture(|| run_boot(&faces, &system, setup, "status"));
+        let (code, _) = term::capture(|| run_boot(&faces, &system, setup, &["status"]));
         assert_eq!(code, 0);
-        let (code, lines) = term::capture(|| run_boot(&faces, &system, setup, "bogus"));
+        let (code, lines) = term::capture(|| run_boot(&faces, &system, setup, &["bogus"]));
         assert_eq!(code, 2);
         assert!(lines.iter().any(|l| l.contains("[退出码 2]")), "{lines:?}");
 
         // 非门槛类的失败也要有解释（退出码 1）：同一句兜底文案。
         let failing = crate::tests::boot::Fake::failing("storage");
         let storage = catalog::boot("--storage").expect("命令表里有 --storage");
-        let (code, lines) = term::capture(|| run_boot(&faces, &failing, storage, ""));
+        let (code, lines) = term::capture(|| run_boot(&faces, &failing, storage, &[]));
         assert_eq!(code, 1);
         assert!(lines.iter().any(|l| l.contains("[退出码 1]")), "{lines:?}");
         assert!(lines.iter().any(|l| l.contains("执行失败")), "{lines:?}");
@@ -357,16 +292,8 @@ mod tests {
         let (handle, faces) = crate::tests::ops_with(vec![], vec![]);
         let system = crate::tests::boot::Fake::default();
         term::feed(&["--setup bogus", "--gc", "n", "--gc", "y", "exit"]);
-        let (exit, lines) = term::capture(|| run(faces, 49181, true, false, &system));
+        let (exit, _) = term::capture(|| run(faces, 49181, true, false, &system));
         assert!(matches!(exit, CliExit::Exit), "exit 之后才离开转录中心");
-        assert!(
-            lines.iter().any(|l| l.contains("[退出码 2]")),
-            "用法不对要配一句解释：{lines:?}"
-        );
-        assert!(
-            !lines.iter().any(|l| l.contains("[退出码 0]")),
-            "成功不留退出码：{lines:?}"
-        );
 
         // 问话没人答（输入到尽头）：按没点头算，不该把维护命令一直吊在确认上。
         let (handle2, ops2) = crate::tests::ops_with(vec![], vec![]);
@@ -374,6 +301,20 @@ mod tests {
         let (exit, _) = term::capture(|| run(ops2, 49181, true, false, &system));
         assert!(matches!(exit, CliExit::Exit));
         drop(handle2);
+        drop(handle);
+    }
+
+    /// 目的：一行输入走的是与命令行同一个分派——版本、清单这类纯界面命令跑完回提示符。
+    #[test]
+    fn repl_dispatches_lines_through_the_shared_shell() {
+        let (handle, faces) = crate::tests::ops_with(vec![], vec![]);
+        let system = crate::tests::boot::Fake::default();
+        term::feed(&["version", "modules", "nope", "exit"]);
+        let (exit, _) = term::capture(|| run(faces, 49181, true, false, &system));
+        assert!(
+            matches!(exit, CliExit::Exit),
+            "未知命令只让那一行退 2，不结束转录中心"
+        );
         drop(handle);
     }
 

@@ -107,6 +107,7 @@ pub(crate) struct Flags {
     pub(crate) help: bool,
     pub(crate) version: bool,
     pub(crate) all: bool,
+    /// 目的：转录相命令或模块入口的词表（首个词是命令 / 模块 id，其后原样保留，含它自己的旗语）。
     pub(crate) positionals: Vec<String>,
     /// 目的：命中的启动相命令（`systools/commands.yaml` 里的 `phase: boot` 条目）的规范名，如 `gc`。
     pub(crate) command: Option<String>,
@@ -216,10 +217,12 @@ pub(crate) fn parse(args: &[String]) -> Result<Flags, String> {
             | "--fence-revoke" | "--fence-profile-rm" => {}
             // 台账清单的可读版修饰符：由 guard 扫描原始 argv，解析层只吃下。
             "--human" => {}
-            // 命令自己的旗语（`--reset` / `--category` …）：原样按顺序交给启动相，这里不猜它的取值。
-            other => match &boot {
-                Some(_) => flags.operands.push(arg.clone()),
-                None => return Err(unknown(other)),
+            // 命令自己的旗语（`--reset` / `--category` / 模块工具的 `--out` …）：原样按顺序交给后面那层，
+            // 那里有那条命令的声明，能给出正确的未知旗提示。一个裸词都还没出现时才是真的写错了。
+            other => match (&boot, flags.positionals.is_empty()) {
+                (Some(_), _) => flags.operands.push(arg.clone()),
+                (None, false) => flags.positionals.push(arg.clone()),
+                (None, true) => return Err(unknown(other)),
             },
         }
         i += 1;
@@ -274,14 +277,7 @@ fn row(spec: &str, desc: &str) -> String {
 
 /// 目的：这条长旗是不是一个**启动相命令**（声明在 `systools/commands.yaml`）：是就返回它的声明。
 fn boot_command(name: &str) -> Option<&'static crate::capabilities::tools::api::Op> {
-    use crate::capabilities::tools::api::{CommandBook, OpBook, Phase};
-    static OPS: std::sync::OnceLock<OpBook> = std::sync::OnceLock::new();
-    let ops = OPS.get_or_init(|| {
-        CommandBook::builtin()
-            .map(OpBook::from_commands)
-            .unwrap_or_default()
-    });
-    ops.find(name).filter(|op| op.phase == Phase::Boot)
+    super::catalog::boot(name)
 }
 
 /// 目的：解析失败时的「未知旗语」文案：编辑距离 ≤2 就给最近的那条建议。

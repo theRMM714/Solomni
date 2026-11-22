@@ -1,5 +1,5 @@
 //! 目的：钉 CLI 前端（传输侧）的输入解析与点名包装契约。
-//! 管：动作 id 两种写法、会话创建走动作表、逗号与空白分名、空登记处点名引导、等待清单逐行、EOF 停卡。
+//! 管：会话创建走动作表、逗号与空白分名、空登记处点名引导、等待清单逐行、EOF 停卡。
 //! 不管：业务规则：点名归 registry、命名与生成中禁改归 session/runtime、组合语义与动作分发。
 //! 联动：`ActionOps::act`、`runtime::create_session`、src/tests/api/ 的对应测试。
 
@@ -8,19 +8,6 @@ use super::ops_with;
 use super::prelude::*;
 use crate::kernel::api::types::Tier;
 use crate::presentation::cli;
-
-/// 模块工具名两种写法都收：`<模块id>.<工具名>` 与完整的 `module.<模块id>.<工具名>`。
-#[test]
-fn module_action_id_accepts_both_forms() {
-    assert_eq!(
-        cli::module_action_id("toolbox.read_txt"),
-        "module.toolbox.read_txt"
-    );
-    assert_eq!(
-        cli::module_action_id("module.toolbox.read_txt"),
-        "module.toolbox.read_txt"
-    );
-}
 
 /// 建会话在 CLI 上走**动作表**：同一份声明、同一处授权（未知形态在分发处被拒）。
 #[test]
