@@ -31,7 +31,7 @@ async function openWizard(draft) {
   const resumed = !!(draft && draft.__wizardDraft);
   // 两种形态共用一份 agent 卡片列表：single 恰好 0/1 个；collab 可多个。
   const w = resumed ? draft : {
-    mode: 'single', agents: [], task: '', tier: 'host', guest: '', permission: 'workspace',
+    mode: 'single', agents: [], task: '', tier: 'host', guest: '', permission: 'offline',
     context_freshness: false, freshness_keep_percent: 80, __wizardDraft: true,
   };
   if (!Array.isArray(w.agents)) w.agents = [];

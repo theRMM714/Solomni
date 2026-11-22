@@ -79,7 +79,7 @@ const state = {
         exit_code: 0, ok: true, status: "done",
         output: "FRONTEND-SMOKE-OK\nTOKENS-SMOKE-OK\nALL TESTS PASSED",
       },
-      permission_label: "工作区", permission_profile: "workspace",
+      permission_label: "离线", permission_profile: "offline",
       thinking: {
         level: null, default_level: "high", label: "高",
         options: [{ id: "low", label: "低" }, { id: "high", label: "高" }], note: "",

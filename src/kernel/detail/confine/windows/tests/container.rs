@@ -575,7 +575,7 @@ tryHost(() => trySelf(() => process.exit(0)));
     let code = run_in_container(sid, &spec, &format!("node probe.js {}", host_port))
         .expect("容器进程应当能启动");
     let got = std::fs::read_to_string(leaf.join("loopback-probe.txt")).unwrap_or_default();
-    eprintln!("[探针] 回环结论（exit={code}）：{}", got.trim());
+    eprintln!("[实测] 回环（exit={code}）：{}", got.trim());
     assert!(
         got.contains("host=") && got.contains("self="),
         "探针要把两个问题都跑出结论（exit={code}，拿到 {got:?}）"
@@ -707,7 +707,7 @@ setTimeout(() => { fs.writeFileSync('client.txt', 'TIMEOUT'); process.exit(0); }
         .expect("容器进程应当能启动");
     let got = std::fs::read_to_string(leaf.join("client.txt")).unwrap_or_default();
     eprintln!(
-        "[探针] 两进程同容器回环（client exit={code}）：{}",
+        "[实测] 同容器两进程回环（client exit={code}）：{}",
         got.trim()
     );
     let _ = server.join();
