@@ -6,6 +6,7 @@
 pub use crate::capabilities::workspace::domain::asset::{
     FileVersion, MAX_ASSET_BYTES, VERSION_TEXT_LIMIT, media_hint,
 };
+pub use crate::capabilities::workspace::domain::freshness::ReadVerdict;
 pub use crate::capabilities::workspace::domain::hash::{Sha256, content_hash};
 pub use crate::capabilities::workspace::domain::readfact::ReadFact;
 /// 目的：`work_*` 工具的名字、取参与回执拼装——`tools` 与 `turn` 只从这里取，不碰 domain。
@@ -348,16 +349,18 @@ pub trait Workspace: Send + Sync {
         paths: &[String],
     ) -> Result<Vec<PathGateInfo>, String>;
 
-    /// **读取是否过期**：一批读取事实（工作树、路径、行区间、当时的指纹）逐个判定。
-    /// 返回：与 `queries` 同序的布尔值；true = 读过的行在主副本里已经变了（这段内容该被替换成占位符）。
-    /// 约束：判据是**内容**不是时间——路径没了算过期；指纹相同算不过期；指纹不同才比行区间。
-    ///   旧版本从内容寻址对象库里取；对象缺失时按过期处理（宁可供模型重读，不供奉可能错的旧内容）。
-    fn work_stale_reads(
+    /// **读取相对当前版本的判决**：一批读取事实（工作树、路径、行区间、当时的指纹）逐个判定。
+    /// 返回：与 `queries` 同序的 `ReadVerdict`——SameVersion = 指纹相同；Shifted = 版本变了但那段
+    ///   内容还在；Changed = 那段内容被改过或删掉了。
+    /// 约束：判据是**内容**不是时间——路径没了算 Changed；指纹相同算 SameVersion；指纹不同才比行区间。
+    ///   旧版本从内容寻址对象库里取；对象缺失时按 Changed 处理（宁可供模型重读，不供奉可能错的旧内容）。
+    ///   消费者策略不同：占位符用 `is_stale()`（只换 Changed），写门禁只认 SameVersion。
+    fn judge_reads(
         &self,
         work: &str,
         agent: &str,
         queries: &[ReadQuery],
-    ) -> Result<Vec<bool>, String>;
+    ) -> Result<Vec<ReadVerdict>, String>;
     /// 目的：把主副本物化回某个提交点（只改共享区，不动各会话）。
     /// 约束：非破坏性——目标之后的提交仍保留，可再次回滚。
     fn work_restore(&self, work: &str, commit: u64) -> Result<(), String>;

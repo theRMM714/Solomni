@@ -1076,11 +1076,19 @@ pub(crate) fn read_facts_rebuild_identically_to_live() {
     let mut core = native_core(
         NativeGateway {
             scripts: Mutex::new(vec![vec![
-                NativeStep::Calls(vec![ToolCall {
-                    id: "c1".to_string(),
-                    name: "read".to_string(),
-                    args_json: format!("{{\"path\":\"{}\"}}", a),
-                }]),
+                NativeStep::Calls(vec![
+                    ToolCall {
+                        id: "c1".to_string(),
+                        name: "read".to_string(),
+                        args_json: format!("{{\"path\":\"{}\"}}", a),
+                    },
+                    // 同一版本再读一次：台账按（路径, 版本, 行窗口）去重，不重复记。
+                    ToolCall {
+                        id: "c2".to_string(),
+                        name: "read".to_string(),
+                        args_json: format!("{{\"path\":\"{}\"}}", a),
+                    },
+                ]),
                 NativeStep::Text("{\"type\":\"say\",\"text\":\"读了\"}".to_string()),
             ]]),
             seen: Default::default(),
@@ -1106,7 +1114,7 @@ pub(crate) fn read_facts_rebuild_identically_to_live() {
     })
     .unwrap();
     let live = core.single_reads(&sid).expect("单 agent 会话");
-    assert_eq!(live.len(), 1, "整份读完要留下一条读事实");
+    assert_eq!(live.len(), 1, "同版本重复读只留一条读事实");
     assert_eq!(
         (live[0].fact.from, live[0].fact.to),
         (1, 2),
@@ -1122,7 +1130,7 @@ pub(crate) fn read_facts_rebuild_identically_to_live() {
         tool_views(&events)[0]
             .observations
             .iter()
-            .any(|f| f.read_fact().is_some()),
+            .any(|f| !f.read_facts().is_empty()),
         "工具行要带上读事实"
     );
 
@@ -1138,7 +1146,7 @@ pub(crate) fn read_facts_rebuild_identically_to_live() {
 
 /// 目的：读过的文件在别处被改后，**下一次发给模型的消息**里那条工具结果要换成过期占位符。
 /// 约束：只换发送视图，转录本身逐字不动（回档 / 折叠 / 面板都按原样读）；判据门槛为保底 0%、省下的字符过 FRESHNESS_MIN_SAVED_CHARS。
-///   这里的"改过"用沙箱副本对不上来构造（内存版本库里没存这份内容）；按内容比对的过期判定本身由 work_stale_reads 的用例钉住。
+///   这里的"改过"用沙箱副本对不上来构造（内存版本库里没存这份内容）；按内容比对的过期判定本身由 judge_reads 的用例钉住。
 #[test]
 pub(crate) fn stale_read_turns_into_a_placeholder_in_the_next_send_view() {
     use crate::capabilities::llm::api::ToolCall;
@@ -1253,6 +1261,135 @@ pub(crate) fn stale_read_turns_into_a_placeholder_in_the_next_send_view() {
         "省下的 tokens：{}",
         stats.saved_tokens
     );
+}
+
+/// 目的：大文件只能分段读时，每段读各自记账、各自判过期、各自出占位符——分段读不再是盲区。
+#[test]
+pub(crate) fn stale_read_of_a_large_file_is_replaced_segment_by_segment() {
+    use crate::capabilities::llm::api::ToolCall;
+    let hist = Arc::new(InMemoryHistory::new());
+    let io = Arc::new(InMemorySysIo::new());
+    // 400 行 ≈ 12K 字符；单次 read 的 14K 预算虽够，但这里显式分段读，构造 Ranges 覆盖。
+    let mut big = String::new();
+    for i in 1..=400 {
+        big.push_str(&format!(
+            "第{:03}行 这是一段用于撑大上下文以便触发展开替换的正文。\n",
+            i
+        ));
+    }
+    io.seed(&["w", "a", "big.txt"], &big);
+    let path = s(&["w", "a", "big.txt"]);
+    let seen: SeenLog = Default::default();
+    let mut core = native_core(
+        NativeGateway {
+            scripts: Mutex::new(vec![vec![
+                NativeStep::Calls(vec![
+                    ToolCall {
+                        id: "c1".to_string(),
+                        name: "read".to_string(),
+                        args_json: format!("{{\"path\":\"{}\",\"offset\":1,\"limit\":150}}", path),
+                    },
+                    ToolCall {
+                        id: "c2".to_string(),
+                        name: "read".to_string(),
+                        args_json: format!(
+                            "{{\"path\":\"{}\",\"offset\":151,\"limit\":150}}",
+                            path
+                        ),
+                    },
+                ]),
+                NativeStep::Text("{\"type\":\"say\",\"text\":\"读完了\"}".to_string()),
+            ]]),
+            seen: Arc::clone(&seen),
+        },
+        Arc::clone(&hist),
+        Arc::clone(&io),
+    );
+    core.registry_mut().probe_model_tools("m").expect("探测");
+    let mut spec = work("w", WorkMode::Single, &["a"]);
+    spec.freshness = Some((true, 0));
+    let sid = core.create_work(spec).unwrap().sid;
+
+    with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "读 big.txt",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
+    assert_eq!(
+        core.single_reads(&sid).expect("单 agent 会话").len(),
+        2,
+        "两段读各记一条读事实"
+    );
+
+    with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "继续",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
+
+    let sent = seen
+        .lock()
+        .expect("锁")
+        .last()
+        .cloned()
+        .expect("第二回合要发请求");
+    let notes: Vec<String> = sent
+        .iter()
+        .filter(|m| m.content.starts_with("[已过期：") && m.content.contains("big.txt"))
+        .map(|m| m.content.clone())
+        .collect();
+    assert_eq!(
+        notes.len(),
+        2,
+        "每段各换一张占位符：{:?}",
+        sent.iter()
+            .map(|m| m.content.chars().take(60).collect::<String>())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        notes.iter().any(|n| n.contains("第1-150行")),
+        "前段占位符：{:?}",
+        notes
+    );
+    assert!(
+        notes.iter().any(|n| n.contains("第151-300行")),
+        "后段占位符：{:?}",
+        notes
+    );
+
+    let history = core.single_history(&sid).expect("单 agent 历史");
+    assert!(
+        history.iter().any(|m| m.content.contains("第001行")),
+        "转录必须保留原文（占位符只换发送视图）"
+    );
+
+    let view = core
+        .work
+        .session_view(
+            &core.turn,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+            &sid,
+        )
+        .expect("会话视图");
+    let stats = view.freshness_stats.expect("这一轮要留下替换统计");
+    assert_eq!(stats.judged, 2, "两段都过期");
+    assert_eq!(stats.replaced, 2, "两条工具结果都换掉");
+    assert!(!stats.skipped, "省下的量够付缓存失效");
 }
 
 /// 目的：一个模型都没登记时**不能建会话**——不能再用内置假模型把流程跑起来。

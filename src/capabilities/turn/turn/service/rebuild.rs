@@ -1,5 +1,5 @@
 //! 目的：turn 侧的会话重建——从落盘的事件与元数据重建出一条会话（单 agent / 协作 / 代理三种形态）。
-//! 管：外部工作区绑定的复检与绑定、`rebuild_session` 的三形态分支、转录还原（`replay_reads` / `replay_dialogue`）、代理会话的装配。
+//! 管：外部工作区绑定的复检与绑定、`rebuild_session` 的三形态分支、转录还原（`replay_ledgers` / `replay_dialogue`）、代理会话的装配。
 //! 不管：准入与派发闸（`service/admit.rs`）、沙箱与权限事实（`service/facts.rs`）、会话怎么落盘（`session`）。
 //! 联动：`runtime` 的启用与回档只经这里重建会话；代理会话由 `runtime` 的代理用例经 `build_proxy` 取。
 
@@ -197,6 +197,7 @@ impl Turn {
                 let (window, percent, keep_percent) =
                     self.context_budget(registry, a.model.as_deref());
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
+                let (observations, reads) = replay_ledgers(events, compacted_upto);
                 let spec = crate::capabilities::conversation::session::api::RebuildSpec {
                     params,
                     member,
@@ -212,8 +213,8 @@ impl Turn {
                     model: a.model.clone().or_else(|| registry.core_model()),
                     freshness: freshness.0,
                     freshness_keep_percent: freshness.1,
-                    reads: replay_reads(events),
-                    observations: replay_observations(events, compacted_upto),
+                    reads,
+                    observations,
                     usage: crate::capabilities::conversation::session::api::last_usage(events),
                 };
                 Session::Single(
@@ -240,9 +241,10 @@ impl Turn {
                 ));
                 s.set_context_freshness(freshness.0);
                 s.set_freshness_keep_percent(freshness.1);
-                s.restore_observations(replay_observations(events, compacted_upto));
-                for (body, fact) in replay_reads(events) {
-                    s.note_read_at(body, fact);
+                let (observations, reads) = replay_ledgers(events, compacted_upto);
+                s.restore_observations(observations);
+                for (reply, body, fact) in reads {
+                    s.note_read_at(body, reply, fact);
                 }
                 s.set_last_usage(crate::capabilities::conversation::session::api::last_usage(
                     events,
@@ -258,14 +260,20 @@ impl Turn {
     }
 }
 
-/// 目的：把转录里的读事实重新装回读台账（重建后的发送视图与实时一致）。
+/// 目的：把转录里的观察事实与读事实**一次扫描**装回两个账本：写门禁的账本 + 发送视图的读台账。
 ///
-/// 约束：正文按 `tool_result_body` 现算，必须与 `reply_msgs` 同源——发送视图按正文找消息。
-///   被压缩吃掉的行不会命中任何消息，留着也无害。
-fn replay_reads(
+/// 约束：两个账本必须同水位——压缩点之前的行既不再授权写、也不再参与过期替换；
+///   回档后的转录本身已截断，不另判。正文按 `tool_result_body` 现算，必须与 `reply_msgs`
+///   同源（发送视图按正文找消息）。
+fn replay_ledgers(
     events: &[serde_json::Value],
-) -> Vec<(String, crate::capabilities::workspace::api::ReadFact)> {
-    let mut out = Vec::new();
+    compacted_upto: u64,
+) -> (
+    Vec<crate::capabilities::tools::api::ObservationFact>,
+    Vec<(u64, String, crate::capabilities::workspace::api::ReadFact)>,
+) {
+    let mut facts = Vec::new();
+    let mut reads = Vec::new();
     for ev in events {
         if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
             continue;
@@ -283,47 +291,20 @@ fn replay_reads(
                 continue;
             };
             let body = crate::capabilities::conversation::session::api::tool_result_body(&c);
-            for fact in &c.observations {
-                if let Some(read) = fact.read_fact() {
-                    out.push((body.clone(), read));
+            for f in c.observations {
+                if f.schema != crate::capabilities::tools::api::OBSERVATION_FORMAT
+                    || f.reply < compacted_upto
+                {
+                    continue;
                 }
+                for read in f.read_facts() {
+                    reads.push((f.reply, body.clone(), read));
+                }
+                facts.push(f);
             }
         }
     }
-    out
-}
-
-/// 目的：把转录里的观察事实重新装回写门禁的账本（重启后仍认活动窗口里的读）。
-///
-/// 约束：压缩点之前的行已不在发送视图里，它们的观察证据一并作废；回档后的转录本身已截断，不另判。
-fn replay_observations(
-    events: &[serde_json::Value],
-    compacted_upto: u64,
-) -> Vec<crate::capabilities::tools::api::ObservationFact> {
-    let mut out = Vec::new();
-    for ev in events {
-        if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
-            continue;
-        }
-        let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
-            continue;
-        };
-        for l in lines {
-            let Some(t) = l.get("tool") else {
-                continue;
-            };
-            let Ok(c) = serde_json::from_value::<
-                crate::capabilities::conversation::session::api::ToolCallView,
-            >(t.clone()) else {
-                continue;
-            };
-            out.extend(c.observations.into_iter().filter(|f| {
-                f.schema == crate::capabilities::tools::api::OBSERVATION_FORMAT
-                    && f.reply >= compacted_upto
-            }));
-        }
-    }
-    out
+    (facts, reads)
 }
 
 /// 目的：把转录事件还原成（对话, 每行历史长度, 每行回复号, 每行 id, 压缩点, 压缩行 id）。
@@ -599,7 +580,7 @@ impl Turn {
 
 #[cfg(test)]
 mod tests {
-    use super::replay_observations;
+    use super::replay_ledgers;
 
     fn line(reply: u64, path: &str) -> serde_json::Value {
         serde_json::json!({
@@ -628,13 +609,16 @@ mod tests {
         })
     }
 
-    /// 目的：重启回填只认压缩点之后的行——压缩掉的读不再授权写。
+    /// 目的：重启回填只认压缩点之后的行——压缩掉的读既不授权写，也不再参与过期替换。
     #[test]
-    fn replay_observations_drops_rows_before_the_compaction_point() {
+    fn replay_ledgers_drop_rows_before_the_compaction_point() {
         let events = vec![line(3, "old.md"), line(5, "live.md")];
-        let facts = replay_observations(&events, 4);
+        let (facts, reads) = replay_ledgers(&events, 4);
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].path, "live.md");
         assert_eq!(facts[0].reply, 5);
+        assert_eq!(reads.len(), 1);
+        assert_eq!(reads[0].0, 5);
+        assert_eq!(reads[0].2.path, "live.md");
     }
 }

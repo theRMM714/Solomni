@@ -103,10 +103,12 @@ pub struct AgentSession {
 }
 
 /// 目的：一条读事实与它落成的那条工具结果消息的正文。
-/// 约束：正文用于在发送视图里定位消息（对话会被压缩移位，下标不可靠）。
+/// 约束：正文用于在发送视图里定位消息（对话会被压缩移位，下标不可靠）；
+///   reply 是这条工具结果所在回复的行 id，压缩/回档据此同步作废（与观察账本同一水位）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadAt {
     pub body: String,
+    pub reply: u64,
     pub fact: crate::capabilities::workspace::api::ReadFact,
 }
 
@@ -144,10 +146,20 @@ pub trait CompactChatFactory: Send + Sync {
 }
 
 /// 目的：过期读取的占位符——模型看到"这段内容不可信，要就重读"，而不是看不到它存在。
-pub fn expired_note(fact: &crate::capabilities::workspace::api::ReadFact) -> String {
+/// 参数：ranges 是这条工具结果里所有过期段（同一份读的分段、或多次重叠读），按显示顺序排好。
+pub fn expired_note(path: &str, ranges: &[(u64, u64)]) -> String {
+    let mut parts = Vec::with_capacity(ranges.len());
+    for (from, to) in ranges {
+        if from == to {
+            parts.push(from.to_string());
+        } else {
+            parts.push(format!("{from}-{to}"));
+        }
+    }
     format!(
-        "[已过期：{} 第{}-{}行，读取后文件已修改；需要时重新 read]",
-        fact.path, fact.from, fact.to
+        "[已过期：{} 第{}行，读取后文件已修改；需要时重新 read]",
+        path,
+        parts.join("、")
     )
 }
 
@@ -172,7 +184,8 @@ pub const FRESHNESS_MIN_SAVED_CHARS: usize = 8000;
 
 /// 目的：**发送视图**的派生——判成过期的那条工具结果换成占位符，其余逐字保留。
 /// 约束：按**正文**定位消息（压缩会把旧消息移走、下标不可靠）；正文找不到就跳过，
-///   绝不动别的行。reads 与 stale 同序，只包含确实判定过的读。
+///   绝不动别的行。reads 与 stale 同序，只包含确实判定过的读；同一条消息的多段读
+///   按消息归并成一个占位符（judged 按段计，replaced 按消息计）。
 ///   保底：keep_chars 是前缀字符预算，从头累加到跨过它的消息之前一律原样（保住前缀缓存）。
 pub fn freshness_view(
     dialogue: &[Msg],
@@ -195,7 +208,10 @@ pub fn freshness_view(
             acc += m.content.chars().count();
         }
     }
-    let mut saved_chars = 0usize;
+    // 同一条工具结果消息可能带多段读（分段读、或同一版本被读过多次）：
+    // 按消息归并，把该消息所有过期段合成一个占位符，只替换一次。
+    type StaleGroup<'a> = (usize, &'a str, Vec<(u64, u64)>);
+    let mut groups: Vec<StaleGroup<'_>> = Vec::new();
     for (r, stale) in reads {
         if !*stale {
             continue;
@@ -207,7 +223,23 @@ pub fn freshness_view(
         if idx < boundary {
             continue;
         }
-        let note = expired_note(&r.fact);
+        match groups.iter_mut().find(|(g, _, _)| *g == idx) {
+            Some((_, _, ranges)) => ranges.push((r.fact.from, r.fact.to)),
+            None => groups.push((idx, r.fact.path.as_str(), vec![(r.fact.from, r.fact.to)])),
+        }
+    }
+    groups.sort_by_key(|(idx, _, _)| *idx);
+    let mut saved_chars = 0usize;
+    for (idx, path, mut ranges) in groups {
+        ranges.sort_unstable();
+        let mut merged: Vec<(u64, u64)> = Vec::with_capacity(ranges.len());
+        for (from, to) in ranges {
+            match merged.last_mut() {
+                Some(last) if from <= last.1.saturating_add(1) => last.1 = last.1.max(to),
+                _ => merged.push((from, to)),
+            }
+        }
+        let note = expired_note(path, &merged);
         saved_chars += msgs[idx]
             .content
             .chars()
@@ -436,12 +468,27 @@ impl AgentSession {
 
     /// 目的：记下"读过这个范围"（发送视图据此判断过期）。
     /// 约束：body 必须是那条工具结果消息的**正文**——发送时按它定位消息，压缩移位后照样找得到。
+    ///   同一次读（工作树、路径、版本、行区间都相同）只留一条：重建会重放全部历史，
+    ///   同一标的被读过多次时以最新那条正文与回复为准（最可能还在发送视图里）。
     pub fn note_read_at(
         &mut self,
         body: String,
+        reply: u64,
         fact: crate::capabilities::workspace::api::ReadFact,
     ) {
-        self.reads.push(ReadAt { body, fact });
+        let same = |r: &ReadAt| {
+            r.fact.worktree == fact.worktree
+                && r.fact.path == fact.path
+                && r.fact.blob == fact.blob
+                && r.fact.from == fact.from
+                && r.fact.to == fact.to
+        };
+        if let Some(r) = self.reads.iter_mut().find(|r| same(r)) {
+            r.body = body;
+            r.reply = reply;
+            return;
+        }
+        self.reads.push(ReadAt { body, reply, fact });
     }
 
     /// 目的：本会话的读台账（发送视图与重建共用）。
@@ -720,10 +767,11 @@ impl AgentSession {
         for m in self.marks.iter_mut() {
             *m = m.saturating_sub(cut) + 1;
         }
-        // 被压进摘要的那段工具行不再发给模型：它们的观察证据一并作废（重读比误改便宜）。
+        // 被压进摘要的那段工具行不再发给模型：它们的观察证据与读台账一并作废（重读比误改便宜）。
         if let Some(t) = self.tools.as_mut() {
             t.observations.retain_from(plan.up_to);
         }
+        self.reads.retain(|r| r.reply >= plan.up_to);
         Some(self.note_compacted(plan.up_to, summary))
     }
 
@@ -793,6 +841,7 @@ impl AgentSession {
         if let Some(t) = self.tools.as_mut() {
             t.observations.clear();
         }
+        self.reads.clear();
         let rows = self.marks.len();
         self.line_reply.truncate(rows);
         self.line_ids.truncate(rows);
@@ -862,14 +911,18 @@ pub fn unique_work_name(base: &str, fallback: &str, exists: impl Fn(&str) -> boo
 mod tests {
     use super::*;
 
-    fn fact() -> crate::capabilities::workspace::api::ReadFact {
+    fn fact_with(from: u64, to: u64) -> crate::capabilities::workspace::api::ReadFact {
         crate::capabilities::workspace::api::ReadFact {
             worktree: String::new(),
             path: "docs/README.md".to_string(),
-            from: 3,
-            to: 9,
+            from,
+            to,
             blob: "abc".to_string(),
         }
+    }
+
+    fn fact() -> crate::capabilities::workspace::api::ReadFact {
+        fact_with(3, 9)
     }
 
     // 省够门槛才有替换：正文得够长，短正文会整体回退（见 FRESHNESS_MIN_SAVED_CHARS）。
@@ -884,10 +937,12 @@ mod tests {
         let dialogue = vec![Msg::user("hi"), stale.clone(), fresh.clone()];
         let r1 = ReadAt {
             body: stale.content.clone(),
+            reply: 1,
             fact: fact(),
         };
         let r2 = ReadAt {
             body: fresh.content.clone(),
+            reply: 1,
             fact: fact(),
         };
         let (out, stats) = freshness_view(&dialogue, &[(&r1, true), (&r2, false)], 0);
@@ -904,9 +959,50 @@ mod tests {
     }
 
     #[test]
+    fn freshness_view_merges_the_segments_of_one_tool_result() {
+        // 同一条工具结果里的多段读：相邻/重叠的段合并，隔开的段用顿号分开，只替换一次。
+        let body = Msg::user(long_body("old "));
+        let r1 = ReadAt {
+            body: body.content.clone(),
+            reply: 1,
+            fact: fact_with(3, 5),
+        };
+        let r2 = ReadAt {
+            body: body.content.clone(),
+            reply: 1,
+            fact: fact_with(6, 9),
+        };
+        let (out, stats) =
+            freshness_view(std::slice::from_ref(&body), &[(&r1, true), (&r2, true)], 0);
+        assert_eq!(
+            out[0].content,
+            "[已过期：docs/README.md 第3-9行，读取后文件已修改；需要时重新 read]"
+        );
+        assert_eq!(stats.judged, 2);
+        assert_eq!(stats.replaced, 1);
+
+        let r3 = ReadAt {
+            body: body.content.clone(),
+            reply: 1,
+            fact: fact_with(3, 5),
+        };
+        let r4 = ReadAt {
+            body: body.content.clone(),
+            reply: 1,
+            fact: fact_with(8, 9),
+        };
+        let (out, _) = freshness_view(std::slice::from_ref(&body), &[(&r3, true), (&r4, true)], 0);
+        assert_eq!(
+            out[0].content,
+            "[已过期：docs/README.md 第3-5、8-9行，读取后文件已修改；需要时重新 read]"
+        );
+    }
+
+    #[test]
     fn freshness_view_skips_a_body_that_compaction_removed() {
         let r = ReadAt {
             body: "gone".to_string(),
+            reply: 1,
             fact: fact(),
         };
         let (out, stats) = freshness_view(&[Msg::user("hi")], &[(&r, true)], 0);
@@ -923,6 +1019,7 @@ mod tests {
         let dialogue = vec![Msg::user("hi"), stale.clone(), fresh.clone()];
         let r = ReadAt {
             body: stale.content.clone(),
+            reply: 1,
             fact: fact(),
         };
         // 保底预算盖住整段对话：一条都不换。
@@ -940,6 +1037,7 @@ mod tests {
         let stale = Msg::user("[工具结果] read\nold text");
         let r = ReadAt {
             body: stale.content.clone(),
+            reply: 1,
             fact: fact(),
         };
         let dialogue = vec![stale.clone()];
