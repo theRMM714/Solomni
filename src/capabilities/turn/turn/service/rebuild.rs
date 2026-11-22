@@ -532,6 +532,7 @@ impl Turn {
             modules: BTreeMap::new(),
             modules_with_userdata: std::collections::BTreeSet::new(),
             permissions: self.permissions_for(registry, meta)?,
+            scope: self.shared_scope_for(registry, meta)?,
             // 代理发言席自己住在宿主上（文件工具也跑在宿主），不需要 guest 翻译；
             // 但视图盘打开时仍要同一个视图写法，否则环境块渲染视图路径、寻址却按宿主根判越界。
             path_codec: crate::kernel::api::view_drive::view_codec(),

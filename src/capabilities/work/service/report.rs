@@ -185,7 +185,7 @@ impl Work {
         self.host_plan_now(probe, &roster.modules).unusable
     }
 
-    /// 目的：把一条会话的生效权限变成配置视图（含四档可选值与收窄提示）。
+    /// 目的：把一条会话的生效授权变成配置视图（网络档位 + 共享区归属 + 可选档位）。
     pub(crate) fn permission_view(
         &self,
         turn: &Turn,
@@ -200,31 +200,18 @@ impl Work {
             ),
             None => None,
         };
-        let warning = if effective.is_no_access() {
-            "当前根档位与本次收窄没有交集：这个会话目前没有可用权限。".to_string()
-        } else {
-            String::new()
-        };
+        let scope = turn.shared_scope_for(registry, meta)?;
         Ok(PermissionView {
             profile: effective.profile,
             label: effective.profile.label().to_string(),
             summary: effective.profile.summary().to_string(),
-            reach: effective.reach.to_vec(),
-            decisions: PermissionDecisionsView {
-                read: effective.decisions.read,
-                write: effective.decisions.write,
-                exec_sandbox: effective.decisions.exec_sandbox,
-                exec_external: effective.decisions.exec_external,
-            },
             shared: PermissionSharedView {
-                read: effective.shared_read.clone(),
-                write: effective.shared_write.clone(),
-                deny: effective.deny.clone(),
+                read: scope.read.clone(),
+                write: scope.write.clone(),
+                deny: scope.deny.clone(),
             },
-            tools: effective.tools.clone(),
             narrowed: meta.parent.is_some() && meta.sandbox.narrowing.is_some(),
             parent_profile,
-            warning,
             profiles: crate::capabilities::permission::api::ProfileId::all()
                 .into_iter()
                 .map(|p| p.spec())

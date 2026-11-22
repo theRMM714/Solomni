@@ -595,11 +595,8 @@ pub(crate) fn agent_sandboxes_from_a_work_are_read_only_for_the_shared_area() {
     let roster = core.modules_handle().roster();
     let sandboxes = core.sandboxes(&meta, &roster).unwrap();
     let sb = sandboxes.list.first().expect("至少一个 agent 沙箱");
-    let (place, path) = sb.resolve(&p(&["w", "work", "x.txt"])).unwrap();
-    assert!(
-        !sb.can_write(&place, &path),
-        "生产里 agent 沙箱不能直接写共享区"
-    );
+    let (place, _path) = sb.resolve(&p(&["w", "work", "x.txt"])).unwrap();
+    assert!(!sb.can_write(&place), "生产里 agent 沙箱不能直接写共享区");
 }
 
 /// 目的：GC 只从引用出发算活集合：有 live 钉子时旧提交保住，引用全删才真正回收。

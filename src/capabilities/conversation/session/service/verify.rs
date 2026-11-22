@@ -56,14 +56,7 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
         .map(|f| {
             f.into_iter()
                 .map(|(id, _)| id.to_string())
-                .filter(|id| {
-                    book.get(id)
-                        .map(|s| {
-                            sb.permissions
-                                .offers(id, s.effect(), &s.max_reach(), s.scope)
-                        })
-                        .unwrap_or(true)
-                })
+                .filter(|id| book.contains_key(id))
                 .collect()
         })
         .unwrap_or_default();

@@ -24,13 +24,11 @@ export function thinkingLabel(id) {
 }
 
 
-export const PERMISSION_ORDER = ['view', 'workspace', 'external', 'all_reach'];
+export const PERMISSION_ORDER = ['offline', 'online'];
 
 export const PERMISSION_LABELS = {
-  view: '仅可查看',
-  workspace: '工作区内修改',
-  external: '外部可达（逐次确认）',
-  all_reach: '全可达（自动放行）',
+  offline: '离线',
+  online: '联网',
 };
 
 

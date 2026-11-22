@@ -24,18 +24,10 @@ pub struct ToolSchema {
     ///    未声明的（含写入类）独占执行，并作为并发批次之间的屏障。
     #[serde(default)]
     pub parallel: bool,
-    /// 目的：**权限标签**（如 `fs-read` / `fs-write`）：用于说明与“核心先核实”筛选；真正授权看 effect / reach。
+    /// 目的：**能力标签**（如 `fs-read` / `fs-write`）：只作说明与"核心先核实"筛选。
+    /// 约束：它不再是授权依据——文件面与网络面的授予对所有工具固定，谁在哪一席能调由角色面决定。
     #[serde(default)]
     pub capability: String,
-    /// 目的：这次操作属于哪一类；缺省按 capability 推导。
-    #[serde(default)]
-    pub effect: Option<crate::capabilities::permission::api::Effect>,
-    /// 目的：工具可用的最大 reach；缺省按 effect 推导。
-    #[serde(default)]
-    pub reach: Option<crate::capabilities::permission::api::ReachSet>,
-    /// 目的：这个执行类工具接不接受模型给的 per-call scope 参数。
-    #[serde(default)]
-    pub scope: bool,
     /// 目的：谁能调这条动作——**调用者身份**清单（`user` = 人经呈现层调用；其余是角色 id）。
     /// 约束：它和 `systools/roles.yaml` 的（角色 → 工具面）是同一关系的两面，由 `SystemTools::problems` 双向锁死一致。
     #[serde(default)]
@@ -43,20 +35,6 @@ pub struct ToolSchema {
 }
 
 impl ToolSchema {
-    /// 目的：这个工具的 effect；没写就按 capability 推导。
-    pub fn effect(&self) -> crate::capabilities::permission::api::Effect {
-        self.effect.unwrap_or_else(|| {
-            crate::capabilities::permission::api::Effect::from_capability(&self.capability)
-        })
-    }
-
-    /// 目的：这个工具的最大 reach；没写就按 effect 给默认。
-    pub fn max_reach(&self) -> crate::capabilities::permission::api::ReachSet {
-        self.reach
-            .clone()
-            .unwrap_or_else(|| self.effect().default_reach())
-    }
-
     /// 声明了的参数表；没声明 = 调用方不做校验。
     fn declared(&self) -> Option<&BTreeMap<String, Param>> {
         self.params.as_ref()

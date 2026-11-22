@@ -1,28 +1,26 @@
-//! 目的：shell 的权限与派发契约测试——scope 派生的围栏、档位决定、runtime roots 与 guest 派发。
-//! 管：workspace 拒绝 external、external 档 ask、all_reach 不问、view 不发放、按次 profile 与 guest 超时。
+//! 目的：shell 的工具面与围栏契约——工具面只由角色面决定，档位只管网络开关与围栏 net。
+//! 管：两档都发放 shell、runtime roots 只进宿主成员工具面。
 //! 不管：真实进程 / 平台围栏（在 kernel 的 process 测试）与 VM 引擎实现。
 //! 联动：systools/tools.yaml 的 shell 声明、tools/domain/shell.rs、session 的 engine/tools。
 use super::super::prelude::*;
-use crate::capabilities::permission::api::{Effect, PermissionDefaults, ProfileId};
+use crate::capabilities::permission::api::{PermissionDefaults, ProfileId};
 use crate::capabilities::tools::api::ToolBook;
 
-/// 目的：view 档不发放 shell、workspace 及以上发放。
+/// 目的：档位不再裁剪工具面——两档都给 shell，差别只在网络。
 #[test]
-pub(crate) fn view_does_not_offer_shell_but_workspace_does() {
+pub(crate) fn profile_does_not_change_the_tool_face() {
     let book: ToolBook = crate::tests::doubles::test_systools().tools;
-    let schema = book.get("shell").expect("shell 声明");
-    let offers = |profile: ProfileId| {
-        let d = PermissionDefaults {
-            profile,
-            ..Default::default()
-        };
-        d.to_permission_set()
-            .offers("shell", Effect::Exec, &schema.max_reach(), schema.scope)
+    assert!(book.contains_key("shell"), "shell 要在工具书里");
+    let face = vec!["shell".to_string()];
+    let ids = crate::capabilities::conversation::session::api::face_tools(face, &book);
+    assert_eq!(ids, vec!["shell".to_string()], "角色面就是授权面");
+    let net = |profile: ProfileId| {
+        PermissionDefaults { profile }
+            .to_permission_set()
+            .allows_network()
     };
-    assert!(!offers(ProfileId::View), "仅可查看档不发放 shell");
-    assert!(offers(ProfileId::Workspace));
-    assert!(offers(ProfileId::External));
-    assert!(offers(ProfileId::AllReach));
+    assert!(!net(ProfileId::Offline));
+    assert!(net(ProfileId::Online));
 }
 
 /// 目的：基础工具链根只进宿主成员工具面。

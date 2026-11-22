@@ -69,6 +69,7 @@ fn meta(name: &str) -> SessionMeta {
         }],
         exec: ExecSpec::default(),
         sandbox: Default::default(),
+        shared: Default::default(),
         parent: None,
         node: None,
         delegation: None,

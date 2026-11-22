@@ -1,5 +1,5 @@
 //! 目的：成员回合里的工具循环——声明面 → 放行判定 → 并发调度 → 执行（内置 / 模块外部）→ 回填。
-//! 管：只认 MemberTools（这一回合的工具面与观察账本）；策略（放行表、并发调度、确认闸）在这里。
+//! 管：只认 MemberTools（这一回合的工具面与观察账本）；策略（放行表、并发调度）在这里。
 //! 不管：模型调用（在 llm / session 端口后）；工具机制本身（在 tools 的端口后面）。
 //! 联动：执行经 tools 的 ToolExec 端口；回填顺序与转录行形状见 docs/session/session-model.md。
 
@@ -8,7 +8,6 @@ pub(crate) use super::fence::CallDone;
 use crate::capabilities::conversation::session::api::{SessionEvent, ToolFace};
 use crate::capabilities::conversation::session::domain::tools::MemberTools;
 use crate::capabilities::llm::api::ToolInvoke;
-use crate::capabilities::permission::api::{CallScope, Decision, Effect, Reach, ReachSet};
 use crate::capabilities::tools::api::{Observations, SessionWriteGate, ShellFacts, ToolSchema};
 use crate::kernel::api::types::ToolOutcome;
 
@@ -21,10 +20,9 @@ pub(crate) type BranchDone = (
     Option<ShellFacts>,
 );
 
-/// 目的：一次调用的执行上下文（问卡、放行、取消、批前观察快照），只为把签名读短。
+/// 目的：一次调用的执行上下文（问卡、取消、批前观察快照），只为把签名读短。
 pub(crate) struct CallCtl<'a> {
     pub ask: Option<&'a dyn crate::kernel::ports::AskUser>,
-    pub grant: &'a CallGrant,
     pub cancel: &'a std::sync::atomic::AtomicBool,
     pub gate_facts: &'a [crate::capabilities::tools::api::ObservationFact],
     pub budget: crate::capabilities::tools::api::ResultBudget,
@@ -57,7 +55,6 @@ pub(crate) fn run_branch(
 ) -> BranchDone {
     let CallCtl {
         ask,
-        grant,
         cancel,
         gate_facts,
         budget,
@@ -96,7 +93,7 @@ pub(crate) fn run_branch(
         commit_writes(ctx, &mut branch, &mut outcome);
         (String::new(), outcome)
     } else if crate::capabilities::tools::api::is_exec(name) {
-        let (outcome, facts) = run_shell(ctx, name, args_json, *ask, grant, cancel, *budget);
+        let (outcome, facts) = run_shell(ctx, name, args_json, *ask, cancel, *budget);
         shell = facts;
         (String::new(), outcome)
     } else if let Some(h) = handler_for(ctx, name) {
@@ -120,7 +117,7 @@ pub(crate) fn run_branch(
             body: String::new(),
             lead: String::new(),
         };
-        dispatch_external(ctx, &inv, *ask, grant, *budget)
+        dispatch_external(ctx, &inv, *ask, *budget)
     };
     // 统一兜底：无论内置、shell、模块还是核心自有工具，回执进上下文前都按这一批的预算收口。
     let mut outcome = outcome;
@@ -264,46 +261,13 @@ pub(crate) fn is_parallel(face: &ToolFace, module: Option<&str>, name: &str) -> 
     }
 }
 
-/// 目的：一次待用户确认的工具调用：工具名 + 所属模块（内置/核心自有为空）+ 参数原文。
-pub struct ToolConfirm {
-    pub module: Option<String>,
-    pub tool: String,
-    pub args: String,
-}
-
-/// 目的：确认回调：`(待确认调用, 事件出口) -> 用户选的选项 id`（`allow` / `deny` / `full`）：实现方阻塞等回答。
-pub type ConfirmFn<'a> = &'a mut dyn FnMut(&ToolConfirm, &mut dyn FnMut(SessionEvent)) -> String;
-
-/// 目的：一次生成里的确认通道：allow_turn 一旦置位，本轮（这次生成）剩余 ask 都放行；
-///   confirm 由调用方实现（阻塞等用户回答，给回选项 id）。
-pub struct ConfirmGate<'a> {
-    pub allow_turn: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    pub confirm: ConfirmFn<'a>,
-}
-
-/// 目的：一次调用在这次档位下的生效范围与处置。
-#[derive(Debug, Clone)]
-pub struct CallGrant {
-    pub reach: ReachSet,
-    pub decision: Decision,
-}
-
-/// 目的：模块工具的派生声明（模块暂不声明 effect / reach；按执行类给保守默认）。
+/// 目的：模块工具的派生声明（模块不声明参数契约；参数原样交给它自己解释）。
 fn module_schema() -> ToolSchema {
     ToolSchema {
         desc: String::new(),
         params: None,
         parallel: false,
         capability: "none".to_string(),
-        effect: Some(Effect::Exec),
-        reach: Some(ReachSet::from([
-            Reach::Private,
-            Reach::ModuleRead,
-            Reach::ModuleWrite,
-            Reach::HostRead,
-            Reach::Network,
-        ])),
-        scope: false,
         callers: Vec::new(),
     }
 }
@@ -329,84 +293,35 @@ fn schema_for(ctx: &MemberTools, module: Option<&str>, tool: &str) -> Option<Too
     }
 }
 
-/// 目的：求这次调用的生效 reach 与处置；scope 越出档位或工具最大 reach 就拒绝。
-fn grant_for(
+/// 目的：执行前的预检——未知工具、非法的 shell 参数（命令长度 / scope / timeout）都在这里如实拒绝。
+/// 约束：预检不过的调用不执行、不加进并发批；返回的 Err 就是回给模型的那句事实。
+fn check_call(
     ctx: &MemberTools,
     module: Option<&str>,
     tool: &str,
     args_json: &str,
-) -> Result<CallGrant, String> {
+) -> Result<(), String> {
     let schema = match schema_for(ctx, module, tool) {
         Some(s) => s,
         // 模块工具的名字/归属由 dispatch 如实说清（没指明模块、没有这个模块、模块没声明这个工具）。
         None if !ctx.face.modules.is_empty() => module_schema(),
         None => return Err(format!("未知工具：{}", tool)),
     };
-    let effect = schema.effect();
-    if effect == Effect::None {
-        return Ok(CallGrant {
-            reach: ReachSet::empty(),
-            decision: Decision::Allow,
-        });
-    }
-    // shell 的语义校验（命令长度 / scope / timeout）放在闸门前：非法命令不弹卡、不落进程。
+    // shell 的语义校验（命令长度 / scope / timeout）放在执行前：非法命令不落进程。
     if crate::capabilities::tools::api::is_exec(tool) {
         crate::capabilities::tools::api::parse_shell(&schema, args_json)?;
     }
-    let scope = if schema.scope {
-        let args: serde_json::Value =
-            serde_json::from_str(args_json).map_err(|e| format!("参数不是合法 JSON：{}", e))?;
-        CallScope::from_request(args.get("scope").and_then(|v| v.as_str()))?
-    } else {
-        CallScope::None
-    };
-    let requested = if schema.scope {
-        Some(scope.reach())
-    } else {
-        None
-    };
-    let reach = ctx
-        .face
-        .sandbox
-        .permissions
-        .grant(&schema.max_reach(), requested.as_ref())?;
-    // 只有模块工具用「模块.工具」作为逐工具决定的键；内置 / 核心自有工具仍用工具名。
-    let is_system = crate::capabilities::tools::api::is_builtin(tool)
-        || crate::capabilities::tools::api::is_exec(tool)
-        || handler_for(ctx, tool).is_some();
-    let owner = if is_system {
-        None
-    } else {
-        module.map(|m| m.to_string()).or_else(|| {
-            if ctx.face.modules.len() == 1 {
-                ctx.face.modules.keys().next().cloned()
-            } else {
-                None
-            }
-        })
-    };
-    let qualified = owner
-        .map(|m| format!("{}.{}", m, tool))
-        .unwrap_or_else(|| tool.to_string());
-    let decision = ctx
-        .face
-        .sandbox
-        .permissions
-        .decision_for(&qualified, effect, scope);
-    Ok(CallGrant { reach, decision })
+    Ok(())
 }
 
 /// 目的：执行一批调用：连续声明可并发的合成一批并发跑，其余各自独占；结果按原始下标返回。
-///   每次调用先过权限闸门：reach 不够 / scope 越界 / deny 不执行；ask 进统一裁决队；
-///   allow_turn 只对本轮后续 ask 生效。没有可回答前端时 ask 一律拒绝。
+///   每次调用先过预检：未知工具 / 非法 shell 参数如实拒绝、不执行。
 pub(crate) fn run_batch(
     ctx: &mut MemberTools,
     plan: &[(Option<String>, String, String)],
-    mut confirms: Option<&mut ConfirmGate<'_>>,
     ask: Option<&dyn crate::kernel::ports::AskUser>,
     cancel: &std::sync::atomic::AtomicBool,
     budget: crate::capabilities::tools::api::ResultBudget,
-    sink: &mut dyn FnMut(SessionEvent),
 ) -> Vec<CallDone> {
     // 预检：剩余上下文连一条最小回执都放不下时，整批都不执行——避免 shell 已经产生副作用却看不到输出。
     if budget.exhausted() {
@@ -424,9 +339,9 @@ pub(crate) fn run_batch(
             .collect();
     }
     let mut done: Vec<Option<CallDone>> = (0..plan.len()).map(|_| None).collect();
-    let grants: Vec<Result<CallGrant, String>> = plan
+    let checks: Vec<Result<(), String>> = plan
         .iter()
-        .map(|(module, tool, args)| grant_for(ctx, module.as_deref(), tool, args))
+        .map(|(module, tool, args)| check_call(ctx, module.as_deref(), tool, args))
         .collect();
     // 同批调用共享批前观察快照：这一批里 read 出来的内容，模型还没看到，不能授权同批后面的写。
     let gate_facts = ctx.observations.facts().to_vec();
@@ -434,86 +349,8 @@ pub(crate) fn run_batch(
     while i < plan.len() {
         let (module, tool, args) = &plan[i];
         let label = module.clone().unwrap_or_default();
-        let grant = match &grants[i] {
-            Ok(g) => g.clone(),
-            Err(why) => {
-                done[i] = Some((label, deny(&ctx.face, why.clone()), Vec::new(), None));
-                i += 1;
-                continue;
-            }
-        };
-        if grant.decision.is_deny() {
-            let why = format!(
-                "当前档位「{}」不允许这次调用。",
-                ctx.face.sandbox.permissions.profile.label()
-            );
-            done[i] = Some((label, refuse(why), Vec::new(), None));
-            i += 1;
-            continue;
-        }
-        if grant.decision.is_ask() {
-            let already = confirms
-                .as_ref()
-                .map(|g| g.allow_turn.load(std::sync::atomic::Ordering::Relaxed))
-                .unwrap_or(false);
-            if already {
-                done[i] = Some(run_one(
-                    ctx,
-                    module.as_deref(),
-                    tool,
-                    args,
-                    &CallCtl {
-                        ask,
-                        grant: &grant,
-                        cancel,
-                        gate_facts: &gate_facts,
-                        budget,
-                    },
-                ));
-                i += 1;
-                continue;
-            }
-            let Some(gate) = confirms.as_deref_mut() else {
-                let why = "这次调用需要用户确认，但当前没有可回答的前端；按拒绝处理，未执行。"
-                    .to_string();
-                done[i] = Some((label, refuse(why), Vec::new(), None));
-                i += 1;
-                continue;
-            };
-            let req = ToolConfirm {
-                module: module.clone(),
-                tool: tool.clone(),
-                args: args.clone(),
-            };
-            let decision = (gate.confirm)(&req, sink);
-            let allow_turn =
-                decision == crate::capabilities::conversation::session::api::OPT_TOOL_ALLOW_TURN;
-            if allow_turn {
-                gate.allow_turn
-                    .store(true, std::sync::atomic::Ordering::Relaxed);
-            }
-            let allowed = allow_turn
-                || decision == crate::capabilities::conversation::session::api::OPT_TOOL_ALLOW;
-            done[i] = Some(if allowed {
-                run_one(
-                    ctx,
-                    module.as_deref(),
-                    tool,
-                    args,
-                    &CallCtl {
-                        ask,
-                        grant: &grant,
-                        cancel,
-                        gate_facts: &gate_facts,
-                        budget,
-                    },
-                )
-            } else {
-                let why =
-                    "用户没有放行这次工具调用：它没有执行。请换一种做法，或请用户调整会话权限。"
-                        .to_string();
-                (label, refuse(why), Vec::new(), None)
-            });
+        if let Err(why) = &checks[i] {
+            done[i] = Some((label, deny(&ctx.face, why.clone()), Vec::new(), None));
             i += 1;
             continue;
         }
@@ -521,7 +358,7 @@ pub(crate) fn run_batch(
             let mut j = i;
             while j < plan.len()
                 && is_parallel(&ctx.face, plan[j].0.as_deref(), &plan[j].1)
-                && matches!(&grants[j], Ok(g) if g.decision == Decision::Allow)
+                && checks[j].is_ok()
             {
                 j += 1;
             }
@@ -529,12 +366,7 @@ pub(crate) fn run_batch(
             let batch: Vec<BranchDone> = std::thread::scope(|s| {
                 let handles: Vec<_> = plan[i..j]
                     .iter()
-                    .enumerate()
-                    .map(|(k, (module, tool, args))| {
-                        let g = match &grants[i + k] {
-                            Ok(g) => g.clone(),
-                            Err(_) => unreachable!("并行批只收 allow"),
-                        };
+                    .map(|(module, tool, args)| {
                         let facts = gate_facts.clone();
                         s.spawn(move || {
                             run_branch(
@@ -544,7 +376,6 @@ pub(crate) fn run_batch(
                                 args,
                                 &CallCtl {
                                     ask,
-                                    grant: &g,
                                     cancel,
                                     gate_facts: &facts,
                                     budget,
@@ -571,7 +402,6 @@ pub(crate) fn run_batch(
                 args,
                 &CallCtl {
                     ask,
-                    grant: &grant,
                     cancel,
                     gate_facts: &gate_facts,
                     budget,
@@ -584,10 +414,8 @@ pub(crate) fn run_batch(
     // 每一次调用都留一条**同形状的审计记录**（与呈现层的动作记录同一处格式化）：可查、可对账。
     for ((module, tool, _args), slot) in plan.iter().zip(done.iter()) {
         if let Some((_label, outcome, _facts, _shell)) = slot {
-            let name = match module {
-                Some(m) => format!("{}.{}", m, tool),
-                None => tool.clone(),
-            };
+            let name =
+                crate::capabilities::conversation::session::api::qualify(module.as_deref(), tool);
             ctx.log.info(
                 "action",
                 &crate::capabilities::tools::api::action_audit(
@@ -726,14 +554,13 @@ pub(crate) fn deny(face: &ToolFace, why: String) -> ToolOutcome {
     )
 }
 
-/// 目的：执行一次 shell：按 scope 派生围栏，host 走 ProcessRunner，VM 走 guest；回执补 scope 提示。
-/// 约束：requested 已在 grant_for 里校验；这里只按 granted 派生围栏，不自动升级 scope。
+/// 目的：执行一次 shell：按会话的固定授予派生围栏，host 走 ProcessRunner，VM 走 guest。
+/// 约束：scope 只决定"命令在哪个落点跑"，不参与授权；围栏恒为沙箱 rw + 模块目录只读 + 主机只读根。
 pub(crate) fn run_shell(
     ctx: &MemberTools,
     name: &str,
     args_json: &str,
     ask: Option<&dyn crate::kernel::ports::AskUser>,
-    grant: &CallGrant,
     cancel: &std::sync::atomic::AtomicBool,
     budget: crate::capabilities::tools::api::ResultBudget,
 ) -> (ToolOutcome, Option<ShellFacts>) {
@@ -756,18 +583,14 @@ pub(crate) fn run_shell(
             None,
         );
     }
-    let mut fence = crate::kernel::api::fence::FenceSpec::for_call(
-        &ctx.face.sandbox,
-        &grant.reach,
-        None,
-        &ctx.face.fence,
-    )
-    .at(&ctx.face.sandbox.private);
+    let mut fence =
+        crate::kernel::api::fence::FenceSpec::for_call(&ctx.face.sandbox, None, &ctx.face.fence)
+            .at(&ctx.face.sandbox.private);
     fence.ro_tree.extend(ctx.face.runtime_roots.iter().cloned());
     fence.ro_tree.sort();
     fence.ro_tree.dedup();
-    // 容器身份按"会话 + agent + 受保护根集合"派生（见 container_name）：scope 不同 → 根集合不同 → 不同 SID；
-    // 同一 reach 的后续调用复用 SID 与 ACL。生命周期归会话，调用结束不释放。
+    // 容器身份按"会话 + agent + 受保护根集合"派生（见 container_name）：同一会话的 shell 共用 SID 与 ACL。
+    // 生命周期归会话，调用结束不释放。
     if ctx.face.tier == crate::kernel::api::types::Tier::Vm && ctx.face.guest_lease.is_empty() {
         return (
             ToolOutcome::new(
@@ -785,12 +608,7 @@ pub(crate) fn run_shell(
     };
     let slot = ctx.shell_live.clone();
     if let Some(slot) = &slot {
-        let scope = match call.scope {
-            CallScope::Sandbox => "sandbox",
-            CallScope::External => "external",
-            CallScope::None => "",
-        };
-        slot.start(&call.script, scope, &cwd_view);
+        slot.start(&call.script, call.scope.as_str(), &cwd_view);
     }
     // 本机档的围栏准备耗时由 ProcessRunner 同线程交棒（见 kernel 的 take_fence_prep）；虚拟机档没有本机 ACL 准备，这里恒为 None。
     let mut fence_prep: Option<crate::kernel::api::process::FenceTiming> = None;
@@ -857,7 +675,6 @@ pub(crate) fn dispatch_external(
     ctx: &MemberTools,
     inv: &ToolInvoke,
     ask: Option<&dyn crate::kernel::ports::AskUser>,
-    grant: &CallGrant,
     budget: crate::capabilities::tools::api::ResultBudget,
 ) -> (String, ToolOutcome) {
     let module = match inv.module.as_deref() {
@@ -928,11 +745,10 @@ pub(crate) fn dispatch_external(
                 .get(&module)
                 .map(|v| v.as_slice())
                 .unwrap_or(&[]);
-            // 每次调用按生效 reach 派生围栏：sh 与模块工具同一把尺子，不再用会话并集围栏执行。
+            // 每次调用按固定授予派生围栏：sh 与模块工具同一把尺子（模块目录恒只读，该模块 userdata 可写）。
             // 容器身份 = 会话 + agent + 受保护根集合（见 container_name）；租约就是会话 id，调用结束不释放。
             let fence = crate::kernel::api::fence::FenceSpec::for_call(
                 &ctx.face.sandbox,
-                &grant.reach,
                 Some(&module),
                 &ctx.face.fence,
             )

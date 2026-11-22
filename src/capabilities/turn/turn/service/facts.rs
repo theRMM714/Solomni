@@ -1,5 +1,5 @@
 //! 目的：turn 侧取「一席事实」的地方——沙箱清单、权限链与生效权限、工具环境事实（含 `env::api::member`）、上下文预算，都从这里从端口读齐。
-//! 管：`sandboxes` / `permission_chain` / `permissions_for` / `permission_for_agent` 的取数与派生，
+//! 管：`sandboxes` / `permission_chain` / `permissions_for` / `shared_scope_for` / `access_for_agent` 的取数与派生，
 //!   `member_env` 的入参收口与逐字段拷贝、`member_face` 的薄入口、`build_single` 的整场装配，`context_budget` 的窗口与阈值。
 //! 不管：装配规则（在 `session::service::assemble`）、登记处里有什么（`registry`）、会话怎么落盘（`service/admit.rs`）。
 //! 联动：`runtime/service/env.rs` 的薄入口转调这里；`service/rebuild.rs` 重建会话时也取这里的事实。
@@ -17,9 +17,10 @@ use crate::capabilities::llm::api::Channel;
 #[cfg(test)]
 use crate::capabilities::llm::api::ToolMode;
 use crate::capabilities::permission::api::PermissionSet;
+use crate::capabilities::turn::env::api::SeatAccess;
 use crate::capabilities::turn::turn::service::session::Turn;
 use crate::capabilities::vm::api::GuestOs;
-use crate::capabilities::workspace::api::{Sandbox, Sandboxes};
+use crate::capabilities::workspace::api::{Sandbox, Sandboxes, SharedScope};
 use crate::kernel::api::types::Tier;
 use crate::kernel::ports::HostProbe;
 
@@ -52,7 +53,7 @@ impl Turn {
                 roster,
                 codec: path_codec,
             },
-            &|agent| self.permission_for_agent(registry, meta, agent),
+            &|agent| self.access_for_agent(registry, meta, agent),
         )
     }
 
@@ -81,23 +82,47 @@ impl Turn {
         crate::capabilities::turn::env::api::permissions(&chain, app)
     }
 
-    /// 目的：某个 agent 的生效权限：协作主会话里的发言席优先取它自己的子会话 narrowing。
-    fn permission_for_agent(
+    /// 目的：一条会话的**生效共享区归属**：全局默认 → 根覆盖 → 每层收窄 → 全局硬黑名单。
+    pub(crate) fn shared_scope_for(
+        &self,
+        registry: &dyn Registry,
+        meta: &SessionMeta,
+    ) -> Result<SharedScope, String> {
+        let chain = self.permission_chain(meta)?;
+        let app = registry.app();
+        crate::capabilities::turn::env::api::shared_scope(&chain, app)
+    }
+
+    /// 目的：某个 agent 的生效授权：协作主会话里的发言席优先取它自己的子会话（收窄层在那里）。
+    fn access_for_agent(
         &self,
         registry: &dyn Registry,
         meta: &SessionMeta,
         agent: &str,
-    ) -> Result<PermissionSet, String> {
+    ) -> Result<SeatAccess, String> {
+        let target = self.seat_meta(meta, agent);
+        match target {
+            Some(child) => Ok(SeatAccess {
+                permissions: self.permissions_for(registry, &child)?,
+                scope: self.shared_scope_for(registry, &child)?,
+            }),
+            None => Ok(SeatAccess {
+                permissions: self.permissions_for(registry, meta)?,
+                scope: self.shared_scope_for(registry, meta)?,
+            }),
+        }
+    }
+
+    /// 目的：协作主会话里某一席真正的会话元信息（发言席有自己的子会话就用它，否则就是这条会话）。
+    fn seat_meta(&self, meta: &SessionMeta, agent: &str) -> Option<SessionMeta> {
         if meta.agents.len() == 1 && meta.agents[0].name == agent {
-            return self.permissions_for(registry, meta);
+            return None;
         }
         let child_name = format!("{}--{}", meta.name, agent);
-        if let Ok(child) = self.history.meta(&child_name)
-            && child.parent.as_deref() == Some(meta.name.as_str())
-        {
-            return self.permissions_for(registry, &child);
-        }
-        self.permissions_for(registry, meta)
+        self.history
+            .meta(&child_name)
+            .ok()
+            .filter(|child| child.parent.as_deref() == Some(meta.name.as_str()))
     }
 
     /// 目的：一席的工具环境事实：模块注入项 + 宿主可读根 / 网络 / 档位 / 包计划，交给 `env` 派生后**逐字段拷成值结构**。

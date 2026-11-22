@@ -21,20 +21,20 @@ const refreshState = (...a) => app.refreshState(...a);
 /// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
 const $ = (sel) => doc.querySelector(sel);
 
-/* 权限档位小卡片：只列四档 + 一个“更多设置”。子会话禁用比父档更宽的选项；
+/* 网络档位小卡片：只列两档 + 一个“更多设置”。子会话禁用比父档更宽的选项；
  * 生成中禁用全部（后端也会拒绝，这里先给出原因，免得白点一下）。 */
 function openPermissionMenu(chip, s) {
-  const current = s.permission_profile || 'workspace';
+  const current = s.permission_profile || 'offline';
   const parent = s.permission_parent || null;
   const parentIdx = parent ? PERMISSION_ORDER.indexOf(parent) : PERMISSION_ORDER.length - 1;
   /** @type {Array<{label?: string, icon?: string, disabled?: boolean, reason?: string, sep?: boolean, danger?: boolean, onClick?: () => void}>} */
   const items = PERMISSION_ORDER.map((id, i) => {
     const disabled = s.running || (!!parent && i > parentIdx);
     const reason = s.running
-      ? '会话正在生成：先停止再切换权限'
+      ? '会话正在生成：先停止再切网络档位'
       : (!!parent && i > parentIdx ? '子会话只能收窄：要放宽请改主会话' : '');
     return {
-      icon: id === current ? 'check' : (id === 'all_reach' ? 'alert' : 'shield'),
+      icon: id === current ? 'check' : 'shield',
       label: PERMISSION_LABELS[id] + (id === current ? '（当前）' : ''),
       disabled,
       reason,
@@ -93,7 +93,7 @@ async function switchThinking(sid, level) {
   }
 }
 
-/* 快速切档只改 profile（并回到该档的 reach / decision 默认）；共享区范围保留，要改这些走“更多权限设置”。 */
+/* 快速切档只改网络档位；共享区范围原样保留，要改这些走“更多权限设置”。 */
 async function switchPermission(sid, profile) {
   const s = state.sessions.get(sid);
   if (!s) return;
@@ -101,7 +101,7 @@ async function switchPermission(sid, profile) {
   try {
     await api('POST', actionUrl('set_permission_profile'), { session_id: sid, profile });
     await refreshState();
-    ui.toast('ok', '权限档位：' + (PERMISSION_LABELS[profile] || profile));
+    ui.toast('ok', '网络档位：' + (PERMISSION_LABELS[profile] || profile));
   } catch (e) {
     ui.toast('err', e.message || String(e));
   }
@@ -215,7 +215,7 @@ function syncStatusbar(s) {
       icon: 'shield',
       text: s.permission_label + (s.permission_narrowed ? '（收窄）' : ''),
       label: '权限档位',
-      title: '当前权限档位：' + s.permission_label + '（点开可切换；子会话只能收窄）',
+      title: '当前网络档位：' + s.permission_label + '（点开可切换；子会话只能收窄）',
     });
     permChip.onclick = () => openPermissionMenu(permChip, s);
     inner.appendChild(permChip);

@@ -10,26 +10,28 @@ prompt: 1
 taskchain: 1
 
 # 第 2 层
-catalog: 2
 workspace: 2
 
 # 第 3 层
-residents: 3
-tools: 3
-vm: 3
+catalog: 3
 
 # 第 4 层
-conversation: 4
-provision: 4
+residents: 4
+tools: 4
+vm: 4
 
 # 第 5 层
-maintenance: 5
-turn: 5
+conversation: 5
+provision: 5
 
 # 第 6 层
-lifecycle: 6
-system: 6
-work: 6
+maintenance: 6
+turn: 6
 
 # 第 7 层
-runtime: 7
+lifecycle: 7
+system: 7
+work: 7
+
+# 第 8 层
+runtime: 8

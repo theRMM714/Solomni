@@ -30,6 +30,7 @@ pub(crate) fn child_edit_writes_back_to_the_agent_roster() {
         agents: vec![agent_meta("a", &["a"], None)],
         exec: Default::default(),
         sandbox: Default::default(),
+        shared: Default::default(),
         parent: Some("w".to_string()),
         node: None,
         delegation: None,
@@ -97,6 +98,7 @@ pub(crate) fn tree_wide_module_overlap_is_allowed_on_child_edit() {
         agents: vec![agent_meta("a", &["a"], None)],
         exec: Default::default(),
         sandbox: Default::default(),
+        shared: Default::default(),
         parent: Some("w".to_string()),
         node: None,
         delegation: None,
@@ -367,9 +369,8 @@ pub(crate) fn cut_lines_stay_out_of_the_model_dialogue() {
 /// 目的：根编辑不覆盖子收窄；子只能再收窄，不能换更高档。
 #[test]
 pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
-    use crate::capabilities::permission::api::{
-        Decision, PermissionLayer, ProfileId, ScopeMode, SharedEdit,
-    };
+    use crate::capabilities::permission::api::{PermissionLayer, ProfileId};
+    use crate::capabilities::workspace::api::{ScopeMode, SharedEdit};
     let hist = Arc::new(InMemoryHistory::new());
     let mut core = core_with_all(
         vec![module_of("a")],
@@ -387,66 +388,67 @@ pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
         .turn
         .spawn_agent_session(&parent, "a", core.registry.as_ref(), core.probe.as_ref())
         .unwrap();
-    let with = |mut e: SessionEdit, p: PermissionLayer| {
-        e.permission = Some(p);
-        e
-    };
-    core.edit_session(
-        &child,
-        with(
-            edit_of(vec![("a", &["a"], "")]),
-            PermissionLayer {
-                profile: Some(ProfileId::View),
-                shared: Some(SharedEdit {
-                    read: Some(ScopeMode::Paths(vec!["src".to_string()])),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        ),
-    )
-    .expect("子收窄");
-    core.edit_session(
-        &parent,
-        with(
-            edit_of(vec![("a", &["a"], "")]),
-            PermissionLayer {
-                shared: Some(SharedEdit {
-                    write: Some(ScopeMode::Paths(vec!["docs".to_string()])),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        ),
-    )
-    .expect("根编辑");
+    // 子：档位钉在离线（根的默认也是离线，属于合法收窄）+ 共享区只读 src。
+    let mut child_edit = edit_of(vec![("a", &["a"], "")]);
+    child_edit.permission = Some(PermissionLayer {
+        profile: Some(ProfileId::Offline),
+    });
+    child_edit.shared = Some(SharedEdit {
+        read: Some(ScopeMode::Paths(vec!["src".to_string()])),
+        ..Default::default()
+    });
+    core.edit_session(&child, child_edit).expect("子收窄");
+    // 根：放宽到联网 + 写范围收到 docs。放宽只改根自己的 ceiling，不动子的 narrowing。
+    let mut root_edit = edit_of(vec![("a", &["a"], "")]);
+    root_edit.permission = Some(PermissionLayer {
+        profile: Some(ProfileId::Online),
+    });
+    root_edit.shared = Some(SharedEdit {
+        write: Some(ScopeMode::Paths(vec!["docs".to_string()])),
+        ..Default::default()
+    });
+    core.edit_session(&parent, root_edit).expect("根编辑");
     let (cm, _) = core.lifecycle.history_open(&child).unwrap();
-    assert!(cm.sandbox.narrowing.is_some(), "根编辑不能清掉子收窄");
+    assert_eq!(
+        cm.sandbox.narrowing.as_ref().and_then(|l| l.profile),
+        Some(ProfileId::Offline),
+        "根编辑不能清掉子收窄"
+    );
+    assert_eq!(
+        cm.shared.read,
+        Some(ScopeMode::Paths(vec!["src".to_string()])),
+        "子自己的读范围原样保留"
+    );
     let (pm, _) = core.lifecycle.history_open(&parent).unwrap();
-    assert!(pm.sandbox.ceiling.is_some(), "根 ceiling 落盘");
-    let cfg = core.session_config(&child).unwrap();
     assert_eq!(
-        cfg.permission.profile,
-        ProfileId::View,
-        "子档位仍是收窄后的 view"
+        pm.sandbox.ceiling.as_ref().and_then(|l| l.profile),
+        Some(ProfileId::Online),
+        "根 ceiling 换成联网"
     );
     assert_eq!(
-        cfg.permission.decisions.write,
-        Decision::Deny,
-        "view 的写决定生效"
+        pm.shared.write,
+        Some(ScopeMode::Paths(vec!["docs".to_string()]))
     );
-    let widen = with(
-        edit_of(vec![("a", &["a"], "")]),
-        PermissionLayer {
-            profile: Some(ProfileId::AllReach),
-            ..Default::default()
-        },
+    assert_eq!(
+        core.session_config(&child).unwrap().permission.profile,
+        ProfileId::Offline,
+        "子的收窄压过根的放宽"
     );
+    // 根切回离线后，子不能再往宽里选。
+    let mut back = edit_of(vec![("a", &["a"], "")]);
+    back.permission = Some(PermissionLayer {
+        profile: Some(ProfileId::Offline),
+    });
+    core.edit_session(&parent, back).expect("根切回离线");
+    let mut widen = edit_of(vec![("a", &["a"], "")]);
+    widen.permission = Some(PermissionLayer {
+        profile: Some(ProfileId::Online),
+    });
     let err = core.edit_session(&child, widen).unwrap_err();
     assert!(err.contains("更宽"), "{}", err);
 }
 
-/// 目的：创建时选的档位直接落进根 ceiling；旧 meta 不兼容是预期。
+/// 目的：创建时选的档位直接落进根 ceiling。
 #[test]
 pub(crate) fn creation_writes_the_chosen_profile_into_the_root_ceiling() {
     use crate::capabilities::permission::api::ProfileId;
@@ -460,16 +462,16 @@ pub(crate) fn creation_writes_the_chosen_profile_into_the_root_ceiling() {
         Arc::new(InMemorySysIo::new()),
     );
     let mut spec = work("wv", WorkMode::Single, &["a"]);
-    spec.permission = Some(ProfileId::View);
+    spec.permission = Some(ProfileId::Online);
     let sid = core.create_work(spec).unwrap().sid;
     let (meta, _) = core.lifecycle.history_open(&sid).unwrap();
     assert_eq!(
         meta.sandbox.ceiling.as_ref().and_then(|l| l.profile),
-        Some(ProfileId::View)
+        Some(ProfileId::Online)
     );
     assert_eq!(
         core.session_config(&sid).unwrap().permission.profile,
-        ProfileId::View
+        ProfileId::Online
     );
 }
 
@@ -486,28 +488,27 @@ pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
         Arc::clone(&hist),
         Arc::new(InMemorySysIo::new()),
     );
-    let parent = core
-        .create_work(collab_work("p", &["a"], false, "需求"))
-        .unwrap()
-        .sid;
+    let mut spec = collab_work("p", &["a"], false, "需求");
+    spec.permission = Some(ProfileId::Online);
+    let parent = core.create_work(spec).unwrap().sid;
     let child = core
         .turn
         .spawn_agent_session(&parent, "a", core.registry.as_ref(), core.probe.as_ref())
         .unwrap();
-    core.set_permission_profile(&parent, ProfileId::View)
+    core.set_permission_profile(&parent, ProfileId::Offline)
         .expect("根快速切档");
     let (pm, _) = core.lifecycle.history_open(&parent).unwrap();
     assert_eq!(
         pm.sandbox.ceiling.as_ref().and_then(|l| l.profile),
-        Some(ProfileId::View)
+        Some(ProfileId::Offline)
     );
     assert_eq!(
         core.session_config(&child).unwrap().permission.profile,
-        ProfileId::View,
+        ProfileId::Offline,
         "子会话继承新的根 ceiling"
     );
     let err = core
-        .set_permission_profile(&child, ProfileId::AllReach)
+        .set_permission_profile(&child, ProfileId::Online)
         .unwrap_err();
     assert!(err.contains("更宽"), "{}", err);
 }
@@ -534,6 +535,7 @@ pub(crate) fn guest_lease_follows_the_tier_and_the_proxy_root() {
             ..Default::default()
         },
         sandbox: Default::default(),
+        shared: Default::default(),
         parent: parent.map(|p| p.to_string()),
         node: None,
         delegation: None,

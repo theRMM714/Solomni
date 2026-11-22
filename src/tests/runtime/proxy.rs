@@ -779,15 +779,15 @@ pub(crate) fn proxy_profile_can_be_quick_switched() {
         .expect("建代理");
     let target = sid.clone();
     handle
-        .call(move |core| core.set_permission_profile(&target, ProfileId::View))
+        .call(move |core| core.set_permission_profile(&target, ProfileId::Offline))
         .expect("代理快速切档");
     let (meta, _) = faces.history.open(&sid).expect("落盘");
     assert_eq!(
         meta.sandbox.ceiling.as_ref().and_then(|l| l.profile),
-        Some(ProfileId::View)
+        Some(ProfileId::Offline)
     );
     assert_eq!(
         faces.work.config(&sid).unwrap().permission.profile,
-        ProfileId::View
+        ProfileId::Offline
     );
 }

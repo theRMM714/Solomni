@@ -226,8 +226,12 @@ pub fn validate_thinking(
 pub struct SandboxSettings {
     #[serde(default)]
     pub policy: SandboxPolicy,
+    /// 目的：新建会话的默认网络档位（离线 / 联网）。
     #[serde(default)]
     pub defaults: crate::capabilities::permission::api::PermissionDefaults,
+    /// 目的：新建会话的默认共享区归属（读范围 / 写范围 / 黑名单）。
+    #[serde(default)]
+    pub scope: crate::capabilities::workspace::api::SharedScope,
 }
 
 /// 目的：全局沙箱硬约束。会话不能覆盖这里的任何字段。
@@ -524,9 +528,11 @@ pub fn validate_compact_settings(
 
 /// 目的：校验 settings.yaml 的沙箱段——路径、枚举与硬黑名单。
 pub fn validate_sandbox_settings(s: &SandboxSettings) -> Result<(), String> {
-    crate::capabilities::permission::api::validate_defaults(&s.defaults)?;
+    s.scope
+        .validate()
+        .map_err(|why| format!("sandbox.scope：{}", why))?;
     for e in &s.policy.deny {
-        crate::capabilities::permission::api::validate_entry(e)
+        crate::capabilities::workspace::api::validate_entry(e)
             .map_err(|why| format!("sandbox.policy.deny：{}", why))?;
     }
     for r in &s.policy.host_read_roots {

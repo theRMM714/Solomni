@@ -132,9 +132,6 @@ tools:
   # —— 执行类系统工具：一次性 shell ——
   shell:
     capability: exec
-    effect: exec
-    reach: [private, module-read, host-read, network]
-    scope: true                # 接受模型给的 per-call scope：sandbox / external；省略 = sandbox
     callers: [executor, solo, core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       在本环境跑一条一次性命令（构建 / 测试 / 跑脚本）：cwd 固定是你的私有沙箱，无交互 stdin / TTY；
@@ -334,7 +331,7 @@ tools:
         desc: 仅人经呈现层可用：共享区主副本绑定的外部工作区根（已存在的绝对目录）；省略 = 会话内 work/。子会话继承父会话，不接受自选
       permission:
         type: string
-        desc: 创建时的权限档位：view / workspace / external / all_reach（仅人经呈现层；代理子会话继承父 ceiling）
+        desc: 创建时的网络档位：offline / online（仅人经呈现层；代理子会话继承父 ceiling）
       context_freshness:
         type: boolean
         desc: 仅人经呈现层可用：建会话时就打开过期内容替换（读过的文件被改后，那条工具结果在发给模型前换成占位符）；省略 = 关
@@ -468,8 +465,6 @@ tools:
   # —— 共享区版本化工作区：agent 只写自己的沙箱，用 pull / commit / push 与主副本同步 ——
   work_pull:
     capability: none              # 由 workspace 能力执行（经核心自有工具的派发路径），不经 SysIo
-    effect: write                 # 写私有沙箱；读共享区取副本
-    reach: [private, shared-read]
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       把本次工作共享区（主副本）的指定路径拉进**你自己的沙箱**（同一相对路径），并记下拉取基线。
@@ -486,8 +481,6 @@ tools:
         desc: 要拉取的路径数组（相对共享区、/ 分隔的字符串；文件夹会整棵展开）
   work_commit:
     capability: none              # 由 workspace 能力执行；只写自己的工作线，共享区一个字都不动
-    effect: write
-    reach: [private]
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       同 git commit：把沙箱里点名的文件记成**你自己工作线**上的一条提交，共享区与主线都不变。
@@ -509,8 +502,6 @@ tools:
         desc: 提交说明（一句话说清这次改了什么）
   work_push:
     capability: none              # 由 workspace 能力执行；共享区只由它（和 work_sync / 用户投喂）推进
-    effect: write
-    reach: [shared-read, shared-write]
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       同 git push：把你工作线上已提交的改动推送进共享区主线，落一条 squash 提交（不是你的每一条本地提交）。
@@ -529,8 +520,6 @@ tools:
         desc: 主线提交说明（一句话说清这次推送的内容）
   work_status:
     capability: none              # 只读：不碰文件，读版本库与拉取基线
-    effect: read
-    reach: [private, shared-read]
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
     desc: |
@@ -545,8 +534,6 @@ tools:
         desc: 只看这些路径（相对共享区、/ 分隔）；省略 = 你已拉取过的全部路径 + 沙箱未跟踪清单
   work_ignore:
     capability: none              # 由 workspace 能力执行；只改版本库目录里的 .workignore，不碰 .gitignore
-    effect: write
-    reach: [shared-read, shared-write]
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       读写本次工作的**过滤名单** \`.workignore\`（放在版本库目录里，不进共享区，也不会被提交）：
@@ -566,8 +553,6 @@ tools:
         desc: 要追加或删掉的规则行（op=add / remove 时必填；一行一条，语法同 .gitignore）
   work_sync:
     capability: none              # 由 workspace 能力执行；把工作区磁盘现状采纳成外部提交
-    effect: write
-    reach: [shared-read, shared-write]
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       把工作区磁盘上点名路径、还没被记录的变化采纳成一条 author=external 的主线提交，推进共享区 head；不改任何沙箱。
@@ -582,8 +567,6 @@ tools:
         desc: 要采纳的工作区路径数组（相对共享区、/ 分隔；文件夹会整棵展开）
   work_versions:
     capability: none              # 只读：读基线对象、主副本对象与沙箱文件
-    effect: read
-    reach: [private, shared-read]
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
     desc: |
@@ -599,8 +582,6 @@ tools:
         desc: 共享区内的相对路径（/ 分隔的单个文件；文件夹请逐个看）
   work_diff:
     capability: none              # 只读：读工作线对象与沙箱文件，不写任何东西
-    effect: read
-    reach: [private, shared-read]
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
     desc: |
@@ -622,8 +603,6 @@ tools:
         desc: 只看这些路径（相对共享区、/ 分隔；省略 = 全部）
   work_resolve:
     capability: none              # 改基线（take=upstream 还会改沙箱文件）；共享主副本不动
-    effect: write
-    reach: [private, shared-read]
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       解决基线冲突或在两个版本之间显式选边。take=upstream：用主副本覆盖沙箱（主副本已删则删本地）；
@@ -647,8 +626,6 @@ tools:
         desc: take=local 必填：调用方看到的主副本提交 id（work_status / work_versions 返回）；与当前 head 不符会被拒绝
   work_reset:
     capability: none              # 改工作线引用与私有沙箱；共享主副本不动
-    effect: write
-    reach: [private]
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       同 git restore / git reset：在**你自己**的工作线上回退，共享区不受影响。
@@ -670,8 +647,6 @@ tools:
         desc: to 形态专用：true = 只移工作线引用、不改沙箱文件；缺省 false（重铺沙箱）
   work_lost:
     capability: none              # 列备份只读；restore 只写自己的沙箱，不碰共享主副本
-    effect: read
-    reach: [private, shared-read]
     callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       列出 / 恢复覆盖或删除前备份的**本地版本**（版本库 lost/ 下，按 agent 隔离）；来源是 work_resolve take=upstream、work_reset、回档 / 删除 / 留档。
@@ -812,10 +787,10 @@ tools:
   set_permission_profile:
     capability: none              # 只改档位，不碰名单 / 环境
     callers: [user]
-    desc: 快速切换会话权限档位（view / workspace / external / all_reach）；子会话只能收窄，整棵 work tree 生成中拒绝。
+    desc: 快速切换会话网络档位（offline / online）；子会话只能收窄，整棵 work tree 生成中拒绝。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
-      profile: { type: string, required: true, non_empty: true, desc: view / workspace / external / all_reach }
+      profile: { type: string, required: true, non_empty: true, desc: offline / online }
   edit_session:
     capability: none
     callers: [user]
@@ -826,7 +801,8 @@ tools:
       tier: { type: string, required: true, non_empty: true, desc: 执行档位 host / vm }
       guest: { type: string, desc: 虚拟机档的虚拟根名（清单里的一个名字；可选） }
       pins: { type: object, desc: 能力定版表（可选） }
-      permission: { type: object, desc: 会话级权限层（profile / reach / shared / decisions / tools；子会话只能收窄；网络是全局策略） }
+      permission: { type: object, desc: 会话级网络档位（profile；子会话只能收窄；网络是全局策略） }
+      shared: { type: object, desc: 会话级共享区归属（read / write / deny；子会话只能收窄） }
   upload:
     capability: none
     callers: [user]

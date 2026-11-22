@@ -40,12 +40,8 @@ impl Turn {
                 // 两个出口（流式短暂事件 / 定稿事件）都要收进同一份事件流：用 RefCell 共享。
                 let out = std::cell::RefCell::new(prefix);
                 {
-                    // 同步驱动、生成期间读不到键盘：这一趟不接工具级确认，也没有可回答的前端。
-                    let io = TurnIo {
-                        llm,
-                        decisions: None,
-                        ask: None,
-                    };
+                    // 同步驱动、生成期间读不到键盘：这一趟没有可回答的前端。
+                    let io = TurnIo { llm, ask: None };
                     let mut emit = |ev: SessionEvent| out.borrow_mut().push(ev);
                     let mut sink = |ev: SessionEvent| out.borrow_mut().push(ev);
                     // 执行提示词是**核心派的活**（派发行）：界面系统行、上下文 user 角色。
@@ -116,7 +112,6 @@ impl Turn {
                         timeout_secs: opts.timeout_secs,
                         thinking,
                     },
-                    decisions: None,
                     ask: None,
                 };
                 let mut emit = |e: SessionEvent| notes.borrow_mut().push(e);
@@ -392,6 +387,8 @@ impl Turn {
             exec: pmeta.exec.clone(),
             // 子会话只带自己的 narrowing；父的 ceiling 在判定时沿链求交，不复制。
             sandbox: Default::default(),
+            // 共享区归属沿工作根继承：子会话不额外收窄。
+            shared: Default::default(),
             parent: Some(parent.to_string()),
             node: None,
             delegation: None,

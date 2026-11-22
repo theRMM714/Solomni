@@ -69,16 +69,14 @@ async function openWizard(draft) {
   ui.attachHelp(ctxField, wizardCopy.context);
   syncCtx();
   const profileField = doc.createElement('div'); profileField.className = 'wf-field';
-  const profileLabel = doc.createElement('div'); profileLabel.className = 'wf-label'; profileLabel.textContent = '权限档位';
+  const profileLabel = doc.createElement('div'); profileLabel.className = 'wf-label'; profileLabel.textContent = '网络档位';
   const profileSel = selectInput([
-    { value: 'view', label: '仅可查看' },
-    { value: 'workspace', label: '工作区内修改（默认）' },
-    { value: 'external', label: '外部可达（逐次确认）' },
-    { value: 'all_reach', label: '全可达（自动放行）' },
-  ], w.permission || 'workspace');
+    { value: 'offline', label: '离线（默认）' },
+    { value: 'online', label: '联网' },
+  ], w.permission || 'offline');
   profileSel.addEventListener('change', () => { w.permission = profileSel.value; });
   profileField.appendChild(profileLabel); profileField.appendChild(profileSel);
-  profileField.appendChild(ui.hint('档位只决定能到哪、要不要问；创建后仍可在会话配置里收窄。代理形态默认全可达。'));
+  profileField.appendChild(ui.hint(wizardCopy.permission));
   if (!vmOk) {
     const reqs = (tiers && tiers.vm_requirements) || [];
     // 只列**现状**：怎么补这件事由下面的按钮承担（把指引和动作分成两件事，用户不会只看到话看不到路）。
@@ -399,10 +397,10 @@ function pickWorkspaceDir(onPick) {
 
     modeSel.addEventListener('change', () => {
       w.mode = modeSel.value;
-      // 代理形态默认显式选全可达（用户仍可在下拉里改；不再由后端硬编码）。
+      // 代理形态默认显式选联网（用户仍可在下拉里改；不再由后端硬编码）。
       if (w.mode === 'proxy') {
-        w.permission = 'all_reach';
-        profileSel.value = 'all_reach';
+        w.permission = 'online';
+        profileSel.value = 'online';
       }
       // 从协作切回单 agent：只保留第一张卡片（不静默替换成别的人）。
       if (w.mode === 'single' && w.agents.length > 1) w.agents = [w.agents[0]];
@@ -476,7 +474,7 @@ function pickWorkspaceDir(onPick) {
       let agents;
       if (w.mode === 'proxy') {
         // 代理：没有名单、没有需求——选这个形态就是授予全权（档位由上面的选择显式落盘）。
-        const proxyBody = { name, mode: 'proxy', agents: [], tier: w.tier, guest: w.tier === 'vm' ? vmGuest : null, permission: w.permission || 'all_reach' };
+        const proxyBody = { name, mode: 'proxy', agents: [], tier: w.tier, guest: w.tier === 'vm' ? vmGuest : null, permission: w.permission || 'online' };
         proxyBody.context_freshness = !!w.context_freshness;
         proxyBody.freshness_keep_percent = keepNow();
         const proxyWs = workspaceIn.value.trim();
@@ -513,7 +511,7 @@ function pickWorkspaceDir(onPick) {
       }
       const names = agents.map((a) => a.name);
       const dup = names.filter((n, i) => names.indexOf(n) !== i)[0];
-      const body = { name, mode: w.mode, agents, tier: w.tier, permission: w.permission || 'workspace' };
+      const body = { name, mode: w.mode, agents, tier: w.tier, permission: w.permission || 'offline' };
       body.context_freshness = !!w.context_freshness;
       body.freshness_keep_percent = keepNow();
       const bodyWs = workspaceIn.value.trim();

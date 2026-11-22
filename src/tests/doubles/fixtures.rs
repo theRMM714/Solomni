@@ -97,6 +97,7 @@ pub(crate) fn test_sandbox(
         modules: map,
         modules_with_userdata: std::collections::BTreeSet::new(),
         permissions: Default::default(),
+        scope: Default::default(),
         path_codec: None,
         filter_rules: abs(&[
             "demo",

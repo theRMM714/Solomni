@@ -92,11 +92,10 @@
 | `sandbox.policy.windows.write_acl` | 布尔 | 否 | `false` | 是否允许 Windows 容器围栏写本机目录 ACL（首次启动会引导） |
 | `sandbox.policy.host_read_roots` | 字符串数组 | 否 | `[]` | 用户显式授权的主机绝对路径只读根 |
 | `sandbox.policy.deny` | 字符串数组 | 否 | `[]` | 全局黑名单（工作区相对路径）：硬底线，会话只能追加 |
-| `sandbox.defaults.profile` | 字符串 | 否 | `workspace` | 默认档位：`view` / `workspace` / `external` / `all_reach` |
-| `sandbox.defaults.shared.read` | 字符串／数组 | 否 | `all` | 共享区读范围三态：`all` / `none` / 路径数组 |
-| `sandbox.defaults.shared.write` | 字符串／数组 | 否 | `all` | 共享区写范围三态 |
-| `sandbox.defaults.shared.deny` | 字符串数组 | 否 | `[]` | 默认追加黑名单；全局 `policy.deny` 仍是硬底线 |
-| `sandbox.defaults.tools` | 映射 | 否 | `{}` | 逐工具决定：工具名 → `allow` / `ask` / `deny` |
+| `sandbox.defaults.profile` | 字符串 | 否 | `offline` | 默认网络档位：`offline` / `online` |
+| `sandbox.scope.read` | 字符串／数组 | 否 | `all` | 默认共享区读范围三态：`all` / `none` / 路径数组 |
+| `sandbox.scope.write` | 字符串／数组 | 否 | `all` | 默认共享区写范围三态 |
+| `sandbox.scope.deny` | 字符串数组 | 否 | `[]` | 默认追加黑名单；全局 `policy.deny` 仍是硬底线 |
 | `qemu_path` | 字符串 | 否 | 空 | 虚拟机档 QEMU 可执行文件路径；空 = 取项目内补齐的那个，否则看 PATH |
 | `virtiofsd_path` | 字符串 | 否 | 空 | 虚拟机档共享后端的外部程序路径；口径同 `qemu_path` |
 | `smbd_path` | 字符串 | 否 | 空 | 虚拟机档 smb 共享档的 helper 路径；口径同 `qemu_path` |

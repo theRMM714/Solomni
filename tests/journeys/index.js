@@ -19,7 +19,6 @@ const JOURNEYS = [
   { id: "shell", unit: "tools", title: "零模块 shell：成功与退出码都落成工具行（真机围栏档）", deps: ["registry"], requires: ["E2E_FENCE_LIVE"] },
   { id: "modules", unit: "tools", title: "多模块 cwd + 漏写 module 如实报错", deps: ["registry"] },
   { id: "files", unit: "conversation", title: "上传不覆盖 + 文件清单 + @ 引用改写（含空格与句读）", deps: ["single-write"] },
-  { id: "tool-ask", unit: "tools", title: "工具级确认：allow / deny / allow_turn 三态", deps: ["registry"] },
   { id: "bad-envelope", unit: "tools", title: "非法工具信封：失败工具行且 JSON 不上屏", deps: ["registry"] },
   { id: "unclosed-envelope", unit: "tools", title: "未闭合信封：正文保留、坏 JSON 不上屏", deps: ["registry"] },
   { id: "abs-path", unit: "tools", title: "外部工具用真实绝对路径读投喂文件", deps: ["registry"] },

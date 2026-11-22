@@ -569,10 +569,7 @@ pub(crate) fn exhausted_budget_skips_the_whole_batch() {
     ];
     let budget = crate::capabilities::tools::api::ResultBudget::for_batch(20_000, 19_800, 2);
     assert!(budget.exhausted(), "构造前提：预算已枯竭");
-    let mut events = 0;
-    let done = run_batch(&mut tools, &plan, None, None, &cancel, budget, &mut |_| {
-        events += 1
-    });
+    let done = run_batch(&mut tools, &plan, None, &cancel, budget);
     assert_eq!(done.len(), 2, "每个调用都要有回执");
     for (_, outcome, _, _) in &done {
         assert!(!outcome.ok);
@@ -586,7 +583,6 @@ pub(crate) fn exhausted_budget_skips_the_whole_batch() {
         runner.calls.lock().expect("锁").is_empty(),
         "预检失败不得落进程"
     );
-    assert_eq!(events, 0, "预检失败不该发执行事件");
 }
 
 /// 目的：read 的可见内容与观察事实必须同受一批预算约束；被预算切掉的行绝不能记成读过。

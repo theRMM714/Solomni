@@ -388,6 +388,7 @@ pub(crate) fn vm_edit_from_host_to_vm_keeps_external_workspace_mounts() {
             guest: Some(guest),
             pins: BTreeMap::new(),
             permission: None,
+            shared: None,
         },
     )
     .expect("切进虚拟机档");

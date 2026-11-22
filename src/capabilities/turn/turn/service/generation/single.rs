@@ -103,11 +103,7 @@ pub(crate) fn run_prepared<H: TurnHost>(
                         bus.push(&sid, std::slice::from_ref(&ev));
                     }
                 };
-                let io = TurnIo {
-                    llm,
-                    decisions,
-                    ask,
-                };
+                let io = TurnIo { llm, ask };
                 // 逐轮外送 + 边落盘：一轮跑完就上屏并落盘（中途刷新页面因此看得到已产生的部分）。
                 // seq 取**最后一次**入台的序号：命令回包按它给订阅起点。
                 let mut seq = 0u64;

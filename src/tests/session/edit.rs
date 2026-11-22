@@ -46,13 +46,11 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
             tier: "vm".to_string(),
             guest: Some(guest.clone()),
             pins: BTreeMap::new(),
-            permission: Some(crate::capabilities::permission::api::PermissionLayer {
-                shared: Some(crate::capabilities::permission::api::SharedEdit {
-                    write: Some(crate::capabilities::permission::api::ScopeMode::Paths(
-                        vec!["docs".to_string()],
-                    )),
-                    ..Default::default()
-                }),
+            permission: None,
+            shared: Some(crate::capabilities::workspace::api::SharedEdit {
+                write: Some(crate::capabilities::workspace::api::ScopeMode::Paths(vec![
+                    "docs".to_string(),
+                ])),
                 ..Default::default()
             }),
         },
@@ -63,7 +61,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     assert_eq!(cfg.tier, "vm");
     assert_eq!(
         cfg.permission.shared.write,
-        crate::capabilities::permission::api::ScopeMode::Paths(vec!["docs".to_string()])
+        crate::capabilities::workspace::api::ScopeMode::Paths(vec!["docs".to_string()])
     );
     let (meta, events) = hist.load(&sid).unwrap();
     assert_eq!(
@@ -73,15 +71,11 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     );
     assert_eq!(meta.exec.tier, Tier::Vm);
     assert_eq!(
-        meta.sandbox
-            .ceiling
-            .as_ref()
-            .and_then(|l| l.shared.as_ref())
-            .and_then(|s| s.write.clone()),
-        Some(crate::capabilities::permission::api::ScopeMode::Paths(
-            vec!["docs".to_string()]
-        )),
-        "会话级权限写回 meta"
+        meta.shared.write,
+        Some(crate::capabilities::workspace::api::ScopeMode::Paths(vec![
+            "docs".to_string()
+        ])),
+        "会话级共享区归属写回 meta"
     );
     assert_eq!(
         meta.exec.guest.as_deref(),
@@ -355,6 +349,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
             pins: BTreeMap::from([("python".to_string(), "3.12.4".to_string())]),
         },
         sandbox: Default::default(),
+        shared: Default::default(),
         parent: None,
         node: None,
         delegation: None,
@@ -392,4 +387,9 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
     assert!(defaulted.exec.guest.is_none());
     assert!(defaulted.exec.pins.is_empty());
     assert_eq!(defaulted.run, RunState::Active);
+    assert_eq!(
+        defaulted.shared,
+        Default::default(),
+        "缺 shared 段 = 不额外收窄"
+    );
 }

@@ -4,10 +4,10 @@
 //! 联动：`turn` 装配工具面时按 allowed 现取本文件的 `work_handlers`；版本库写入由 workspace 的
 //!   service 串行化（它持版本库端口）。
 
-use crate::capabilities::permission::api::{PermissionSet, Reach};
 use crate::capabilities::workspace::api as dw;
 use crate::capabilities::workspace::api::{
-    CommitRequest, DiffRequest, ResetRequest, ResolveRequest, ResolveTake, Sandbox, Workspace,
+    CommitRequest, DiffRequest, ResetRequest, ResolveRequest, ResolveTake, Sandbox, SharedScope,
+    Workspace,
 };
 use crate::kernel::api::types::ToolOutcome;
 use crate::kernel::ports::ToolHandler;
@@ -20,25 +20,22 @@ pub struct WorkHandler {
     work: String,
     /// 这一席的 agent 实例名（拉取基线按它记）。
     agent: String,
-    /// 这一席的生效权限：提交与拉取的 reach 与共享区范围在这里收口。
-    permissions: PermissionSet,
+    /// 这一席的共享区路径归属：拉取与提交的路径在这里收口。
+    scope: SharedScope,
 }
 
 /// 目的：逐条路径过读权限：拉不进来的东西，读了也没有，所以在这里就拒绝（不作为提交/冲突问题）。
-///  纯判定（输入只有生效权限与路径），便于 T1 直接钉规则。
-pub(crate) fn check_readable(permissions: &PermissionSet, paths: &[String]) -> Result<(), String> {
-    if !permissions.may_read_shared() {
-        return Err(format!(
-            "读取被拒：当前档位「{}」没有共享区读取权限",
-            permissions.profile.label()
-        ));
+///  纯判定（输入只有共享区归属与路径），便于 T1 直接钉规则。
+pub(crate) fn check_readable(scope: &SharedScope, paths: &[String]) -> Result<(), String> {
+    if !scope.may_read() {
+        return Err("读取被拒：当前会话没有共享区读取权限".to_string());
     }
     for p in paths {
-        if !permissions.read_ok(p) {
+        if !scope.read_ok(p) {
             return Err(format!(
                 "读取被拒：{} 不在允许读取的路径内（允许：{}）",
                 p,
-                permissions.read_roots_listing()
+                scope.read_roots_listing()
             ));
         }
     }
@@ -47,22 +44,19 @@ pub(crate) fn check_readable(permissions: &PermissionSet, paths: &[String]) -> R
 
 /// 目的：逐条路径过写权限：任一条越界 → 整次提交拒绝（与冲突拒绝同一风格，不静默放过）。
 pub(crate) fn check_writable(
-    permissions: &PermissionSet,
+    scope: &SharedScope,
     paths: &[String],
     deletes: &[String],
 ) -> Result<(), String> {
-    if !permissions.may_write(Reach::SharedWrite) {
-        return Err(format!(
-            "提交被拒：当前档位「{}」没有共享区提交权限",
-            permissions.profile.label()
-        ));
+    if !scope.may_commit() {
+        return Err("提交被拒：当前会话没有共享区提交权限".to_string());
     }
     for p in paths.iter().chain(deletes.iter()) {
-        if !permissions.write_ok(p) {
+        if !scope.write_ok(p) {
             return Err(format!(
                 "提交被拒（越界）：{} 不在允许提交的路径内（允许：{}）",
                 p,
-                permissions.write_roots_listing()
+                scope.write_roots_listing()
             ));
         }
     }
@@ -70,18 +64,18 @@ pub(crate) fn check_writable(
 }
 
 impl WorkHandler {
-    /// 目的：按一席的沙箱事实造执行者（工作名、agent 实例名与生效权限都从沙箱来）。
+    /// 目的：按一席的沙箱事实造执行者（工作名、agent 实例名与共享区归属都从沙箱来）。
     pub fn new(
         workspace: Arc<dyn Workspace + Send + Sync>,
         work: &str,
         agent: &str,
-        permissions: PermissionSet,
+        scope: SharedScope,
     ) -> WorkHandler {
         WorkHandler {
             workspace,
             work: work.to_string(),
             agent: agent.to_string(),
-            permissions,
+            scope,
         }
     }
 
@@ -90,10 +84,10 @@ impl WorkHandler {
             Ok(p) => p,
             Err(e) => return outcome(false, e),
         };
-        if let Err(e) = check_readable(&self.permissions, &paths) {
+        if let Err(e) = check_readable(&self.scope, &paths) {
             return outcome(false, e);
         }
-        if let Err(e) = check_writable(&self.permissions, &paths, &[]) {
+        if let Err(e) = check_writable(&self.scope, &paths, &[]) {
             return outcome(false, e);
         }
         // 同步是这一席在当行做的动作：锚落在这里，回档到更早的行才能越过它。
@@ -118,7 +112,7 @@ impl WorkHandler {
             Ok(p) => p,
             Err(e) => return outcome(false, e),
         };
-        if let Err(e) = check_readable(&self.permissions, &paths) {
+        if let Err(e) = check_readable(&self.scope, &paths) {
             return outcome(false, e);
         }
         match self.workspace.work_pull(&self.work, &self.agent, &paths) {
@@ -142,7 +136,7 @@ impl WorkHandler {
             Ok(p) => p,
             Err(e) => return outcome(false, e),
         };
-        if let Err(e) = check_writable(&self.permissions, &paths, &deletes) {
+        if let Err(e) = check_writable(&self.scope, &paths, &deletes) {
             return outcome(false, e);
         }
         let message = dw::str_arg(args, "message").unwrap_or_default();
@@ -162,14 +156,8 @@ impl WorkHandler {
     /// 目的：把已提交的改动推送进主线。
     /// 约束：推送写共享区，所以只过「共享区提交权限」这一道闸；逐条路径的写范围在 work_commit 已经卡过。
     fn push(&self, session: &str, agent: &str, line: u64, args: &serde_json::Value) -> ToolOutcome {
-        if !self.permissions.may_write(Reach::SharedWrite) {
-            return outcome(
-                false,
-                format!(
-                    "推送被拒：当前档位「{}」没有共享区提交权限",
-                    self.permissions.profile.label()
-                ),
-            );
+        if !self.scope.may_commit() {
+            return outcome(false, "推送被拒：当前会话没有共享区提交权限".to_string());
         }
         let req = dw::PushRequest {
             message: dw::str_arg(args, "message").unwrap_or_default(),
@@ -189,7 +177,7 @@ impl WorkHandler {
             Ok(p) => p,
             Err(e) => return outcome(false, e),
         };
-        if let Err(e) = check_readable(&self.permissions, &paths) {
+        if let Err(e) = check_readable(&self.scope, &paths) {
             return outcome(false, e);
         }
         let from = match commit_id(args, "from") {
@@ -203,7 +191,7 @@ impl WorkHandler {
         let req = DiffRequest { from, to, paths };
         match self.workspace.work_diff(&self.work, &self.agent, &req) {
             Ok(mut r) => {
-                r.entries.retain(|e| self.permissions.read_ok(&e.path));
+                r.entries.retain(|e| self.scope.read_ok(&e.path));
                 outcome(true, dw::render_diff(&r))
             }
             Err(e) => outcome(false, e),
@@ -211,7 +199,7 @@ impl WorkHandler {
     }
 
     /// 目的：把沙箱按工作线头恢复（`paths`），或把工作线移回某个提交（`to`）。
-    /// 约束：两种形态都只动这一席的沙箱与工作线，因此只要求“能写私有沙箱”；
+    /// 约束：两种形态都只动这一席的沙箱与工作线（沙箱恒可写，不再有权限闸）；
     ///   路径仍要过读作用域（看不见的路径不能借 reset 覆盖）。
     fn reset(&self, args: &serde_json::Value) -> ToolOutcome {
         let paths = match dw::str_list(args, "paths") {
@@ -227,17 +215,8 @@ impl WorkHandler {
             Some(serde_json::Value::Bool(b)) => *b,
             Some(_) => return outcome(false, "keep_changes 必须是布尔值".to_string()),
         };
-        if let Err(e) = check_readable(&self.permissions, &paths) {
+        if let Err(e) = check_readable(&self.scope, &paths) {
             return outcome(false, e);
-        }
-        if !self.permissions.may_write_private() {
-            return outcome(
-                false,
-                format!(
-                    "恢复被拒：当前档位「{}」不允许写入私有沙箱",
-                    self.permissions.profile.label()
-                ),
-            );
         }
         let req = ResetRequest {
             paths,
@@ -255,14 +234,14 @@ impl WorkHandler {
             Ok(p) => p,
             Err(e) => return outcome(false, e),
         };
-        if let Err(e) = check_readable(&self.permissions, &paths) {
+        if let Err(e) = check_readable(&self.scope, &paths) {
             return outcome(false, e);
         }
         match self.workspace.work_status(&self.work, &self.agent, &paths) {
             Ok(mut r) => {
                 // 路径清单也受读作用域约束：不能靠 work_status 看到读不到的路径名。
-                r.tree.retain(|p| self.permissions.read_ok(p));
-                r.entries.retain(|e| self.permissions.read_ok(&e.path));
+                r.tree.retain(|p| self.scope.read_ok(p));
+                r.entries.retain(|e| self.scope.read_ok(&e.path));
                 outcome(true, dw::render_status(&r))
             }
             Err(e) => outcome(false, e),
@@ -279,24 +258,15 @@ impl WorkHandler {
         };
         match op.as_str() {
             "list" => {
-                if !self.permissions.may_read_shared() {
-                    return outcome(
-                        false,
-                        format!(
-                            "读取被拒：当前档位「{}」没有共享区读取权限",
-                            self.permissions.profile.label()
-                        ),
-                    );
+                if !self.scope.may_read() {
+                    return outcome(false, "读取被拒：当前会话没有共享区读取权限".to_string());
                 }
             }
             "add" | "remove" => {
-                if !self.permissions.may_write(Reach::SharedWrite) {
+                if !self.scope.may_commit() {
                     return outcome(
                         false,
-                        format!(
-                            "改过滤规则被拒：当前档位「{}」没有共享区提交权限",
-                            self.permissions.profile.label()
-                        ),
+                        "改过滤规则被拒：当前会话没有共享区提交权限".to_string(),
                     );
                 }
             }
@@ -323,7 +293,7 @@ impl WorkHandler {
                 );
             }
         };
-        if let Err(e) = check_readable(&self.permissions, std::slice::from_ref(&path)) {
+        if let Err(e) = check_readable(&self.scope, std::slice::from_ref(&path)) {
             return outcome(false, e);
         }
         match self.workspace.work_versions(&self.work, &self.agent, &path) {
@@ -361,7 +331,7 @@ impl WorkHandler {
                 );
             }
         };
-        if let Err(e) = check_readable(&self.permissions, &paths) {
+        if let Err(e) = check_readable(&self.scope, &paths) {
             return outcome(false, e);
         }
         let req = ResolveRequest {
@@ -392,17 +362,8 @@ impl WorkHandler {
                     "恢复要带 expect_current（当前沙箱文件的 hash；文件不存在传空串）".to_string(),
                 );
             };
-            if let Err(e) = check_readable(&self.permissions, std::slice::from_ref(&path)) {
+            if let Err(e) = check_readable(&self.scope, std::slice::from_ref(&path)) {
                 return outcome(false, e);
-            }
-            if !self.permissions.may_write_private() {
-                return outcome(
-                    false,
-                    format!(
-                        "恢复被拒：当前档位「{}」不允许写入私有沙箱",
-                        self.permissions.profile.label()
-                    ),
-                );
             }
             return match self
                 .workspace
@@ -413,7 +374,7 @@ impl WorkHandler {
             };
         }
         if let Some(p) = &path
-            && let Err(e) = check_readable(&self.permissions, std::slice::from_ref(p))
+            && let Err(e) = check_readable(&self.scope, std::slice::from_ref(p))
         {
             return outcome(false, e);
         }
@@ -422,7 +383,7 @@ impl WorkHandler {
             .work_lost(&self.work, &self.agent, path.as_deref())
         {
             Ok(mut r) => {
-                r.entries.retain(|e| self.permissions.read_ok(&e.path));
+                r.entries.retain(|e| self.scope.read_ok(&e.path));
                 outcome(true, dw::render_lost(&r))
             }
             Err(e) => outcome(false, e),
@@ -460,7 +421,7 @@ pub fn work_handlers(
         Arc::clone(workspace),
         &sb.work_name,
         &sb.agent,
-        sb.permissions.clone(),
+        sb.scope.clone(),
     ))]
 }
 

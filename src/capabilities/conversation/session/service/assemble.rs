@@ -19,7 +19,6 @@ use crate::capabilities::conversation::session::domain::assemble::{
 };
 use crate::capabilities::conversation::session::domain::tools::MemberTools;
 use crate::capabilities::llm::api::{Channel, Llm, Msg, ToolMode};
-use crate::capabilities::permission::api::CallScope;
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::residents::api::ResidentOps;
 use crate::capabilities::tools::api::{ObservationFact, Observations, ToolExec, Tools, tool_notes};
@@ -163,7 +162,7 @@ pub struct ProxySpec<'a> {
 /// 目的：装配一席的工具环境：发放名单过滤 → 工作区工具执行者 → 模块工具表与已就绪服务 → 说明块 → 工具面。
 pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools {
     let sb = spec.sandbox;
-    // 角色表发放的系统工具 id 清单（工具面的名字部分），再按权限档位过滤。
+    // 角色表发放的系统工具 id 清单（工具面的名字部分），去掉总表里查不到的。
     let book = ports.systools.book();
     let allowed = face_tools(
         ports
@@ -172,13 +171,11 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
             .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
             .unwrap_or_default(),
         &book,
-        &sb.permissions,
     );
     let handlers =
         crate::capabilities::workspace::api::work_handlers(&ports.workspace, sb, &allowed);
     // 工具面：静态模块工具 + **已就绪**常驻服务的操作（操作是服务跑起来才发现的，按模块现填）。
-    let with_modules = ports.systools.allows_module_tools(spec.role)
-        && sb.permissions.may_exec(CallScope::Sandbox);
+    let with_modules = ports.systools.allows_module_tools(spec.role);
     let mut table = tool_table(spec.modules);
     // 服务清单是全局的：只把**这个 agent 工具面里**的模块服务写进提示词。
     let started = if with_modules {

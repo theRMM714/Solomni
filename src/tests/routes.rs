@@ -270,6 +270,7 @@ fn meta(name: &str) -> SessionMeta {
         agents: Vec::new(),
         exec: crate::kernel::api::types::ExecSpec::default(),
         sandbox: Default::default(),
+        shared: Default::default(),
         parent: None,
         node: None,
         delegation: None,
@@ -320,28 +321,16 @@ impl WorkOps for FakeFaces {
                 note: String::new(),
             },
             permission: crate::capabilities::work::api::PermissionView {
-                profile: crate::capabilities::permission::api::ProfileId::Workspace,
-                label: "工作区内修改".to_string(),
+                profile: crate::capabilities::permission::api::ProfileId::Offline,
+                label: "离线".to_string(),
                 summary: "测试".to_string(),
-                reach: crate::capabilities::permission::api::ProfileId::Workspace
-                    .spec()
-                    .reach
-                    .to_vec(),
-                decisions: crate::capabilities::work::api::PermissionDecisionsView {
-                    read: crate::capabilities::permission::api::Decision::Allow,
-                    write: crate::capabilities::permission::api::Decision::Allow,
-                    exec_sandbox: crate::capabilities::permission::api::Decision::Allow,
-                    exec_external: crate::capabilities::permission::api::Decision::Deny,
-                },
                 shared: crate::capabilities::work::api::PermissionSharedView {
-                    read: crate::capabilities::permission::api::ScopeMode::All,
-                    write: crate::capabilities::permission::api::ScopeMode::All,
+                    read: crate::capabilities::workspace::api::ScopeMode::All,
+                    write: crate::capabilities::workspace::api::ScopeMode::All,
                     deny: Vec::new(),
                 },
-                tools: BTreeMap::new(),
                 narrowed: false,
                 parent_profile: None,
-                warning: String::new(),
                 profiles: Vec::new(),
             },
             pins: BTreeMap::new(),
