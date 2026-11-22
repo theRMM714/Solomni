@@ -30,7 +30,8 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
-    CreateProcessW, GetExitCodeProcess, INFINITE, PROCESS_INFORMATION, STARTF_USESTDHANDLES,
+    CreateProcessW, GetExitCodeProcess, INFINITE, OpenProcess, PROCESS_INFORMATION,
+    PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW, STARTF_USESTDHANDLES,
     STARTUPINFOW, WaitForSingleObject,
 };
 
@@ -335,11 +336,47 @@ fn open_conn(
 }
 
 /// 目的：这个端口是不是**本产品自己**在听（转录中心、QEMU 的 QGA、SMB 助手都在内）：是就一律拒。
-/// 约束：判定靠「监听者的 pid 在本产品进程树里」，不靠端口表——端口会漂移，表会漏。
+/// 约束：判定靠「监听者的 pid 在本产品进程树里，或它跑的就是本产品这个可执行文件」，不靠端口表——端口会漂移，表会漏。
 fn served_by_product(port: u16, owner: u32) -> bool {
     listening_pids(port)
         .into_iter()
-        .any(|pid| in_process_tree(pid, owner))
+        .any(|pid| in_process_tree(pid, owner) || same_executable(pid))
+}
+
+/// 目的：`pid` 跑的是不是本产品这个可执行文件——盖住「用户另起了一个产品实例」：它不在本进程树里，控制面一样不该被摸到。
+/// 约束：读不到镜像路径（受保护或已退出）就当不是——判定失败只能更宽松，不能把用户自己的服务拒掉。
+fn same_executable(pid: u32) -> bool {
+    if pid == std::process::id() {
+        return true;
+    }
+    let Ok(mine) = std::env::current_exe() else {
+        return false;
+    };
+    let Some(theirs) = process_image(pid) else {
+        return false;
+    };
+    mine.to_string_lossy()
+        .eq_ignore_ascii_case(&theirs.to_string_lossy())
+}
+
+/// 目的：某个进程的镜像完整路径；读不到（权限不足 / 已退出）返回 `None`。
+fn process_image(pid: u32) -> Option<std::path::PathBuf> {
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return None;
+        }
+        let mut buf = [0u16; 1024];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(handle, 0, buf.as_mut_ptr(), &mut len);
+        CloseHandle(handle);
+        if ok == 0 || len == 0 {
+            return None;
+        }
+        Some(std::path::PathBuf::from(String::from_utf16_lossy(
+            &buf[..len as usize],
+        )))
+    }
 }
 
 /// 目的：本机（IPv4）**从回环可达**地监听这个端口的进程号；查不到就当作没人听。
@@ -601,6 +638,15 @@ mod tests {
         );
     }
 
+    /// 目的：盖住「用户另起了一个产品实例」——它不在本进程树里，但跑的是同一个可执行文件，控制面一样不该被摸到。
+    #[test]
+    fn the_product_executable_counts_as_the_product_wherever_it_runs() {
+        assert!(
+            same_executable(std::process::id()),
+            "本进程自己跑的就是产品这个可执行文件"
+        );
+    }
+
     /// 目的：**回归**——中继自己在容器里绑 127.0.0.2:<端口>，它与宿主 127.0.0.1:<端口>
     ///   在 TCP 表里同端口号；只按端口判就会把中继自己认成「产品在听」，每条合法连接都被拒。
     #[test]
@@ -618,6 +664,7 @@ mod tests {
             "中继自己那条 127.0.0.2 监听不能算成产品端口，否则合法连接全被拒"
         );
     }
+
     /// 目的：中继命令行里的端口清单只收合法端口；`0` 静默跳过（宿主侧还会再按清单校验一次）。
     #[test]
     fn the_port_list_takes_legal_ports_only() {
