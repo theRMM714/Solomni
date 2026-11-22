@@ -15,7 +15,7 @@ use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::AppSettings;
 use crate::capabilities::conversation::session::api::SessionMeta;
 use crate::capabilities::permission::api::PermissionSet;
-use crate::capabilities::workspace::api::{Sandbox, Sandboxes, WorkRoots};
+use crate::capabilities::workspace::api::{Sandbox, Sandboxes, WORKIGNORE, WorkRoots};
 use crate::kernel::api::fence::FenceSpec;
 use crate::kernel::api::types::Tier;
 use crate::kernel::ports::PathCodec;
@@ -126,6 +126,7 @@ pub fn sandboxes(
             modules_with_userdata,
             permissions: permissions(&a.name)?,
             path_codec: facts.codec.clone(),
+            filter_rules: facts.roots.store.join(WORKIGNORE),
         });
     }
     Ok(Sandboxes {

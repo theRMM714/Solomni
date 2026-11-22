@@ -258,7 +258,7 @@ fn user_actions_have_a_presentation_entry_or_are_exempt() {
         "patch",
         "delete",
         "list",
-        "search",
+        "grep",
         "node_verdict",
         "checklist",
         "verdict",

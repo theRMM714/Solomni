@@ -188,6 +188,42 @@ impl std::fmt::Display for WriteFault {
     }
 }
 
+/// 目的：遍历时的过滤开关——隐藏文件与忽略文件（.gitignore / .ignore / 工作区规则）各一个开关。
+///    约束：两个开关互相独立；关掉忽略不等于放行隐藏文件（与 rg 的 --no-ignore / --hidden 一致）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WalkOpts {
+    /// 目的：true = 连点号开头的文件/目录也遍历。
+    pub hidden: bool,
+    /// 目的：true = 按 .gitignore / .ignore / 工作区过滤规则剪枝。
+    pub ignore: bool,
+}
+
+/// 目的：遍历里认出的一**个文件**（目录只用于剪枝，不进清单）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WalkEntry {
+    /// 目的：相对遍历根的写法，一律 / 分隔（排序也按它）。
+    pub rel: String,
+    /// 目的：文件字节数（0 = 空文件或读不到大小）。
+    pub bytes: u64,
+}
+
+/// 目的：单文件流式扫描的结果：这个文件是不是二进制、共几行、有没有编码/长行损失。
+///    约束：二进制文件一行都不回调；长行被截到 MAX_SCAN_LINE_BYTES 后计进 long_lines。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ScanSummary {
+    /// 目的：前 8 KiB 里出现 NUL = 二进制，这次没有扫任何一行。
+    pub binary: bool,
+    /// 目的：扫到的行数（含末行没有换行符的情况）。
+    pub lines: u64,
+    /// 目的：存在非法 UTF-8 字节，交给回调的行是按替换字符呈现的近似内容。
+    pub lossy: bool,
+    /// 目的：超长行（被截到上限）的条数。
+    pub long_lines: u64,
+}
+
+/// 目的：扫描单行时最多读多少字节；超出的部分丢掉并计入 `long_lines`。
+pub const MAX_SCAN_LINE_BYTES: usize = 64 * 1024;
+
 /// 目的：内置文件工具的读写端口：机制在适配层，放行/寻址/越界在本能力。
 ///   读严格按 UTF-8 解码，非法字节如实标注；写一律 UTF-8；列目录只报名字/类型/大小。
 pub trait SysIo: Send + Sync {
@@ -231,4 +267,23 @@ pub trait SysIo: Send + Sync {
     fn is_dir(&self, path: &std::path::Path) -> Result<bool, String>;
     /// 删除一个文件 / 链接；`recursive=true` 时删除整棵目录（不跟随其内部的链接）。
     fn delete(&self, path: &std::path::Path, recursive: bool) -> Result<(), String>;
+    /// 目的：读一份小配置文本（不过哈希、不按读上限截断）：不存在 = Ok(None)。
+    /// 约束：只给 `.workignore` 这类工作区级配置用；正文读取仍走 `read` / `read_page`。
+    fn read_small(&self, path: &std::path::Path) -> Result<Option<String>, String>;
+    /// 目的：递归列出 `root` 下的**文件**（按相对路径排序），过滤交给 `opts` 与 `rules`。
+    /// 约束：不跟符号链接；`rules` 是工作区过滤规则全文（`.workignore` 语法），`opts.ignore` 为 false 时完全不用它；
+    ///   权限不在这里判（调用方逐项判，拿不到读权限就不扫）。
+    fn walk(
+        &self,
+        root: &std::path::Path,
+        rules: Option<&str>,
+        opts: WalkOpts,
+    ) -> Result<Vec<WalkEntry>, String>;
+    /// 目的：流式扫一份文本文件，逐行回调（行号从 1 数），不把整份读进内存。
+    /// 约束：回调返回后继续；二进制（前 8 KiB 含 NUL）直接回头 `binary=true`，不回调任何行。
+    fn scan_lines(
+        &self,
+        path: &std::path::Path,
+        each: &mut dyn FnMut(u32, &str),
+    ) -> Result<ScanSummary, String>;
 }

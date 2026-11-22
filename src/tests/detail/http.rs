@@ -546,7 +546,7 @@ fn http_chat_assembles_streaming_tool_calls_by_index() {
         "{}{}{}{}{}data: [DONE]\n\n",
         sse_tool(0, Some("call_a"), Some("read"), Some("{\"pa")),
         sse_tool(0, None, None, Some("th\":\"/x\"}")),
-        sse_tool(1, Some("call_b"), Some("search"), Some("{}")),
+        sse_tool(1, Some("call_b"), Some("grep"), Some("{}")),
         sse_finish("tool_calls"),
         "",
     );
@@ -574,7 +574,7 @@ fn http_chat_assembles_streaming_tool_calls_by_index() {
         out.calls[0].args_json, "{\"path\":\"/x\"}",
         "分片的 arguments 要按序拼起来"
     );
-    assert_eq!(out.calls[1].name, "search");
+    assert_eq!(out.calls[1].name, "grep");
     assert_eq!(out.calls[1].args_json, "{}");
 }
 

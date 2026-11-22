@@ -39,6 +39,8 @@ unic-langid = { version = "0.9", default-features = false }
 # regex 做模式匹配（用户要的是「像 rg 那样能写正则」，不是再写一层 glob 解释器）。
 ignore = "0.4"
 regex = "1"
+# glob 过滤（grep 的 glob 参数）：globset 就是 ignore 用的那套匹配器，直接复用同一份实现与语义。
+globset = "0.4"
 
 # 测试要压出 tar.xz 再解回来，压缩器只在测试构建里启用（生产二进制不带编码器）。
 [dev-dependencies]

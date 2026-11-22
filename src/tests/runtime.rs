@@ -897,7 +897,7 @@ pub(crate) fn tool_envelope_after_prose_runs_and_json_never_shows() {
     });
     const N: usize = 10; // 远大于任何合理上限：证明没有调用次数上限
     let mut script: Vec<String> = (0..N).map(|_| TOOL_CALL.to_string()).collect();
-    script.push("到此为止。{\"type\":\"tool\",\"name\":\"grep\",\"args\":{}}".to_string());
+    script.push("到此为止。{\"type\":\"tool\",\"name\":\"scan\",\"args\":{}}".to_string());
     // 脚本替身会**重复最后一条**：末条必须是"不再发起工具调用"的正文，否则就是死循环。
     script.push("收工。".to_string());
     let mut member = BTreeMap::new();
@@ -906,7 +906,7 @@ pub(crate) fn tool_envelope_after_prose_runs_and_json_never_shows() {
     mod_a
         .manifest
         .tools
-        .insert("grep".to_string(), decl("python tools/grep.py"));
+        .insert("scan".to_string(), decl("python tools/scan.py"));
     let mut core = core_with_runner(
         vec![mod_a],
         gw(member, vec!["[]".into()]),

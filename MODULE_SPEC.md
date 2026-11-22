@@ -63,7 +63,7 @@ modules/<模块 id>/
 - `command` 必填，空 = 拒收；命令里的路径统一写 `/`（跨平台）。
 - 首个 token 决定入口形态：相对路径（含 `/` 或 `\`，如 `build/indexer`、`./tools/run.sh`）= 模块内的产物，模块目录下必须存在且能直接执行（unix 要求可执行位）——不在场时建会话就拒绝，并指到模块自己的 README。
 - 裸名（`python` / `node` / `indexer`）走 PATH 与 `runtimes` 能力；绝对路径不由模块目录判。
-- 占用内置保留名（`read` / `write` / `edit` / `patch` / `delete` / `list` / `search` / `submit_report`）= 拒收；内置工具属核心，调用不写 `module`。
+- 占用内置保留名（`read` / `write` / `edit` / `patch` / `delete` / `list` / `grep` / `submit_report`）= 拒收；内置工具属核心，调用不写 `module`。
 - 工具身份是（模块 id, 工具名）这一对：不同模块可以声明同名工具，调用时写明 `module` 就各归各模块。
 - 省略 `module` 时，只有该 agent 恰好一个模块才替它定，否则如实报错并列出可用的 `模块.工具`。
 - 模块不发言，agent 发言：模块被装进哪个 agent，就以那个 agent 的名义说话；一个 agent 装多个模块时，它的工具说明 = 这些 `system` 的合成，能力摘要 = 这些 `brief` 的一行。
@@ -73,7 +73,7 @@ modules/<模块 id>/
 - 放行：核心只执行本模块 `tools` 里声明过的工具；表外一律拒绝并把可用清单发回（清单与调用面见 `docs/tools/tools-and-roles.md`）。
 - 参数：声明了 `params` 就按它校验；不符时不启动进程，回执说清哪个参数不合，并把该工具的签名原样发回。
 - 回注：stdout/stderr（截断后）作为 `[工具结果]` 消息发回 agent，继续生成直到最终答复；单轮里的工具调用没有次数上限。
-- 阶段：执行阶段与单 agent 会话里都能用；讨论阶段只发只读核实工具（`read` / `list` / `search`），不给模块工具。
+- 阶段：执行阶段与单 agent 会话里都能用；讨论阶段只发只读核实工具（`read` / `list` / `grep`），不给模块工具。
 - 独立入口：声明的 `tools`（与 `services`）就是模块不经 agent 可直接跑的入口——CLI `module <模块 id>.<工具名> [json]`、`resident …` 与 Web 的「模块与服务」面板走同一份动作目录；工具同时是动作表里的一条动作（id = `module.<模块 id>.<工具名>`）。
 - 直接调用仍按本模块 `params` 校验；可选 `workspace` 给一份工作目录（缺省 = 模块自己的 `userdata/`），围栏与 agent 会话同一口径。
 - 只写 `system`、不声明任何入口的模块在列表里如实标注「只能经 agent 使用」；没有额外的独立入口声明节——声明了哪个工具，就是能直跑哪个（动作表见 `docs/tools/tools-and-roles.md`）。

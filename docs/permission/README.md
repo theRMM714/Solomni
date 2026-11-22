@@ -32,7 +32,7 @@
   - host-read：用户显式授权的主机只读根；
   - network：出站网络。
 - **Effect（这次操作属于哪类）**
-  - read：read / list / search / work_pull / work_status / work_versions；
+  - read：read / list / grep / work_pull / work_status / work_versions；
   - write：write / edit / patch / delete / work_commit / work_push / work_resolve / work_lost 的恢复；
   - exec：模块工具 / shell；
   - none：不碰文件、不需要权限闸门的动作。

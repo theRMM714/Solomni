@@ -25,7 +25,7 @@ pub(crate) fn roster() -> Vec<String> {
 }
 
 pub(crate) const TOOL_CALL: &str =
-    "{\"type\":\"tool\",\"name\":\"grep\",\"args\":{\"keyword\":\"x\"}}";
+    "{\"type\":\"tool\",\"name\":\"scan\",\"args\":{\"keyword\":\"x\"}}";
 
 /// 目的：带工具环境的测试席位：生产里工具面归会话（`AgentSession`），测试里跟成员放在一起，便于逐席改 face、通道与执行服务。
 pub(crate) struct WithTools {
@@ -33,14 +33,14 @@ pub(crate) struct WithTools {
     pub tools: Option<MemberTools>,
 }
 
-/// 目的：带工具环境的成员：模块 m0 声明 grep → python tools/grep.py（cwd = 该模块目录）。
+/// 目的：带工具环境的成员：模块 m0 声明 scan → python tools/scan.py（cwd = 该模块目录）。
 pub(crate) fn member_with_tools(
     id: &str,
     script: Vec<String>,
     runner: Arc<impl ProcessRunner + 'static>,
 ) -> WithTools {
     let mut commands = BTreeMap::new();
-    commands.insert("grep".to_string(), "python tools/grep.py".to_string());
+    commands.insert("scan".to_string(), "python tools/scan.py".to_string());
     let mut modules = BTreeMap::new();
     modules.insert(
         "m0".to_string(),
@@ -58,7 +58,7 @@ pub(crate) fn member_with_tools(
         crate::capabilities::llm::api::ToolMode::Envelope,
         scripted(script),
     );
-    // 该路径走模块声明的外部命令（grep）：空沙箱 + 内存 IO，内置工具不参与。
+    // 该路径走模块声明的外部命令（scan）：空沙箱 + 内存 IO，内置工具不参与。
     WithTools {
         member: m,
         tools: Some(MemberTools {

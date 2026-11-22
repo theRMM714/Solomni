@@ -89,24 +89,45 @@ tools:
         type: string
         required: true
         desc: 要列出的目录
-  search:
+  grep:
     capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
-    desc: 在文本文件里查关键词，返回带行号的命中行。
+    desc: 在文件或目录里按正则（或字面）找行，返回「路径:行号:正文」；目录递归，按 .gitignore / .workignore 与隐藏文件、二进制剪枝。
     parallel: true                    # 只读、无副作用
     params:
       path:
         type: string
         required: true
-        desc: 要搜索的路径
-      keyword:
+        desc: 文件或目录（目录递归）
+      pattern:
         type: string
         required: true
         non_empty: true
-        desc: 要查找的文本
+        desc: 要匹配的模式：默认按 Rust 正则；fixed=true 时按字面
+      glob:
+        type: array
+        desc: 只搜文件名或相对路径命中这些 glob 的文件（如 ["*.rs","src/**"]）；省略 = 不过滤
       ignore_case:
         type: boolean
         desc: 是否忽略大小写；省略即区分大小写
+      fixed:
+        type: boolean
+        desc: pattern 按字面匹配而不是正则
+      context:
+        type: integer
+        desc: 每条命中前后各带几行上下文（0-10，省略 0）
+      max:
+        type: integer
+        desc: 最多回多少条命中（1-500，省略 200；到上限就不再往后扫）
+      files_only:
+        type: boolean
+        desc: 只回命中的文件与命中行数，不回正文
+      hidden:
+        type: boolean
+        desc: 连点号开头的隐藏文件/目录一起搜
+      no_ignore:
+        type: boolean
+        desc: 关掉 .gitignore / .workignore 与噪音目录过滤（隐藏文件仍由 hidden 控制）
 
   # —— 执行类系统工具：一次性 shell ——
   shell:

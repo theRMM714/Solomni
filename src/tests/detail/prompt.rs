@@ -56,7 +56,7 @@ fn role_face_comes_from_the_role_table() {
     assert!(st.tool_face("不存在的角色").is_err(), "未知角色要如实报错");
     // 单 agent 工作（solo）与任务链执行席（executor）差在**回报工具**：回报只有节点子会话有消费者。
     let solo = ids("solo");
-    for tool in ["read", "list", "write", "edit", "patch", "search"] {
+    for tool in ["read", "list", "write", "edit", "patch", "grep"] {
         assert!(
             solo.iter().any(|t| t == tool),
             "solo 该能用 {}：{:?}",

@@ -16,7 +16,7 @@ use crate::capabilities::conversation::session::api::{
 use crate::capabilities::llm::api::{Channel, Msg};
 use crate::capabilities::turn::turn::api::Session;
 use crate::capabilities::turn::turn::service::session::Turn;
-use crate::capabilities::workspace::api::Sandbox;
+use crate::capabilities::workspace::api::{Sandbox, WORKIGNORE};
 use crate::kernel::ports::HostProbe;
 
 /// 目的：代理会话的私有沙箱目录名（只有这一处）。
@@ -535,6 +535,7 @@ impl Turn {
             // 代理发言席自己住在宿主上（文件工具也跑在宿主），不需要 guest 翻译；
             // 但视图盘打开时仍要同一个视图写法，否则环境块渲染视图路径、寻址却按宿主根判越界。
             path_codec: crate::kernel::api::view_drive::view_codec(),
+            filter_rules: roots.store.join(WORKIGNORE),
         };
         let tool_mode = registry.tool_mode(None);
         // 身份是**角色提示词**（core_proxy），不是某个 agent 的模块能力包：

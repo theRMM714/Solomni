@@ -1,4 +1,4 @@
-//! 目的：核心自带内置工具（read / write / edit / patch / delete / list / search）的纯规则——参数校验、取缺省值、拼回执、观察账本。
+//! 目的：核心自带内置工具（read / write / edit / patch / delete / list / grep）的纯规则——参数校验、取缺省值、拼回执、观察账本。
 //! 管：按 `systools/tools.yaml` 的声明校验参数、取缺省值与拼回执；**参数契约不在本文件里**（声明在工具表，本文件只按声明行事）。
 //! 不管：执行策略（名字固定、放行、寻址、根内校验、改动前的"读过"证据）在 runtime；读写机制在 `SysIo` 端口（适配层）。
 //! 联动：由 `service/systool.rs` 调用；路径一律真实绝对路径（根目录经提示词册如实告知），模块声明的外部工具与内置工具同一套路径。
@@ -18,7 +18,7 @@ pub const EDIT: &str = "edit";
 pub const PATCH: &str = "patch";
 pub const DELETE: &str = "delete";
 pub const LIST: &str = "list";
-pub const SEARCH: &str = "search";
+pub const GREP: &str = "grep";
 /// 目的：执行类系统工具——一次性 shell（机制在 kernel 的 ProcessRunner / guest，不在 SysIo）。
 pub const SHELL: &str = "shell";
 
@@ -32,10 +32,20 @@ pub const MAX_READ_LINE_CHARS: usize = 2_000;
 /// 目的：单次 read 最多返回的行数；也是 `limit` 的缺省值与上限（与 systools/tools.yaml 一致）。
 /// 约束：机制层按这个窗口取行，但会扫完整份文件统计行数与版本——>1MB 的文件也能直接读后半段。
 pub const MAX_READ_LINES: usize = 2_000;
-/// 目的：单次 search 回传的命中行数上限（超出如实截断；命中总数照实报）。
-pub const MAX_SEARCH_HITS: usize = 200;
+/// 目的：单次 grep 回传的命中行数上限（`max` 的缺省值；到上限就停止扫描并如实报）。
+pub const MAX_GREP_HITS: usize = 200;
+/// 目的：`max` 参数的上限（再多就该缩小 path / glob，而不是往上下文里灌内容）。
+pub const MAX_GREP_MAX: usize = 500;
 /// 目的：单条命中行回传的字符上限（长行截断，避免一行吃掉整个上下文）。
-pub const MAX_SEARCH_LINE_CHARS: usize = 300;
+pub const MAX_GREP_LINE_CHARS: usize = 300;
+/// 目的：单个文件最多报多少条命中（其余只计数，提示缩小 pattern 或单独搜这个文件）。
+pub const MAX_GREP_PER_FILE: usize = 50;
+/// 目的：`context` 参数的上限（前后各最多几行）。
+pub const MAX_GREP_CONTEXT: usize = 10;
+/// 目的：一次目录递归最多扫多少个文件（再多就如实提示缩小范围）。
+pub const MAX_GREP_FILES: usize = 5_000;
+/// 目的：grep 回执正文的字符上限（`max` 条 × 单行上限之后仍要落在结果预算内）。
+pub const MAX_GREP_CHARS: usize = crate::capabilities::tools::domain::budget::MAX_RESULT_CHARS - 2_000;
 
 /// 目的：执行席的**回报**工具：不碰文件，只把"做完了什么"承载成一次工具调用。
 ///    为什么是工具而不是正文 JSON：回报会驱动核心（判节点完成），属于核心操作（见 tools-and-roles.md）。
@@ -50,7 +60,7 @@ pub fn is_builtin(name: &str) -> bool {
         || name == PATCH
         || name == DELETE
         || name == LIST
-        || name == SEARCH
+        || name == GREP
         || name == REPORT
 }
 
@@ -68,7 +78,7 @@ pub fn names() -> Vec<String> {
         PATCH.to_string(),
         DELETE.to_string(),
         LIST.to_string(),
-        SEARCH.to_string(),
+        GREP.to_string(),
         REPORT.to_string(),
         SHELL.to_string(),
     ]

@@ -67,7 +67,7 @@ pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
         d::MESSAGES,
         "read",
         "list",
-        "search",
+        "grep",
     ] {
         assert!(face.iter().any(|t| t == name), "core_proxy 该能用 {}", name);
     }

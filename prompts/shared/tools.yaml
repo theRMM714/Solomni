@@ -113,7 +113,7 @@ tool_calling_envelope: |-
   工具调用约定：需要用工具时，只输出一个 JSON 信封（不要包裹其它文字）：
   {"type":"tool","module":"模块id","name":"工具名","args":{...参数对象...}}
   外部工具要带上它所属的模块 id（见上面清单每行开头）；核心自己实现的系统工具
-  （read / write / edit / patch / delete / list / search / work_pull / work_commit / work_push / work_status / work_versions / work_diff / work_resolve / work_reset / work_lost 等）不用写 module。
+  （read / write / edit / patch / delete / list / grep / work_pull / work_commit / work_push / work_status / work_ignore / work_versions / work_diff / work_resolve / work_reset / work_lost 等）不用写 module。
   要一次发**多个**调用（互不依赖的那些），就把它们写进同一个信封的 calls 数组——核心按工具声明的并发性一起跑，
   结果按你写的顺序发回：
   {"type":"tool","calls":[{"name":"read","args":{...参数对象...}},{"module":"模块id","name":"工具名","args":{...参数对象...}}]}

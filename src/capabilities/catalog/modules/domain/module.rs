@@ -94,7 +94,7 @@ pub struct ModuleManifest {
     #[serde(default)]
     pub runtimes: Vec<String>,
     /// 目的：外部工具表：工具名 → 该工具的声明（启动命令 + 可选的参数契约）。
-    ///   内置工具名（read / write / search）为保留名，模块不得占用（见 check_tools）。
+    ///   内置工具名（read / write / grep）为保留名，模块不得占用（见 check_tools）。
     #[serde(default)]
     pub tools: BTreeMap<String, ToolDecl>,
     /// 目的：常驻服务表：服务名 → 该服务的声明（用哪个适配器 + 启动命令 + 是否默认启用）。

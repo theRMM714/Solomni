@@ -532,11 +532,11 @@ pub(crate) fn builtin_arg_mistakes_are_named_and_the_signature_comes_back() {
         missing.output
     );
     let empty = run(
-        "search",
-        &format!("{{\"path\":\"{}\",\"keyword\":\"\"}}", note),
+        "grep",
+        &format!("{{\"path\":\"{}\",\"pattern\":\"\"}}", note),
     );
     assert!(
-        !empty.ok && empty.output.contains("参数 keyword 不能是空字符串"),
+        !empty.ok && empty.output.contains("参数 pattern 不能是空字符串"),
         "{}",
         empty.output
     );

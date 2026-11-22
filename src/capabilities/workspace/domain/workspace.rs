@@ -62,6 +62,9 @@ pub struct Sandbox {
     /// 目的：这场会话的路径翻译器（虚拟机档 guest ↔ 宿主；本机档 None = 恒等）。
     /// 约束：只用来把模型给的写法译成宿主路径**再校验**；安全判断仍然只有 `resolve` 一处。
     pub path_codec: Option<std::sync::Arc<dyn crate::kernel::ports::PathCodec>>,
+    /// 目的：过滤规则文件（版本库目录里的 `.workignore`）：检索面（grep）与内容面（哪些文件算工作区内容）共用这一份。
+    /// 约束：只读这份规则；文件不存在时调用方按种子名单兜底，不在这里建目录。
+    pub filter_rules: PathBuf,
 }
 
 impl Sandbox {

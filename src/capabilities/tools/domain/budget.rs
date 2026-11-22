@@ -88,7 +88,7 @@ impl ResultBudget {
 pub enum Continuation {
     /// 目的：执行类（shell 与模块工具）——stdout 不是文件，read 的 offset/limit 接不上。
     Command,
-    /// 目的：文件类（read / search / list 等）——真的能按 offset/limit 接着读。
+    /// 目的：文件类（read / grep / list 等）——真的能按 offset/limit 接着读。
     Read,
 }
 

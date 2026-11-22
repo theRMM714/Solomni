@@ -23,7 +23,7 @@
 | `src/capabilities/workspace/service/facade.rs` | `Workspace` 的唯一 trait 实现：七个基础用例直接委托 `Workdirs`，其余方法逐条转发到同级子模块（Rust 不允许 trait impl 分块） |
 | `src/capabilities/workspace/ports.rs` | 出站端口：`Workdirs`（目录布局）与 `WorkStore`（流式资产原语 + 按 `.workignore` 剪枝的清单 `list_visible` + 版本库小文本读 `read_text` / 写 `write_text` + 跨根复制 + 内容寻址对象 + 提交记录 + 拉取基线 + 待恢复事务 + 提交号 + 跨进程锁 + 对象枚举 / 删除） |
 | `src/capabilities/workspace/service/work_tools.rs` | 成员侧工作工具执行者：`WorkHandler` 认领 `work_pull` / `work_commit` / `work_push` / `work_sync` / `work_status` / `work_ignore` / `work_versions` / `work_diff` / `work_resolve` / `work_reset` / `work_lost`，参数解析与路径权限在这里收口；`work_handlers` 按角色面发放的 `allowed` 现取执行者 |
-| `src/capabilities/workspace/domain/workspace.rs` | 工作区与沙箱的纯数据与寻址（含越界判定） |
+| `src/capabilities/workspace/domain/workspace.rs` | 工作区与沙箱的纯数据与寻址（含越界判定）；`Sandbox.filter_rules` 指向版本库目录里的 `.workignore`——检索面（grep）与内容面共用这一份规则文件 |
 | `src/capabilities/workspace/domain/asset.rs` | 通用资产纯逻辑：分块扫描（指纹 / 大小 / NUL 与 UTF-8 判定 / 受限预览）、`FileVersion`、扩展名媒体类型提示与单文件上限 |
 | `src/capabilities/workspace/domain/freshness.rs` | 读取判决纯逻辑：读过的行在新版本里是否原样还在（按内容找连续行窗口，不看行号与时间），结论分 `SameVersion` / `Shifted` / `Changed` 三态 |
 | `src/capabilities/workspace/domain/hash.rs` | 内容指纹 SHA-256：增量实现，共享区内容寻址的唯一键（纯逻辑） |
@@ -40,4 +40,5 @@
 | `src/capabilities/workspace/domain/workstore/reset.rs` | 回退请求与报告形态：`ResetRequest` / `ResetReport` |
 | `src/capabilities/workspace/domain/workstore/tests.rs` | workstore 纯逻辑单测：路径清理、提交规则、拉取不覆盖本地、解决判定、丢失与备份 |
 | `src/capabilities/workspace/detail/fs_workspace.rs` | `Workdirs` 的落盘实现：`session/<工作名>/` 下的 `work/` 与各 agent 沙箱；准备会话时在版本库目录播种 `.workignore`（已存在不覆盖）；外部工作区绑定投影 `.work-root` 与共享区根解析；跨会话写锁按落点身份做键；用量统计带 2 秒内存缓存且不跟随目录链接 |
-| `src/capabilities/workspace/detail/fs_workstore.rs` | `WorkStore` 的落盘实现：流式扫描 / 写入 / 复制（含跨根备份复制）、按规则剪枝的目录列举、原子写、跨进程锁、版本库对象与对象枚举 / 删除、提交记录、基线、待恢复事务与提交号计数器；目录刷新经 `fs_meta::sync_dir` |
+| `src/capabilities/workspace/detail/walk.rs` | 工作区目录遍历的唯一实现：递归列文件、逐层按名字排序、给了 `.workignore` 规则就整棵剪掉被忽略的子树、按条数上限截断；`fs_workspace` 的清单与 `fs_workstore` 的 `list` / `list_visible` 共用 |
+| `src/capabilities/workspace/detail/fs_workstore.rs` | `WorkStore` 的落盘实现：流式扫描 / 写入 / 复制（含跨根备份复制）、按规则剪枝的目录列举、版本库小文本读 `read_text` / 原子写 `write_text`、跨进程锁、版本库对象与对象枚举 / 删除、提交记录、基线、待恢复事务与提交号计数器；目录刷新经 `fs_meta::sync_dir` |

@@ -22,6 +22,9 @@ cases:
   - id: cargo/tests::tools::gate
     tier: T1
     note: 先读后改门禁（覆盖 / 过期 / 截断行）
+  - id: cargo/tests::tools::grep
+    tier: T1
+    note: 遍历剪枝与模式匹配（.workignore / 隐藏 / 二进制 / glob / 上下文）
   - id: cargo/tests::tools::patch
     tier: T1
     note: 补丁工具
