@@ -24,6 +24,7 @@ mod commit;
 mod diff;
 mod facade;
 mod history;
+mod ignore;
 mod lifecycle;
 mod reset;
 mod resolve;
@@ -115,6 +116,39 @@ impl WorkspaceService {
             .store
             .read_text(&store.join(path_filter::WORKIGNORE))?
             .unwrap_or_else(|| path_filter::WORKIGNORE_SEED.to_string()))
+    }
+
+    /// 目的：一个沙箱里「算工作区内容」的文件清单（与导入用同一份 `.workignore` 剪枝）。
+    /// 约束：规则只管发现；调用方点名的路径仍可单独读写。
+    fn sandbox_files(&self, store: &Path, sandbox: &Path) -> Result<Vec<String>, String> {
+        let rules = self.work_rules(store)?;
+        self.store.list_visible(sandbox, Some(&rules))
+    }
+
+    /// 目的：把这次要落的路径展开成文件集合：可见清单说了算，但**显式点名的单个文件**照样算。
+    /// 约束：规则只管发现——被 `.workignore` 盖住的文件，点名了仍然生效（同 git add -f）；
+    ///   点名一个被盖住的文件夹不展开（与 git add 目录一致，文件夹属于发现）。
+    fn expand_forced(
+        &self,
+        sandbox: &Path,
+        visible: &BTreeSet<String>,
+        paths: &[String],
+    ) -> Result<(Vec<String>, Vec<String>), String> {
+        let mut files = visible.clone();
+        let named_but_hidden = paths.iter().any(|raw| {
+            let rel = raw.trim_matches('/');
+            !files.contains(rel) && !files.iter().any(|p| p.starts_with(&format!("{}/", rel)))
+        });
+        if named_but_hidden {
+            let all = self.store.list(sandbox)?;
+            for raw in paths {
+                let rel = raw.trim_matches('/');
+                if !files.contains(rel) && all.iter().any(|p| p == rel) {
+                    files.insert(rel.to_string());
+                }
+            }
+        }
+        Ok(expand_paths(paths, &files))
     }
 
     /// 目的：工作区磁盘上一条相对路径的实际内容指纹（不存在 = None）。

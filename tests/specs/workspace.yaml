@@ -30,6 +30,9 @@ cases:
   - id: cargo/tests::workspace::gate
     tier: T1
     note: 先读后改门禁（审计与批量）
+  - id: cargo/tests::workspace::ignore
+    tier: T1
+    note: 过滤名单的读改写（work_ignore）与「规则只管发现」
   - id: cargo/tests::workspace::resolve
     tier: T1
     note: 路径解析与虚拟根

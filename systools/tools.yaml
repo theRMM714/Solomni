@@ -522,6 +522,27 @@ tools:
       paths:
         type: array
         desc: 只看这些路径（相对共享区、/ 分隔）；省略 = 你已拉取过的全部路径 + 沙箱未跟踪清单
+  work_ignore:
+    capability: none              # 由 workspace 能力执行；只改版本库目录里的 .workignore，不碰 .gitignore
+    effect: write
+    reach: [shared-read, shared-write]
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    desc: |
+      读写本次工作的**过滤名单** \`.workignore\`（放在版本库目录里，不进共享区，也不会被提交）：
+      grep 与「哪些文件算工作区内容」（首次导入、work_status 的未跟踪清单、work_commit 的文件夹展开）共用这一份。
+      op=list 回整份规则（注释原样，看它再决定改什么）；op=add 追加规则（已在名单里的不重复加）；op=remove 精确删掉某条规则。
+      语法同 .gitignore：一行一条，# 开头是注释，! 取反，结尾 / 只匹配目录，开头 / 只在工作区根上匹配。
+      规则只管**发现**：显式点名单个文件时不受它限制（同 git add -f），已跟踪的文件不会因为新规则消失。
+      默认名单已含 .git 等版本库目录、node_modules、target、__pycache__、.venv、venv；
+      要连隐藏文件一起看或临时关掉忽略，用 grep 的 hidden / no_ignore，而不是删规则。
+    params:
+      op:
+        type: string
+        default: list
+        desc: list（看当前规则）/ add（追加规则）/ remove（删掉某条规则）
+      patterns:
+        type: array
+        desc: 要追加或删掉的规则行（op=add / remove 时必填；一行一条，语法同 .gitignore）
   work_sync:
     capability: none              # 由 workspace 能力执行；把工作区磁盘现状采纳成外部提交
     effect: write

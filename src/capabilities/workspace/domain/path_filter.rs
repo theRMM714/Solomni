@@ -64,3 +64,48 @@ impl Rules {
         }
     }
 }
+
+/// 目的：一条规则最长的字符数（名单是给人看的小文件，不塞大段 glob）。
+pub const MAX_RULE_CHARS: usize = 512;
+
+/// 目的：名单最多的行数（规则是「哪些路径不算内容」的短名单，不替代 .gitignore）。
+pub const MAX_RULE_LINES: usize = 200;
+
+/// 目的：名单文件最多的字节数。
+pub const MAX_RULE_BYTES: usize = 8 * 1024;
+
+/// 目的：校验一条规则行能不能进 `.workignore`（语法之外的越界检查）。
+/// 约束：规则只表达**工作区里的相对路径**——拒绝绝对路径、`..` 段、NUL 与会忽略全部文件的模式；
+///   语法本身由 `Rules::compile` 判。纯判定（只读一行），便于 T1 直接钉边界。
+pub fn check_rule(line: &str) -> Result<(), String> {
+    let t = line.trim();
+    if t.is_empty() {
+        return Err("过滤规则不能是空行".to_string());
+    }
+    if t.chars().count() > MAX_RULE_CHARS {
+        return Err(format!(
+            "过滤规则太长（上限 {} 个字符）：{}",
+            MAX_RULE_CHARS, t
+        ));
+    }
+    if t.contains('\0') {
+        return Err("过滤规则不能含 NUL 字符".to_string());
+    }
+    let body = t.strip_prefix('!').unwrap_or(t);
+    let mut chars = body.chars();
+    let drive = matches!((chars.next(), chars.next()), (Some(c), Some(':')) if c.is_ascii_alphabetic());
+    if drive || body.starts_with("\\") || body.starts_with("//") {
+        return Err(format!(
+            "过滤规则只认工作区内的相对路径，不能是绝对路径：{}",
+            t
+        ));
+    }
+    if body.split(['/', '\\']).any(|seg| seg == "..") {
+        return Err(format!("过滤规则不能跳出工作区（含 ..）：{}", t));
+    }
+    if matches!(t, "*" | "**" | "/*" | "/**") {
+        return Err(format!("这条规则会忽略全部文件，不能这么写：{}", t));
+    }
+    Ok(())
+}
+

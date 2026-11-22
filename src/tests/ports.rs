@@ -404,6 +404,16 @@ fn work_store_double_lists_visible_files_and_reads_small_text() {
     s.write_under(&abs(&["w", ".work"]), ".workignore", b"target\n")
         .unwrap();
     assert_eq!(s.read_text(&rules).unwrap().as_deref(), Some("target\n"));
+    // write_text 覆盖整份小文本，父目录不存在也能写（规则文件的唯一写入口）。
+    s.write_text(&rules, "target\nvenv\n").unwrap();
+    assert_eq!(
+        s.read_text(&rules).unwrap().as_deref(),
+        Some("target\nvenv\n"),
+        "整份覆盖，不追加"
+    );
+    let nested = abs(&["w2", ".work", "nested", ".workignore"]);
+    s.write_text(&nested, "x\n").unwrap();
+    assert_eq!(s.read_text(&nested).unwrap().as_deref(), Some("x\n"));
 }
 
 // ---------- SysIo ----------

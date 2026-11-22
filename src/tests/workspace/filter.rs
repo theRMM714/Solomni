@@ -3,7 +3,7 @@
 //! 不管：目录遍历与剪枝（见 `tests::detail::fs` 的 `list_visible` 用例）；`.gitignore`（只在 grep 的检索面生效）。
 //! 联动：`src/capabilities/workspace/domain/path_filter.rs`；工具面由 `work_ignore` 维护同一份文件。
 
-use crate::capabilities::workspace::api::{Rules, WORKIGNORE_SEED};
+use crate::capabilities::workspace::api::{MAX_RULE_CHARS, Rules, WORKIGNORE_SEED, check_rule};
 use std::path::Path;
 
 fn rules(text: &str) -> Rules {
@@ -62,6 +62,39 @@ fn rules_treat_empty_text_as_no_filter_and_report_bad_lines() {
     assert!(
         err.contains("第 2 行") && err.contains("[z-a]"),
         "错误要点名行号与行内容：{err}"
+    );
+}
+
+/// 目的：写规则前的越界检查——只认工作区内的相对路径，且不接受会忽略全部文件的模式。
+/// 约束：普通 gitignore 写法（目录名、锚定、取反、结尾 /）都要放行，检查只管越界。
+#[test]
+fn check_rule_rejects_escaping_paths_and_catch_all_patterns() {
+    for good in ["node_modules", "*.log", "/build", "!keep.txt", "a/b/c", "**/tmp"] {
+        assert!(
+            check_rule(good).is_ok(),
+            "正常规则要放行：{good}"
+        );
+    }
+    let bad = [
+        ("", "空行"),
+        ("C:/tmp/x", "绝对路径"),
+        ("\\\\server\\share", "绝对路径"),
+        ("../up", ".."),
+        ("a/../../b", ".."),
+        ("*", "忽略全部文件"),
+        ("**", "忽略全部文件"),
+        ("/*", "忽略全部文件"),
+    ];
+    for (rule, want) in bad {
+        let err = check_rule(rule).unwrap_err();
+        assert!(err.contains(want), "规则 {rule:?} 的错误要点名「{want}」：{err}");
+    }
+    let long = "a".repeat(MAX_RULE_CHARS + 1);
+    let err = check_rule(&long).unwrap_err();
+    assert!(err.contains("太长"), "{err}");
+    assert!(
+        check_rule("a\0b").is_err(),
+        "NUL 字符要拒绝"
     );
 }
 

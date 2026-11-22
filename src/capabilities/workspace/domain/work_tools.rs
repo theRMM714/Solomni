@@ -1,6 +1,6 @@
 //! 目的：共享区版本化工作区的核心自有工具（`work_pull` / `work_commit` / `work_push` / `work_status` /
-//!   `work_versions` / `work_diff` / `work_reset` / `work_resolve` / `work_lost` / `work_sync`）的纯逻辑——
-//!   工具名、入参解析与回执拼装。
+//!   `work_versions` / `work_diff` / `work_reset` / `work_resolve` / `work_lost` / `work_sync` /
+//!   `work_ignore`）的纯逻辑——工具名、入参解析与回执拼装。
 //! 管：工具名常量与 `is_work_tool`、取参（`str_list` / `str_arg`）、各工具回执的拼装。
 //! 不管：真正的拉取 / 提交 / 状态 / 三方视图 / 解决 / 备份恢复（走 `workspace::api::Workspace`）；
 //!   冲突、状态与备份判定（在 `workspace`）。
@@ -32,13 +32,22 @@ pub const RESOLVE: &str = "work_resolve";
 pub const LOST: &str = "work_lost";
 /// 目的：把沙箱里的改动并入主副本（`work_sync`）。
 pub const SYNC: &str = "work_sync";
+/// 目的：读写本工作的过滤名单 `.workignore`（`work_ignore`）。
+pub const IGNORE: &str = "work_ignore";
 
 /// 目的：判定这个名字是不是共享区版本化的工具面（角色表 executor / solo 引用它们）。
 pub fn is_work_tool(name: &str) -> bool {
     matches!(
         name,
-        PULL | COMMIT | PUSH | STATUS | VERSIONS | DIFF | RESET | RESOLVE | LOST | SYNC
+        PULL | COMMIT | PUSH | STATUS | VERSIONS | DIFF | RESET | RESOLVE | LOST | SYNC | IGNORE
     )
+}
+
+/// 目的：一次 `.workignore` 读写的回执内容：改后的规则全文按行（注释与空行原样保留）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IgnoreReport {
+    /// 目的：规则全文的行（`.workignore` 的原样内容，便于模型直接看清整份名单）。
+    pub rules: Vec<String>,
 }
 
 /// 回执里最多逐个列出的路径数（超出只说数量，不把整棵共享区灌进上下文）。
@@ -360,6 +369,23 @@ pub fn render_sync(r: &SyncReport) -> String {
         ));
     }
     out.push_str("\n各 agent 的沙箱没动；需要这些内容就再 work_pull。");
+    out
+}
+
+/// 目的：把 work_ignore 的结果说成人能读的几行。
+/// 返回：这份名单同时管哪些事、整份规则原文。
+pub fn render_ignore(r: &IgnoreReport) -> String {
+    let mut out = String::from(
+        "工作区过滤规则（.workignore：grep 与「哪些文件算工作区内容」共用这一份；语法同 .gitignore）：",
+    );
+    if r.rules.iter().all(|l| l.trim().is_empty()) {
+        out.push_str("\n（空——不忽略任何文件）");
+        return out;
+    }
+    for line in &r.rules {
+        out.push('\n');
+        out.push_str(line);
+    }
     out
 }
 

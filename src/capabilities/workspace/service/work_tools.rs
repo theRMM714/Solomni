@@ -269,6 +269,50 @@ impl WorkHandler {
         }
     }
 
+    /// 目的：读 / 改本工作的过滤名单 `.workignore`（内容面与检索面共用的唯一名单）。
+    /// 约束：`list` 只要共享区读权限；`add` / `remove` 改的是「哪些文件算工作区内容」，按共享区提交权限收口。
+    fn ignore(&self, args: &serde_json::Value) -> ToolOutcome {
+        let op = dw::str_arg(args, "op").unwrap_or_else(|| "list".to_string());
+        let patterns = match dw::str_list(args, "patterns") {
+            Ok(p) => p,
+            Err(e) => return outcome(false, e),
+        };
+        match op.as_str() {
+            "list" => {
+                if !self.permissions.may_read_shared() {
+                    return outcome(
+                        false,
+                        format!(
+                            "读取被拒：当前档位「{}」没有共享区读取权限",
+                            self.permissions.profile.label()
+                        ),
+                    );
+                }
+            }
+            "add" | "remove" => {
+                if !self.permissions.may_write(Reach::SharedWrite) {
+                    return outcome(
+                        false,
+                        format!(
+                            "改过滤规则被拒：当前档位「{}」没有共享区提交权限",
+                            self.permissions.profile.label()
+                        ),
+                    );
+                }
+            }
+            other => {
+                return outcome(
+                    false,
+                    format!("op 只认 list / add / remove，收到：{}", other),
+                );
+            }
+        }
+        match self.workspace.work_ignore(&self.work, &op, &patterns) {
+            Ok(r) => outcome(true, dw::render_ignore(&r)),
+            Err(e) => outcome(false, e),
+        }
+    }
+
     fn versions(&self, args: &serde_json::Value) -> ToolOutcome {
         let path = match dw::str_arg(args, "path") {
             Some(p) if !p.trim().is_empty() => p,
@@ -436,6 +480,7 @@ impl ToolHandler for WorkHandler {
             dw::PUSH => self.push(ctx.session, ctx.agent, ctx.line, &args),
             dw::SYNC => self.sync(ctx.session, ctx.line, &args),
             dw::STATUS => self.status(&args),
+            dw::IGNORE => self.ignore(&args),
             dw::VERSIONS => self.versions(&args),
             dw::DIFF => self.diff(&args),
             dw::RESET => self.reset(&args),
