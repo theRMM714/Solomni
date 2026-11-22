@@ -925,6 +925,53 @@ mod tests {
         fact_with(3, 9)
     }
 
+    /// 目的：只装读台账的会话——不接工具、不发请求，用来验台账的作废时机。
+    fn ledger_session() -> AgentSession {
+        let params = SessionParams {
+            agent: "a".to_string(),
+            work_name: "w".to_string(),
+            shared: std::path::PathBuf::from("shared"),
+            private: std::path::PathBuf::from("private"),
+            module_dirs: std::collections::BTreeMap::new(),
+            chara: String::new(),
+            modules: Vec::new(),
+            role_system: None,
+            session_kind: "single".to_string(),
+            role: "solo".to_string(),
+            guest: None,
+        };
+        AgentSession::new(
+            "s",
+            params,
+            Box::new(crate::capabilities::llm::detail::fake_chat::FakeChat::new(
+                Vec::new(),
+            )),
+            None,
+            String::new(),
+        )
+    }
+
+    /// 目的：读台账与观察账本同水位——同版本同区间去重，压缩丢旧行，回档全清。
+    #[test]
+    fn read_ledger_follows_compaction_and_rewind() {
+        let mut s = ledger_session();
+        s.dialogue.push(Msg::user("旧内容".to_string()));
+        s.dialogue.push(Msg::user("新内容".to_string()));
+        s.note_read_at("旧".to_string(), 3, fact_with(1, 2));
+        s.note_read_at("新".to_string(), 9, fact_with(3, 9));
+        s.note_read_at("新（重读）".to_string(), 11, fact_with(3, 9));
+        assert_eq!(s.reads().len(), 2, "同版本同区间再读只更新那一条");
+        assert_eq!(s.reads()[1].body, "新（重读）");
+        assert_eq!(s.reads()[1].reply, 11, "记最新的行号");
+
+        s.apply_compaction(&CompactionPlan { up_to: 5, cut: 1 }, "摘要");
+        assert_eq!(s.reads().len(), 1, "压缩点之前读完的随摘要作废");
+        assert_eq!(s.reads()[0].reply, 11);
+
+        s.apply_rewind(0);
+        assert!(s.reads().is_empty(), "回档清空读台账");
+    }
+
     // 省够门槛才有替换：正文得够长，短正文会整体回退（见 FRESHNESS_MIN_SAVED_CHARS）。
     fn long_body(tag: &str) -> String {
         format!("[工具结果] read\n{}", tag.repeat(3000))
