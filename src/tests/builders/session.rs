@@ -147,6 +147,7 @@ pub(crate) fn seed_session(
         agents,
         exec,
         sandbox: Default::default(),
+        shared: Default::default(),
         parent: None,
         node: None,
         delegation: None,
@@ -173,5 +174,6 @@ pub(crate) fn edit_of(agents: Vec<(&str, &[&str], &str)>) -> SessionEdit {
         guest: None,
         pins: BTreeMap::new(),
         permission: None,
+        shared: None,
     }
 }

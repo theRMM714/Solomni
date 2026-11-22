@@ -13,13 +13,15 @@ pub use crate::capabilities::conversation::session::domain::decisions::{
 pub use crate::capabilities::conversation::session::domain::events::{
     CheckView, ContextUsage, DecisionCard, DecisionQueue, DecisionWaiter, LineView, OPT_ASK_REPLY,
     OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY, OPT_PLAN_START,
-    OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM, OPT_TOOL_ALLOW, OPT_TOOL_ALLOW_TURN, OPT_TOOL_DENY,
-    OptionView, Pending, SessionEvent, ToolCallView, idle, interrupted_note, last_compaction,
-    qualify, stopped_note, working,
+    OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM, OptionView, Pending, SessionEvent, ToolCallView, idle,
+    interrupted_note, last_compaction, qualify, stopped_note, working,
 };
 pub use crate::capabilities::conversation::session::domain::history::{
     Delegation, HistoryView, RunState, SessionMeta, UsageTotals, WorkspaceBinding,
 };
+// 工具面：角色面 → 实际可调的工具（档位只管网络，不再逐工具裁剪）。
+#[allow(unused_imports)]
+pub use crate::capabilities::conversation::session::domain::assemble::face_tools;
 pub use crate::capabilities::conversation::session::domain::mode::Mode;
 #[allow(unused_imports)]
 pub use crate::capabilities::conversation::session::domain::persist::{

@@ -172,7 +172,7 @@ impl Work {
                     guest: spec.guest.as_deref(),
                     profile: spec
                         .permission
-                        .unwrap_or(crate::capabilities::permission::api::ProfileId::AllReach),
+                        .unwrap_or(crate::capabilities::permission::api::ProfileId::Online),
                     workspace,
                     freshness: spec.freshness,
                 },
@@ -300,12 +300,13 @@ impl Work {
                     ceiling: spec.permission.map(|profile| {
                         crate::capabilities::permission::api::PermissionLayer {
                             profile: Some(profile),
-                            ..Default::default()
                         }
                     }),
                     narrowing: None,
                 },
             },
+            // 共享区归属：只在设置里给全局默认；根会话按需在会话配置里覆盖。
+            shared: Default::default(),
             thinking: None,
             run: RunState::Active,
         };
@@ -740,10 +741,10 @@ impl Work {
             sandbox: crate::capabilities::permission::api::SessionSandbox {
                 ceiling: Some(crate::capabilities::permission::api::PermissionLayer {
                     profile: Some(profile),
-                    ..Default::default()
                 }),
                 narrowing: None,
             },
+            shared: Default::default(),
             parent: None,
             node: None,
             delegation: Some(Delegation { granted_at }),

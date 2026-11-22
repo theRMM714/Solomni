@@ -40,9 +40,6 @@ cases:
   - id: e2e/modules
     tier: T5
     note: 多模块 cwd + 漏写 module 如实报错
-  - id: e2e/tool-ask
-    tier: T5
-    note: 工具级确认：allow / deny / allow_turn 三态
   - id: e2e/bad-envelope
     tier: T5
     note: 非法工具信封：失败工具行且 JSON 不上屏

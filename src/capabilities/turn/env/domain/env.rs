@@ -15,7 +15,7 @@ use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::AppSettings;
 use crate::capabilities::conversation::session::api::SessionMeta;
 use crate::capabilities::permission::api::PermissionSet;
-use crate::capabilities::workspace::api::{Sandbox, Sandboxes, WORKIGNORE, WorkRoots};
+use crate::capabilities::workspace::api::{Sandbox, Sandboxes, SharedScope, WORKIGNORE, WorkRoots};
 use crate::kernel::api::fence::FenceSpec;
 use crate::kernel::api::types::Tier;
 use crate::kernel::ports::PathCodec;
@@ -48,6 +48,14 @@ pub struct MemberEnv {
     pub runtime_roots: Vec<PathBuf>,
     /// 目的：各模块隐私字段的注入项（模块 id → 变量对）。
     pub module_env: BTreeMap<String, Vec<(String, String)>>,
+}
+
+/// 目的：一席的生效授权：网络档位 + 共享区归属（两者都按会话链派生，协作发言席按子会话取）。
+pub struct SeatAccess {
+    /// 目的：网络档位（离线 / 联网）。
+    pub permissions: PermissionSet,
+    /// 目的：共享区读 / 写范围与黑名单。
+    pub scope: SharedScope,
 }
 
 /// 目的：组装沙箱清单所需的已取事实。
@@ -92,11 +100,11 @@ pub fn member(facts: &MemberFacts<'_>) -> MemberEnv {
 
 /// 目的：按 agent 名单组装沙箱清单；模块目录只对使用它的 agent 可达。
 /// 参数：`facts` = 已取好的工作名、名单、工作区根、模块清单与路径翻译器；
-///   `permissions` = 某个 agent 的生效权限（协作主会话的发言席要按子会话 narrowing 取）。
+///   `access` = 某个 agent 的生效授权（协作主会话的发言席要按子会话取）。
 /// 错误：工作区没给出某个 agent 的私有根时逐字报「工作区没有给出 agent {名} 的沙箱路径」。
 pub fn sandboxes(
     facts: &SandboxesFacts<'_>,
-    permissions: &dyn Fn(&str) -> Result<PermissionSet, String>,
+    access: &dyn Fn(&str) -> Result<SeatAccess, String>,
 ) -> Result<Sandboxes, String> {
     let mut list: Vec<Sandbox> = Vec::new();
     for a in facts.agents {
@@ -106,6 +114,7 @@ pub fn sandboxes(
             .get(&a.name)
             .cloned()
             .ok_or_else(|| format!("工作区没有给出 agent {} 的沙箱路径", a.name))?;
+        let seat = access(&a.name)?;
         let mut modules = BTreeMap::new();
         let mut modules_with_userdata = BTreeSet::new();
         for id in &a.modules {
@@ -124,7 +133,8 @@ pub fn sandboxes(
             private,
             modules,
             modules_with_userdata,
-            permissions: permissions(&a.name)?,
+            permissions: seat.permissions.clone(),
+            scope: seat.scope.clone(),
             path_codec: facts.codec.clone(),
             filter_rules: facts.roots.store.join(WORKIGNORE),
         });
@@ -137,7 +147,7 @@ pub fn sandboxes(
     })
 }
 
-/// 目的：一条会话的生效权限：全局默认 → 根 ceiling → 每层 narrowing → 全局硬黑名单。
+/// 目的：一条会话的生效网络档位：全局默认 → 根 ceiling → 每层 narrowing（子只能更窄）。
 pub fn permissions(chain: &[SessionMeta], app: &AppSettings) -> Result<PermissionSet, String> {
     let root = chain.first().ok_or_else(|| "会话权限链为空".to_string())?;
     let mut out = app.sandbox.defaults.to_permission_set();
@@ -148,6 +158,16 @@ pub fn permissions(chain: &[SessionMeta], app: &AppSettings) -> Result<Permissio
         if let Some(layer) = child.sandbox.child_layer()? {
             out = out.apply_narrowing(layer)?;
         }
+    }
+    Ok(out)
+}
+
+/// 目的：一条会话的生效共享区归属：全局默认 → 根覆盖 → 每层收窄 → 全局硬黑名单。
+pub fn shared_scope(chain: &[SessionMeta], app: &AppSettings) -> Result<SharedScope, String> {
+    let root = chain.first().ok_or_else(|| "会话权限链为空".to_string())?;
+    let mut out = app.sandbox.scope.clone().apply_root(&root.shared)?;
+    for child in chain.iter().skip(1) {
+        out = out.apply_narrowing(&child.shared)?;
     }
     Ok(out.with_hard_deny(&app.sandbox.policy.deny))
 }

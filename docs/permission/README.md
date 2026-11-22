@@ -1,120 +1,92 @@
 # permission（权限）
 
-> 定位：独立于会话的一类能力——回答「谁能在本机、在哪些路径上做什么、要不要问」。
-> 效力：规范｜核对：2026-11-13｜依据：`src/capabilities/permission/api.rs`
+> 定位：独立于会话的一类能力——只回答「这个会话能不能出站」。
+> 效力：规范｜核对：2026-11-22｜依据：`src/capabilities/permission/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
-- 管：权限声明（全局默认、会话 ceiling、子会话 narrowing）的解析与求交；单次调用的 reach × effect × decision 判定；共享区路径范围；四档 profile 预设。
-- 不管：不认会话、不碰文件系统、不持端口、不持有状态。
-- 不管：落盘的声明在登记处（`settings.yaml` 的 `sandbox.defaults` 与 `sandbox.policy`）与会话 `meta.yaml`；生效态每次现算。
+- 管：网络档位（`offline` / `online`）的解析、全局默认、根 ceiling 与子会话 narrowing 的合并；生效态 `PermissionSet` 只承载这一个开关。
+- 不管：文件可达范围。沙箱、模块目录、主机只读根、工具链都是**固定授予**，不参与判定（见「二、固定授予」）。
+- 不管：共享区路径归属。它是 workspace 的 `SharedScope`（见「三、共享区归属」）。
+- 不管：不认会话、不碰文件系统、不持端口、不持有状态。落盘的声明在登记处（`settings.yaml` 的 `sandbox.defaults`）与会话 `meta.yaml`（`sandbox.ceiling` / `sandbox.narrowing`），生效态每次现算。
 
 ## 入站契约与状态归属
 
-- 入站面：`api`——重导出权限类型、四档预设与校验入口（`hit` / `normalize` / `validate_*` 等）。
+- 入站面：`api`——重导出 `PermissionSet` / `PermissionDefaults` / `PermissionLayer` / `SessionSandbox` / `ProfileId` / `ProfileSpec`。
 - 出站端口：无（纯领域，不自持端口）。
-- 状态归属：不持有状态；落盘的声明在登记处（`settings.yaml` 的 `sandbox.defaults` 与 `sandbox.policy`）与会话 `meta.yaml`，生效态每次现算。
+- 状态归属：不持有状态；生效态由 `turn` 的 `env::permissions` 沿权限链现算，装配进 `workspace` 的 `Sandbox.permissions`。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：无（纯领域，不自持端口）
-- 谁在用我：`registry`（全局默认与硬黑名单）、`session`（meta 的 ceiling / narrowing）、`workspace`（落点判定）、`runtime`（解析与装配）、`tools`（工具声明与围栏派生）
+- 谁在用我：`registry`（全局默认）、`session`（meta 的 ceiling / narrowing）、`workspace`（`Sandbox.permissions`）、`tools`（围栏的 net）、`turn`（求合并）、`runtime`（解析与装配）
 
-## 一、三个维度
+## 一、只有网络是权限
 
-- **Reach（能到哪）**
-  - private：自己的私有沙箱；
-  - shared-read：读共享区主副本；
-  - shared-write：写共享区（只有 work_push 使用；`work_commit` 只写自己的工作线，写工具后的自动提交只进存档线，外部工具进程永远不直接写主副本）；
-  - module-read：读成员模块目录；
-  - module-write：写模块自己的 userdata（只给模块工具进程）；
-  - host-read：用户显式授权的主机只读根；
-  - network：出站网络。
-- **Effect（这次操作属于哪类）**
-  - read：read / list / grep / work_pull / work_status / work_versions / work_ignore 的 list；
-  - write：write / edit / patch / delete / work_commit / work_push / work_resolve / work_lost 的恢复 / work_ignore 的 add 与 remove；
-  - exec：模块工具 / shell；
-  - none：不碰文件、不需要权限闸门的动作。
-- **Decision（怎么处置）**
-  - allow：直接执行；
-  - ask：进统一裁决队；没有可回答前端 = 拒绝；
-  - deny：不执行，如实回执。
-- secret 不是 reach：模块只声明自己有哪些隐秘字段，值只由系统持有并在起模块工具 / 服务进程时注入；agent 与 shell 都不直接触碰它。
+| id | 标签 | 出站 |
+| --- | --- | --- |
+| `offline` | 离线（默认） | 否 |
+| `online` | 联网 | 是，且仍受全局 `sandbox.policy.network` 约束 |
 
-## 二、四档 profile
+- 两档只差一个开关：`PermissionSet { profile }`，`allows_network()` 是它唯一的行为。
+- 全局 `sandbox.policy.network` 是硬上限：`online` 档在它关闭时仍然不能出站（`FenceSpec.net = global_net && permissions.allows_network()`）。
+- 档位名不描述「能读哪里」——没有那样的档位，也没有逐工具决定。
 
-| id | 标签 | reach | 读 | 写 | exec sandbox | exec external |
-| --- | --- | --- | --- | --- | --- | --- |
-| view | 仅可查看 | private + shared-read + module-read | allow | deny | deny | deny |
-| workspace | 工作区内修改 | view + shared-write + module-write | allow | allow | allow | deny |
-| external | 外部可达（逐次确认） | workspace + host-read + network | allow | allow | allow | ask |
-| all_reach | 全可达（自动放行） | 同 external | allow | allow | allow | allow |
+## 二、固定授予（不经权限判定）
 
-- shared-write 只给 work_push（连同 `work_commit` 的发布前自检）；写工具落地后的自动提交只进存档线，不需要它。它不会把共享区放进任何外部进程的 rw。
-- module-write 只给模块工具写自己的 userdata；shell 不声明它，所以全可达也写不进模块 userdata。
-- 私有沙箱不受共享区路径范围约束，但 profile 的 write decision 仍然作用于它（仅可查看档禁写）。
-- 最高档按 reach 命名，不叫「完全权限」；它仍受全局 network / host_read_roots / deny / 围栏强制等级上限。
+- **私有沙箱恒可读写**：这是 agent 的工作副本，写它不需要任何档位。
+- **模块目录恒只读**；模块自己的 `userdata` 只给模块工具进程写；模块工具写**调用方 agent 的沙箱**（契约见 [MODULE_SPEC.md](../../MODULE_SPEC.md)）。
+- **主机只读根**（`sandbox.policy.host_read_roots`）恒只读挂进围栏。
+- **项目工具链与运行包**恒只读（可信执行基座，机器级一次性预授，与档位无关，见 [kernel/README.md](../kernel/README.md) 的「授权主体分两个」）。
+- 因此「读模块源码」「读写共享区」「exec 沙箱还是 external」都不是权限项：前者由角色面（工具面 / 模块声明）决定，后者是执行落点（见「四」）。
 
-## 三、单次调用判定
+## 三、共享区归属（在 workspace，不在本单元）
 
-- 输入：会话生效权限（profile 的 reach / decision）、工具声明（effect / 最大 reach / 是否接 scope）、本次参数。
+- 共享区是**主副本**：任何外部进程都读不到、写不到它；agent 只写沙箱，改动经 `work_pull` / `work_commit` / `work_push`。
+- 「这次会话能读 / 能提交共享区的哪些路径」是 workspace 的 `SharedScope`（三态 all / none / 路径数组 + 黑名单），字段在会话 `meta.yaml` 的 `shared`，全局默认在 `settings.yaml` 的 `sandbox.scope`。
+- 它约束的是**内置文件工具与工作工具**的路径归属（谁能拉、谁能提交），不是围栏里的 ACL——因此没有任何按会话的 ACL 授予与对账（依据见 [docs/workspace/README.md](../workspace/README.md)）。
+- 语义与校验在本单元之外：`src/capabilities/workspace/domain/scope.rs`。
 
-1. granted = 会话 reach ∩ 工具最大 reach；
-2. 工具声明 scope 时：requested = sandbox（只有 private）或 external（private + module-read + host-read + network）；若 requested 不是 granted 的子集 → 拒绝（不是问）；granted = granted ∩ requested；
-3. decision = 会话逐工具覆盖 → profile 的 effect/scope 决定（四档都显式给出；工具声明没有「默认处置」这一层，判定只有一个来源）；
-4. deny 不执行；ask 有前端进裁决队、无前端拒绝；allow 执行；
-5. 执行层按 granted 派生围栏 / 做路径判定。
+## 四、shell 的 scope 是执行落点，不是权限请求
 
-- 卡片上的 allow_turn 只表示「本轮剩余 ask 都不再问」；它不改 reach、不改 profile、不落盘。后续调用如果 reach 不够，仍然拒绝。
-- **shell 的 scope** 是本次调用的 reach 请求，不是第二个权限档：
-  - sandbox（缺省）：只 private + 基础 / 项目工具链只读；net=false；workspace 及以上 allow，view 不发放；不碰共享 / 模块 / 主机只读根。
-  - external：在 sandbox 之上加 module-read / host-read / network（共享区主副本不进容器：读 / 改先 `work_pull`）；external 档 ask、all_reach 档 allow；模块目录仍只读，module-write 不声明，模块 secrets 不注入。
-  - sandbox 与 external 都要求围栏真强制（`allow_degraded=false`），装不上就拒绝；命令被围栏拒绝时回执提示 external，**不自动升级**。
-  - Windows 上容器身份 = `会话租约 + agent + 受保护根集合`（reach 指纹，不含工具链、不含 net）：同一会话里不同 scope 的调用根集合不同 → 不同 SID（按次收窄因此真实成立）；同一 reach 的后续调用复用 SID 与 ACL。授权**按会话持有**，会话改配 / 删除时撤销；一次性调用（构建 / 独立模块工具）各自唯一租约、跑完即撤。
-  - **工具链与运行包不是 reach**：`.tools/` 与 `runtimes/<包>` 是可信执行基座（只读、无秘密、本来就要执行），一次性授给**本产品的能力 SID**（`S-1-15-3-*`，不是 `ALL APPLICATION PACKAGES`——那会把读权限下放给本机所有 AppContainer 应用，见 [kernel/README.md](../kernel/README.md) 的「授权主体分两个」）、按机器级归属记台账（`scope=machine`、无归属，跨会话复用、启动对账不回收），不参与按 reach 的容器身份与按次授权；共享区 / 模块目录 / 用户只读根才按 reach 收窄。产品根上的一条 `(OI)(CI)` 只读属性同属机器级授权（授给同一个能力 SID、跨会话复用、启动对账不回收），也不属于 reach：容器 cwd 走视图盘写法（产品根映射成实例独占的盘符），产品根之外的祖先不授。**机器级一次性预授**（`--setup=fence`，或首次授权成功后自动一次）把产品根 `(OI)(CI)` 只读属性、`.tools/` 与 `runtimes/` 递归只读一次写掉；之后每个新会话只剩按 reach 的容器 SID 授权，不再重复写这批 ACE。
+- `scope=sandbox`（缺省）/ `scope=external` 决定这一次调用把围栏铺到哪一层，两条路都被允许，不存在「档位不允许某个 scope」。
+- `sandbox`：cwd = 私有沙箱，围栏只认私有沙箱 + 只读工具链；不联网。
+- `external`：在 `sandbox` 之上加模块目录、主机只读根与（`online` 档下的）出站网络；仍不碰共享区主副本、不写模块 `userdata`、不注入模块 secrets。
+- 围栏装不上就拒绝（`allow_degraded=false`），回执提示可换 `external`，**不自动升级**。
+- 没有工具级确认队列：不存在 `ask` / `allow_turn` / 工具卡；需要人确认的是核心自己的关卡（建会话、验收、定版），不是权限判定。
 
-## 四、围栏派生
+## 五、围栏派生
 
-- `FenceSpec::for_call` 按本次 granted 派生：private 进 rw；module-write 只把该模块的 userdata 放进 rw；module-read 进 ro_tree（shared-read 不进围栏：共享区主副本只由宿主内的文件工具直读）；host-read 进 ro；network 与全局开关求交。shared-write 永不进 rw。shell 的 per-call 围栏另加项目内**基础工具链根**（只读）；模块工具的放行仍走它自己的命令解释器基线。
-- `FenceSpec::for_session` 只作**会话 base**（提供主机只读根与全局断网事实）再派生按次围栏；撤销走会话租约（`release_by_lease`），不再按「会话并集」反推落点。
-- VM guest 的 per-call 断网由 guest helper 按策略里的 net 做 `unshare(CLONE_NEWNET)`；失败 fail-closed，不静默降级。
+- `FenceSpec::for_call(sandbox, module, base)`：`rw` = 私有沙箱（+ 该模块 `userdata`，若模块有）；`ro` = 主机只读根；`ro_tree` = 全部模块目录；`net` = 全局开关与档位求交。不再有按 reach 的分支。
+- `FenceSpec::for_session(sandbox, host_roots, global_net)`：同一套固定并集，只作会话 base；撤销走会话租约（`release_by_lease`）。
+- VM guest 的 per-call 断网由 guest helper 按策略里的 net 做 `unshare(CLONE_NEWNET)`；失败 fail-closed。
+- Windows 的容器身份 = `会话租约 + agent`（**不含可达根集合**）：同一 `(agent, shell)` 的调用复用 SID 与 ACL，档位切换不需要重写 DACL。
 
-## 五、根 ceiling + 子会话逐层收窄
+## 六、根 ceiling + 子会话逐层收窄
 
-- 根会话持有 ceiling：profile、reach 子集、共享区范围、逐工具决定。
-- 每个子会话只有一层 narrowing；effective = 全局默认 ∩ 根 ceiling ∩ 沿祖先链的每一层 narrowing。
-- 子只能换更低档，reach / 共享区范围 / decision 只能更窄更严；要放宽必须改根 ceiling（`src/capabilities/permission/domain/permission.rs`）。
-- 路径范围只作用于共享区：work_pull / work_commit / work_push / 读共享；私有沙箱永远不受它的路径范围限制。
-- 共享区范围用三态：all / none / 路径数组。字段 None = 不覆盖，Some(none) = 显式无权限，两者必须分开（`src/capabilities/permission/domain/permission.rs`）。
-- 父级编辑只更新 ceiling，再与子 narrowing 求交，不覆盖子收窄；父级收窄到无交集时子会话无权限，并如实提示。
-- 档位切换是根级动作：整棵 work tree 有会话在生成时拒绝（先停再切）；切换在下一次权限判定生效，已经在执行的调用不追溯。
-- Windows 的 ACL 是持久的：容器身份按 `会话 + agent + 可达根集合` 派生；同一 reach 的调用复用授权，会话结束统一回收（`release_by_lease`）。档位收窄后不会再读到别的 scope 留下的外部根（这正是并发重叠场景的判据）。
-
-## 六、工具级确认的引擎路径
-
-- 工具循环在执行一次调用前先过权限闸门。ask 命中时：
-  - 有确认通道才问；没有可回答前端时直接拒绝，不阻塞、不放行；
-  - 有通道时，这次调用作为一关进裁决队，与核心各关卡共用同一条队；
-  - 卡片选项 id 是契约：allow / deny / allow_turn；
-  - 停止 = 整队作废，等待方按拒绝解开；
-  - 卡与回答随会话落盘；重启后不重问已答的。
+- 根写 `sandbox.ceiling`，子写 `sandbox.narrowing`；effective = 全局默认 → 根 ceiling → 沿祖先链每层 narrowing。
+- 子只能换更低档：`apply_narrowing` 用 `rank()` 比较，比父宽即报错（`src/capabilities/permission/domain/permission/base.rs`）。
+- 共享区的收窄与档位无关，在 workspace 的 `SharedEdit` 里独立校验（`src/capabilities/workspace/domain/scope.rs`）：子只能更窄，父编辑只改 ceiling、不覆盖子收窄。
+- 档位切换是根级动作：整棵 work tree 有会话在生成时拒绝（先停再切）；切换从下一次求合并起生效。
 
 ## 七、安全验收
 
-- 行为矩阵：四档 profile × 七个 reach × 四种 effect × 三种 call scope 的处置逐格穷举（`decision_matrix_is_total_across_profile_effect_scope_and_reach`，`src/tests/permission.rs`）。
-- 写决策被拒时，围栏与工作区判据同源地不授私有写（`deny_write_decision_withholds_private_rw`，`src/tests/permission.rs`）。
-- 代数性质：`Decision` 取严的交换 / 结合 / 幂等 / 吸收，`ReachSet` 求交的交换 / 结合 / 幂等与子集等价，共享区三态的子集蕴含与交集逐路径等价（`decision_and_reach_algebra_hold_for_every_combination`、`shared_scope_intersection_and_subset_agree_on_every_path`）。
-- 收窄不放大：子会话的档位、reach、共享区、decision、拒绝名单与逐工具决定逐维断言（`narrowing_never_widens_profile_reach_scope_or_decision`）。
+- 只有两档，且两档只差网络（`profiles_are_two_tiers_that_differ_only_in_network`，`src/tests/permission.rs`）。
+- 根可换档、子只能收窄、空层不改生效态（`permission_set_root_and_narrowing_only_touch_the_tier`，`src/tests/permission.rs`）。
+- 围栏的固定并集：私有沙箱 + 该模块 `userdata` 进 rw、模块目录进 ro_tree、`net` 与全局开关求交（`fence_spec_grants_fixed_surfaces`）。
+- 共享区三态与黑名单：序列化、交集、收窄不放大（`shared_scope_narrowing_never_widens`、`shared_scope_serde_and_merge_edges`，`src/tests/permission.rs`）。
+- 工作工具的路径过滤跟着读范围走（`work_status_filters_paths_outside_read_scope`、`work_lost_is_scoped_by_read_permission`、`work_versions_and_resolve_are_scoped_by_read_permission`）；`write=none` 时提交 / 推送被拒（`no_write_scope_refuses_commit_and_push`）。
+- 工具面只由角色面决定，档位不裁剪（`profile_does_not_change_the_tool_face`，`src/tests/tools/shell.rs`）。
 - CI 的 `--fence-live` 门禁把安全探针的环境跳过记 `quality-fail`，不许当成通过（`tests/gates/steps.js` 的 `securitySkipsIn`）；`--strict-env` 没带 `--fence-live` 同样失败。
 - 围栏路径的根内判定在规范化失败时拒绝含上级段的路径（`inside_root_rejects_parent_escape_even_when_canonicalize_fails`，`src/kernel/detail/confine/windows/tests.rs`）。
 
 ## 改动本单元时必须同步
 
 - 改语义 → 本页 + `REGISTRY_SPEC.md`（settings 的 sandbox 段）+ `docs/session/session-model.md`（meta 的会话级 sandbox）。
-- 改落点判定 → `docs/tools/tools-and-roles.md` 的路径模型 + 平台围栏探针。
+- 改共享区归属 → `docs/workspace/README.md`、`docs/tools/tools-and-roles.md` 的路径模型。
 - 改 `FenceSpec` 字段 → 三平台后端与跨平台字面量门禁（`src/kernel/contracts/fence.rs`）。
-- 改 profile / 工具声明 → `systools/tools.yaml`、`docs/tools/tools-and-roles.md`、Web 配置页与冒烟。
+- 改档位 → `systools/tools.yaml`、`docs/tools/tools-and-roles.md`、Web 配置页与冒烟。
 
 ## 本目录
 

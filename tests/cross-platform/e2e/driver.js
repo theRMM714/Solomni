@@ -3,7 +3,6 @@
 //       → 回档两档：删除（不写标记，沙箱退回该点）与留档+恢复（写标记，按标记展开转录与沙箱）
 //       → 协作（非代拟）跑完交付 → 代拟（复用+组装）确认后名单写回 meta 并建出沙箱
 //       → 外部工具 cwd / 绝对路径 / 自由格式补丁 / 正文+信封 / 原生多调用（协议形状由假供应商核对）
-//       → 工具级确认（与本通道同形）：生成中停下等 allow / deny / allow_turn；快照带那张卡（刷新能重建）；full 本轮不再问
 //       → MCP 常驻服务：模块声明的服务操作进工具面，经真进程调用，回执与本地计算的摘要对账。
 //       → 通用资产：PNG / MP4 上传 → work_pull → work_versions 媒体类型 / 指纹 / 大小，二进制产物走 work_commit + work_push。
 //       → 父死子亡：核心被强杀后，常驻服务的进程跟着消失（最后一步，核心一死就没有后续场景了）。
@@ -201,18 +200,6 @@ async function answer(sid, option, note) {
   const r = await act(sid, 'answer_card', { card: card.id, option: option, note: note || '' });
   assert(await settleSegment(sid, 90000), '回答之后这一段要收尾：' + sid);
   return r;
-}
-
-/** 等某会话**某一关**的卡出现（pending 就是那张卡）：用于"生成中确认"这类必须**并发**驱动的场景。 */
-async function waitPending(sid, gate, ms) {
-  const deadline = Date.now() + ms;
-  while (Date.now() < deadline) {
-    const s = await stateOk();
-    const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === sid);
-    if (v && v.pending && v.pending.gate === gate) return v.pending;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  return null;
 }
 
 /** 限时等一个请求收尾：超时记失败并返回（不让整个驱动被一次卡死拖挂）。 */
@@ -593,76 +580,6 @@ assert(new RegExp('项目 说明\\.md').test(String(usl.line)) && !/@work:/.test
 
 });
 
-await journey('tool-ask', async () => {
-// 工具级确认（逐工具 ask）：真生成 → 真停下 → 真回答；allow / deny / allow_turn 三态都走一遍。
-const nameAsk = 'e2e-ask-' + Date.now();
-const cAsk = await api('POST', '/api/actions/create_session', {
-  name: nameAsk, mode: 'single',
-  agents: [{ name: '确认兵', transient: true, modules: ['research'], model: 'm1' }],
-});
-assert(cAsk.status === 200, '建"工具确认"会话', cAsk.text.slice(0, 200));
-const edAsk = await act(nameAsk, 'edit_session', {
-  agents: [{ name: '确认兵', modules: ['research'], model: 'm1' }],
-  permission: { tools: { write: 'ask' } },
-  tier: 'host',
-});
-assert(edAsk.status === 200, '把 write 的逐工具决定设成 ask', edAsk.text.slice(0, 240));
-const sandbox = path.join(dir(nameAsk), '确认兵');
-const fDeny = path.join(sandbox, 'ask-deny.txt');
-const fAllow = path.join(sandbox, 'ask-allow.txt');
-const fFull1 = path.join(sandbox, 'ask-full-1.txt');
-const fFull2 = path.join(sandbox, 'ask-full-2.txt');
-// 工具确认与核心各关卡**同一条通道**：同一张卡形状、同一条回答命令（卡号 + 选项 id）。
-const answerAsk = (card, option) => act(nameAsk, 'answer_card', { card: card.id, option: option, note: '' });
-const sayAsk = (text) => act(nameAsk, 'send_message', { text });
-
-// ① 拒绝：生成停下来等回答（快照里能看到那张卡），答 deny → 工具不执行。
-const pDeny = sayAsk('工具确认：拒绝');
-const pendDeny = await waitPending(nameAsk, 'tool_approval', 20000);
-assert(pendDeny && (pendDeny.payload || {}).tool === 'write', '等待中的确认出现在 /api/state 快照里（刷新也能重建卡片）', JSON.stringify(pendDeny || {}).slice(0, 200));
-assert((pendDeny.options || []).map((o) => o.id).join() === 'allow,deny,allow_turn', '工具卡的选项 id 是 allow / deny / allow_turn', JSON.stringify((pendDeny || {}).options));
-assert((await answerAsk(pendDeny, 'deny')).status === 200, '答 deny（拒绝）');
-await settle(pDeny, 30000, '拒绝场景');
-assert(!fs.existsSync(fDeny), '拒绝 → 工具没执行（文件不存在）', fDeny);
-
-// ② 放行：答 allow → 工具执行。
-const pAllow = sayAsk('工具确认：放行');
-const pendAllow = await waitPending(nameAsk, 'tool_approval', 20000);
-assert(pendAllow, '第二次确认也停下等回答');
-await answerAsk(pendAllow, 'allow');
-await settle(pAllow, 30000, '放行场景');
-assert(fs.existsSync(fAllow), '放行 → 工具执行（文件存在）', fAllow);
-
-// ③ 本轮不再问：一次回复给两个 write，第一个答 allow_turn → 第二个不再问、两个都执行。
-const pFull = sayAsk('工具确认：两个，本轮不再问');
-const pendFull = await waitPending(nameAsk, 'tool_approval', 20000);
-assert(pendFull, 'allow_turn 场景的第一批确认出现');
-await answerAsk(pendFull, 'allow_turn');
-// 若 allow_turn 没生效会出现第二个确认——自动答掉以免挂住整个驱动，并把"多问了一次"记为失败。
-let second = null;
-for (let i = 0; i < 200; i++) {
-  const s = await stateOk();
-  const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === nameAsk);
-  if (v && v.pending && v.pending.gate === 'tool_approval') { second = v.pending; break; }
-  if (!v || !v.running) break; // 生成已结束
-  await new Promise((r) => setTimeout(r, 100));
-}
-if (second) await answerAsk(second, 'allow');
-await settle(pFull, 30000, 'allow_turn 场景');
-assert(!second, '答 allow_turn 后本轮不再弹第二次确认', JSON.stringify(second || {}).slice(0, 160));
-assert(fs.existsSync(fFull1) && fs.existsSync(fFull2), '答 allow_turn → 本轮两个调用都执行', fFull1 + ' / ' + fFull2);
-// [待确认] 是瞬时 Notice（不落盘），但事件台仍保留它；按 sid 从事件台数。
-// 不能从历史取：历史只给「最后一条转录之后」的尾巴，早于转录的瞬时事件会被跳过。
-const evAsk = await api(
-  'GET',
-  '/api/events?sid=' + encodeURIComponent(nameAsk) + '&since=0',
-);
-const askedTimes = ((evAsk.json && evAsk.json.lines) || [])
-  .flatMap((l) => l.events || [])
-  .filter((e) => e.type === 'notice' && String(e.text || '').includes('[待确认]')).length;
-assert(askedTimes === 3, '全程只停三次（allow_turn 那轮只停一次；若变成 4 = allow_turn 没生效）', 'asked=' + askedTimes);
-
-});
 
 await journey('bad-envelope', async () => {
 // 非法工具信封：必须记成一条失败的工具行，且 JSON 绝不上屏（真实 bug 的回归）
@@ -1316,8 +1233,9 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
           name: nameExt, mode: 'single',
           agents: [{ name: '探针兵', transient: true, modules: ['toolbox'], model: 'm1' }],
           tier: 'vm', guest: vmGuest, workspace: extDir,
-          // shell 的默认 scope=sandbox（只到私沙）；读共享区要显式 scope=external，档位得放行它。
-          permission: 'all_reach',
+          // shell 的默认 scope=sandbox（只到私沙）；读共享区要显式 scope=external。
+          // 这条旅程不联网，档位用默认的离线即可。
+          permission: 'offline',
         });
         assert(ce.status === 200, '建虚拟机档工作并绑定外部工作区', ce.text.slice(0, 240));
         if (ce.status === 200) {

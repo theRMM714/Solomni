@@ -600,17 +600,6 @@ pub enum Pending {
     // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
     #[allow(dead_code)]
     ToolAsk(Box<crate::kernel::api::types::Ask>),
-    /// 工具级确认（`ask` 粒度命中）：这一席的这次调用**在执行前**等用户放行。
-    /// 它是**等在工作线程上**的那一类——发起方（工具循环）阻塞等回答，不点不继续。
-    ToolApproval {
-        /// 谁要跑这次调用（agent 实例名）：卡片的信封显示它。
-        agent: String,
-        /// 这次调用属于哪个模块（内置 / 核心自有为空，没有模块的工具按工具名问）。
-        module: Option<String>,
-        tool: String,
-        /// 模型给的参数原文（如实展示，让用户看清要执行什么）。
-        args: String,
-    },
 }
 
 /// 目的：请教这一关的选项 id——附一句回话（id 是契约，改文案不改行为）。
@@ -631,12 +620,6 @@ pub const OPT_PLAN_SAY: &str = "plan_say";
 pub const OPT_NODE_REWORK: &str = "node_rework";
 /// 目的：节点没过这一关的选项 id——先说一句，由核心 AI 判这句话够不够明确。
 pub const OPT_NODE_SAY: &str = "node_say";
-/// 目的：工具级确认的选项 id——放行这一次。
-pub const OPT_TOOL_ALLOW: &str = "allow";
-/// 目的：工具级确认的选项 id——拒绝（工具不执行，回一条"用户拒绝"的结果给模型）。
-pub const OPT_TOOL_DENY: &str = "deny";
-/// 目的：工具级确认的选项 id——放行这一次，且**本轮（这次生成）剩余 ask 都不再问**（不落盘成策略）。
-pub const OPT_TOOL_ALLOW_TURN: &str = "allow_turn";
 
 /// 目的：工具的全名（内置 / 核心自有 = 工具名；模块工具 = 模块.工具）：卡片与记录都用这一种写法。
 pub fn qualify(module: Option<&str>, tool: &str) -> String {
@@ -655,7 +638,6 @@ impl Pending {
             Pending::ConfirmBegin => "confirm_begin",
             Pending::PlanReview => "plan_review",
             Pending::NodeBlocked { .. } => "node_blocked",
-            Pending::ToolApproval { .. } => "tool_approval",
             // 工具层自己发起的那一类（围栏这类）：机制名固定，重建材料就是那条问题本身。
             Pending::ToolAsk(_) => "tool_ask",
         }
@@ -671,17 +653,6 @@ impl Pending {
             Pending::NodeBlocked { nodes } => serde_json::json!({ "nodes": nodes }),
             // 工具层那一类：重建材料就是那条问题（谁在问 + 消息 + 选项集）。
             Pending::ToolAsk(ask) => serde_json::to_value(ask).unwrap_or(serde_json::Value::Null),
-            Pending::ToolApproval {
-                agent,
-                module,
-                tool,
-                args,
-            } => serde_json::json!({
-                "agent": agent,
-                "module": module,
-                "tool": tool,
-                "args": args
-            }),
             _ => serde_json::json!({}),
         }
     }
@@ -715,7 +686,7 @@ impl Pending {
                     })
                     .unwrap_or_default(),
             },
-            // 工具级确认与**工具层自己发起的那一类**都**不重建**：它们等在工作线程上，
+            // **工具层自己发起的那一类不重建**：它等在工作线程上，
             // 重启后那个等待方已经不存在——重建出来的卡没人能做主，等于拿一张答不了卡糊用户。
             _ => return None,
         })
@@ -745,12 +716,6 @@ impl Pending {
             Pending::NodeBlocked { .. } => vec![
                 o(OPT_NODE_REWORK, "重派没过的节点"),
                 o(OPT_NODE_SAY, "先说一句（核心判明确性）"),
-            ],
-            // 工具级确认：三条都是**真能执行**的（通道里没有置灰那一说）。
-            Pending::ToolApproval { .. } => vec![
-                o(OPT_TOOL_ALLOW, "放行这一次"),
-                o(OPT_TOOL_DENY, "拒绝（不执行）"),
-                o(OPT_TOOL_ALLOW_TURN, "放行，且本轮都不再问"),
             ],
             // 工具层那一类：选项集**由发起方给**（它才知道每条选项真能不能执行），通道原样渲染。
             Pending::ToolAsk(ask) => ask.options.iter().map(|(id, label)| o(id, label)).collect(),
@@ -809,21 +774,6 @@ impl Pending {
                 "有节点没过验收，要不要重派？".to_string(),
                 format!("没过验收的节点：{}。", nodes.join("、")),
                 advice.to_string(),
-            ),
-            Pending::ToolApproval {
-                agent,
-                module,
-                tool,
-                args,
-            } => (
-                "tools",
-                agent.clone(),
-                format!("是否执行工具 {}？", qualify(module.as_deref(), tool)),
-                format!(
-                    "{} 请求执行这次调用：这一席的权限表把它列为「要问」（ask 粒度）。",
-                    agent
-                ),
-                args.clone(),
             ),
             // 工具层那一类：**消息与选项原样来自发起方**——通道不解释内容，只把三段话与选项渲染出来。
             Pending::ToolAsk(ask) => (

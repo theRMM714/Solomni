@@ -57,10 +57,10 @@ function buildPermissionsPage(c, f) {
   c.body.appendChild(f.hostRoots.f);
   c.body.appendChild(f.hardDeny.f);
   c.body.appendChild(secTitle('默认授权'));
-  c.body.appendChild(field('默认权限档位', f.defProfile));
+  c.body.appendChild(field('默认网络档位', f.defProfile));
   c.body.appendChild(f.defSharedRead.wrap);
   c.body.appendChild(f.defSharedWrite.wrap);
-  c.body.appendChild(f.defTools.f);
+  c.body.appendChild(f.defDeny.f);
 }
 
 /// 4 页：资源与进程。

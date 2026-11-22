@@ -73,11 +73,7 @@ pub(crate) fn run_member_turn<H: TurnHost>(
                     bus.push(&sid, std::slice::from_ref(&ev));
                 }
             };
-            let io = TurnIo {
-                llm,
-                decisions,
-                ask,
-            };
+            let io = TurnIo { llm, ask };
             // 权威行与通知也进它自己的台，并在产出的当下落盘（重建与实时同源）。
             let mut sink = |ev: crate::capabilities::conversation::session::api::SessionEvent| {
                 bus.push(&child_sid, std::slice::from_ref(&ev));

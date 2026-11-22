@@ -40,6 +40,10 @@ pub struct SessionMeta {
     /// 目的：这条会话的权限层：根是 ceiling，子是 narrowing。全局给默认值，这里只覆盖显式字段。
     #[serde(default)]
     pub sandbox: crate::capabilities::permission::api::SessionSandbox,
+    /// 目的：这条会话对共享区归属的覆盖：根是覆盖（可放宽到全局默认之外），子是收窄。
+    ///   空 = 完全沿用上一层的范围。
+    #[serde(default)]
+    pub shared: crate::capabilities::workspace::api::SharedEdit,
     /// 目的：思考强度（会话级，只记在**工作根**上；子会话沿 parent 链共享同一个值）。
     /// 约束：None = 随模型默认；各模型是否支持由登记处的 thinking 映射决定（不支持的档拒绝切换）。
     #[serde(default, skip_serializing_if = "Option::is_none")]

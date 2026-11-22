@@ -6,25 +6,17 @@
 use std::collections::BTreeMap;
 
 use crate::capabilities::conversation::session::api::{ModuleTools, ServiceOp};
-use crate::capabilities::permission::api::PermissionSet;
 use crate::capabilities::residents::api::{ServiceState, ServiceView};
 use crate::capabilities::tools::api::ToolBook;
 
-/// 目的：角色面发放的工具 id 再按权限档位过滤——deny 的不发放（不是发放后再拒），ask 的照常发放。
-/// 参数：role_face = 角色表发放的 id 清单；book = 工具总表；permissions = 这一席的生效权限。
+/// 目的：角色面发放的工具 id 再去掉总表里没有的（发放了却查不到，等于发了个空 id）。
+/// 参数：role_face = 角色表发放的 id 清单；book = 工具总表。
 /// 返回：过滤后的 id 清单（发放顺序不变）。
-pub fn face_tools(
-    role_face: Vec<String>,
-    book: &ToolBook,
-    permissions: &PermissionSet,
-) -> Vec<String> {
+/// 约束：角色面**就是**授权面——档位只管网络开关，不再逐工具裁剪。
+pub fn face_tools(role_face: Vec<String>, book: &ToolBook) -> Vec<String> {
     role_face
         .into_iter()
-        .filter(|id| {
-            book.get(id)
-                .map(|s| permissions.offers(id, s.effect(), &s.max_reach(), s.scope))
-                .unwrap_or(true)
-        })
+        .filter(|id| book.get(id).is_some())
         .collect()
 }
 

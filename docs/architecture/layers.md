@@ -44,14 +44,15 @@
 | --- | --- | --- |
 | 0（地基库） | `kernel` | 无 |
 | 1 | `llm`、`permission`、`prompt`、`taskchain` | 0 |
-| 2 | `catalog`、`workspace` | 0–1 |
-| 3 | `residents`、`tools`、`vm` | 0–2 |
-| 4 | `conversation`、`provision` | 0–3 |
-| 5 | `maintenance`、`turn` | 0–4 |
-| 6 | `lifecycle`、`system`、`work` | 0–5 |
-| 7 | `runtime` | 0–6 |
+| 2 | `workspace` | 0–1 |
+| 3 | `catalog` | 0–2 |
+| 4 | `residents`、`tools`、`vm` | 0–3 |
+| 5 | `conversation`、`provision` | 0–4 |
+| 6 | `maintenance`、`turn` | 0–5 |
+| 7 | `lifecycle`、`system`、`work` | 0–6 |
+| 8 | `runtime` | 0–7 |
 
-> 7 层、17 个能力 + `kernel`：本表由 `layers.yaml` 生成（`node tests/docs-sync.mjs --write`），不手写。
+> 8 层、17 个能力 + `kernel`：本表由 `layers.yaml` 生成（`node tests/docs-sync.mjs --write`），不手写。
 <!-- END:layer-table -->
 
 - 门禁要求 `layers.yaml` 里声明的层号**等于**按现有依赖重算的层号（`tests/gates/structure/layers.js`）；写宽一层就等于让门禁放水。

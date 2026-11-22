@@ -150,45 +150,24 @@ pub struct PermissionView {
     pub label: String,
     /// 目的：一句话说明。
     pub summary: String,
-    /// 目的：生效 reach。
-    pub reach: Vec<crate::capabilities::permission::api::Reach>,
-    /// 目的：生效 decision。
-    pub decisions: PermissionDecisionsView,
-    /// 目的：共享区范围。
+    /// 目的：生效的共享区归属（读 / 写范围与黑名单）。
     pub shared: PermissionSharedView,
-    /// 目的：逐工具决定。
-    pub tools: std::collections::BTreeMap<String, crate::capabilities::permission::api::Decision>,
     /// 目的：这条会话是不是子会话收窄层。
     pub narrowed: bool,
     /// 目的：父档位（子会话）。
     pub parent_profile: Option<crate::capabilities::permission::api::ProfileId>,
-    /// 目的：无交集 / 无权限时的如实提示（空 = 没有）。
-    pub warning: String,
-    /// 目的：四档可选值（前端照抄，不自己编）。
+    /// 目的：可选档位（前端照抄，不自己编）。
     pub profiles: Vec<crate::capabilities::permission::api::ProfileSpec>,
 }
 
-/// 目的：权限视图里的四类处置。
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct PermissionDecisionsView {
-    /// 目的：读类。
-    pub read: crate::capabilities::permission::api::Decision,
-    /// 目的：写类。
-    pub write: crate::capabilities::permission::api::Decision,
-    /// 目的：执行类、sandbox scope。
-    pub exec_sandbox: crate::capabilities::permission::api::Decision,
-    /// 目的：执行类、external scope。
-    pub exec_external: crate::capabilities::permission::api::Decision,
-}
-
-/// 目的：权限视图里的共享区范围。
+/// 目的：权限视图里的共享区归属。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PermissionSharedView {
     /// 目的：读范围。
-    pub read: crate::capabilities::permission::api::ScopeMode,
-    /// 目的：写范围。
-    pub write: crate::capabilities::permission::api::ScopeMode,
-    /// 目的：追加黑名单。
+    pub read: crate::capabilities::workspace::api::ScopeMode,
+    /// 目的：写范围（提交的准入门槛）。
+    pub write: crate::capabilities::workspace::api::ScopeMode,
+    /// 目的：黑名单（全局硬底线 + 会话追加）。
     pub deny: Vec<String>,
 }
 
@@ -245,9 +224,12 @@ pub struct SessionEdit {
     pub guest: Option<String>,
     #[serde(default)]
     pub pins: BTreeMap<String, String>,
-    /// 目的：会话级权限层（根 ceiling / 子 narrowing）。`None` = 保留现值。
+    /// 目的：会话级网络档位层（根 ceiling / 子 narrowing）。`None` = 保留现值。
     #[serde(default)]
     pub permission: Option<crate::capabilities::permission::api::PermissionLayer>,
+    /// 目的：会话级共享区归属（根覆盖 / 子收窄）。`None` = 保留现值。
+    #[serde(default)]
+    pub shared: Option<crate::capabilities::workspace::api::SharedEdit>,
 }
 
 /// 目的：上下文「继续」只在后端判断确实有断点时出现（单 agent 上一轮被打断 / 协作泵没走完）。

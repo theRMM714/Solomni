@@ -151,9 +151,6 @@ impl Work {
         let roster = self.modules.roster();
         let reserved = self.systools.reserved_names();
         let mut metas: Vec<AgentMeta> = Vec::new();
-        if let Some(p) = &edit.permission {
-            crate::capabilities::permission::api::validate_layer(p)?;
-        }
         for a in &edit.agents {
             crate::capabilities::catalog::registry::api::validate_name(&a.name)?;
             crate::capabilities::catalog::registry::api::check_reserved(&a.name, &reserved)?;
@@ -290,6 +287,21 @@ impl Work {
                 new_meta.sandbox.ceiling = None;
             }
         }
+        if let Some(s) = &edit.shared {
+            if meta.parent.is_none() {
+                // 根：读 / 写范围整体覆盖，黑名单追加；先按当前生效范围校验写法。
+                turn.shared_scope_for(registry, &meta)?.apply_root(s)?;
+                new_meta.shared = s.clone();
+            } else {
+                // 子：只能收窄；父的生效范围是校验基线。
+                let parent = self
+                    .history
+                    .meta(meta.parent.as_deref().unwrap_or_default())?;
+                turn.shared_scope_for(registry, &parent)?
+                    .apply_narrowing(s)?;
+                new_meta.shared = s.clone();
+            }
+        }
         // 同一 agent 全树只有一份配置：子会话编辑写回所属名单；主会话 / proxy 子工作编辑同步整棵子树。
         let mut new_children: Vec<SessionMeta> = Vec::new();
         if owner.name != meta.name {
@@ -376,7 +388,7 @@ impl Work {
         ))
     }
 
-    /// 目的：用户快速切档——只改 profile（重置 reach / decisions / 逐工具决定），保留共享区范围与黑名单。
+    /// 目的：用户快速切档——只改网络档位，共享区归属原样保留。
     /// 约束：根级动作；整棵 work tree 有会话在生成时拒绝；切换在下一次权限判定生效。
     pub(crate) fn set_permission_profile(
         &mut self,
@@ -399,9 +411,6 @@ impl Work {
         }
         .unwrap_or_default();
         layer.profile = Some(profile);
-        layer.reach = None;
-        layer.decisions = None;
-        layer.tools.clear();
         if meta.parent.is_none() {
             turn.permissions_for(registry, &meta)?.apply_root(&layer)?;
         } else {
@@ -495,10 +504,7 @@ impl Work {
             "permission": serde_json::to_value(&meta.sandbox).unwrap_or(serde_json::Value::Null),
             "permission_effective": turn.permissions_for(registry, meta).ok().map(|p| serde_json::json!({
                 "profile": p.profile,
-                "reach": p.reach,
-                "decisions": p.decisions,
-                "shared": { "read": p.shared_read, "write": p.shared_write, "deny": p.deny },
-                "tools": p.tools,
+                "shared": turn.shared_scope_for(registry, meta).ok(),
             })),
             "agents": meta.agents.iter().map(|a| serde_json::json!({
                 "name": a.name,

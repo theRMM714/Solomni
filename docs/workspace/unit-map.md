@@ -29,6 +29,7 @@
 | `src/capabilities/workspace/domain/hash.rs` | 内容指纹 SHA-256：增量实现，共享区内容寻址的唯一键（纯逻辑） |
 | `src/capabilities/workspace/domain/path_filter.rs` | 工作区过滤的唯一名单与匹配规则：`.workignore` 的文件名与播种内容、把规则文本编译成与 git 同引擎的匹配器（`Rules`）、按相对路径判定忽略（命中的目录连带整棵子树）；内容面与检索面都从这里取规则，不另立名单 |
 | `src/capabilities/workspace/domain/readfact.rs` | 读取事实 `ReadFact`：哪个工作树、哪个路径、读到哪几行、当时的整份指纹（随工具行落盘，过期由它派生） |
+| `src/capabilities/workspace/domain/scope.rs` | 共享区路径归属的唯一实现：三态 `ScopeMode`（all / none / 路径数组，手写序列化）、`SharedScope`（读 / 写 / 黑名单的判定、求交、收窄、合并全局硬底线）、`SharedEdit`（会话级覆盖）与条目规范化 `hit` / `normalize` / `validate_entry` |
 | `src/capabilities/workspace/domain/work_tools.rs` | 成员侧工作工具的回执渲染纯逻辑：工具名清单（`is_work_tool`）、拉取 / 提交 / 推送 / 同步 / 状态 / 过滤名单 / 三方视图 / 差异 / 解决 / 回退 / 备份恢复的回执文本 |
 | `src/capabilities/workspace/domain/workstore.rs` | 版本化工作区纯逻辑的入口：`record` / `path` / `merge` / `resolve` / `status` / `diff` / `reset` 七个职责子模块与内联单测 `tests` 的声明，并向 `api.rs` / `service` 重导出同一个调用面 |
 | `src/capabilities/workspace/domain/workstore/record.rs` | 版本库记录形态：`Index` / `Tree` / `Change` / `Commit` / `Ref` 与待提交、对象信息、GC 报告 |

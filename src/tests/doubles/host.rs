@@ -132,7 +132,6 @@ pub(crate) fn with_turn_io<T>(
 ) -> T {
     let io = TurnIo {
         llm: Default::default(),
-        decisions: None,
         ask: None,
     };
     let cancel = std::sync::atomic::AtomicBool::new(false);

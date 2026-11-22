@@ -1,6 +1,6 @@
 // 浏览器 E2E（L4，由 orchestrator.js 用 E2E_DRIVER=browser.cjs 调起）：
 // 复用同一套夹具 / 假供应商 / 端口，只把驱动换成真实浏览器里的关键旅程。
-// 判据是可见行为：建会话、流式回复、工具裁决卡、设置保存、存储回收、上传。
+// 判据是可见行为：建会话、流式回复、设置保存、存储回收、上传。
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
@@ -190,37 +190,20 @@ async function saveArtifacts(context, page, stamp) {
     const sid = created.sid;
     await page.locator("#tabs .tab", { hasText: workName }).waitFor();
 
-    // ③ 发送并看到流式回复（默认档位允许 write：假供应商先调工具、拿到结果后收尾）
+    // ③ 发送并看到流式回复（假供应商先调工具、拿到结果后收尾）
     await page.fill("#input", "你好，先说一句");
     await page.click("#btn-send");
     await page.locator("#stream .turn-text").getByText("收到", { exact: false }).first().waitFor({ timeout: 30000 });
     console.log("PASS 发送消息并收到回复");
 
-    // 把 write 设成逐工具确认：下面要验真实裁决卡。
-    assert((await act(sid, "edit_session", {
-      agents: [{ name: "单兵", modules: ["summarizer"], model: "m1" }],
-      permission: { tools: { write: "ask" } },
-      tier: "host",
-    })).status === 200, "设置 write 需确认");
-
-    // ④ 工具裁决卡：真停下、真提交 allow、卡消失
-    await page.fill("#input", "工具确认：放行");
-    await page.click("#btn-send");
-    const card = page.locator(".gate-card").first();
-    await card.waitFor({ timeout: 30000 });
-    await card.locator("button", { hasText: /放行/ }).first().click();
-    await card.waitFor({ state: "detached", timeout: 30000 });
-    await page.locator("#stream .turn-text").getByText("收到", { exact: false }).first().waitFor({ timeout: 30000 });
-    console.log("PASS 裁决卡提交后继续生成");
-
-    // ⑤ 设置保存
+    // ④ 设置保存
     await page.click("#btn-settings");
     await page.locator(".modal-title", { hasText: "设置" }).waitFor();
     await page.locator('.settings-foot button:has-text("保存")').click();
     await page.locator(".toast", { hasText: /设置已保存|已保存/ }).first().waitFor({ timeout: 20000 });
     console.log("PASS 设置保存");
 
-    // ⑥ 存储回收：有可回收项就确认，没有就接受空提示；两种都不能静默无反馈
+    // ⑤ 存储回收：有可回收项就确认，没有就接受空提示；两种都不能静默无反馈
     await page.locator('.settings-nav button[data-id="storage"]').click();
     await page.locator(".storage-report .storage-actions").waitFor();
     await page.locator('.storage-report button:has-text("按策略回收")').click();
@@ -244,7 +227,7 @@ async function saveArtifacts(context, page, stamp) {
       console.log("PASS 存储回收（当前没有到策略条件的项，给出明确提示）");
     }
 
-    // ⑦ 上传：文件选择器 → work/
+    // ⑥ 上传：文件选择器 → work/
     await page.keyboard.press("Escape");
     await page.locator(".modal-title", { hasText: "设置" }).waitFor({ state: "detached" });
     const [chooser] = await Promise.all([

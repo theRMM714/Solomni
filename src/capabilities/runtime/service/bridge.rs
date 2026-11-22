@@ -255,7 +255,7 @@ impl Core {
                     granted_at,
                     tier: crate::kernel::api::types::Tier::Host,
                     guest: None,
-                    profile: crate::capabilities::permission::api::ProfileId::AllReach,
+                    profile: crate::capabilities::permission::api::ProfileId::Online,
                     workspace: None,
                     freshness: None,
                 },

@@ -31,7 +31,7 @@ export const settingsCopy = {
     safetyKind: 'warn',
   },
   permissionDefaults: {
-    detail: '默认权限是新建会话的起点；全局黑名单是硬底线，会话只能追加、不能清空。',
+    detail: '默认网络档位与默认共享区范围是新建会话的起点；全局黑名单是硬底线，会话只能追加、不能清空。沙箱本身恒可读写，模块目录恒只读。',
   },
   guestLimits: {
     detail: '每台虚拟机固定 2 GB 内存 / 2 核：到上限时新建会如实拒绝，不会悄悄抢资源。填 0 = 不限制。',

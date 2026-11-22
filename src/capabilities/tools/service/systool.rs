@@ -126,7 +126,7 @@ pub fn execute_with_budget(
     // 写类工具先过写权限（共享主副本是否可写 + 路径白黑名单 + 模块目录只读）；
     // 读类工具过读权限（只对共享主副本生效；私有沙箱与模块目录照旧可读）。
     if matches!(name, WRITE | EDIT) {
-        if !sb.can_write(&place, &path) {
+        if !sb.can_write(&place) {
             return fail(sb.write_refusal(&place, &path));
         }
     } else if matches!(name, READ | LIST | GREP) && !sb.can_read(&place, &path) {
@@ -725,7 +725,7 @@ fn apply_patch(
             Ok(x) => x,
             Err(e) => return fail(block_fault(n, e)),
         };
-        if !sb.can_write(&place, &path) {
+        if !sb.can_write(&place) {
             return fail(block_fault(n, sb.write_refusal(&place, &path)));
         }
         let Some(root) = sb.root_of(&place) else {

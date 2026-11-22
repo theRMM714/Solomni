@@ -9,12 +9,13 @@ use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::AppSettings;
 use crate::capabilities::conversation::session::api::{Mode, RunState, SessionMeta};
 use crate::capabilities::permission::api::{
-    PermissionDefaults, PermissionLayer, ProfileId, Reach, ReachSet, SessionSandbox,
+    PermissionDefaults, PermissionLayer, ProfileId, SessionSandbox,
 };
 use crate::capabilities::turn::env::api::{
-    MemberFacts, SandboxesFacts, host_read_roots, member, network_allowed, permissions, sandboxes,
+    MemberFacts, SandboxesFacts, SeatAccess, host_read_roots, member, network_allowed, permissions,
+    sandboxes, shared_scope,
 };
-use crate::capabilities::workspace::api::{Sandbox, WorkRoots};
+use crate::capabilities::workspace::api::{Sandbox, ScopeMode, SharedEdit, SharedScope, WorkRoots};
 use crate::kernel::api::types::ExecSpec;
 use crate::kernel::api::types::Tier;
 use crate::tests::doubles::module_of;
@@ -40,6 +41,7 @@ fn meta(name: &str, parent: Option<&str>, tier: Tier, mode: Mode) -> SessionMeta
             ..Default::default()
         },
         sandbox: SessionSandbox::default(),
+        shared: SharedEdit::default(),
         parent: parent.map(str::to_string),
         node: None,
         delegation: None,
@@ -60,21 +62,21 @@ fn sandbox() -> Sandbox {
         modules: BTreeMap::new(),
         modules_with_userdata: Default::default(),
         permissions: PermissionDefaults::default().to_permission_set(),
+        scope: SharedScope::default(),
         path_codec: None,
         filter_rules: PathBuf::from(".work").join(".workignore"),
     }
 }
 
+/// 目的：网络档位沿链求值——全局默认 → 根覆盖 → 每层子会话收窄；子会话不能选比父更宽的档。
 #[test]
-fn permissions_narrow_with_the_chain_and_keep_the_hard_deny() {
+fn profile_narrows_with_the_chain() {
     let mut app = AppSettings::default();
-    app.sandbox.defaults.profile = ProfileId::External;
-    app.sandbox.policy.deny = vec!["secret/".to_string()];
+    app.sandbox.defaults.profile = ProfileId::Online;
     let mut root = meta("root", None, Tier::Host, Mode::Single);
     root.sandbox = SessionSandbox {
         ceiling: Some(PermissionLayer {
-            profile: Some(ProfileId::Workspace),
-            ..Default::default()
+            profile: Some(ProfileId::Offline),
         }),
         narrowing: None,
     };
@@ -82,21 +84,64 @@ fn permissions_narrow_with_the_chain_and_keep_the_hard_deny() {
     child.sandbox = SessionSandbox {
         ceiling: None,
         narrowing: Some(PermissionLayer {
-            reach: Some(ReachSet::from([Reach::Private, Reach::SharedRead])),
-            ..Default::default()
+            profile: Some(ProfileId::Offline),
         }),
     };
-    let out = permissions(&[root, child], &app).expect("权限链应能求值");
-    assert_eq!(out.profile, ProfileId::Workspace);
-    assert_eq!(
-        out.reach,
-        ReachSet::from([Reach::Private, Reach::SharedRead])
+    let out = permissions(&[root.clone(), child.clone()], &app).expect("档位链应能求值");
+    assert_eq!(out.profile, ProfileId::Offline);
+    assert!(
+        !out.allows_network(),
+        "根会话关掉的网络，子会话不能自己打开"
     );
-    assert!(!out.reach.contains(Reach::HostRead));
+    // 子会话显式选联网 = 比父更宽：拒绝，而不是悄悄按联网跑。
+    child.sandbox.narrowing = Some(PermissionLayer {
+        profile: Some(ProfileId::Online),
+    });
+    let why = permissions(&[root, child], &app).expect_err("子会话不能放宽档位");
+    assert!(why.contains("更宽"), "拒绝文案要说清是「更宽」：{}", why);
+}
+
+/// 目的：共享区归属沿链求值——全局默认 → 根覆盖 → 子会话收窄；全局硬黑名单最后并上。
+#[test]
+fn shared_scope_applies_root_then_narrows_and_keeps_hard_deny() {
+    let mut app = AppSettings::default();
+    app.sandbox.scope = SharedScope {
+        read: ScopeMode::All,
+        write: ScopeMode::Paths(vec!["docs".to_string()]),
+        deny: Vec::new(),
+    };
+    app.sandbox.policy.deny = vec!["secret/".to_string()];
+    let mut root = meta("root", None, Tier::Host, Mode::Single);
+    root.shared = SharedEdit {
+        read: Some(ScopeMode::Paths(vec![
+            "docs".to_string(),
+            "src".to_string(),
+        ])),
+        write: Some(ScopeMode::Paths(vec!["docs".to_string()])),
+        deny: Vec::new(),
+    };
+    let mut child = meta("root--a", Some("root"), Tier::Host, Mode::Collab);
+    child.shared = SharedEdit {
+        read: Some(ScopeMode::Paths(vec!["docs".to_string()])),
+        ..Default::default()
+    };
+    let out = shared_scope(&[root.clone(), child.clone()], &app).expect("共享区归属应能求值");
+    assert_eq!(out.read, ScopeMode::Paths(vec!["docs".to_string()]));
+    assert_true_ok(&out, "docs/a.txt");
+    assert!(!out.read_ok("src/x.rs"), "子会话把读范围收窄到了 docs");
     assert!(
         out.deny.iter().any(|d| d == "secret/"),
         "全局硬黑名单必须并上"
     );
+    assert!(!out.read_ok("secret/key.txt"), "硬黑名单优先于范围");
+    // 子会话想把读范围放回整棵 = 放宽：拒绝。
+    child.shared.read = Some(ScopeMode::All);
+    let why = shared_scope(&[root, child], &app).expect_err("子会话不能放宽共享区范围");
+    assert!(why.contains("收窄"), "拒绝文案要说清是收窄：{}", why);
+}
+
+fn assert_true_ok(scope: &SharedScope, rel: &str) {
+    assert!(scope.read_ok(rel), "{} 应在读范围内", rel);
 }
 
 #[test]
@@ -205,7 +250,10 @@ fn sandboxes_give_each_agent_only_its_own_modules() {
         codec: None,
     };
     let out = sandboxes(&facts, &|_| {
-        Ok(PermissionDefaults::default().to_permission_set())
+        Ok(SeatAccess {
+            permissions: PermissionDefaults::default().to_permission_set(),
+            scope: SharedScope::default(),
+        })
     })
     .expect("沙箱应能组装");
     assert_eq!(out.list.len(), 2);

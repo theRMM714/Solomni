@@ -554,7 +554,6 @@ pub(crate) fn an_aborted_generation_never_executes_a_repairable_envelope() {
     let events = {
         let io = crate::capabilities::conversation::session::api::TurnIo {
             llm: Default::default(),
-            decisions: None,
             ask: None,
         };
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -599,7 +598,6 @@ pub(crate) fn a_cancelled_generation_never_executes_a_valid_tool_envelope() {
     let events = {
         let io = crate::capabilities::conversation::session::api::TurnIo {
             llm: Default::default(),
-            decisions: None,
             ask: None,
         };
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -652,7 +650,6 @@ pub(crate) fn an_interrupted_generation_keeps_the_half_sentence_as_a_cut_line() 
     let events = {
         let io = crate::capabilities::conversation::session::api::TurnIo {
             llm: Default::default(),
-            decisions: None,
             ask: None,
         };
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));

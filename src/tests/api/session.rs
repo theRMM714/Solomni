@@ -351,6 +351,7 @@ fn editing_is_refused_while_a_session_is_generating() {
         guest: None,
         pins: std::collections::BTreeMap::new(),
         permission: None,
+        shared: None,
     };
     faces.work.edit(&sid, edit()).expect("没在生成时可以改");
 
@@ -512,6 +513,7 @@ fn create_session_and_config_carry_chara_as_a_snapshot() {
                 guest: None,
                 pins: std::collections::BTreeMap::new(),
                 permission: None,
+                shared: None,
             },
         )
         .expect("改配置");
@@ -593,14 +595,14 @@ fn set_permission_profile_action_switches_the_session_profile() {
         .actions
         .act(ActionCall {
             id: "set_permission_profile".to_string(),
-            args: serde_json::json!({ "session_id": sid, "profile": "view" }),
+            args: serde_json::json!({ "session_id": sid, "profile": "online" }),
             caller: Caller::User,
             out: Output::Final,
         })
         .expect("快速切档");
     assert_eq!(
         faces.work.config(&sid).unwrap().permission.profile,
-        ProfileId::View
+        ProfileId::Online
     );
     assert!(
         faces

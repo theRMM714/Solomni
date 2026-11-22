@@ -610,11 +610,9 @@ function settingsForm() {
   const hostRoots = area('主机只读根（绝对路径，每行一条）', sp.host_read_roots);
   const hardDeny = area('全局黑名单（工作区相对路径，只增不减）', sp.deny);
   const defProfile = selectInput([
-    { value: 'view', label: '仅可查看' },
-    { value: 'workspace', label: '工作区内修改（默认）' },
-    { value: 'external', label: '外部可达（逐次确认）' },
-    { value: 'all_reach', label: '全可达（自动放行）' },
-  ], sd.profile || 'workspace');
+    { value: 'offline', label: '离线（默认）' },
+    { value: 'online', label: '联网' },
+  ], sd.profile || 'offline');
   const scopeArea = (label, value) => {
     const mode = Array.isArray(value) ? 'paths' : (value === 'none' ? 'none' : 'all');
     const sel = selectInput([
@@ -636,12 +634,10 @@ function settingsForm() {
       get: () => (sel.value === 'all' ? 'all' : sel.value === 'none' ? 'none' : parseSettingLines(t.value)),
     };
   };
-  const defSharedRead = scopeArea('默认共享区读范围', (sd.shared && sd.shared.read) || 'all');
-  const defSharedWrite = scopeArea('默认共享区写范围', (sd.shared && sd.shared.write) || 'all');
-  const defTools = area(
-    '默认逐工具决定（每行一条：工具名=allow/ask/deny）',
-    Object.entries(sd.tools || {}).map(([k, v]) => k + '=' + v),
-  );
+  const defScope = sb.scope || {};
+  const defSharedRead = scopeArea('默认共享区读范围', defScope.read || 'all');
+  const defSharedWrite = scopeArea('默认共享区写范围', defScope.write || 'all');
+  const defDeny = area('默认共享区黑名单（工作区相对路径）', defScope.deny);
   const st = state.settings.storage || {};
   const stPeriodic = checkbox('启用全局周期回收', st.periodic_gc !== false, '关掉只停周期；构建前 headroom 始终启用');
   const stInterval = numberInput('全局自动回收间隔（分钟，至少 15）', st.gc_interval_minutes == null ? 15 : st.gc_interval_minutes, 15, 10080);
@@ -650,7 +646,7 @@ function settingsForm() {
   const stVolume = numberInput('新构建缓存卷大小（GiB）', st.build_volume_gib == null ? 16 : st.build_volume_gib, 1, 1024);
   const stFree = numberInput('宿主最低剩余空间（GiB）', st.min_free_gib == null ? 2 : st.min_free_gib, 0, 1024);
   const stLog = numberInput('日志保留天数（0 = 不按龄）', st.log_keep_days == null ? 14 : st.log_keep_days, 0, 3650);
-  return { stream, cot, to, remind, pct, keep, compactModel, guests, thinkLevels, network, writeAcl, enFs, enNet, enTree, enEnv, onUnavailable, hostRoots, hardDeny, defProfile, defSharedRead, defSharedWrite, defTools, stPeriodic, stInterval, stCap, stKeep, stVolume, stFree, stLog };
+  return { stream, cot, to, remind, pct, keep, compactModel, guests, thinkLevels, network, writeAcl, enFs, enNet, enTree, enEnv, onUnavailable, hostRoots, hardDeny, defProfile, defSharedRead, defSharedWrite, defDeny, stPeriodic, stInterval, stCap, stKeep, stVolume, stFree, stLog };
 }
 
 function parseSettingLines(text) {
@@ -692,24 +688,11 @@ function collectSettings(f) {
         host_read_roots: parseSettingLines(f.hostRoots.t.value),
         deny: parseSettingLines(f.hardDeny.t.value),
       },
-      defaults: {
-        profile: f.defProfile.value,
-        shared: {
-          read: f.defSharedRead.get(),
-          write: f.defSharedWrite.get(),
-          deny: [],
-        },
-        tools: (() => {
-          const out = {};
-          for (const line of parseSettingLines(f.defTools.t.value)) {
-            const i = line.indexOf('=');
-            if (i < 0) continue;
-            const k = line.slice(0, i).trim();
-            const v = line.slice(i + 1).trim();
-            if (k && ['allow', 'ask', 'deny'].includes(v)) out[k] = v;
-          }
-          return out;
-        })(),
+      defaults: { profile: f.defProfile.value },
+      scope: {
+        read: f.defSharedRead.get(),
+        write: f.defSharedWrite.get(),
+        deny: parseSettingLines(f.defDeny.t.value),
       },
     },
   };

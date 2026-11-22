@@ -56,7 +56,7 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
     tier: cfg.tier === 'vm' ? 'vm' : 'host',
     guest: cfg.guest || '',
     pins: {},
-    permission: cfg.permission || { profile: 'workspace', shared: { read: 'all', write: 'all', deny: [] }, tools: {} },
+    permission: cfg.permission || { profile: 'offline', shared: { read: 'all', write: 'all', deny: [] } },
   };
   const pins0 = cfg.pins || {};
   for (const k of Object.keys(pins0)) draft.pins[k] = pins0[k];
@@ -188,7 +188,8 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
   }
   box.appendChild(secP);
 
-  // 会话权限：四档 + 共享区三态 + 逐工具决定（网络是全局开关，不在这里）
+  // 会话权限：网络档位（两档）+ 共享区归属（读写各三态 + 追加黑名单）。
+  // 沙箱恒可读写、模块目录恒只读、工具面只由角色面决定——没有「逐工具决定」这种东西。
   const secPerm = ui.div('cfg-sec');
   secPerm.appendChild(ui.div('cfg-sec-title', '会话权限'));
   secPerm.appendChild(ui.detail(sessionConfigCopy.network));
@@ -196,19 +197,17 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
   const parseLines = (text) => String(text || '')
     .split(/[\n,]/).map((s) => s.trim()).filter((s) => s.length > 0);
   const profiles = (cfg.permission && cfg.permission.profiles) || [
-    { id: 'view', label: '仅可查看', summary: '' },
-    { id: 'workspace', label: '工作区内修改', summary: '' },
-    { id: 'external', label: '外部可达（逐次确认）', summary: '' },
-    { id: 'all_reach', label: '全可达（自动放行）', summary: '' },
+    { id: 'offline', label: '离线', summary: '' },
+    { id: 'online', label: '联网', summary: '' },
   ];
-  const curProfile = perm.profile || 'workspace';
+  const curProfile = perm.profile || 'offline';
   const parentProfile = (cfg.permission && cfg.permission.parent_profile) || null;
   const parentIndex = parentProfile ? profiles.findIndex((p) => p.id === parentProfile) : profiles.length - 1;
   const prof = selectInput(profiles.map((p) => ({ value: p.id, label: p.label })), curProfile);
   Array.from(prof.children || []).forEach((o, i) => {
     if (parentProfile && i > parentIndex) o.disabled = true;
   });
-  secPerm.appendChild(field('权限档位', prof));
+  secPerm.appendChild(field('网络档位', prof));
   const profHint = ui.hint('');
   secPerm.appendChild(profHint);
   const syncProf = () => {
@@ -246,20 +245,7 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
   const getRead = scopeEditor('共享区读范围', (perm.shared && perm.shared.read) || 'all');
   const getWrite = scopeEditor('共享区写范围', (perm.shared && perm.shared.write) || 'all');
   const deny = makeList('追加黑名单（读写都禁；全局黑名单是硬底线，这里只能追加）', (perm.shared && perm.shared.deny) || []);
-  const toolsArea = areaInput('每行一条：工具名=allow/ask/deny');
-  toolsArea.value = Object.entries(perm.tools || {}).map(([k, v]) => k + '=' + v).join('\n');
-  secPerm.appendChild(field('逐工具决定（可选；子会话不能改）', toolsArea));
-  const parseTools = () => {
-    const out = {};
-    for (const line of parseLines(toolsArea.value)) {
-      const i = line.indexOf('=');
-      if (i < 0) continue;
-      const k = line.slice(0, i).trim();
-      const v = line.slice(i + 1).trim();
-      if (k && ['allow', 'ask', 'deny'].includes(v)) out[k] = v;
-    }
-    return out;
-  };
+  secPerm.appendChild(ui.detail('沙箱本身恒可读写；模块目录恒只读；共享区是主副本，改动经 work_commit 提交。'));
   box.appendChild(secPerm);
 
   // 思考强度：工作根一个档（子会话共享）；改了就生效，与状态栏 chip 走同一个动作。
@@ -330,14 +316,11 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
       tier: draft.tier,
       guest: draft.tier === 'vm' ? (draft.guest || null) : null,
       pins: pins,
-      permission: {
-        profile: prof.value,
-        shared: {
-          read: getRead(),
-          write: getWrite(),
-          deny: parseLines(deny.value),
-        },
-        tools: (cfg.permission && cfg.permission.narrowed) ? {} : parseTools(),
+      permission: { profile: prof.value },
+      shared: {
+        read: getRead(),
+        write: getWrite(),
+        deny: parseLines(deny.value),
       },
     };
     save.disabled = true;

@@ -85,9 +85,7 @@ pub(crate) fn run_execution<S: Seat>(
             &mut |_r: &crate::capabilities::conversation::session::service::engine::round::Round,
                   _s: &mut dyn FnMut(crate::capabilities::conversation::session::api::SessionEvent)| {},
             &mut sink,
-            // 测试不接工具级确认：直接执行（确认路径由 permission 的用例单独钉）。
-            None,
-            // 也不接工具层提问：默认路径就是"没有可回答的前端 = fail-closed 拒绝"。
+            // 不接工具层提问：默认路径就是"没有可回答的前端 = fail-closed 拒绝"。
             None,
             &[],
             false,

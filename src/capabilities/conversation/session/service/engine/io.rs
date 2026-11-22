@@ -1,5 +1,5 @@
 //! 目的：回合引擎的端口与结论——一次回合要用的 IO 槽位（`TurnIo`）与两类回合结果（`MemberTurn` / `CompactedTurn`）。
-//! 管：`TurnIo` 的三个槽位（调用参数 / 裁决队 / 提问端口）；`MemberTurn` 的结论形态与构造；`CompactedTurn` 的压缩结果。
+//! 管：`TurnIo` 的两个槽位（调用参数 / 提问端口）；`MemberTurn` 的结论形态与构造；`CompactedTurn` 的压缩结果。
 //! 不管：会话状态（在 `domain/`）；模型调用与工具执行机制（在 `llm` / `tools` 的端口后）；取消开关与短暂事件出口（按调用形参传，不进结构）。
 //! 联动：`driver` / `round` / `tools` 读 `TurnIo`；协作能力与 turn 的生成流程消费 `MemberTurn`；`CompactedTurn` 由 `driver::compact_session` 产出。
 
@@ -8,16 +8,13 @@ use crate::capabilities::llm::api::{LlmOpts, Verb};
 use crate::kernel::ports::AskUser;
 use std::sync::Arc;
 
-/// 目的：一次回合要用的 IO 槽位：调用参数 / 本会话的裁决队 / 工具层提问端口。
+/// 目的：一次回合要用的 IO 槽位：调用参数 / 工具层提问端口。
 /// 约束：`emit`（短暂事件出口）与 `cancel`（停止开关）**不进结构**：它们按调用形参传，
 ///   结构本身于是可克隆、可跨线程共享，也不用为借用期写生命周期。
 #[derive(Clone)]
 pub struct TurnIo {
     /// 目的：本回合的调用参数（流式与预算，来自全局设置）。
     pub llm: LlmOpts,
-    /// 目的：本会话的裁决队（工具级确认这类"等在工作线程上"的关进它）。
-    ///   `None` = 这一趟不接工具级确认（照常执行）——测试、讨论席与没有交互前端的生成都走它。
-    pub decisions: Option<Arc<dyn crate::capabilities::conversation::session::api::Gates>>,
     /// 目的：本会话的**提问端口**（工具执行层与围栏经它请用户裁决）：走同一条裁决队、**阻塞**等回答。
     ///   `None` = 这一趟没有可回答的前端（CLI 非交互、端到端夹具、测试、讨论席）——按 fail-closed 拒绝。
     pub ask: Option<Arc<dyn AskUser>>,

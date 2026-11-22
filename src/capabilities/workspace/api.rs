@@ -14,6 +14,11 @@ pub use crate::capabilities::workspace::domain::path_filter::{
     MAX_RULE_BYTES, MAX_RULE_CHARS, MAX_RULE_LINES, Rules, WORKIGNORE, WORKIGNORE_SEED, check_rule,
 };
 pub use crate::capabilities::workspace::domain::readfact::ReadFact;
+/// 目的：共享区路径归属（读 / 写范围与黑名单）——\`permission\` 只管档位与网络，归属规则在这里。
+#[allow(unused_imports)] // 入站面：规则类型给调用方与测试取用
+pub use crate::capabilities::workspace::domain::scope::{
+    ScopeMode, SharedEdit, SharedScope, hit, normalize, validate_entry,
+};
 /// 目的：`work_*` 工具的名字、取参与回执拼装——`tools` 与 `turn` 只从这里取，不碰 domain。
 #[allow(unused_imports)]
 pub use crate::capabilities::workspace::domain::work_tools::{
