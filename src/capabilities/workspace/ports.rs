@@ -46,6 +46,13 @@ pub trait WorkStore: Send + Sync {
     fn remove_under(&self, root: &Path, rel: &str) -> Result<(), String>;
     /// 递归列 root 下的文件（相对路径、/ 分隔、稳定排序）。
     fn list(&self, root: &Path) -> Result<Vec<String>, String>;
+    /// 目的：递归列 root 下**算工作区内容**的文件：按 `.workignore` 剪掉被忽略的目录与文件。
+    /// 约束：`rules` 是规则原文（`.workignore` 的内容），`None` = 不过滤；忽略语义只在
+    ///   `domain::path_filter`，本端口不解释规则。
+    fn list_visible(&self, root: &Path, rules: Option<&str>) -> Result<Vec<String>, String>;
+    /// 目的：读版本库目录里的一个小文本文件（过滤规则等）；不存在 = None。
+    fn read_text(&self, path: &Path) -> Result<Option<String>, String>;
+
     /// 目的：读 root 下文件的大小；不存在 = None。
     /// 约束：只读元数据，不读内容；上限预检用它。
     fn stat_under(&self, root: &Path, rel: &str) -> Result<Option<u64>, String>;

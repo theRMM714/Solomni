@@ -177,6 +177,14 @@ fn ws_key(root: &std::path::Path, rel: &str) -> String {
     format!("{}|{}", root.to_string_lossy(), rel)
 }
 
+/// 版本库目录里的小文本文件（如 `.workignore`）在替身里的键：按「父目录 | 文件名」存，与其它文件同一张表。
+fn text_key(path: &std::path::Path) -> String {
+    match (path.parent(), path.file_name()) {
+        (Some(dir), Some(name)) => ws_key(dir, &name.to_string_lossy()),
+        _ => path.to_string_lossy().into_owned(),
+    }
+}
+
 fn scan_bytes(bytes: &[u8], preview: Option<usize>) -> FileVersion {
     let mut scanner = AssetScanner::new(preview);
     scanner.feed(bytes);
@@ -304,6 +312,32 @@ impl WorkStore for InMemoryWorkStore {
             .collect();
         out.sort();
         Ok(out)
+    }
+
+    fn list_visible(
+        &self,
+        root: &std::path::Path,
+        rules: Option<&str>,
+    ) -> Result<Vec<String>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        let rules = crate::capabilities::workspace::api::Rules::compile(root, rules.unwrap_or(""))?;
+        let mut out = self.list(root)?;
+        out.retain(|rel| !rules.is_ignored(rel, false));
+        Ok(out)
+    }
+
+    fn read_text(&self, path: &std::path::Path) -> Result<Option<String>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        Ok(self
+            .files
+            .lock()
+            .expect("锁")
+            .get(&text_key(path))
+            .map(|b| String::from_utf8_lossy(b).into_owned()))
     }
 
     fn stat_under(&self, root: &std::path::Path, rel: &str) -> Result<Option<u64>, String> {

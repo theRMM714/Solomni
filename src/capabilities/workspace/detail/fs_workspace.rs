@@ -3,7 +3,9 @@
 //! 不管：版本库提交语义（在 service/domain）与会话 meta 的读写（在 session）。
 //! 联动：由 workspace 的 service.rs 持有（R12）；布局见 docs/session/session-model.md。
 
-use crate::capabilities::workspace::api::{AreaUsage, WorkFiles, WorkRoots, WorkUsage};
+use crate::capabilities::workspace::api::{
+    AreaUsage, WORKIGNORE, WORKIGNORE_SEED, WorkFiles, WorkRoots, WorkUsage,
+};
 use crate::capabilities::workspace::ports::Workdirs;
 use crate::kernel::api::layout;
 use std::collections::{BTreeMap, HashMap};
@@ -199,6 +201,14 @@ impl Workdirs for FsWorkspace {
     fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String> {
         let dir = self.session_dir(session);
         std::fs::create_dir_all(&dir).map_err(|e| format!("建会话目录失败：{}", e))?;
+        // 过滤规则要早于首次导入落地：规则只有一处（版本库目录里），导入与检索面看到同一份名单。
+        let store = dir.join(".work");
+        std::fs::create_dir_all(&store).map_err(|e| format!("建版本库目录失败：{}", e))?;
+        let rules = store.join(WORKIGNORE);
+        if !rules.exists() {
+            std::fs::write(&rules, WORKIGNORE_SEED)
+                .map_err(|e| format!("写过滤规则失败（{}）：{}", rules.display(), e))?;
+        }
         if !self.is_external(session) {
             std::fs::create_dir_all(dir.join("work"))
                 .map_err(|e| format!("建 work 目录失败：{}", e))?;

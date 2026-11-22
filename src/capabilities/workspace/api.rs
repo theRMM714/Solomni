@@ -8,6 +8,9 @@ pub use crate::capabilities::workspace::domain::asset::{
 };
 pub use crate::capabilities::workspace::domain::freshness::ReadVerdict;
 pub use crate::capabilities::workspace::domain::hash::{Sha256, content_hash};
+/// 目的：工作区过滤的唯一名单与匹配规则——`tools` 的 grep 与内容面的导入 / 清单都只从这里取。
+#[allow(unused_imports)] // 入站面：规则类型给调用方与测试取用
+pub use crate::capabilities::workspace::domain::path_filter::{Rules, WORKIGNORE, WORKIGNORE_SEED};
 pub use crate::capabilities::workspace::domain::readfact::ReadFact;
 /// 目的：`work_*` 工具的名字、取参与回执拼装——`tools` 与 `turn` 只从这里取，不碰 domain。
 #[allow(unused_imports)]

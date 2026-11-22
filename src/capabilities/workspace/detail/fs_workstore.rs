@@ -5,6 +5,7 @@
 //! 联动：由 workspace 的 `service.rs` 经 `WorkStore` 端口持有（R12）；装配在 `main.rs`。
 
 use crate::capabilities::workspace::domain::asset::{ASSET_CHUNK_BYTES, AssetScanner, FileVersion};
+use crate::capabilities::workspace::domain::path_filter::Rules;
 use crate::capabilities::workspace::domain::workstore::{
     Commit, Index, ObjectInfo, Pending, Ref, RefKind, join_rel,
 };
@@ -179,8 +180,8 @@ fn lock_store(store: &Path) -> Result<File, String> {
     )
 }
 
-/// 递归列文件（只列文件），相对路径用 / 分隔，稳定排序。
-fn collect(root: &Path, out: &mut Vec<String>, prefix: &str) {
+/// 递归列文件（只列文件），相对路径用 / 分隔，稳定排序；给了规则就整棵剪掉被忽略的子树。
+fn collect(root: &Path, out: &mut Vec<String>, prefix: &str, rules: Option<&Rules>) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
@@ -200,8 +201,11 @@ fn collect(root: &Path, out: &mut Vec<String>, prefix: &str) {
         } else {
             format!("{}/{}", prefix, name)
         };
+        if rules.is_some_and(|r| r.is_ignored(&rel, is_dir)) {
+            continue;
+        }
         if is_dir {
-            collect(&path, out, &rel);
+            collect(&path, out, &rel, rules);
         } else {
             out.push(rel);
         }
@@ -220,8 +224,23 @@ impl WorkStore for FsWorkStore {
 
     fn list(&self, root: &Path) -> Result<Vec<String>, String> {
         let mut out = Vec::new();
-        collect(root, &mut out, "");
+        collect(root, &mut out, "", None);
         Ok(out)
+    }
+
+    fn list_visible(&self, root: &Path, rules: Option<&str>) -> Result<Vec<String>, String> {
+        let rules = Rules::compile(root, rules.unwrap_or(""))?;
+        let mut out = Vec::new();
+        collect(root, &mut out, "", Some(&rules));
+        Ok(out)
+    }
+
+    fn read_text(&self, path: &Path) -> Result<Option<String>, String> {
+        match std::fs::read_to_string(path) {
+            Ok(text) => Ok(Some(text)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("读文件失败（{}）：{}", path.display(), e)),
+        }
     }
 
     fn stat_under(&self, root: &Path, rel: &str) -> Result<Option<u64>, String> {

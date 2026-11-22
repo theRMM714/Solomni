@@ -35,6 +35,10 @@ crossterm = { version = "0.29", default-features = false, features = ["events", 
 # 关掉默认特性避开与全仓 syn 3 的重复依赖；语言标签要 unic-langid 的类型（本就在依赖树里）。
 fluent-bundle = { version = "0.16.0", default-features = false }
 unic-langid = { version = "0.9", default-features = false }
+# grep 与工作区过滤：ignore 与 git 同引擎解析 `.gitignore` / `.workignore`（匹配语义不自己发明），
+# regex 做模式匹配（用户要的是「像 rg 那样能写正则」，不是再写一层 glob 解释器）。
+ignore = "0.4"
+regex = "1"
 
 # 测试要压出 tar.xz 再解回来，压缩器只在测试构建里启用（生产二进制不带编码器）。
 [dev-dependencies]
