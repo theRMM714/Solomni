@@ -470,6 +470,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
         manifest: ModuleManifest {
             build: None,
             id: "m1".to_string(),
+            version: "0.1.0".to_string(),
             brief: "测试模块".to_string(),
             system: "用法：测试。".to_string(),
             enabled: true,
@@ -532,6 +533,7 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
         manifest: ModuleManifest {
             build: None,
             id: "m1".to_string(),
+            version: "0.1.0".to_string(),
             brief: "测试模块".to_string(),
             system: "用法：测试。".to_string(),
             enabled: true,

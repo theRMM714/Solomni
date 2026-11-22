@@ -281,7 +281,7 @@ prompts/
 
 ## 十四、产品命令面
 
-- **命令表是命令面的唯一声明**：`systools/commands.yaml` 写每条产品命令的名字、别名、分组、`phase`（`boot` 装配核心前跑完退出 / `core` 转录中心里输入）、写法、一句话说明、确认门槛与命令自己的旗语；手册、菜单、Tab 补全与未知命令建议都是这张表的投影。
+- **命令表是命令面的唯一声明**：`systools/commands.yaml` 写每条产品命令的名字、别名、分组、`phase`（`boot` 装配核心前跑完退出 / `core` 转录中心里输入）、执行者（`core` / `system` / `ui`）、一句话说明、确认门槛与参数声明（与动作面同一种形状：类型、位置序号、可选值、缺省值）；表经 `src/capabilities/tools/domain/op.rs` 投影成 `Op` 书，手册、菜单、Tab 补全、未知命令建议与文本解析都是它的派生。
 - **与工具表同族**：两张表都是"声明在文本层的契约"，解析与校验只在 `src/capabilities/tools/domain/commands.rs` 一处（`CommandBook`）；命令面**不拥有行为**——执行由 `src/presentation/cli/boot.rs`（启动相，经 `system` 能力）与 `src/presentation/cli.rs`（转录相）分派。
 - **编译进二进制**：表用 `include_str!` 编进来，`solomni --help` 在任何目录下都可用，不依赖产品根上的 yaml 是否就位；这与运行时读盘的 `tools.yaml` 有意不同（命令是产品语法，不是用户策略）。
 - **覆盖门禁**：`src/tests/commands.rs` 双向比对——表里每条 `boot` 命令必须真在 `src/presentation/cli/boot.rs` 里有执行入口、每条 `core` 命令必须真在 `src/presentation/cli.rs` 里出现；`boot.rs` 用到的旗语必须在表里声明，`src/entry/args.rs` 只许留内部协议旗语。

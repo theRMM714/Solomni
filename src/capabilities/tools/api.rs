@@ -6,7 +6,10 @@
 pub use crate::capabilities::tools::domain::budget::{
     ResultBudget, cap_result_with, continuation_for,
 };
-pub use crate::capabilities::tools::domain::commands::{Command, CommandBook, Phase};
+pub use crate::capabilities::tools::domain::commands::{CommandBook, Phase};
+pub use crate::capabilities::tools::domain::op::{
+    Executor, Op, OpBook, complete as complete_op, parse as parse_op, usage as op_usage,
+};
 pub use crate::capabilities::tools::domain::patch::{EditFault, Fault};
 pub use crate::capabilities::tools::domain::roles::{RoleTable, SystemTools, action_audit};
 pub use crate::capabilities::tools::domain::schema::{
@@ -455,9 +458,12 @@ pub trait Tools: Send + Sync {
     /// 内置工具总表（工具**是什么**的声明书）：调用方要持有它时拿走一份。
     fn book(&self) -> ToolBook;
 
-    /// 目录保留名（`systools/names.yaml`）：`session/<工作>/` 下由布局固定占用的目录名，
-    /// agent 实例名不得占用。名单在表里，不在代码里。
-    fn reserved_names(&self) -> Vec<String>;
+    /// agent 保留名（`systools/names.yaml` 的 `agents`）：`session/<工作>/` 下由布局固定占用的
+    /// 目录名，agent 实例名不得占用。名单在表里，不在代码里。
+    fn reserved_agents(&self) -> Vec<String>;
+
+    /// 模块保留名（同表 `modules` 块）：模块 id 不得占用。产品命令名与别名由 Op 目录在装配期并入。
+    fn reserved_modules(&self) -> Vec<String>;
 
     /// 悬空引用与缺能力（空 = 一切正常）：装配期自检与测试门禁读它。
     fn problems(&self) -> Vec<String>;

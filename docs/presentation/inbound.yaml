@@ -12,8 +12,8 @@ src/presentation/web.rs: conversation/session maintenance/storage runtime work w
 
 # 终端渠道：解析、启动相、命令手册、会话流、裁决、渲染
 src/presentation/cli/argv.rs: tools
-src/presentation/cli/boot.rs: maintenance/storage system
-src/presentation/cli/catalog.rs: tools
+src/presentation/cli/boot.rs: maintenance/storage system tools
+src/presentation/cli/catalog.rs: catalog/modules tools
 src/presentation/cli/commands.rs: runtime workspace
 src/presentation/cli/flows.rs: catalog/registry
 src/presentation/cli/gate.rs: catalog/registry provision

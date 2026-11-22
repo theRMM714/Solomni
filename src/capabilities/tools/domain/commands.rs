@@ -1,7 +1,7 @@
 //! 目的：命令面——产品对外暴露的每一条命令都声明在 `systools/commands.yaml`（转录相 `core` 与启动相 `boot` 共用一张表）。
-//! 管：读表、校验表（名字与别名唯一、分组与写法自洽）、按名查找、按相与分组取清单。
-//! 不管：手册怎么排版（`presentation/cli/catalog.rs`）、命令怎么执行（`entry/args.rs` 与 `presentation/cli.rs` 各自分派）。
-//! 联动：`presentation/cli` 的手册与补全、`src/entry/args.rs` 的启动相识别、`src/tests/commands.rs` 的覆盖门禁。
+//! 管：读表、校验表的骨架（名字与别名唯一、分组与说明不缺）、投影成 `Op`。
+//! 不管：写法（由参数声明派生，见 `op.rs`）、手册怎么排版（`presentation/cli/catalog.rs`）、命令怎么执行（各相自己的分派）。
+//! 联动：`op.rs` 把这张表投影成 op 书；`presentation/cli` 的手册与补全、`src/tests/commands.rs` 的覆盖门禁都读 op 书。
 
 use serde::Deserialize;
 use std::sync::OnceLock;
@@ -19,17 +19,6 @@ pub enum Phase {
     Core,
 }
 
-/// 目的：命令自己的一条旗语（只给手册与启动相识别用；参数类型与校验仍归工具表）。
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CommandFlag {
-    pub name: String,
-    /// 目的：占位符（空 = 布尔旗），如 `<guest>`。
-    #[serde(default)]
-    pub value: String,
-    pub desc: String,
-}
-
 /// 目的：一条命令的声明。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,9 +28,6 @@ pub struct Command {
     pub aliases: Vec<String>,
     pub group: String,
     pub phase: Phase,
-    /// 目的：位置参数写法（空 = 不收位置参数），如 `<agent名…>`。
-    #[serde(default)]
-    pub usage: String,
     /// 目的：手册里的一行说明。
     pub brief: String,
     /// 目的：这条命令有写操作，需要 `--yes` 才算数（缺省只预览或只报状态）。
@@ -50,23 +36,15 @@ pub struct Command {
     /// 目的：`--json` 时的机器回执字段（给手册用；回执本身由呈现层排版）。
     #[serde(default)]
     pub json: Option<String>,
+    /// 目的：参数契约（与动作面同一个形状）：位置序号、可选值、类型、缺省值都写在这里。
+    ///   约束：写法（usage）、手册、补全与校验全部从它派生，不再手写字符串。
     #[serde(default)]
-    pub flags: Vec<CommandFlag>,
-}
-
-impl Command {
-    /// 目的：这条命令的调用写法：启动相加长旗前缀，转录相就是名字本身；带上位置参数写法。
-    pub fn invocation(&self) -> String {
-        let head = match self.phase {
-            Phase::Boot => format!("--{}", self.name),
-            Phase::Core => self.name.clone(),
-        };
-        if self.usage.is_empty() {
-            head
-        } else {
-            format!("{} {}", head, self.usage)
-        }
-    }
+    pub params: Option<
+        std::collections::BTreeMap<String, crate::capabilities::catalog::modules::api::Param>,
+    >,
+    /// 目的：最后一步落在哪（core / system / ui）：声明与解析共用，只有执行入口不同。
+    #[serde(default)]
+    pub executor: super::op::Executor,
 }
 
 /// 目的：整张命令表（文件顺序即手册顺序；分组按首次出现排）。
@@ -110,38 +88,9 @@ impl CommandBook {
         }
     }
 
-    /// 目的：按名字或别名查一条命令；接受前导 `--`（启动相写法）与前导 `/`（`/help`）。
-    pub fn find(&self, raw: &str) -> Option<&Command> {
-        let name = raw.trim();
-        let name = name.strip_prefix("--").unwrap_or(name);
-        let name = name.strip_prefix('/').unwrap_or(name);
-        self.commands
-            .iter()
-            .find(|c| c.name == name || c.aliases.iter().any(|a| a.trim_start_matches('/') == name))
-    }
-
-    /// 目的：某一相里的分组，按首次出现排序。
-    pub fn groups(&self, phase: Phase) -> Vec<&str> {
-        let mut out: Vec<&str> = Vec::new();
-        for cmd in self.commands.iter().filter(|c| c.phase == phase) {
-            if !out.contains(&cmd.group.as_str()) {
-                out.push(&cmd.group);
-            }
-        }
-        out
-    }
-
-    /// 目的：某一相、某一组里的命令（文件顺序）。
-    pub fn in_group(&self, phase: Phase, group: &str) -> Vec<&Command> {
-        self.commands
-            .iter()
-            .filter(|c| c.phase == phase && c.group == group)
-            .collect()
-    }
-
-    /// 目的：某一相的全部命令。
-    pub fn phase(&self, phase: Phase) -> Vec<&Command> {
-        self.commands.iter().filter(|c| c.phase == phase).collect()
+    /// 目的：文件顺序的全部命令（手册与投影都读它）。
+    pub fn commands(&self) -> &[Command] {
+        &self.commands
     }
 
     /// 目的：表自身的矛盾（空 = 一切正常）：装配期自检与覆盖门禁读它。
@@ -159,25 +108,12 @@ impl CommandBook {
             if cmd.brief.trim().is_empty() {
                 out.push(format!("命令 {} 没写一句话说明", cmd.name));
             }
-            if cmd.usage.contains('\n') {
-                out.push(format!("命令 {} 的写法不该换行", cmd.name));
-            }
             for name in std::iter::once(&cmd.name).chain(cmd.aliases.iter()) {
                 if seen.contains(name) {
                     out.push(format!("名字 {} 重复声明", name));
                 } else {
                     seen.push(name.clone());
                 }
-            }
-            let mut flags: Vec<&str> = Vec::new();
-            for flag in &cmd.flags {
-                if !flag.name.starts_with("--") {
-                    out.push(format!("命令 {} 的旗语 {} 要长旗形式", cmd.name, flag.name));
-                }
-                if flags.contains(&flag.name.as_str()) {
-                    out.push(format!("命令 {} 的旗语 {} 重复", cmd.name, flag.name));
-                }
-                flags.push(&flag.name);
             }
         }
         out

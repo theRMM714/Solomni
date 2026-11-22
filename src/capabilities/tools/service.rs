@@ -77,8 +77,12 @@ impl Tools for ToolsService {
         self.catalog.tools.clone()
     }
 
-    fn reserved_names(&self) -> Vec<String> {
-        self.catalog.reserved_names.clone()
+    fn reserved_agents(&self) -> Vec<String> {
+        self.catalog.reserved_agents.clone()
+    }
+
+    fn reserved_modules(&self) -> Vec<String> {
+        self.catalog.reserved_modules.clone()
     }
 
     fn problems(&self) -> Vec<String> {

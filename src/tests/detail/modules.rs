@@ -14,25 +14,36 @@ fn fs_modules_accepts_valid_folders_and_rejects_each_illegal_form_with_a_reason(
         std::fs::create_dir_all(&d).expect("建模块目录");
         std::fs::write(d.join("module.yaml"), yaml).expect("写清单");
     };
-    put("good", "id: good\nbrief: 简介\nsystem: 用法：good\n");
+    put(
+        "good",
+        "id: good\nversion: 0.1.0\nbrief: 简介\nsystem: 用法：good\n",
+    );
     std::fs::create_dir_all(dir.join("nomanual")).expect("目录");
     std::fs::write(
         dir.join("nomanual").join("module.yaml"),
-        "id: 别的名字\nbrief: b\nsystem: s\n",
+        "id: 别的名字\nversion: 0.1.0\nbrief: b\nsystem: s\n",
     )
     .expect("写");
     std::fs::create_dir_all(dir.join("missyaml")).expect("空目录");
     put(
         "reserved",
-        "id: reserved\nbrief: b\nsystem: s\ntools:\n  read:\n    command: python x.py\n",
+        "id: reserved\nversion: 0.1.0\nbrief: b\nsystem: s\ntools:\n  read:\n    command: python x.py\n",
     );
     put(
         "badcap",
-        "id: badcap\nbrief: b\nsystem: s\nruntimes: [Python]\n",
+        "id: badcap\nversion: 0.1.0\nbrief: b\nsystem: s\nruntimes: [Python]\n",
     );
-    put("broken", "id: broken\nbrief: [不是字符串\n");
+    put("broken", "id: broken\nversion: 0.1.0\nbrief: [不是字符串\n");
+    // 模块 id 是动作 id 前缀：与命令词撞名要拒收；版本必填。
+    put("taken", "id: taken\nversion: 0.1.0\nbrief: b\nsystem: s\n");
+    put("noversion", "id: noversion\nbrief: b\nsystem: s\n");
 
-    let roster = FsModules::new(dir, crate::capabilities::tools::api::names()).scan();
+    let roster = FsModules::new(
+        dir,
+        crate::capabilities::tools::api::names(),
+        vec!["taken".to_string()],
+    )
+    .scan();
     let ids: Vec<&str> = roster
         .modules
         .iter()
@@ -41,7 +52,7 @@ fn fs_modules_accepts_valid_folders_and_rejects_each_illegal_form_with_a_reason(
     assert_eq!(ids, vec!["good"], "只有合法模块进清单，且按 id 排序");
     assert_eq!(
         roster.rejected.len(),
-        5,
+        7,
         "每种非法形式都要留下原因：{:?}",
         roster.rejected
     );
@@ -51,9 +62,15 @@ fn fs_modules_accepts_valid_folders_and_rejects_each_illegal_form_with_a_reason(
     assert!(all.contains("保留名"), "内置工具名占用要拒收：{}", all);
     assert!(all.contains("不合法"), "运行能力名非法要拒收：{}", all);
     assert!(all.contains("非法"), "坏 yaml 要拒收：{}", all);
+    assert!(
+        all.contains("模块 id 'taken' 是保留名"),
+        "与命令词撞名要拒收并说明：{}",
+        all
+    );
+    assert!(all.contains("没写 version"), "缺版本要拒收并说明：{}", all);
 
     // 目录整个不存在 = 空清单（放入即出现，移出即消失）。
-    let gone = FsModules::new(root.join("没有这个目录"), Vec::new()).scan();
+    let gone = FsModules::new(root.join("没有这个目录"), Vec::new(), Vec::new()).scan();
     assert!(gone.modules.is_empty() && gone.rejected.is_empty());
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -70,18 +87,18 @@ fn fs_modules_validates_service_and_secret_declarations() {
     };
     put(
         "ok",
-        "id: ok\nbrief: b\nsystem: s\nservices:\n  fs:\n    adapter: mcp\n    command: npx -y server\nsecrets:\n  token:\n    env: TOKEN\n",
+        "id: ok\nversion: 0.1.0\nbrief: b\nsystem: s\nservices:\n  fs:\n    adapter: mcp\n    command: npx -y server\nsecrets:\n  token:\n    env: TOKEN\n",
     );
     put(
         "noadapter",
-        "id: noadapter\nbrief: b\nsystem: s\nservices:\n  fs:\n    command: x\n",
+        "id: noadapter\nversion: 0.1.0\nbrief: b\nsystem: s\nservices:\n  fs:\n    command: x\n",
     );
     put(
         "noenv",
-        "id: noenv\nbrief: b\nsystem: s\nsecrets:\n  token:\n    desc: 缺 env\n",
+        "id: noenv\nversion: 0.1.0\nbrief: b\nsystem: s\nsecrets:\n  token:\n    desc: 缺 env\n",
     );
 
-    let roster = FsModules::new(dir, crate::capabilities::tools::api::names()).scan();
+    let roster = FsModules::new(dir, crate::capabilities::tools::api::names(), Vec::new()).scan();
     let ids: Vec<&str> = roster
         .modules
         .iter()
@@ -104,7 +121,7 @@ fn fs_modules_reads_the_userdata_fact() {
         std::fs::create_dir_all(&d).expect("建模块目录");
         std::fs::write(
             d.join("module.yaml"),
-            format!("id: {}\nbrief: b\nsystem: s\n", folder),
+            format!("id: {}\nversion: 0.1.0\nbrief: b\nsystem: s\n", folder),
         )
         .expect("写清单");
     };
@@ -113,7 +130,12 @@ fn fs_modules_reads_the_userdata_fact() {
     std::fs::create_dir_all(dir.join("with").join("userdata")).expect("建 userdata");
     std::fs::write(dir.join("with").join("userdata").join("keep.txt"), "x").expect("放已有的状态");
 
-    let roster = FsModules::new(dir.clone(), crate::capabilities::tools::api::names()).scan();
+    let roster = FsModules::new(
+        dir.clone(),
+        crate::capabilities::tools::api::names(),
+        Vec::new(),
+    )
+    .scan();
     let fact = |id: &str| {
         roster
             .modules

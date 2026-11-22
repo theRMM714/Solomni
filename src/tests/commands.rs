@@ -1,12 +1,13 @@
-//! 目的：命令面门禁——`systools/commands.yaml` 是唯一声明，且与两处分派实现（启动相、转录相）逐条对齐。
-//! 管：表自身自洽、手册覆盖全部启动命令、入口与 CLI 都认得表里的每一条命令（双向，含反向的孤儿旗语）。
+//! 目的：命令面门禁——`systools/commands.yaml` 是唯一声明，投影成 op 书后由同一套解析器消费。
+//! 管：op 书自洽（重名、位置序号、枚举、相位与执行者）、手册覆盖、两相分派认得每条命令、启动相不再自写旗语词法。
 //! 不管：手册排版（`src/tests/cli.rs`）与命令行为（各业务测试）。
-//! 联动：`systools/commands.yaml`、`src/presentation/cli/boot.rs`、`src/presentation/cli.rs`、`src/entry/args.rs`。
+//! 联动：`systools/commands.yaml`、`src/capabilities/tools/domain/op.rs`、`src/presentation/cli/boot.rs`、`src/presentation/cli.rs`。
 
-use crate::capabilities::tools::api::{CommandBook, Phase};
+use crate::capabilities::tools::api::{CommandBook, Op, OpBook, Phase};
 use crate::presentation::cli::catalog;
+use std::sync::OnceLock;
 
-/// 启动相的分派实现（启动命令与它们的旗语落在这里）。
+/// 启动相的分派实现（只按名字取字段；旗语与位置参数由声明解析）。
 const BOOT: &str = include_str!("../presentation/cli/boot.rs");
 /// 入口的内部协议分派（这里不许再出现产品命令）。
 const ENTRY_ARGS: &str = include_str!("../entry/args.rs");
@@ -31,8 +32,29 @@ const INTERNAL: &[&str] = &[
 /// 跨命令修饰旗语（不是某条命令自己的旗语，故不写进命令表）。
 const MODIFIERS: &[&str] = &["--json"];
 
-fn book() -> &'static CommandBook {
-    CommandBook::builtin().expect("命令表可解析")
+/// 目的：命令表投影成的 op 书——门禁从它取证，不再自己维护一份清单。
+fn ops() -> &'static OpBook {
+    static OPS: OnceLock<OpBook> = OnceLock::new();
+    OPS.get_or_init(|| {
+        let book = CommandBook::builtin().expect("命令表可解析");
+        OpBook::from_commands(book)
+    })
+}
+
+/// 目的：某一相的命令（声明顺序）。
+fn phase(phase: Phase) -> Vec<&'static Op> {
+    ops().ops().iter().filter(|op| op.phase == phase).collect()
+}
+
+/// 目的：某一相的分组，按首次出现排序。
+fn groups(phase: Phase) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for op in self::phase(phase) {
+        if !out.contains(&op.group) {
+            out.push(op.group.clone());
+        }
+    }
+    out
 }
 
 /// 目的：从一段 Rust 源码里抠出所有 `"--xxx"` 旗语字面量（去重，保持出现顺序）。
@@ -59,42 +81,58 @@ fn flags_in(source: &str) -> Vec<String> {
     out
 }
 
-/// 表自身：能解析、无矛盾、两相都不为空、分组按首次出现排序。
+/// 声明自身：能解析、无矛盾、两相都不为空、分组按首次出现排序。
 #[test]
 fn table_is_self_consistent() {
-    let book = book();
+    let book = ops();
     assert!(book.problems().is_empty(), "{:?}", book.problems());
     assert_eq!(
-        book.phase(Phase::Boot).len(),
+        phase(Phase::Boot).len(),
         7,
         "启动相七条：doctor/provision/work-gc/storage/gc/build/setup"
     );
-    assert_eq!(book.phase(Phase::Core).len(), 17, "转录相十七条");
-    assert_eq!(book.groups(Phase::Boot), vec!["维护"]);
-    let core = book.groups(Phase::Core);
-    assert_eq!(core.first(), Some(&"会话"));
-    assert_eq!(core.last(), Some(&"系统"));
+    assert_eq!(
+        phase(Phase::Core).len(),
+        16,
+        "转录相十六条（module 命令已删：模块工具走 <模块> 词）"
+    );
+    assert_eq!(groups(Phase::Boot), vec!["维护"]);
+    let core = groups(Phase::Core);
+    assert_eq!(core.first().map(String::as_str), Some("会话"));
+    assert_eq!(core.last().map(String::as_str), Some("系统"));
+}
+
+/// 相位与执行者自洽：启动相只可能是系统能力，转录相不许挂系统能力。
+#[test]
+fn phase_and_executor_agree() {
+    let mut broken = Vec::new();
+    for op in phase(Phase::Boot) {
+        if op.executor.name() != "system" {
+            broken.push(format!("{} 是启动相却是 {}", op.id, op.executor.name()));
+        }
+    }
+    for op in phase(Phase::Core) {
+        if op.executor.name() == "system" {
+            broken.push(format!("{} 是转录相却挂着系统能力", op.id));
+        }
+    }
+    assert!(broken.is_empty(), "{broken:?}");
 }
 
 /// 手册：启动命令一条不落（含它的写法），单条说明给出旗语与确认门槛。
 #[test]
 fn help_lists_every_boot_command() {
     let help = catalog::help_text(false);
-    for cmd in book().phase(Phase::Boot) {
-        assert!(
-            help.contains(&cmd.invocation()),
-            "手册漏了：{}",
-            cmd.invocation()
-        );
-        assert!(help.contains(&cmd.brief), "手册漏了说明：{}", cmd.brief);
+    for op in phase(Phase::Boot) {
+        let usage = catalog::entry_usage(op);
+        assert!(help.contains(&usage), "手册漏了：{}", usage);
+        assert!(help.contains(&op.brief), "手册漏了说明：{}", op.brief);
     }
     let gc = catalog::detail("--gc").expect("启动相命令有自己的说明");
-    assert!(
-        gc.contains(&book().find("gc").expect("gc").invocation()),
-        "{gc}"
-    );
+    let gc_op = ops().find("gc").expect("gc");
+    assert!(gc.contains(&catalog::entry_usage(gc_op)), "{gc}");
     assert!(gc.contains("--yes"), "旗语要列出来：{gc}");
-    assert!(gc.contains("--category <类别>"), "{gc}");
+    assert!(gc.contains("--category <string>"), "{gc}");
     assert!(gc.contains("确认："), "有写操作就要写确认门槛：{gc}");
     assert!(
         catalog::detail("--doctor")
@@ -103,29 +141,21 @@ fn help_lists_every_boot_command() {
     );
 }
 
-/// 双向对齐：表里的启动命令启动相认得，启动相用的每个旗语表里也声明了。
+/// 对齐：表里的启动命令启动相认得；启动相也不许再手写命令旗语（词法归声明与 `op::parse`）。
 #[test]
 fn boot_commands_match_boot_dispatch() {
-    let book = book();
-    for cmd in book.phase(Phase::Boot) {
-        let literal = format!("\"{}\"", cmd.name);
+    for op in phase(Phase::Boot) {
+        let literal = format!("\"{}\"", op.id);
         assert!(
             BOOT.contains(&literal),
             "启动命令 {} 在 presentation/cli/boot.rs 里没有执行入口",
-            cmd.name
+            op.id
         );
     }
-    let declared: Vec<String> = book
-        .phase(Phase::Boot)
-        .iter()
-        .flat_map(|c| c.flags.iter().map(|f| f.name.clone()))
-        .collect();
     for flag in flags_in(BOOT) {
         assert!(
-            declared.contains(&flag)
-                || INTERNAL.contains(&flag.as_str())
-                || MODIFIERS.contains(&flag.as_str()),
-            "启动相用了没声明的旗语 {}（命令自己的旗语要在命令表里写）",
+            INTERNAL.contains(&flag.as_str()) || MODIFIERS.contains(&flag.as_str()),
+            "启动相里还留着命令旗语 {}（旗语由命令声明的参数派生，不该手写）",
             flag
         );
     }
@@ -143,38 +173,37 @@ fn entry_keeps_only_internal_protocol() {
     }
 }
 
-/// 双向对齐：表里的转录相命令 CLI 认得，且补全与建议只从表里出。
+/// 对齐：表里的转录相命令 CLI 认得，且补全与建议只从表里出。
 #[test]
 fn core_commands_match_cli_dispatch() {
-    let book = book();
-    for cmd in book.phase(Phase::Core) {
-        let literal = format!("\"{}\"", cmd.name);
+    for op in phase(Phase::Core) {
+        let literal = format!("\"{}\"", op.id);
         assert!(
             CLI.contains(&literal),
             "转录相命令 {} 在 presentation/cli.rs 里没有分派",
-            cmd.name
+            op.id
         );
         assert!(
-            catalog::complete(&cmd.name).contains(&cmd.name),
+            catalog::complete(&op.id).contains(&op.id),
             "补全里没有 {}",
-            cmd.name
+            op.id
         );
     }
     assert!(catalog::suggest("singel").as_deref() == Some("single"));
     assert!(catalog::suggest("porxy").as_deref() == Some("proxy"));
 }
+
 /// 机器回执：启动命令的说明里要写清 --json 会得到什么字段，且 --json 能被解析器认出来。
 #[test]
 fn boot_commands_declare_json_receipt() {
-    let book = book();
-    for cmd in book.phase(Phase::Boot) {
-        let json = cmd.json.as_deref().unwrap_or("");
+    for op in phase(Phase::Boot) {
+        let json = op.json.as_deref().unwrap_or("");
         assert!(
             !json.trim().is_empty(),
             "启动命令 {} 没写 --json 的字段说明",
-            cmd.name
+            op.id
         );
-        let detail = catalog::detail(&format!("--{}", cmd.name)).expect("启动命令有自己的说明");
+        let detail = catalog::detail(&format!("--{}", op.id)).expect("启动命令有自己的说明");
         assert!(detail.contains("等价 JSON"), "{}", detail);
         assert!(detail.contains(json), "说明里的字段要与表一致：{}", detail);
     }
@@ -208,7 +237,7 @@ fn global_flags_work_on_both_sides_of_a_boot_command() {
     assert_eq!(rooted.root.as_deref(), Some("fixture"));
     assert!(rooted.operands.is_empty(), "{:?}", rooted.operands);
 
-    // 命令自己的旗语与裸词按原顺序留给启动相。
+    // 命令自己的旗语与裸词按原顺序留给启动相（再由 op::parse 校验）。
     let gc = crate::presentation::cli::argv::parse(&[
         "--gc".to_string(),
         "--category=logs".to_string(),
@@ -244,6 +273,7 @@ fn global_flags_work_on_both_sides_of_a_boot_command() {
     assert_eq!(bare.operands, vec!["dev".to_string()]);
     assert!(bare.positionals.is_empty(), "启动相之后不该再进位置参数");
 }
+
 /// 覆盖：人能经呈现层用的动作，要么在呈现层有入口，要么在下面登记豁免。
 ///
 /// 口径：`systools/tools.yaml` 的 `callers` 里写了 `user` 的工具算「人的动作面」；豁免表只放
@@ -312,7 +342,7 @@ fn user_actions_have_a_presentation_entry_or_are_exempt() {
         }
     }
 
-    let mut missing: Vec<&str> = Vec::new();
+    let mut absent: Vec<&str> = Vec::new();
     for tool in &user_tools {
         if TOOL_FACE.contains(&tool.as_str()) {
             continue;
@@ -320,12 +350,12 @@ fn user_actions_have_a_presentation_entry_or_are_exempt() {
         let quoted = format!("\"{}\"", tool);
         let single = format!("'{}'", tool);
         if !blob.contains(&quoted) && !blob.contains(&single) {
-            missing.push(tool.as_str());
+            absent.push(tool.as_str());
         }
     }
     assert!(
-        missing.is_empty(),
+        absent.is_empty(),
         "这些动作人能用，但呈现层没有入口，也没登记豁免：{:?}",
-        missing
+        absent
     );
 }

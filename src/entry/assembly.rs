@@ -300,6 +300,13 @@ pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, Str
                     crate::capabilities::catalog::modules::detail::FsModules::new(
                         root.join("modules"),
                         crate::capabilities::tools::api::names(),
+                        // 启动相没有工具能力可问：命令词直接取编译进来的命令表投影；
+                        // 名字表的 modules 块由核心装配在装载工具能力后再并入（启动相不派发模块动作）。
+                        crate::capabilities::tools::api::CommandBook::builtin()
+                            .map(|b| {
+                                crate::capabilities::tools::api::OpBook::from_commands(b).ids()
+                            })
+                            .unwrap_or_default(),
                     ),
                 ),
                 Arc::new(

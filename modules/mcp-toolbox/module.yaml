@@ -1,4 +1,5 @@
 id: mcp-toolbox
+version: 0.1.0
 brief: >-
   本机小工具箱（MCP 常驻服务）：取当前时间、生成随机 UUID、算 SHA-256 摘要，还有一块只活在服务进程里的便签（记住 / 取回）。
 system: >-

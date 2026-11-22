@@ -12,9 +12,20 @@ use crate::capabilities::system::api::{
     BuildRequest, EnsureRequest, Fault, FenceFacts, GcRequest, ResetRequest, System, WorkGcRequest,
     toolchain_json, toolchain_lines,
 };
+use crate::capabilities::tools::api::{CommandBook, Op, OpBook};
 use crate::capabilities::workspace::api::WorkGcReport;
 use crate::kernel::api::types::JobState;
 use crate::presentation::cli::boot;
+
+/// 目的：命令表里那一条——用例只按名字取，旗语与校验都由声明决定（表非法就直接失败）。
+pub(crate) fn op(name: &str) -> &'static Op {
+    static OPS: std::sync::OnceLock<OpBook> = std::sync::OnceLock::new();
+    let ops = OPS.get_or_init(|| {
+        OpBook::from_commands(CommandBook::builtin().expect("命令表非法（systools/commands.yaml）"))
+    });
+    ops.find(name)
+        .unwrap_or_else(|| panic!("命令表里没有 {} 这条命令", name))
+}
 
 /// 目的：合成一份系统维护面——每条命令要的分支由字段决定，用例不碰磁盘也不起进程。
 /// 约束：转录中心那条路径（`presentation::cli::run_boot`）也用它，免得再写一份替身。
@@ -173,9 +184,9 @@ fn faces(words: &[&str]) -> Vec<String> {
 fn read_only_commands_print_receipts() {
     let fake = Fake::default();
     for json in [false, true] {
-        assert_eq!(boot::run("doctor", &[], &fake, json), 0);
-        assert_eq!(boot::run("storage", &[], &fake, json), 0);
-        assert_eq!(boot::run("provision", &[], &fake, json), 0);
+        assert_eq!(boot::run(op("doctor"), &[], &fake, json), 0);
+        assert_eq!(boot::run(op("storage"), &[], &fake, json), 0);
+        assert_eq!(boot::run(op("provision"), &[], &fake, json), 0);
     }
 }
 
@@ -185,7 +196,7 @@ fn provision_ensure_and_reset_report_both_ways() {
     for json in [false, true] {
         assert_eq!(
             boot::run(
-                "provision",
+                op("provision"),
                 &faces(&["--ensure=toolchain", "--yes"]),
                 &fake,
                 json
@@ -193,12 +204,12 @@ fn provision_ensure_and_reset_report_both_ways() {
             0
         );
         assert_eq!(
-            boot::run("provision", &faces(&["--ensure", "--yes"]), &fake, json),
+            boot::run(op("provision"), &faces(&["--ensure", "--yes"]), &fake, json),
             0
         );
         assert_eq!(
             boot::run(
-                "provision",
+                op("provision"),
                 &faces(&["--reset", "dev", "--yes"]),
                 &fake,
                 json
@@ -212,7 +223,7 @@ fn provision_ensure_and_reset_report_both_ways() {
 fn gc_reports_or_starts_a_job() {
     let fake = Fake::default();
     for json in [false, true] {
-        assert_eq!(boot::run("gc", &faces(&["--yes"]), &fake, json), 0);
+        assert_eq!(boot::run(op("gc"), &faces(&["--yes"]), &fake, json), 0);
     }
     // 后台作业：第一眼还在跑，轮询一次就结束（覆盖增量打行与退出码分支）。
     let started = Fake {
@@ -230,7 +241,7 @@ fn gc_reports_or_starts_a_job() {
         },
         ..Fake::default()
     };
-    assert_eq!(boot::run("gc", &faces(&["--yes"]), &started, false), 0);
+    assert_eq!(boot::run(op("gc"), &faces(&["--yes"]), &started, false), 0);
     let failed = Fake {
         gc: Some(CleanOutcome::Started(JobState {
             running: true,
@@ -246,8 +257,8 @@ fn gc_reports_or_starts_a_job() {
         },
         ..Fake::default()
     };
-    assert_eq!(boot::run("gc", &faces(&["--yes"]), &failed, false), 1);
-    assert_eq!(boot::run("gc", &faces(&["--yes"]), &failed, true), 1);
+    assert_eq!(boot::run(op("gc"), &faces(&["--yes"]), &failed, false), 1);
+    assert_eq!(boot::run(op("gc"), &faces(&["--yes"]), &failed, true), 1);
 }
 
 /// 目的：便携维护的三条分支——省略模式只报状态、写模式交给能力、未知模式退 2、能力失败按自己的码退。
@@ -255,33 +266,33 @@ fn gc_reports_or_starts_a_job() {
 fn setup_reports_status_and_refuses_unknown_modes() {
     let fake = Fake::default();
     for json in [false, true] {
-        assert_eq!(boot::run("setup", &[], &fake, json), 0);
-        assert_eq!(boot::run("setup", &faces(&["status"]), &fake, json), 0);
-        assert_eq!(boot::run("setup", &faces(&["path"]), &fake, json), 0);
-        assert_eq!(boot::run("setup", &faces(&["bogus"]), &fake, json), 2);
+        assert_eq!(boot::run(op("setup"), &[], &fake, json), 0);
+        assert_eq!(boot::run(op("setup"), &faces(&["status"]), &fake, json), 0);
+        assert_eq!(boot::run(op("setup"), &faces(&["path"]), &fake, json), 0);
+        assert_eq!(boot::run(op("setup"), &faces(&["bogus"]), &fake, json), 2);
     }
     let broken = Fake {
         fault: Some("setup"),
         ..Fake::default()
     };
-    assert_eq!(boot::run("setup", &faces(&["path"]), &broken, false), 1);
-    assert_eq!(boot::run("setup", &faces(&["path"]), &broken, true), 1);
+    assert_eq!(boot::run(op("setup"), &faces(&["path"]), &broken, false), 1);
+    assert_eq!(boot::run(op("setup"), &faces(&["path"]), &broken, true), 1);
 }
 
 #[test]
 fn gc_without_confirmation_previews() {
     let fake = Fake::default();
     assert_eq!(
-        boot::run("gc", &faces(&["--category=logs"]), &fake, false),
+        boot::run(op("gc"), &faces(&["--category=logs"]), &fake, false),
         2
     );
     assert_eq!(
-        boot::run("gc", &faces(&["--category", "logs"]), &fake, true),
+        boot::run(op("gc"), &faces(&["--category", "logs"]), &fake, true),
         2
     );
     // 预览里查不到这个类别：仍然只是「还差一次确认」，照样给 2。
     assert_eq!(
-        boot::run("gc", &faces(&["--category=nope"]), &fake, false),
+        boot::run(op("gc"), &faces(&["--category=nope"]), &fake, false),
         2
     );
     // 状态取不到时预览直接失败。
@@ -290,11 +301,11 @@ fn gc_without_confirmation_previews() {
         ..Fake::default()
     };
     assert_eq!(
-        boot::run("gc", &faces(&["--category=logs"]), &blind, false),
+        boot::run(op("gc"), &faces(&["--category=logs"]), &blind, false),
         1
     );
     assert_eq!(
-        boot::run("gc", &faces(&["--category=logs"]), &blind, true),
+        boot::run(op("gc"), &faces(&["--category=logs"]), &blind, true),
         1
     );
 }
@@ -320,9 +331,9 @@ fn work_gc_covers_preview_and_apply() {
         ..Fake::default()
     };
     for json in [false, true] {
-        assert_eq!(boot::run("work-gc", &faces(&["dev"]), &dry, json), 0);
+        assert_eq!(boot::run(op("work-gc"), &faces(&["dev"]), &dry, json), 0);
         assert_eq!(
-            boot::run("work-gc", &faces(&["dev", "--yes"]), &dry, json),
+            boot::run(op("work-gc"), &faces(&["dev", "--yes"]), &dry, json),
             0
         );
     }
@@ -331,22 +342,22 @@ fn work_gc_covers_preview_and_apply() {
         ..Fake::default()
     };
     assert_eq!(
-        boot::run("work-gc", &faces(&["dev", "--yes"]), &fake, false),
+        boot::run(op("work-gc"), &faces(&["dev", "--yes"]), &fake, false),
         0
     );
-    assert_eq!(boot::run("work-gc", &faces(&["dev"]), &fake, true), 0);
+    assert_eq!(boot::run(op("work-gc"), &faces(&["dev"]), &fake, true), 0);
     // 缺工作名 / 能力面拒绝。
-    assert_eq!(boot::run("work-gc", &[], &fake, false), 2);
+    assert_eq!(boot::run(op("work-gc"), &[], &fake, false), 2);
     let refused = Fake {
         fault: Some("work_gc"),
         ..Fake::default()
     };
     assert_eq!(
-        boot::run("work-gc", &faces(&["dev", "--yes"]), &refused, false),
+        boot::run(op("work-gc"), &faces(&["dev", "--yes"]), &refused, false),
         2
     );
     assert_eq!(
-        boot::run("work-gc", &faces(&["dev", "--yes"]), &refused, true),
+        boot::run(op("work-gc"), &faces(&["dev", "--yes"]), &refused, true),
         2
     );
 }
@@ -355,7 +366,7 @@ fn work_gc_covers_preview_and_apply() {
 fn build_prints_output_and_rejects_bad_operands() {
     let fake = Fake::default();
     for json in [false, true] {
-        assert_eq!(boot::run("build", &faces(&["toolbox"]), &fake, json), 0);
+        assert_eq!(boot::run(op("build"), &faces(&["toolbox"]), &fake, json), 0);
     }
     let skipped = Fake {
         build: Some(Built {
@@ -366,21 +377,35 @@ fn build_prints_output_and_rejects_bad_operands() {
         }),
         ..Fake::default()
     };
-    assert_eq!(boot::run("build", &faces(&["toolbox"]), &skipped, false), 0);
-    // 缺模块名 / --guest 给了空值。
-    assert_eq!(boot::run("build", &[], &fake, false), 2);
     assert_eq!(
-        boot::run("build", &faces(&["toolbox", "--guest", ""]), &fake, false),
+        boot::run(op("build"), &faces(&["toolbox"]), &skipped, false),
+        0
+    );
+    // 缺模块名 / --guest 给了空值。
+    assert_eq!(boot::run(op("build"), &[], &fake, false), 2);
+    assert_eq!(
+        boot::run(
+            op("build"),
+            &faces(&["toolbox", "--guest", ""]),
+            &fake,
+            false
+        ),
         2
     );
     // 能力面报错。
-    assert_eq!(boot::run("build", &faces(&["toolbox"]), &skipped, true), 0);
+    assert_eq!(
+        boot::run(op("build"), &faces(&["toolbox"]), &skipped, true),
+        0
+    );
     let missing = Fake {
         build: None,
         ..Fake::default()
     };
-    assert_eq!(boot::run("build", &faces(&["nope"]), &missing, false), 1);
-    assert_eq!(boot::run("build", &faces(&["nope"]), &missing, true), 1);
+    assert_eq!(
+        boot::run(op("build"), &faces(&["nope"]), &missing, false),
+        1
+    );
+    assert_eq!(boot::run(op("build"), &faces(&["nope"]), &missing, true), 1);
 }
 
 #[test]
@@ -389,21 +414,21 @@ fn failures_carry_their_own_exit_code() {
         fault: Some("storage"),
         ..Fake::default()
     };
-    assert_eq!(boot::run("storage", &[], &failing, false), 1);
-    assert_eq!(boot::run("storage", &[], &failing, true), 1);
+    assert_eq!(boot::run(op("storage"), &[], &failing, false), 1);
+    assert_eq!(boot::run(op("storage"), &[], &failing, true), 1);
     let no_provision = Fake {
         fault: Some("provision"),
         ..Fake::default()
     };
-    assert_eq!(boot::run("provision", &[], &no_provision, false), 1);
-    assert_eq!(boot::run("provision", &[], &no_provision, true), 1);
+    assert_eq!(boot::run(op("provision"), &[], &no_provision, false), 1);
+    assert_eq!(boot::run(op("provision"), &[], &no_provision, true), 1);
     let no_ensure = Fake {
         fault: Some("ensure"),
         ..Fake::default()
     };
     assert_eq!(
         boot::run(
-            "provision",
+            op("provision"),
             &faces(&["--ensure=toolchain"]),
             &no_ensure,
             true
@@ -415,22 +440,31 @@ fn failures_carry_their_own_exit_code() {
         ..Fake::default()
     };
     assert_eq!(
-        boot::run("provision", &faces(&["--reset", "dev"]), &no_reset, false),
+        boot::run(
+            op("provision"),
+            &faces(&["--reset", "dev"]),
+            &no_reset,
+            false
+        ),
         2
     );
     let no_gc = Fake {
         fault: Some("gc"),
         ..Fake::default()
     };
-    assert_eq!(boot::run("gc", &faces(&["--yes"]), &no_gc, true), 2);
+    assert_eq!(boot::run(op("gc"), &faces(&["--yes"]), &no_gc, true), 2);
 }
 
 #[test]
 fn unknown_operands_and_commands_are_refused() {
     let fake = Fake::default();
-    assert_eq!(boot::run("doctor", &faces(&["--nope"]), &fake, false), 2);
-    assert_eq!(boot::run("doctor", &faces(&["-x"]), &fake, false), 2);
-    assert_eq!(boot::run("nope", &[], &fake, false), 1);
+    assert_eq!(
+        boot::run(op("doctor"), &faces(&["--nope"]), &fake, false),
+        2
+    );
+    assert_eq!(boot::run(op("doctor"), &faces(&["-x"]), &fake, false), 2);
+    // 未知命令不再进启动相：入口按声明查 op，查不到就是用法错误（见 `catalog::boot`）。
+    assert!(crate::presentation::cli::catalog::boot("nope").is_none());
 }
 
 /// 目的：真实装配一次系统维护面（临时根）——启动相命令对着真能力也得给出退出码。
@@ -494,17 +528,23 @@ fn real_assembly_serves_every_boot_command() {
 
     // 呈现层的每条命令也对着真能力跑一遍（不看文案，只看退出码）。
     for json in [false, true] {
-        assert_eq!(boot::run("doctor", &[], &service, json), 0);
-        assert_eq!(boot::run("storage", &[], &service, json), 0);
-        assert_eq!(boot::run("provision", &[], &service, json), 0);
+        assert_eq!(boot::run(op("doctor"), &[], &service, json), 0);
+        assert_eq!(boot::run(op("storage"), &[], &service, json), 0);
+        assert_eq!(boot::run(op("provision"), &[], &service, json), 0);
         assert_eq!(
-            boot::run("gc", &faces(&["--category=logs"]), &service, json),
+            boot::run(op("gc"), &faces(&["--category=logs"]), &service, json),
             2
         );
-        assert_eq!(boot::run("work-gc", &[], &service, json), 2);
-        assert_eq!(boot::run("build", &[], &service, json), 2);
-        assert_eq!(boot::run("setup", &faces(&["status"]), &service, json), 0);
-        assert_eq!(boot::run("setup", &faces(&["bogus"]), &service, json), 2);
+        assert_eq!(boot::run(op("work-gc"), &[], &service, json), 2);
+        assert_eq!(boot::run(op("build"), &[], &service, json), 2);
+        assert_eq!(
+            boot::run(op("setup"), &faces(&["status"]), &service, json),
+            0
+        );
+        assert_eq!(
+            boot::run(op("setup"), &faces(&["bogus"]), &service, json),
+            2
+        );
     }
     boot::print_gc(&GcReport::default());
     boot::print_gc(&GcReport {
@@ -599,7 +639,10 @@ fn writes_are_confirmed_in_place_and_refused_while_sessions_run() {
         answer: true,
         asked: std::cell::RefCell::new(Vec::new()),
     };
-    assert_eq!(boot::run_asked("gc", &[], &fake, false, &mut yes, true), 0);
+    assert_eq!(
+        boot::run_asked(op("gc"), &[], &fake, false, &mut yes, true),
+        0
+    );
     assert_eq!(asked(&yes), 1, "写操作要先问一句");
 
     // 摇头：只预览，退出码不再算错（人已经明确作答）。
@@ -607,7 +650,10 @@ fn writes_are_confirmed_in_place_and_refused_while_sessions_run() {
         answer: false,
         asked: std::cell::RefCell::new(Vec::new()),
     };
-    assert_eq!(boot::run_asked("gc", &[], &fake, false, &mut no, true), 0);
+    assert_eq!(
+        boot::run_asked(op("gc"), &[], &fake, false, &mut no, true),
+        0
+    );
     assert_eq!(asked(&no), 1);
 
     // 有会话在跑：不问、不写，只给预览。
@@ -616,7 +662,7 @@ fn writes_are_confirmed_in_place_and_refused_while_sessions_run() {
         asked: std::cell::RefCell::new(Vec::new()),
     };
     assert_eq!(
-        boot::run_asked("gc", &[], &fake, false, &mut idle, false),
+        boot::run_asked(op("gc"), &[], &fake, false, &mut idle, false),
         0
     );
     assert_eq!(asked(&idle), 0, "不许写的时候连问都不问");
@@ -627,7 +673,7 @@ fn writes_are_confirmed_in_place_and_refused_while_sessions_run() {
         asked: std::cell::RefCell::new(Vec::new()),
     };
     assert_eq!(
-        boot::run_asked("doctor", &[], &fake, false, &mut read_only, true),
+        boot::run_asked(op("doctor"), &[], &fake, false, &mut read_only, true),
         0
     );
     assert_eq!(asked(&read_only), 0);
@@ -662,7 +708,7 @@ fn confirm_questions_name_the_target() {
     let ask = |command: &str, operands: &[String]| -> String {
         let mut rec = Recorder(std::cell::RefCell::new(Vec::new()));
         assert_eq!(
-            boot::run_asked(command, operands, &fake, true, &mut rec, true),
+            boot::run_asked(op(command), operands, &fake, true, &mut rec, true),
             0,
             "摇头只预览，退出码不再算错"
         );
@@ -674,7 +720,15 @@ fn confirm_questions_name_the_target() {
     assert!(ask("gc", &faces(&["--category=logs"])).contains("存储类别 logs"));
     assert!(ask("gc", &[]).contains("按策略回收存储"));
     assert!(ask("work-gc", &faces(&["dev"])).contains("工作 dev"));
-    assert!(ask("work-gc", &[]).contains("确认回收？"));
+
+    // 缺必填参数在确认之前就被声明驱动的解析挡掉，不会问一句没意义的确认。
+    let mut rec = Recorder(std::cell::RefCell::new(Vec::new()));
+    assert_eq!(
+        boot::run_asked(op("work-gc"), &[], &fake, true, &mut rec, true),
+        2,
+        "缺必填参数是用法错误"
+    );
+    assert!(rec.0.borrow().is_empty(), "参数不全就不该问确认");
     assert!(ask("provision", &faces(&["--reset", "dev"])).contains("虚拟根 dev"));
     assert!(ask("provision", &faces(&["--ensure"])).contains("下载并补齐依赖"));
 }

@@ -403,7 +403,7 @@ impl RegistryOps for Handle {
         // 保留名与模块存在性都在 registry 的保存用例里；清单与保留名两样事实由这里取一份给它。
         self.call(move |core| {
             let roster = core.modules_handle().roster();
-            let reserved = core.systools_handle().reserved_names();
+            let reserved = core.systools_handle().reserved_agents();
             let draft = crate::capabilities::catalog::registry::api::AgentDraft {
                 name,
                 modules,

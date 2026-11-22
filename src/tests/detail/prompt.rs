@@ -88,10 +88,10 @@ fn names_table_lists_directory_reserved_names() {
         .expect("读三张表");
     for want in ["work", "children"] {
         assert!(
-            st.reserved_names.iter().any(|n| n == want),
+            st.reserved_agents.iter().any(|n| n == want),
             "名字表里该有 {}：{:?}",
             want,
-            st.reserved_names
+            st.reserved_agents
         );
     }
 }

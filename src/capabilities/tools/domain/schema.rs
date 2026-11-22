@@ -73,6 +73,9 @@ impl ToolSchema {
             if let Some(hi) = p.max {
                 marks.push(format!("不大于 {}", compact_num(hi)));
             }
+            if let Some(vals) = &p.values {
+                marks.push(format!("可选 {}", vals.join(" / ")));
+            }
             let desc = p.desc.trim();
             lines.push(if desc.is_empty() {
                 format!("- {}（{}）", name, marks.join("，"))
@@ -120,6 +123,16 @@ impl ToolSchema {
             }
             if let Some(d) = &p.default {
                 node.insert("default".to_string(), d.clone());
+            }
+            if let Some(vals) = &p.values {
+                node.insert(
+                    "enum".to_string(),
+                    serde_json::Value::Array(
+                        vals.iter()
+                            .map(|v| serde_json::Value::String(v.clone()))
+                            .collect(),
+                    ),
+                );
             }
             props.insert(name.clone(), serde_json::Value::Object(node));
             if p.required {
@@ -170,6 +183,15 @@ impl ToolSchema {
                     }
                     if p.non_empty && v.as_str().map(str::is_empty).unwrap_or(false) {
                         return Err(ArgFault::Empty(name.clone()));
+                    }
+                    if let Some(vals) = &p.values
+                        && let Some(s) = v.as_str()
+                        && !vals.iter().any(|x| x == s)
+                    {
+                        return Err(ArgFault::NotInValues {
+                            name: name.clone(),
+                            values: vals.clone(),
+                        });
                     }
                     if let Some(n) = v.as_f64() {
                         if let Some(lo) = p.min
@@ -290,6 +312,16 @@ pub enum ArgFault {
     TooBig { name: String, max: String },
     /// 声明里没有这个键。
     Unknown(String),
+    /// 值不在声明的可选值清单里。
+    NotInValues { name: String, values: Vec<String> },
+    /// 文本入口（CLI/TUI）的词法错误：命令里出现了声明没有的旗语。
+    UnknownFlag(String),
+    /// 旗语缺值（布尔旗给了 `=值` 也归这里）。
+    FlagNeedsValue(String),
+    /// 位置参数或旗语重复给了。
+    Duplicate(String),
+    /// 多了声明没收的位置参数。
+    ExtraOperand(String),
 }
 
 /// 数值的 JSON 写法：整数就写整数（2000 而不是 2000.0）。

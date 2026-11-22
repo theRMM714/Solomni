@@ -27,6 +27,30 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// 目的：命令表投影成的 op 书——入口分派、自洽检查与模块保留名都读它，只解析一次。
+/// 约束：命令表非法或声明互相矛盾都是装配错误：就地退出，不留一个「跑起来但手册是错的」进程。
+fn command_ops() -> &'static capabilities::tools::api::OpBook {
+    static OPS: std::sync::OnceLock<capabilities::tools::api::OpBook> = std::sync::OnceLock::new();
+    OPS.get_or_init(|| {
+        let book = match capabilities::tools::api::CommandBook::builtin() {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("[装配失败] 命令表非法（systools/commands.yaml）：{}", e);
+                std::process::exit(1);
+            }
+        };
+        let ops = capabilities::tools::api::OpBook::from_commands(book);
+        let problems = ops.problems();
+        if !problems.is_empty() {
+            for problem in &problems {
+                eprintln!("[装配失败] 命令声明不自洽：{}", problem);
+            }
+            std::process::exit(1);
+        }
+        ops
+    })
+}
+
 /// 目的：装配核心之前就能回答的旗语：`--help`（含 `<命令> --help`）、`--version` 就地输出并给出退出码。
 fn early_exit(flags: &presentation::cli::argv::Flags) -> Option<i32> {
     if let Some(topic) = &flags.help_topic {
@@ -102,6 +126,16 @@ fn main() {
 
     // 启动相命令（--doctor / --gc / --provision …）：命令表说有哪些、system 能力执行，拿到码就退。
     if let Some(command) = flags.command.as_deref() {
+        let Some(op) = command_ops()
+            .find(command)
+            .filter(|op| op.phase == capabilities::tools::api::Phase::Boot)
+        else {
+            eprintln!(
+                "[错误] 没有这个启动命令：{}（solomni --help 看全部）",
+                command
+            );
+            std::process::exit(2);
+        };
         // 维护命令不跑会话，也就不需要视图盘：只清扫上一次崩溃/强杀留下的盘符映射，不分配新的。
         view_drive_sweep(&home);
         let system = match entry::assembly::system(&root, &base) {
@@ -112,7 +146,7 @@ fn main() {
             }
         };
         std::process::exit(presentation::cli::boot::run(
-            command,
+            op,
             &flags.operands,
             &system,
             flags.json,
@@ -198,12 +232,6 @@ fn main() {
     );
     let workspace = capabilities::workspace::detail::FsWorkspace::new(root.join("session"));
     let workstore = capabilities::workspace::detail::FsWorkStore::new();
-    // 保留名表（内置工具名）由**组合根**问一次工具能力后交进去：清单校验归 workspace，
-    // 名字空间归 tools，两边不互相依赖。
-    let source = capabilities::catalog::modules::detail::FsModules::new(
-        root.join("modules"),
-        capabilities::tools::api::names(),
-    );
     // 运行包能力：依赖文件夹 runtimes/（一个包 = 一个文件夹 + package.yaml）。
     let packages: Arc<dyn capabilities::catalog::packages::api::Packages + Send + Sync> = Arc::new(
         capabilities::catalog::packages::service::PackagesService::with_base(
@@ -424,6 +452,15 @@ fn main() {
     let toolexec: Arc<dyn capabilities::tools::api::ToolExec + Send + Sync> = tools_svc.clone();
     let systools: Arc<dyn capabilities::tools::api::Tools + Send + Sync> = tools_svc;
 
+    // 保留名表（内置工具名）由**组合根**问一次工具能力后交进去：清单校验归 modules，名字空间归 tools，
+    // 两边不互相依赖。模块 id 还与产品命令词互斥（它是动作 id 前缀），命令词在这里并进同一份保留名。
+    let mut module_reserved = capabilities::tools::api::Tools::reserved_modules(&*systools);
+    module_reserved.extend(command_ops().ids());
+    let source = capabilities::catalog::modules::detail::FsModules::new(
+        root.join("modules"),
+        capabilities::tools::api::names(),
+        module_reserved,
+    );
     // **模块能力**：清单来源与启停覆盖落盘只由它的 service 持有（R12）；它是模块事实的唯一上游。
     let module_state =
         capabilities::catalog::modules::detail::YamlModuleState::new(home.join("modules.yaml"));

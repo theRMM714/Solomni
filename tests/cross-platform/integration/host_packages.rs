@@ -45,7 +45,7 @@ fn host_build_uses_a_runtime_package_from_runtimes() {
     std::fs::create_dir_all(&module).expect("建模块");
     std::fs::write(
         module.join("module.yaml"),
-        "id: hello\nbrief: 本机包构建\nsystem: 用法：hi\nbuild:\n  command: pkgtool\n  needs: [pkgtool]\ntools:\n  hi:\n    command: build/hi\n",
+        "id: hello\nversion: 0.1.0\nbrief: 本机包构建\nsystem: 用法：hi\nbuild:\n  command: pkgtool\n  needs: [pkgtool]\ntools:\n  hi:\n    command: build/hi\n",
     )
     .expect("写模块清单");
 
@@ -81,7 +81,7 @@ fn host_build_uses_a_runtime_package_from_runtimes() {
     std::fs::create_dir_all(&needy).expect("建缺包模块");
     std::fs::write(
         needy.join("module.yaml"),
-        "id: needy\nbrief: 缺包\nsystem: 用法：hi\nbuild:\n  command: pkgtool\n  needs: [no-such-cap]\ntools:\n  hi:\n    command: build/hi\n",
+        "id: needy\nversion: 0.1.0\nbrief: 缺包\nsystem: 用法：hi\nbuild:\n  command: pkgtool\n  needs: [no-such-cap]\ntools:\n  hi:\n    command: build/hi\n",
     )
     .expect("写缺包清单");
     let out = Command::new(bin())

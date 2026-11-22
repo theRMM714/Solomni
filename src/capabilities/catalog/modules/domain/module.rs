@@ -71,6 +71,21 @@ pub struct Param {
     /// 目的：数值上界（含）。
     #[serde(default)]
     pub max: Option<f64>,
+    /// 目的：位置参数序号（1 起）。声明了才允许不写 `--名字`：命令行按这个序号取位置参数。
+    ///    约束：只给呈现层的文本入口用；模型侧工具调用永远传具名 JSON，不受它影响。
+    #[serde(default)]
+    pub positional: Option<u32>,
+    /// 目的：这个位置参数**吃光剩下的全部位置参数**（如 `single <agent名…>`）。
+    ///    约束：只允许出现在序号最大的那个位置参数上，且一个声明里至多一个。
+    #[serde(default)]
+    pub rest: bool,
+    /// 目的：可选值清单（枚举）：值只能是其中一项；写进模型侧说明与 JSON Schema 的 enum。
+    #[serde(default)]
+    pub values: Option<Vec<String>>,
+    /// 目的：文本入口里可以**光写旗语不给值**（值收成空串，如 `--ensure` = 全量补齐）。
+    ///    约束：只对非布尔参数有意义；模型侧工具调用永远传具名 JSON，不受它影响。
+    #[serde(default)]
+    pub optional_value: bool,
 }
 
 use std::collections::BTreeMap;
@@ -80,6 +95,11 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModuleManifest {
     pub id: String,
+    /// 目的：模块版本（作者声明）：只做展示与 `--version`，**不参与**加载、依赖或兼容判定。
+    ///   写法：字符串；不带引号的 `0.1.0` 与数字形的 `1.0` 都按字面收下（见 `de_version`）。
+    ///   缺字段收成空串，由 `check_version` 报「没写 version」——「解析失败」与「内容不合规」各有稳定文案。
+    #[serde(default, deserialize_with = "de_version")]
+    pub version: String,
     pub brief: String,
     pub system: String,
     /// 目的：模块声明的**构建方法**（可选）：系统在**目标环境**里照它把产物编出来（见 MODULE_SPEC 的「构建」）。
@@ -154,6 +174,63 @@ pub struct ToolDecl {
     ///   同一回复里的多个可并发调用会真的并发跑（结果仍按调用顺序回填）。
     #[serde(default)]
     pub parallel: bool,
+}
+
+/// 目的：版本号既收字符串也收 YAML 的数字标量（`1.0` 会被 YAML 解析成浮点）：统一成字面文本。
+/// 约束：这里只归一化写法，不做语义判断——版本策略由作者自己定（见 check_version）。
+fn de_version<'de, D>(d: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct Text;
+    impl serde::de::Visitor<'_> for Text {
+        type Value = String;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("字符串或数字形式的版本号")
+        }
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<String, E> {
+            Ok(v.to_string())
+        }
+        fn visit_string<E: serde::de::Error>(self, v: String) -> Result<String, E> {
+            Ok(v)
+        }
+        fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<String, E> {
+            Ok(v.to_string())
+        }
+        fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<String, E> {
+            Ok(v.to_string())
+        }
+        fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<String, E> {
+            Ok(format!("{}", v))
+        }
+    }
+    d.deserialize_any(Text)
+}
+
+/// 目的：模块 id 的保留名校验：模块 id 是动作 id 的前缀（`module.<模块>.<工具>`），
+///    不能与产品命令词或名字表 `modules` 块的占位词同形。大小写不敏感（Windows 文件系统如此）。
+pub fn check_module_id(id: &str, reserved: &[String]) -> Result<(), String> {
+    if reserved.iter().any(|r| r.eq_ignore_ascii_case(id)) {
+        return Err(format!(
+            "模块 id '{}' 是保留名（它已经是产品命令词或动作 id 前缀）：换一个名字",
+            id
+        ));
+    }
+    Ok(())
+}
+
+/// 目的：版本号的校验：必填、非空、不含空白与控制字符（不做 semver 判定）。
+pub fn check_version(m: &ModuleManifest) -> Result<(), String> {
+    if m.version.trim().is_empty() {
+        return Err("module.yaml 没写 version（模块版本，如 0.1.0）".to_string());
+    }
+    if m.version
+        .chars()
+        .any(|c| c.is_whitespace() || c.is_control())
+    {
+        return Err(format!("version 里有空白或控制字符：{:?}", m.version));
+    }
+    Ok(())
 }
 
 /// 目的：运行能力声明的校验（纯逻辑；扫描模块时由适配层调用）：非法或重复 = 拒收并说明原因，不纠正。

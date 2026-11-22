@@ -22,6 +22,7 @@ mod lifecycle;
 mod llm;
 mod mcp;
 mod modules;
+mod op;
 mod packages;
 mod permission;
 mod ports;

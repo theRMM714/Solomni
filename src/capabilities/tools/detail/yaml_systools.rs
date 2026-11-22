@@ -20,11 +20,14 @@ struct RoleFile {
     roles: RoleTable,
 }
 
-/// 名字表的文件形状：目录保留名（agent 实例名不得占用）。
+/// 名字表的文件形状：两块保留名——agent 实例名（布局目录）与模块 id（动作 id 前缀）。
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct NamesFile {
     #[serde(default)]
-    reserved: Vec<String>,
+    agents: Vec<String>,
+    #[serde(default)]
+    modules: Vec<String>,
 }
 
 pub struct YamlSystools {
@@ -58,13 +61,21 @@ impl SystoolsSource for YamlSystools {
             .map_err(|e| format!("名字表读不了（systools/names.yaml）：{}", e))?;
         let names: NamesFile = yaml_serde::from_str(&text)
             .map_err(|e| format!("名字表非法（systools/names.yaml）：{}", e))?;
-        if names.reserved.is_empty() {
-            return Err("名字表里一个保留名都没有（systools/names.yaml）".to_string());
+        if names.agents.is_empty() {
+            return Err(
+                "名字表里 agent 保留名一块是空的（systools/names.yaml 的 agents）".to_string(),
+            );
+        }
+        if names.modules.is_empty() {
+            return Err(
+                "名字表里模块保留名一块是空的（systools/names.yaml 的 modules）".to_string(),
+            );
         }
         Ok(SystemTools {
             tools: tools.tools,
             roles: roles.roles,
-            reserved_names: names.reserved,
+            reserved_agents: names.agents,
+            reserved_modules: names.modules,
         })
     }
 }

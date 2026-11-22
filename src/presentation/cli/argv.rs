@@ -150,7 +150,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Flags, String> {
             if let Some(cmd) = boot_command(name) {
                 // 启动相命令：记下名字，剩下的继续按全局旗语解析——命令放在前面不影响 --root 这类旗语；
                 // 认不出的旗语留给命令自己（--reset / --category …），类型与校验归启动相。
-                boot = Some(cmd.name.clone());
+                boot = Some(cmd.id.clone());
                 flags.command = boot.clone();
                 // `--help --gc` 也要给这条命令自己的手册。
                 if flags.help {
@@ -273,10 +273,15 @@ fn row(spec: &str, desc: &str) -> String {
 }
 
 /// 目的：这条长旗是不是一个**启动相命令**（声明在 `systools/commands.yaml`）：是就返回它的声明。
-fn boot_command(name: &str) -> Option<&'static crate::capabilities::tools::api::Command> {
-    let book = crate::capabilities::tools::api::CommandBook::builtin().ok()?;
-    book.find(name)
-        .filter(|c| c.phase == crate::capabilities::tools::api::Phase::Boot)
+fn boot_command(name: &str) -> Option<&'static crate::capabilities::tools::api::Op> {
+    use crate::capabilities::tools::api::{CommandBook, OpBook, Phase};
+    static OPS: std::sync::OnceLock<OpBook> = std::sync::OnceLock::new();
+    let ops = OPS.get_or_init(|| {
+        CommandBook::builtin()
+            .map(OpBook::from_commands)
+            .unwrap_or_default()
+    });
+    ops.find(name).filter(|op| op.phase == Phase::Boot)
 }
 
 /// 目的：解析失败时的「未知旗语」文案：编辑距离 ≤2 就给最近的那条建议。

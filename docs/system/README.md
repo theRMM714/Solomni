@@ -28,7 +28,7 @@
 
 ## 一、命令面与执行面的分工
 
-- 命令名、旗语与确认门槛的唯一声明是 `systools/commands.yaml`；`src/presentation/cli/boot.rs` 只把操作数翻成 `api::System` 的一次调用并排版回执。
+- 命令名、参数与确认门槛的唯一声明是 `systools/commands.yaml`；操作数由 `src/capabilities/tools/domain/op.rs` 的 `parse` 按声明转成 JSON，`src/presentation/cli/boot.rs` 只按字段名取值、翻成 `api::System` 的一次调用并排版回执。
 - 确认门槛由能力判，不靠命令行拦：`ensure` / `reset` 缺 `confirm` 报 `Fault::usage`；`gc` 无类别时缺省 dry-run（返回 0 并给预览），带类别时缺 `--yes` 由呈现层按预览退出 2——与迁移前的旗语行为逐条一致。
 - 退出码口径：0 成功 / 1 执行失败 / 2 用法或确认门槛不对，由 `Fault` 的两个构造器区分。
 - 状态视图：`setup status` 的回执是平台 / 根 / PATH 入口 / 围栏缺项的键值块，呈现层不带 `--json` 时排成三行（`[便携]` 前缀），带 `--json` 时原样打这份 JSON。
@@ -48,7 +48,7 @@
 ## 改动本单元时必须同步
 
 - `src/presentation/cli/boot.rs` → 新增或改启动相命令时同步操作数解析、回执与退出码。
-- `systools/commands.yaml` → 命令名、分组、旗语与确认门槛的声明；表与两处分派的一致性由 `src/tests/commands.rs` 锁死。
+- `systools/commands.yaml` → 命令名、分组、参数声明与确认门槛；装配期由 `src/main.rs` 的 `command_ops` 对声明做硬失败自检，表与两处分派的对齐由 `src/tests/commands.rs` 锁死。
 - `src/entry/assembly.rs` → `SystemDeps` 的装配；新增端口注入只在这里落一次。
 - `docs/entry/README.md` → 组合根不再执行产品命令；启动相清单以本页与命令表为准。
 - 测试缺口：本单元是业务能力，缺口记在 `tests/gaps.yaml`；格式见 [docs/testing/gaps-acceptance.md](../testing/gaps-acceptance.md) 的「缺口账」。

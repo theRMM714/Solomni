@@ -313,7 +313,7 @@ fn catalog_drives_help_completion_and_suggestions() {
     assert!(cli::catalog::help_text(true).contains("--probe-tools"));
 
     let single = cli::catalog::detail("single").expect("单条说明");
-    assert!(single.contains("<agent名…>"), "{single}");
+    assert!(single.contains("[agents…]"), "写法由声明派生：{single}");
     assert!(cli::catalog::detail("/help").is_some(), "别名也认");
     assert!(cli::catalog::detail("nope").is_none());
 
