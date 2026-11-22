@@ -3,22 +3,84 @@
 //! 不管：命令分发、事件渲染、裁决回合。
 //! 联动：`cli/gate.rs`、`cli/view.rs`、`cli/commands.rs`
 
+use super::shell::Outcome;
 use super::*;
+use crate::capabilities::system::api::System;
 use crate::presentation::faces::Faces;
 use serde_json::{Value, json};
 
-/// 目的：单 agent 会话：点名的 agent 一起干同一件事，进转录提示符直到空行。
-pub(super) fn single_flow(faces: &Faces, args: &Value) {
+/// 目的：会话里的提示符：一行输入的归属只在这里判一次——`/` 开头是命令，其余都是发给这条会话的消息。
+/// 参数：`cursor` 是事件台游标（跟读用）；`opts` 是同一个呈现选项（`/web` 之类要拿默认端口）。
+/// 返回：离开这条会话的去向（`/leave` 回转录中心、`/web` 转界面、`/exit` 退出进程）。
+/// 约束：空行不再结束会话（以前那是隐藏语义）；`//` 转义成字面的 `/`。
+fn talk(
+    faces: &Faces,
+    system: &dyn System,
+    sid: &str,
+    cursor: &mut u64,
+    opts: &shell::Opts,
+) -> Outcome {
+    loop {
+        let Some(raw) = term::ask("你>") else {
+            eof_stop(faces, sid);
+            return Outcome::Done(0);
+        };
+        let line = raw.trim();
+        if line.is_empty() {
+            term::line(&term::ink(
+                theme::Ink::Dim,
+                "[提示] 空行不发送任何东西：/leave 离开这条会话",
+            ));
+            continue;
+        }
+        if let Some(literal) = line.strip_prefix("//") {
+            say(faces, sid, cursor, literal);
+            continue;
+        }
+        if let Some(cmd) = line.strip_prefix('/') {
+            let cmd = cmd.trim();
+            if cmd.is_empty() {
+                term::line(&term::ink(
+                    theme::Ink::Dim,
+                    "[提示] / 后面写命令（help 看全部命令）",
+                ));
+                continue;
+            }
+            match shell::run_line(faces, system, cmd, opts) {
+                Outcome::Done(_) => continue,
+                other => return other,
+            }
+        }
+        say(faces, sid, cursor, line);
+    }
+}
+
+/// 目的：把一句话发给会话并跟读结果（终端只在最终结果上渲染）。
+fn say(faces: &Faces, sid: &str, cursor: &mut u64, text: &str) {
+    let say = text.to_string();
+    match act_interactive(faces, sid, CliAction::Say(say), cursor, Output::Final) {
+        Ok(acted) => follow(faces, sid, cursor, acted),
+        Err(e) => println!("[错误] {}", e),
+    }
+}
+
+/// 目的：单 agent 会话：点名的 agent 一起干同一件事，进转录提示符直到 `/leave`。
+pub(super) fn single_flow(
+    faces: &Faces,
+    system: &dyn System,
+    args: &Value,
+    opts: &shell::Opts,
+) -> Outcome {
     let views = match faces.registry.agents() {
         Ok(v) => v,
         Err(e) => {
             println!("[错误] {}", e);
-            return;
+            return Outcome::Done(1);
         }
     };
     if views.is_empty() {
         println!("[错误] {}（CLI 不再直接点模块）", NO_AGENTS);
-        return;
+        return Outcome::Done(1);
     }
     // 点名 1 个 = 直接用该 agent（模块数不限）；点名多个 / 无参 = 全部。
     // **「多个并成一个临时组合」的组合语义由核心在建工作时收口**（前端只交点名结果）。
@@ -33,7 +95,7 @@ pub(super) fn single_flow(faces: &Faces, args: &Value) {
             Ok(l) => l,
             Err(e) => {
                 println!("[错误] {}", e);
-                return;
+                return Outcome::Done(1);
             }
         }
     };
@@ -41,7 +103,7 @@ pub(super) fn single_flow(faces: &Faces, args: &Value) {
         Ok(n) => n,
         Err(e) => {
             println!("[错误] {}", e);
-            return;
+            return Outcome::Done(1);
         }
     };
     // 档位：CLI 不提供交互选择，用设置里的默认档（与 Web 向导的默认一致）。
@@ -56,40 +118,27 @@ pub(super) fn single_flow(faces: &Faces, args: &Value) {
         Ok(sid) => sid,
         Err(e) => {
             println!("[错误] {}", e);
-            return;
+            return Outcome::Done(1);
         }
     };
     cursor = drain(faces, &sid, cursor);
-    println!("（单 agent {} —— 输入消息，空行结束会话）", sid);
-    loop {
-        let say = prompt("你>");
-        if say.is_empty() {
-            break;
-        }
-        // 终端只在最终结果上渲染，不要流式（怎么显示是呈现层的事）。
-        match act_interactive(
-            faces,
-            &sid,
-            CliAction::Say(say.clone()),
-            &mut cursor,
-            Output::Final,
-        ) {
-            Ok(acted) => follow(faces, &sid, &mut cursor, acted),
-            Err(e) => {
-                println!("[错误] {}", e);
-                break;
-            }
-        }
-    }
+    println!("（单 agent {} —— 输入消息，/leave 离开）", sid);
+    talk(faces, system, &sid, &mut cursor, opts)
 }
 
 /// 目的：把决定权整块交给核心：**没有名单**（核心自己挑人、建子工作），接着就是跟它对话。 选这一形态本身就是**授予全权**（`WorkMode::Proxy` → `meta.delegation`）。
-pub(super) fn proxy_flow(faces: &Faces) {
+/// 参数：`seed` 是进来之前就打好的那句话（转录中心顶层直接敲消息时用），先发出去再进提示符。
+pub(super) fn proxy_flow(
+    faces: &Faces,
+    system: &dyn System,
+    seed: Option<String>,
+    opts: &shell::Opts,
+) -> Outcome {
     let work_name = match faces.work.unique_work_name("proxy", "proxy") {
         Ok(n) => n,
         Err(e) => {
             println!("[错误] {}", e);
-            return;
+            return Outcome::Done(1);
         }
     };
     let tier = faces
@@ -103,30 +152,15 @@ pub(super) fn proxy_flow(faces: &Faces) {
         Ok(sid) => sid,
         Err(e) => {
             println!("[错误] {}", e);
-            return;
+            return Outcome::Done(1);
         }
     };
     cursor = drain(faces, &sid, cursor);
-    println!("（核心代理 {} —— 输入消息，空行结束会话）", sid);
-    loop {
-        let say = prompt("你>");
-        if say.is_empty() {
-            break;
-        }
-        match act_interactive(
-            faces,
-            &sid,
-            CliAction::Say(say.clone()),
-            &mut cursor,
-            Output::Final,
-        ) {
-            Ok(acted) => follow(faces, &sid, &mut cursor, acted),
-            Err(e) => {
-                println!("[错误] {}", e);
-                break;
-            }
-        }
+    println!("（核心代理 {} —— 输入消息，/leave 离开）", sid);
+    if let Some(seed) = seed {
+        say(faces, &sid, &mut cursor, &seed);
     }
+    talk(faces, system, &sid, &mut cursor, opts)
 }
 
 /// 目的：协作会话：给需求、点名单（或让核心代拟），之后一律按裁决卡推进。

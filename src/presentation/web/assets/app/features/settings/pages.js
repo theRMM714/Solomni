@@ -727,6 +727,7 @@ const SETTINGS_PAGES = [
   { id: 'models', group: '登记', label: '模型与核心默认', icon: 'dot' },
   { id: 'agents', group: '登记', label: 'agent 管理', icon: 'users' },
   { id: 'modules', group: '登记', label: '模块与服务', icon: 'folder' },
+  { id: 'actions', group: '登记', label: '动作与工具', icon: 'gear' },
 ];
 
 /* ---------- 通用：多选一弹层（顶替原生 confirm 的三选） ---------- */

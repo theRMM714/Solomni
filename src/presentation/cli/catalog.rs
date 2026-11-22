@@ -187,16 +187,20 @@ pub(crate) fn param_row(
     format!("    {}{}{}\n", spec, " ".repeat(pad), p.desc)
 }
 
-/// 目的：Tab 补全候选：命令名与别名（启动相写成 `--名字`），已给出命令时按声明补参数。
-/// 参数：`prefix` 是当前正在输入的整行；为空时给全部命令。
+/// 目的：Tab 补全候选：只对命令生效（`/` 开头），消息文本不给候选。
+/// 参数：`prefix` 是当前正在输入的整行（含前导 `/`）；不是命令时返回空。
+/// 约束：候选一律带前导 `/`——命令与消息的区别只有前缀，补全也不能自己换一套写法。
 pub(crate) fn complete(prefix: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
+    let Some(rest) = prefix.strip_prefix('/') else {
+        return Vec::new();
+    };
     // 已经写全一个命令词 + 空格：补全从这个命令自己的声明里出（旗语与枚举值）。
-    if let Some((head, tail)) = prefix.split_once(' ')
+    if let Some((head, tail)) = rest.split_once(' ')
         && let Some(op) = ops().find(head)
     {
         return complete_op(op, tail.trim_start());
     }
+    let mut out: Vec<String> = Vec::new();
     for op in ops().ops() {
         let names = std::iter::once(&op.id).chain(op.aliases.iter());
         for name in names {
@@ -204,8 +208,8 @@ pub(crate) fn complete(prefix: &str) -> Vec<String> {
                 Phase::Boot => flag_form(name),
                 Phase::Core => name.clone(),
             };
-            if name.starts_with(prefix) && !out.contains(&name) {
-                out.push(name);
+            if name.starts_with(rest) && !out.contains(&name) {
+                out.push(format!("/{}", name));
             }
         }
     }

@@ -9,7 +9,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/presentation/cli.rs` | 终端转录中心入口：启动页 → 提示符（每行交 `shell`）→ 会话流；启动相命令在提示符里也走这里（`run_boot`：拒 `--root`、忽略 `--json`、就地确认、有会话在跑时只预览）；不做业务判断、不持状态 |
+| `src/presentation/cli.rs` | 终端转录中心入口：启动页 → 提示符（前缀定归属：`/` 开头交 `shell`，其余开或接核心代理会话）→ 会话流；启动相命令在提示符里也走这里（`run_boot`：拒 `--root`、忽略 `--json`、就地确认、有会话在跑时只预览）；不做业务判断、不持状态 |
 | `src/presentation/cli/commands.rs` | 一次性命令：`diagnose` / `secret` / `resident` / `work` / `rewind`；取参与打印回执（参数已由声明解析成 JSON） |
 | `src/presentation/cli/shell.rs` | 词表先落到声明上：命令与模块工具走同一条入口（`--json` / `--help` / `--version` 摘取、模块清单与三级手册 `modules` / `<模块>` / `<模块> <工具>`）；命令行一次性调用与转录中心提示符共用 |
 | `src/presentation/cli/view.rs` | 渲染原语：启动页事实行、状态行、花名册、菜单（取自命令目录）；交互模式富渲染（角色行、工具行、验收/交付、上下文用量），非 TTY 保持原样文本 |

@@ -329,12 +329,7 @@ impl ActionOps for Handle {
                     .params
                     .iter()
                     .flatten()
-                    .map(|(name, p)| ActionParamView {
-                        name: name.clone(),
-                        ty: p.ty.name().to_string(),
-                        required: p.required,
-                        desc: p.desc.clone(),
-                    })
+                    .map(|(name, p)| ActionParamView::of(name, p))
                     .collect(),
                 available: true,
                 reason: String::new(),
@@ -353,12 +348,7 @@ impl ActionOps for Handle {
                             .params
                             .iter()
                             .flatten()
-                            .map(|(name, p)| ActionParamView {
-                                name: name.clone(),
-                                ty: p.ty.name().to_string(),
-                                required: p.required,
-                                desc: p.desc.clone(),
-                            })
+                            .map(|(name, p)| ActionParamView::of(name, p))
                             .collect(),
                         None => Vec::new(),
                     };
@@ -367,6 +357,11 @@ impl ActionOps for Handle {
                         ty: "string".to_string(),
                         required: false,
                         desc: "工作目录（绝对路径）；省略 = 模块自己的 userdata/".to_string(),
+                        default: None,
+                        min: None,
+                        max: None,
+                        values: None,
+                        positional: None,
                     });
                     let (available, reason) = match missing.get(&m.manifest.id) {
                         Some(caps) => (false, format!("缺运行能力：{}", caps.join("、"))),

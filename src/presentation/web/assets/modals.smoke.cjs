@@ -457,38 +457,57 @@ if (!loadErrors.length) {
       got.id === "n1" && got.sid === "w--a" && got.rework === 2 &&
       String(got.report).indexOf("语料抽好了") === 0;
   });
-  // ⑦ 模块与服务面板：只列模块；服务带开关与运行态；功能给「使用」，参数在子卡片里。
-  check("模块与服务面板只列模块、功能走「使用」子卡片", () => {
-    const got = vm.runInNewContext(`
+  // ⑦ 模块与服务面板只管启停与服务；调用在动作页（参数按声明现渲染）。
+  check("模块页不含调用入口，动作页按声明渲染参数表单", () => {
+    const mods = vm.runInNewContext(`
       (() => {
         const ctx = openModal('测试', () => {});
         renderModulesPanel(ctx,
-          [{ id: 'research', brief: '调研', enabled: true, services: [{ name: 'fs', enabled: false }] },
+          [{ id: 'research', version: '0.1.0', brief: '调研', enabled: true, services: [{ name: 'fs', enabled: false }] },
            { id: 'lonely', brief: '只有 system', enabled: false, services: [] }],
           [{ module: 'research', name: 'fs', adapter: 'mcp', state: '未启动' }],
-          [{ id: 'set_module_enabled', desc: '模块开关', params: [] },
-           { id: 'control_resident', desc: '服务开关', params: [] },
-           { id: 'module.research.grep', desc: '搜索', params: [] }],
           async () => {});
         const walk = (n, out) => { out.push(n); for (const c of (n.children || [])) walk(c, out); return out; };
         const nodes = walk($('#modal-root'), []);
         const texts = nodes.map((n) => n.textContent || '');
         const labels = nodes.filter((n) => n.tagName === 'BUTTON').map((n) => n.textContent);
-        const listed = { use: labels.indexOf('使用') >= 0, run: labels.indexOf('运行') >= 0 };
-        openUseCard({ id: 'module.research.grep', desc: '搜索', params: [{ name: 'q', ty: 'string' }] });
-        const after = walk($('#modal-root'), []).filter((n) => n.tagName === 'BUTTON').map((n) => n.textContent);
         return {
-          research: texts.some((t) => t.indexOf('research') >= 0),
+          version: texts.some((t) => t.indexOf('research 0.1.0') >= 0),
           service: texts.some((t) => t.indexOf('fs · mcp · 未启动') >= 0),
-          use: listed.use,
-          noRunInList: !listed.run,
-          noSysTools: texts.every((t) => t.indexOf('set_module_enabled') < 0 && t.indexOf('control_resident') < 0),
-          lonely: texts.some((t) => t.indexOf('只能经 AI 使用') >= 0),
-          subRun: after.indexOf('运行') >= 0,
+          noInvoke: labels.indexOf('运行') < 0 && labels.indexOf('使用') < 0,
+          hint: texts.some((t) => t.indexOf('动作与工具') >= 0),
         };
       })()
     `, sandbox);
-    return got.research && got.service && got.use && got.noRunInList && got.noSysTools && got.lonely && got.subRun;
+    const form = vm.runInNewContext(`
+      (() => {
+        const ctx = openModal('动作', () => {});
+        ctx.body.appendChild(actionRunner({
+          id: 'module.research.grep', desc: '搜索', available: true,
+          params: [
+            { name: 'q', ty: 'string', required: true, desc: '关键词', positional: 1 },
+            { name: 'limit', ty: 'integer', required: false, default: 20, min: 1, max: 100 },
+            { name: 'mode', ty: 'string', required: false, values: ['fast', 'deep'] },
+            { name: 'case', ty: 'boolean', required: false },
+          ],
+        }));
+        const walk = (n, out) => { out.push(n); for (const c of (n.children || [])) walk(c, out); return out; };
+        const nodes = walk($('#modal-root'), []);
+        const texts = nodes.map((n) => n.textContent || '');
+        const sel = nodes.find((n) => n.tagName === 'SELECT');
+        const nums = nodes.filter((n) => n.tagName === 'INPUT' && n.type === 'number');
+        return {
+          required: texts.some((t) => t.indexOf('q（必填）') >= 0),
+          positional: texts.some((t) => t.indexOf('位置 1') >= 0),
+          select: !!sel && sel.children.length === 2,
+          bounds: nums.length === 1 && nums[0].value === '20' && nums[0].min === '1' && nums[0].max === '100',
+          bool: nodes.filter((n) => n.tagName === 'INPUT' && n.type === 'checkbox').length === 1,
+          run: nodes.some((n) => n.tagName === 'BUTTON' && n.textContent === '运行'),
+        };
+      })()
+    `, sandbox);
+    return mods.version && mods.service && mods.noInvoke && mods.hint &&
+      form.required && form.positional && form.select && form.bounds && form.bool && form.run;
   });
   // ⑧ 核心默认块：设置模型页顶部有下拉与保存，容器须给二者留间距（保存按钮紧贴下拉的回归）。
   check("核心默认块：下拉与保存按钮在设置模型页且有间距", () => {

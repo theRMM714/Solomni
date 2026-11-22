@@ -93,6 +93,7 @@ function writeToolbox(py) {
   fs.mkdirSync(path.join(dir, "tools"), { recursive: true });
   const text = [
     "id: toolbox",
+    "version: 0.1.0",
     "brief: e2e 夹具：声明一个外部工具，用来验证工具进程的工作目录是它自己的模块目录。",
     "system: >-",
     "  你负责读文本。工具用法（参数以 JSON 对象经信封 args 传入）：",
@@ -135,6 +136,7 @@ function writeMcpModule(py) {
   fs.writeFileSync(path.join(dir, "tools", "server.py"), prelude + source);
   const text = [
     "id: mcp-toolbox",
+    "version: 0.1.0",
     "brief: e2e 夹具：声明一个 MCP 常驻服务，验证「服务操作进工具面并被调用」。",
     "system: >-",
     "  你手上有一个 MCP 工具箱（常驻服务 toolbox），操作有 toolbox.sha256 / toolbox.uuid / toolbox.now /",

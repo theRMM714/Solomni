@@ -15,7 +15,7 @@ src/presentation/cli/argv.rs: tools
 src/presentation/cli/boot.rs: maintenance/storage system tools
 src/presentation/cli/catalog.rs: catalog/modules tools
 src/presentation/cli/commands.rs: runtime workspace
-src/presentation/cli/flows.rs: catalog/registry
+src/presentation/cli/flows.rs: catalog/registry system
 src/presentation/cli/gate.rs: catalog/registry provision
 src/presentation/cli/shell.rs: catalog/modules runtime system tools
 src/presentation/cli/view.rs: catalog/packages conversation/session work

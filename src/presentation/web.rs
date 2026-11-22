@@ -746,7 +746,10 @@ fn state_json(faces: &Faces, fence: &FenceInfo) -> Result<serde_json::Value, Str
     Ok(json!({
         "modules": roster.modules.iter().map(|m| json!({
             "id": m.manifest.id,
+            "version": m.manifest.version,
             "brief": m.manifest.brief,
+            // 给 agent 的说明：模块页原样显示，调用页不重复一遍。
+            "system": m.manifest.system,
             // 模块声明的运行能力：创建向导据此预判"这个虚拟根满足不了哪些模块"。
             "runtimes": m.manifest.runtimes,
             "enabled": faces.modules.module_enabled(&m.manifest.id).unwrap_or(false),
