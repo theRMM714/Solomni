@@ -274,6 +274,105 @@ fn fs_sys_io_reads_utf8_flags_lossy_and_truncation_and_creates_parents() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// 目的：目录遍历按 .gitignore / .workignore 与隐藏、二进制剪枝，流式按行扫描从磁盘读，前 8 KiB 含 NUL 判二进制。
+#[test]
+fn fs_sys_io_walks_a_tree_and_scans_lines_from_disk() {
+    use crate::capabilities::tools::ports::WalkOpts;
+    let root = scratch("fs-sysio-walk");
+    std::fs::create_dir_all(root.join("src")).expect("建目录");
+    std::fs::create_dir_all(root.join("node_modules").join("pkg")).expect("建目录");
+    std::fs::create_dir_all(root.join(".hidden")).expect("建目录");
+    std::fs::write(root.join("src").join("a.rs"), "let a = 1;\nlet b = 2;\n").expect("写文件");
+    std::fs::write(root.join("node_modules").join("pkg").join("i.js"), "x\n").expect("写文件");
+    std::fs::write(root.join(".hidden").join("h.txt"), "h\n").expect("写文件");
+    std::fs::write(root.join(".gitignore"), "node_modules/\n").expect("写规则");
+    std::fs::write(root.join("bin.dat"), [b'a', 0, b'b']).expect("写二进制");
+    let io = FsSysIo::default();
+
+    let walked = io
+        .walk(
+            &root,
+            None,
+            WalkOpts {
+                hidden: false,
+                ignore: true,
+            },
+        )
+        .expect("遍历成功");
+    let rels: Vec<&str> = walked.iter().map(|e| e.rel.as_str()).collect();
+    assert_eq!(
+        rels,
+        vec!["bin.dat", "src/a.rs"],
+        "点号开头的文件与目录一律按隐藏处理：{:?}",
+        rels
+    );
+
+    let walked = io
+        .walk(
+            &root,
+            None,
+            WalkOpts {
+                hidden: true,
+                ignore: true,
+            },
+        )
+        .expect("遍历成功");
+    let rels: Vec<&str> = walked.iter().map(|e| e.rel.as_str()).collect();
+    assert_eq!(
+        rels,
+        vec![".gitignore", ".hidden/h.txt", "bin.dat", "src/a.rs"],
+        "放行隐藏文件、.gitignore 仍生效：{:?}",
+        rels
+    );
+
+    let walked = io
+        .walk(
+            &root,
+            None,
+            WalkOpts {
+                hidden: false,
+                ignore: false,
+            },
+        )
+        .expect("遍历成功");
+    let rels: Vec<&str> = walked.iter().map(|e| e.rel.as_str()).collect();
+    assert!(
+        rels.contains(&"node_modules/pkg/i.js"),
+        "关掉忽略后依赖目录要能搜到：{:?}",
+        rels
+    );
+
+    let mut seen: Vec<(u32, String)> = Vec::new();
+    let summary = io
+        .scan_lines(&root.join("src").join("a.rs"), &mut |n, line| {
+            seen.push((n, line.to_string()));
+        })
+        .expect("扫描成功");
+    assert_eq!(summary.lines, 2, "行号从 1 数到 2");
+    assert!(!summary.binary && !summary.lossy);
+    assert_eq!(
+        seen,
+        vec![(1, "let a = 1;".to_string()), (2, "let b = 2;".to_string())]
+    );
+
+    let mut called = 0;
+    let summary = io
+        .scan_lines(&root.join("bin.dat"), &mut |_, _| {
+            called += 1;
+        })
+        .expect("扫描成功");
+    assert!(summary.binary, "含 NUL 判二进制");
+    assert_eq!(called, 0, "二进制不回调任何行");
+
+    assert_eq!(
+        io.read_small(&root.join(".gitignore"))
+            .expect("读成功")
+            .as_deref(),
+        Some("node_modules/\n")
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// 目的：按行窗口读时只取请求区间，但行数与版本覆盖整份文件——超过 1MB 也能直接读后半段。
 #[test]
 fn fs_sys_io_read_page_reads_a_late_window_and_counts_the_whole_file() {

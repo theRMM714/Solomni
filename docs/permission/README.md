@@ -32,8 +32,8 @@
   - host-read：用户显式授权的主机只读根；
   - network：出站网络。
 - **Effect（这次操作属于哪类）**
-  - read：read / list / grep / work_pull / work_status / work_versions；
-  - write：write / edit / patch / delete / work_commit / work_push / work_resolve / work_lost 的恢复；
+  - read：read / list / grep / work_pull / work_status / work_versions / work_ignore 的 list；
+  - write：write / edit / patch / delete / work_commit / work_push / work_resolve / work_lost 的恢复 / work_ignore 的 add 与 remove；
   - exec：模块工具 / shell；
   - none：不碰文件、不需要权限闸门的动作。
 - **Decision（怎么处置）**

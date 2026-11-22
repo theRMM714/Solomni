@@ -64,10 +64,13 @@ impl WorkspaceService {
             CommitLine::Work | CommitLine::Save => tree.clone(),
         };
         // 沙箱里的文件全集（paths 里的文件夹据此展开）。
-        let sandbox_files: BTreeSet<String> = self.sandbox_files(&store, &sandbox)?.into_iter().collect();
+        let sandbox_files: BTreeSet<String> =
+            self.sandbox_files(&store, &sandbox)?.into_iter().collect();
         // 存档线记的是**整棵沙箱快照**：回档要把沙箱铺回它当时的样子，只记调用方点名的路径会漏。
         let (want, missing) = match line {
-            CommitLine::Main | CommitLine::Work => self.expand_forced(&sandbox, &sandbox_files, &req.paths)?,
+            CommitLine::Main | CommitLine::Work => {
+                self.expand_forced(&sandbox, &sandbox_files, &req.paths)?
+            }
             CommitLine::Save => (sandbox_files.iter().cloned().collect(), Vec::new()),
         };
         if !missing.is_empty() {

@@ -12,10 +12,7 @@ use std::path::{Path, PathBuf};
 
 /// 目的：grep 的匹配器：正则（缺省）或按字面；忽略大小写在构造时折进去，逐行只判一次。
 enum GrepMatch {
-    Literal {
-        needle: String,
-        fold: bool,
-    },
+    Literal { needle: String, fold: bool },
     Regex(regex::Regex),
 }
 
@@ -50,7 +47,12 @@ fn grep_matcher(pattern: &str, fixed: bool, ignore_case: bool) -> Result<GrepMat
         .case_insensitive(ignore_case)
         .build()
         .map(GrepMatch::Regex)
-        .map_err(|e| format!("pattern 不是合法正则：{}。要按字面匹配就加 \"fixed\":true。", e))
+        .map_err(|e| {
+            format!(
+                "pattern 不是合法正则：{}。要按字面匹配就加 \"fixed\":true。",
+                e
+            )
+        })
 }
 
 /// 目的：glob 过滤集合；没有 glob = None（不过滤）。
@@ -253,7 +255,9 @@ pub(super) fn run(
     } else {
         targets.push((path.display().to_string(), path.to_path_buf()));
     }
-    let body_budget = MAX_GREP_CHARS.min(budget.limit().saturating_sub(512)).max(256);
+    let body_budget = MAX_GREP_CHARS
+        .min(budget.limit().saturating_sub(512))
+        .max(256);
     let mut body: Vec<String> = Vec::new();
     let mut used = 0usize;
     let mut total_hits = 0usize;
@@ -318,14 +322,21 @@ pub(super) fn run(
     let mode = format!(
         "{}{}",
         if fixed { "按字面" } else { "正则" },
-        if ignore_case { "、忽略大小写" } else { "" }
+        if ignore_case {
+            "、忽略大小写"
+        } else {
+            ""
+        }
     );
     let glob_note = if globs.is_empty() {
         String::new()
     } else {
         format!("，glob {:?}", globs)
     };
-    let mut out = format!("[grep] {} 匹配「{}」（{}{}）", spec, pattern, mode, glob_note);
+    let mut out = format!(
+        "[grep] {} 匹配「{}」（{}{}）",
+        spec, pattern, mode, glob_note
+    );
     if body.is_empty() {
         out.push_str("\n（没有命中行）");
     } else {
@@ -372,7 +383,9 @@ pub(super) fn run(
         out.push_str("\n[编码] 有文件含非法 UTF-8 字节，命中行按替换字符呈现。");
     }
     if no_ignore {
-        out.push_str("\n[过滤] 这次关掉了忽略规则与工作区过滤，.git 与 node_modules 之类也会被扫。");
+        out.push_str(
+            "\n[过滤] 这次关掉了忽略规则与工作区过滤，.git 与 node_modules 之类也会被扫。",
+        );
     }
     ToolOutcome::new(true, out)
 }

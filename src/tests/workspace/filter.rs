@@ -69,11 +69,15 @@ fn rules_treat_empty_text_as_no_filter_and_report_bad_lines() {
 /// 约束：普通 gitignore 写法（目录名、锚定、取反、结尾 /）都要放行，检查只管越界。
 #[test]
 fn check_rule_rejects_escaping_paths_and_catch_all_patterns() {
-    for good in ["node_modules", "*.log", "/build", "!keep.txt", "a/b/c", "**/tmp"] {
-        assert!(
-            check_rule(good).is_ok(),
-            "正常规则要放行：{good}"
-        );
+    for good in [
+        "node_modules",
+        "*.log",
+        "/build",
+        "!keep.txt",
+        "a/b/c",
+        "**/tmp",
+    ] {
+        assert!(check_rule(good).is_ok(), "正常规则要放行：{good}");
     }
     let bad = [
         ("", "空行"),
@@ -87,15 +91,15 @@ fn check_rule_rejects_escaping_paths_and_catch_all_patterns() {
     ];
     for (rule, want) in bad {
         let err = check_rule(rule).unwrap_err();
-        assert!(err.contains(want), "规则 {rule:?} 的错误要点名「{want}」：{err}");
+        assert!(
+            err.contains(want),
+            "规则 {rule:?} 的错误要点名「{want}」：{err}"
+        );
     }
     let long = "a".repeat(MAX_RULE_CHARS + 1);
     let err = check_rule(&long).unwrap_err();
     assert!(err.contains("太长"), "{err}");
-    assert!(
-        check_rule("a\0b").is_err(),
-        "NUL 字符要拒绝"
-    );
+    assert!(check_rule("a\0b").is_err(), "NUL 字符要拒绝");
 }
 
 /// 目的：播种的默认名单覆盖 VCS 元数据与依赖缓存，但不把隐藏文件一律忽略。

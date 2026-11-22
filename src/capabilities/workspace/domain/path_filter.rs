@@ -93,7 +93,8 @@ pub fn check_rule(line: &str) -> Result<(), String> {
     }
     let body = t.strip_prefix('!').unwrap_or(t);
     let mut chars = body.chars();
-    let drive = matches!((chars.next(), chars.next()), (Some(c), Some(':')) if c.is_ascii_alphabetic());
+    let drive =
+        matches!((chars.next(), chars.next()), (Some(c), Some(':')) if c.is_ascii_alphabetic());
     if drive || body.starts_with("\\") || body.starts_with("//") {
         return Err(format!(
             "过滤规则只认工作区内的相对路径，不能是绝对路径：{}",
@@ -108,4 +109,3 @@ pub fn check_rule(line: &str) -> Result<(), String> {
     }
     Ok(())
 }
-

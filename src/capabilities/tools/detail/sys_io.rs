@@ -893,7 +893,9 @@ impl SysIo for FsSysIo {
     ) -> Result<ScanSummary, String> {
         let mut file = std::fs::File::open(path).map_err(|e| format!("读取失败：{}", e))?;
         let mut head = vec![0u8; 8 * 1024];
-        let n = file.read(&mut head).map_err(|e| format!("读取失败：{}", e))?;
+        let n = file
+            .read(&mut head)
+            .map_err(|e| format!("读取失败：{}", e))?;
         head.truncate(n);
         if probe_binary(&head) {
             return Ok(ScanSummary {
@@ -902,10 +904,8 @@ impl SysIo for FsSysIo {
             });
         }
         // 已经读掉的头部接回流前：二进制判定不额外读第二遍，也不丢开头。
-        let mut reader = std::io::BufReader::with_capacity(
-            64 * 1024,
-            std::io::Cursor::new(head).chain(file),
-        );
+        let mut reader =
+            std::io::BufReader::with_capacity(64 * 1024, std::io::Cursor::new(head).chain(file));
         let mut summary = ScanSummary::default();
         let mut buf: Vec<u8> = Vec::new();
         loop {
