@@ -33,7 +33,7 @@ impl crate::capabilities::vm::api::Vm for DiagnosingVm {
         &self,
         _lease: &str,
         _run: &crate::capabilities::vm::api::GuestRun,
-        _fence: &crate::kernel::api::fence::FenceSpec,
+        _fence: &crate::kernel::api::fence::FencePlan,
     ) -> crate::kernel::api::types::ToolOutcome {
         crate::kernel::api::types::ToolOutcome::new(false, "替身不跑命令".to_string())
     }

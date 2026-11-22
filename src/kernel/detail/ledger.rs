@@ -213,7 +213,7 @@ pub fn release_by_lease(home: &std::path::Path, lease: &str) -> Result<(), Strin
 
 /// 目的：一次**一次性调用**的收尾——撤它自己的 ACE、删它的按次 profile、删 `private/Packages/<名字>` 空壳。
 pub fn release_call(
-    spec: &crate::kernel::contracts::fence::FenceSpec,
+    spec: &crate::kernel::contracts::fence::FencePlan,
     home: &std::path::Path,
 ) -> Result<(), String> {
     admin::release_call(spec, home)

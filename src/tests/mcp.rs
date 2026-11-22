@@ -5,7 +5,7 @@
 
 use crate::capabilities::residents::detail::McpAdapter;
 use crate::capabilities::residents::ports::{LaunchSpec, ServiceAdapter};
-use crate::kernel::api::fence::FenceSpec;
+use crate::kernel::api::fence::FencePlan;
 use crate::kernel::ports::SessionHost;
 use crate::tests::doubles::{RecordingLog, ScriptedHost};
 use serde_json::json;
@@ -21,7 +21,7 @@ fn launch() -> LaunchSpec {
         options: Default::default(),
         env: vec![("TOKEN".to_string(), "s3cr3t".to_string())],
         path: None,
-        fence: FenceSpec::standalone(std::path::Path::new("."), None, false),
+        fence: FencePlan::standalone(std::path::Path::new("."), None, false),
     }
 }
 
@@ -113,7 +113,7 @@ fn mcp_adapter_talks_to_a_real_stdio_server() {
     );
     let mut spec = launch();
     spec.command = format!("{} tests/fixtures/mcp_echo.py", py);
-    spec.fence = FenceSpec::standalone(&root, None, false);
+    spec.fence = FencePlan::standalone(&root, None, false);
 
     let (mut instance, faces) = adapter.start(&spec).expect("真实服务要握手成功");
     assert!(

@@ -186,7 +186,7 @@ impl ModuleSource for VecSource {
 /// 目的：无声围栏端口：测试里不碰任何 ACL（真实实现在 src/kernel/detail/confine）。
 pub(crate) struct NoFenceHost;
 impl crate::kernel::ports::FenceHost for NoFenceHost {
-    fn release_call(&self, _spec: &crate::kernel::api::fence::FenceSpec) -> Result<(), String> {
+    fn release_call(&self, _spec: &crate::kernel::api::fence::FencePlan) -> Result<(), String> {
         Ok(())
     }
 }

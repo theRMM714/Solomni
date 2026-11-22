@@ -4,7 +4,7 @@
 //! 联动：能力等级由启动报告如实给出；调用方见 confine.rs。
 
 use super::{Capability, FENCE_FAILED, FenceVerdict, shell_command};
-use crate::kernel::contracts::fence::FenceSpec;
+use crate::kernel::contracts::fence::FencePlan;
 
 pub fn capability() -> Capability {
     Capability {
@@ -22,20 +22,20 @@ pub fn effective_paths(fs: bool, net: bool, _write_allowed: bool) -> (bool, bool
     (fs, net)
 }
 
-pub fn verify(_spec: &FenceSpec, _command: &str) -> FenceVerdict {
+pub fn verify(_spec: &FencePlan, _command: &str) -> FenceVerdict {
     FenceVerdict::EnvUnavailable("本平台没有接入文件系统围栏（只有超时与整棵树终止）".to_string())
 }
 
 /// 目的：`_prepared`（外层是否已完成本机授权）与 `_home`（容器 profile 的台账落点）只有 Windows 的容器围栏用得上：
 ///   本平台没有容器这一步。
 pub fn run_fenced(
-    spec: &FenceSpec,
+    spec: &FencePlan,
     _prepared: bool,
     _home: Option<&std::path::Path>,
     command: &str,
     policy: &crate::kernel::contracts::fence::FenceRunPolicy,
 ) -> i32 {
-    if (policy.require_fs || (policy.require_net && !spec.net)) && !policy.allow_degraded {
+    if (policy.require_fs || (policy.require_net && !spec.net.on())) && !policy.allow_degraded {
         eprintln!("[围栏] 本平台没有接入文件系统/网络围栏：按全局策略拒绝执行");
         return FENCE_FAILED;
     }
@@ -45,5 +45,31 @@ pub fn run_fenced(
             eprintln!("[围栏] 工具进程启动失败：{}", e);
             FENCE_FAILED
         }
+    }
+}
+
+/// 目的：本平台后端（没有原生围栏机制，如实降级）。
+pub(crate) struct Backend;
+
+impl super::Confine for Backend {
+    fn capability(&self) -> super::Capability {
+        capability()
+    }
+
+    fn verify(&self, plan: &FencePlan, command: &str) -> super::FenceVerdict {
+        verify(plan, command)
+    }
+
+    fn effective_paths(&self, fs: bool, net: bool, write_allowed: bool) -> (bool, bool) {
+        effective_paths(fs, net, write_allowed)
+    }
+    fn run(
+        &self,
+        plan: &FencePlan,
+        prepared: super::Prepared,
+        command: &str,
+        policy: &crate::kernel::contracts::fence::FenceRunPolicy,
+    ) -> i32 {
+        run_fenced(plan, prepared.prepared, prepared.home, command, policy)
     }
 }

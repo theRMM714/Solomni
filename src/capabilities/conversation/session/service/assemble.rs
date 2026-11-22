@@ -24,7 +24,7 @@ use crate::capabilities::residents::api::ResidentOps;
 use crate::capabilities::tools::api::{ObservationFact, Observations, ToolExec, Tools, tool_notes};
 use crate::capabilities::vm::api::{GuestOs, Vm};
 use crate::capabilities::workspace::api::{ReadFact, Sandbox, Workspace};
-use crate::kernel::api::fence::FenceSpec;
+use crate::kernel::api::fence::FencePlan;
 use crate::kernel::api::types::Tier;
 use crate::kernel::ports::Log;
 
@@ -56,7 +56,7 @@ pub struct SessionPorts {
 #[derive(Debug, Clone)]
 pub struct MemberEnvParts {
     /// 目的：本成员工具进程的围栏（可达范围 + 断网）。
-    pub fence: FenceSpec,
+    pub fence: FencePlan,
     /// 目的：模块 id → 该模块隐私字段的注入项（env 名 → 值）；起进程时只走环境，不进命令行。
     pub module_env: BTreeMap<String, Vec<(String, String)>>,
     /// 目的：本机档运行包的生效 PATH（由 packages 计划给出；虚拟机档 / 没有包 = None）。

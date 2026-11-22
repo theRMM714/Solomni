@@ -43,7 +43,7 @@ impl crate::kernel::ports::FenceHost for RecordingFence {
         Ok(())
     }
 
-    fn release_call(&self, spec: &crate::kernel::api::fence::FenceSpec) -> Result<(), String> {
+    fn release_call(&self, spec: &crate::kernel::api::fence::FencePlan) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }

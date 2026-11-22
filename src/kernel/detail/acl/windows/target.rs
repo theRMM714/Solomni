@@ -22,16 +22,21 @@ pub(crate) struct GrantTarget {
     pub(crate) part: FencePart,
 }
 
-/// 目的：一个**读写叶子**是哪一环：私有沙箱 / 模块目录与 cwd 之下 / 其余数据边界。
+/// 目的：一个**写叶子**是哪一环：私有沙箱 / 模块目录与 cwd 之下 / 其余数据边界。
 /// 约束：判据按策略侧派生的路径比（沙箱、模块目录、cwd 都不是猜出来的），三类**都是必要落点**——
 ///   区别只在给用户看时说不说得清缺的是哪一环。
-fn rw_part(spec: &FenceSpec, path: &Path) -> FencePart {
-    if !spec.private.as_os_str().is_empty() && path == spec.private {
+fn write_part(plan: &FencePlan, path: &Path) -> FencePart {
+    if !plan.home.as_os_str().is_empty() && path == plan.home {
         return FencePart::Sandbox;
     }
     let under =
         |root: &Path| !root.as_os_str().is_empty() && (path == root || path.starts_with(root));
-    if under(&spec.cwd) || spec.ro_tree.iter().any(|m| under(m)) {
+    if under(&plan.cwd)
+        || plan
+            .grants
+            .iter()
+            .any(|g| g.access == Access::Read && g.reach == Reach::Tree && under(&g.path))
+    {
         return FencePart::Module;
     }
     FencePart::DataBoundary
@@ -46,12 +51,8 @@ fn rw_part(spec: &FenceSpec, path: &Path) -> FencePart {
 ///   参数 root：视图盘生效时给产品根，祖先链只补到产品根（含）为止；产品根之外一级都不写——
 ///   cwd 走视图写法后，容器只需要映射根这一级的读属性。根外祖先缺 RA 的代价由视图盘消除，
 ///   而不是靠改写盘根下的大型目录的 DACL（顺整棵树重算继承，真机 193 s/条）。
-///   参数 cwd_leaf：false 表示 cwd 已被读写叶子覆盖（视图生效且 cwd == private），不再重复加只读叶子。
-pub(crate) fn grant_targets(
-    spec: &FenceSpec,
-    root: Option<&Path>,
-    cwd_leaf: bool,
-) -> Vec<GrantTarget> {
+///   工作目录本身不单独授权：它恒被某条只读子树或写子树覆盖（模块目录就是那条子树）。
+pub(crate) fn grant_targets(plan: &FencePlan, root: Option<&Path>) -> Vec<GrantTarget> {
     let mut todo: Vec<GrantTarget> = Vec::new();
     let mut leaves: Vec<GrantTarget> = Vec::new();
     let leaf = |path: &Path, rights: u32, recursive: bool, part: FencePart| GrantTarget {
@@ -61,35 +62,33 @@ pub(crate) fn grant_targets(
         inherit: true,
         part,
     };
-    for root in &spec.rw {
-        if !root.as_os_str().is_empty() {
-            leaves.push(leaf(root, RIGHTS_RW, true, rw_part(spec, root)));
+    // 私有沙箱：整棵子树可读写（工具进程的 HOME / TEMP 在这里）。
+    if !plan.home.as_os_str().is_empty() {
+        leaves.push(leaf(&plan.home, RIGHTS_RW, true, FencePart::Sandbox));
+    }
+    // 其余授予照意图逐条落实：写授予 → RIGHTS_RW，读授予 → RIGHTS_RO；
+    // 落点形状 Dir 只这一层（不递归不继承），Tree 整棵子树（递归并继承）。
+    for grant in &plan.grants {
+        if grant.path.as_os_str().is_empty() {
+            continue;
         }
+        let recursive = grant.reach == Reach::Tree;
+        let (rights, part) = match grant.access {
+            Access::Write => (RIGHTS_RW, write_part(plan, &grant.path)),
+            // 用户显式授权的主机只读根（`sandbox.policy.host_read_roots`）：只写只读 ACE，
+            // **授给该 agent 自己的容器 SID**——不能授给共享组（那等于向任意容器程序开放用户数据）。
+            Access::Read if !recursive => (RIGHTS_RO, FencePart::AuthorizedRead),
+            // 只读子树（模块目录对 agent 只读）：必须递归可读（工具脚本在目录里）。
+            Access::Read => (RIGHTS_RO, FencePart::Module),
+        };
+        leaves.push(leaf(&grant.path, rights, recursive, part));
     }
-    // 用户显式授权的主机只读根（`sandbox.policy.host_read_roots`）：只写只读 ACE，**授给该 agent 自己的容器 SID**；
-    // 不能授给共享组（那等于向任意容器程序开放用户数据）；不递归（用户可能授很大的目录）。
-    for root in &spec.ro {
-        if !root.as_os_str().is_empty() {
-            leaves.push(leaf(root, RIGHTS_RO, false, FencePart::AuthorizedRead));
-        }
-    }
-    // 只读**子树**（模块目录对 agent 只读）：必须递归可读（工具脚本在目录里），所以 recursive + inherit。
-    for root in &spec.ro_tree {
-        if !root.as_os_str().is_empty() {
-            leaves.push(leaf(root, RIGHTS_RO, true, FencePart::Module));
-        }
-    }
-    // 工作目录（模块根）：工具进程要能在里面起（读 + 执行），但**不因此获得写**。
-    // 已授权可写的模块同时也在 rw 里，那一条（更早入列）给的写权才是准的。
-    if cwd_leaf && !spec.cwd.as_os_str().is_empty() {
-        leaves.push(leaf(&spec.cwd, RIGHTS_RO, true, FencePart::Cwd));
-    }
-    // 父目录：只读属性、不递归、不继承（带 (OI)(CI) 的 ACE 会传播，撤权断链就污染整棵子树）；shell 的 cwd = private 时
+    // 父目录：只读属性、不递归、不继承（带 (OI)(CI) 的 ACE 会传播，撤权断链就污染整棵子树）；shell 的 cwd = home 时
     // 要逐级补祖先的 FILE_READ_ATTRIBUTES，这条链是机器级授权（授给本产品能力 SID、跨会话复用、对账不回收）。
-    let deep = !spec.private.as_os_str().is_empty() && spec.cwd == spec.private;
+    let deep = !plan.home.as_os_str().is_empty() && plan.cwd == plan.home;
     for one in &leaves {
         // 只有 shell 的 cwd/private 这个叶子需要祖先属性；运行包根等只给直接父目录。
-        let deep_leaf = deep && (one.path == spec.cwd || one.path == spec.private);
+        let deep_leaf = deep && (one.path == plan.cwd || one.path == plan.home);
         let mut parent = one.path.parent();
         while let Some(p) = parent {
             // 视图盘生效时根外祖先不写：已经越过产品根就停，不能碰盘根下大型目录的 DACL。

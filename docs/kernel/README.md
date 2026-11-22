@@ -32,13 +32,13 @@
 
 ## 一、围栏落点：必要与可选
 
-- 授权（写目录 ACL）只有 Windows 的容器围栏需要：外层进程一次性把「可达范围」逐条授给容器身份，落点清单由 `grant_targets` 给出（叶子 + 直接父目录的只读属性）。**必要 / 可选的判据只有一处**：`src/kernel/contracts/fence.rs` 的 `FencePart::necessary`（枚举里 `AuthorizedRead` 与 `Parent` 两条就是可选的）。
+- 授权（写目录 ACL）只有 Windows 的容器围栏需要：外层进程一次性把「可达范围」逐条授给容器身份，落点清单由 `grant_targets` 从**计划**推出（每条授予的叶子 + 直接父目录的只读属性）。**必要 / 可选的判据只有一处**：`src/kernel/detail/confine/prep.rs` 的 `FencePart::necessary`（枚举里 `AuthorizedRead` 与 `Parent` 两条就是可选的）。`FencePart` 是**实现层词汇**（解释器基线、祖先链、容器身份这些只有 Windows 知道），不出现在对外契约里：调用方只拿 `FenceBlocked`。
 - 必要（缺了这次命令在容器里起不来，或这次执行根本做不了该做的事）：
 
 | 落点 | 缺了会怎样 |
 | --- | --- |
 | 解释器安装目录 | 容器里连解释器都起不来 |
-| 模块目录 / 工具进程的工作目录 | 工具脚本与它的依赖在这里，命令的起点也在这里 |
+| 模块目录 | 工具脚本与它的依赖在这里（只读子树）；命令的 cwd 落在私有沙箱或这个子树里，不再单列一条 cwd 授予 |
 | 私有沙箱 | `HOME` / `TEMP` 的落点，也是**容器临时目录**（`Packages/<容器名>/AC/Temp`）的父目录：进程连临时文件都落不下 |
 | 其余数据边界（共享主副本、模块 `userdata/`） | 这次执行要读写的根：读不到输入、写不进产物 |
 | 容器身份 / 授权台账 | 围栏本身的前提（派生不出 SID、台账落不下就先不动本机权限项） |
@@ -63,31 +63,35 @@
   - **授权主体分两个（仅 Windows）**：我们自己写的 ACE 一律授给**本产品的能力 SID**（`solomni.fence.baseline`，经 `DeriveCapabilitySidsFromName` 派生成 `S-1-15-3-*`，见 `src/kernel/detail/container/windows.rs` 的 `CAPABILITY_NAME` / `product_capability_sid`）——profile（`CreateAppContainerProfile`）与令牌（`SECURITY_CAPABILITIES`）两处都声明它，只有声明了的容器才拿得到这条只读。**不用 `ALL APPLICATION PACKAGES`（`S-1-15-2-1`）当授权主体**：那等于把读权限下放给本机所有 AppContainer 应用。系统目录（`System32` 等）自带的 AAPP 只读 ACE 不是我们写的、也改不动，所以解释器预检**两个主体都认**（`interpreter_baseline_present`），但只有能力 SID 那条算「我们已授」（`system_baseline_sid` 只用于识别，不用于写入）。真机判据：`tests/windows/probes/capability.rs` 的 `capability_sid_is_grantable_and_not_blanket`——带能力的容器读得到只授给该能力的文件、不带能力的读不到，且两者都写得了自己的工作目录。
   - **机器级一次性预授（仅 Windows）**：`--setup=fence`（或首次授权成功后自动一次）把两类落点一次写掉——产品根上的一条 `(OI)(CI)` 读属性（授给本产品能力 SID，覆盖根下全部既有与新建子项，视图盘根因此可解析；产品根之外的祖先不写）、`.tools/` 与 `runtimes/` 的递归只读。之后 `prepare_fence` 对这些落点全部命中已有 ACE、零写入；机器级条目不随会话回收，撤除走 `--fence-clean` 或按条撤销。入口 `src/kernel/detail/confine/windows/machine.rs`（`machine_plan` / `machine_missing` / `machine_ensure`），门面在 `src/kernel/detail/confine/prep.rs`。
   - **旧全应用包授权的退役（仅 Windows）**：`--setup=fence` 预授成功后顺带退役台账里**我们自己发过的**机器级 AAPP 条目（`retire_legacy_machine_grants`）：只认 `scope=machine` 且 SID 为 `S-1-15-2-1` 的条目，**先授后撤**——同一路径上能力 SID 的 ACE 覆盖得住这条的权限位（继承来的也算）才撤，覆盖不住就保留（解释器目录、产品根之外的祖先因此留着，要撤用 `--fence-revoke <SID> <路径>`）。系统目录自带的 AAPP ACE 不进台账，一条都不碰；盘卷根不动。浅路径先撤：父目录那条可继承 ACE 一撤，子目录继承到的副本由系统一并收走，子条目只销账、不再各写一次整树 ACL；撤与撤后核对都只看对象**自己带着**的 ACE（继承来的投影属于祖先那条授权，不在这一条里撤）。逐条开台账事务（锁只罩读—改—写），撤后核对残留；任一条失败就保留条目、如实报，重跑可再撤。首次授权后的自动那一趟只走 `machine_ensure`，不做这件慢清理。真机判据：`src/kernel/detail/confine/windows/tests/grant.rs` 的 `legacy_aapp_machine_grants_retire_only_after_capability_is_in_place`。
-  - **三类根（仅 Windows）**：① **可信执行基座**——产品内工具链（`.tools/`）与运行包（`runtimes/<包>`）是只读二进制、不携带任何 scope 信息，一次性授给本产品能力 SID（与祖先链同路，不同于系统解释器目录自带的 AAPP），按**机器级**归属记台账（`scope=machine`、无归属，启动对账不回收、跨会话复用），**不进按 reach 的容器身份**；② **受保护数据 / 代码**——私有沙箱、共享区、模块目录、模块 `userdata/`、用户授权只读根，按 reach 授给容器 SID；③ 系统基线（`C:\Windows` 等）。把工具链放进 reach 会让同一份 16k 文件按每个 scope 组合各授一次（本机实测 56s/次），属于类别错误。
-  - **容器临时目录先建**（仅 Windows）：`prepare_fence` 在授权前建好 `<私有沙箱>/Packages/<容器名>/AC/Temp`——AppContainer 的 `GetTempPath2` **不读 TMP/TEMP**，编译器这类程序缺了它直接 abort（`Cannot create temporary file`）；目录在 `rw` 之下，递归 ACE 覆盖它，不单列一条授权。`private` 为空时跳过并记一条事实。
+  - **三类根（仅 Windows）**：① **可信执行基座**——产品内工具链（`.tools/`）与运行包（`runtimes/<包>`）是只读二进制、不携带任何 scope 信息，一次性授给本产品能力 SID（与祖先链同路，不同于系统解释器目录自带的 AAPP），按**机器级**归属记台账（`scope=machine`、无归属，启动对账不回收、跨会话复用），**不进容器身份**；② **受保护数据 / 代码**——私有沙箱（`home`）、模块目录、模块 `userdata/`、用户授权只读根，按计划里的授予授给容器 SID；③ 系统基线（`C:\Windows` 等）。把工具链放进计划会让同一份 16k 文件按每个计划组合各授一次（本机实测 56s/次），属于类别错误。
+  - **容器临时目录先建**（仅 Windows）：`prepare_fence` 在授权前建好 `<私有沙箱>/Packages/<容器名>/AC/Temp`——AppContainer 的 `GetTempPath2` **不读 TMP/TEMP**，编译器这类程序缺了它直接 abort（`Cannot create temporary file`）；目录在私有沙箱（`home`）之下，递归 ACE 覆盖它，不单列一条授权。`private` 为空时跳过并记一条事实。
   - **未授权档位不是这条路**（仅 Windows）：用户没开 `sandbox.policy.windows.write_acl` 时外层根本不写权限项，容器围栏不装；若策略要求强制则拒绝，否则按无围栏执行并在启动报告标出。Linux / macOS 没有外层授权这一步，围栏照常装。
   - **启动门（组合根）**：默认 CLI 与 `--web` 都先判 `require` vs 本次实际，并把「未授权」与「本机能力缺失」分开报；未满足时只能本次降级 / 重设 / 退出（`src/main.rs`）。没有可回答的前端、或 `on_unavailable=refuse` 且不重设 = 退出，不会启动前端。首次启动（没有 `.home/settings.yaml`）在 Windows 先问一次是否授权写 ACL；选否不写盘、进入启动门。授权后立刻跑机器级预授；后续启动只做 O(深度) 只读对账，缺项只提示 `--setup=fence`，不阻断。`require` + `write_acl=false` 的矛盾配置在加载 / 保存时即拒绝，不会进入门。
   - **回执 = 正文 + 结构化说明**：`RunOutcome` / `ToolOutcome` 的 `output` 只放进程原始输出；超时、退出码、信号、启动失败、围栏没装上都表达成 `Note`（稳定 ASCII 码 + 类型化参数 + `info` / `warning` / `error`），码表在 `src/kernel/contracts/note.rs`。kernel 只产出码与参数，**不构造业务文案**（R6）；文本在边缘按 `locales/<lang>.ftl` 渲染（`src/kernel/detail/i18n.rs`）。
   - **不声称失败原因**：越界拒绝发生在工具子进程内部（ACL / Landlock / seatbelt 都在那里），守门进程只看得到退出码与被本地化的 OS 文案。回执因此**只说跑没跑、退出码多少**，不写"被围栏拒绝"之类因果；可达范围这类事实由工具层结构化交给界面，不进模型回执。
-- 平台：只有 Windows 有「外层授权写 ACL」这一步；Linux 的 Landlock 与 macOS 的 seatbelt 在守门进程里自足，那里没有 `prepare_fence`（不是存在但空转）。三个平台各自的强制项与降级条件见「二、工具进程与守门协议」。
+- **意图与实现分家**：上层只交 `FencePlan`（`agent` / `lease` / `home` / `cwd` / `grants` / `net`）。每条授予是 `Grant { path, access, reach }`：
+  - `access` 只有 `Read` / `Write` 两档——写蕴含读与执行（三平台都给不出「只收窄执行位」这种授予，设第三档就是假抽象）；
+  - `reach` 只有 `Dir`（只这一层）/ `Tree`（整棵子树）——只有 Windows 的 DACL 能如实表达「不递归」，Landlock 的 path-beneath 只能按子树落实（如实放宽，不假装精确；Windows 侧的落实见 `src/kernel/detail/acl/windows/target.rs` 的 `grant_targets`，Linux 侧见 `src/kernel/detail/confine/linux.rs` 的 `install_rules`）；
+  - `home` 隐含一条「写整棵子树」的授予（私有沙箱、`HOME` / `TEMP`、容器临时目录都在它下面），不再重复进 `grants`。
+- 平台差异全部收在 `src/kernel/detail/confine.rs` 的 `trait Confine`（`capability` / `verify` / `effective_paths` / `run`）的四个实现里：Linux 落成 Landlock + seccomp，macOS 落成 seatbelt profile，Windows 落成 AppContainer + 目录 ACL，其它平台如实降级。**上层代码里没有围栏的 `cfg(windows)` 分支**。「先把授权写进本机」这一步只有 Windows 有（Unix 的围栏在守门进程里自足），所以它是 Windows 后端自己的入口 `prepare_fence`（`src/kernel/detail/confine/windows.rs`），不占 trait 的位置；三个调用点都在 Windows 专用文件里。三个平台各自的强制项与降级条件见「二、工具进程与守门协议」。
 - **启动对账只回收归属明确已死的条目**：`reconcile` 走台账、**不调用** `sweep_orphan_aces` / `sweep_profiles`（那两条无归属、会误伤在跑实例）；孤儿清扫只在用户手动的 `--fence-clean`。台账里的机器级条目（`scope = machine`、没有归属）按设计也不回收：它们授给本产品能力 SID、跨会话复用，撤除走 `--fence-clean` 或按条撤销（`src/kernel/detail/ledger/windows/liveness.rs` 的 `entry_state`）。台账之外的本程序 profile 会以「只报告、不自动删」列出来（没有归属证明，删了会误伤在跑实例），处置入口同样是 `--fence-clean`。
 - **台账写事务串行**：每条授权 / profile 带**归属**（pid + 进程创建时刻 + 会话租约），台账落在 `.home/fence-grants.json`；写事务用**进程内互斥 + 跨进程文件锁**，两个进程不会同时改同一份台账。
 - **锁只罩台账读—改—写**：`with_ledger` 在锁内 `load` → 记账 → `save`，返回即释放；慢的 ACL 写（`grant_verified` / `TreeSetNamedSecurityInfoW`）、`acl_scan`、`has_ace_for` 都在锁外。同进程的并发工具调用不因某一条整树重算互相排队，跨进程锁的持有时间与 ACL 写时长解耦（`src/kernel/detail/ledger/windows/store.rs`、`src/kernel/detail/ledger/windows/journal.rs`）。
 - **围栏准备分步计时与进度**（仅 Windows）：`prepare_fence` 只对**真写** ACL 的落点记一步（标签固定词表：解释器目录 / 祖先链 / 受保护根 / 可信基座，不含用户路径），首次真写前 stderr 提示一次「首次为…补权限（可能要几十秒）」，完成后一条汇总（只报 ≥1 秒的类别；纯命中 / 总耗时 <1 秒保持安静）；耗时的围栏准备部分由工具层按总耗时补一条说明（码 `shell.place.prep`，≥1 秒才报；`src/kernel/detail/confine/prep.rs` 的 `FenceStep` / `FencePrep.steps`、`src/kernel/detail/process.rs` 的 `FenceTiming`）。
-- **身份按会话与 agent、生命周期按会话**：Windows 的容器身份 = `会话租约 + agent + 受保护根集合`（根集合指纹，不含工具链、不含 net）——授予固定后同一 agent 的根集合恒定，同一身份的后续调用复用 SID 与 ACL。授权由会话持有：调用结束**不**释放，会话改配 / 删除时由 `release_by_lease` 按会话租约撤 ACE、删 profile；删除会话先停 guest、再删目录，然后把按租约撤权甩到后台（先删目录让根内授权走「路径不在 → 只销账」快分支）；进程退出导致后台线程被杀时，残留由 `reconcile` 按死归属回收。
+- **身份按会话与 agent、生命周期按会话**：Windows 的容器身份 = `会话租约 + agent + 计划指纹`（`home` / `cwd` / 每条授予的权限与路径；不含工具链、不含 net）——授予固定后同一 agent 的根集合恒定，同一身份的后续调用复用 SID 与 ACL。授权由会话持有：调用结束**不**释放，会话改配 / 删除时由 `release_by_lease` 按会话租约撤 ACE、删 profile；删除会话先停 guest、再删目录，然后把按租约撤权甩到后台（先删目录让根内授权走「路径不在 → 只销账」快分支）；进程退出导致后台线程被杀时，残留由 `reconcile` 按死归属回收。
   - **容器身份评估结论（仅 Windows）**：保留 AppContainer profile + 根集合指纹，不改全局 SID、也不每次调用换 SID（`src/kernel/detail/container/windows.rs` 的 `container_name` / `ensure_profile`）。理由：profile 必须在场才能拿到 AAPP 组（否则容器连系统解释器都打不开）；ACL 写成本按根集合计，同一根集合复用 profile 才能让后续调用零写；每次调用换 SID 会把授权成本推到每次调用；机器级只读交给产品能力 SID、不进根集合指纹，避免工具链 / 运行包按调用各授一次。边界：AppContainer 是同一用户内的 DACL 隔离，不是跨用户安全边界；profile 名是 FNV 指纹，不是秘密。真机判据：`tests/windows/probes/capability.rs` 的 `capability_sid_is_grantable_and_not_blanket`。一次性调用（构建 / 独立模块工具）没有会话，各自唯一租约，跑完走 `release_call`（含 `private/Packages/<名字>` 临时目录）。
 
 ## 二、工具进程与守门协议
 
 - 一次工具执行（`ProcessRunner` 的实现 `ProcTools`）：
   - 外层用**当前程序自己**当守门进程：`--fence-run <FenceJob JSON> -- <命令>`。
-  - `FenceJob` = `FenceSpec` + `prepared`（外层是否已写完本机授权）+ `home`（容器 profile 的台账落点）+ `policy`（本进程的强制项与降级许可）；扁平成一个 JSON 传给守门进程。
+  - `FenceJob` = `FencePlan` + `prepared`（外层是否已写完本机授权）+ `product_home`（产品私有区，容器 profile 的台账落点）+ `policy`（本进程的强制项与降级许可）；扁平成一个 JSON 传给守门进程。`product_home` 不叫 `home`：`FencePlan.home` 是 agent 的私有沙箱，两者不是一回事。
   - 命令作为**一个 argv** 交给守门进程，外层不拼 shell；模块工具的参数 JSON 经 stdin 送进工具进程，不进命令行；shell 的脚本自身经 stdin（Unix）或临时 `.ps1`（Windows）送达。
   - 守门进程用系统 shell 执行模块作者写的命令行（`sh -c` / `cmd /C`）——命令行是模块声明的一部分。shell 的启动命令由机制生成：Unix `sh -c "$(cat)"`；Windows PowerShell（pwsh 7 优先、5.1 回退，`-File` 临时 .ps1；脚本先设 `$ErrorActionPreference = 'Stop'`，未处理的 PowerShell 错误当场中止并以非 0 结束；脚本尾部 `if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }` 把**最后一次原生命令**的码变成回执退出码（PowerShell 自己不会传播它），显式 `exit N` 优先）。
   - **容器里的程序名先相对化**（仅 Windows）：AppContainer 下**绝对路径**的程序会被拒（真机：同一文件用 `D:\…\x.exe` 报 Access denied，用 `..\x.exe` 正常——相对路径走 cwd 的目录句柄，不遍历卷根；非系统盘的卷根 DACL 要管理员才写得动）。执行前把首 token 的程序名解析成绝对路径、再改写成相对 cwd 的路径（同卷才改；裸名按容器里生效的 PATH / PATHEXT 解析；跨卷或解析不出则原样）。参数里的路径不动。
   - 环境白名单：外层 `env_clear`，只注入 `fence_env`（PATH / PATHEXT / 系统根 / LANG / TZ 等，`HOME` 与 `TEMP` 指向该 agent 私有沙箱）与模块隐秘字段；其它环境与凭据不进工具进程。
-  - **围栏是固定并集，没有按权限项的分支**（派生在 `src/capabilities/tools/domain/fence.rs`）：`FenceSpec::for_call` 一律把私有沙箱（+ 该模块 `userdata`）放 rw、主机只读根放 ro、全部模块目录放 ro_tree，`net` = 全局开关与档位求交；共享区主副本永不进围栏（只由宿主内的文件工具直读，容器里的进程要读先 `work_pull`）。`for_session` 用同一套并集作**会话 base**，撤权走会话租约，不用于按次派生。
-  - **shell 的一次执行**：`run_shell` 走同一个守门进程；`timeout_secs` 是本次的（不沿用模块工具的 30 秒），到点或取消旗置位都杀整棵树；输出原样交回（模型可见的截断由工具层的回执预算统一施加），落点与本次耗时由工具层补成说明（码 `shell.place` / `shell.place.prep`；没跑成的调用不加落点行，但结构化事实仍记下落点与耗时）；每次调用都 `require_fs + require_net + allow_degraded=false`，装不上拒绝；Windows 的容器身份按 `会话 + agent` 派生（同一身份复用 SID 与 ACL），授权按会话持有、会话改配 / 删除时回收；工具链与运行包是基础工具链基线，不参与按次授权。
+  - **围栏是固定并集，没有按权限项的分支**（派生在 `src/capabilities/tools/domain/fence.rs`）：`FencePlan::for_call` 一律把私有沙箱（`home`，隐含一条写授予）+ 该模块 `userdata`（写）与全部模块目录（只读子树）写进 `grants`，主机只读根是 `Grant::read`，`net` = 全局开关与档位求交；共享区主副本永不进围栏（只由宿主内的文件工具直读，容器里的进程要读先 `work_pull`）。`for_session` 用同一套并集作**会话 base**，撤权走会话租约，不用于按次派生。
+  - **shell 的一次执行**：`run_shell` 走同一个守门进程；`timeout_secs` 是本次的（不沿用模块工具的 30 秒），到点或取消旗置位都杀整棵树；输出原样交回（模型可见的截断由工具层的回执预算统一施加），落点与本次耗时由工具层补成说明（码 `shell.place` / `shell.place.prep`；没跑成的调用不加落点行，但结构化事实仍记下落点与耗时）；每次调用都 `require_fs + require_net + allow_degraded=false`，装不上拒绝；Windows 的容器身份按 `会话租约 + agent + 计划指纹` 派生（同一计划复用 SID 与 ACL），授权按会话持有、会话改配 / 删除时回收；工具链与运行包是基础工具链基线，不参与按次授权。
   - **VM guest 的 per-call 断网**：guest helper 读策略里的 `net`，false 时在子进程前 `unshare(CLONE_NEWNET)`；失败以 111 fail-closed，不静默降级。helper 同时读 `timeout_secs` 并按它杀树；guest 输出按 `GuestRun.output_limit` 只留开头或开头 + 结尾。
   - 收尾：stdout / stderr 分别读；模块工具超时 30 秒（`ProcTools::timeout`），shell 用本次 `timeout_secs`；到时连根杀树；输出原样交回——机制层不做模型可见的截断，16k 预算唯一在 `src/capabilities/tools/domain/budget.rs`。超时与机制失败记成回执说明的码；围栏裁决的文案归工具层，机制不硬编码。
   - 围栏装不上（本机不支持 / 容器起不来）：命中 `require_fs` / `require_net` 且未同意降级时，守门进程以 `FENCE_FAILED` **拒绝执行**；已同意降级才如实降级继续。Linux 的文件系统与网络两项**独立**判定，一项装不上不影响另一项。能力等级已在启动报告里说明。
@@ -99,7 +103,7 @@
 
 | 平台 | 文件系统 | 出站网络 | 机制 |
 | --- | --- | --- | --- |
-| Linux | Landlock（运行基线 / 系统只读区只读，`/dev/null` 例外可写；其余按 reach；内核不支持或规则被拒时如实降级） | 按 `net`（真 = 不装网络过滤器；假 = seccomp 拒绝非 AF_UNIX / AF_NETLINK socket，TCP/UDP/raw 与回环都出不去） | 守门进程内装 Landlock 与 seccomp |
+| Linux | Landlock（运行基线 / 系统只读区只读，`/dev/null` 例外可写；其余按计划的授予；内核不支持或规则被拒时如实降级） | 按 `net`（真 = 不装网络过滤器；假 = seccomp 拒绝非 AF_UNIX / AF_NETLINK socket，TCP/UDP/raw 与回环都出不去） | 守门进程内装 Landlock 与 seccomp |
 | macOS | seatbelt（`sandbox_init` 是私有且已弃用的 ABI；失效时如实降级） | 按 `net`（真 = 放行 `network-outbound`；假 = 拒绝 `network*`） | 守门进程内装 seatbelt；祖先元数据放行 `file-read-metadata` |
 | Windows | AppContainer（外层 `prepare_fence` 把可达范围写进目录 ACL） | 按 `net`（真 = 授 `internetClient` 公网出站；假 = 不授） | 守门进程建容器 profile 并在容器内跑；作业对象管进程树与进程数上限 |
 | 其它 | 无（如实降级） | 无 | 只有超时与整棵树终止 |
@@ -171,10 +175,10 @@
 ## 改动本单元时必须同步
 
 - 共享形状（R6）一改，所有使用者同改；路径拼接规则见 `docs/architecture/rust-dev.md` 的「跨平台机制」（禁止把分隔符写进字符串）。
-- 平台专属代码本地不编译——`FenceSpec` 字面量必须写全字段（跨平台字面量门禁，`src/kernel/contracts/fence.rs`）；改围栏 → `tests/<平台>/` 探针。
+- 平台专属代码本地不编译——`FencePlan` 字面量必须写全字段（跨平台字面量门禁，`src/kernel/contracts/fence.rs`）；改围栏 → `tests/<平台>/` 探针。
 - 围栏的写后核对与回滚在 `src/kernel/detail/acl/windows/verify.rs`、台账在 `src/kernel/detail/ledger/windows/`：改落点形状（`GrantTarget`，`src/kernel/detail/acl/windows/target.rs`）或台账字段时，`prepare_fence` / `release_fence` / `clean` / `clean_all` / `sweep_orphan_aces` 与按条处置（`catalog` / `restore_one` / `revoke_grant` / `remove_profile_one`）要一起改。
 - `clean` 与 `clean_all` 的分工：前者默认只撤按次 / 会话授权与 profile，保留 `scope=machine` 条目（测试每轮收尾不重写祖先 ACE）；后者连机器级一起撤，是 `--fence-clean` 的入口。带机器级授权的路径不能按快照整体还原（会把机器级 ACE 一起抹掉），这些路径上的按次 ACE 走逐条精确撤销。
-- 改**归属字段**（含会话租约 `Sandbox.session` → `FenceSpec.lease` → `Owner.lease`）或启动对账时，`src/kernel/detail/ledger/windows/liveness.rs` 的 `current_owner` / `owners_state`、`src/kernel/detail/ledger/windows/reconcile.rs` 的 `reconcile` 与 `src/kernel/detail/ledger/windows/release.rs` 的 `release_fence` / `clean` / `clean_all` 要一起改；启动对账的接线在 `src/main.rs`。
+- 改**归属字段**（含会话租约 `Sandbox.session` → `FencePlan.lease` → `Owner.lease`）或启动对账时，`src/kernel/detail/ledger/windows/liveness.rs` 的 `current_owner` / `owners_state`、`src/kernel/detail/ledger/windows/reconcile.rs` 的 `reconcile` 与 `src/kernel/detail/ledger/windows/release.rs` 的 `release_fence` / `clean` / `clean_all` 要一起改；启动对账的接线在 `src/main.rs`。
 - ACE 的读法只有一处：`src/kernel/detail/acl/windows.rs` 的 `ace_parts` 按 ACE 头算 SID 偏移（标准 ACE 与回调 ACE 从第 8 字节起，对象 ACE 再加 Flags(4) 与在场的 GUID）。改覆盖的 ACE 类型或身份形状时，写后核对、诊断转储与 `src/kernel/detail/confine/windows/tests.rs` 的对象 ACE 往返探针要一起看。
 - 容器里**列目录**的判据：同一个授权叶子上，cmd 的 `dir` 与 PowerShell 的 `Get-ChildItem` 会被拒；cmd 的 `for` 枚举与 python 的 `os.listdir` / `os.scandir` 正常。所以「列自己的产物」用 `for` 枚举钉住（`src/kernel/detail/confine/windows/tests.rs` 的 `container_roundtrip_sees_leaf_but_not_parent_content` 第四步），`dir` 不是可依赖的列举手段。
 - **解释器按真身授权，容器 PATH 先换真身**：命令名经目录重解析点（符号链接 / 联接）进来时，`fence_env` 把容器 PATH 里的绝对目录项逐层换成真身（`src/kernel/detail/launch.rs` 的 `canonical_path_var`），`interpreter_roots_for_exe` 只授真身安装根——容器不再按 junction 原路径搜索，链接对象因此不需要 DACL（此前靠 PATH 穿链接、只授首尾会漏掉中间联接；真机 nvm 的 `.nodejs` → `.link\nodejs` → 版本目录曾报 `node` 找不到）。不往链接或 `C:\hostedtoolcache` / `C:\Program Files` 这类大目录写 DACL：前者会被写后核对判成丢项，后者会触发整树继承重算（CI 上曾把 Python 工具调用拖过 120 秒）。相对项与取不到真身的项原样保留。预检与执行共用这份清单。

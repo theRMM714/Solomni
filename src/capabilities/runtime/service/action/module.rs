@@ -111,17 +111,17 @@ impl Handle {
             return Err(arg_fault_text(&full, &schema, &fault));
         }
         let work = work.map(std::path::PathBuf::from);
-        let mut fence = crate::kernel::api::fence::FenceSpec::standalone(
+        let mut fence = crate::kernel::api::fence::FencePlan::standalone(
             &module.root,
             work.as_deref(),
             module.has_userdata,
         );
-        fence.net = self.settings()?.sandbox.policy.network;
+        fence.net = crate::kernel::api::fence::NetPolicy::from_flag(
+            self.settings()?.sandbox.policy.network,
+        );
         // 独立调用没有会话：给唯一 lease，跑完按它收尾（Windows 上才有独立的容器身份）。
         fence.lease = crate::kernel::api::fence::call_lease(&fence.agent);
-        fence.ro_tree.extend(host_plan.roots.iter().cloned());
-        fence.ro_tree.sort();
-        fence.ro_tree.dedup();
+        fence.extend_read_tree(host_plan.roots.iter().cloned());
         let args_json = serde_json::to_string(&module_args).unwrap_or_else(|_| "{}".to_string());
         // 人直接跑模块工具：这一趟**没有可回答的前端**（没有会话、没有裁决队），所以不给提问端口——
         // 围栏的必要落点授不上时按 fail-closed 拒绝；隐私字段只经环境变量注入（值不进命令行）。

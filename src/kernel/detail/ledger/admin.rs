@@ -4,7 +4,7 @@
 //! 联动：只由 `ledger.rs` 门面调用。
 
 use super::{Ledger, ReconcileReport};
-use crate::kernel::contracts::fence::FenceSpec;
+use crate::kernel::contracts::fence::FencePlan;
 use std::path::Path;
 
 #[cfg(windows)]
@@ -22,7 +22,7 @@ pub(super) fn release_by_lease(home: &Path, lease: &str) -> Result<(), String> {
 }
 
 /// 目的：一次性调用的收尾（撤 ACE、删 profile 与临时目录）；没有该机制的平台为空操作。
-pub(super) fn release_call(spec: &FenceSpec, home: &Path) -> Result<(), String> {
+pub(super) fn release_call(spec: &FencePlan, home: &Path) -> Result<(), String> {
     backend::release_call(spec, home)
 }
 

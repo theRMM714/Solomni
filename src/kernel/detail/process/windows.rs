@@ -50,7 +50,7 @@ pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
     if tools.platform.write_allowed.load(Ordering::Relaxed) {
         // 围栏准备单独计时：首调用逐条写 ACL 常常占掉整次耗时的绝大部分，回执要能分辨它。
         let fence_started = Instant::now();
-        let prep = confine::prepare_fence(fence, ctx.command, &tools.platform.home);
+        let prep = confine::windows::prepare_fence(fence, ctx.command, &tools.platform.home);
         let steps = prep.steps.clone();
         super::FENCE_PREP.with(|slot| {
             slot.set(Some(FenceTiming {
@@ -281,7 +281,7 @@ fn write_shell_script(run: &ShellRun<'_>) -> Result<(String, PathBuf), String> {
     let dir = if !run.fence.cwd.as_os_str().is_empty() {
         run.fence.cwd.clone()
     } else {
-        run.fence.private.clone()
+        run.fence.home.clone()
     };
     if dir.as_os_str().is_empty() {
         return Err("shell 没有可写的私有沙箱（cwd 为空）".to_string());

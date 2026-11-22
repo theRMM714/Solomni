@@ -524,7 +524,7 @@ pub(crate) fn work_gc_keeps_index_and_commit_objects_and_removes_the_rest() {
 /// 目的：只读共享区：读得到、写不进；写自己的沙箱照旧；围栏也不含主副本。这是"agent 绕不过 pull/commit 直接写共享区"的工具层证据，围栏层的证据由三平台探针给。
 #[test]
 pub(crate) fn read_only_shared_refuses_builtin_writes_and_leaves_the_fence() {
-    use crate::kernel::api::fence::FenceSpec;
+    use crate::kernel::api::fence::FencePlan;
     let sb = test_sandbox_readonly("a", &[]);
     let io = InMemorySysIo::new();
     io.seed(&["demo", "work", "note.txt"], "内容");
@@ -570,15 +570,18 @@ pub(crate) fn read_only_shared_refuses_builtin_writes_and_leaves_the_fence() {
     );
     assert!(ok.ok, "{}", ok.output);
 
-    // 围栏：主副本永远不进 rw（写共享只能走 work_commit）；私有沙箱进 rw。
-    let spec = FenceSpec::for_session(&sb, &[], false);
-    assert!(!spec.rw.contains(&sb.shared), "主副本不该进 rw");
-    assert!(spec.rw.contains(&sb.private));
+    // 围栏：主副本永远不进可写面（写共享只能走 work_commit）；私有沙箱可写。
+    let spec = FencePlan::for_session(&sb, &[], false);
+    assert!(!spec.write_roots().contains(&sb.shared), "主副本不该可写");
+    assert!(spec.write_roots().contains(&sb.private));
     // 会话租约从沙箱带出：同名 agent 的多个并发会话靠它区分围栏归属。
     assert_eq!(spec.lease, sb.session, "围栏租约 = 沙箱的会话 id");
     let writable = test_sandbox("a", &[]);
-    let spec2 = FenceSpec::for_session(&writable, &[], false);
-    assert!(!spec2.rw.contains(&writable.shared), "共享写不直接进 rw");
+    let spec2 = FencePlan::for_session(&writable, &[], false);
+    assert!(
+        !spec2.write_roots().contains(&writable.shared),
+        "共享写不直接进可写面"
+    );
 }
 
 /// 目的：env.rs 装出来的 **agent 会话沙箱**默认就是只读共享区（生产接线，不是测试助手自己设的）。

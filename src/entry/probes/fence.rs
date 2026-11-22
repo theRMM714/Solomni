@@ -9,7 +9,7 @@ pub fn print_fence_env(args: &[String], flag: usize) -> i32 {
     let command = command_after_separator(args);
     match crate::kernel::detail::confine::FenceJob::from_json(&raw) {
         Ok(job) => {
-            for (k, v) in crate::kernel::detail::confine::fence_env(&job.spec, &command) {
+            for (k, v) in crate::kernel::detail::confine::fence_env(&job.plan, &command) {
                 println!("{}={}", k.to_string_lossy(), v.to_string_lossy());
             }
             0
@@ -42,7 +42,7 @@ pub fn fence_verify(args: &[String], flag: usize) -> i32 {
             return crate::kernel::detail::confine::FENCE_FAILED;
         }
     };
-    match crate::kernel::detail::confine::verify(&job.spec, &command) {
+    match crate::kernel::detail::confine::verify(&job.plan, &command) {
         crate::kernel::detail::confine::FenceVerdict::Enforced => {
             println!("enforced");
             0

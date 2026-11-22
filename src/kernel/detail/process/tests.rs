@@ -4,7 +4,7 @@
 //! 联动：与 `src/kernel/detail/process.rs` 同模块，`#[cfg(test)] mod tests;` 指到这里。
 
 use super::*;
-use crate::kernel::contracts::fence::FenceSpec;
+use crate::kernel::contracts::fence::FencePlan;
 use crate::kernel::domain::receipt::STDERR_HEADER;
 // 测试夹具按 &Path 收参（clippy 的 ptr_arg）：Path 显式写在测试模块里，
 // 顶层只按需导入 PathBuf——否则顶层会多出一次"只被 glob 用到"的导入。
@@ -18,15 +18,17 @@ fn env_whitelist_drops_foreign_vars_and_moves_home_into_the_sandbox() {
         std::env::set_var("SOLOMNI_PROBE_SECRET", "leak-me");
     }
     let private = PathBuf::from("demo").join("agent-a");
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "a".to_string(),
         lease: String::new(),
-        private: private.clone(),
-        ro_tree: Vec::new(),
-        rw: vec![PathBuf::from("demo").join("work"), private.clone()],
         cwd: PathBuf::from("mods").join("m0"),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: private.clone(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![PathBuf::from("demo").join("work"), private.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let env: Vec<(String, String)> =
         crate::kernel::detail::confine::fence_env(&spec, "python tools/x.py")
@@ -127,15 +129,13 @@ fn receipt_markers_are_structured_codes() {
 fn sandbox_mode_refuses_missing_requirements_until_degraded() {
     use crate::kernel::domain::fence::SandboxMode;
     use crate::kernel::domain::fence::SandboxRequirements;
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "a".to_string(),
         lease: String::new(),
-        rw: Vec::new(),
-        ro: Vec::new(),
-        ro_tree: Vec::new(),
-        private: PathBuf::new(),
         cwd: PathBuf::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(Vec::new(), Vec::new(), Vec::new()),
     };
     let mode = SandboxMode::new(
         SandboxRequirements {
@@ -154,9 +154,9 @@ fn sandbox_mode_refuses_missing_requirements_until_degraded() {
     mode.set_degraded(true);
     assert!(mode.check(&spec, false).is_ok(), "本进程同意降级后放行");
     mode.set_degraded(false);
-    let allow_net = FenceSpec {
-        net: true,
-        ro: Vec::new(),
+    let allow_net = FencePlan {
+        net: true.into(),
+        grants: crate::kernel::contracts::fence::grants_of(Vec::new(), Vec::new(), Vec::new()),
         ..spec.clone()
     };
     // 文件系统仍然缺，所以还是拒绝；但“网络围栏”不应再单独要求。
@@ -246,16 +246,18 @@ fn real_runner(exe: PathBuf, home: &std::path::Path, timeout_secs: u64) -> ProcT
     t
 }
 
-fn spec_for(dir: &Path) -> FenceSpec {
-    FenceSpec {
+fn spec_for(dir: &Path) -> FencePlan {
+    FencePlan {
         agent: "proc".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![dir.to_path_buf()],
+        home: PathBuf::new(),
         cwd: dir.to_path_buf(),
-        ro: Vec::new(),
-        net: false,
+        net: (false).into(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![dir.to_path_buf()],
+            Vec::new(),
+            Vec::new(),
+        ),
     }
 }
 
@@ -576,7 +578,7 @@ fn unwritable_interpreter_dir_never_silently_runs_unfenced() {
     let _fence = crate::tests::fence_acl_guard();
     use crate::capabilities::tools::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
     use crate::capabilities::tools::service::fence::ToolFenceGate;
-    use crate::kernel::contracts::fence::FencePart;
+    use crate::kernel::detail::acl::FencePart;
     if !fence_live() {
         eprintln!("[探针] 未开启真机围栏测试：本探针要写本机权限项，已跳过；要真跑加 --fence-live");
         return;
@@ -595,7 +597,7 @@ fn unwritable_interpreter_dir_never_silently_runs_unfenced() {
     let spec = spec_for(&dir);
     let command = format!("{} probe.js", node);
     // 先问机制：这一态在本机构造得出来吗（真授不上才继续，能授权就如实跳过）。
-    let prep = confine::prepare_fence(&spec, &command, &home);
+    let prep = confine::windows::prepare_fence(&spec, &command, &home);
     let Some(blocked) = prep.blocked.as_ref() else {
         eprintln!(
             "[探针] 本机解释器目录授得进（构造不出\"授不上\"这一态）：真机探针跳过（不静默当作通过）"
@@ -604,7 +606,7 @@ fn unwritable_interpreter_dir_never_silently_runs_unfenced() {
         let _ = std::fs::remove_dir_all(&dir);
         return;
     };
-    if blocked.part != FencePart::Interpreter {
+    if blocked.what != FencePart::Interpreter.label() {
         eprintln!(
             "[诊断] 本机授不上的不是解释器目录，而是 {}：这条探针仍按同一条规矩断言",
             blocked.line()
@@ -652,7 +654,7 @@ fn unwritable_interpreter_dir_never_silently_runs_unfenced() {
         "放弃之后命令绝不许跑：{}",
         out.output
     );
-    for want in [blocked.part.label(), "没有执行", "怎么补"] {
+    for want in [blocked.what, "没有执行", "怎么补"] {
         assert!(
             out.output.contains(want),
             "回执要写清 {}：{}",
@@ -986,7 +988,7 @@ fn real_shell_uses_powershell_utf8_exit_code_and_cleans_its_script() {
         let home = dir.join(".home");
         let tools = real_runner_with_write(exe.clone(), &home).with_powershell(Some(program));
         let mut spec = spec_for(&dir);
-        spec.private = dir.clone();
+        spec.home = dir.clone();
         let out = tools.run_shell(&crate::kernel::ports::ShellRun {
             fence: &spec,
             script: "Write-Output '中文'; exit 3",
@@ -1065,7 +1067,7 @@ fn real_windows_shell_writes_relative_files_in_its_private_cwd() {
     let home = dir.join(".home");
     let tools = real_runner_with_write(exe, &home);
     let mut spec = spec_for(&dir);
-    spec.private = dir.clone();
+    spec.home = dir.clone();
     let out = tools.run_shell(&crate::kernel::ports::ShellRun {
         fence: &spec,
         // 先如实交出三处「当前在哪」：定位（provider）、脚本根、进程 cwd——失败时据此判定是谁没到位。

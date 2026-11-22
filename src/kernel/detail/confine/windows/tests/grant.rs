@@ -25,15 +25,17 @@ fn internet_client_capability_is_only_built_when_net_is_true() {
 #[test]
 fn container_profile_follows_the_session_and_reach() {
     let _fence = crate::tests::fence_acl_guard();
-    let a = FenceSpec {
+    let a = FencePlan {
         agent: "甲".to_string(),
         lease: "w".to_string(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![PathBuf::from("session").join("w1")],
         cwd: PathBuf::from("modules").join("m0"),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![PathBuf::from("session").join("w1")],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     // 同一个（会话, agent, reach）重复派生：身份稳定（外层授权与守门进程各算一次必须一致）。
     assert_eq!(container_name(&a), container_name(&a.clone()));
@@ -47,7 +49,11 @@ fn container_profile_follows_the_session_and_reach() {
     );
     // 同会话、不同 reach：独立身份（窄调用看不到宽调用的根）。
     let mut c = a.clone();
-    c.rw = vec![PathBuf::from("session").join("w2")];
+    c.grants = crate::kernel::contracts::fence::grants_of(
+        vec![PathBuf::from("session").join("w2")],
+        Vec::new(),
+        Vec::new(),
+    );
     assert_ne!(
         container_name(&a),
         container_name(&c),
@@ -59,7 +65,7 @@ fn container_profile_follows_the_session_and_reach() {
     assert_ne!(container_name(&a), container_name(&d), "不同 agent 不共用");
     // net 不进指纹：同一 reach 开/断网共用一个身份（可见范围不变，能力在令牌里按次给）。
     let mut e = a.clone();
-    e.net = true;
+    e.net = crate::kernel::contracts::fence::NetPolicy::Public;
     assert_eq!(container_name(&a), container_name(&e), "net 不进容器身份");
     assert!(is_our_profile(&container_name(&a)));
 }
@@ -124,21 +130,23 @@ fn grant_targets_include_parents_with_stat_only() {
         .join("solomni-grant-targets")
         .join("modules")
         .join("m0");
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![dir.clone()],
-        ro: vec![
-            std::env::temp_dir()
-                .join("solomni-grant-targets")
-                .join("shared"),
-        ],
         cwd: module_root.clone(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![dir.clone()],
+            vec![
+                std::env::temp_dir()
+                    .join("solomni-grant-targets")
+                    .join("shared"),
+            ],
+            Vec::new(),
+        ),
     };
-    let targets = grant_targets(&spec, None, true);
+    let targets = grant_targets(&spec, None);
     let find = |p: &std::path::Path| targets.iter().find(|t| t.path == p).cloned();
     // 叶子：读写根递归、只读根不递归。
     assert_eq!(
@@ -174,8 +182,8 @@ fn grant_targets_include_parents_with_stat_only() {
         "用户授权的只读根是可选落点（授不上只记事实）"
     );
     // 父目录：只读属性、不递归、**不继承**——继承会把 ACE 传播进整棵子树，
-    // 撤权断链时残留面就是整棵子树。
-    for leaf in [&dir, &module_root] {
+    // 撤权断链时残留面就是整棵子树。cwd 不单独成叶子（它落在授予的子树里），所以只看两条授予。
+    for leaf in [&dir, &shared] {
         let parent = leaf.parent().expect("叶子有父目录").to_path_buf();
         let got = find(&parent).expect("父目录要在落点清单里");
         assert_eq!(got.rights, RIGHTS_STAT, "父目录只授读属性：{:?}", parent);
@@ -199,19 +207,21 @@ fn shell_cwd_gets_every_ancestor_stat_only() {
         .join("a")
         .join("b")
         .join("work");
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe".to_string(),
         lease: String::new(),
-        private: private.clone(),
-        ro_tree: Vec::new(),
-        rw: vec![private.clone()],
-        ro: Vec::new(),
         cwd: private.clone(),
-        net: false,
+        net: false.into(),
+        home: private.clone(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![private.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     // 视图盘生效：祖先链止于产品根（这里用 solomni-grant-targets 当产品根），根外一级都不写。
     let root = std::env::temp_dir().join("solomni-grant-targets");
-    let targets = grant_targets(&spec, Some(&root), true);
+    let targets = grant_targets(&spec, Some(&root));
     let find = |p: &std::path::Path| targets.iter().find(|t| t.path == p).cloned();
     for anc in private.ancestors().skip(1) {
         if anc.as_os_str().is_empty() || anc.parent().is_none() {
@@ -228,16 +238,15 @@ fn shell_cwd_gets_every_ancestor_stat_only() {
         assert_eq!(got.part, FencePart::Parent);
     }
     assert!(find(&root).is_some(), "产品根自身（映射根）要补一条 STAT");
-    // 视图生效且 cwd == private 时由读写叶子覆盖 cwd，不再重复加只读 cwd 叶子。
-    let without_cwd_leaf = grant_targets(&spec, Some(&root), false);
+    // cwd == home 时由读写叶子覆盖 cwd，不再重复加只读 cwd 叶子。
     assert!(
-        !without_cwd_leaf
+        !targets
             .iter()
             .any(|t| t.path == private && t.rights == RIGHTS_RO),
-        "cwd == private 时不重复加只读 cwd 叶子"
+        "cwd == home 时不重复加只读 cwd 叶子"
     );
     // 视图不可用（root=None）时保持旧行为：祖先链补到盘根前一级。
-    let legacy = grant_targets(&spec, None, true);
+    let legacy = grant_targets(&spec, None);
     assert!(
         legacy
             .iter()
@@ -253,17 +262,19 @@ fn grant_targets_keep_module_read_only_and_cwd_read_only() {
     let base = std::env::temp_dir().join("solomni-grant-targets");
     let module = base.join("modules").join("m0");
     let userdata = module.join("userdata");
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: vec![module.clone()],
-        rw: vec![userdata.clone()],
-        ro: Vec::new(),
         cwd: module.clone(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![userdata.clone()],
+            Vec::new(),
+            vec![module.clone()],
+        ),
     };
-    let targets = grant_targets(&spec, None, true);
+    let targets = grant_targets(&spec, None);
     // 同一个路径可能有多条（父目录 STAT + 叶子 RO/RW），所以要按**权限位**找那一条，
     // 不能取第一条（那往往是父目录的 STAT）。
     let has = |p: &std::path::Path, r: u32, rec: bool, inh: bool| {
@@ -301,15 +312,17 @@ fn grants_are_written_when_the_environment_allows_it() {
         discard(&base);
         return;
     }
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![target.clone()],
         cwd: target.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![target.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     // 台账落在探针自己的 base 里（不碰真实 .home/）；产品根 = base，所以落点在根内走快照。
     let home = base.join(".home");
@@ -378,22 +391,24 @@ fn prepare_reports_a_blocking_integrity_label() {
         discard(&base);
         return;
     }
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-label".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![target.clone()],
         cwd: target.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![target.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let home = base.join(".home");
     let outcome = prepare_fence(&spec, "cmd", &home);
     let blocked = outcome
         .blocked
         .expect("标签挡写要如实报 blocked，不能报成功");
-    assert_eq!(blocked.part, FencePart::IntegrityLabel);
+    assert_eq!(blocked.what, FencePart::IntegrityLabel.label());
     assert_eq!(blocked.path, target, "要指明是哪个落点");
     assert!(
         blocked.why.contains("Medium"),
@@ -423,15 +438,17 @@ fn fence_steps_only_cover_real_acl_writes() {
         discard(&base);
         return;
     }
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-steps".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![target.clone()],
         cwd: target.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![target.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let home = base.join(".home");
     let first = prepare_fence(&spec, "cmd", &home);
@@ -486,15 +503,17 @@ fn trusted_base_grants_are_machine_scope() {
         discard(&base);
         return;
     }
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-base".to_string(),
         lease: String::new(),
-        private: private.clone(),
-        ro_tree: vec![tool.clone()],
-        rw: vec![private.clone()],
-        cwd: private,
-        ro: Vec::new(),
-        net: false,
+        cwd: private.clone(),
+        net: false.into(),
+        home: private.clone(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![private.clone()],
+            Vec::new(),
+            vec![tool.clone()],
+        ),
     };
     let home = base.join(".home");
     let first = prepare_fence(&spec, "cmd", &home);
@@ -538,15 +557,17 @@ fn revoke_removes_the_container_ace_from_the_given_roots() {
         discard(&base);
         return;
     }
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![target.clone()],
         cwd: target.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![target.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let home = base.join(".home");
     expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
@@ -583,15 +604,17 @@ fn read_only_grants_write_ro_aces_and_revoke_removes_them() {
         discard(&base);
         return;
     }
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-ro".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![target.clone()],
-        ro: vec![ro.clone()],
         cwd: target.clone(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![target.clone()],
+            vec![ro.clone()],
+            Vec::new(),
+        ),
     };
     let home = base.join(".home");
     expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
@@ -631,15 +654,17 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
     let leaf = base.join("leaf");
     std::fs::create_dir_all(&leaf).expect("建探针目录");
     std::fs::write(leaf.join("data.txt"), "x").expect("写探针文件");
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-leftover".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![leaf.clone()],
         cwd: leaf.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![leaf.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let home = base.join(".home");
     // 父目录已从祖先（产品根）继承到同主体的只读属性授权时，prepare_fence 按「已有 ACE 就跳过」
@@ -739,15 +764,17 @@ fn object_ace_is_covered_by_the_write_then_equal_check() {
     }
     let file = base.join("data.txt");
     std::fs::write(&file, b"x").expect("写探针文件");
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-object-ace".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![base.clone()],
         cwd: base.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![base.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     let snapshot = sd_bytes(&file).expect("记下探针文件的原始安全描述符");
@@ -823,15 +850,17 @@ fn acl_write_flavours_are_probed_for_scope_and_readability() {
     // 那样的进程做不了观察，也留不了干净的现场——如实跳过，不静默当作通过，更不制造残留。
     let pre = base.join("preflight");
     std::fs::create_dir_all(&pre).expect("建预检目录");
-    let pre_spec = FenceSpec {
+    let pre_spec = FencePlan {
         agent: "acl-probe-preflight".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![pre.clone()],
         cwd: pre.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![pre.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let pre_sid = container_sid(&container_name(&pre_spec)).expect("派生预检容器 SID");
     let round_trip = grant_one(pre_sid, &pre, RIGHTS_RO, false, false).is_ok()
@@ -853,15 +882,17 @@ fn acl_write_flavours_are_probed_for_scope_and_readability() {
         std::fs::create_dir_all(tree.join("sub")).expect("建探针树");
         std::fs::write(tree.join("a.txt"), b"a").expect("写根文件");
         std::fs::write(tree.join("sub").join("b.txt"), b"b").expect("写子文件");
-        let spec = FenceSpec {
+        let spec = FencePlan {
             agent: format!("acl-probe-{tag}"),
             lease: String::new(),
-            private: PathBuf::new(),
-            ro_tree: Vec::new(),
-            rw: vec![tree.clone()],
             cwd: tree.clone(),
-            ro: Vec::new(),
-            net: false,
+            net: false.into(),
+            home: PathBuf::new(),
+            grants: crate::kernel::contracts::fence::grants_of(
+                vec![tree.clone()],
+                Vec::new(),
+                Vec::new(),
+            ),
         };
         let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
         let root_before = acl_entries(&tree).expect("读写入前根 ACE 集合");
@@ -1134,15 +1165,17 @@ fn clean_keeps_machine_scope_unless_full_cleanup_is_requested() {
         discard(&base);
         return;
     }
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-clean".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![target.clone()],
         cwd: target.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![target.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let home = base.join(".home");
     // 覆盖来自祖先继承时 prepare_fence 不重复写，也就没有自己的机器级条目可保留（保留数因此是 0）。

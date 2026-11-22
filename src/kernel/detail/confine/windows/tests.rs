@@ -86,15 +86,17 @@ pub(crate) fn acl_round_trip(base: &Path, tag: &str) -> bool {
         Ok(v) => v,
         Err(_) => return false,
     };
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: format!("acl-preflight-{tag}"),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![target.clone()],
         cwd: target.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![target.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let sid = match container_sid(&container_name(&spec)) {
         Ok(s) => s,
@@ -112,7 +114,7 @@ pub(crate) fn acl_round_trip(base: &Path, tag: &str) -> bool {
 
 /// 失败现场：把容器自己的视图落进叶子再报出来（"被拒"还是"真没有"要分得清）。
 /// 诊断本身只写授权落点，不会把失败吞掉。
-fn container_diag(sid: PSID, spec: &FenceSpec, leaf: &Path) -> String {
+fn container_diag(sid: PSID, spec: &FencePlan, leaf: &Path) -> String {
     let _ = run_in_container(sid, spec, "whoami /priv > diag.txt 2>&1");
     let _ = run_in_container(
         sid,

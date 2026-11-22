@@ -62,17 +62,17 @@ fn where_text(blocked: &FenceBlocked) -> String {
 fn refused_text(blocked: &FenceBlocked) -> String {
     format!(
         "[围栏] 这次调用**没有执行**：{}（{}）授不上——{}。怎么补：{}",
-        blocked.part.label(),
+        blocked.what,
         where_text(blocked),
         blocked.why,
-        blocked.part.fix()
+        blocked.fix
     )
 }
 
 /// 目的：不执行时的回执——哪一环、哪个目录、缺什么前提、怎么补；用户拒绝与"没人答"分别追加一句。
 fn refusal(blocked: &FenceBlocked, outcome: &AskOutcome) -> String {
     let path = where_text(blocked);
-    let part = blocked.part.label();
+    let part = blocked.what;
     let mut output = refused_text(blocked);
     let extra = match outcome {
         AskOutcome::Chosen(_) => Some(
@@ -122,7 +122,7 @@ fn strict_refusal(blocked: &FenceBlocked) -> String {
 fn unfenced_note(blocked: &FenceBlocked) -> String {
     format!(
         "[围栏] 这次调用按你的裁决**无围栏**执行（没有容器那层强制）：{}（{}）授不上——{}",
-        blocked.part.label(),
+        blocked.what,
         where_text(blocked),
         blocked.why
     )

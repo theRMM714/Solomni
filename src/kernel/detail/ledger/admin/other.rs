@@ -4,7 +4,7 @@
 //! 联动：由 `src/kernel/detail/ledger/admin.rs` 在非 Windows 目标选中。
 
 use super::super::{Ledger, ReconcileReport};
-use crate::kernel::contracts::fence::FenceSpec;
+use crate::kernel::contracts::fence::FencePlan;
 use std::path::Path;
 
 /// 目的：非 Windows 没有持久授权，释放为空操作。
@@ -13,7 +13,7 @@ pub(super) fn release_by_lease(_home: &Path, _lease: &str) -> Result<(), String>
 }
 
 /// 目的：非 Windows 没有按次 profile 与 ACE，收尾为空操作。
-pub(super) fn release_call(_spec: &FenceSpec, _home: &Path) -> Result<(), String> {
+pub(super) fn release_call(_spec: &FencePlan, _home: &Path) -> Result<(), String> {
     Ok(())
 }
 

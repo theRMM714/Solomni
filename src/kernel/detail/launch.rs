@@ -3,7 +3,7 @@
 //! 不管：围栏授权与台账（在 `acl` / `ledger`）、容器身份（在 `container`）、平台容器生命周期。
 //! 联动：由 `confine` 的后端、`container` 的容器内启动、`process.rs` 与 `entry/toolchains.rs` 消费。
 
-use crate::kernel::contracts::fence::FenceSpec;
+use crate::kernel::contracts::fence::FencePlan;
 use std::ffi::OsString;
 use std::process::Command;
 
@@ -147,7 +147,7 @@ pub fn shell_command(command: &str) -> Command {
 
 /// 目的：环境白名单：子进程只拿到这些（其余一律不继承——密钥与无关凭据不进工具进程）。
 ///   解释器需要 HOME/TEMP 这类落点：全部指到该 agent 的私有沙箱里。
-pub fn fence_env(spec: &FenceSpec, command: &str) -> Vec<(OsString, OsString)> {
+pub fn fence_env(spec: &FencePlan, command: &str) -> Vec<(OsString, OsString)> {
     let keep = [
         "PATH",
         "PATHEXT",
@@ -170,7 +170,7 @@ pub fn fence_env(spec: &FenceSpec, command: &str) -> Vec<(OsString, OsString)> {
     out.push((OsString::from("PYTHONIOENCODING"), OsString::from("utf-8")));
     out.push((OsString::from("PYTHONUTF8"), OsString::from("1")));
     // 工作区内的落点：私有沙箱作为 HOME / TEMP（缓存与临时文件不出工作区）。
-    let home = spec.private_or_cwd();
+    let home = spec.home_or_cwd();
     out.push((OsString::from("HOME"), home.clone().into_os_string()));
     // Windows 建 AppContainer 进程要读它：白名单里没有它就 CreateProcessW 直接失败。
     out.push((

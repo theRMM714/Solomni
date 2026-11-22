@@ -16,7 +16,7 @@ use crate::capabilities::catalog::registry::api::AppSettings;
 use crate::capabilities::conversation::session::api::SessionMeta;
 use crate::capabilities::permission::api::PermissionSet;
 use crate::capabilities::workspace::api::{Sandbox, Sandboxes, SharedScope, WORKIGNORE, WorkRoots};
-use crate::kernel::api::fence::FenceSpec;
+use crate::kernel::api::fence::FencePlan;
 use crate::kernel::api::types::Tier;
 use crate::kernel::ports::PathCodec;
 
@@ -41,7 +41,7 @@ pub struct MemberFacts<'a> {
 /// 目的：一席工具环境里由事实派生的部分。
 pub struct MemberEnv {
     /// 目的：该 agent 的围栏（可达范围 + 断网 + 环境白名单落点）。
-    pub fence: FenceSpec,
+    pub fence: FencePlan,
     /// 目的：工具进程的 PATH 入口（本机运行包换过 PATH 时才有）。
     pub runtime_path: Option<OsString>,
     /// 目的：工具链根：宿主档 = 基础根 + 包根，虚拟机档 = 包根。
@@ -78,10 +78,8 @@ pub struct SandboxesFacts<'a> {
 /// 参数：`facts` = 调用方已取好的事实（沙箱、只读根、网络、档位、基础根、包计划、模块机密）。
 /// 返回：围栏（只读树并进包根、去重保序）、PATH 入口、工具链根、模块注入项。
 pub fn member(facts: &MemberFacts<'_>) -> MemberEnv {
-    let mut fence = FenceSpec::for_session(facts.sandbox, facts.host_read_roots, facts.net);
-    fence.ro_tree.extend(facts.plan.roots.iter().cloned());
-    fence.ro_tree.sort();
-    fence.ro_tree.dedup();
+    let mut fence = FencePlan::for_session(facts.sandbox, facts.host_read_roots, facts.net);
+    fence.extend_read_tree(facts.plan.roots.iter().cloned());
     let mut runtime_roots = if facts.tier == Tier::Host {
         facts.base_roots.to_vec()
     } else {

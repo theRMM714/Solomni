@@ -39,15 +39,17 @@ fn journal_records_snapshot_and_grant_before_touching_acl() {
             .any(|s| Path::new(&s.path) == target && s.bytes == bytes),
         "动 ACL 之前台账里就要有原始安全描述符"
     );
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-journal".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![target.clone()],
         cwd: target.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![target.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
     let rec = load_record(&home);
@@ -75,15 +77,17 @@ fn write_then_restore_keeps_the_original_ace_set() {
     }
     let before = acl_entries(&target).expect("读写入前 ACE 集合");
     let bytes = sd_bytes(&target).expect("存原始安全描述符");
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-multiset".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![target.clone()],
         cwd: target.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![target.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     grant_verified(sid, &target, RIGHTS_RO, false, false).expect("写入并核对应当成功");
@@ -121,15 +125,17 @@ fn missing_grant_target_is_skipped_and_not_journaled() {
         return;
     }
     let absent = base.join("missing");
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-skip".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![target.clone(), absent.clone()],
         cwd: target.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![target.clone(), absent.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let home = base.join(".home");
     let outcome = prepare_fence(&spec, "cmd", &home);
@@ -193,21 +199,23 @@ fn journal_failure_blocks_the_acl_write() {
     // home 用一个普通文件占位：save_record 的 create_dir_all 必然失败，台账落不了盘。
     let home = base.join("home-as-file");
     std::fs::write(&home, b"not a dir").expect("写占位文件");
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-journal-gate".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![target.clone()],
         cwd: target.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![target.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let outcome = prepare_fence(&spec, "cmd", &home);
     // 台账落不了盘 = **必要**的一环走不动：如实进结论（调用方据此问用户或拒绝，不许降级）。
     assert_eq!(
-        outcome.blocked.as_ref().map(|b| b.part),
-        Some(FencePart::Ledger),
+        outcome.blocked.as_ref().map(|b| b.what),
+        Some(FencePart::Ledger.label()),
         "台账落不了盘必须如实报成必要落点授不上：{:?}",
         outcome.blocked
     );
@@ -240,15 +248,17 @@ fn ledger_catalog_and_per_item_disposal_keep_the_rest_untouched() {
         return;
     }
     let home = base.join(".home");
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-grant".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![inside.clone()],
         cwd: inside.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![inside.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     let sid_text = sid_to_string(sid);
@@ -411,25 +421,29 @@ fn reconcile_reclaims_dead_owners_and_keeps_live_ones() {
         return;
     }
     let home = base.join(".home");
-    let spec_live = FenceSpec {
+    let spec_live = FencePlan {
         agent: "probe-reconcile-live".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![live.clone()],
         cwd: live.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![live.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
-    let spec_stale = FenceSpec {
+    let spec_stale = FencePlan {
         agent: "probe-reconcile-stale".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![stale.clone()],
         cwd: stale.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![stale.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     expect_granted(&prepare_fence(&spec_live, "cmd", &home), "活授权应当成功");
     expect_granted(
@@ -491,15 +505,13 @@ fn reconcile_reports_ledger_less_profiles_without_deleting_them() {
         std::env::temp_dir().join(format!("solomni-reconcile-orphan-{}", std::process::id()));
     let home = base.join(".home");
     std::fs::create_dir_all(&home).expect("建台账目录");
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-reconcile-orphan".to_string(),
         lease: "call-orphan".to_string(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: Vec::new(),
         cwd: PathBuf::new(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(Vec::new(), Vec::new(), Vec::new()),
     };
     let name = container_name(&spec);
     // 只建 profile、不记台账（模拟台账被删 / 非台账路径留下的残留）。
@@ -538,15 +550,17 @@ fn reconcile_skips_entries_without_ownership() {
         return;
     }
     let home = base.join(".home");
-    let spec = FenceSpec {
+    let spec = FencePlan {
         agent: "probe-reconcile-skip".to_string(),
         lease: String::new(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![target.clone()],
         cwd: target.clone(),
-        ro: Vec::new(),
-        net: false,
+        net: false.into(),
+        home: PathBuf::new(),
+        grants: crate::kernel::contracts::fence::grants_of(
+            vec![target.clone()],
+            Vec::new(),
+            Vec::new(),
+        ),
     };
     expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
     // 清空全部归属（模拟归属读不出来 / 台账丢失）：对账必须报告并跳过，不许回收。
@@ -611,7 +625,7 @@ fn machine_target_is_only_the_ancestor_chain_shape() {
     );
     assert!(
         !is_machine_target(&GrantTarget {
-            part: FencePart::Cwd,
+            part: FencePart::Sandbox,
             ..machine
         }),
         "非 Parent 落点不是机器级"

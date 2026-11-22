@@ -28,7 +28,7 @@
 ## 二、执行分派与就绪
 - 会话在 `tier == Vm` 时把模块命令交给 guest；建会话 / 启用历史会话时装配并拉起，删除会话时销毁。
 - 改配按装配输入变化重建：模块集合 / 档位 / 虚拟根 / 定版变了才重建；只改模型或权限不重建；网络是全局开关（`sandbox.policy.network`），改它走整体重启，不按会话重建。
-- 一个主会话树共用一台 guest：guest 租约 = 顶层工作名（proxy 树 = 代理根名），协作 / 节点 / proxy 子工作的工具租约都指向它；主机围栏租约仍按子会话（`FenceSpec.lease` 与工具上下文里的 `guest_lease` 分开）。
+- 一个主会话树共用一台 guest：guest 租约 = 顶层工作名（proxy 树 = 代理根名），协作 / 节点 / proxy 子工作的工具租约都指向它；主机围栏租约仍按子会话（`FencePlan.lease` 与工具上下文里的 `guest_lease` 分开）。
 - 环境属于主会话：`tier / guest / net / pins` 由人建主会话时决定，子会话只读继承；核心代理的 `create_session` 不接受模型自选环境。
 - 网络是全局开关（`sandbox.policy.network`），不是会话字段：虚拟机档决定 guest 网卡；本机档由平台围栏决定（Windows `internetClient`、macOS `network-outbound`、Linux `net=false` 用 seccomp 拒绝非本地 socket；Linux `net=true` 不装网络过滤器，不限制入站 / 绑定）；默认 false；Windows 只放行公网出站，不授 private network / loopback。
 - guest 装配按整棵树聚合：plan / 沙箱 / 包冲突 / 定版取作用域根与整棵子树的并集；新子会话的包已被运行 guest 装载就直接加入，引入新包时要求树空闲后按新装配重建，不做运行包动态加载。

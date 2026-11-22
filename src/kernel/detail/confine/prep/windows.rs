@@ -3,14 +3,7 @@
 //! 不管：台账条目形状（在 `ledger`）；非 Windows 的降级文案（在 `prep/other.rs`）。
 //! 联动：由 `src/kernel/detail/confine/prep.rs` 按平台选中。
 
-use super::FencePrep;
-use crate::kernel::contracts::fence::FenceSpec;
 use crate::kernel::detail::confine::windows as backend;
-
-/// 目的：把围栏要用的授权一次性做好（写目录 ACL）。
-pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &std::path::Path) -> FencePrep {
-    backend::prepare_fence(spec, command, home)
-}
 
 /// 目的：默认回收：按台账撤掉按次 / 会话权限项与容器 profile，保留机器级授权（仅测试用）。
 #[cfg(test)]

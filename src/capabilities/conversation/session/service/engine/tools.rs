@@ -584,11 +584,9 @@ pub(crate) fn run_shell(
         );
     }
     let mut fence =
-        crate::kernel::api::fence::FenceSpec::for_call(&ctx.face.sandbox, None, &ctx.face.fence)
+        crate::kernel::api::fence::FencePlan::for_call(&ctx.face.sandbox, None, &ctx.face.fence)
             .at(&ctx.face.sandbox.private);
-    fence.ro_tree.extend(ctx.face.runtime_roots.iter().cloned());
-    fence.ro_tree.sort();
-    fence.ro_tree.dedup();
+    fence.extend_read_tree(ctx.face.runtime_roots.iter().cloned());
     // 容器身份按"会话 + agent + 受保护根集合"派生（见 container_name）：同一会话的 shell 共用 SID 与 ACL。
     // 生命周期归会话，调用结束不释放。
     if ctx.face.tier == crate::kernel::api::types::Tier::Vm && ctx.face.guest_lease.is_empty() {
@@ -747,7 +745,7 @@ pub(crate) fn dispatch_external(
                 .unwrap_or(&[]);
             // 每次调用按固定授予派生围栏：sh 与模块工具同一把尺子（模块目录恒只读，该模块 userdata 可写）。
             // 容器身份 = 会话 + agent + 受保护根集合（见 container_name）；租约就是会话 id，调用结束不释放。
-            let fence = crate::kernel::api::fence::FenceSpec::for_call(
+            let fence = crate::kernel::api::fence::FencePlan::for_call(
                 &ctx.face.sandbox,
                 Some(&module),
                 &ctx.face.fence,

@@ -140,57 +140,70 @@ fn sandbox_places_are_fixed_except_the_shared_scope() {
 /// 目的：围栏按固定规则推——私有区 + 模块 userdata 可写，模块目录只读，共享区永不进围栏。
 #[test]
 fn fence_spec_grants_fixed_surfaces() {
-    use crate::kernel::api::fence::FenceSpec;
+    use crate::kernel::api::fence::{Access, FencePlan, Reach};
     let mut sb = test_sandbox("a1", &[]);
     let module = abs(&["mods", "data"]);
     sb.modules.insert("data".to_string(), module.clone());
     sb.modules_with_userdata.insert("data".to_string());
 
-    let session = FenceSpec::for_session(&sb, &[], false);
-    assert!(session.ro_tree.contains(&module), "模块目录对 agent 只读");
+    let session = FencePlan::for_session(&sb, &[], false);
     assert!(
-        session.rw.contains(&module.join("userdata")),
+        session.paths(Access::Read, Reach::Tree).contains(&module),
+        "模块目录对 agent 只读"
+    );
+    assert!(
+        session.write_roots().contains(&module.join("userdata")),
         "模块进程可写自己的 userdata"
     );
-    assert!(!session.rw.contains(&module), "agent 不能整块写模块目录");
-    assert!(!session.rw.contains(&sb.shared), "共享区永不被直接写");
-    assert!(session.rw.contains(&sb.private), "私有沙箱可写");
-    assert_eq!(session.private, sb.private, "HOME/TEMP 落在私有沙箱");
-    assert!(!session.net, "离线档不给网络");
+    assert!(
+        !session.write_roots().contains(&module),
+        "agent 不能整块写模块目录"
+    );
+    assert!(
+        !session.write_roots().contains(&sb.shared),
+        "共享区永不被直接写"
+    );
+    assert!(session.write_roots().contains(&sb.private), "私有沙箱可写");
+    assert_eq!(session.home, sb.private, "HOME/TEMP 落在私有沙箱");
+    assert!(!session.net.on(), "离线档不给网络");
 
     // 一次调用：模块工具带上该模块的 userdata；不带模块就不给。
-    let call = FenceSpec::for_call(&sb, Some("data"), &session);
-    assert!(call.rw.contains(&module.join("userdata")));
-    assert!(call.rw.contains(&sb.private));
-    assert!(!call.rw.contains(&module));
-    assert!(!call.ro_tree.contains(&sb.shared));
-    let call = FenceSpec::for_call(&sb, None, &session);
-    assert!(!call.rw.contains(&module.join("userdata")));
-    assert!(call.ro_tree.contains(&module));
+    let call = FencePlan::for_call(&sb, Some("data"), &session);
+    assert!(call.write_roots().contains(&module.join("userdata")));
+    assert!(call.write_roots().contains(&sb.private));
+    assert!(!call.write_roots().contains(&module));
+    assert!(!call.paths(Access::Read, Reach::Tree).contains(&sb.shared));
+    let call = FencePlan::for_call(&sb, None, &session);
+    assert!(!call.write_roots().contains(&module.join("userdata")));
+    assert!(call.paths(Access::Read, Reach::Tree).contains(&module));
 
-    // 联网档 + 全局开网：围栏才带 net；关全局则仍是 false。
+    // 联网档 + 全局开网：围栏才带 net；关全局则仍是 off。
     sb.permissions = pset(ProfileId::Online);
-    assert!(FenceSpec::for_session(&sb, &[], true).net);
-    assert!(!FenceSpec::for_session(&sb, &[], false).net);
+    assert!(FencePlan::for_session(&sb, &[], true).net.on());
+    assert!(!FencePlan::for_session(&sb, &[], false).net.on());
     sb.permissions = pset(ProfileId::Offline);
-    assert!(!FenceSpec::for_session(&sb, &[], true).net);
+    assert!(!FencePlan::for_session(&sb, &[], true).net.on());
 }
 
 /// 目的：外部工作区的共享根不是可写入面——shell 的围栏不含它，内置工具也不能写它。
 /// 约束：外部磁盘的改动由 work_sync 采纳；work_adopt_sandbox 对它返回空是预期，不是门禁例外。
 #[test]
 fn external_shared_root_is_not_a_shell_write_surface() {
-    use crate::kernel::api::fence::FenceSpec;
+    use crate::kernel::api::fence::{Access, FencePlan, Reach};
     let external = abs(&["external", "proj"]);
     let mut sb = test_sandbox("a1", &[]);
     sb.shared = external.clone();
-    let session = FenceSpec::for_session(&sb, &[], false);
-    assert!(!session.rw.contains(&external), "共享根永不被直接写");
-    let call = FenceSpec::for_call(&sb, None, &session);
+    let session = FencePlan::for_session(&sb, &[], false);
     assert!(
-        !call.rw.contains(&external),
+        !session.write_roots().contains(&external),
+        "共享根永不被直接写"
+    );
+    let call = FencePlan::for_call(&sb, None, &session);
+    assert!(
+        !call.write_roots().contains(&external)
+            && !call.paths(Access::Read, Reach::Tree).contains(&external),
         "按次围栏不含共享根：{:?}",
-        call.rw
+        call.write_roots()
     );
     assert!(!sb.can_write(&Place::Shared));
 }

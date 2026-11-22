@@ -13,7 +13,7 @@
 //!   登录会话级的（同用户的所有进程都看得见），因此守门进程只调 attach_view_drive 读记录、校验映射，
 //!   不重复登记。
 
-use crate::kernel::contracts::fence::FenceSpec;
+use crate::kernel::contracts::fence::FencePlan;
 use crate::kernel::ports::PathCodec;
 use serde::{Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
@@ -117,10 +117,10 @@ pub fn active_view() -> Option<ViewDrive> {
 ///   模块工具的 cwd 是模块根，沿用宿主 cwd 与宿主程序名：把它也译成视图写法，程序名里带分隔符的
 ///   相对路径会被算成跨卷绝对路径，容器里反而调不起来；而它本就不需要视图盘（祖先链只对
 ///   cwd == private 的深叶路径写）。
-/// 参数：spec —— 本次围栏的路径面。
+/// 参数：spec —— 本次围栏的意图。
 /// 返回：视图盘生效且 spec.cwd 就是 spec.private 时给盘；否则 None（调用方回退真实路径）。
-pub(crate) fn active_shell_view(spec: &FenceSpec) -> Option<ViewDrive> {
-    if spec.private.as_os_str().is_empty() || spec.cwd != spec.private {
+pub(crate) fn active_shell_view(spec: &FencePlan) -> Option<ViewDrive> {
+    if spec.home.as_os_str().is_empty() || spec.cwd != spec.home {
         return None;
     }
     active_view()

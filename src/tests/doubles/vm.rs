@@ -373,7 +373,7 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
         &self,
         _lease: &str,
         run: &crate::capabilities::vm::domain::guest::GuestRun,
-        _fence: &crate::kernel::api::fence::FenceSpec,
+        _fence: &crate::kernel::api::fence::FencePlan,
     ) -> crate::kernel::api::types::ToolOutcome {
         self.runs
             .lock()

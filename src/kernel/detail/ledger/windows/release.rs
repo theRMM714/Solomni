@@ -4,7 +4,7 @@
 //! 联动：撤销经 acl.rs 的 revoke_one / restore_sd；盘上格式与锁在 store.rs；入口是 --fence-clean 与 confine.rs 的 release_by_lease。
 
 use super::super::*;
-use crate::kernel::contracts::fence::FenceSpec;
+use crate::kernel::contracts::fence::FencePlan;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use windows_sys::Win32::Security::Isolation::DeleteAppContainerProfile;
@@ -310,7 +310,7 @@ fn commit_release(
 /// 参数：spec 是该会话各席的围栏范围；home 是产品私有区（台账落点，也是产品根的锚）。
 /// 约束：两阶段——锁内摘归属并落盘，锁外做 ACL，再锁内复检销账；慢的整树重算不占台账锁。
 /// 错误：撤权、还原或台账更新失败时如实返回；失败条目留在台账里，供下次重试。
-pub fn release_fence(spec: &FenceSpec, home: &Path) -> Result<(), String> {
+pub fn release_fence(spec: &FencePlan, home: &Path) -> Result<(), String> {
     let sid = container_sid(&container_name(spec))?;
     let sid_text = sid_to_string(sid);
     free_sid(sid);

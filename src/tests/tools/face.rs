@@ -446,22 +446,20 @@ pub(crate) fn module_tools_are_concurrent_only_when_declared() {
 ///    （保护模块自己的 userdata），声明了 parallel 的只读调用仍可并发。
 #[test]
 pub(crate) fn module_lease_serializes_exclusive_calls_but_allows_parallel_readers() {
-    use crate::kernel::api::fence::FenceSpec;
+    use crate::kernel::api::fence::FencePlan;
     fn exercise(runner: Arc<ParallelRunner>, parallel: bool) {
         let svc = test_tools_svc_with(
             Arc::clone(&runner) as Arc<dyn ProcessRunner>,
             Arc::new(InMemorySysIo::new()),
             Arc::new(NoFenceHost),
         );
-        let fence = FenceSpec {
+        let fence = FencePlan {
             agent: "a".to_string(),
             lease: "w".to_string(),
-            rw: Vec::new(),
-            ro: Vec::new(),
-            ro_tree: Vec::new(),
-            private: PathBuf::new(),
             cwd: PathBuf::new(),
-            net: false,
+            net: false.into(),
+            home: PathBuf::new(),
+            grants: crate::kernel::contracts::fence::grants_of(Vec::new(), Vec::new(), Vec::new()),
         };
         let env: Vec<(String, String)> = Vec::new();
         std::thread::scope(|s| {
