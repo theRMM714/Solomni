@@ -464,8 +464,8 @@ impl WorkOps for FakeFaces {
                 tier: h.exec.tier.as_str().to_string(),
                 tier_ready: true,
                 tier_missing: Vec::new(),
-                permission_profile: "workspace".to_string(),
-                permission_label: "工作区内修改".to_string(),
+                permission_profile: "offline".to_string(),
+                permission_label: "离线".to_string(),
                 context_freshness: false,
                 thinking: crate::capabilities::work::api::ThinkingView {
                     level: None,
@@ -579,8 +579,8 @@ impl RuntimeOps for FakeFaces {
             tier: "host".to_string(),
             tier_ready: true,
             tier_missing: Vec::new(),
-            permission_profile: "workspace".to_string(),
-            permission_label: "工作区内修改".to_string(),
+            permission_profile: "offline".to_string(),
+            permission_label: "离线".to_string(),
             context_freshness: false,
             thinking: crate::capabilities::work::api::ThinkingView {
                 level: None,
