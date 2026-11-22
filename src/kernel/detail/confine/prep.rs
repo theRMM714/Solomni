@@ -12,6 +12,7 @@ mod other;
 mod windows;
 #[cfg(not(windows))]
 use other as platform;
+pub(crate) use platform::prepare_entry;
 pub use platform::{machine_ensure, machine_missing, retire_legacy_machine_grants};
 #[cfg(windows)]
 use windows as platform;

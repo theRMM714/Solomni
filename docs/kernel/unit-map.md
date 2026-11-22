@@ -71,8 +71,8 @@
 | `src/kernel/detail/view_drive_lifecycle.rs` | 视图盘生命周期门面：分配、清扫、释放与路径编解码；按平台选中 `src/kernel/detail/view_drive_lifecycle/{windows,unix}.rs` |
 | `src/kernel/detail/view_drive_lifecycle/windows.rs` | 视图盘生命周期的 Windows 后端：逃生口、真分配与释放、控制台终止（Ctrl+C / 关窗 / 注销 / 关机）时的退出清理 |
 | `src/kernel/detail/view_drive_lifecycle/unix.rs` | 视图盘生命周期的非 Windows 后端：不分配、编解码恒 `None` |
-| `src/kernel/detail/confine.rs` | 围栏**实现**门面：`trait Confine`（`capability` / `verify` / `effective_paths` / `run`）与平台后端选择（Windows 另有自己的 `prepare_fence` 授权入口，不属于跨平台契约）——上层只认计划，平台差异全在四个实现里；另含 `FenceHost` 释放适配（台账动作在 `src/kernel/detail/ledger.rs`） |
-| `src/kernel/detail/confine/job.rs` | 守门进程的围栏作业：`FenceJob` 的 JSON 形态、启动命令（`launcher`）与执行转交（`run_fenced`）；策略由调用方传入 |
+| `src/kernel/detail/confine.rs` | 围栏**实现**门面：`trait Confine`（`capability` / `verify` / `effective_paths` / `local_relay` / `run`）与平台后端选择（Windows 另有自己的 `prepare_fence` 授权入口，不属于跨平台契约）——上层只认计划，平台差异全在四个实现里；另含 `FenceHost` 释放适配（台账动作在 `src/kernel/detail/ledger.rs`） |
+| `src/kernel/detail/confine/job.rs` | 守门进程的围栏作业：`FenceJob` 的 JSON 形态、启动命令（`launcher`）与执行转交（`run_fenced`）；策略由调用方传入；`NetPolicy::Local` 在 `local_relay()` 为假的平台上在这里拒绝执行 |
 | `src/kernel/detail/confine/prep.rs` | 围栏准备与机器级预授（门面）：`FencePrep` / `FenceStep` 的成败记录与步骤计时；机器级预授按平台经 `src/kernel/detail/confine/prep/windows.rs` / `src/kernel/detail/confine/prep/other.rs` 转交 |
 | `src/kernel/detail/confine/prep/windows.rs` | `prep` 的 Windows 后端：围栏授权准备、按次回收与机器级预授的转交 |
 | `src/kernel/detail/confine/prep/other.rs` | `prep` 的非 Windows 后端：没有机器级预授时如实返回未支持，退役为空操作 |
@@ -86,8 +86,10 @@
 | `src/kernel/detail/confine/windows/tests/container.rs` | 容器内真机往返用例族：叶子读得到写得到、父目录内容列不到、模块只读、绝对路径程序、按次临时目录与并发隔离 |
 | `src/kernel/detail/confine/windows/tests/grant.rs` | 围栏授权用例族：落点清单与 STAT 祖先、权限位覆盖、写后核对、台账归属与撤销、失败回滚、完整性标签挡写 |
 | `src/kernel/detail/confine/windows/tests/workspace.rs` | 视图盘用例：容器 cwd 落在映射盘符 |
-| `src/kernel/detail/container.rs` | 容器身份与容器内启动的门面：只有 Windows 有实现（`src/kernel/detail/container/windows.rs`），其余平台为空模块 |
-| `src/kernel/detail/container/windows.rs` | Windows 容器围栏的启动面：AppContainer 档案与 SID、本产品能力 SID（`solomni.fence.baseline` → `S-1-15-3-*`，profile 与令牌两处都声明）、`net` 对应的 internetClient 能力、UTF-16 转换、system shell 与 kill-on-close 作业对象、容器内启动 |
+| `src/kernel/detail/container.rs` | 容器身份与容器内启动的门面：只有 Windows 有实现（`src/kernel/detail/container/windows.rs`）；其余平台走 `src/kernel/detail/container/other.rs` 的如实拒绝 |
+| `src/kernel/detail/container/other.rs` | 容器能力的非 Windows 后端：回环中继入口如实拒绝（`FENCE_FAILED`），不假装有容器 |
+| `src/kernel/detail/container/windows/relay.rs` | Windows 回环中继：容器内 bind `127.0.0.2:<端口>`、宿主按端口清单 dial `127.0.0.1:<端口>`，两侧用继承的匿名管道传帧；端口白名单与「产品自己的端口」都在宿主侧判（后者按监听者 pid 是否落在本产品进程树，不靠端口表） |
+| `src/kernel/detail/container/windows.rs` | Windows 容器围栏的启动面：AppContainer 档案与 SID、本产品能力 SID（`solomni.fence.baseline` → `S-1-15-3-*`，profile 与令牌两处都声明）、`net` 对应的 internetClient 能力、UTF-16 转换、system shell 与 kill-on-close 作业对象、容器内启动（`container_command` / `spawn_in_container` / `wait_and_reap` 三个零件，回环中继也复用） |
 | `src/kernel/detail/launch.rs` | 命令启动形状（门面）：PATH / PATHEXT 解析、安装目录上溯、`shell_command` 与 `fence_env`；平台分支在 `src/kernel/detail/launch/windows.rs` / `src/kernel/detail/launch/unix.rs` |
 | `src/kernel/detail/launch/windows.rs` | `launch` 的 Windows 后端：真身解析、重解析点判定、node 开关、程序名改写与 `cmd` shell |
 | `src/kernel/detail/launch/unix.rs` | `launch` 的非 Windows 后端：执行位、链接与 `sh` shell |

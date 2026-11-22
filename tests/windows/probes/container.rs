@@ -4,7 +4,8 @@
 //! 联动：src/guard/、node run-tests.js --fence-live。
 
 use crate::probe::{
-    env_blocks_container, job_json, job_json_net, run_launcher, runtime_env, scratch,
+    env_blocks_container, fence_clean, job_json, job_json_local, job_json_net, prepare_fence,
+    run_launcher, runtime_env, scratch,
 };
 use std::path::PathBuf;
 use std::process::Command;
@@ -375,4 +376,105 @@ fn env_unavailable_degrades_and_still_runs_the_command() {
             .map(|d| d.flatten().map(|e| e.file_name()).collect::<Vec<_>>())
             .unwrap_or_default()
     );
+}
+
+/// 探针用的回环客户端：连 `127.0.0.2:<端口>`（容器里经中继到达宿主的同名端口），把结果写进文件。
+/// 三种结果：`OK <载荷>` / `ERR <错误码>` / `TIMEOUT`——判据读文件，不靠 stdout（容器 stdio 会混进别的输出）。
+const RELAY_CLIENT: &str = r#"
+const net = require('net');
+const [port, addr, out] = process.argv.slice(2);
+const fs = require('fs');
+const s = net.connect(Number(port), addr);
+let got = '';
+s.setTimeout(4000, () => { fs.writeFileSync(out, 'TIMEOUT'); s.destroy(); });
+s.on('data', (c) => { got += c.toString(); });
+s.on('end', () => fs.writeFileSync(out, 'OK ' + got.trim()));
+s.on('error', (e) => fs.writeFileSync(out, 'ERR ' + e.code));
+"#;
+
+/// **回环中继**：`net=Local` 时容器里访问 `127.0.0.2:<端口>` 要真的到宿主的 `127.0.0.1:<端口>`；
+/// 不在清单里的端口在容器里连不上（中继只绑清单内的端口）。两个方向都断言：
+/// 只证"通"会把"全放行"当通过，只证"不通"会把"机制根本没起来"当通过。
+#[test]
+fn container_reaches_listed_host_ports_through_the_relay() {
+    if skip_unless_live("container_reaches_listed_host_ports_through_the_relay") {
+        return;
+    }
+    const MARK: &str = "RELAY-MARK-7731";
+    let served = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("占宿主的回环端口");
+    let port = served.local_addr().expect("取端口").port();
+    let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let hits = accepted.clone();
+    std::thread::spawn(move || {
+        for stream in served.incoming() {
+            let Ok(mut s) = stream else { continue };
+            hits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let _ = std::io::Write::write_all(&mut s, MARK.as_bytes());
+            let _ = s.shutdown(std::net::Shutdown::Both);
+        }
+    });
+    // 一个**没有**人监听、也没进清单的端口：容器里应当立刻连不上（不是超时）。
+    let free = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("取一个空端口");
+    let unlisted = free.local_addr().expect("取端口").port();
+    drop(free);
+
+    let root = scratch("container-relay");
+    let home = root.join(".home");
+    let sandbox = root.join("sandbox");
+    std::fs::create_dir_all(&sandbox).expect("建夹具沙箱");
+    let client = sandbox.join("relay-client.js");
+    std::fs::write(&client, RELAY_CLIENT).expect("写探针脚本");
+    let allowed_out = sandbox.join("relay-allowed.txt");
+    let blocked_out = sandbox.join("relay-blocked.txt");
+    let allowed = format!(
+        "node \"{}\" {} 127.0.0.2 \"{}\"",
+        client.display(),
+        port,
+        allowed_out.display()
+    );
+    // 中继进程是本产品自己的可执行文件，它那条单文件只读授权只能由授权这一步写下：先授权、再执行。
+    let spec = job_json_local(
+        std::slice::from_ref(&sandbox),
+        &sandbox,
+        true,
+        Some(&home),
+        &[port],
+    );
+    let (gcode, _gout, gerr) = prepare_fence(&spec, &allowed);
+    if env_blocks_container(&gerr) || gerr.contains("授不上") {
+        eprintln!(
+            "[探针] 本机写不了围栏授权，跳过回环中继断言：{}",
+            gerr.trim()
+        );
+        fence_clean(&root);
+        return;
+    }
+    assert_eq!(gcode, Some(0), "围栏授权应当授上：{}", gerr);
+
+    let (code, _out, err) = run_launcher(&spec, &allowed);
+    let got = std::fs::read_to_string(&allowed_out).unwrap_or_default();
+    assert!(
+        got.contains(MARK),
+        "容器应当经中继拿到宿主的应答（exit={:?}，结果={:?}，宿主被连={}）：{}",
+        code,
+        got,
+        accepted.load(std::sync::atomic::Ordering::SeqCst),
+        err
+    );
+
+    let blocked = format!(
+        "node \"{}\" {} 127.0.0.2 \"{}\"",
+        client.display(),
+        unlisted,
+        blocked_out.display()
+    );
+    let (_code, _out, err) = run_launcher(&spec, &blocked);
+    let got = std::fs::read_to_string(&blocked_out).unwrap_or_default();
+    assert!(
+        got.starts_with("ERR"),
+        "清单外的端口不该连得上（结果={:?}）：{}",
+        got,
+        err
+    );
+    fence_clean(&root);
 }

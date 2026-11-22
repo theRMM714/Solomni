@@ -8,7 +8,7 @@ pub mod https;
 pub mod routes;
 pub mod unpack;
 
-pub use fence::{fence_verify, print_fence_env};
+pub use fence::{fence_prepare, fence_verify, print_fence_env};
 pub use https::https_check;
 pub use routes::print_routes;
 pub use unpack::unpack_cli;

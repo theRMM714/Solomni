@@ -50,21 +50,22 @@
     因此 agent 在共享区上跑测试现在做不到：测试要在共享区就地读到**未提交**的依赖，shell 的
     围栏只有私有沙箱（外加只读的模块目录与主机只读根），看不到共享区。
     把共享区整个拷进沙箱再测与"让 agent 把共享区拉下来"等价，没有意义，所以否决该路径。
-    结论是不给共享区授 ACL，改由「容器内回环中继」解决（已真机实测：容器连不到宿主监听、
-    能自 bind 自连、同容器两进程互通），但 test_shell 与中继都还没实现，记为缺口。
+    结论是不给共享区授 ACL，改由「容器内回环中继」解决：Windows 侧已落地并真机通过
+    （`tests/windows/probes/container.rs` 的 `container_reaches_listed_host_ports_through_the_relay`），
+    但 `test_shell`（在共享区就地跑测试的入口）与 Linux / macOS 的回环中继仍未实现，记为缺口。
   how: |
-    1) 宿主建一对匿名管道，用同一容器 SID 起中继进程（容器内 bind 白名单端口，另一端接继承的管道句柄），
-       再起真正的测试命令；多端口由同一中继进程 bind 多个端口，不按端口加进程。
-    2) 中继↔宿主不走网络（句柄继承）：零 DACL、零管理员、零 loopback 豁免、零全端口暴露。
-    3) 端口白名单在**宿主侧**校验：中继每次接入在管道上带端口号，宿主校验后才 dial 到 127.0.0.1:<port>
-       （产品端口 3081、QGA 随机端口、SMB 45678 不在放行集 → 容器内表现为 ETIMEDOUT）。
-    4) 边界：先只做 TCP + 127.0.0.1；UDP 与 ::1 需各自再加中继。
+    1) Windows 中继已实现（`src/kernel/detail/container/windows/relay.rs`）：容器内 bind `127.0.0.2:<端口>`，
+       宿主按端口清单 dial `127.0.0.1:<端口>`，两侧用继承的匿名管道传帧，不走网络。
+    2) 端口清单在**宿主侧**校验；产品自己的端口按「监听者 pid 在本产品进程树里」判、不靠端口表
+       （转录中心 3081、QGA 随机端口、SMB 助手 45678 由此自动覆盖），容器里表现为连接被关。
+    3) 边界：先只做 TCP + 127.0.0.1；UDP 与 ::1 需各自再加中继。
+    4) 下一步：Linux / macOS 各自的端口级回环（netns 能只留 lo 且精确到端口，seatbelt 没有端口维度）。
     5) 新增 `test_shell` 工具作为共享区测试入口（跑「不改被跟踪文件」的测试；
-       改 tracked 文件走写后校验 + 回滚 + 回执），与本中继同批实现。
+       改 tracked 文件走写后校验 + 回滚 + 回执）。
   accept: |
     在共享区目录上能跑起一个需要本地端口的测试（自起服务自连经中继），且共享区不产生任何按会话 ACL；
     产品端口与 QGA / SMB 端口在容器内仍不可达；node run-tests.js 全绿。
-  blocked_by: 缺少实现（test_shell 与容器内回环中继均未实现；中继形态已实测可行）
+  blocked_by: 缺少实现（test_shell；Linux / macOS 的回环中继；Windows 中继已落地）
 
 - id: vm.windows-macos-guest
   scope: global

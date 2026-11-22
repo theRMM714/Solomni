@@ -31,6 +31,9 @@ use windows_sys::Win32::System::Threading::{
     WaitForSingleObject,
 };
 
+mod relay;
+pub(crate) use relay::{RELAY_FLAG, relay_entry};
+
 /// 目的：本程序建的容器 profile 前缀（`container_name` 生成的就是它；`--fence-clean` 按它扫整族）。
 pub(crate) const PROFILE_PREFIX: &str = "Solomni.Agent.";
 
@@ -301,12 +304,20 @@ pub(crate) fn internet_client_sid(enabled: bool) -> Result<Option<Vec<u8>>, Stri
     Ok(Some(sid))
 }
 
-/// 目的：把工具进程放进容器里跑：按 `net` 授/不授 `internetClient`，stdio 用外层给的那三个句柄；环境用运行期白名单显式给出。
-pub(crate) fn run_in_container(sid: PSID, spec: &FencePlan, command: &str) -> Result<i32, String> {
-    // 环境块显式给（见 fence_env）：子进程拿到的就是白名单本身，不靠"守门进程恰好继承了什么"。
-    let env = crate::kernel::detail::launch::fence_env(spec, command);
-    // 视图盘只给 cwd == 私有沙箱的调用（shell）用：映射根一级即可，根外祖先链不必再授 ACE，程序名也译视图写法。
-    // 模块工具 cwd 是模块根，沿用宿主 cwd 与宿主程序名——译成视图写法会把相对程序名算成跨卷绝对路径。
+/// 目的：回环中继档的容器内启动（真现在 `relay` 子模块）。只有 `net.is_local()` 用得到。
+pub(crate) fn relay_run(
+    sid: PSID,
+    spec: &FencePlan,
+    command: &str,
+    ports: &[u16],
+) -> Result<i32, String> {
+    relay::run(sid, spec, command, ports)
+}
+
+/// 目的：把工具命令包成容器里要跑的整条命令行：交系统 shell 解释，并配上容器里该用的程序（shell 自身）与 cwd。
+/// 约束：视图盘只给 cwd == 私有沙箱的调用（shell）用：映射根一级即可，根外祖先链不必再授 ACE，程序名也译视图写法。
+///   模块工具 cwd 是模块根，沿用宿主 cwd 与宿主程序名——译成视图写法会把相对程序名算成跨卷绝对路径。
+pub(crate) fn container_command(spec: &FencePlan, command: &str) -> (PathBuf, String, PathBuf) {
     let view = crate::kernel::detail::view_drive::active_shell_view(spec);
     let cwd = view
         .as_ref()
@@ -318,7 +329,37 @@ pub(crate) fn run_in_container(sid: PSID, spec: &FencePlan, command: &str) -> Re
         Some(v) => crate::kernel::detail::launch::view_program_command(command, v),
         None => command.to_string(),
     };
-    let command = &crate::kernel::detail::launch::container_program_command(&command, &cwd);
+    let command = crate::kernel::detail::launch::container_program_command(&command, &cwd);
+    // 命令交系统 shell 解释（与既有语义一致：命令行来自 module.yaml）。
+    // 镜像路径显式给出：容器里用 lpApplicationName 解析更稳（不给路径时搜索偶发失败）。
+    let shell_exe = system_shell();
+    let line = format!(
+        "\"{}\" /C {}",
+        shell_exe.display(),
+        crate::kernel::detail::launch::windows_program_separators(&command)
+    );
+    (shell_exe, line, cwd)
+}
+
+/// 目的：在给定容器身份下起一个进程（stdio 继承调用方的三个标准句柄；环境 = 围栏白名单 + `extra_env`）。
+/// 参数：`app` 给 `None` 时让 Windows 自己解析命令行首词；`command` 只用来算环境白名单，不参与启动。
+/// 返回：起不来的进程句柄（调用方负责 `wait_and_reap`）。
+pub(crate) fn spawn_in_container(
+    sid: PSID,
+    spec: &FencePlan,
+    command: &str,
+    app: Option<&Path>,
+    cmdline: &str,
+    cwd: &Path,
+    extra_env: &[(String, String)],
+) -> Result<PROCESS_INFORMATION, String> {
+    // 环境块显式给（见 fence_env）：子进程拿到的就是白名单本身，不靠"守门进程恰好继承了什么"。
+    let mut env = crate::kernel::detail::launch::fence_env(spec, command);
+    env.extend(
+        extra_env
+            .iter()
+            .map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v))),
+    );
     let mut block: Vec<u16> = Vec::new();
     for (k, v) in env {
         block.extend(k.encode_wide());
@@ -380,25 +421,20 @@ pub(crate) fn run_in_container(sid: PSID, spec: &FencePlan, command: &str) -> Re
         si.StartupInfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     }
     si.lpAttributeList = list;
-    // 命令交系统 shell 解释（与既有语义一致：命令行来自 module.yaml）。
-    // 镜像路径显式给出：容器里用 lpApplicationName 解析更稳（不给路径时搜索偶发失败）。
-    let shell_exe = system_shell();
-    let shell = format!(
-        "\"{}\" /C {}",
-        shell_exe.display(),
-        crate::kernel::detail::launch::windows_program_separators(command)
-    );
-    let mut cmdline: Vec<u16> = std::ffi::OsStr::new(&shell)
+    let mut line: Vec<u16> = std::ffi::OsStr::new(cmdline)
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
-    let app = wide(&shell_exe);
-    let cwd = wide(&cwd);
+    let app_wide = app.map(wide);
+    let cwd = wide(cwd);
     let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
     let created = unsafe {
         CreateProcessW(
-            app.as_ptr(),
-            cmdline.as_mut_ptr(),
+            app_wide
+                .as_ref()
+                .map(|a| a.as_ptr())
+                .unwrap_or(std::ptr::null()),
+            line.as_mut_ptr(),
             std::ptr::null_mut(),
             std::ptr::null_mut(),
             1,
@@ -413,12 +449,13 @@ pub(crate) fn run_in_container(sid: PSID, spec: &FencePlan, command: &str) -> Re
     let err = std::io::Error::last_os_error();
     unsafe { DeleteProcThreadAttributeList(list) };
     if created == 0 {
-        return Err(format!(
-            "CreateProcessW 失败（{}）：{}",
-            shell_exe.display(),
-            err
-        ));
+        return Err(format!("CreateProcessW 失败（{}）：{}", err, cmdline));
     }
+    Ok(pi)
+}
+
+/// 目的：等容器里的进程退出并拿退出码，顺手收掉两个句柄。
+pub(crate) fn wait_and_reap(pi: PROCESS_INFORMATION) -> Result<i32, String> {
     let mut code: u32 = FENCE_FAILED as u32;
     unsafe {
         WaitForSingleObject(pi.hProcess, INFINITE);
@@ -427,4 +464,11 @@ pub(crate) fn run_in_container(sid: PSID, spec: &FencePlan, command: &str) -> Re
         CloseHandle(pi.hProcess);
     }
     Ok(code as i32)
+}
+
+/// 目的：把工具进程放进容器里跑（常规档：不经回环中继）。
+pub(crate) fn run_in_container(sid: PSID, spec: &FencePlan, command: &str) -> Result<i32, String> {
+    let (app, cmdline, cwd) = container_command(spec, command);
+    let pi = spawn_in_container(sid, spec, command, Some(&app), &cmdline, &cwd, &[])?;
+    wait_and_reap(pi)
 }

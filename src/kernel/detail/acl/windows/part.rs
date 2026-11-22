@@ -30,6 +30,8 @@ pub(crate) enum FencePart {
     Ledger,
     /// 落点的强制完整性标签：高于 Low 且不许向上写时，DACL 授权再对容器也写不进。
     IntegrityLabel,
+    /// 本产品可执行文件（回环中继进程要在容器里跑起来，单文件只读）。
+    Relay,
 }
 
 impl FencePart {
@@ -52,6 +54,7 @@ impl FencePart {
             FencePart::ContainerIdentity => "容器身份",
             FencePart::Ledger => "授权台账",
             FencePart::IntegrityLabel => "落点的完整性标签",
+            FencePart::Relay => "本产品可执行文件（回环中继）",
         }
     }
 
@@ -70,6 +73,9 @@ impl FencePart {
             FencePart::Ledger => "确认产品私有区 .home/ 可写（授权台账要落在那里）",
             FencePart::IntegrityLabel => {
                 "提权清掉这个目录的强制完整性标签（icacls 只能设级别、删不掉标签），或把落点换到未打标签的目录"
+            }
+            FencePart::Relay => {
+                "确认本产品可执行文件在你拥有的位置、这次调用读得到它（它自己不能被换成别的文件）"
             }
             FencePart::AuthorizedRead | FencePart::Parent => {
                 "这一次不影响围栏成立；下次想让它可达再补"

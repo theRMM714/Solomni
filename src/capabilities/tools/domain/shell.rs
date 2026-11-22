@@ -13,15 +13,20 @@ use std::time::Duration;
 /// 目的：单条 shell 命令的字符上限；超过就要求模型先把脚本写进沙箱再执行（命令不拼进命令行）。
 pub const MAX_COMMAND_CHARS: usize = 8_000;
 
-/// 目的：一次已校验的 shell 调用——脚本与本次超时。授予是固定的（私有沙箱 rw、模块目录与主机只读根 ro、网络按档位），
-///   调用参数里没有任何范围旋钮：范围由围栏派生决定，不由模型挑。
+/// 目的：一次已校验的 shell 调用——脚本、本次超时、要放的宿主回环端口。授予是固定的（私有沙箱 rw、模块目录与主机只读根 ro、网络按档位），
+///   调用参数里唯一的旋钮是 `local_ports`：它不扩大文件系统授予，只决定容器内哪几个宿主回环端口可连。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShellCall {
     /// 目的：要执行的命令原文（模型写的本环境 shell 语法）。
     pub script: String,
     /// 目的：本次执行的超时；到点连根杀整棵进程树。
     pub timeout: Duration,
+    /// 目的：要放行的宿主回环端口（空 = 不碰回环，走会话档位）。
+    pub local_ports: Vec<u16>,
 }
+
+/// 目的：单次调用能要几个回环端口——一个中继进程要 bind 这么多个监听，多到几十个就没有"测试一个服务"的形状了。
+pub const MAX_LOCAL_PORTS: usize = 8;
 
 /// 目的：按工具声明校验并解析一次 shell 调用；参数不符 / 命令过长都如实报事实。
 /// 参数：`schema` = systools/tools.yaml 里的 shell 声明；`args_json` = 模型给的参数对象。
@@ -50,10 +55,47 @@ pub fn parse(schema: &ToolSchema, args_json: &str) -> Result<ShellCall, String> 
         .get("timeout_secs")
         .and_then(|v| v.as_u64())
         .unwrap_or(120);
+    let local_ports = parse_local_ports(&args)?;
     Ok(ShellCall {
         script,
         timeout: Duration::from_secs(secs),
+        local_ports,
     })
+}
+
+/// 目的：把 `local_ports` 摊成去重后的端口清单；形状不符 / 越界 / 太多都如实报事实。
+/// 约束：数组元素形状由 JSON Schema 的 `items: {}` 放过，逐元素校验在这里做（schema.check 只管"是不是数组"）。
+fn parse_local_ports(args: &serde_json::Value) -> Result<Vec<u16>, String> {
+    let Some(arr) = args.get("local_ports").and_then(|v| v.as_array()) else {
+        return Ok(Vec::new());
+    };
+    if arr.len() > MAX_LOCAL_PORTS {
+        return Err(format!(
+            "local_ports 最多 {} 个端口（这次给了 {} 个）：一个中继进程绑这么多监听没有意义，请只列测试真正要连的端口。",
+            MAX_LOCAL_PORTS,
+            arr.len()
+        ));
+    }
+    let mut out: Vec<u16> = Vec::with_capacity(arr.len());
+    for item in arr {
+        let Some(n) = item.as_u64() else {
+            return Err(format!(
+                "local_ports 的成员必须是端口号（整数 1-65535），这次给了 {}：这条调用没有执行。",
+                item
+            ));
+        };
+        if n == 0 || n > u64::from(u16::MAX) {
+            return Err(format!(
+                "local_ports 里的 {} 不是合法端口（1-65535）：这条调用没有执行。",
+                n
+            ));
+        }
+        let port = u16::try_from(n).unwrap_or_default();
+        if !out.contains(&port) {
+            out.push(port);
+        }
+    }
+    Ok(out)
 }
 
 /// 目的：shell 回执的状态行分类——退出码之外的三种收尾（超时 / 用户停止 / 被信号结束）。

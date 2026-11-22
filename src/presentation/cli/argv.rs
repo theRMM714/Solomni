@@ -88,6 +88,7 @@ const OPAQUE: &[&str] = &[
     "--unpack",
     "--print-fence-env",
     "--fence-verify",
+    "--fence-prepare",
     "--print-routes",
     "--probe-tools",
     "--probe-replay",

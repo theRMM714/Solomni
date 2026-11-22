@@ -83,6 +83,14 @@ pub fn launcher(exe: &Path, job: &FenceJob, command: &str) -> Command {
 
 /// 目的：守门进程内：装围栏 → 跑命令 → 返回退出码。失败必须报错（stderr）并用 FENCE_FAILED 退出。
 pub fn run_fenced(job: &FenceJob, command: &str) -> i32 {
+    // 回环中继是平台能力：不支持的平台**拒绝执行**，不降级成回环全通——
+    // 这些平台的 net=off 本来就放行本地回环，按 off 落下去会把宿主回环上的一切（含产品端口）一起送出去。
+    if job.plan.net.is_local() && !backend().local_relay() {
+        eprintln!(
+            "[围栏] 本平台还没有回环中继：local_ports 这次不成立，拒绝执行（不降级成回环全通）"
+        );
+        return crate::kernel::contracts::fence::FENCE_FAILED;
+    }
     backend().run(
         &job.plan,
         Prepared {

@@ -1,4 +1,4 @@
-//! 目的：围栏机制验证与运行期环境白名单探针（隐藏模式 --fence-env / --fence-verify）。
+//! 目的：围栏机制验证、授权预写与运行期环境白名单探针（隐藏模式 --fence-env / --fence-verify / --fence-prepare）。
 //! 管：守门协议 JSON 的解析、命令取法与三态结论打印。
 //! 不管：围栏安装与平台差异（在 kernel::detail::confine）；用户帮助。
 //! 联动：由 main 在对应分支调用；入参是守门进程那份 JSON。
@@ -14,6 +14,21 @@ pub fn print_fence_env(args: &[String], flag: usize) -> i32 {
             }
             0
         }
+        Err(e) => {
+            eprintln!("[围栏] {}", e);
+            crate::kernel::detail::confine::FENCE_FAILED
+        }
+    }
+}
+
+/// 目的：`--fence-prepare`：把这份计划要的本机围栏授权写进本机，**不执行命令**——
+///   真实会话里由外层工具进程做的是同一件事，这个入口让「授权」与「执行」能分两步验。
+/// 返回：0 = 必要落点全授上（或本平台不需要写）；111 = 授不上（原因已逐条打到 stderr）。
+pub fn fence_prepare(args: &[String], flag: usize) -> i32 {
+    let raw = args.get(flag + 1).cloned().unwrap_or_default();
+    let command = command_after_separator(args);
+    match crate::kernel::detail::confine::FenceJob::from_json(&raw) {
+        Ok(job) => crate::kernel::detail::confine::prep::prepare_entry(&job, &command),
         Err(e) => {
             eprintln!("[围栏] {}", e);
             crate::kernel::detail::confine::FENCE_FAILED

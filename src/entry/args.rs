@@ -24,6 +24,16 @@ pub(crate) fn before_root(args: &[String]) -> Option<i32> {
     {
         return Some(crate::guard::fence_run(args, i));
     }
+    // 回环中继（内部协议，只在容器里跑）：把一个容器身份下要连的本机端口沿继承来的管道路由到宿主，再起真正的命令。
+    // 排在围栏旗之后：它是围栏的一个档（net=local），不是独立玩法。
+    if let Some(i) = args
+        .iter()
+        .position(|a| a == crate::kernel::detail::container::RELAY_FLAG)
+    {
+        return Some(crate::kernel::detail::container::relay_entry(
+            &args[i + 1..],
+        ));
+    }
     // 隐藏模式：走**产品自己那套**出站链路打一次最小 HTTPS 请求，三态如实回报
     // （ok / no-net / tls-fail|fail）——CI 三平台据此验本构建的 TLS 栈，不需要任何密钥。
     if let Some(i) = args.iter().position(|a| a == "--https-check") {
@@ -42,6 +52,10 @@ pub(crate) fn before_root(args: &[String]) -> Option<i32> {
     // 未授权时段的拒绝执行（见 capabilities/tools/detail/proc_tools.rs）就靠这一份结论。
     if let Some(i) = args.iter().position(|a| a == "--fence-verify") {
         return Some(super::probes::fence_verify(args, i));
+    }
+    // 授权预写（探针与手工排查）：只把它写进本机、不执行命令，好让「授权」与「执行」分两步验。
+    if let Some(i) = args.iter().position(|a| a == "--fence-prepare") {
+        return Some(super::probes::fence_prepare(args, i));
     }
     // 入站契约（机器可读）：HTTP 路由目录的唯一定义（见 docs/presentation/contracts.md）。
     if args.iter().any(|a| a == "--print-routes") {

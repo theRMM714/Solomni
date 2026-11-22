@@ -21,6 +21,7 @@ const INTERNAL: &[&str] = &[
     "--unpack",
     "--print-fence-env",
     "--fence-verify",
+    "--fence-prepare",
     "--print-routes",
     "--fence-clean",
     "--probe-tools",
