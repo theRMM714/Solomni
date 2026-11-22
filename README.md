@@ -115,7 +115,7 @@ tools:                       # 可选：模块工具表
 
 - 模块工具只有一条调用约定：**启动命令 + 参数 + stdin/stdout 回执**；长驻 MCP 服务写进 `services`。
 - 工具进程可达该 agent 的私有沙箱与它使用的模块目录；共享区主副本要先 `work_pull`，发布用 `work_commit` + `work_push`（冲突用 `work_versions` / `work_resolve`）。模块目录（含 `userdata/`）对 agent 的文件工具只读：agent 只有模块使用权，模块数据由模块自己的工具 / 服务进程维护。
-- `shell` 默认 `scope=sandbox`：只碰私有沙箱 + 只读基础 / 项目工具链；要读模块目录 / 主机只读根或联网用 `scope=external`，按会话档位 ask / allow；共享区主副本不进容器（先 `work_pull`）。模块 userdata 不可写，不注入模块 secrets。
+- `shell` 授予固定：私有沙箱读写，模块目录 / 基础 / 项目工具链与主机只读根只读，网络按会话档位（离线不放行）；参数里没有 scope。共享区主副本不进容器（先 `work_pull`）。模块 userdata 不可写，不注入模块 secrets。
 - 能跑通就是合法模块；跑不通时核心如实报错，不猜、不兜底。
 
 ### 跑一遍演示

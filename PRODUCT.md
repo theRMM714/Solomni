@@ -65,7 +65,7 @@
 - 每个工作一个目录 `session/<工作名>/`：`work/` 是本工作的共享区主副本（用户投喂与成品；根会话可绑定产品目录之外的目录作为共享区根），版本库固定在会话目录的 `.work/`，每个 agent 有自己的私有沙箱（也就是它的工作副本），子会话落在它的 `children/` 下（可再嵌套）——完整布局与命名规则见 [docs/session/session-model.md](docs/session/session-model.md)。
 - agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml`）。
 
-- **构建 / 测试 / 跑脚本用 shell**（执行类系统工具）：cwd 固定私有沙箱，默认 `scope=sandbox` 只碰私有沙箱 + 只读基础 / 项目工具链；要读模块目录 / 主机只读根或联网用 `scope=external`（两条路都被允许，档位只决定 net 能不能真放行）；共享区主副本不进容器（读 / 改先 `work_pull`，发布走 `work_commit` + `work_push`），模块 userdata 不可写，不注入模块 secrets。
+- **构建 / 测试 / 跑脚本用 shell**（执行类系统工具）：cwd 固定私有沙箱，授予也是固定的——私有沙箱读写、模块目录与基础 / 项目工具链、主机只读根只读，网络按会话档位（离线不放行）；调用参数里没有范围旋钮。共享区主副本不进容器（读 / 改先 `work_pull`，发布走 `work_commit` + `work_push`），模块 userdata 不可写，不注入模块 secrets。
 - **文件读写用内置工具**（`read` / `list` / `write` / `edit` / `patch` / `delete` / `grep`；`patch` 用自由格式补丁，大段内容不必塞进 JSON；`delete` 默认只删沙箱里的文件）：核心把占位符替换成**本环境写法的根**（本机档 = 宿主路径，虚拟机档 = guest 路径）；越出这些根（相对路径、`..`）一律拒绝（`src/capabilities/tools/service.rs`），虚拟机档下的 guest 写法在寻址前译回宿主路径再校验。
 - **一 agent 一格目录**：读不到别人的私有区、也写不进去；产物有归属，返工找得到人。模块目录不被任何 agent 拥有：agent 只有使用权，agent 的文件工具对模块目录（含 `userdata/`）只读，模块数据由模块自己的工具 / 服务进程维护。
 - 跨 agent 流动只有 `work/`、共用模块的调用与进入上下文的转录这些明路。
@@ -89,8 +89,8 @@
 - 虚拟机档按 guest 平台装载包，能力也可由 guest 画像（`guest.yaml` 的 `runtimes`）满足。
 - 缺能力 = 本机档那次执行如实拒绝并说明缺什么，虚拟机档在「开始」前**拒绝创建**（没有工具用户完不成工作）；两者都**不是**会话崩溃（契约见 [docs/vm/README.md](docs/vm/README.md) 的「判据与预检」）。
 - **三层隔离，各说各的实际强度**：
-- ① 内置文件工具是**工具层**越界拒绝（路径校验）；shell 没有 path 参数，它的边界是**围栏**（sandbox / external），不是路径表；
-- ② 模块工具与 shell 进程从**守门进程**里跑（环境白名单、超时连根杀树、进程数上限）；guest 内由 Linux helper 对齐同一组策略（只读基线、解释器目录、env 白名单、按次 `timeout_secs` 杀树、head/head+tail 输出）；Windows 的 sandbox / external shell 用按次临时容器 profile。
+- ① 内置文件工具是**工具层**越界拒绝（路径校验）；shell 没有 path 参数，它的边界是**围栏**（固定的授予集），不是路径表；
+- ② 模块工具与 shell 进程从**守门进程**里跑（环境白名单、超时连根杀树、进程数上限）；guest 内由 Linux helper 对齐同一组策略（只读基线、解释器目录、env 白名单、按次 `timeout_secs` 杀树、head/head+tail 输出）；Windows 的 shell 用容器 profile。
 - ③ 文件系统围栏按平台接入（Linux Landlock、macOS seatbelt、Windows AppContainer）。
 - **全局沙箱策略是硬约束**（`sandbox.policy`）：默认 `require`，机制不可用时启动门按 `on_unavailable` 询问是否**本进程降级**（不落盘，重启再问）、重设或退出；自检确认机制有效却仍装不上 = 程序自己写错了，那一路**拒绝执行**。
 - **门不过就不起前端**：默认 CLI 与 `--web` 都先过环境检查；没有可回答的前端时直接退出，不会“先开 Web 再说”。

@@ -189,7 +189,7 @@ fn external_shared_root_is_not_a_shell_write_surface() {
     let call = FenceSpec::for_call(&sb, None, &session);
     assert!(
         !call.rw.contains(&external),
-        "external 调用围栏不含共享根：{:?}",
+        "按次围栏不含共享根：{:?}",
         call.rw
     );
     assert!(!sb.can_write(&Place::Shared));

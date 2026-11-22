@@ -31,7 +31,7 @@ pub struct Core {
     /// 目的：隐秘字段的统一管理面——工具 / 服务起进程时按它解析注入项并脱敏。
     pub(super) secrets:
         Arc<dyn crate::capabilities::catalog::secrets::api::SecretOps + Send + Sync>,
-    /// 目的：项目内基础工具链的只读安装根（python / node / cc）——shell 的 sandbox 与 external 都放行它们。
+    /// 目的：项目内基础工具链的只读安装根（python / node / cc）——shell 每次调用都放行它们。
     ///  来源是组合根读到的 active.json；不按 agent 的模块重复注入。
     pub(super) base_roots: Vec<std::path::PathBuf>,
     /// 目的：工具总表与角色表的能力面（授权两张表；名字表由组合根另取）——**表本体在工具能力里**，与册子互不依赖。

@@ -74,7 +74,7 @@ const state = {
         window: 200000, exact: true, cache_read: 12000, cache_creation: 800,
       },
       shell: {
-        command: "node run-tests.js", scope: "全量", cwd: "/demo/work",
+        command: "node run-tests.js", cwd: "/demo/work",
         started_at: 1762797500, finished_at: 1762797580, elapsed_secs: 80.4,
         exit_code: 0, ok: true, status: "done",
         output: "FRONTEND-SMOKE-OK\nTOKENS-SMOKE-OK\nALL TESTS PASSED",

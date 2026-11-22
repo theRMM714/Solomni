@@ -75,7 +75,7 @@ function popoverNote(text, cls) {
 let shellCardOpen = null; // { sid, box, body, dur, sig }
 
 function shellCardSig(sh) {
-  return [sh.command, sh.scope, sh.cwd, sh.started_at, sh.finished_at, sh.elapsed_secs,
+  return [sh.command, sh.cwd, sh.started_at, sh.finished_at, sh.elapsed_secs,
     sh.exit_code, sh.status, sh.ok, sh.historical ? 1 : 0, (sh.output || '').length].join('\u0001');
 }
 
@@ -89,9 +89,6 @@ function fillShellCard(body, sh) {
     cmd.textContent = sh.command;
     body.appendChild(cmd);
   }
-  body.appendChild(popoverRow('scope', sh.scope === 'external'
-    ? 'external（模块目录 / 主机只读根 / 网络）'
-    : 'sandbox（只碰私有沙箱）'));
   body.appendChild(popoverRow('cwd', sh.cwd || '—'));
   body.appendChild(popoverRow('状态', shellStatusLabel(sh, running)));
   body.appendChild(popoverRow('退出码', sh.exit_code == null ? '—' : String(sh.exit_code)));

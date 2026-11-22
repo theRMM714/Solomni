@@ -235,7 +235,7 @@ function syncStatusbar(s) {
     inner.appendChild(thChip);
   }
 
-  // shell：运行中 / 最近一次的结果；点开看命令、scope、cwd、退出码与回执预览。
+  // shell：运行中 / 最近一次的结果；点开看命令、cwd、退出码与回执预览。
   if (s.shell) {
     const sh = s.shell;
     const running = shellRunning(sh);

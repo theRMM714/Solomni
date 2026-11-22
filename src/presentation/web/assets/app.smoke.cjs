@@ -993,19 +993,19 @@ setTimeout(async () => {
           " const single = run('s1', 'single', ctx, head);" +
           " const proxy = run('s2', 'proxy', { prompt_tokens: 900, completion_tokens: 100, total_tokens: 1000, window: 10000, exact: true }, null);" +
           " const collab = run('s3', 'collab', ctx, head);" +
-          " const shellLive = { command: 'echo hi', scope: 'sandbox', cwd: '/x', started_at: Math.floor(Date.now()/1000) - 12, finished_at: Math.floor(Date.now()/1000), exit_code: 0, ok: true, status: 'exit', output: 'hi' };" +
+          " const shellLive = { command: 'echo hi', cwd: '/x', started_at: Math.floor(Date.now()/1000) - 12, finished_at: Math.floor(Date.now()/1000), exit_code: 0, ok: true, status: 'exit', output: 'hi' };" +
           " const withShell = run('s4', 'single', ctx, head, shellLive);" +
-          " const shellTimeout = { command: 'sleep 99', scope: 'sandbox', cwd: '/x', started_at: Math.floor(Date.now()/1000) - 30, finished_at: Math.floor(Date.now()/1000), elapsed_secs: 30, exit_code: null, ok: false, status: 'timeout', output: '' };" +
+          " const shellTimeout = { command: 'sleep 99', cwd: '/x', started_at: Math.floor(Date.now()/1000) - 30, finished_at: Math.floor(Date.now()/1000), elapsed_secs: 30, exit_code: null, ok: false, status: 'timeout', output: '' };" +
           " const withTimeout = run('s7', 'single', ctx, head, shellTimeout);" +
-          " const shellStopped = { command: 'sleep 99', scope: 'sandbox', cwd: '/x', started_at: Math.floor(Date.now()/1000) - 5, finished_at: Math.floor(Date.now()/1000), elapsed_secs: 5, exit_code: null, ok: false, status: 'stopped', output: '' };" +
+          " const shellStopped = { command: 'sleep 99', cwd: '/x', started_at: Math.floor(Date.now()/1000) - 5, finished_at: Math.floor(Date.now()/1000), elapsed_secs: 5, exit_code: null, ok: false, status: 'stopped', output: '' };" +
           " const withStopped = run('s8', 'single', ctx, head, shellStopped);" +
-          " const shellSignal = { command: 'sleep 99', scope: 'sandbox', cwd: '/x', started_at: Math.floor(Date.now()/1000) - 5, finished_at: Math.floor(Date.now()/1000), elapsed_secs: 5, exit_code: null, ok: false, status: 'signal', output: '' };" +
+          " const shellSignal = { command: 'sleep 99', cwd: '/x', started_at: Math.floor(Date.now()/1000) - 5, finished_at: Math.floor(Date.now()/1000), elapsed_secs: 5, exit_code: null, ok: false, status: 'signal', output: '' };" +
           " const withSignal = run('s9', 'single', ctx, head, shellSignal);" +
           " const th = { level: null, default_level: 'high', label: 'high', options: [{ id: 'high', label: 'high' }], note: '' };" +
           " const withThinking = run('s5', 'single', ctx, head, null, th);" +
-          " const shellHist = { command: 'echo hi', scope: 'sandbox', cwd: '/x', started_at: 0, finished_at: null, elapsed_secs: 2, exit_code: 1, ok: false, status: 'exit', output: 'x', historical: true };" +
+          " const shellHist = { command: 'echo hi', cwd: '/x', started_at: 0, finished_at: null, elapsed_secs: 2, exit_code: 1, ok: false, status: 'exit', output: 'x', historical: true };" +
           " const withHist = run('s6', 'single', ctx, head, shellHist);" +
-          " const shellHistTimeout = { command: 'sleep 99', scope: 'sandbox', cwd: '/x', started_at: 0, finished_at: null, elapsed_secs: 2, exit_code: null, ok: false, status: 'timeout', output: '', historical: true };" +
+          " const shellHistTimeout = { command: 'sleep 99', cwd: '/x', started_at: 0, finished_at: null, elapsed_secs: 2, exit_code: null, ok: false, status: 'timeout', output: '', historical: true };" +
           " const withHistTimeout = run('s10', 'single', ctx, head, shellHistTimeout);" +
           " const bar = box.children[0];" +
           " const kids = bar ? (bar.children || []) : [];" +
@@ -1099,7 +1099,7 @@ setTimeout(async () => {
         "(function () {" +
           " state.sessions.clear();" +
           " const s = { sid: 'sh', mode: 'single', lines: [], live: [], fold: {}, scroll: {}, context: null," +
-          "   shell: { command: 'echo hi', scope: 'sandbox', cwd: '/w', started_at: Math.floor(Date.now()/1000) - 3," +
+          "   shell: { command: 'echo hi', cwd: '/w', started_at: Math.floor(Date.now()/1000) - 3," +
           "     finished_at: null, elapsed_secs: null, exit_code: null, status: null, ok: null, output: '', historical: false }," +
           "   work: null, workAt: 1, workDirty: false, workError: '', running: true, sending: false, readonly: false };" +
           " state.sessions.set('sh', s); state.activeSid = 'sh';" +

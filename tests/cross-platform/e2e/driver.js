@@ -1233,7 +1233,6 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
           name: nameExt, mode: 'single',
           agents: [{ name: '探针兵', transient: true, modules: ['toolbox'], model: 'm1' }],
           tier: 'vm', guest: vmGuest, workspace: extDir,
-          // shell 的默认 scope=sandbox（只到私沙）；读共享区要显式 scope=external。
           // 这条旅程不联网，档位用默认的离线即可。
           permission: 'offline',
         });

@@ -547,7 +547,7 @@ pub(crate) fn rebuild_restores_the_last_shell_snapshot_from_the_transcript() {
                 "id": 0,
                 "tool": {
                     "speaker": "a", "module": "", "name": "shell", "ok": true,
-                    "args": "{\"command\":\"npm test\",\"scope\":\"sandbox\"}",
+                    "args": "{\"command\":\"npm test\"}",
                     "output": "ok",
                     "shell": {
                         "cwd": "/w/a", "elapsed_ms": 7_000,
@@ -600,7 +600,7 @@ pub(crate) fn rebuild_reads_the_structured_shell_facts() {
                 "id": 0,
                 "tool": {
                     "speaker": "a", "module": "", "name": "shell", "ok": true,
-                    "args": "{\"command\":\"npm test\",\"scope\":\"sandbox\"}",
+                    "args": "{\"command\":\"npm test\"}",
                     "output": "ok（回执被截断，没有尾行）",
                     "shell": {
                         "cwd": "/w/b", "elapsed_ms": 331_400,
