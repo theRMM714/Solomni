@@ -37,7 +37,8 @@ function syncJump(fresh) {
   const btn = boxes.jump;
   if (!btn) return;
   const show = !follow && !!boxes.owner;
-  btn.classList.toggle('hidden', !show);
+  if (show) btn.classList.remove('hidden');
+  else btn.classList.add('hidden');
   if (!show) btn.classList.remove('fresh');
   else if (fresh) btn.classList.add('fresh');
 }

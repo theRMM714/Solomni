@@ -290,7 +290,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check("history: 生成中会话的编辑被禁用", busyEdit && busyEdit.disabled === true, "disabled=" + (busyEdit && busyEdit.disabled));
   check("history: 生成中的禁用理由写在 title 上", busyEdit && String(busyEdit.title).indexOf("正在生成中") >= 0, busyEdit && busyEdit.title);
   check("history: 生成中会话的编辑没有接线", busyEdit && typeof busyEdit.onclick !== "function");
-  check("history: 状态文案保留（·进行中）", allText(items[0]).indexOf("·进行中") < 0 && allText(busyItem).indexOf("·进行中") >= 0);
+  const lampClass = (it) => {
+    const dot = findByClass(it, "hdot")[0];
+    return dot ? dot.className : "";
+  };
+  check("history: 状态灯表运行态",
+    lampClass(items[0]) === "hdot idle" && lampClass(busyItem) === "hdot run",
+    lampClass(items[0]) + " / " + lampClass(busyItem));
 
   /* ---- 配置面板（started=true、虚拟机档）：冻结、模块、模型、档位、运行能力、定版、网络 ---- */
   openConfig("w");
