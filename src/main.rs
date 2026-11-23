@@ -406,7 +406,7 @@ fn main() {
     if sandbox_mode.degraded() {
         eprintln!("[沙箱] 本进程已降级：缺失的强制项按如实降级执行；重启后重新评估");
     }
-    // **会话类型表**（systools/profiles.yaml）：一个会话类型就是一串机制与它用到的角色。
+    // **会话类型表**（systools/profiles.yaml）：一个会话类型就是一串流程与它用到的角色。
     // 它是会话类型的唯一声明处：提示词册子的会话类型、机制册的校验都以它为口径；装配期就校验。
     let profiles =
         match capabilities::conversation::session::detail::yaml_profiles::YamlProfiles::new(
@@ -680,6 +680,7 @@ fn main() {
         Arc::new(kernel::detail::HostProbeAdapter),
         residents,
         secrets,
+        profiles,
     )
     .with_base_roots(base_roots);
 

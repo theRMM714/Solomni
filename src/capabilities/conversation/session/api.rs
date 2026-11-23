@@ -19,11 +19,13 @@ pub use crate::capabilities::conversation::session::domain::events::{
 pub use crate::capabilities::conversation::session::domain::flow::{
     Flow, Handback, MemberAsk, Settle,
 };
-// 复合流程：装配期把会话类型表里的流程序列串成一条（驱动仍只认 `Flow`）。
+// 流程工厂面：组合根把实现注入 turn / work，装配点只按 id 取段。
+pub use crate::capabilities::conversation::session::domain::flows::{
+    FlowSetup, Flows, sequence_of,
+};
 pub use crate::capabilities::conversation::session::domain::history::{
     Delegation, HistoryView, RunState, SessionMeta, UsageTotals, WorkspaceBinding,
 };
-pub use crate::capabilities::conversation::session::domain::sequence::Sequence;
 // 会话类型表：组合根装载它，装配期用它校验角色与流程。
 pub use crate::capabilities::conversation::session::domain::profile::Profiles;
 // 工具面：角色面 → 实际可调的工具（档位只管网络，不再逐工具裁剪）。

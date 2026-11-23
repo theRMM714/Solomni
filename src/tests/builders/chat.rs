@@ -380,5 +380,6 @@ pub(crate) fn native_core(
         crate::tests::doubles::test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        crate::tests::doubles::test_profiles(),
     )
 }

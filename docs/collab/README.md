@@ -15,6 +15,7 @@
 - 词汇归属：协作事件与关卡在 `src/capabilities/conversation/collab/domain/`（`events.rs` / `gates.rs`），会话只提供「机制事件」通道与不解释 `kind` 的裁决队——改协作流程不改会话文件。
 - 流程面：协作在 `src/capabilities/conversation/collab/service/flow.rs` 实现 `session::api::Flow`（推一步 / 让出一回合 / 交回处置 / 处置自己发的关卡）；`turn` 的驱动只认流程面，认不出这是协作。关卡的解释在 `src/capabilities/conversation/collab/domain/gates.rs`（`Pending::from_gate` 认出是哪一关，`CollabSession::dispose` 落定）。
 - 两条流程：讨论（`discuss`：核心代理主持、讨论席开会，收敛后由核心写一份总结）与执行（`execute`：核心拟计划与任务链、执行席逐节点干、核心逐阶段验收后交付）。两者共用同一个 `CollabSession` 类型与同一份落盘事实，用 `Phase`（`src/capabilities/conversation/collab/service/collab.rs`）分开；装配期由 `Sequence` 串起来——前一段交出的总结就是后一段的需求。
+- 流程工厂：`src/capabilities/conversation/collab/service/flows.rs` 的 `CollabFlows` 实现 `session::api::Flows`（按 id 造讨论段或执行段，新建走 `start`、重建走 `restore`）；组合根把它注入 `turn` / `work`，装配点只按会话类型表的 `flows` 要段，因此 `work` / `turn` 不认识协作。
 - 状态归属：会话对象及其状态只有它写；「转录即状态」的派生在 `src/capabilities/conversation/collab/domain/collab_state.rs`（纯函数、可回放）。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）

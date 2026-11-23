@@ -107,6 +107,13 @@ impl Flow for Sequence {
         }
     }
 
+    fn begin_with(&mut self, task: &str, sink: &mut dyn FnMut(SessionEvent)) {
+        // 需求只交给第一段：后面的段从上一段的产物接手。
+        if let Some(first) = self.steps.first_mut() {
+            first.begin_with(task, sink);
+        }
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

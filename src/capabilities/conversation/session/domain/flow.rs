@@ -108,6 +108,12 @@ pub trait Flow: Send {
     fn intake(&mut self, text: String) {
         let _ = text;
     }
+    /// 目的：会话开场把用户需求交给流程（第一段收下它；默认只是当成本段输入）。
+    /// 约束：一段流程只开场一次；需求由用户那条消息给出，不是流程自己编的。
+    fn begin_with(&mut self, task: &str, sink: &mut dyn FnMut(SessionEvent)) {
+        let _ = sink;
+        self.intake(task.to_string());
+    }
     /// 目的：本段流程的产物（交给下一段；`None` = 没交出东西）。
     fn output(&self) -> Option<String> {
         None

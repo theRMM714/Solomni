@@ -96,6 +96,11 @@ impl Flow for CollabSession {
         self.task = text;
     }
 
+    fn begin_with(&mut self, task: &str, sink: &mut dyn FnMut(SessionEvent)) {
+        // 第一段收用户需求：需求入转录并按分段规则起步（讨论段开会 / 执行段直接拟计划）。
+        CollabSession::set_task(self, task, sink);
+    }
+
     fn output(&self) -> Option<String> {
         self.summary.clone()
     }

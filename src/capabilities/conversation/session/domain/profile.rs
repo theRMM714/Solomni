@@ -50,6 +50,14 @@ impl Profiles {
         self.profiles.iter().map(|p| p.id.clone()).collect()
     }
 
+    /// 目的：一个会话类型按顺序要跑的流程 id（装配按它逐段造；没有这个类型返回 `None`）。
+    pub fn flows_of(&self, id: &str) -> Option<Vec<String>> {
+        self.profiles
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.flows.iter().map(|f| f.id.clone()).collect())
+    }
+
     /// 目的：装配期校验：每个形态恰好一个类型、流程都注册过且不重复、每个流程有人出演、用到的角色都在类型里。
     /// 返回：`Ok(())` 表示这张表可以拿去装配。
     /// 错误：文案点名 `systools/profiles.yaml` 与出问题的那一项。

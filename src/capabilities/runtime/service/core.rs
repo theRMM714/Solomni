@@ -73,8 +73,22 @@ impl Core {
         probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
         residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
         secrets: Arc<dyn crate::capabilities::catalog::secrets::api::SecretOps + Send + Sync>,
+        profiles: crate::capabilities::conversation::session::api::Profiles,
     ) -> Core {
         let compact = Arc::new(CompactRuntime::new(Arc::clone(&llm)));
+        // 流程工厂在这里注入：turn / work 只认 `session::api::Flows`，具体流程的类型只出现在协作能力里。
+        let flows: Arc<dyn crate::capabilities::conversation::session::api::Flows> = Arc::new(
+            crate::capabilities::conversation::collab::api::CollabFlows::new(
+                Arc::clone(&llm),
+                Arc::clone(&vm),
+                Arc::clone(&modules),
+                Arc::clone(&prompt),
+                Arc::clone(&systools),
+                Arc::clone(&tools),
+                Arc::clone(&log),
+                profiles,
+            ),
+        );
         // 会话本体收在 turn：它只认能力面与压缩工厂，不认 runtime 的端口（层 8 不得依赖层 9）。
         let turn = crate::capabilities::turn::turn::api::Turn::new(
             Arc::clone(&workspace),
@@ -92,6 +106,7 @@ impl Core {
             Arc::clone(&history),
             Arc::clone(&modules),
             Arc::clone(&packages),
+            Arc::clone(&flows),
         );
         // work 用例面与 runtime 共享同一批能力面（Arc 克隆，不新建实现）。
         let work = Work::new(
@@ -107,6 +122,7 @@ impl Core {
             Arc::clone(&prompt),
             Arc::clone(&systools),
             Arc::clone(&log),
+            flows,
         );
         let lifecycle = crate::capabilities::lifecycle::api::Lifecycle::new(
             Arc::clone(&history),
