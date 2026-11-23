@@ -603,8 +603,9 @@ function setActive(sid) {
   state.pathRoots = null;
   const cached = app.filesCache.get(sid);
   if (cached) state.pathRoots = buildRootList(cached.roots);
-  renderTabs(); renderStream(true); renderGate(state.sessions.get(sid));
   const s = state.sessions.get(sid);
+  // 流程视图跟着活跃会话走：它是整页的一部分，漏画就会把上一个会话的链留在状态栏上方。
+  renderTabs(); renderStream(true); renderGate(s); app.renderFlow(s);
   if (s) { syncComposer(s); loadWork(sid); }
   if (!s || !s.readonly) $('#input').focus();
   if (!cached) loadPathRoots(sid); // 没缓存就去拉一次（失败静默），拿到后补一次重渲染
