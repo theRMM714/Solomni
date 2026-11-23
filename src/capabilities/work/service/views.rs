@@ -34,6 +34,35 @@ impl Work {
             .collect()
     }
 
+    /// 目的：把流程 id 解析成完整声明（临时拼装用）——声明取会话类型表里同 id 的那份。
+    /// 约束：id 必须是表里声明过的流程（白名单由同一份表给出）；重复给同一个 id 如实拒绝。
+    pub(crate) fn flow_decls(
+        &self,
+        ids: &[String],
+    ) -> Result<Vec<crate::capabilities::conversation::session::api::FlowDecl>, String> {
+        use crate::capabilities::conversation::session::api::FlowDecl;
+        let book = self.flows.book();
+        let known: Vec<&FlowDecl> = book.profiles.iter().flat_map(|p| p.flows.iter()).collect();
+        let mut out: Vec<FlowDecl> = Vec::new();
+        for id in ids {
+            if out.iter().any(|f| &f.id == id) {
+                return Err(format!("临时拼装里同一个流程出现了两次：{}", id));
+            }
+            let decl = known.iter().copied().find(|f| &f.id == id).ok_or_else(|| {
+                let mut names: Vec<&str> = known.iter().map(|f| f.id.as_str()).collect();
+                names.sort_unstable();
+                names.dedup();
+                format!(
+                    "会话类型表里没有这个流程：{}（已注册的流程：{}；systools/profiles.yaml）",
+                    id,
+                    names.join(" / ")
+                )
+            })?;
+            out.push(decl.clone());
+        }
+        Ok(out)
+    }
+
     /// 目的：上下文「继续」是否该出现——判据只在后端（前端不按末条/类型猜）。
     /// 约束：正在跑、已归档、已停止、代理、或没有真实断点时不出现；有流程的会话有挂起卡时由卡承担。
     ///   已停止 / 已归档都是历史态，恢复入口是「启用会话」/「恢复归档」；这时的「继续」会被派发闸拒掉。

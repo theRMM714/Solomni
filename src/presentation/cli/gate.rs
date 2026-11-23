@@ -388,6 +388,7 @@ pub(crate) fn create_session_action(
     faces: &Faces,
     name: &str,
     kind: &str,
+    flows: Option<&[crate::capabilities::conversation::session::api::FlowDecl]>,
     agents: &[AgentMeta],
     task: Option<&str>,
     tier: Tier,
@@ -404,12 +405,17 @@ pub(crate) fn create_session_action(
             })
         })
         .collect();
+    // 预设类型给 kind；临时拼装给 flows（两者只能给一个，后端会再校验一遍）。
     let mut args = serde_json::json!({
         "name": name,
-        "kind": kind,
         "agents": agents,
         "tier": tier.as_str(),
     });
+    if let Some(flows) = flows {
+        args["flows"] = serde_json::json!(flows);
+    } else {
+        args["kind"] = serde_json::json!(kind);
+    }
     if let Some(t) = task {
         args["task"] = serde_json::json!(t);
     }

@@ -174,6 +174,7 @@ pub(crate) fn work(name: &str, kind: &str, modules: &[&str]) -> WorkSpec {
         }]
     };
     WorkSpec {
+        flows: None,
         freshness: None,
         name: name.to_string(),
         kind: kind.to_string(),

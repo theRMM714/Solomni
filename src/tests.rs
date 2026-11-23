@@ -168,6 +168,7 @@ pub(crate) fn single_work(
     modules: &[&str],
 ) -> crate::capabilities::work::api::WorkSpec {
     crate::capabilities::work::api::WorkSpec {
+        flows: None,
         freshness: None,
         name: name.to_string(),
         kind: crate::capabilities::conversation::session::api::SINGLE.to_string(),

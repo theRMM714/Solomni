@@ -21,6 +21,10 @@ pub const MEETING: &str = "collab";
 pub const PROXY: &str = "proxy";
 /// 目的：核心代理坐的角色名（角色表里的名字；代理式会话没有流程、坐这个席）。
 pub const PROXY_ROLE: &str = "core_proxy";
+/// 目的：临时拼装用的会话类型 id（没落进类型表，声明随会话一起落盘）。
+pub const CUSTOM: &str = "custom";
+/// 目的：临时拼装的显示名（界面与转录里按这个名字显示，不用 id）。
+pub const CUSTOM_NAME: &str = "临时组合";
 
 /// 目的：一个流程声明：跑哪个已注册的流程、核心席用哪些身份、成员席各要几个。
 /// 约束：`core` 必须是核心席角色，`members` 必须是成员席角色；产物按声明顺序一条一条接（上一条的输出就是下一条的输入）。
@@ -77,6 +81,23 @@ impl SessionSpec {
     /// 目的：要跑的流程 id，按声明顺序。
     pub fn flow_ids(&self) -> Vec<String> {
         self.flows.iter().map(|f| f.id.clone()).collect()
+    }
+}
+
+/// 目的：把临时拼装的流程声明包成落盘声明（类型 id 固定 `custom`，根身份取流程里出现的第一个角色）。
+/// 参数：`flows` = 已通过 `Profiles::check_inline` 校验的流程声明。
+/// 返回：可以直接落进 `SessionMeta` 的声明。
+pub fn inline_spec(flows: Vec<FlowDecl>) -> SessionSpec {
+    let role = flows
+        .iter()
+        .find_map(|f| f.core.first().cloned())
+        .or_else(|| flows.iter().find_map(|f| f.members.keys().next().cloned()))
+        .unwrap_or_default();
+    SessionSpec {
+        kind: CUSTOM.to_string(),
+        name: CUSTOM_NAME.to_string(),
+        role,
+        flows,
     }
 }
 
@@ -220,72 +241,126 @@ impl Profiles {
     /// 参数：`seats` = 角色表的全部角色与坐席（组合根从工具能力问来）。
     /// 错误：逐个点名「会话类型 / 流程 → 角色」。
     pub fn check_roles(&self, seats: &[(String, Seat)]) -> Result<(), String> {
-        let seat_of = |role: &str| {
-            seats
-                .iter()
-                .find(|(name, _)| name == role)
-                .map(|(_, seat)| *seat)
-        };
         for p in &self.profiles {
-            for role in &p.roles {
-                if seat_of(role).is_none() {
-                    return Err(format!(
-                        "会话类型 {} 引用的角色不在角色表里：{}（systools/roles.yaml）",
-                        p.id, role
-                    ));
-                }
-            }
-            for f in &p.flows {
-                for role in &f.core {
-                    match seat_of(role) {
-                        None => {
-                            return Err(format!(
-                                "会话类型 {} 的流程 {} 引用的角色不在角色表里：{}（systools/roles.yaml）",
-                                p.id, f.id, role
-                            ));
-                        }
-                        Some(Seat::Member) => {
-                            return Err(format!(
-                                "会话类型 {} 的流程 {} 把成员席角色 {} 放在核心席（systools/roles.yaml）",
-                                p.id, f.id, role
-                            ));
-                        }
-                        Some(Seat::Core) => {}
-                    }
-                    if !p.roles.iter().any(|r| r == role) {
-                        return Err(format!(
-                            "会话类型 {} 的流程 {} 用了类型里没声明的角色：{}（systools/profiles.yaml）",
-                            p.id, f.id, role
-                        ));
-                    }
-                }
-                for role in f.members.keys() {
-                    match seat_of(role) {
-                        None => {
-                            return Err(format!(
-                                "会话类型 {} 的流程 {} 引用的角色不在角色表里：{}（systools/roles.yaml）",
-                                p.id, f.id, role
-                            ));
-                        }
-                        Some(Seat::Core) => {
-                            return Err(format!(
-                                "会话类型 {} 的流程 {} 把核心席角色 {} 放在成员席（systools/roles.yaml）",
-                                p.id, f.id, role
-                            ));
-                        }
-                        Some(Seat::Member) => {}
-                    }
-                    if !p.roles.iter().any(|r| r == role) {
-                        return Err(format!(
-                            "会话类型 {} 的流程 {} 用了类型里没声明的角色：{}（systools/profiles.yaml）",
-                            p.id, f.id, role
-                        ));
-                    }
-                }
-            }
+            check_profile(p, seats)?;
         }
         Ok(())
     }
+
+    /// 目的：临时拼装的校验：流程都注册过且不重复、每个流程有人出演、角色都在册且席位没坐反。
+    /// 参数：`flows` = 调用方内联的流程声明；`seats` = 角色表的全部角色与坐席。
+    /// 返回：`Ok(())` 表示这场临时拼装可以拿去装配。
+    /// 错误：文案点名「临时拼装」与出问题的那一项。
+    pub fn check_inline(&self, flows: &[FlowDecl], seats: &[(String, Seat)]) -> Result<(), String> {
+        if flows.is_empty() {
+            return Err("临时拼装至少要有一个流程（systools/profiles.yaml）".to_string());
+        }
+        let mut seen: Vec<&str> = Vec::new();
+        let mut roles: Vec<String> = Vec::new();
+        for f in flows {
+            if !REGISTERED.contains(&f.id.as_str()) {
+                return Err(format!(
+                    "临时拼装的流程没注册：{}（已注册：{}）",
+                    f.id,
+                    REGISTERED.join(" / ")
+                ));
+            }
+            if seen.contains(&f.id.as_str()) {
+                return Err(format!("临时拼装里同一个流程出现了两次：{}", f.id));
+            }
+            seen.push(&f.id);
+            if f.core.is_empty() && f.members.is_empty() {
+                return Err(format!("临时拼装的流程 {} 没有声明任何身份", f.id));
+            }
+            for (role, min) in &f.members {
+                if *min == 0 {
+                    return Err(format!("临时拼装的流程 {} 给 {} 要 0 个成员", f.id, role));
+                }
+            }
+            for role in f.core.iter().chain(f.members.keys()) {
+                if !roles.contains(role) {
+                    roles.push(role.clone());
+                }
+            }
+        }
+        let p = Profile {
+            id: CUSTOM.to_string(),
+            name: CUSTOM_NAME.to_string(),
+            hint: String::new(),
+            roles,
+            flows: flows.to_vec(),
+        };
+        check_profile(&p, seats)
+    }
+}
+
+/// 目的：一个类型的席位与角色自洽：角色都在册、核心席不坐成员角色、成员席不坐核心角色。
+/// 参数：`p` = 要检查的类型（表里的或临时拼装包出来的）；`seats` = 角色表的全部角色与坐席。
+/// 错误：逐个点名「类型 / 流程 → 角色」。
+fn check_profile(p: &Profile, seats: &[(String, Seat)]) -> Result<(), String> {
+    let seat_of = |role: &str| {
+        seats
+            .iter()
+            .find(|(name, _)| name == role)
+            .map(|(_, seat)| *seat)
+    };
+    for role in &p.roles {
+        if seat_of(role).is_none() {
+            return Err(format!(
+                "会话类型 {} 引用的角色不在角色表里：{}（systools/roles.yaml）",
+                p.id, role
+            ));
+        }
+    }
+    for f in &p.flows {
+        for role in &f.core {
+            match seat_of(role) {
+                None => {
+                    return Err(format!(
+                        "会话类型 {} 的流程 {} 引用的角色不在角色表里：{}（systools/roles.yaml）",
+                        p.id, f.id, role
+                    ));
+                }
+                Some(Seat::Member) => {
+                    return Err(format!(
+                        "会话类型 {} 的流程 {} 把成员席角色 {} 放在核心席（systools/roles.yaml）",
+                        p.id, f.id, role
+                    ));
+                }
+                Some(Seat::Core) => {}
+            }
+            if !p.roles.iter().any(|r| r == role) {
+                return Err(format!(
+                    "会话类型 {} 的流程 {} 用了类型里没声明的角色：{}（systools/profiles.yaml）",
+                    p.id, f.id, role
+                ));
+            }
+        }
+        for role in f.members.keys() {
+            match seat_of(role) {
+                None => {
+                    return Err(format!(
+                        "会话类型 {} 的流程 {} 引用的角色不在角色表里：{}（systools/roles.yaml）",
+                        p.id, f.id, role
+                    ));
+                }
+                Some(Seat::Core) => {
+                    return Err(format!(
+                        "会话类型 {} 的流程 {} 把核心席角色 {} 放在成员席（systools/roles.yaml）",
+                        p.id, f.id, role
+                    ));
+                }
+                Some(Seat::Member) => {}
+            }
+            if !p.roles.iter().any(|r| r == role) {
+                return Err(format!(
+                    "会话类型 {} 的流程 {} 用了类型里没声明的角色：{}（systools/profiles.yaml）",
+                    p.id, f.id, role
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -451,6 +526,42 @@ mod tests {
         p.profiles[1].roles.push("reviewer".to_string());
         let err = p.check_roles(&seats()).unwrap_err();
         assert!(err.contains("不在角色表里：reviewer"), "{}", err);
+    }
+
+    #[test]
+    fn an_inline_assembly_is_checked_against_the_same_whitelist() {
+        let p = base();
+        // 合法：现拼一段讨论。
+        p.check_inline(&[flow("discuss")], &seats())
+            .expect("表里声明过的流程可以直接拼");
+
+        // 空表：临时拼装至少要有一段流程。
+        let err = p.check_inline(&[], &seats()).unwrap_err();
+        assert!(err.contains("至少要有一个流程"), "{}", err);
+
+        // 没注册的流程。
+        let err = p.check_inline(&[flow("review")], &seats()).unwrap_err();
+        assert!(err.contains("没注册：review"), "{}", err);
+
+        // 同一段流程拼两次。
+        let err = p
+            .check_inline(&[flow("discuss"), flow("discuss")], &seats())
+            .unwrap_err();
+        assert!(err.contains("同一个流程出现了两次"), "{}", err);
+
+        // 席位坐反：成员席角色放进核心席，仍然要拦。
+        let mut bad = flow("discuss");
+        bad.core = vec!["discussant".to_string()];
+        let err = p.check_inline(&[bad], &seats()).unwrap_err();
+        assert!(err.contains("成员席角色 discussant 放在核心席"), "{}", err);
+
+        // 折出来的声明：类型记作 custom，流程原样带上。
+        let spec = inline_spec(vec![flow("discuss"), flow("execute")]);
+        assert_eq!(spec.kind, CUSTOM);
+        assert_eq!(spec.name, CUSTOM_NAME);
+        assert_eq!(spec.role, "planner", "角色取第一段流程的核心席");
+        assert_eq!(spec.flow_ids(), vec!["discuss", "execute"]);
+        assert!(spec.driven());
     }
 
     #[test]

@@ -30,7 +30,8 @@ pub use crate::capabilities::conversation::session::domain::history::{
 // 名字常量只给产品自带的类型表与测试引用：非测试代码按类型的流程走，不按名字分支。
 #[allow(unused_imports)]
 pub use crate::capabilities::conversation::session::domain::profile::{
-    MEETING, PROXY, PROXY_ROLE, Profiles, SINGLE, SessionSpec,
+    CUSTOM, CUSTOM_NAME, FlowDecl, MEETING, PROXY, PROXY_ROLE, Profiles, SINGLE, SessionSpec,
+    inline_spec,
 };
 // 工具面：角色面 → 实际可调的工具（档位只管网络，不再逐工具裁剪）。
 #[allow(unused_imports)]

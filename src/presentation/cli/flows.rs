@@ -114,7 +114,7 @@ pub(super) fn single_flow(
         .unwrap_or(Tier::Host);
     // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
     let mut cursor = faces.events.head();
-    let sid = match create_session_action(faces, &work_name, "single", &picked, None, tier) {
+    let sid = match create_session_action(faces, &work_name, "single", None, &picked, None, tier) {
         Ok(sid) => sid,
         Err(e) => {
             println!("[错误] {}", e);
@@ -148,7 +148,7 @@ pub(super) fn proxy_flow(
         .unwrap_or(Tier::Host);
     // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
     let mut cursor = faces.events.head();
-    let sid = match create_session_action(faces, &work_name, "proxy", &[], None, tier) {
+    let sid = match create_session_action(faces, &work_name, "proxy", None, &[], None, tier) {
         Ok(sid) => sid,
         Err(e) => {
             println!("[错误] {}", e);
@@ -164,8 +164,26 @@ pub(super) fn proxy_flow(
 }
 
 /// 目的：协作会话：给需求、点名单（或让核心代拟），之后一律按裁决卡推进。
+/// 约束：给 `flows` 就是**临时拼装**——按列出的流程 id 现拼（声明取自会话类型表），不走预设类型。
 pub(super) fn collab_flow(faces: &Faces, args: &Value) {
     let names = text(args, "agents").unwrap_or_default();
+    let flow_arg = text(args, "flows").unwrap_or_default();
+    let ids: Vec<String> = flow_arg
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    let flows = if ids.is_empty() {
+        None
+    } else {
+        match faces.work.flow_decls(&ids) {
+            Ok(d) => Some(d),
+            Err(e) => {
+                println!("[错误] {}", e);
+                return;
+            }
+        }
+    };
     let trimmed = names.trim();
     let delegate = trimmed.is_empty() || trimmed == "?";
     let task = prompt("需求>");
@@ -181,7 +199,12 @@ pub(super) fn collab_flow(faces: &Faces, args: &Value) {
             }
         }
     };
-    let work_name = match faces.work.unique_work_name("collab", "collab") {
+    let (base, fallback) = if flows.is_some() {
+        ("custom", "custom")
+    } else {
+        ("collab", "collab")
+    };
+    let work_name = match faces.work.unique_work_name(base, fallback) {
         Ok(n) => n,
         Err(e) => {
             println!("[错误] {}", e);
@@ -195,7 +218,16 @@ pub(super) fn collab_flow(faces: &Faces, args: &Value) {
         .unwrap_or(Tier::Host);
     let mut cursor = faces.events.head();
     // 代拟由形态派生（协作 + 没给名单 = 核心按需求拟名单）；CLI 只交点名结果。
-    let sid = match create_session_action(faces, &work_name, "collab", &agents, Some(&task), tier) {
+    let kind = if flows.is_some() { "" } else { "collab" };
+    let sid = match create_session_action(
+        faces,
+        &work_name,
+        kind,
+        flows.as_deref(),
+        &agents,
+        Some(&task),
+        tier,
+    ) {
         Ok(sid) => {
             cursor = drain(faces, &sid, cursor);
             sid

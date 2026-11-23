@@ -138,6 +138,14 @@ impl WorkOps for Handle {
     fn session_types(&self) -> Result<Vec<SessionTypeView>, String> {
         self.call(|core| Ok(core.session_types()))
     }
+
+    fn flow_decls(
+        &self,
+        ids: &[String],
+    ) -> Result<Vec<crate::capabilities::conversation::session::api::FlowDecl>, String> {
+        let ids = ids.to_vec();
+        self.call(move |core| core.flow_decls(&ids))
+    }
 }
 
 impl TurnOps for Handle {

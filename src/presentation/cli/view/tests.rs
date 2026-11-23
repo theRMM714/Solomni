@@ -282,6 +282,12 @@ impl WorkOps for FakeCore {
     fn session_types(&self) -> Result<Vec<SessionTypeView>, String> {
         Err("没装类型表".into())
     }
+    fn flow_decls(
+        &self,
+        _: &[String],
+    ) -> Result<Vec<crate::capabilities::conversation::session::api::FlowDecl>, String> {
+        Err("没装流程表".into())
+    }
     fn create_work(&self, _: WorkSpec) -> Result<(WorkOpened, u64), String> {
         Err("没装建工作".into())
     }

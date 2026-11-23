@@ -31,6 +31,9 @@ commands:
         type: string
         rest: true
         desc: agent 名（省略或 ? = 由核心代拟名单）
+      flows:
+        type: string
+        desc: 临时拼装的流程 id（逗号分隔，如 discuss,execute；省略 = 用预设的 collab 类型）
 
   - name: proxy
     group: 会话

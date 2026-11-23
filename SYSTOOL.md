@@ -12,6 +12,7 @@
 | 这个**身份有什么**：坐哪一席（核心 / 成员）+ 引用的系统工具 id + 提示词 + 是否给模块工具 | `systools/roles.yaml` |
 | 工作区布局**固定占用的目录名**（agent 实例名不得占用） | `systools/names.yaml` |
 | 一个**会话类型**的 id 与显示名、有哪些身份角色、按什么顺序跑哪些流程、每个流程的核心席与成员席（各要几员） | `systools/profiles.yaml` |
+| 临时拼装的会话类型（请求里省略 `kind`、内联流程声明）落盘成什么 | 折成 `SessionSpec`，`kind` 记 `custom`（`src/capabilities/conversation/session/domain/profile.rs` 的 `inline_spec`） |
 | 已确认但尚未实施的系统工具与验收条件，**不限角色**（非当前工具表、非测试缺口账） | [systool_gaps.yaml](systool_gaps.yaml) |
 | 角色引用了表里不存在的 id 为什么硬失败、工具与角色的名单为什么在代码里没有第二份 | 装配期 `SystemTools::problems()`，由 `src/tests/detail/prompt.rs` 锁死 |
 
