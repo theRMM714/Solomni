@@ -3,7 +3,6 @@
 //! 不管：流程内部的状态机；会话表、落盘与呈现（分别归 turn 的会话表、session 的历史与 presentation）。
 //! 联动：`turn` 的驱动循环与 `turn::generation` 的工作线程按这套接口推进任何流程；协作的实现见 `collab`。
 
-use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
@@ -11,6 +10,7 @@ use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::conversation::session::api::{Gate, GateTicket, MemberTurn, SessionEvent};
 use crate::capabilities::llm::api::{CompleteOpts, Msg};
 use crate::capabilities::tools::api::Tools;
+use crate::capabilities::workspace::api::Sandboxes;
 
 /// 目的：已注册的流程 id：`systools/profiles.yaml` 只能引用这里的名字（新增流程在这里加一行）。
 pub const REGISTERED: &[&str] = &["discuss", "execute"];
@@ -61,6 +61,28 @@ pub struct Settle {
     pub roster: Option<Vec<AgentMeta>>,
 }
 
+/// 目的：可派的活——流程把工作拆成节点时，驱动按这套事实建子会话、记完成、发事件（不认识节点的字段）。
+/// 约束：只给事实与记账；什么时候派、一个成员能不能同时跑两件，由驱动与流程各自的既有判据决定。
+pub trait WorkPlan: Send {
+    /// 目的：方案是否已过审（没过审一个都不派）。
+    fn approved(&self) -> bool;
+    /// 目的：现在能派的活：(节点 id, 负责人)。
+    fn ready(&self) -> Vec<(String, String)>;
+    /// 目的：正忙的负责人（一个成员一次只跑一件）。
+    fn busy(&self) -> Vec<String>;
+    /// 目的：某件活的任务提示词与返工提示（两段文本；没有上一轮验收结论时第二段为空）。
+    fn objective(&self, node: &str) -> Option<(String, String)>;
+    /// 目的：某件活的负责人（建子会话按它）。
+    fn assignee(&self, node: &str) -> Option<String>;
+    /// 目的：这个子会话正在跑哪件活（交回时标记完成按它）。
+    fn running(&self, sid: &str) -> Option<String>;
+    /// 目的：记下某件活跑在哪个子会话里并标成在跑（子会话刚建好时由驱动调用）。
+    fn start(&mut self, node: &str, sid: &str);
+    /// 目的：记下某件活的产出（子会话交回时由驱动调用）。
+    fn finish(&mut self, node: &str, note: &str);
+    /// 目的：派活的事件（流程自己的词汇；驱动原样外送，不解释它）。
+    fn started_event(&self, node: &str, sid: &str, assignee: &str) -> SessionEvent;
+}
 /// 目的：流程——会话流程的插件面：驱动只按这套动作推进，不再认识任何具体流程的字段。
 /// 约束：同一会话同一时刻只属于一个流程；进入 / 退出由落盘转录派生，不是内存标志。
 pub trait Flow: Send {
@@ -83,18 +105,6 @@ pub trait Flow: Send {
     fn pass_over(&mut self, ask: &MemberAsk, sink: &mut dyn FnMut(SessionEvent));
     /// 目的：成员回合失败：如实记下，下一步推一步时由流程交回中断（不静默吞掉）。
     fn failed(&mut self, err: &str);
-    /// 目的：流程自己的业务面（任务链、名单、沙箱）取回具体类型；驱动路径不用它。
-    fn as_any(&self) -> &dyn Any;
-    /// 目的：同上（可写一份）。
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-    /// 目的：这一段的业务面：单段流程是自己，复合流程是**当前这一段**（工作视图与派活按它取类型）。
-    fn part(&self) -> &dyn Any {
-        self.as_any()
-    }
-    /// 目的：同上（可写一份）。
-    fn part_mut(&mut self) -> &mut dyn Any {
-        self.as_any_mut()
-    }
     /// 目的：本流程转录的下一个行号（界面续号与回档重放都读它）。
     fn next_line(&self) -> u64;
     /// 目的：回档后重设行号（行号只增不退，值是全量最大 id + 1）。
@@ -140,5 +150,34 @@ pub trait Flow: Send {
     fn settles_inline(&self, gate: &Gate) -> bool {
         let _ = gate;
         false
+    }
+    /// 目的：本流程的可派工作（把工作拆成节点的流程返回它；默认没有）。
+    fn plan(&self) -> Option<&dyn WorkPlan> {
+        None
+    }
+    /// 目的：同上（可写一份）。
+    fn plan_mut(&mut self) -> Option<&mut dyn WorkPlan> {
+        None
+    }
+    /// 目的：撤回某个成员的「同意」（协议里有「同意」这一步的流程实现它；返回 false = 本流程没有这一说）。
+    fn withdraw_agree(&mut self, agent: &str, sink: &mut dyn FnMut(SessionEvent)) -> bool {
+        let _ = (agent, sink);
+        false
+    }
+    /// 目的：把用户写的文字按本会话环境改写（@ 引用翻译；默认原样）。
+    fn adapt_text(&self, text: &str) -> String {
+        text.to_string()
+    }
+    /// 目的：沙箱清单换成这一份（名单落定后由驱动通知；默认什么都不做）。
+    fn set_sandboxes(&mut self, sandboxes: Sandboxes) {
+        let _ = sandboxes;
+    }
+    /// 目的：整场工作的下一个回合号（子会话的回合标记读它；默认 0 = 本流程不自增）。
+    fn turn_cursor(&mut self) -> u64 {
+        0
+    }
+    /// 目的：本流程自己发的卡上**默认答哪个选项**（核心代答它建的子会话时用；默认没有）。
+    fn default_answer(&self) -> Option<String> {
+        None
     }
 }

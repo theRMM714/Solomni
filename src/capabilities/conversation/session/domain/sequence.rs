@@ -3,14 +3,14 @@
 //! 不管：任何一段自己的状态机（归各流程）；会话类型表与装配（归会话能力的装配与组合根）。
 //! 联动：`systools/profiles.yaml` 里一条会话类型的 flows 序列由它承载；驱动只认 `Flow`。
 
-use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::conversation::session::api::{
-    Flow, Gate, GateTicket, Handback, MemberAsk, MemberTurn, SessionEvent, Settle,
+    Flow, Gate, GateTicket, Handback, MemberAsk, MemberTurn, SessionEvent, Settle, WorkPlan,
 };
+use crate::capabilities::workspace::api::Sandboxes;
 
 /// 目的：一串按顺序跑的流程段：前一段收尾后产物交给下一段，行号接着上一段。
 pub struct Sequence {
@@ -114,30 +114,6 @@ impl Flow for Sequence {
         }
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn part(&self) -> &dyn Any {
-        if self.steps.is_empty() {
-            return self;
-        }
-        let at = self.at.min(self.steps.len() - 1);
-        self.steps[at].part()
-    }
-
-    fn part_mut(&mut self) -> &mut dyn Any {
-        if self.steps.is_empty() {
-            return self;
-        }
-        let at = self.at.min(self.steps.len() - 1);
-        self.steps[at].part_mut()
-    }
-
     fn next_line(&self) -> u64 {
         self.current().map(|s| s.next_line()).unwrap_or(0)
     }
@@ -152,6 +128,43 @@ impl Flow for Sequence {
         for step in &mut self.steps {
             step.adopt_roster(roster);
         }
+    }
+
+    fn plan(&self) -> Option<&dyn WorkPlan> {
+        self.current().and_then(|s| s.plan())
+    }
+
+    fn plan_mut(&mut self) -> Option<&mut dyn WorkPlan> {
+        self.current_mut().and_then(|s| s.plan_mut())
+    }
+
+    fn withdraw_agree(&mut self, agent: &str, sink: &mut dyn FnMut(SessionEvent)) -> bool {
+        match self.current_mut() {
+            Some(step) => step.withdraw_agree(agent, sink),
+            None => false,
+        }
+    }
+
+    fn adapt_text(&self, text: &str) -> String {
+        match self.current() {
+            Some(step) => step.adapt_text(text),
+            None => text.to_string(),
+        }
+    }
+
+    fn set_sandboxes(&mut self, sandboxes: Sandboxes) {
+        // 沙箱是会话级事实：每一段都要认得出路径（后一段不再是同一个对象）。
+        for step in &mut self.steps {
+            step.set_sandboxes(sandboxes.clone());
+        }
+    }
+
+    fn turn_cursor(&mut self) -> u64 {
+        self.current_mut().map(|s| s.turn_cursor()).unwrap_or(0)
+    }
+
+    fn default_answer(&self) -> Option<String> {
+        self.current().and_then(|s| s.default_answer())
     }
 
     fn is_done(&self) -> bool {

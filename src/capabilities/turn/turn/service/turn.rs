@@ -419,8 +419,12 @@ impl Turn {
     /// 目的：标记节点完成并记下它的产出，供父会话做总验收。
     /// 参数：`sid` = 协作会话；`node` = 节点名；`note` = 该节点的产出摘要。
     pub(super) fn mark_node_done(&mut self, sid: &str, node: &str, note: &str) {
-        if let Some(c) = self.session_mut(sid).and_then(|s| s.collab_mut()) {
-            c.mark_node_done(node, note);
+        if let Some(p) = self
+            .session_mut(sid)
+            .and_then(|s| s.flow_mut())
+            .and_then(|f| f.plan_mut())
+        {
+            p.finish(node, note);
         }
     }
 
@@ -453,6 +457,13 @@ impl Turn {
         Ok(s.params().identity(&*prompt, s.tool_mode()))
     }
 
+    /// 目的：本会话的流程自己声明的默认作答选项（核心代答它建的子会话时用；没有就 None）。
+    pub(crate) fn default_answer(&self, sid: &str) -> Option<String> {
+        self.session(sid)
+            .and_then(|s| s.flow())
+            .and_then(|f| f.default_answer())
+    }
+
     /// 目的：往某个会话注入一条**系统消息**（讨论的提醒走这条；见 session-model.md 二"系统消息"）。
     ///  返回要外送/落盘的事件。
     pub fn note_system(&mut self, sid: &str, text: &str) -> Result<Vec<SessionEvent>, String> {
@@ -476,8 +487,8 @@ impl Turn {
         };
         let tid = self
             .session_mut(&parent)
-            .and_then(|s| s.collab_mut())
-            .map(|c| c.next_turn_id())
+            .and_then(|s| s.flow_mut())
+            .map(|f| f.turn_cursor())
             .unwrap_or(0);
         if let Some(Session::Single(s)) = self.session_mut(child) {
             s.set_turn(tid);

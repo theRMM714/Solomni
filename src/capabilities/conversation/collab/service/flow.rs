@@ -3,17 +3,19 @@
 //! 不管：泵与状态机本身（在 pump / discussion / turn_io）；驱动循环（在 turn）。
 //! 联动：`turn` 的驱动循环与 `turn::generation` 的工作线程只认 `Flow`，认不出这是协作。
 
-use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use crate::capabilities::catalog::registry::api::AgentMeta;
-use crate::capabilities::conversation::collab::domain::gates::Pending;
+use crate::capabilities::conversation::collab::domain::events::CollabEvent;
+use crate::capabilities::conversation::collab::domain::gates::{OPT_BEGIN_ALLOW, Pending};
 use crate::capabilities::conversation::collab::service::collab::CollabSession;
 use crate::capabilities::conversation::collab::service::discussion::AfterTurn;
 use crate::capabilities::conversation::session::api::{
-    Flow, Gate, GateTicket, Handback, MemberAsk, MemberTurn, SessionEvent, Settle,
+    Flow, Gate, GateTicket, Handback, MemberAsk, MemberTurn, SessionEvent, Settle, WorkPlan,
 };
+use crate::capabilities::taskchain::api::NodeStatus;
+use crate::capabilities::workspace::api::Sandboxes;
 
 impl Flow for CollabSession {
     fn set_cancel(&mut self, cancel: Arc<AtomicBool>) {
@@ -70,14 +72,6 @@ impl Flow for CollabSession {
         self.note_turn_failure(err.to_string());
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
     fn next_line(&self) -> u64 {
         self.next_line
     }
@@ -124,5 +118,116 @@ impl Flow for CollabSession {
 
     fn settles_inline(&self, gate: &Gate) -> bool {
         matches!(Pending::from_gate(gate), Some((Pending::ConfirmSlate, _)))
+    }
+
+    fn plan(&self) -> Option<&dyn WorkPlan> {
+        Some(self)
+    }
+
+    fn plan_mut(&mut self) -> Option<&mut dyn WorkPlan> {
+        Some(self)
+    }
+
+    fn withdraw_agree(&mut self, agent: &str, sink: &mut dyn FnMut(SessionEvent)) -> bool {
+        CollabSession::withdraw_agree(self, agent, sink);
+        true
+    }
+
+    fn adapt_text(&self, text: &str) -> String {
+        self.retask_text(text)
+    }
+
+    fn set_sandboxes(&mut self, sandboxes: Sandboxes) {
+        CollabSession::set_sandboxes(self, sandboxes);
+    }
+
+    fn turn_cursor(&mut self) -> u64 {
+        self.next_turn_id()
+    }
+
+    fn default_answer(&self) -> Option<String> {
+        // 核心自己建的子会话停在「允许自裁」那张卡上时默认按它答（选项 id 是协作的词汇，驱动不认）。
+        Some(OPT_BEGIN_ALLOW.to_string())
+    }
+}
+
+impl WorkPlan for CollabSession {
+    fn approved(&self) -> bool {
+        self.plan_approved()
+    }
+
+    fn ready(&self) -> Vec<(String, String)> {
+        let Some(chain) = self.chain() else {
+            return Vec::new();
+        };
+        // **只派当前阶段**：同一阶段的节点并发跑，下一阶段要等本阶段整体验收通过。
+        let stage = chain.current_stage().unwrap_or(1);
+        chain
+            .stage_ready(stage)
+            .into_iter()
+            .filter(|n| n.sub_session.is_none())
+            .map(|n| (n.id.clone(), n.assignee.clone()))
+            .collect()
+    }
+
+    fn busy(&self) -> Vec<String> {
+        let Some(chain) = self.chain() else {
+            return Vec::new();
+        };
+        chain
+            .nodes
+            .iter()
+            .filter(|n| matches!(n.status, NodeStatus::Running))
+            .map(|n| n.assignee.clone())
+            .collect()
+    }
+
+    fn objective(&self, node: &str) -> Option<(String, String)> {
+        let chain = self.chain()?;
+        let n = chain.nodes.iter().find(|n| n.id == node)?;
+        let note = n
+            .acceptance
+            .as_ref()
+            .map(|a| a.note.clone())
+            .unwrap_or_default();
+        // **返工必须知道上次错在哪**，否则只会原样重做。
+        let rework = if note.trim().is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n== 上次没通过的原因 ==\n{}\n这次请针对上面的原因返工。\n",
+                note
+            )
+        };
+        Some((n.objective.clone(), rework))
+    }
+
+    fn assignee(&self, node: &str) -> Option<String> {
+        self.chain()?
+            .nodes
+            .iter()
+            .find(|n| n.id == node)
+            .map(|n| n.assignee.clone())
+    }
+
+    fn running(&self, sid: &str) -> Option<String> {
+        self.running_node_of(sid)
+    }
+
+    fn start(&mut self, node: &str, sid: &str) {
+        self.mark_node_started(node, sid);
+    }
+
+    fn finish(&mut self, node: &str, note: &str) {
+        self.mark_node_done(node, note);
+    }
+
+    fn started_event(&self, node: &str, sid: &str, assignee: &str) -> SessionEvent {
+        CollabEvent::NodeStarted {
+            node: node.to_string(),
+            sid: sid.to_string(),
+            assignee: assignee.to_string(),
+        }
+        .push()
     }
 }
