@@ -132,7 +132,7 @@ node start.js --web
 node demo/run-demo.mjs         # 组合式：一个 agent 装三个模块（python / node / C++）
 node demo/run-demo-collab.mjs  # 小组协作：三个 agent 各持一份能力协商，走完整条流程
 node demo/run-demo-mcp.mjs     # MCP：单 agent 只装 mcp-toolbox，拉起常驻服务并真调它的操作
-node demo/run-demo-proxy.mjs   # 代理：只跟核心说话，它自己挑人、建子工作、被叫醒；停止即全停
+node demo/run-demo-proxy.mjs   # 代理：只跟核心说话；三场拼装（只执行 / 只讨论 / 会议）由它挑人、建子工作、代答关卡
 node demo/run-demo-vm.mjs      # 虚拟机档：单 agent 在 guest 里跑 harvest，产物经实时共享直接落宿主
 ```
 

@@ -157,7 +157,7 @@ async function main() {
     { name: "检索手", modules: ["indexer"] },
   ];
   if (MODEL) for (const a of agents) a.model = MODEL;
-  const created = await api("POST", actUrl("create_session"), { name: WORK, mode: "collab", agents, task });
+  const created = await api("POST", actUrl("create_session"), { name: WORK, kind: "collab", agents, task });
   ok(created.status === 200, "建协作工作 " + WORK + "（3 个 agent / 3 个模块 / 3 种语言）", created.text);
   const sid = (created.json && created.json.sid) || WORK;
 

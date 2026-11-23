@@ -189,7 +189,7 @@ node start.js --web
 node demo/run-demo.mjs         # composite: one agent holding three modules (python / node / C++)
 node demo/run-demo-collab.mjs  # collaboration: three agents with separate powers, end to end
 node demo/run-demo-mcp.mjs     # MCP: one agent holding only mcp-toolbox, starts the resident service and calls it
-node demo/run-demo-proxy.mjs   # proxy: talk to the core only; it picks people, one stop stops the tree
+node demo/run-demo-proxy.mjs   # proxy: talk to the core only; three compositions (execute-only / discuss-only / meeting), it picks people and answers their gates
 node demo/run-demo-vm.mjs      # VM tier: one agent running harvest inside the guest; artifacts land on the host live
 ```
 

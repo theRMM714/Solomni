@@ -125,7 +125,7 @@ async function main() {
   const agent = { name: "资料手", modules: ["harvest"] };
   if (MODEL) agent.model = MODEL;
   const created = await api("POST", actUrl("create_session"), {
-    name: WORK, mode: "single", tier: "vm", guest: VM_GUEST, agents: [agent],
+    name: WORK, kind: "single", tier: "vm", guest: VM_GUEST, agents: [agent],
   });
   if (created.status !== 200) {
     ok(false, "建虚拟机档工作 " + WORK, created.text);

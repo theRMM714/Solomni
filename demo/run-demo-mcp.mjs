@@ -134,7 +134,7 @@ async function main() {
   // ② 再建工作：一个 agent，只装这一个模块。
   const agent = { name: AGENT, modules: [MODULE] };
   if (MODEL) agent.model = MODEL;
-  const created = await api("POST", actUrl("create_session"), { name: WORK, mode: "single", agents: [agent] });
+  const created = await api("POST", actUrl("create_session"), { name: WORK, kind: "single", agents: [agent] });
   ok(created.status === 200, "建工作 " + WORK, created.text);
   const sid = (created.json && created.json.sid) || WORK;
 
