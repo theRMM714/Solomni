@@ -26,12 +26,15 @@ pub use crate::capabilities::conversation::session::domain::flows::{
 pub use crate::capabilities::conversation::session::domain::history::{
     Delegation, HistoryView, RunState, SessionMeta, UsageTotals, WorkspaceBinding,
 };
-// 会话类型表：组合根装载它，装配期用它校验角色与流程。
-pub use crate::capabilities::conversation::session::domain::profile::Profiles;
+// 会话类型表与解析后声明：组合根装载它，装配期用它校验角色与流程；meta 落 `SessionSpec`。
+// 名字常量只给产品自带的类型表与测试引用：非测试代码按类型的流程走，不按名字分支。
+#[allow(unused_imports)]
+pub use crate::capabilities::conversation::session::domain::profile::{
+    MEETING, PROXY, PROXY_ROLE, Profiles, SINGLE, SessionSpec,
+};
 // 工具面：角色面 → 实际可调的工具（档位只管网络，不再逐工具裁剪）。
 #[allow(unused_imports)]
 pub use crate::capabilities::conversation::session::domain::assemble::face_tools;
-pub use crate::capabilities::conversation::session::domain::mode::Mode;
 #[allow(unused_imports)]
 pub use crate::capabilities::conversation::session::domain::persist::{
     PersistPolicy, SYSTEM_SID_SUGGEST, is_system_session, persist_policy_for,
@@ -74,8 +77,8 @@ pub use crate::capabilities::conversation::session::service::{
 // 会话树派生：父子关系、工作根、配置归属、树级装配 meta 与 guest 作用域（只读 `History`）。
 #[allow(unused_imports)]
 pub use crate::capabilities::conversation::session::service::tree::{
-    config_owner_of, flat_modules, guest_lease, guest_lease_for, guest_scope, role_of,
-    session_kind_of, subtree_of, tree_meta, tree_meta_with, tree_order, work_root, work_root_of,
+    config_owner_of, flat_modules, guest_lease, guest_lease_for, guest_scope, subtree_of,
+    tree_meta, tree_meta_with, tree_order, work_root, work_root_of,
 };
 
 /// 目的：落盘会话的**队列面**：呈现层经 runtime 的队列代理调它（列表 / 打开 / 删除）。

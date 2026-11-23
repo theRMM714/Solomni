@@ -116,7 +116,7 @@ function renderHistory() {
       const live = state.sessions.get(h.name);
       const running = !!(live && live.running) || !!(state.running && state.running.has(h.name));
       const stateTag = h.run === 'stopped' ? '·已停止' : (running && !h.done ? '·进行中 ' : '');
-      mode.textContent = stateTag + h.mode +
+      mode.textContent = stateTag + app.typeLabel(h.kind) +
         (h.tier === 'vm' && h.tier_ready === false ? '·虚拟机档不可用' : '') +
         (h.workspace_missing ? '·工作区不存在' : '');
       const pencil = ui.iconButton({ icon: 'pencil', label: '会话操作', tip: '', cls: 'hpen' });
@@ -182,7 +182,7 @@ function archivedRow(it) {
   const name = doc.createElement('span');
   name.className = 'hname'; name.textContent = it.name; name.title = it.name;
   const mode = doc.createElement('span'); mode.className = 'hmode';
-  mode.textContent = '·已归档 ' + it.mode;
+  mode.textContent = '·已归档 ' + app.typeLabel(it.kind);
   const pencil = ui.iconButton({ icon: 'pencil', label: '会话操作', tip: '', cls: 'hpen' });
   pencil.onclick = (e) => { e.stopPropagation(); ui.menu(pencil, historyMenu(it)); };
   row.appendChild(name); row.appendChild(mode); row.appendChild(pencil);
@@ -247,7 +247,7 @@ async function openHistory(name) {
   try {
     const r = await api('GET', '/api/history/' + encodeURIComponent(name));
     const s = {
-      sid: name, mode: (r.meta && r.meta.mode) || 'single', title: name,
+      sid: name, kind: (r.meta && r.meta.kind) || '', title: name,
       parent: (r.meta && r.meta.parent) || null,
       lines: [], live: [], pending: null, sending: false,
       running: false, working: null, running_known: false,

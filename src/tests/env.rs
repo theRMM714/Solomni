@@ -7,7 +7,7 @@ use crate::capabilities::catalog::modules::api::Roster;
 use crate::capabilities::catalog::packages::api::PackagePlan;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::AppSettings;
-use crate::capabilities::conversation::session::api::{Mode, RunState, SessionMeta};
+use crate::capabilities::conversation::session::api::{MEETING, RunState, SINGLE, SessionMeta};
 use crate::capabilities::permission::api::{
     PermissionDefaults, PermissionLayer, ProfileId, SessionSandbox,
 };
@@ -24,13 +24,13 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 /// 一条最小会话 meta：权限段与工作区绑定由调用方按需覆盖。
-fn meta(name: &str, parent: Option<&str>, tier: Tier, mode: Mode) -> SessionMeta {
+fn meta(name: &str, parent: Option<&str>, tier: Tier, kind: &str) -> SessionMeta {
     SessionMeta {
         usage_totals: Default::default(),
         context_freshness: false,
         freshness_keep_percent: 80,
         name: name.to_string(),
-        mode,
+        spec: crate::tests::builders::seeded_spec(kind),
         delegate: false,
         modules: Vec::new(),
         task: None,
@@ -73,14 +73,14 @@ fn sandbox() -> Sandbox {
 fn profile_narrows_with_the_chain() {
     let mut app = AppSettings::default();
     app.sandbox.defaults.profile = ProfileId::Online;
-    let mut root = meta("root", None, Tier::Host, Mode::Single);
+    let mut root = meta("root", None, Tier::Host, SINGLE);
     root.sandbox = SessionSandbox {
         ceiling: Some(PermissionLayer {
             profile: Some(ProfileId::Offline),
         }),
         narrowing: None,
     };
-    let mut child = meta("root--a", Some("root"), Tier::Host, Mode::Collab);
+    let mut child = meta("root--a", Some("root"), Tier::Host, MEETING);
     child.sandbox = SessionSandbox {
         ceiling: None,
         narrowing: Some(PermissionLayer {
@@ -111,7 +111,7 @@ fn shared_scope_applies_root_then_narrows_and_keeps_hard_deny() {
         deny: Vec::new(),
     };
     app.sandbox.policy.deny = vec!["secret/".to_string()];
-    let mut root = meta("root", None, Tier::Host, Mode::Single);
+    let mut root = meta("root", None, Tier::Host, SINGLE);
     root.shared = SharedEdit {
         read: Some(ScopeMode::Paths(vec![
             "docs".to_string(),
@@ -120,7 +120,7 @@ fn shared_scope_applies_root_then_narrows_and_keeps_hard_deny() {
         write: Some(ScopeMode::Paths(vec!["docs".to_string()])),
         deny: Vec::new(),
     };
-    let mut child = meta("root--a", Some("root"), Tier::Host, Mode::Collab);
+    let mut child = meta("root--a", Some("root"), Tier::Host, MEETING);
     child.shared = SharedEdit {
         read: Some(ScopeMode::Paths(vec!["docs".to_string()])),
         ..Default::default()

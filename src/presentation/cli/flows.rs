@@ -126,7 +126,7 @@ pub(super) fn single_flow(
     talk(faces, system, &sid, &mut cursor, opts)
 }
 
-/// 目的：把决定权整块交给核心：**没有名单**（核心自己挑人、建子工作），接着就是跟它对话。 选这一形态本身就是**授予全权**（`WorkMode::Proxy` → `meta.delegation`）。
+/// 目的：把决定权整块交给核心：**没有名单**（核心自己挑人、建子工作），接着就是跟它对话。 选这一类型本身就是**授予全权**（`proxy` → `meta.delegation`）。
 /// 参数：`seed` 是进来之前就打好的那句话（转录中心顶层直接敲消息时用），先发出去再进提示符。
 pub(super) fn proxy_flow(
     faces: &Faces,

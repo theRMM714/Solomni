@@ -472,9 +472,14 @@ impl Core {
     pub fn suggest_models(
         &self,
         task: &str,
-        mode: WorkMode,
+        kind: &str,
     ) -> Result<(Vec<AgentSuggestion>, Vec<SessionEvent>), String> {
-        self.work.suggest_models(self.registry.as_ref(), task, mode)
+        self.work.suggest_models(self.registry.as_ref(), task, kind)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。
+    pub fn session_types(&self) -> Vec<crate::capabilities::work::api::SessionTypeView> {
+        self.work.session_types()
     }
 
     /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。

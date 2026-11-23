@@ -93,7 +93,9 @@ impl FsHistory {
             .unwrap_or(false);
         Some(HistoryView {
             name: meta.name,
-            mode: meta.mode,
+            kind: meta.spec.kind.clone(),
+            flows: meta.spec.driven(),
+            auto: meta.spec.is_proxy_spec(),
             ts: meta.ts,
             done,
             // 档位来自 meta 的 exec 段：列表视图据此提示"环境已变"，不拦打开。

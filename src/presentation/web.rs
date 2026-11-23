@@ -5,7 +5,6 @@
 
 use crate::capabilities::runtime::api::Output;
 use crate::capabilities::runtime::api::{Acted, ActionCall, Caller, SessionEvent};
-use crate::capabilities::work::api::WorkMode;
 use crate::capabilities::workspace::api::MAX_ASSET_BYTES;
 use crate::presentation::faces::Faces;
 pub(crate) mod assets;
@@ -700,11 +699,18 @@ pub(crate) fn route(
                 Err(e) => return complaint(400, e),
             };
             let task = str_field(&req, "task");
-            let mode = match parse_mode(&str_field(&req, "mode")) {
-                Ok(m) => m,
+            // 前端旧字段叫 mode，两者同义：都只是会话类型 id。
+            let raw = str_field(&req, "kind");
+            let raw = if raw.trim().is_empty() {
+                str_field(&req, "mode")
+            } else {
+                raw
+            };
+            let kind = match parse_kind(&raw) {
+                Ok(k) => k,
                 Err(e) => return complaint(400, e),
             };
-            match faces.work.suggest_models(&task, mode) {
+            match faces.work.suggest_models(&task, &kind) {
                 Ok(agents) => ok_json(json!({ "ok": true, "agents": agents })),
                 Err(e) => complaint(400, e),
             }
@@ -715,18 +721,14 @@ pub(crate) fn route(
     }
 }
 
-/// 目的：请求里的形态标识 → WorkMode：唯一解析处；未知值如实报错（路由据此回 400）。
-pub fn parse_mode(s: &str) -> Result<WorkMode, String> {
-    match s {
-        "single" => Ok(WorkMode::Single),
-        "collab" => Ok(WorkMode::Collab),
-        // 代理形态：没有名单，用户选它就是**授予全权**（见 docs/runtime/README.md）。
-        "proxy" => Ok(WorkMode::Proxy),
-        other => Err(format!(
-            "未知模式：{}（只接受 single / collab / proxy）",
-            other
-        )),
+/// 目的：请求里的会话类型 → 类型 id：唯一解析处；空值如实报错（路由据此回 400）。
+/// 约束：不复制会话类型表——在册与否由工作能力按 systools/profiles.yaml 判。
+pub fn parse_kind(s: &str) -> Result<String, String> {
+    let kind = s.trim();
+    if kind.is_empty() {
+        return Err("kind 不能为空（要会话类型表里的一个）".to_string());
     }
+    Ok(kind.to_string())
 }
 
 /// 概览状态：模块清单 + 供应商/模型视图 + 核心默认 + 进行中会话（均无密钥）。
@@ -785,6 +787,8 @@ fn state_json(faces: &Faces, fence: &FenceInfo) -> Result<serde_json::Value, Str
                 .into_iter()
                 .collect::<std::collections::BTreeMap<_, _>>(),
         },
+        // 会话类型表（新建向导的选项）：名字与说明由后端给，前端不复制一份类型知识。
+        "session_types": faces.work.session_types()?,
         "sessions": sessions,
         "history": history,
     }))

@@ -16,14 +16,12 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-// 定义在**能力面**：呈现层只认这里，不再经 `runtime::` 根转一手；形态词汇只有一套——**会话**拥有它（落盘在 `SessionMeta::mode`），工作侧用这个名字读它。
-pub use crate::capabilities::conversation::session::api::Mode as WorkMode;
-
-/// 目的：创建工作的全部用户决定（形态 + 参与的 agent；模型按 agent 指定）。
+/// 目的：创建工作的全部用户决定（会话类型 + 参与的 agent；模型按 agent 指定）。
 #[derive(Debug, Clone)]
 pub struct WorkSpec {
     pub name: String,
-    pub mode: WorkMode,
+    /// 目的：会话类型名（表里的预设，如 单机 / 会议 / 代理；创建时解析成 `SessionSpec` 落盘）。
+    pub kind: String,
     pub agents: Vec<AgentMeta>,
     /// 目的：协作：本次需求（必填）。
     pub task: Option<String>,
@@ -175,7 +173,8 @@ pub struct PermissionSharedView {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SessionConfig {
     pub sid: String,
-    pub mode: WorkMode,
+    /// 目的：会话类型名（声明里的，如「单机」「会议」）。
+    pub kind: String,
     /// 目的：会话已经开过（流水里有内容）= agent 名单与形态冻结。
     pub started: bool,
     pub agents: Vec<ConfigAgent>,
@@ -247,7 +246,12 @@ pub struct ContinueView {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SessionView {
     pub sid: String,
-    pub mode: WorkMode,
+    /// 目的：会话类型名（落盘声明里的那个标签）。
+    pub kind: String,
+    /// 目的：这条会话有没有流程（有流程就不接受自由发言，由机制推进）。
+    pub flows: bool,
+    /// 目的：决定权是不是整块交给核心（没有名单、没有需求：界面叫代理式）。
+    pub auto: bool,
     pub done: bool,
     /// 目的：这条会话记的执行档位（`host` / `vm`）：打开时据此提示"环境已变"。
     pub tier: String,
@@ -419,6 +423,8 @@ pub(crate) use crate::capabilities::work::service::{PreparedEdit, PreparedWork, 
 pub(crate) struct ProxySeed<'a> {
     /// 目的：新会话的工作名，也是它在会话目录里的落盘名。
     pub(crate) name: &'a str,
+    /// 目的：会话类型名（要在类型表里；解析成落盘声明）。
+    pub(crate) kind: &'a str,
     /// 目的：授予的秒级时间戳，写进 `meta.delegation`。
     pub(crate) granted_at: i64,
     /// 目的：用户选的档位；也是这条会话建子工作时的默认档位。
@@ -479,5 +485,25 @@ pub trait WorkOps: Send + Sync {
     /// 与「开始」的校验同源（同一把 `tier_readiness` 尺子），界面照抄，不自己编话。
     fn tier_choices(&self) -> Result<TierChoices, String>;
     /// 目的：核心按任务推荐的 agent 草案（带理由；用户可改）。
-    fn suggest_models(&self, task: &str, mode: WorkMode) -> Result<Vec<AgentSuggestion>, String>;
+    fn suggest_models(&self, task: &str, kind: &str) -> Result<Vec<AgentSuggestion>, String>;
+    /// 目的：会话类型表给界面看的那份（选类型时的名字与说明、要不要名单与需求）。
+    /// 约束：按 systools/profiles.yaml 的声明顺序；界面渲染它，不自己复制类型知识。
+    fn session_types(&self) -> Result<Vec<SessionTypeView>, String>;
+}
+
+/// 目的：一个会话类型在界面上的样子（新建向导的逐个选项）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SessionTypeView {
+    /// 目的：类型 id（提交与命令用它）。
+    pub kind: String,
+    /// 目的：显示名（界面按它渲染）。
+    pub name: String,
+    /// 目的：一句说明（这个类型与别的有什么区别）。
+    pub hint: String,
+    /// 目的：有没有流程（有 = 由流程推进，名单可以先空着让核心拟）。
+    pub flows: bool,
+    /// 目的：要不要选 agent 名单（代理式不要：决定权整块交给核心）。
+    pub roster: bool,
+    /// 目的：要不要写本次需求（代理式不要：目标由核心自己拆）。
+    pub needs_task: bool,
 }

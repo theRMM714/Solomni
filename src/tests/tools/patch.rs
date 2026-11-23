@@ -5,6 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
+use crate::capabilities::conversation::session::api::SINGLE;
 #[test]
 pub(crate) fn patch_channel_writes_files_without_json_escaping() {
     // 自由格式：信封之后原样跟补丁文本（含中文与换行，完全不转义）；一次两块、落在两个文件。
@@ -27,10 +28,7 @@ pub(crate) fn patch_channel_writes_files_without_json_escaping() {
         gw(member, vec!["[]".into()]),
         Arc::clone(&io),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["m0"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["m0"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -94,10 +92,7 @@ pub(crate) fn a_failing_patch_block_writes_nothing_at_all() {
         gw(member, vec!["[]".into()]),
         Arc::clone(&io),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["m0"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["m0"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -153,10 +148,7 @@ pub(crate) fn a_patch_whose_second_file_fails_writes_neither() {
         gw(member, vec!["[]".into()]),
         Arc::clone(&io),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["m0"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["m0"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -199,10 +191,7 @@ pub(crate) fn a_patch_without_end_marker_is_refused_with_the_line() {
         gw(member, vec!["[]".into()]),
         Arc::clone(&io),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["m0"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["m0"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -249,10 +238,7 @@ pub(crate) fn rewind_leaves_the_file_untracked_so_overwrite_is_allowed() {
         gw(member, vec!["[]".into()]),
         Arc::clone(&io),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     // 第一轮：新建，放行
     let e1 = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(

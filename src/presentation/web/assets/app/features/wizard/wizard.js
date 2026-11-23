@@ -29,9 +29,10 @@ async function openWizard(draft) {
   // draft = 上一次没提交的草稿：补齐依赖后要把向导按原样重开，别把用户已经填的东西丢掉。
   // onclick 直接挂本函数时第一个参数是事件对象，所以按**标记**认草稿，不按真值认。
   const resumed = !!(draft && draft.__wizardDraft);
-  // 两种形态共用一份 agent 卡片列表：single 恰好 0/1 个；collab 可多个。
+  // 类型表由后端给（systools/profiles.yaml）：界面只按它渲染名字与差别，不写死类型名。
+  // 有名单的类型共用一份 agent 卡片列表：单人的恰好 0/1 个，多人的可多个。
   const w = resumed ? draft : {
-    mode: 'single', agents: [], task: '', tier: 'host', guest: '', permission: 'offline',
+    kind: '', agents: [], task: '', tier: 'host', guest: '', permission: 'offline',
     context_freshness: false, freshness_keep_percent: 80, __wizardDraft: true,
   };
   if (!Array.isArray(w.agents)) w.agents = [];
@@ -206,19 +207,19 @@ function pickWorkspaceDir(onPick) {
     workspaceRow.appendChild(wsDefault);
     const workspaceWrap = doc.createElement('div');
     workspaceWrap.appendChild(workspaceRow);
-    const modeSel = selectInput([
-      { value: 'single', label: '单 agent（1 个或多个模块）' },
-      { value: 'collab', label: '协作（多个 agent）' },
-      { value: 'proxy', label: '代理（把决定权整块交给核心）' },
-    ], 'single');
-    // 形态说明随选择走（三种形态的差别就在这一句里说清）。
-    const modeHint = doc.createElement('div'); modeHint.className = 'wf-hint';
-    function modeHintText() {
-      if (w.mode === 'proxy') return wizardCopy.modeProxy;
-      if (w.mode === 'collab') {
-        return '协作：多个 agent 各自独立沙箱，先分权协商、再按任务链执行，由核心统一验收。';
-      }
-      return '单 agent：选 1 个模块 = 直连式；选多个 = 组合式。';
+    // 会话类型是可扩展的数据：选项、名字与差别都来自后端（app.typeOf），这里不复制一份类型知识。
+    const types = state.types || [];
+    const typeSel = selectInput(
+      types.map((t) => ({ value: t.kind, label: t.name || t.kind })),
+      w.kind || (types[0] && types[0].kind) || ''
+    );
+    if (!w.kind && types[0]) w.kind = types[0].kind;
+    // 当前类型的形状：roster 假 = 决定权整块交给核心（不问名单）；flows 假 = 没有流程（单 agent 轮循环）。
+    const typeNow = () => app.typeOf(w.kind) || null;
+    const typeHint = doc.createElement('div'); typeHint.className = 'wf-hint';
+    function typeHintText() {
+      const t = typeNow();
+      return (t && t.hint) || '';
     }
     const partWrap = doc.createElement('div'); partWrap.className = 'wf-field';
     const modelWrap = doc.createElement('div'); modelWrap.className = 'wf-models';
@@ -236,11 +237,15 @@ function pickWorkspaceDir(onPick) {
       if (!state.models.length) {
         return '未登记任何模型，不能创建会话：先到「设置 → 模型与核心默认」登记供应商与模型';
       }
-      if (w.mode === 'proxy') {
+      const t = typeNow();
+      if (!t) {
+        return '还没取到会话类型表（systools/profiles.yaml）：刷新页面再试';
+      }
+      if (!t.roster) {
         return state.core ? '' : '代理会话必须设定核心默认模型：先到「设置 → 模型与核心默认」选定';
       }
       if (!w.agents.length) {
-        return w.mode === 'single' ? '单 agent：先选或新建一个 agent' : '协作：先加入至少 1 个 agent';
+        return t.flows ? '先加入至少 1 个 agent' : '先选或新建一个 agent';
       }
       const noModel = w.agents.find((a) => !a.model);
       if (noModel && !state.core) {
@@ -335,7 +340,7 @@ function pickWorkspaceDir(onPick) {
 
     function agentSection() {
       const box = doc.createElement('div'); box.className = 'form-col';
-      if (w.mode === 'single') {
+      if (!(typeNow() || {}).flows) {
         if (w.agents.length) box.appendChild(app.agentCard(w.agents[0], cardHandlers(0)));
         else box.appendChild(emptyHint('（还没有选 agent）'));
         box.appendChild(agentActions(true, w.agents.length > 0));
@@ -351,12 +356,13 @@ function pickWorkspaceDir(onPick) {
 
     function renderParts() {
       partWrap.innerHTML = '';
-      const text = modeHintText();
-      modeHint.innerHTML = '';
-      if (text && typeof text === 'object') modeHint.appendChild(ui.detail(text));
-      else modeHint.textContent = text;
-      // 代理形态没有名单也没有模型要选：把该说的说清，把不该问的收起来。
-      const proxy = w.mode === 'proxy';
+      const text = typeHintText();
+      typeHint.innerHTML = '';
+      if (text && typeof text === 'object') typeHint.appendChild(ui.detail(text));
+      else typeHint.textContent = text;
+      // 决定权整块交给核心的类型没有名单也没有模型要选：把该说的说清，把不该问的收起来。
+      const t = typeNow() || {};
+      const proxy = !t.roster;
       taskField.className = proxy ? 'wf-field hidden' : 'wf-field';
       recBtn.className = proxy ? 'btn btn-lead hidden' : 'btn btn-lead';
       if (proxy) {
@@ -367,17 +373,17 @@ function pickWorkspaceDir(onPick) {
         return;
       }
       const lab = doc.createElement('div'); lab.className = 'wf-label';
-      lab.textContent = w.mode === 'single' ? 'agent' : 'agent 名单';
+      lab.textContent = t.flows ? 'agent 名单' : 'agent';
       partWrap.appendChild(lab);
       partWrap.appendChild(agentSection());
       const rule = doc.createElement('div'); rule.className = 'wf-hint';
-      rule.textContent = w.mode === 'single' ? '恰好 1 个；模块数不限。' : '可多个，各自独立沙箱。';
+      rule.textContent = t.flows ? '可多个，各自独立沙箱。' : '恰好 1 个；模块数不限。';
       partWrap.appendChild(rule);
     }
 
     function renderModels() {
       modelWrap.innerHTML = '';
-      if (w.mode === 'proxy') {
+      if (!(typeNow() || {}).roster) {
         modelWrap.appendChild(emptyHint('（代理会话走核心默认通道：模型按登记处的核心默认）'));
         if (!state.core) {
           modelWrap.appendChild(ui.hint('（核心默认模型未设定：代理会话不能创建；先到「设置 → 模型与核心默认」选定）', 'warn'));
@@ -395,25 +401,27 @@ function pickWorkspaceDir(onPick) {
 
     function renderAll() { renderParts(); renderModels(); syncGuestGap(); syncCreateButton(); }
 
-    modeSel.addEventListener('change', () => {
-      w.mode = modeSel.value;
-      // 代理形态默认显式选联网（用户仍可在下拉里改；不再由后端硬编码）。
-      if (w.mode === 'proxy') {
+    typeSel.addEventListener('change', () => {
+      w.kind = typeSel.value;
+      const t = typeNow() || {};
+      // 决定权交给核心的类型默认显式选联网（用户仍可在下拉里改；不再由后端硬编码）。
+      if (!t.roster) {
         w.permission = 'online';
         profileSel.value = 'online';
       }
-      // 从协作切回单 agent：只保留第一张卡片（不静默替换成别的人）。
-      if (w.mode === 'single' && w.agents.length > 1) w.agents = [w.agents[0]];
+      // 从多人切回单人：只保留第一张卡片（不静默替换成别的人）。
+      if (!t.flows && w.agents.length > 1) w.agents = [w.agents[0]];
       renderAll();
     });
 
     recBtn.onclick = async () => {
-      if (w.mode === 'proxy') { c.setMsg('代理形态不需要名单：核心自己挑人', true); return; }
+      const t = typeNow() || {};
+      if (!t.roster) { c.setMsg('这类会话不需要名单：核心自己挑人', true); return; }
       const task = taskIn.value.trim();
       if (!task) { c.setMsg('先写下本次需求，核心才能据此推荐', true); return; }
       c.setMsg('核心根据需求推荐中…');
       try {
-        const r = await api('POST', '/api/suggest-models', { task, mode: w.mode });
+        const r = await api('POST', '/api/suggest-models', { task, kind: w.kind });
         const rec = (r.agents || []).filter((a) => a && (a.name || (a.modules || []).length));
         if (!rec.length) { c.setMsg('核心未给出可用建议', true); return; }
         const asItem = (a) => {
@@ -430,9 +438,10 @@ function pickWorkspaceDir(onPick) {
           };
         };
         const items = rec.map(asItem);
-        w.agents = w.mode === 'single' ? [items[0]] : items;
+        const one = !t.flows;
+        w.agents = one ? [items[0]] : items;
         renderAll();
-        c.setMsg(w.mode === 'single'
+        c.setMsg(one
           ? '核心建议 agent「' + items[0].name + '」（见下方卡片；名字、人设、模块、模型都可改）'
           : '核心已给出建议（见下方卡片；每条都可改）');
       } catch (e) { c.setMsg(e.message, true); }
@@ -472,9 +481,10 @@ function pickWorkspaceDir(onPick) {
         return;
       }
       let agents;
-      if (w.mode === 'proxy') {
-        // 代理：没有名单、没有需求——选这个形态就是授予全权（档位由上面的选择显式落盘）。
-        const proxyBody = { name, mode: 'proxy', agents: [], tier: w.tier, guest: w.tier === 'vm' ? vmGuest : null, permission: w.permission || 'online' };
+      const t = typeNow() || {};
+      if (!t.roster) {
+        // 决定权交给核心的类型：没有名单、没有需求——选这个类型就是授予全权（档位由上面的选择显式落盘）。
+        const proxyBody = { name, kind: w.kind, agents: [], tier: w.tier, guest: w.tier === 'vm' ? vmGuest : null, permission: w.permission || 'online' };
         proxyBody.context_freshness = !!w.context_freshness;
         proxyBody.freshness_keep_percent = keepNow();
         const proxyWs = workspaceIn.value.trim();
@@ -484,12 +494,12 @@ function pickWorkspaceDir(onPick) {
         await submit(proxyBody);
         return;
       }
-      if (w.mode === 'single') {
-        if (!w.agents.length) { c.setMsg('单 agent：先选或新建一个 agent', true); return; }
+      if (!t.flows) {
+        if (!w.agents.length) { c.setMsg('先选或新建一个 agent', true); return; }
         const a = w.agents[0];
         const mods = (a.modules || []).slice();
         const nm = (a.name || '').trim() || mods[0] || '';
-        if (!nm) { c.setMsg('单 agent：给这个 agent 一个名字（或至少 1 个模块）', true); return; }
+        if (!nm) { c.setMsg('给这个 agent 一个名字（或至少 1 个模块）', true); return; }
         agents = [{
           name: nm,
           transient: !!a.transient,
@@ -499,7 +509,7 @@ function pickWorkspaceDir(onPick) {
         }];
       } else {
         if (!w.agents.length) { c.setMsg('请先加入至少 1 个 agent', true); return; }
-        if (!task) { c.setMsg('协作模式必须填写本次需求', true); return; }
+        if (!task) { c.setMsg('有流程的会话必须填写本次需求', true); return; }
         agents = w.agents.map((a) => ({
           name: a.name.trim(),
           transient: !!a.transient,
@@ -511,7 +521,7 @@ function pickWorkspaceDir(onPick) {
       }
       const names = agents.map((a) => a.name);
       const dup = names.filter((n, i) => names.indexOf(n) !== i)[0];
-      const body = { name, mode: w.mode, agents, tier: w.tier, permission: w.permission || 'offline' };
+      const body = { name, kind: w.kind, agents, tier: w.tier, permission: w.permission || 'offline' };
       body.context_freshness = !!w.context_freshness;
       body.freshness_keep_percent = keepNow();
       const bodyWs = workspaceIn.value.trim();
@@ -532,8 +542,8 @@ function pickWorkspaceDir(onPick) {
 
     c.body.appendChild(field('工作名称', nameIn));
     c.body.appendChild(field('工作区（可选）', workspaceWrap, wizardCopy.workspace));
-    c.body.appendChild(field('形态', modeSel));
-    c.body.appendChild(modeHint);
+    c.body.appendChild(field('会话类型', typeSel));
+    c.body.appendChild(typeHint);
     c.body.appendChild(tierField);
     c.body.appendChild(ctxField);
     c.body.appendChild(profileField);
@@ -562,8 +572,10 @@ function pickWorkspaceDir(onPick) {
 async function startSession(body) {
   const r = await api('POST', actionUrl('create_session'), body);
   const sid = r.sid;
+  // 新会话的形状按类型表判：有流程的会排队推进，决定权交给核心的不收追问。
+  const t = app.typeOf(body.kind) || {};
   const s = {
-    sid, mode: body.mode, title: body.name || sid, run: 'active',
+    sid, kind: body.kind, flows: !!t.flows, auto: !t.roster, title: body.name || sid, run: 'active',
     lines: [], live: [], pending: null, sending: false,
     running: false, working: null, running_known: false,
     context: null, shell: null, work: null, workAt: 0, workDirty: false, workError: '',

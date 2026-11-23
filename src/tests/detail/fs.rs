@@ -4,7 +4,7 @@
 //! 联动：隔离根 `tests::scratch`；会话元数据夹具 `meta` 在文件内。
 
 use super::*;
-use crate::capabilities::conversation::session::api::Mode;
+use crate::capabilities::conversation::session::api::{MEETING, SINGLE, SessionSpec};
 use crate::capabilities::workspace::api::{ChangeKind, CommitAnchor, WORKIGNORE, WORKIGNORE_SEED};
 use crate::tests::doubles::test_workspace_store;
 
@@ -14,7 +14,7 @@ fn meta(name: &str) -> SessionMeta {
         context_freshness: false,
         freshness_keep_percent: 80,
         name: name.to_string(),
-        mode: Mode::Single,
+        spec: SessionSpec::plain(SINGLE, "单机", "solo"),
         delegate: false,
         modules: vec!["a".to_string()],
         task: None,
@@ -626,16 +626,16 @@ fn fs_history_roundtrips_lists_deletes_and_rejects_broken_meta() {
     assert!(listed[0].done, "ended 之后 done = true");
 
     let mut renamed = meta("w1");
-    renamed.mode = Mode::Collab;
+    renamed.spec = SessionSpec::plain(MEETING, "会议", "discussant");
     h.save_meta(&renamed).expect("写回元信息");
     assert_eq!(
-        h.load("w1").expect("读回").0.mode,
-        Mode::Collab,
+        h.load("w1").expect("读回").0.spec.kind,
+        MEETING,
         "meta.yaml 是会话身份的唯一真相"
     );
 
     std::fs::create_dir_all(root.join("w2")).expect("造一个坏会话");
-    std::fs::write(root.join("w2").join("meta.yaml"), "mode: [不是字符串").expect("造坏 meta");
+    std::fs::write(root.join("w2").join("meta.yaml"), "spec: [不是字符串").expect("造坏 meta");
     assert!(
         h.load("w2").unwrap_err().contains("非法"),
         "坏 meta 要如实报错，不静默跳过"
@@ -655,7 +655,7 @@ fn fs_history_nests_children_inside_their_parent_dir() {
     let root = scratch("fs-history-children");
     let h = FsHistory::new(root.clone());
     let mut parent = meta("p");
-    parent.mode = Mode::Collab;
+    parent.spec = SessionSpec::plain(MEETING, "会议", "discussant");
     h.create(&parent).expect("建父会话");
     let mut child = meta("p--甲");
     child.parent = Some("p".to_string());

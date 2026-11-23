@@ -4,7 +4,7 @@
 //! 联动：只经 `History` 端口读 meta 与列表；`runtime` 的建工作、改配、回档与历史列表都调这里。
 
 use crate::capabilities::catalog::registry::api::AgentMeta;
-use crate::capabilities::conversation::session::api::{History, HistoryView, Mode, SessionMeta};
+use crate::capabilities::conversation::session::api::{History, HistoryView, SessionMeta};
 use crate::kernel::api::types::Tier;
 
 /// 目的：整张名单的扁平模块清单（保序去重）：同一模块被多个 agent 共用时只出现一次。
@@ -102,7 +102,7 @@ pub fn config_owner_of(history: &dyn History, meta: &SessionMeta) -> Result<Sess
     let mut owner = meta.clone();
     while let Some(p) = owner.parent.clone() {
         let pm = history.meta(&p)?;
-        if pm.mode == Mode::Collab {
+        if pm.spec.driven() {
             owner = pm;
         } else {
             break;
@@ -154,46 +154,13 @@ pub fn tree_meta_with(
     Ok(out)
 }
 
-/// 目的：这个会话的**使用类型**（机制册的第一把钥匙）：按落盘形态派生，重建后是同一份。
-///  协作派生的成员 / 节点会话算 **collab**（它属于那场协作），其余单 agent 会话算 single，代理算 proxy。
-pub fn session_kind_of(history: &dyn History, meta: &SessionMeta) -> Result<String, String> {
-    let kind = match meta.mode {
-        Mode::Proxy => Mode::Proxy,
-        Mode::Collab => Mode::Collab,
-        // 单 agent 会话：父是协作会话时它属于那场协作。
-        Mode::Single => match meta.parent.as_deref() {
-            Some(p) => match history.meta(p) {
-                Ok(pm) if pm.mode == Mode::Collab => Mode::Collab,
-                _ => Mode::Single,
-            },
-            None => Mode::Single,
-        },
-    };
-    Ok(kind.as_str().to_string())
-}
-
-/// 目的：这一席的**角色**（机制册的第二把钥匙，也是工具面与提示词的角色名）。
-///  与实时建立同一把尺子：协作的成员 / 节点 = executor；代理 = core_proxy；其余单 agent 工作 = solo。
-pub fn role_of(history: &dyn History, meta: &SessionMeta) -> Result<String, String> {
-    if meta.mode == Mode::Proxy {
-        return Ok("core_proxy".to_string());
-    }
-    match meta.parent.as_deref() {
-        Some(p) => match history.meta(p) {
-            Ok(pm) if pm.mode == Mode::Collab => Ok("executor".to_string()),
-            _ => Ok("solo".to_string()),
-        },
-        None => Ok("solo".to_string()),
-    }
-}
-
 /// 目的：这条会话的共享 guest 租约；空 = 本机档，或代理父会话自己没有 guest。
 /// 约束：一个主会话树一台 guest；proxy 父会话没有 guest，它的每个子工作临时各占一台。
 pub fn guest_lease(meta: &SessionMeta, top: &SessionMeta) -> Option<String> {
     if top.exec.tier != Tier::Vm {
         return None;
     }
-    if top.mode == Mode::Proxy && meta.parent.is_none() {
+    if top.is_proxy() && meta.parent.is_none() {
         return None;
     }
     Some(top.name.clone())

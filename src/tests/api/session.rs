@@ -8,9 +8,10 @@ use super::super::{ops_with, single_work, slow_ops};
 use super::support::spawn;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::runtime::api::{Acted, ActionCall, Caller};
-use crate::capabilities::work::api::{ConfigAgent, SessionEdit, WorkMode, WorkSpec};
+use crate::capabilities::work::api::{ConfigAgent, SessionEdit, WorkSpec};
 use crate::presentation::faces::Faces;
 
+use crate::capabilities::conversation::session::api::SINGLE;
 use crate::capabilities::runtime::api::Output;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -308,7 +309,7 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
         .create_work(WorkSpec {
             freshness: None,
             name: "组合".to_string(),
-            mode: WorkMode::Single,
+            kind: SINGLE.to_string(),
             agents: picked,
             task: None,
             delegate: false,
@@ -478,7 +479,7 @@ fn create_session_and_config_carry_chara_as_a_snapshot() {
             id: "create_session".to_string(),
             args: serde_json::json!({
                 "name": "w-chara",
-                "mode": "single",
+                "kind": "single",
                 "agents": [{
                     "name": "甲",
                     "transient": true,
@@ -558,7 +559,7 @@ fn host_session_uses_package_bin_path() {
         probe,
     );
     let sid = core
-        .create_work(crate::tests::doubles::work("w", WorkMode::Single, &["a"]))
+        .create_work(crate::tests::doubles::work("w", SINGLE, &["a"]))
         .unwrap()
         .sid;
     crate::tests::doubles::with_turn_io(|io, cancel, emit| {

@@ -179,12 +179,12 @@ impl Core {
         })
     }
 
-    /// 目的：一个会话的形态：落盘 meta 是唯一真相；取不到（无此会话）就是 None。
-    pub(crate) fn session_mode(
+    /// 目的：一个会话的声明：落盘 meta 是唯一真相；取不到（无此会话）就是 None。
+    pub(crate) fn session_spec(
         &self,
         sid: &str,
-    ) -> Option<crate::capabilities::conversation::session::api::Mode> {
-        self.lifecycle.history_open(sid).ok().map(|(m, _)| m.mode)
+    ) -> Option<crate::capabilities::conversation::session::api::SessionSpec> {
+        self.lifecycle.history_open(sid).ok().map(|(m, _)| m.spec)
     }
 
     /// 目的：代理工具：控制里的**归档与恢复**（只做运行态的状态转移，不启动也不停止生成——
@@ -252,6 +252,7 @@ impl Core {
                 self.probe.as_ref(),
                 crate::capabilities::work::api::ProxySeed {
                     name,
+                    kind: crate::capabilities::conversation::session::api::PROXY,
                     granted_at,
                     tier: crate::kernel::api::types::Tier::Host,
                     guest: None,
@@ -310,13 +311,13 @@ impl crate::capabilities::conversation::proxy::api::ProxyHost for ProxyBridge {
         let target = target.to_string();
         // 运行态闸门 + 形态：**一次核心命令**问清（无此会话 / 已暂停 / 已关闭都如实拒绝，
         // 不给模型一个"发出去了其实没跑"的假回执）。
-        let mode = handle.call({
+        let spec = handle.call({
             let t = target.clone();
             move |core| core.turn.dispatch_target(&t)
         })?;
         // 先记来源：这条不是用户原话这个事实要进目标会话的可回放记录（正文不伪装成用户发言）。
         handle.record_notice(&target, SessionEvent::Notice(d::relay_note(msg.kind)));
-        if mode == crate::capabilities::conversation::session::api::Mode::Collab {
+        if spec.driven() {
             // 协作子会话：它此刻挂着哪张卡时，**只有当这次转达明确写了选项 id 才代答**（附言 = 转达的话）；
             // 没写选项 id 就没有答案——不替用户猜（见 docs/session/session-model.md 的「请用户裁决」）。
             let card = handle.call({

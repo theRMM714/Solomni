@@ -24,7 +24,7 @@ pub use crate::capabilities::prompt::domain::prompt::render;
 pub use crate::capabilities::catalog::registry::api::{ModelDraft, ModelEntry, Provider, Settings};
 
 pub use crate::capabilities::catalog::registry::api::AgentMeta;
-pub use crate::capabilities::conversation::session::api::{Mode, RunState, SessionMeta};
+pub use crate::capabilities::conversation::session::api::{RunState, SessionMeta};
 
 pub use crate::capabilities::conversation::session::domain::tools::MemberTools;
 pub use crate::capabilities::conversation::session::domain::tools::ModuleTools;
@@ -43,7 +43,7 @@ pub use crate::capabilities::catalog::modules::ports::ModuleSource;
 pub use crate::capabilities::workspace::ports::Workdirs;
 
 pub use crate::capabilities::runtime::api::SessionEvent;
-pub use crate::capabilities::work::api::{ConfigAgent, SessionEdit, WorkMode, WorkSpec};
+pub use crate::capabilities::work::api::{ConfigAgent, SessionEdit, WorkSpec};
 
 pub use crate::capabilities::conversation::collab::api::{CollabEvent, Pending};
 

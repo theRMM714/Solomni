@@ -5,6 +5,7 @@
 
 use super::super::prelude::*;
 use super::support::*;
+use crate::capabilities::conversation::session::api::SINGLE;
 
 /// 目的：两边都改时，人工合并后用 take=local 推进基线，提交成功且主副本拿到合并结果。
 #[test]
@@ -590,10 +591,7 @@ pub(crate) fn agent_sandboxes_from_a_work_are_read_only_for_the_shared_area() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec!["[]".into()]);
     let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let meta = core.lifecycle.history_open(&sid).unwrap().0;
     let roster = core.modules_handle().roster();
     let sandboxes = core.sandboxes(&meta, &roster).unwrap();

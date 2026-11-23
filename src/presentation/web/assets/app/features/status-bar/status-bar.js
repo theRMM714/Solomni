@@ -41,7 +41,7 @@ function openPermissionMenu(chip, s) {
       onClick: () => { if (id !== current) switchPermission(s.sid, id); },
     };
   });
-  if (s.mode !== 'proxy') {
+  if (!s.auto) {
     items.push({ sep: true });
     items.push({ icon: 'gear', label: '更多权限设置…', onClick: () => openConfig(s.sid) });
   }
@@ -264,7 +264,7 @@ function syncStatusbar(s) {
   }
 
   // 协作主会话没有一条持续发给模型的对话：不显示上下文 chip（不伪造数字）。
-  if (s.mode !== 'collab') {
+  if (!s.flows) {
     const c = s.context;
     // 窗口登记为 0 = 本轮没拿到窗口：按后端 128K 兜底算占用，与卡片同一份口径。
     const win = Number((c && c.window) || 0) || 128000;

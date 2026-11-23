@@ -42,7 +42,7 @@
 | 代码里按边界切分的一块（业务单元、地基库、根（入口层）、呈现层各算一个；业务单元即 `src/capabilities/<单元>/`，与 `layers.yaml` 一行对应） | **单元**（unit） | 模块、组件 |
 | 业务边界（`src/capabilities/<单元>/<子业务>/`；独立业务的判据见 `docs/architecture/boundaries.md`） | **子业务**（能力 / capability） | 业务模块、模块 |
 | 一次任务里"用谁、怎么组合、谁拍板" | **形态**（single / collab / proxy） | 模式、架构、拓扑 |
-| 一个形态的具体组成（身份角色 + 流程序列 + 每个流程的核心席 / 成员席） | **会话类型**（`Profiles`；数据在 `systools/profiles.yaml`） | 会话模板、流程模板 |
+| 一个会话类型的组成（id 与显示名、身份角色、流程序列、每个流程的核心席 / 成员席） | **会话类型**（`Profiles`；数据在 `systools/profiles.yaml`；落盘是 `SessionSpec`） | 会话模板、流程模板 |
 | 驱动与具体流程之间的插件契约（推一步 / 让出一步 / 交回 / 处置自己发的关卡） | **流程**（`Flow`；id 登记在 `src/capabilities/conversation/session/domain/flow.rs` 的 `REGISTERED`） | 流程引擎、编排器 |
 | 一次运行与它的落盘单元 | **会话**（session） | 对话、聊天 |
 | 挂在父会话 `children/` 下的会话 | **子会话**（强调"它是一场完整工作"时可写**子工作**） | 子 agent、子任务 |

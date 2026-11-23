@@ -5,19 +5,23 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
+use crate::capabilities::conversation::session::api::{MEETING, PROXY, SINGLE};
 // ---------- Core 门面：会话中心（内存组合根） ----------
 #[test]
 pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
-    // web 与 runtime 的形态词汇只有 single / collab / proxy；其它一律不认。
-    use crate::presentation::web::parse_mode;
-    assert!(matches!(parse_mode("single"), Ok(WorkMode::Single)));
-    assert!(matches!(parse_mode("collab"), Ok(WorkMode::Collab)));
-    // 第三人形态：代理（没有名单，选它就是授予全权）。
-    assert!(matches!(parse_mode("proxy"), Ok(WorkMode::Proxy)));
-    assert!(parse_mode("nope").is_err());
-    for bad in ["bogus", "omni", ""] {
-        let e = parse_mode(bad).unwrap_err();
-        assert!(e.contains("未知模式"), "web 必须 400 并说明：{}", e);
+    // 呈现层只把会话类型原样往下传：在册与否由工作能力按会话类型表判（见 detail/profiles.rs）。
+    use crate::presentation::web::parse_kind;
+    assert_eq!(parse_kind("single").unwrap(), SINGLE);
+    assert_eq!(parse_kind(" collab ").unwrap(), MEETING);
+    assert_eq!(parse_kind("proxy").unwrap(), PROXY);
+    assert_eq!(
+        parse_kind("自己拼的类型").unwrap(),
+        "自己拼的类型",
+        "临时类型名照传"
+    );
+    for bad in ["", "   "] {
+        let e = parse_kind(bad).unwrap_err();
+        assert!(e.contains("kind 不能为空"), "web 必须 400 并说明：{}", e);
     }
 }
 
@@ -81,7 +85,7 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
         cmeta.node.is_none(),
         "节点不再记在会话 meta 里：一个 agent 一个会话，哪个节点正跑在它里面由链的 sub_session 认"
     );
-    assert_eq!(cmeta.mode, Mode::Single);
+    assert_eq!(cmeta.spec.kind, SINGLE);
     assert_eq!(
         crate::capabilities::conversation::session::api::work_root(
             core.history_handle().as_ref(),

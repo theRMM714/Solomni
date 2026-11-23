@@ -5,6 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
+use crate::capabilities::conversation::session::api::SINGLE;
 
 #[test]
 pub(crate) fn session_config_reports_tier_missing_and_runtimes_dir() {
@@ -12,7 +13,7 @@ pub(crate) fn session_config_reports_tier_missing_and_runtimes_dir() {
     seed_session(
         &hist,
         "w",
-        Mode::Single,
+        SINGLE,
         vec![agent_meta("a", &["a"], Some("m"))],
         ExecSpec {
             tier: Tier::Vm,
@@ -30,7 +31,7 @@ pub(crate) fn session_config_reports_tier_missing_and_runtimes_dir() {
     );
     let cfg = core.session_config("w").unwrap();
     assert_eq!(cfg.sid, "w");
-    assert_eq!(cfg.mode, Mode::Single);
+    assert_eq!(cfg.kind, SINGLE);
     assert!(!cfg.started, "没有内容的会话 = 还没开过");
     assert_eq!(cfg.tier, "vm");
     assert_eq!(cfg.agents[0].model, "m");

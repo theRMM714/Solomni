@@ -20,7 +20,7 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api` 的 DTO（`WorkSpec` / `WorkOpened`（形态用 `WorkMode` = 会话 `Mode` 的别名）/ `SessionConfig` / `SessionEdit` / `SessionView` / `ContinueView` / `FilesView` / `RuntimeReport` / `TierChoices` / `PermissionView` / `ThinkingView` / `AgentSuggestion` / `ConfigAgent` / `WorkMode`）与 guest 三类（`GuestBoot` / `GuestStop` / `EditGuest` / `GuestDiagnose`）；`work` 自己的 `WorkOps`、`turn` 的 `TurnOps` 与 `runtime` 的 `RuntimeOps` 签名直接用这些类型。
+- 入站面：`api` 的 DTO（`WorkSpec` / `WorkOpened` / `SessionTypeView`（会话类型表给界面的那份）/ `SessionConfig` / `SessionEdit` / `SessionView` / `ContinueView` / `FilesView` / `RuntimeReport` / `TierChoices` / `PermissionView` / `ThinkingView` / `AgentSuggestion` / `ConfigAgent` / `WorkMode`）与 guest 三类（`GuestBoot` / `GuestStop` / `EditGuest` / `GuestDiagnose`）；`work` 自己的 `WorkOps`、`turn` 的 `TurnOps` 与 `runtime` 的 `RuntimeOps` 签名直接用这些类型。
 - 状态归属：`Work` 只持能力面（`root` / `history` / `workspace` / `vm` / `packages` / `provision` / `modules` / `llm` / `tools` / `prompt` / `systools` / `log`），**不自持会话状态**：会话在世表、运行态与裁决队都在 `turn`，经形参 `&Turn` / `&mut Turn` 读写；`registry` / `probe` 同样按次传入。
 - 两段式的中间产物（`PreparedWork` / `PendingWork` / `PreparedEdit` / `PreparedActivation`）只在本能力内流转，不在 `api` 出现。
 
@@ -42,7 +42,7 @@
 - `src/capabilities/work/service/views.rs` → `SessionView` 的继续判据与文件视图是行为契约：改判据必须同改 `src/tests/api/session.rs`、`src/tests/routes.rs`、`src/tests/runtime/proxy.rs` 的断言。
 - `src/capabilities/work/service/create.rs` → 建工作的顺序、日志 key 与失败撤销是行为契约：改一处必须同改 `src/tests/runtime.rs`、`src/tests/api/compaction.rs`、`src/tests/session/lifecycle.rs` 的断言与 e2e 的建工作旅程。
 - `src/capabilities/work/service/guest_job.rs` → 稳定根判据与 guest 规格是行为契约：改一处必须同改 e2e 的 vm 档会话场景与 `SOLOMNI_VM_LIVE` 真机探针（`tests/cross-platform/gaps.yaml`）。
-- `src/capabilities/work/domain.rs` → 工作名校验与自由函数（`dedup_modules` / `merge_into_one` / `mode_str` / `session_started`）是纯逻辑，行为由 e2e 的建工作与协作旅程覆盖（具体实现的用例已移除）。
+- `src/capabilities/work/domain.rs` → 工作名校验与自由函数（`dedup_modules` / `merge_into_one` / `session_started`）是纯逻辑，行为由 e2e 的建工作与协作旅程覆盖（具体实现的用例已移除）。
 - `src/capabilities/turn/turn/service/facts.rs` 的 `Turn::build_single`（装配落 `src/capabilities/conversation/session/service/assemble.rs`）→ 本单元 `commit_work` 的唯一装配入口：改签名必须同改这里、`src/capabilities/turn/turn/unit-map` 的对应行与 `Turn` 的用例。
 
 ## 本目录

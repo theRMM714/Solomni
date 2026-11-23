@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::conversation::session::api::{
-    AgentSession, Flow, Gates, Mode, RunState, SessionEvent, subtree_of,
+    AgentSession, Flow, Gates, RunState, SessionEvent, subtree_of,
 };
 use crate::capabilities::turn::turn::api::{Prepared, Session};
 use crate::kernel::ports::HostProbe;
@@ -299,9 +299,12 @@ impl Turn {
         }
     }
 
-    /// 目的：一个会话的形态：落盘 meta 是唯一真相；取不到（无此会话）就是 None。
-    pub(crate) fn session_mode(&self, sid: &str) -> Option<Mode> {
-        self.history.load(sid).ok().map(|(m, _)| m.mode)
+    /// 目的：一个会话的声明：落盘 meta 是唯一真相；取不到（无此会话）就是 None。
+    pub(crate) fn session_spec(
+        &self,
+        sid: &str,
+    ) -> Option<crate::capabilities::conversation::session::api::SessionSpec> {
+        self.history.load(sid).ok().map(|(m, _)| m.spec)
     }
 
     /// 目的：这些会话里是否有任何一个的回合还攥在生成线程手里（核心里"生成中"）。

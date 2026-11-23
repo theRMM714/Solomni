@@ -5,6 +5,7 @@
 
 use super::builders::*;
 use super::prelude::*;
+use crate::capabilities::conversation::session::api::SINGLE;
 
 #[test]
 pub(crate) fn prompt_render_replaces_and_rejects_missing() {
@@ -324,10 +325,7 @@ pub(crate) fn user_at_reference_is_rewritten_in_transcript_and_history() {
         vec!["{\"type\":\"say\",\"text\":\"好的\"}".to_string()],
     );
     let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,

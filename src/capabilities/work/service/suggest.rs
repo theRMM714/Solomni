@@ -13,7 +13,7 @@ impl Work {
         &self,
         registry: &dyn Registry,
         task: &str,
-        mode: WorkMode,
+        kind: &str,
     ) -> Result<(Vec<AgentSuggestion>, Vec<SessionEvent>), String> {
         if !registry.any_models() {
             return Err("登记处还没有任何模型，请先到「模型登记」添加".to_string());
@@ -37,14 +37,24 @@ impl Work {
             },
             &mut crate::capabilities::conversation::slate::api::Request {
                 task,
-                mode: match mode {
-                    WorkMode::Single => crate::capabilities::conversation::slate::api::Mode::Single,
-                    WorkMode::Collab => crate::capabilities::conversation::slate::api::Mode::Collab,
-                    // 代理形态没有名单可拟（核心自己挑人）；如实拒绝，不拿单模式的清单糊弄。
-                    WorkMode::Proxy => {
+                mode: {
+                    if !self.flows.book().known(kind) {
+                        return Err(format!(
+                            "会话类型表里没有「{}」这个类型（systools/profiles.yaml）",
+                            kind
+                        ));
+                    }
+                    // 代理类型没有名单可拟（核心自己挑人）；如实拒绝，不拿单席的清单糊弄。
+                    if kind == crate::capabilities::conversation::session::api::PROXY {
                         return Err(
                             "代理形态没有名单：决定权整块交给核心，由它自己挑人".to_string()
                         );
+                    }
+                    // 有流程 = 要凑一队人（多席拟名单）；没有流程 = 一个人（单席拟名单）。
+                    let many = self.flows.book().spec_of(kind).is_some_and(|s| s.driven());
+                    match many {
+                        true => crate::capabilities::conversation::slate::api::Mode::Collab,
+                        false => crate::capabilities::conversation::slate::api::Mode::Single,
                     }
                 },
                 chat: chat.as_mut(),

@@ -89,7 +89,7 @@ function check(name, cond, extra) {
 /* ---------- 固定夹具：与 /api/sessions/{sid}/config 的 JSON 形状同形 ---------- */
 /* 路径用中性书写形式（斜杠 + 无盘符），只验呈现，不代表任何机器路径。 */
 const CFG = {
-  sid: "w", mode: "single", started: true,
+  sid: "w", kind: "single", flows: false, started: true,
   agents: [{ name: "调研员", modules: ["research"], model: "m1", chara: "会话快照人设" }],
   tier: "vm", guest: "debian-13", net: true,
   permission: {
@@ -126,7 +126,7 @@ const CFG = {
   runtimes_dir: "/runtimes",
 };
 const RAW = { // 还没开过的协作会话：名字可改、本机档
-  sid: "raw", mode: "collab", started: false,
+  sid: "raw", kind: "collab", flows: true, started: false,
   agents: [{ name: "x", modules: ["research"], model: "" }, { name: "y", modules: ["research"], model: "m2" }],
   tier: "host", guest: null, guests: [], net: false, pins: {},
   permission: { profile: "offline", label: "离线", summary: "", shared: { read: "all", write: "all", deny: [] }, narrowed: false, parent_profile: null, profiles: [] },
@@ -163,10 +163,16 @@ const sandbox = {
         providers: [], models: [{ id: "m1", name: "模型一" }, { id: "m2", name: "模型二" }],
         core: "m1", rejected: [], agents: [],
         settings: { streaming: true, show_reasoning: true },
+        // 类型表由后端给（向导与侧栏的名字都查它）。
+        session_types: [
+          { kind: "single", name: "单机", hint: "一个 agent 直接干活。", flows: false, roster: true, needs_task: false },
+          { kind: "collab", name: "会议", hint: "先讨论再执行。", flows: true, roster: true, needs_task: true },
+          { kind: "proxy", name: "代理", hint: "决定权整块交给核心。", flows: false, roster: false, needs_task: false },
+        ],
         sessions: [],
         history: [
-          { name: "w", mode: "single", ts: 1, done: true },
-          { name: "busy-one", mode: "collab", ts: 2, done: false },
+          { name: "w", kind: "single", ts: 1, done: true },
+          { name: "busy-one", kind: "collab", flows: true, ts: 2, done: false },
         ],
       });
     }
@@ -208,7 +214,7 @@ const sandbox = {
         available: {},
       } });
     }
-    if (/\/api\/history\/[^/]+$/.test(url)) return jsonRes({ meta: { mode: "single" }, events: [] });
+    if (/\/api\/history\/[^/]+$/.test(url)) return jsonRes({ meta: { kind: "single" }, events: [] });
     if (/\/files$/.test(url)) return jsonRes({ work: [], agents: [], roots: { work: "/session/w/work", agents: [] } });
     if (/\/api\/sessions\/w\/config$/.test(url)) return jsonRes({ config: CFG });
     if (/\/api\/sessions\/raw\/config$/.test(url)) return jsonRes({ config: RAW });
@@ -253,7 +259,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   if (loadErrors.length) return finish();
 
   await sleep(80); // 让启动路径的 refreshState 落地（renderHistory 用的是桩历史）
-  state.sessions.set("busy-one", { sid: "busy-one", sending: false, running: true, running_known: true, mode: "collab" }); // 本标签页收到了它的运行态事件
+  state.sessions.set("busy-one", { sid: "busy-one", sending: false, running: true, running_known: true, kind: "collab", flows: true }); // 本标签页收到了它的运行态事件
   renderHistory();
 
   /* ---- 会话列表：铅笔菜单 + 点条目不进会话 + 生成中禁用「编辑配置」 ---- */
@@ -293,7 +299,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const t = allText(modal);
   check("config: 标题带会话名", t.indexOf("配置：w") >= 0);
   check("config: 冻结说明（名单与形态）", t.indexOf("名单与形态已冻结") >= 0, t.slice(0, 200));
-  check("config: 形态说明", t.indexOf("单 agent（恰好 1 个 agent，模块数不限）") >= 0);
+  check("config: 类型说明", t.indexOf("会话类型：单机（没有流程，直接轮循环）") >= 0, t.slice(0, 400));
   check("config: agent 名字只读", t.indexOf("名字（只读）") >= 0);
   check("config: 模块选项来自 /api/state", t.indexOf("research") >= 0 && t.indexOf("+ 添加模块") >= 0);
   const selects = walk(modal, []).filter((x) => x.tag === "select");
@@ -401,7 +407,7 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   check("config(raw): 没有冻结提示", t2.indexOf("名单与形态冻结") < 0);
   const nameInputs = walk(m2, []).filter((n) => n.tag === "input" && String(n.placeholder).indexOf("agent 名字") >= 0);
   check("config(raw): 名字可编辑（会话还没开过）", nameInputs.length === 2 && nameInputs.every((n) => n.disabled !== true));
-  check("config(raw): 协作形态说明", t2.indexOf("协作（N 个 agent，各自独立沙箱）") >= 0);
+  check("config(raw): 有流程的类型说明", t2.indexOf("会话类型：会议（按流程推进）") >= 0, t2.slice(0, 400));
   check("config(raw): 本机档不显示虚拟根选择器",
     t2.indexOf("虚拟机（虚拟根）") >= 0 && String(guestField(m2).className).indexOf("hidden") >= 0, guestField(m2).className);
   // 前置条件不具备 = 虚拟机档禁用（不让选），并把后端给的原因原样呈现；本机档照旧可选。

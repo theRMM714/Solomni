@@ -9,8 +9,8 @@
 
 ## 一、形态
 - **执行席按 agent 一会话**（含同 agent 串行）、**讨论回合开工具循环**（能只读核实、拿不到模块工具）、**讨论由核心驱动**（泵只决定"该问谁"，成员回合在它自己的会话里跑，核实行与回合标记都落进那个会话；主会话只留"谁说了什么"）。
-- **形态词汇只有一套**：`Mode`（`single` / `collab` / `proxy`）定义在会话领域（`src/capabilities/conversation/session/domain/mode.rs`），落盘就是这三个小写词（`meta.yaml` 的 `mode`）。`work` 侧的 `WorkMode` 与 `proxy` 侧的 `SessionMode` 都只是它的别名，外部词一律经 `Mode::parse` 或 `parse_mode` 转成值；写进 meta 的形态不可能是第四种词，读回时 serde 直接拒掉未知值，所以构建会话时不再有「未知形态」分支。
-- **会话类型是数据**：一个会话类型就是一串流程与它们用到的身份角色，声明在 `systools/profiles.yaml`（三个形态各一条；`flows` 为空 = 没有流程、直接轮循环）。每个流程写清 `core`（核心通道出演的身份，不进成员表）与 `members`（成员席各要几员）。装配期校验：与 `Mode` 一一对应、流程在 `session/domain/flow.rs` 的 `REGISTERED` 里、每个流程有人出演、引用的角色都在角色表且没有坐错席（`core` 只收 `seat: core`，`members` 只收 `seat: member`；`session::domain::profile::Profiles`，加载在 `session/detail/yaml_profiles.rs`）。
+- **会话类型是落盘的声明，不是分支**：建会话时把类型表里那一条解析成 `SessionSpec`（`kind` / `name` / `role` / `flows`）写进 `meta.yaml`，之后装配只看这份声明——有流程就按流程装配，没有就一个 agent 直接轮循环（`spec.driven()`）；代码里没有「形态枚举」，也不按名字分支。类型 id 同时是命令与落盘用的词（ASCII），`name` 只给界面显示，`hint` 是选类型时的一句说明。
+- **会话类型是数据**：一个会话类型就是一串流程与它们用到的身份角色，声明在 `systools/profiles.yaml`（自带 single / collab / proxy 三条；`flows` 为空 = 没有流程、直接轮循环）。每条写清 `id`（命令与落盘用）、`name`（界面显示）、`hint`（一句说明）、`roles` 与 `flows`；每个流程写清 `core`（核心通道出演的身份，不进成员表）与 `members`（成员席各要几员）。装配期校验：id 唯一且不含空白、流程在 `session/domain/flow.rs` 的 `REGISTERED` 里、每个流程有人出演、引用的角色都在角色表且没有坐错席（`core` 只收 `seat: core`，`members` 只收 `seat: member`；`session::domain::profile::Profiles`，加载在 `session/detail/yaml_profiles.rs`）。
 - **agent 会话在第一个回合按需建**。
 - 主会话投影行带 `turn`（回档按回合同步截断）；角色表机制化（工具面与越权校验同出一份表）；压缩：`compact` 工具 + `compacted` 转录行 + 发送视图，按模型窗口百分比自动触发。
 

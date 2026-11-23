@@ -4,7 +4,7 @@
 //! 联动：回合推进的所有方法族的事件都经 `record_events` 落盘（见 docs/session/session-model.md）。
 
 use crate::capabilities::conversation::session::api::{
-    Mode, Persister, RunState, SessionEvent, subtree_of,
+    Persister, RunState, SessionEvent, subtree_of,
 };
 
 use super::session::Turn;
@@ -24,13 +24,16 @@ impl Turn {
         Ok(tree)
     }
 
-    /// 目的：派发目标的形态 + 这一次派发放不放行（放行 = Ok(mode)）。
+    /// 目的：派发目标的声明 + 这一次派发放不放行（放行 = Ok(spec)）。
     ///  代理转达与叫醒共用这一处，免得"看不看运行态"两处口径不一致。
-    pub(crate) fn dispatch_target(&self, sid: &str) -> Result<Mode, String> {
+    pub(crate) fn dispatch_target(
+        &self,
+        sid: &str,
+    ) -> Result<crate::capabilities::conversation::session::api::SessionSpec, String> {
         let meta = self.history.meta(sid)?;
         match meta.dispatch_refusal() {
             Some(e) => Err(e),
-            None => Ok(meta.mode),
+            None => Ok(meta.spec),
         }
     }
 

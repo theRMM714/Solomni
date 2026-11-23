@@ -375,8 +375,8 @@ assert((await reg('upsert_agent', { name: '双子', modules: ['research', 'revie
 
 await journey('suggest', async () => {
 // 推荐：核心优先复用登记处里的 agent（不代拟模型）
-const sug = await api('POST', '/api/suggest-models', { task: '调研并总结', mode: 'single' });
-assert(sug.status === 200, 'POST /api/suggest-models(mode=single)', sug.text.slice(0, 160));
+const sug = await api('POST', '/api/suggest-models', { task: '调研并总结', kind: 'single' });
+assert(sug.status === 200, 'POST /api/suggest-models(kind=single)', sug.text.slice(0, 160));
 const rec = (sug.json && sug.json.agents && sug.json.agents[0]) || {};
 assert(rec.reuse === true, '复用项带 reuse=true', JSON.stringify(rec));
 assert(rec.name === '双子' && rec.model === 'm2', '复用沿用登记处的模型（不代拟）', JSON.stringify(rec));
@@ -388,12 +388,12 @@ await journey('single-write', async () => {
 // 单 agent（模块无外部工具）：内置 write 落在该 agent 私沙箱
 name1 = 'e2e-single-' + Date.now();
 const c1 = await api('POST', '/api/actions/create_session', {
-  name: name1, mode: 'single',
+  name: name1, kind: 'single',
   agents: [{ name: '专属', transient: true, modules: ['research'], model: 'm1' }],
 });
 assert(c1.status === 200, '建单 agent 工作', c1.text.slice(0, 200));
 const meta1 = fs.readFileSync(path.join(dir(name1), 'meta.yaml'), 'utf8');
-assert(/mode: single/.test(meta1), 'meta.mode = single', meta1.split('\n').slice(0, 6).join(' | '));
+assert(/kind: single/.test(meta1), 'meta.spec.kind = single', meta1.split('\n').slice(0, 6).join(' | '));
 
 const said = await act(name1, 'send_message', { text: '记一笔' });
 assert(said.status === 200, '单 agent 发言', said.text.slice(0, 200));
@@ -425,7 +425,7 @@ await journey('rewind-archive', async () => {
 // 恢复按标记把转录与共享区一起展回来（删除模式不写标记，这条是新的一档）。
 const nameArc = 'e2e-archive-' + Date.now();
 const cArc = await api('POST', '/api/actions/create_session', {
-  name: nameArc, mode: 'single',
+  name: nameArc, kind: 'single',
   agents: [{ name: '专属', transient: true, modules: ['research'], model: 'm1' }],
 });
 assert(cArc.status === 200, '建留档回档工作', cArc.text.slice(0, 200));
@@ -473,7 +473,7 @@ if (process.env.E2E_FENCE_LIVE !== '1') {
 } else {
   const nameShell = 'e2e-shell-' + Date.now();
   const cShell = await api('POST', '/api/actions/create_session', {
-    name: nameShell, mode: 'single',
+    name: nameShell, kind: 'single',
     agents: [{ name: '执行手', transient: true, modules: [], model: 'm1' }],
   });
   assert(cShell.status === 200, '建零模块单 agent 工作（shell）', cShell.text.slice(0, 200));
@@ -516,7 +516,7 @@ fs.mkdirSync(path.join(ROOT, 'modules', 'toolbox', 'userdata'), { recursive: tru
 fs.writeFileSync(path.join(ROOT, 'modules', 'toolbox', 'userdata', 'e2e.txt'), '第一行内容\n第二行内容\n');
 const name1b = 'e2e-multi-' + Date.now();
 const c1b = await api('POST', '/api/actions/create_session', {
-  name: name1b, mode: 'single',
+  name: name1b, kind: 'single',
   agents: [{ name: '双子形', transient: true, modules: ['research', 'toolbox'], model: 'm1' }],
 });
 assert(c1b.status === 200, '建单 agent 工作（1 个 agent 带 2 个模块）', c1b.text.slice(0, 200));
@@ -585,7 +585,7 @@ await journey('bad-envelope', async () => {
 // 非法工具信封：必须记成一条失败的工具行，且 JSON 绝不上屏（真实 bug 的回归）
 const name1f = 'e2e-badenv-' + Date.now();
 const c1f = await api('POST', '/api/actions/create_session', {
-  name: name1f, mode: 'single',
+  name: name1f, kind: 'single',
   agents: [{ name: '坏信封手', transient: true, modules: ['toolbox'], model: 'm1' }],
 });
 assert(c1f.status === 200, '建「坏信封」工作', c1f.text.slice(0, 200));
@@ -603,7 +603,7 @@ await journey('unclosed-envelope', async () => {
 // 正文在前、坏信封在后且未闭合：正文保留，坏 JSON 不上屏
 const name1g = 'e2e-unclosed-' + Date.now();
 const c1g = await api('POST', '/api/actions/create_session', {
-  name: name1g, mode: 'single',
+  name: name1g, kind: 'single',
   agents: [{ name: '半截手', transient: true, modules: ['toolbox'], model: 'm1' }],
 });
 assert(c1g.status === 200, '建「半截信封」工作', c1g.text.slice(0, 200));
@@ -621,7 +621,7 @@ await journey('abs-path', async () => {
 // 外部工具 + 真实绝对路径读用户投喂的文件（最初那个"read_txt 不认识路径"的场景，现在必须是绿的）
 const name1h = 'e2e-abspath-' + Date.now();
 const c1h = await api('POST', '/api/actions/create_session', {
-  name: name1h, mode: 'single',
+  name: name1h, kind: 'single',
   agents: [{ name: '工具手', transient: true, modules: ['toolbox'], model: 'm1' }],
 });
 assert(c1h.status === 200, '建「绝对路径」工作', c1h.text.slice(0, 200));
@@ -642,7 +642,7 @@ await journey('patch', async () => {
 // 自由格式补丁：信封 + 之后原样跟补丁正文（不转义）——这条新路径必须在真实二进制上通
 const name1p = 'e2e-patch-' + Date.now();
 const c1p = await api('POST', '/api/actions/create_session', {
-  name: name1p, mode: 'single',
+  name: name1p, kind: 'single',
   agents: [{ name: '补丁手', transient: true, modules: ['research'], model: 'm1' }],
 });
 assert(c1p.status === 200, '建「补丁」工作', c1p.text.slice(0, 200));
@@ -670,7 +670,7 @@ await journey('ref-collab', async () => {
 // 协作里引用某个 agent 的私沙：如实说明只有那个 agent 能读（speaker = None）
 const name1e = 'e2e-refcollab-' + Date.now();
 const c1e = await api('POST', '/api/actions/create_session', {
-  name: name1e, mode: 'collab', task: '@sandbox:甲/秘密.md 只看这个',
+  name: name1e, kind: 'collab', task: '@sandbox:甲/秘密.md 只看这个',
   agents: [{ name: '甲', transient: true, modules: ['summarizer'], model: 'm1' }],
 });
 assert(c1e.status === 200, '建引用私沙的协作工作', c1e.text.slice(0, 200));
@@ -685,7 +685,7 @@ await journey('prose', async () => {
 // 同一轮"先写正文再发工具信封"：正文进转录，信封 JSON 不出现在任何行里
 const name1d = 'e2e-prose-' + Date.now();
 const c1d = await api('POST', '/api/actions/create_session', {
-  name: name1d, mode: 'single',
+  name: name1d, kind: 'single',
   agents: [{ name: '双子形2', transient: true, modules: ['research', 'toolbox'], model: 'm1' }],
 });
 assert(c1d.status === 200, '建「正文+工具」工作', c1d.text.slice(0, 200));
@@ -703,7 +703,7 @@ await journey('collab', async () => {
 // 协作（非代拟）：两个 agent 跑完五阶段并交付
 const name2 = 'e2e-collab-' + Date.now();
 const c2 = await api('POST', '/api/actions/create_session', {
-  name: name2, mode: 'collab', task: '一起把事情做完',
+  name: name2, kind: 'collab', task: '一起把事情做完',
   agents: [
     { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
     { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
@@ -752,7 +752,7 @@ await journey('delegate', async () => {
 // 代拟：核心优先复用（单兵）+ 组装（新助手），确认后名单写回 meta
 const name3 = 'e2e-delegate-' + Date.now();
 // 协作且不给名单 = 委托核心代拟（delegate 由核心按形态派生，不再是参数）。
-const c3 = await api('POST', '/api/actions/create_session', { name: name3, mode: 'collab', agents: [], task: '调研一下再总结' });
+const c3 = await api('POST', '/api/actions/create_session', { name: name3, kind: 'collab', agents: [], task: '调研一下再总结' });
 assert(c3.status === 200, '建代拟工作（无名单）', c3.text.slice(0, 200));
 // 开场事实在**事件台**上（回包只给 head）：按会话过滤取它自己的流。
 const c3Bus = JSON.stringify(
@@ -786,7 +786,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
   // ① agree 收敛：只有一个人同意时不该收敛（要出现下一轮），两人都同意才收敛。
   const nA = 'e2e-collab-noconv-' + Date.now();
   assert((await api('POST', '/api/actions/create_session', {
-    name: nA, mode: 'collab', task: '不收敛：先各说各的',
+    name: nA, kind: 'collab', task: '不收敛：先各说各的',
     agents: [
       { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
       { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
@@ -800,7 +800,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
   // ② leave 不可逆：退场后不再被询问；留下的那个人同意即收敛（退场者不算收敛门槛）。
   const nB = 'e2e-collab-leave-' + Date.now();
   assert((await api('POST', '/api/actions/create_session', {
-    name: nB, mode: 'collab', task: '退场：甲先撤',
+    name: nB, kind: 'collab', task: '退场：甲先撤',
     agents: [
       { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
       { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
@@ -819,7 +819,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
   // ③ 轮次上限：谁都不同意 → 触上限并交用户裁决。
   const nC = 'e2e-collab-cap-' + Date.now();
   assert((await api('POST', '/api/actions/create_session', {
-    name: nC, mode: 'collab', task: '上限：一直议下去',
+    name: nC, kind: 'collab', task: '上限：一直议下去',
     agents: [
       { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
       { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
@@ -832,7 +832,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
   // ④ 返工闭环：验收先 fail → 定向返工 → 重验 → 交付。
   const nD = 'e2e-collab-rework-' + Date.now();
   assert((await api('POST', '/api/actions/create_session', {
-    name: nD, mode: 'collab', task: '返工：第一次验收不过',
+    name: nD, kind: 'collab', task: '返工：第一次验收不过',
     agents: [
       { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
       { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
@@ -860,7 +860,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
   // ⑤ 撤回同意：撤回行进转录，讨论重新打开并继续轮转。
   const nE = 'e2e-collab-withdraw-' + Date.now();
   assert((await api('POST', '/api/actions/create_session', {
-    name: nE, mode: 'collab', task: '不收敛：撤回后重议',
+    name: nE, kind: 'collab', task: '不收敛：撤回后重议',
     agents: [
       { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
       { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
@@ -881,7 +881,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
   // ⑥ ask 中止：agent 提问 → 轮转中止并呈给用户；回答后继续。
   const nF = 'e2e-collab-ask-' + Date.now();
   assert((await api('POST', '/api/actions/create_session', {
-    name: nF, mode: 'collab', task: '提问：需要用户决定',
+    name: nF, kind: 'collab', task: '提问：需要用户决定',
     agents: [
       { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
       { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
@@ -924,7 +924,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
       'MCP 服务拉起并发现操作（握手 + tools/list）', JSON.stringify(mcpOps));
     const nameM = 'e2e-mcp-' + Date.now();
     const cM = await api('POST', '/api/actions/create_session', {
-      name: nameM, mode: 'single',
+      name: nameM, kind: 'single',
       agents: [{ name: '工具手', transient: true, modules: [MCP_MODULE], model: 'm1' }],
     });
     assert(cM.status === 200, '建「MCP 工具箱」工作（只有一个模块）', cM.text.slice(0, 200));
@@ -959,7 +959,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
   const nameR = 'e2e-realtools-' + Date.now();
   const workDir = path.join(ROOT, 'session', nameR, 'work');
   const cR = await api('POST', '/api/actions/create_session', {
-    name: nameR, mode: 'single',
+    name: nameR, kind: 'single',
     agents: [{ name: '资料手', transient: true, modules: ['harvest', 'render', 'indexer'], model: 'm1' }],
   });
   assert(cR.status === 200, '建「真工具」工作（harvest + render + indexer）', cR.text.slice(0, 200));
@@ -1053,7 +1053,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
   assert((await reg('set_settings', { streaming: false })).status === 200, '关流式（本场景用）');
   const name1n = 'e2e-native-' + Date.now();
   const c1n = await api('POST', '/api/actions/create_session', {
-    name: name1n, mode: 'single',
+    name: name1n, kind: 'single',
     agents: [{ name: '多调手', transient: true, modules: ['summarizer'], model: 'm1' }],
   });
   assert(c1n.status === 200, '建「原生多调用」工作', c1n.text.slice(0, 200));
@@ -1095,7 +1095,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
   {
     await reg('upsert_agent', { name: '代甲', modules: ['render'], model: 'm1' });
     const pName = 'e2e-agency-' + Date.now();
-    const created = await api('POST', '/api/actions/create_session', { name: pName, mode: 'proxy' });
+    const created = await api('POST', '/api/actions/create_session', { name: pName, kind: 'proxy' });
     assert(created.status === 200 && created.json && created.json.sid === pName, '建代理会话（第三人形态，没有名单）', created.text.slice(0, 200));
     const said = await act(pName, 'send_message', { text: '把这件事做完' });
     assert(said.status === 200, '跟代理说一句，它自己跑一轮', said.text.slice(0, 200));
@@ -1134,7 +1134,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
   } else {
     const nameVm = 'e2e-vm-' + Date.now();
     const cv = await api('POST', '/api/actions/create_session', {
-      name: nameVm, mode: 'single',
+      name: nameVm, kind: 'single',
       agents: [{ name: '探针兵', transient: true, modules: ['toolbox'], model: 'm1' }],
     });
     assert(cv.status === 200, '建虚拟机档工作（先本机档）', cv.text.slice(0, 200));
@@ -1230,7 +1230,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
       const nameExt = 'e2e-vm-ext-' + Date.now();
       try {
         const ce = await api('POST', '/api/actions/create_session', {
-          name: nameExt, mode: 'single',
+          name: nameExt, kind: 'single',
           agents: [{ name: '探针兵', transient: true, modules: ['toolbox'], model: 'm1' }],
           tier: 'vm', guest: vmGuest, workspace: extDir,
           // 这条旅程不联网，档位用默认的离线即可。

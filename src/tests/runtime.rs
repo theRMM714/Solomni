@@ -7,6 +7,7 @@ mod proxy;
 use super::builders::*;
 use super::prelude::*;
 // 只有非 macOS 的用例用得到这个面（macOS 上其余用例整体 cfg 掉）。
+use crate::capabilities::conversation::session::api::{MEETING, PROXY, SINGLE};
 #[cfg(not(target_os = "macos"))]
 use crate::presentation::faces::Faces;
 
@@ -114,7 +115,7 @@ pub(crate) fn creating_a_vm_session_does_not_block_the_core() {
     let core = runtime_for_vm(probe, engine.clone(), vec![module_of("a")]);
     let handle = Handle::spawn(core).expect("起核心");
     let faces = Faces::from_handle(&handle);
-    let mut spec = work("w-core-free", WorkMode::Single, &["a"]);
+    let mut spec = work("w-core-free", SINGLE, &["a"]);
     spec.tier = Tier::Vm;
     spec.guest = Some(guest.clone());
     let creator = {
@@ -160,7 +161,7 @@ pub(crate) fn a_failed_guest_boot_leaves_no_session_behind() {
     let core = runtime_for_vm(probe, engine, vec![module_of("a")]);
     let handle = Handle::spawn(core).expect("起核心");
     let faces = Faces::from_handle(&handle);
-    let mut spec = work("w-boot-fail", WorkMode::Single, &["a"]);
+    let mut spec = work("w-boot-fail", SINGLE, &["a"]);
     spec.tier = Tier::Vm;
     spec.guest = Some(guest);
     let err = faces.work.create_work(spec).expect_err("起不来要如实拒绝");
@@ -174,7 +175,7 @@ pub(crate) fn a_failed_guest_boot_leaves_no_session_behind() {
         "历史里不该留下这条会话"
     );
     // 占名也要撤掉：同名重试能通过（而不是被"工作名已存在"挡住）。
-    let mut again = work("w-boot-fail", WorkMode::Single, &["a"]);
+    let mut again = work("w-boot-fail", SINGLE, &["a"]);
     again.tier = Tier::Host;
     faces
         .work
@@ -254,7 +255,7 @@ fn assert_two_stable_mounts(
 pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
     let engine = FakeEngine::new();
     let (mut core, product, external, guest) = core_for_external_vm("vm-ext-boot", engine.clone());
-    let mut spec = work("wx", WorkMode::Single, &["a"]);
+    let mut spec = work("wx", SINGLE, &["a"]);
     spec.tier = Tier::Vm;
     spec.guest = Some(guest);
     spec.workspace = Some(external.clone());
@@ -370,7 +371,7 @@ pub(crate) fn loaded_binding_is_rechecked_against_the_tier() {
 pub(crate) fn vm_edit_from_host_to_vm_keeps_external_workspace_mounts() {
     let engine = FakeEngine::new();
     let (mut core, product, external, guest) = core_for_external_vm("vm-ext-edit", engine.clone());
-    let mut spec = work("wx", WorkMode::Single, &["a"]);
+    let mut spec = work("wx", SINGLE, &["a"]);
     spec.workspace = Some(external.clone());
     let sid = core.create_work(spec).expect("本机档 + 外部工作区可建").sid;
     assert!(
@@ -404,7 +405,7 @@ pub(crate) fn external_workspace_vm_delete_stops_guest_and_keeps_external() {
     let engine = FakeEngine::new();
     let (mut core, product, external, guest) =
         core_for_external_vm("vm-ext-delete", engine.clone());
-    let mut spec = work("wx", WorkMode::Single, &["a"]);
+    let mut spec = work("wx", SINGLE, &["a"]);
     spec.tier = Tier::Vm;
     spec.guest = Some(guest);
     spec.workspace = Some(external.clone());
@@ -439,7 +440,7 @@ pub(crate) fn failed_guest_boot_cleans_external_workspace_store() {
         ..Default::default()
     };
     let (mut core, product, external, guest) = core_for_external_vm("vm-ext-boot-fail", engine);
-    let mut spec = work("wx", WorkMode::Single, &["a"]);
+    let mut spec = work("wx", SINGLE, &["a"]);
     spec.tier = Tier::Vm;
     spec.guest = Some(guest);
     spec.workspace = Some(external.clone());
@@ -553,10 +554,7 @@ pub(crate) fn plan_review_carries_the_core_advice() {
 #[test]
 pub(crate) fn work_upload_conflict_and_safe_name() {
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
-    let sid = core
-        .create_work(work("up", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("up", SINGLE, &["a"])).unwrap().sid;
     assert!(core.work_upload(&sid, "x.txt", b"hello", false).unwrap());
     assert!(
         !core.work_upload(&sid, "x.txt", b"again", false).unwrap(),
@@ -674,10 +672,7 @@ pub(crate) fn repeated_malformed_envelopes_each_get_a_failed_row() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), script);
     let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -724,10 +719,7 @@ pub(crate) fn prose_then_unclosed_tool_envelope_is_malformed_and_keeps_prose() {
         ],
     );
     let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -800,10 +792,7 @@ pub(crate) fn prose_then_tool_envelope_keeps_prose_line_and_rebuilds_identically
         Arc::clone(&hist),
         Arc::clone(&io),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -915,10 +904,7 @@ pub(crate) fn tool_envelope_after_prose_runs_and_json_never_shows() {
         gw(member, vec!["[]".into()]),
         Arc::clone(&runner),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -996,10 +982,7 @@ pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
     core.registry_mut()
         .probe_model_tools("m")
         .expect("探测（把这条通道判成原生）");
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -1100,10 +1083,7 @@ pub(crate) fn read_facts_rebuild_identically_to_live() {
         Arc::clone(&io),
     );
     core.registry_mut().probe_model_tools("m").expect("探测");
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -1183,7 +1163,7 @@ pub(crate) fn stale_read_turns_into_a_placeholder_in_the_next_send_view() {
         Arc::clone(&io),
     );
     core.registry_mut().probe_model_tools("m").expect("探测");
-    let mut spec = work("w", WorkMode::Single, &["a"]);
+    let mut spec = work("w", SINGLE, &["a"]);
     spec.freshness = Some((true, 0));
     let sid = core.create_work(spec).unwrap().sid;
 
@@ -1309,7 +1289,7 @@ pub(crate) fn stale_read_of_a_large_file_is_replaced_segment_by_segment() {
         Arc::clone(&io),
     );
     core.registry_mut().probe_model_tools("m").expect("探测");
-    let mut spec = work("w", WorkMode::Single, &["a"]);
+    let mut spec = work("w", SINGLE, &["a"]);
     spec.freshness = Some((true, 0));
     let sid = core.create_work(spec).unwrap().sid;
 
@@ -1400,7 +1380,7 @@ pub(crate) fn stale_read_of_a_large_file_is_replaced_segment_by_segment() {
 fn creating_a_session_without_any_model_is_refused_and_leaves_no_history() {
     let mut core = core_with_settings(InMemorySettings::without_models());
     let err = core
-        .create_work(work("no-model", WorkMode::Single, &[]))
+        .create_work(work("no-model", SINGLE, &[]))
         .expect_err("没有模型必须拒绝");
     assert!(err.contains("还没有任何模型"), "{}", err);
     assert!(
@@ -1415,7 +1395,7 @@ fn creating_a_session_without_core_default_is_refused() {
     let mut core =
         core_with_settings_modules(InMemorySettings::without_core(), vec![module_of("a")]);
     let err = core
-        .create_work(work("no-core", WorkMode::Single, &["a"]))
+        .create_work(work("no-core", SINGLE, &["a"]))
         .expect_err("没有核心默认必须拒绝");
     assert!(err.contains("agent a 没有可用模型通道"), "{}", err);
     assert!(err.contains("核心 AI 未设定默认模型"), "{}", err);
@@ -1432,7 +1412,7 @@ fn creating_a_proxy_without_core_default_is_refused() {
     let spec = WorkSpec {
         freshness: None,
         name: "no-core-proxy".to_string(),
-        mode: WorkMode::Proxy,
+        kind: PROXY.to_string(),
         agents: Vec::new(),
         task: None,
         delegate: false,
@@ -1456,7 +1436,7 @@ fn creating_a_proxy_without_core_default_is_refused() {
 fn creating_a_collab_without_core_default_is_refused_even_with_explicit_models() {
     let mut core =
         core_with_settings_modules(InMemorySettings::without_core(), vec![module_of("a")]);
-    let mut spec = work("no-core-collab", WorkMode::Collab, &["a"]);
+    let mut spec = work("no-core-collab", MEETING, &["a"]);
     spec.task = Some("做个东西".to_string());
     spec.agents[0].model = Some("m".to_string());
     let err = core

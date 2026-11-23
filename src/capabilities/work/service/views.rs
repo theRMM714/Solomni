@@ -8,47 +8,67 @@ use super::*;
 use crate::capabilities::conversation::session::api::{subtree_of, work_root};
 
 impl Work {
-    /// 目的：上下文「继续」是否该出现——判据只在后端（前端不按末条/模式猜）。
-    /// 约束：正在跑、已归档、已停止、代理、或没有真实断点时不出现；协作有挂起卡时由卡承担，不给继续。
+    /// 目的：会话类型表翻成界面要的样子（名字、一句说明、要不要名单与需求）。
+    /// 约束：顺序照声明；要不要需求按声明里的流程（有流程才必填本次需求）；代理式（没有流程、坐核心代理席）不要名单。
+    pub(crate) fn session_types(&self) -> Vec<SessionTypeView> {
+        use crate::capabilities::conversation::session::api::PROXY_ROLE;
+        self.flows
+            .book()
+            .profiles
+            .iter()
+            .map(|p| {
+                let auto = p.flows.is_empty() && p.roles.iter().any(|r| r == PROXY_ROLE);
+                SessionTypeView {
+                    kind: p.id.clone(),
+                    name: if p.name.trim().is_empty() {
+                        p.id.clone()
+                    } else {
+                        p.name.clone()
+                    },
+                    hint: p.hint.clone(),
+                    flows: !p.flows.is_empty(),
+                    roster: !auto,
+                    needs_task: !p.flows.is_empty(),
+                }
+            })
+            .collect()
+    }
+
+    /// 目的：上下文「继续」是否该出现——判据只在后端（前端不按末条/类型猜）。
+    /// 约束：正在跑、已归档、已停止、代理、或没有真实断点时不出现；有流程的会话有挂起卡时由卡承担。
     ///   已停止 / 已归档都是历史态，恢复入口是「启用会话」/「恢复归档」；这时的「继续」会被派发闸拒掉。
     fn continue_action(
         &self,
         turn: &Turn,
         sid: &str,
         running: bool,
-        mode: WorkMode,
-        run: &str,
+        entry: Option<&HistoryView>,
         has_pending: bool,
     ) -> Option<ContinueView> {
-        if running
-            || run == "archived"
-            || run == RunState::Stopped.as_str()
-            || mode == WorkMode::Proxy
-        {
+        let flows = entry.is_some_and(|h| h.flows);
+        let auto = entry.is_some_and(|h| h.auto);
+        let run = entry.map(|h| h.run.as_str()).unwrap_or("active");
+        if running || run == "archived" || run == RunState::Stopped.as_str() {
             return None;
         }
-        match mode {
-            WorkMode::Single => {
-                // 只有「上一轮还没答完」才算断点：末条是 AI 发言时继续会撞上「请先发言再继续」。
-                let user_last =
-                    matches!(turn.session(sid), Some(Session::Single(s)) if s.last_is_user());
-                if user_last {
-                    Some(ContinueView {
-                        kind: "turn".to_string(),
-                        label: "继续".to_string(),
-                        reason: "上一轮被打断：继续会把这轮重答一遍".to_string(),
-                    })
-                } else {
-                    None
-                }
-            }
-            WorkMode::Collab if !has_pending => Some(ContinueView {
-                kind: "collab".to_string(),
-                label: "恢复协作".to_string(),
-                reason: "协作泵没有在跑".to_string(),
-            }),
-            _ => None,
+        if flows {
+            // 有流程的会话没有「断点重答」这回事：泵没在跑就从断点推进（挂起卡优先由卡承担）。
+            return (!has_pending).then(|| ContinueView {
+                kind: "resume".to_string(),
+                label: "继续".to_string(),
+                reason: "流程没有在跑".to_string(),
+            });
         }
+        if auto {
+            return None;
+        }
+        // 只有「上一轮还没答完」才算断点：末条是 AI 发言时继续会撞上「请先发言再继续」。
+        let user_last = matches!(turn.session(sid), Some(Session::Single(s)) if s.last_is_user());
+        user_last.then(|| ContinueView {
+            kind: "turn".to_string(),
+            label: "继续".to_string(),
+            reason: "上一轮被打断：继续会把这轮重答一遍".to_string(),
+        })
     }
 
     /// 目的：一条会话的权威视图（启用回包 / 正在生成时附着用）：状态、运行态与上下文继续。
@@ -95,7 +115,11 @@ impl Work {
             .into_iter()
             .map(|(sid, done)| {
                 let entry = history.iter().find(|h| h.name == sid);
-                let mode = entry.map(|h| h.mode).unwrap_or(WorkMode::Single);
+                let kind = entry.map(|h| h.kind.clone()).unwrap_or_else(|| {
+                    crate::capabilities::conversation::session::api::SINGLE.to_string()
+                });
+                let flows = entry.is_some_and(|h| h.flows);
+                let auto = entry.is_some_and(|h| h.auto);
                 // 运行态取落盘事实（不在内存里留影子状态）；拿不到（生成中 / 未落盘）按正常运行。
                 let run = entry
                     .map(|h| h.run.as_str())
@@ -117,14 +141,14 @@ impl Work {
                 let can_update_task = match turn.session(&sid) {
                     Some(Session::Flow(_)) => true,
                     Some(Session::Single(_)) => false,
-                    None => mode == WorkMode::Collab,
+                    None => flows,
                 };
                 // 待裁决：**判据只有队本身**（核心各关卡与工具级确认排在同一条队上）——
                 // 正在生成的会话（对象在工作线程手里）照样取得到；推的卡片事件与它是同一份。
                 let pending = turn.desk().peek_gate(&sid).and_then(|d| d.json());
                 let running = running_now.contains(&sid);
                 let continue_action =
-                    self.continue_action(turn, &sid, running, mode, &run, pending.is_some());
+                    self.continue_action(turn, &sid, running, entry, pending.is_some());
                 // 只有持续对话的会话才有单一上下文；协作主会话由核心按次组上下文，不伪造数字。
                 let context = match turn.session(&sid) {
                     Some(Session::Single(s)) => s.context_usage(),
@@ -190,7 +214,9 @@ impl Work {
                 SessionView {
                     running,
                     sid,
-                    mode,
+                    kind,
+                    flows,
+                    auto,
                     done,
                     tier: exec.tier.as_str().to_string(),
                     tier_ready: readiness.ready(),

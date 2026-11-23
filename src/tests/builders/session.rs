@@ -4,6 +4,7 @@
 //! 联动：`src/capabilities/runtime/api.rs` 与 `src/capabilities/modules/api.rs`。
 
 use super::*;
+use crate::capabilities::conversation::session::api::SessionSpec;
 
 pub(crate) fn chain_node(id: &str, deps: &[&str]) -> crate::capabilities::taskchain::api::TaskNode {
     crate::capabilities::taskchain::api::TaskNode {
@@ -126,11 +127,19 @@ pub(crate) fn agent_meta(name: &str, modules: &[&str], model: Option<&str>) -> A
     }
 }
 
+/// 目的：按会话类型表造一份落盘声明（夹具与产品同一条路：会议类型自带流程、代理类型坐核心席）。
+/// 参数：`kind` = 会话类型 id；表里没有就退回一个没有流程的单 agent 声明。
+pub(crate) fn seeded_spec(kind: &str) -> SessionSpec {
+    crate::tests::doubles::test_profiles()
+        .spec_of(kind)
+        .unwrap_or_else(|| SessionSpec::plain(kind, kind, "solo"))
+}
+
 /// 目的：直接把一份 meta 放进内存历史（模拟"重启后从盘上读回该会话"）。
 pub(crate) fn seed_session(
     hist: &Arc<InMemoryHistory>,
     name: &str,
-    mode: Mode,
+    kind: &str,
     agents: Vec<AgentMeta>,
     exec: ExecSpec,
 ) {
@@ -139,7 +148,7 @@ pub(crate) fn seed_session(
         context_freshness: false,
         freshness_keep_percent: 80,
         name: name.to_string(),
-        mode,
+        spec: seeded_spec(kind),
         delegate: false,
         modules: agents.iter().flat_map(|a| a.modules.clone()).collect(),
         task: None,

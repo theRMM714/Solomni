@@ -5,6 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
+use crate::capabilities::conversation::session::api::SINGLE;
 use crate::capabilities::conversation::session::api::run_batch;
 #[test]
 pub(crate) fn tool_loop_rejects_undeclared_tool() {
@@ -166,10 +167,7 @@ pub(crate) fn builtin_file_tools_run_in_direct_session() {
         gw(member, vec!["[]".into()]),
         Arc::clone(&io),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -217,10 +215,7 @@ pub(crate) fn envelope_mode_native_calls_become_a_failed_tool_line() {
         raw: "先确认一下：".to_string(),
     };
     let mut core = core_with_io_gateway(vec![module_of("a")], gateway, Arc::clone(&io));
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,

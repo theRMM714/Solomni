@@ -214,7 +214,7 @@ http.createServer((req, res) => {
       } else if (nTools === 1) {
         // 建会话 = 建 + 写开头 + 开工：task 就是它的第一句（不再另发一条消息）。
         calls = call('create_session', {
-          mode: 'single',
+          kind: 'single',
           agents: [{ ref: '代甲' }],
           task: '把这件事做完',
           request_id: 'agency-1',

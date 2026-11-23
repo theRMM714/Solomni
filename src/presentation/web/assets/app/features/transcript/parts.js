@@ -225,7 +225,7 @@ function lineBlock(p, s, key, live) {
 function sessionNote(s) {
   if (!s) return null;
   const bits = [];
-  if (s.mode === 'proxy') {
+  if (s.auto) {
     bits.push('代理模式：核心代你挑人、建子工作并回答它们的关卡——这就是全权；' +
       '按「停止」会让相关会话一起停下。');
   }

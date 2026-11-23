@@ -5,6 +5,7 @@
 
 use super::builders::*;
 use super::prelude::*;
+use crate::capabilities::conversation::session::api::SINGLE;
 
 #[test]
 pub(crate) fn envelope_parse_clean() {
@@ -78,10 +79,7 @@ pub(crate) fn malformed_tool_envelope_becomes_a_failed_tool_line() {
         Arc::clone(&hist),
         Arc::clone(&io),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -449,10 +447,7 @@ pub(crate) fn reasoning_is_kept_on_final_transcript_lines() {
         ReasoningGateway,
         Arc::new(InMemorySysIo::new()),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -504,10 +499,7 @@ pub(crate) fn envelope_only_round_produces_only_a_tool_line() {
         ok: true,
     });
     let mut core = core_with_runner(vec![mod_a], gw(member, vec!["[]".into()]), runner);
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let rows = transcript_rows(
         &with_turn_io(|io, cancel, emit| {
             core.turn.single_say(
@@ -545,10 +537,7 @@ pub(crate) fn an_aborted_generation_never_executes_a_repairable_envelope() {
     // 中止网关：这一轮的通道回调返回 false（调用方要求停止）
     let mut core =
         core_with_io_gateway(vec![module_of("a")], AbortGateway { raw }, Arc::clone(&io));
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     // 取消标志在生成开始前就已置位 = 用户按下了「停止」：引擎据此收尾，
     // 不再发起下一次调用（工具调用没有上限兜底，这条出口必须自己站住）。
     let events = {
@@ -591,10 +580,7 @@ pub(crate) fn a_cancelled_generation_never_executes_a_valid_tool_envelope() {
     let io = Arc::new(InMemorySysIo::new());
     let mut core =
         core_with_io_gateway(vec![module_of("a")], AbortGateway { raw }, Arc::clone(&io));
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = {
         let io = crate::capabilities::conversation::session::api::TurnIo {
             llm: Default::default(),
@@ -643,10 +629,7 @@ pub(crate) fn an_interrupted_generation_keeps_the_half_sentence_as_a_cut_line() 
         },
         Arc::clone(&io),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = {
         let io = crate::capabilities::conversation::session::api::TurnIo {
             llm: Default::default(),
@@ -710,10 +693,7 @@ pub(crate) fn a_truncated_output_is_reported_as_truncation_not_as_a_bad_envelope
             ],
         },
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -746,10 +726,7 @@ pub(crate) fn a_truncated_output_is_reported_as_truncation_not_as_a_bad_envelope
             script: vec!["半句话".to_string()],
         },
     );
-    let sid2 = core2
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid2 = core2.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events2 = with_turn_io(|io, cancel, emit| {
         core2.turn.single_say(
             &sid2,
@@ -791,10 +768,7 @@ pub(crate) fn a_freeform_envelope_is_never_repaired() {
         gw(member, vec!["[]".into()]),
         Arc::clone(&io),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["m0"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["m0"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -852,10 +826,7 @@ pub(crate) fn envelope_multi_call_runs_every_call_and_rebuilds_identically() {
         Arc::clone(&hist),
         Arc::clone(&io),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -953,10 +924,7 @@ pub(crate) fn envelope_rejects_mixing_the_single_and_calls_shapes() {
         gw(member, vec!["[]".into()]),
         Arc::clone(&io),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,

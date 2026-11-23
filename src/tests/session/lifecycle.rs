@@ -5,6 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
+use crate::capabilities::conversation::session::api::SINGLE;
 
 #[test]
 pub(crate) fn create_work_persists_and_history_replays() {
@@ -18,7 +19,7 @@ pub(crate) fn create_work_persists_and_history_replays() {
         Arc::new(InMemorySysIo::new()),
     );
     let sid = core
-        .create_work(work("工作一", WorkMode::Single, &["a"]))
+        .create_work(work("工作一", SINGLE, &["a"]))
         .unwrap()
         .sid;
     assert_eq!(sid, "工作一");
@@ -37,9 +38,9 @@ pub(crate) fn create_work_persists_and_history_replays() {
     let list = core.lifecycle.history_list();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].name, "工作一");
-    assert_eq!(list[0].mode, Mode::Single);
+    assert_eq!(list[0].kind, SINGLE);
     let (meta, events) = core.lifecycle.history_open("工作一").unwrap();
-    assert_eq!(meta.mode, Mode::Single);
+    assert_eq!(meta.spec.kind, SINGLE);
     assert!(
         events
             .iter()
@@ -48,7 +49,7 @@ pub(crate) fn create_work_persists_and_history_replays() {
     );
     // 重名（磁盘已存在）被拒
     assert!(
-        core.create_work(work("工作一", WorkMode::Single, &["a"]))
+        core.create_work(work("工作一", SINGLE, &["a"]))
             .unwrap_err()
             .contains("已存在")
     );
@@ -59,10 +60,7 @@ pub(crate) fn create_work_persists_and_history_replays() {
             .unwrap()
     );
     assert!(core.lifecycle.history_list().is_empty());
-    assert!(
-        core.create_work(work("工作一", WorkMode::Single, &["a"]))
-            .is_ok()
-    );
+    assert!(core.create_work(work("工作一", SINGLE, &["a"])).is_ok());
 }
 
 /// 目的：删父带子：整个子树一起消失；子会话不允许单独删（它由核心按节点派生）。
@@ -125,7 +123,7 @@ pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
     seed_session(
         &store,
         "w",
-        Mode::Single,
+        SINGLE,
         vec![agent_meta("a", &[], None)],
         ExecSpec::default(),
     );
@@ -193,7 +191,7 @@ pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
     seed_session(
         &store,
         "w",
-        Mode::Single,
+        SINGLE,
         vec![agent_meta("a", &[], None)],
         ExecSpec::default(),
     );
@@ -232,7 +230,7 @@ pub(crate) fn session_delete_logs_background_release_failures() {
     seed_session(
         &store,
         "w",
-        Mode::Single,
+        SINGLE,
         vec![agent_meta("a", &[], None)],
         ExecSpec::default(),
     );
@@ -384,15 +382,12 @@ pub(crate) fn create_work_uses_chosen_tier_and_rejects_unavailable_vm() {
         Arc::clone(&hist),
         Arc::new(InMemorySysIo::new()),
     );
-    let host = core
-        .create_work(work("h", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let host = core.create_work(work("h", SINGLE, &["a"])).unwrap().sid;
     assert_eq!(
         core.lifecycle.history_open(&host).unwrap().0.exec.tier,
         Tier::Host
     );
-    let mut vm = work("v", WorkMode::Single, &["a"]);
+    let mut vm = work("v", SINGLE, &["a"]);
     vm.tier = Tier::Vm;
     let err = core.create_work(vm).unwrap_err();
     assert!(err.contains("虚拟机档现在不可用"), "{}", err);
@@ -409,18 +404,18 @@ pub(crate) fn create_work_validates_user_choices() {
         gw(BTreeMap::new(), vec!["[]".into()]),
     );
     assert!(
-        core.create_work(work("", WorkMode::Single, &["a"]))
+        core.create_work(work("", SINGLE, &["a"]))
             .unwrap_err()
             .contains("工作名不能为空")
     );
     assert!(
-        core.create_work(work("x", WorkMode::Single, &["ghost"]))
+        core.create_work(work("x", SINGLE, &["ghost"]))
             .unwrap_err()
             .contains("无此模块")
     );
     // 模块可以为空：零模块 agent 照样建得出来（只用内建文件工具）。
     let opened = core
-        .create_work(work("零模块", WorkMode::Single, &[]))
+        .create_work(work("零模块", SINGLE, &[]))
         .expect("零模块 agent 合法");
     assert_eq!(opened.agents.len(), 1);
     assert!(
@@ -437,7 +432,7 @@ pub(crate) fn create_work_validates_user_choices() {
     let two_agents = WorkSpec {
         freshness: None,
         name: "x".to_string(),
-        mode: WorkMode::Single,
+        kind: SINGLE.to_string(),
         agents: vec![
             AgentMeta {
                 name: "甲".to_string(),
@@ -477,7 +472,7 @@ pub(crate) fn create_work_validates_user_choices() {
             .unwrap_err()
             .contains("必须填写本次需求")
     );
-    let mut bad_model = work("x", WorkMode::Single, &["a"]);
+    let mut bad_model = work("x", SINGLE, &["a"]);
     bad_model.agents[0].model = Some("ghost".to_string());
     assert!(
         core.create_work(bad_model)
@@ -485,18 +480,15 @@ pub(crate) fn create_work_validates_user_choices() {
             .contains("无此模型")
     );
     // 建一次成功后重名被拒
+    assert!(core.create_work(work("同名", SINGLE, &["a"])).is_ok());
     assert!(
-        core.create_work(work("同名", WorkMode::Single, &["a"]))
-            .is_ok()
-    );
-    assert!(
-        core.create_work(work("同名", WorkMode::Single, &["a"]))
+        core.create_work(work("同名", SINGLE, &["a"]))
             .unwrap_err()
             .contains("已存在")
     );
     // 非法字符（将来要当目录名）
     assert!(
-        core.create_work(work("a/b", WorkMode::Single, &["a"]))
+        core.create_work(work("a/b", SINGLE, &["a"]))
             .unwrap_err()
             .contains("不能包含")
     );

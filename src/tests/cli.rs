@@ -6,6 +6,7 @@
 use super::doubles::module_of;
 use super::ops_with;
 use super::prelude::*;
+use crate::capabilities::conversation::session::api::SINGLE;
 use crate::kernel::api::types::Tier;
 use crate::presentation::cli;
 
@@ -107,7 +108,7 @@ fn eof_answers_a_pending_card_by_stopping_instead_of_hanging() {
     let sid = "cli-eof-1";
     faces
         .work
-        .create_work(work(sid, WorkMode::Single, &["a"]))
+        .create_work(work(sid, SINGLE, &["a"]))
         .expect("建会话");
     let door = {
         let s = sid.to_string();

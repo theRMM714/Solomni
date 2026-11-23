@@ -5,6 +5,7 @@
 
 use super::builders::*;
 use super::prelude::*;
+use crate::capabilities::conversation::session::api::{MEETING, SINGLE};
 
 #[test]
 pub(crate) fn settings_resolves_model_to_channel() {
@@ -207,7 +208,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
     let spec = WorkSpec {
         freshness: None,
         name: "w".to_string(),
-        mode: WorkMode::Single,
+        kind: SINGLE.to_string(),
         agents: vec![AgentMeta {
             name: "调研".to_string(),
             transient: false,
@@ -242,7 +243,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
     let cross = WorkSpec {
         freshness: None,
         name: "cross".to_string(),
-        mode: WorkMode::Collab,
+        kind: MEETING.to_string(),
         agents: vec![
             AgentMeta {
                 name: "x".to_string(),

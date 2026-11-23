@@ -5,6 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
+use crate::capabilities::conversation::session::api::{MEETING, PROXY, SINGLE, SessionSpec};
 
 /// 目的：核心重启后启用一条 VM 历史会话——必须真的准备并拉起共享 guest，且不跑模型。
 #[test]
@@ -14,7 +15,7 @@ pub(crate) fn activating_a_vm_history_session_boots_the_shared_guest() {
     seed_session(
         &hist,
         "w",
-        Mode::Single,
+        SINGLE,
         vec![agent_meta("a", &["a"], None)],
         vm_spec(),
     );
@@ -57,7 +58,7 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
     seed_session(
         &hist,
         "w",
-        Mode::Collab,
+        MEETING,
         vec![agent_meta("a", &["a"], None), agent_meta("b", &["b"], None)],
         vm_spec(),
     );
@@ -66,7 +67,7 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
         context_freshness: false,
         freshness_keep_percent: 80,
         name: "w--a".to_string(),
-        mode: Mode::Single,
+        spec: SessionSpec::plain(SINGLE, "单机", "solo"),
         delegate: false,
         modules: vec!["a".to_string()],
         task: None,
@@ -133,13 +134,13 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
 #[test]
 pub(crate) fn proxy_children_share_the_proxy_tree_guest() {
     let hist = Arc::new(InMemoryHistory::new());
-    seed_session(&hist, "p", Mode::Proxy, Vec::new(), vm_spec());
+    seed_session(&hist, "p", PROXY, Vec::new(), vm_spec());
     let child = SessionMeta {
         usage_totals: Default::default(),
         context_freshness: false,
         freshness_keep_percent: 80,
         name: "p--a".to_string(),
-        mode: Mode::Single,
+        spec: SessionSpec::plain(SINGLE, "单机", "solo"),
         delegate: false,
         modules: vec!["a".to_string()],
         task: None,

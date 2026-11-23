@@ -7,7 +7,7 @@ use super::*;
 use crate::capabilities::runtime::api::Handle;
 use crate::capabilities::work::api::{
     AgentSuggestion, FilesView, RuntimeDiagnosis, RuntimeReport, SessionConfig, SessionEdit,
-    SessionView, TierChoices, WorkMode, WorkOpened, WorkOps, WorkSpec,
+    SessionTypeView, SessionView, TierChoices, WorkOpened, WorkOps, WorkSpec,
 };
 use crate::presentation::faces::Faces;
 
@@ -276,8 +276,11 @@ impl WorkOps for FakeCore {
     fn tier_choices(&self) -> Result<TierChoices, String> {
         Err("没装档位选择".into())
     }
-    fn suggest_models(&self, _: &str, _: WorkMode) -> Result<Vec<AgentSuggestion>, String> {
+    fn suggest_models(&self, _: &str, _: &str) -> Result<Vec<AgentSuggestion>, String> {
         Err("没装推荐".into())
+    }
+    fn session_types(&self) -> Result<Vec<SessionTypeView>, String> {
+        Err("没装类型表".into())
     }
     fn create_work(&self, _: WorkSpec) -> Result<(WorkOpened, u64), String> {
         Err("没装建工作".into())

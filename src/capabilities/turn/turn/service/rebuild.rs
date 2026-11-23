@@ -9,8 +9,7 @@ use std::sync::Arc;
 use crate::capabilities::catalog::modules::api::Module;
 use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::conversation::session::api::{
-    AgentSession, Mode, SessionMeta, SessionParams, guest_lease_for, role_of, session_kind_of,
-    work_root, work_root_of,
+    AgentSession, SessionMeta, SessionParams, guest_lease_for, work_root, work_root_of,
 };
 use crate::capabilities::llm::api::{Channel, Msg};
 use crate::capabilities::turn::turn::api::Session;
@@ -90,16 +89,10 @@ impl Turn {
         let issued = crate::capabilities::conversation::session::api::issued_in(events);
         let desk = self.desk_for(&meta.name, issued);
         desk.rebuild(issued);
-        let built = match meta.mode {
-            Mode::Collab => {
-                // 按会话类型表里声明的流程序列重建：本层不认识任何具体流程（工厂是组合根注入的）。
-                let ids = self
-                    .flows
-                    .book()
-                    .flows_of(Mode::Collab.as_str())
-                    .ok_or_else(|| {
-                        "会话类型表里没有「协作」这个类型（systools/profiles.yaml）".to_string()
-                    })?;
+        let built = if meta.spec.driven() {
+            {
+                // 按这条会话声明里的流程序列重建：本层不认识任何具体流程（工厂是组合根注入的）。
+                let ids = meta.spec.flow_ids();
                 let setup = crate::capabilities::conversation::session::api::FlowSetup {
                     settings: registry.snapshot(),
                     core_channel: None,
@@ -117,8 +110,9 @@ impl Turn {
                 )?;
                 Session::Flow(Box::new(pipeline))
             }
-            // 单 agent：按 meta.agents[0] 重建（名单是唯一真相；模块数不限）。
-            Mode::Single => {
+        } else if !meta.is_proxy() {
+            // 没有流程的单 agent：按 meta.agents[0] 重建（名单是唯一真相；模块数不限）。
+            {
                 let a = meta
                     .agents
                     .first()
@@ -151,8 +145,8 @@ impl Turn {
                         &a.name,
                         &sb,
                         &modules,
-                        &session_kind_of(self.history.as_ref(), meta)?,
-                        &role_of(self.history.as_ref(), meta)?,
+                        &meta.spec.kind,
+                        &meta.spec.role,
                     )
                     .with_chara(a.chara.clone())
                     .with_guest(crate::capabilities::vm::api::guest_os_of(
@@ -168,9 +162,8 @@ impl Turn {
                     &meta.exec,
                     &modules,
                 );
-                // 身份与角色**同一把尺子**（重建与实时不能各写一份，见 Core::role_of）：
-                // 协作派生的成员 / 节点 = executor（拿得到回报工具）；其余单 agent 工作 = solo。
-                let role = role_of(self.history.as_ref(), meta)?;
+                // 角色取落盘声明里的那一席（成员 / 节点会话是 executor）——与实时同一个口径。
+                let role = meta.spec.role.clone();
                 let host_plan = if meta.exec.tier == crate::kernel::api::types::Tier::Host {
                     crate::capabilities::vm::api::host_plan_for(
                         &self.packages.library(),
@@ -234,8 +227,9 @@ impl Turn {
                     ),
                 )
             }
+        } else {
             // 代理会话：没有 agent（核心自己说话）；外壳由 build_proxy 装配，回放与单 agent 共用同一件。
-            Mode::Proxy => {
+            {
                 let mut s = self.build_proxy(meta, registry)?;
                 let (history, marks, line_reply, line_ids, compacted_upto, compacted_line) =
                     replay_dialogue(events, s.tool_mode());

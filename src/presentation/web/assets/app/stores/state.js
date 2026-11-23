@@ -17,6 +17,8 @@ const DEFAULT_SETTINGS = {
 export function createState() {
   return {
     modules: [], providers: [], models: [], core: null, rejected: [], agents: [],
+    // 会话类型表（后端按 systools/profiles.yaml 给）：向导与侧栏的名字都查它。
+    types: [],
     history: [],
     settings: { ...DEFAULT_SETTINGS },
     fence: null,
@@ -42,9 +44,21 @@ export function snapshotRunning(state, sid) {
   return false;
 }
 
+/** 目的：按会话类型 id 取类型表里的那一条（没有就是 null）。 */
+export function typeOf(state, kind) {
+  return (state.types || []).find((t) => t.kind === kind) || null;
+}
+
+/** 目的：界面显示的类型名：表里有就用 name，没有（例如类型表删了这条）就退回 id。 */
+export function typeLabel(state, kind) {
+  const t = typeOf(state, kind);
+  return (t && t.name) || kind || '';
+}
+
 function newSession(v, h) {
   return {
-    sid: v.sid, mode: v.mode || 'single', title: (h && h.name) || v.sid, run: v.run || 'active',
+    sid: v.sid, kind: v.kind || '', flows: !!v.flows, auto: !!v.auto,
+    title: (h && h.name) || v.sid, run: v.run || 'active',
     parent: (h && h.parent) || null,
     lines: [], live: [], pending: v.pending || null, sending: false, answering: false,
     running: false, working: null, running_known: false,
@@ -69,6 +83,10 @@ function newSession(v, h) {
 function align(state, cur, v) {
   cur.can_update_task = !!v.can_update_task;
   cur.run = v.run || 'active';
+  // 类型与流程是落盘事实：变了就跟着变（类型表改名不影响已开会话的 kind）。
+  if (v.kind !== undefined) cur.kind = v.kind;
+  if (v.flows !== undefined) cur.flows = !!v.flows;
+  if (v.auto !== undefined) cur.auto = !!v.auto;
   cur.pending = v.pending || null;
   // 只读视图不显示上下文继续（只有启用）。
   if (!cur.readonly) cur.continue_action = v.continue || null;
@@ -105,6 +123,7 @@ export function projectSnapshot(state, s) {
   state.core = s.core || null;
   state.rejected = s.rejected || [];
   state.agents = s.agents || [];
+  state.types = s.session_types || [];
   state.history = s.history || [];
   state.views = new Map((s.sessions || []).map((v) => [v.sid, v]));
   state.running = new Set(

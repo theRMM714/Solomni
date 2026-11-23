@@ -7,8 +7,8 @@
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::conversation::session::api::{
-    Answered, DecisionQueue, Flow, Gate, GateTicket, Handback, Mode, RunState, SessionEvent,
-    SessionMeta, TurnIo, UsageTotals, flat_modules, work_root,
+    Answered, DecisionQueue, Flow, Gate, GateTicket, Handback, RunState, SessionEvent, SessionMeta,
+    SessionSpec, TurnIo, UsageTotals, flat_modules, work_root,
 };
 use crate::capabilities::prompt::api::Segment;
 use crate::capabilities::turn::turn::api::{Prepared, RestoreRequest, Session};
@@ -366,7 +366,15 @@ impl Turn {
             context_freshness: false,
             freshness_keep_percent: 80,
             name: child.clone(),
-            mode: Mode::Single,
+            // 子会话是"一个 agent 在自己的沙箱里干活"：没有流程（单机类型），身份是执行者。
+            spec: SessionSpec::plain(
+                crate::capabilities::conversation::session::api::SINGLE,
+                &self
+                    .flows
+                    .book()
+                    .label_of(crate::capabilities::conversation::session::api::SINGLE),
+                "executor",
+            ),
             delegate: false,
             modules: a.modules.clone(),
             // 会话跨整场工作，所以记**工作的需求**（节点目标由链记着，随回合下发）。
@@ -420,7 +428,7 @@ impl Turn {
         let (meta, _) = self.history.load(child).ok()?;
         let parent = meta.parent.clone()?;
         let (pm, _) = self.history.load(&parent).ok()?;
-        if pm.mode != Mode::Proxy {
+        if !pm.is_proxy() {
             return None;
         }
         let mut ps = self.take_single(&parent).ok()?;

@@ -50,14 +50,14 @@ fn a_missing_or_broken_table_is_an_assembly_error() {
         "语法坏要如实报"
     );
 
-    // 语法对、规则不对：同样装配失败，文案点名文件。
+    // 语法对、规则不对：同样装配失败，文案点名文件与出问题的那一项。
     std::fs::write(
         broken.join("profiles.yaml"),
-        "profiles:\n  - id: single\n    roles: [solo]\n    flows: []\n",
+        "profiles:\n  - id: single\n    roles: [solo]\n    flows:\n      - id: ghost\n        members: {solo: 1}\n",
     )
-    .expect("造缺类型的表");
+    .expect("造没注册流程的表");
     let err = YamlProfiles::new(broken).load().unwrap_err();
-    assert!(err.contains("缺一个会话形态：collab"), "{}", err);
+    assert!(err.contains("流程没注册：ghost"), "{}", err);
 
     let _ = std::fs::remove_dir_all(&root);
 }
