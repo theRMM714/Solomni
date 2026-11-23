@@ -152,15 +152,38 @@ impl Handle {
         &self,
         args: &serde_json::Value,
     ) -> Result<d::NewSession, String> {
-        let kind = args
+        let wanted = args
             .get("kind")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .trim()
             .to_string();
-        if kind.is_empty() {
-            return Err("kind 不能为空（要会话类型表里的一个）".to_string());
-        }
+        // 临时拼装：给了 flows 就不查预设类型（白名单在 work 的准备段校验）。
+        let flows: Option<Vec<crate::capabilities::conversation::session::api::FlowDecl>> =
+            match args.get("flows") {
+                Some(v) => {
+                    let flows: Vec<_> = serde_json::from_value(v.clone())
+                        .map_err(|e| format!("flows 格式不对：{}", e))?;
+                    if flows.is_empty() {
+                        return Err("临时拼装至少要有一个流程".to_string());
+                    }
+                    Some(flows)
+                }
+                None => None,
+            };
+        let kind = if flows.is_some() {
+            if !wanted.is_empty()
+                && wanted != crate::capabilities::conversation::session::api::CUSTOM
+            {
+                return Err("kind 与 flows 只能给一个（临时拼装省略 kind）".to_string());
+            }
+            crate::capabilities::conversation::session::api::CUSTOM.to_string()
+        } else {
+            if wanted.is_empty() {
+                return Err("kind 不能为空（要会话类型表里的一个；临时拼装改用 flows）".to_string());
+            }
+            wanted
+        };
         let mut agents: Vec<crate::capabilities::catalog::registry::api::AgentMeta> = Vec::new();
         if let Some(arr) = args.get("agents").and_then(|v| v.as_array()) {
             for (i, a) in arr.iter().enumerate() {
@@ -220,6 +243,7 @@ impl Handle {
         }
         Ok(d::NewSession {
             kind,
+            flows,
             agents,
             task: args
                 .get("task")

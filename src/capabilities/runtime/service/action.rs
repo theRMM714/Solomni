@@ -531,6 +531,7 @@ impl Core {
         let work = WorkSpec {
             name,
             kind,
+            flows: spec.flows.clone(),
             agents,
             task,
             delegate,

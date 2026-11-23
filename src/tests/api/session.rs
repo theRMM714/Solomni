@@ -11,7 +11,7 @@ use crate::capabilities::runtime::api::{Acted, ActionCall, Caller};
 use crate::capabilities::work::api::{ConfigAgent, SessionEdit, WorkSpec};
 use crate::presentation::faces::Faces;
 
-use crate::capabilities::conversation::session::api::SINGLE;
+use crate::capabilities::conversation::session::api::{CUSTOM, FlowDecl, SINGLE};
 use crate::capabilities::runtime::api::Output;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -307,6 +307,7 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
     let (opened, _) = faces
         .work
         .create_work(WorkSpec {
+            flows: None,
             freshness: None,
             name: "组合".to_string(),
             kind: SINGLE.to_string(),
@@ -335,6 +336,25 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
     assert!(meta.agents[0].transient, "并出来的「组合」是临时 agent");
 }
 
+/// 目的：临时拼装——省略 preset、内联流程声明建会话，落盘的类型是 custom，流程原样记在元数据里。
+#[test]
+fn an_inline_assembly_creates_a_custom_session_type() {
+    let (_h, faces) = ops_with(vec![module_of("a"), module_of("b")], Vec::new());
+    let mut spec = super::super::doubles::collab_work("拼的", &["a", "b"], false, "做点事");
+    spec.kind = String::new();
+    spec.flows = Some(vec![FlowDecl {
+        id: "discuss".to_string(),
+        core: vec!["core_proxy".to_string()],
+        members: std::collections::BTreeMap::from([("discussant".to_string(), 2)]),
+    }]);
+    let (opened, _) = faces.work.create_work(spec).expect("临时拼装建会话");
+    assert_eq!(opened.agents.len(), 2, "名单照给的进会话");
+    let (meta, _) = faces.history.open("拼的").expect("读 meta");
+    assert_eq!(meta.spec.kind, CUSTOM, "临时拼装落成 custom 类型");
+    assert_eq!(meta.spec.name, "临时组合", "类型名给界面渲染");
+    assert_eq!(meta.spec.flow_ids(), vec!["discuss"]);
+    assert!(meta.spec.driven(), "带流程 = 由流程驱动");
+}
 #[test]
 fn editing_is_refused_while_a_session_is_generating() {
     let (_h, faces, _ticks) = slow_ops(vec![module_of("a")]);

@@ -17,4 +17,5 @@
 | `src/capabilities/conversation/proxy/domain.rs` | 纯形状分区入口（`proxy` 子模块） |
 | `src/capabilities/conversation/proxy/service.rs` | 执行面分区入口（`proxy` 子模块） |
 | `src/capabilities/conversation/proxy/domain/proxy.rs` | 六工具的载荷与回执：`*Args`、`CatalogScope` / `ObserveView` / `ControlAction` 的解析、授权判据 `authorize`、`resolve_new_session` / `relay` / 三个请求校验器 / `render_catalog` |
+| `src/capabilities/conversation/proxy/domain/proxy/tests.rs` | 六工具的纯逻辑用例：入参核对、授权判据、拒绝文案与临时拼装的解析（`#[cfg(test)] mod tests;` 指向） |
 | `src/capabilities/conversation/proxy/service/proxy.rs` | 执行面：`ProxyTools::call` 的认领 → 参数 → 幂等 → 授权 → 宿主五步与幂等账；`ProxyHandler`（代理会话那一回合的 `ToolHandler`） |
