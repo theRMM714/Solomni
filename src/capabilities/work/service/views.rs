@@ -115,7 +115,7 @@ impl Work {
                 // 「改需求」能力位：有本次需求行才给。在表里看会话种类；不在表里（生成中/未打开）
                 // 看落盘 meta 的形态（那是名单与形态的单一真相）。
                 let can_update_task = match turn.session(&sid) {
-                    Some(Session::Mech(_)) => true,
+                    Some(Session::Flow(_)) => true,
                     Some(Session::Single(_)) => false,
                     None => mode == WorkMode::Collab,
                 };
@@ -233,7 +233,7 @@ impl Work {
         bytes: &[u8],
         overwrite: bool,
     ) -> Result<bool, String> {
-        // 策略在 runtime：先净化文件名，再交给工作区端口（机制只看已净化的名字）。
+        // 策略在 runtime：先净化文件名，再交给工作区端口（流程只看已净化的名字）。
         let name = crate::capabilities::workspace::api::safe_file_name(name)?;
         if !turn.holds(sid) && self.history.load(sid).is_err() {
             return Err(format!("无此会话：{}", sid));
@@ -248,7 +248,7 @@ impl Work {
         // 锚到主会话当时的下一条行号，回档才能把这次投喂算进某个转录点。
         let line = match turn.session(sid) {
             Some(Session::Single(s)) => s.next_line,
-            Some(Session::Mech(m)) => m.next_line(),
+            Some(Session::Flow(m)) => m.next_line(),
             None => 0,
         };
         self.workspace.work_commit_user(
@@ -262,7 +262,7 @@ impl Work {
     }
 
     /// 目的：本工作可引用的文件清单 + 真实根（前端 @ 菜单与「长路径缩写」用）。
-    ///  名单取自会话 meta（活动会话与历史会话都以 meta.agents 为权威）；列目录的机制在 Workspace 端口，
+    ///  名单取自会话 meta（活动会话与历史会话都以 meta.agents 为权威）；列目录的流程在 Workspace 端口，
     ///  根取自沙箱（与文件清单同源）：agents 与 roots.agents 同序同名。
     pub fn files_view(
         &self,
@@ -420,7 +420,7 @@ impl Work {
         let mut out = Vec::new();
         match turn.session_mut(sid) {
             Some(Session::Single(s)) => out.extend(s.note_notice(text)),
-            Some(Session::Mech(m)) => m.notice(text, &mut |e| out.push(e)),
+            Some(Session::Flow(m)) => m.notice(text, &mut |e| out.push(e)),
             None => out.push(SessionEvent::Notice(text.to_string())),
         }
         out

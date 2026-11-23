@@ -49,8 +49,8 @@ impl CollabSession {
         self.pump_with(sink);
     }
 
-    /// 目的：泵让出的那一步（该问谁、给它什么上下文）——机制面在此取走并补齐驱动要的参数。
-    ///   约束：只有这一个出口；驱动不再自己拼「谁 / 什么参数」，见 `session::api::Mechanism`。
+    /// 目的：泵让出的那一步（该问谁、给它什么上下文）——流程面在此取走并补齐驱动要的参数。
+    ///   约束：只有这一个出口；驱动不再自己拼「谁 / 什么参数」，见 `session::api::Flow`。
     pub(crate) fn take_pending_ask(
         &mut self,
     ) -> Option<(usize, String, Vec<crate::capabilities::llm::api::Msg>)> {

@@ -42,7 +42,7 @@
 - `systools/tools.yaml` → 加 / 改一个系统工具：唯一真相在这里，同次补实现、角色表按需引用与测试
 - `systools/roles.yaml` → 改角色：同次同步 `prompts/roles/<角色>`（提示词与工具面同处声明，分开必然漂）
 - `systools/names.yaml` → 加 / 改保留目录名：同次同步落盘布局文档 [docs/session/session-model.md](docs/session/session-model.md)
-- `systools/profiles.yaml` → 改会话类型 / 流程顺序 / 席位与人数：同次同步机制册 `prompts/shared/mechanisms.yaml` 的 `session`、`session/domain/mechanism.rs` 的 `REGISTERED` 与角色表的 `seat`（装配期校验，见 [docs/session/session-model.md](docs/session/session-model.md)）
+- `systools/profiles.yaml` → 改会话类型 / 流程顺序 / 席位与人数：同次同步机制册 `prompts/shared/mechanisms.yaml` 的 `session`、`session/domain/flow.rs` 的 `REGISTERED` 与角色表的 `seat`（装配期校验，见 [docs/session/session-model.md](docs/session/session-model.md)）
 - `systools/roles.yaml` 的 `seat` → 改一个角色坐核心席还是成员席：同次检查它没有同时出现在另一席（装配期按 `systools/profiles.yaml` 的 `core` / `members` 校验）
 - `docs/tools/tools-and-roles.md` → 改路径模型 / 围栏口径：同次同步 [ARCHITECTURE.md](ARCHITECTURE.md)
 - `src/tests/detail/prompt.rs` → 悬空引用由装配期 `SystemTools::problems()` 挡下，改表后保持它锁死

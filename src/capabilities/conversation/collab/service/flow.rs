@@ -1,7 +1,7 @@
-//! 目的：协作会话作为**一个机制**：把泵的「推一步 / 让出一回合 / 交回」翻译成机制面的动作。
-//! 管：`Mechanism for CollabSession` 的逐项实现（成员抽问、交回处置、失败记下）。
+//! 目的：协作会话作为**一个流程**：把泵的「推一步 / 让出一回合 / 交回」翻译成流程面的动作。
+//! 管：`Flow for CollabSession` 的逐项实现（成员抽问、交回处置、失败记下）。
 //! 不管：泵与状态机本身（在 pump / discussion / turn_io）；驱动循环（在 turn）。
-//! 联动：`turn` 的驱动循环与 `turn::generation` 的工作线程只认 `Mechanism`，认不出这是协作。
+//! 联动：`turn` 的驱动循环与 `turn::generation` 的工作线程只认 `Flow`，认不出这是协作。
 
 use std::any::Any;
 use std::sync::Arc;
@@ -11,10 +11,10 @@ use crate::capabilities::conversation::collab::domain::gates::Pending;
 use crate::capabilities::conversation::collab::service::collab::CollabSession;
 use crate::capabilities::conversation::collab::service::discussion::AfterTurn;
 use crate::capabilities::conversation::session::api::{
-    Gate, GateTicket, Handback, Mechanism, MemberAsk, MemberTurn, SessionEvent, Settle,
+    Flow, Gate, GateTicket, Handback, MemberAsk, MemberTurn, SessionEvent, Settle,
 };
 
-impl Mechanism for CollabSession {
+impl Flow for CollabSession {
     fn set_cancel(&mut self, cancel: Arc<AtomicBool>) {
         CollabSession::set_cancel(self, cancel);
     }

@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
-use crate::capabilities::conversation::session::domain::mechanism::REGISTERED;
+use crate::capabilities::conversation::session::domain::flow::REGISTERED;
 use crate::capabilities::conversation::session::domain::mode::Mode;
 use crate::capabilities::tools::api::Seat;
 
@@ -15,7 +15,7 @@ use crate::capabilities::tools::api::Seat;
 /// 约束：`core` 必须是核心席角色，`members` 必须是成员席角色；产物按声明顺序一条一条接（上一条的输出就是下一条的输入）。
 #[derive(Debug, Clone, Deserialize)]
 pub struct FlowDecl {
-    /// 目的：流程的注册 id（必须在 `mechanism::REGISTERED` 里）。
+    /// 目的：流程的注册 id（必须在 `flow::REGISTERED` 里）。
     pub id: String,
     /// 目的：核心席用到的身份（核心通道出演，不进成员表）。
     #[serde(default)]

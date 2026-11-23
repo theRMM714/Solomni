@@ -1,20 +1,20 @@
-//! 目的：测试替身机制——一个与协作无关的最小机制，用来钉住「驱动只认机制面」。
-//! 管：StandIn 的机制面实现（开场推一步、问一个人、吸收、收工、处置自己的关卡）与它自己的事件。
+//! 目的：测试替身流程——一个与协作无关的最小流程，用来钉住「驱动只认流程面」。
+//! 管：StandIn 的流程面实现（开场推一步、问一个人、吸收、收工、处置自己的关卡）与它自己的事件。
 //! 不管：真实流程（在 collab）；本文件不碰 turn 的会话表、落盘与呈现。
-//! 联动：src/tests/mechanism.rs 把它塞进 `Session::Mech`，走 `Turn::collab_advance` 的同一条驱动。
+//! 联动：src/tests/flow.rs 把它塞进 `Session::Flow`，走 `Turn::collab_advance` 的同一条驱动。
 
 use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use crate::capabilities::conversation::session::api::{
-    Gate, GateTicket, Handback, Mechanism, MemberAsk, MemberTurn, SessionEvent, Settle,
+    Flow, Gate, GateTicket, Handback, MemberAsk, MemberTurn, SessionEvent, Settle,
 };
 use crate::capabilities::llm::api::{CompleteOpts, Msg};
 use crate::capabilities::tools::api::Tools;
 
-/// 目的：最小机制：开场推一条自己的事件，问名单里第一个成员一回合，吸收后收工。
-/// 约束：只用机制面（不认协作的任何字段）；事件走 `SessionEvent::Push`，呈现侧不必认识它。
+/// 目的：最小流程：开场推一条自己的事件，问名单里第一个成员一回合，吸收后收工。
+/// 约束：只用流程面（不认协作的任何字段）；事件走 `SessionEvent::Push`，呈现侧不必认识它。
 pub(crate) struct StandIn {
     /// 目的：本回合的工具面（驱动拿去解析身份槽；替身直接沿用装配时的那一份）。
     systools: Arc<dyn Tools>,
@@ -22,7 +22,7 @@ pub(crate) struct StandIn {
     asked: bool,
     /// 目的：成员回合已经吸收没有。
     fed: bool,
-    /// 目的：机制自己的收工标记（驱动只问 `is_done`）。
+    /// 目的：流程自己的收工标记（驱动只问 `is_done`）。
     done: bool,
     /// 目的：自己的行号（回档时由 lifecycle 设置）。
     next_line: u64,
@@ -35,7 +35,7 @@ pub(crate) struct StandIn {
 }
 
 impl StandIn {
-    /// 目的：造一个替身机制；工具面由调用方给（与真实机制同一条路）。
+    /// 目的：造一个替身流程；工具面由调用方给（与真实流程同一条路）。
     pub(crate) fn new(systools: Arc<dyn Tools>) -> StandIn {
         StandIn {
             systools,
@@ -60,7 +60,7 @@ impl StandIn {
     }
 }
 
-impl Mechanism for StandIn {
+impl Flow for StandIn {
     fn set_cancel(&mut self, cancel: Arc<AtomicBool>) {
         self.cancel = Some(cancel);
     }
@@ -92,7 +92,7 @@ impl Mechanism for StandIn {
         Some(MemberAsk {
             index: 0,
             member: "a".to_string(),
-            identity: "你是替身机制问出来的一步：说一句就行。".to_string(),
+            identity: "你是替身流程问出来的一步：说一句就行。".to_string(),
             turn: Vec::<Msg>::new(),
             turn_id: 1,
             round: 1,

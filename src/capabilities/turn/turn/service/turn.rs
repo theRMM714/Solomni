@@ -1,5 +1,5 @@
 //! 目的：单 agent 的回合收发——工具形态刷新、生成前准备、节点派发准备、同步生成入口、继续；
-//!   以及会话的放取（单 agent / 机制槽）与交回时的收尾判据。
+//!   以及会话的放取（单 agent / 流程槽）与交回时的收尾判据。
 //! 管：一次单 agent 回合的判据（形态变了先提示、继续时末条必须是用户发言）、放取时的运行态闸门、
 //!   交回时按落盘运行态作废裁决队、压缩回合的身份块、系统消息注入、回合编号。
 //! 不管：拟名单、会话启用、协作链推进（在 `flow`）、模型调用本身（在 `collab` 与 `llm`）。
@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::conversation::session::api::{
-    AgentSession, Gates, Mechanism, Mode, RunState, SessionEvent, subtree_of,
+    AgentSession, Flow, Gates, Mode, RunState, SessionEvent, subtree_of,
 };
 use crate::capabilities::turn::turn::api::{Prepared, Session};
 use crate::kernel::ports::HostProbe;
@@ -80,7 +80,7 @@ impl Turn {
     ) -> Result<Prepared, String> {
         // 还没装进内存的会话先从落盘重建（"继续"可能先于"打开"到达；真没这个会话仍然报无此会话）。
         self.ensure_session(sid, registry, probe)?;
-        if matches!(self.session(sid), Some(Session::Mech(_))) {
+        if matches!(self.session(sid), Some(Session::Flow(_))) {
             return Ok(Prepared::NotSingle);
         }
         let mut prefix: Vec<SessionEvent> = Vec::new();
@@ -129,7 +129,7 @@ impl Turn {
         probe: &dyn HostProbe,
     ) -> Result<Prepared, String> {
         self.ensure_session(child, registry, probe)?;
-        if matches!(self.session(child), Some(Session::Mech(_))) {
+        if matches!(self.session(child), Some(Session::Flow(_))) {
             return Ok(Prepared::NotSingle);
         }
         // 节点的生成跟随设置里的流式开关；思考强度按工作根解析（子会话共享）。
@@ -226,8 +226,8 @@ impl Turn {
                         vec![SessionEvent::Notice(NEED_USER.to_string())]
                     }
                 }
-                // 机制不需要用户发言：从断点推进流水线。
-                Session::Mech(m) => {
+                // 流程不需要用户发言：从断点推进流水线。
+                Session::Flow(m) => {
                     let mut out = Vec::new();
                     m.resume(&mut |e| out.push(e));
                     out
@@ -260,14 +260,14 @@ impl Turn {
         }
     }
 
-    /// 目的：把一个机制会话**交给工作线程**（核心表里留"生成中"）。
-    ///  会话还没装进内存时先从落盘重建：机制的"继续"可能先于"打开"到达。
-    pub(crate) fn take_mech(
+    /// 目的：把一个流程会话**交给工作线程**（核心表里留"生成中"）。
+    ///  会话还没装进内存时先从落盘重建：流程的"继续"可能先于"打开"到达。
+    pub(crate) fn take_flow(
         &mut self,
         sid: &str,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
-    ) -> Result<Box<dyn Mechanism>, String> {
+    ) -> Result<Box<dyn Flow>, String> {
         // 同上：运行态闸门是第一道，先于"取出来"。
         self.dispatch_gate(sid)?;
         if self.is_running(sid) {
@@ -277,13 +277,13 @@ impl Turn {
             self.ensure_session(sid, registry, probe)?;
         }
         match self.take(sid) {
-            Some(Session::Mech(m)) => {
+            Some(Session::Flow(m)) => {
                 self.mark_running(sid.to_string());
                 Ok(m)
             }
             Some(other) => {
                 self.put(sid.to_string(), other);
-                Err("该会话不是机制会话".to_string())
+                Err("该会话不是流程会话".to_string())
             }
             None => Err("无此会话".to_string()),
         }
@@ -364,12 +364,12 @@ impl Turn {
     pub(crate) fn put_collab(
         &mut self,
         sid: &str,
-        c: Box<dyn Mechanism>,
+        c: Box<dyn Flow>,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
     ) -> (Vec<SessionEvent>, Vec<(String, String, String)>) {
         self.unmark_running(sid);
-        self.put(sid.to_string(), Session::Mech(c));
+        self.put(sid.to_string(), Session::Flow(c));
         // 交回时这段工作已被停 / 已关闭：队列里没答的卡**一律作废**（生成期间对象在别人手里，只能在这里补）。
         let mut voided = self.void_gates_of(sid);
         let (spawned, todo) = self.spawn_ready_nodes(sid, registry, probe);
