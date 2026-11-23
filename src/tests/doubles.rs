@@ -8,7 +8,7 @@
 use super::builders::SilentRunner;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::runtime::api::SessionEvent;
-use crate::capabilities::work::api::{WorkMode, WorkSpec};
+use crate::capabilities::work::api::WorkSpec;
 
 use crate::capabilities::catalog::modules::api::{Module, ModuleManifest};
 use crate::capabilities::catalog::modules::ports::ModuleSource;
@@ -16,8 +16,7 @@ use crate::capabilities::catalog::packages::domain::manifest::{Library, PackageM
 use crate::capabilities::catalog::packages::ports::PackageSource;
 use crate::capabilities::catalog::registry::api::{ModelEntry, Provider, Settings};
 use crate::capabilities::catalog::registry::ports::SettingsStore;
-use crate::capabilities::conversation::session::api::TurnIo;
-use crate::capabilities::conversation::session::api::{HistoryView, SessionMeta};
+use crate::capabilities::conversation::session::api::{HistoryView, SessionMeta, TurnIo};
 use crate::capabilities::conversation::session::ports::HistoryStore;
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};

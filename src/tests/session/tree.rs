@@ -5,6 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
+use crate::capabilities::conversation::session::api::{MEETING, PROXY, SINGLE, SessionSpec};
 
 /// 目的：共享 guest 的子会话也能改配置；写回该 agent 的唯一名单，而不是留一份会漂的副本。
 #[test]
@@ -13,7 +14,7 @@ pub(crate) fn child_edit_writes_back_to_the_agent_roster() {
     seed_session(
         &hist,
         "w",
-        Mode::Collab,
+        MEETING,
         vec![agent_meta("a", &["a"], None), agent_meta("b", &["b"], None)],
         Default::default(),
     );
@@ -22,7 +23,7 @@ pub(crate) fn child_edit_writes_back_to_the_agent_roster() {
         context_freshness: false,
         freshness_keep_percent: 80,
         name: "w--a".to_string(),
-        mode: Mode::Single,
+        spec: SessionSpec::plain(SINGLE, "单机", "solo"),
         delegate: false,
         modules: vec!["a".to_string()],
         task: None,
@@ -81,7 +82,7 @@ pub(crate) fn tree_wide_module_overlap_is_allowed_on_child_edit() {
     seed_session(
         &hist,
         "w",
-        Mode::Collab,
+        MEETING,
         vec![agent_meta("a", &["a"], None), agent_meta("b", &["b"], None)],
         Default::default(),
     );
@@ -90,7 +91,7 @@ pub(crate) fn tree_wide_module_overlap_is_allowed_on_child_edit() {
         context_freshness: false,
         freshness_keep_percent: 80,
         name: "w--a".to_string(),
-        mode: Mode::Single,
+        spec: SessionSpec::plain(SINGLE, "单机", "solo"),
         delegate: false,
         modules: vec!["a".to_string()],
         task: None,
@@ -134,7 +135,7 @@ pub(crate) fn continue_hint_is_derived_from_the_session_state() {
     seed_session(
         &hist,
         "w",
-        Mode::Single,
+        SINGLE,
         vec![agent_meta("a", &["a"], None)],
         Default::default(),
     );
@@ -178,7 +179,7 @@ pub(crate) fn stopped_session_offers_enable_instead_of_continue() {
     seed_session(
         &hist,
         "w",
-        Mode::Single,
+        SINGLE,
         vec![agent_meta("a", &["a"], None)],
         Default::default(),
     );
@@ -230,7 +231,7 @@ pub(crate) fn archive_hides_dispatch_and_restore_brings_it_back() {
     seed_session(
         &hist,
         "w",
-        Mode::Single,
+        SINGLE,
         vec![agent_meta("a", &["a"], None)],
         Default::default(),
     );
@@ -461,7 +462,7 @@ pub(crate) fn creation_writes_the_chosen_profile_into_the_root_ceiling() {
         Arc::clone(&hist),
         Arc::new(InMemorySysIo::new()),
     );
-    let mut spec = work("wv", WorkMode::Single, &["a"]);
+    let mut spec = work("wv", SINGLE, &["a"]);
     spec.permission = Some(ProfileId::Online);
     let sid = core.create_work(spec).unwrap().sid;
     let (meta, _) = core.lifecycle.history_open(&sid).unwrap();
@@ -519,12 +520,12 @@ pub(crate) fn guest_lease_follows_the_tier_and_the_proxy_root() {
     use crate::capabilities::conversation::session::api::guest_lease;
     use crate::kernel::api::types::ExecSpec;
     use crate::kernel::api::types::Tier;
-    let meta = |name: &str, parent: Option<&str>, tier: Tier, mode: Mode| SessionMeta {
+    let meta = |name: &str, parent: Option<&str>, tier: Tier, kind: &str| SessionMeta {
         usage_totals: Default::default(),
         context_freshness: false,
         freshness_keep_percent: 80,
         name: name.to_string(),
-        mode,
+        spec: crate::tests::builders::seeded_spec(kind),
         delegate: false,
         modules: Vec::new(),
         task: None,
@@ -543,16 +544,16 @@ pub(crate) fn guest_lease_follows_the_tier_and_the_proxy_root() {
         run: RunState::Active,
         workspace: None,
     };
-    let proxy = meta("proxy-root", None, Tier::Vm, Mode::Proxy);
+    let proxy = meta("proxy-root", None, Tier::Vm, PROXY);
     assert_eq!(guest_lease(&proxy, &proxy), None, "代理根自己没有 guest");
-    let child = meta("proxy-root--a", Some("proxy-root"), Tier::Vm, Mode::Collab);
+    let child = meta("proxy-root--a", Some("proxy-root"), Tier::Vm, MEETING);
     assert_eq!(
         guest_lease(&child, &proxy),
         Some("proxy-root".to_string()),
         "子工作共用代理根那一台"
     );
-    let solo = meta("solo", None, Tier::Vm, Mode::Single);
+    let solo = meta("solo", None, Tier::Vm, SINGLE);
     assert_eq!(guest_lease(&solo, &solo), Some("solo".to_string()));
-    let host = meta("host", None, Tier::Host, Mode::Single);
+    let host = meta("host", None, Tier::Host, SINGLE);
     assert_eq!(guest_lease(&host, &host), None, "本机档没有 guest");
 }

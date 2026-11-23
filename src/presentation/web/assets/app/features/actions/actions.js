@@ -143,7 +143,7 @@ async function activateFlow() {
 }
 
 function applyActivation(s, v) {
-  s.mode = v.mode || s.mode;
+  s.kind = v.kind || s.kind;
   s.run = v.run || s.run || 'active';
   s.running = !!v.running;
   s.running_known = true;

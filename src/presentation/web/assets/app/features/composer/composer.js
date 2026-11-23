@@ -346,7 +346,7 @@ function onSend() {
     ui.notice('请按卡片作答', '这一关请点卡片上的选项；要补充的话写在卡片里的附言框。', 'info');
     return;
   }
-  if (s.mode !== 'collab') { const v = takeInput(); if (v) act('say', v); return; } // 单 agent 形态可以自由发言
+  if (!s.flows) { const v = takeInput(); if (v) act('say', v); return; } // 单 agent 形态可以自由发言
   // 协作无挂起时忽略发送（避免打断泵）。
 }
 

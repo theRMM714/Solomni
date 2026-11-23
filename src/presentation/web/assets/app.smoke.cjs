@@ -79,6 +79,12 @@ const sandbox = {
           modules: [{ id: "research", brief: "调研", runtimes: ["python", "ruby"] }],
           providers: [], rejected: ["broken-mod"], agents: [], history: [],
           settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70, compact_keep_percent: 15, compact_model: '' },
+          // 会话类型表由后端给：向导只按它渲染选项，不写死类型名。
+          session_types: [
+            { kind: 'single', name: '单机', hint: '一个 agent 直接干活。', flows: false, roster: true, needs_task: false },
+            { kind: 'collab', name: '会议', hint: '先讨论再执行。', flows: true, roster: true, needs_task: true },
+            { kind: 'proxy', name: '代理', hint: '决定权整块交给核心。', flows: false, roster: false, needs_task: false },
+          ],
           fence: stateStub.fence,
           sessions: stateStub.sessions,
         }),
@@ -89,7 +95,7 @@ const sandbox = {
       return {
         ok: true,
         json: async () => ({
-          meta: { name: "smoke-w", mode: "single", done: false },
+          meta: { name: "smoke-w", kind: "single", done: false },
           events: [
             { type: "transcript", lines: [{ id: 0, kind: "user", speaker: "用户", line: "刷新前的一句" }] },
           ],
@@ -192,7 +198,7 @@ setTimeout(async () => {
     try {
       // 记的是虚拟机档、本机现在承载不了：打开前要给提示（不拦打开）。
       vm.runInNewContext(
-        "state.history = [{ name: 'w', mode: 'single', ts: 1, done: true, tier: 'vm', tier_ready: false, tier_missing: ['本机虚拟机监视器不可用'] }];" +
+        "state.history = [{ name: 'w', kind: 'single', ts: 1, done: true, tier: 'vm', tier_ready: false, tier_missing: ['本机虚拟机监视器不可用'] }];" +
           "warnIfTierUnavailable('w');",
         sandbox
       );
@@ -692,7 +698,7 @@ setTimeout(async () => {
     try {
       const r = await vm.runInNewContext(
         "(async function () {" +
-          " const s = { sid: 'at-w', mode: 'single', lines: [], live: [], pending: null, sending: false," +
+          " const s = { sid: 'at-w', kind: 'single', lines: [], live: [], pending: null, sending: false," +
           "   running: false, running_known: true, done: false, readonly: false, fold: {}, scroll: {} };" +
           " state.sessions.set('at-w', s); state.activeSid = 'at-w';" +
           " const i = document.querySelector('#input');" +
@@ -714,7 +720,7 @@ setTimeout(async () => {
     try {
       const r = await vm.runInNewContext(
         "(async function () {" +
-          " const s = { sid: 'cmd-w', mode: 'single', lines: [], live: [], pending: null, sending: false," +
+          " const s = { sid: 'cmd-w', kind: 'single', lines: [], live: [], pending: null, sending: false," +
           "   running: false, running_known: true, done: false, readonly: false, fold: {}, scroll: {} };" +
           " state.sessions.set('cmd-w', s); state.activeSid = 'cmd-w';" +
           " const i = document.querySelector('#input'); i.value = '/compact'; i.selectionStart = 8;" +
@@ -741,15 +747,31 @@ setTimeout(async () => {
       const texts = all.map((n) => String(n.textContent || "")).join("|");
       const sel = all.filter((n) => (n.children || []).length >= 3)
         .find((n) => (n.children || []).some((o) => o.value === "proxy"));
-      wizardProxy = !!sel && texts.indexOf("代理（把决定权整块交给核心）") >= 0;
-      if (!wizardProxy) loadErrors.push("向导代理形态检查：没有找到 proxy 选项");
+      // 选项名字来自后端类型表（name），选中后说明换成该类型的 hint：界面不写死类型知识。
+      if (sel) {
+        sel.value = "proxy";
+        (sel._h.change || []).forEach((fn) => fn());
+      }
+      const texts2 = all.map((n) => String(n.textContent || "")).join("|");
+      wizardProxy = !!sel && texts.indexOf("代理") >= 0 && texts2.indexOf("决定权整块交给核心") >= 0;
+      if (!wizardProxy) loadErrors.push("向导代理类型检查：没有找到 proxy 选项或说明");
       // 没有登记任何模型：创建按钮必须禁用，并说清先去登记（后端也会拒绝）。
       const createBtn = all.find((n) => (n.tag === "button" || n.tagName === "BUTTON") && n.textContent === "创建并开始");
       wizardBlocked = !!createBtn && createBtn.disabled === true &&
         texts.indexOf("未登记任何模型") >= 0;
       if (!wizardBlocked) loadErrors.push("向导无模型检查：创建按钮没有禁用或缺少提示");
+      // 代理类型看完改回单机：下面要验的是单 agent + 虚拟机档那条路。
+      if (!loadErrors.length) {
+        const back = all.find((n) => (n.children || []).some((o) => o.value === "single"));
+        if (back) {
+          back.value = "single";
+          (back._h.change || []).forEach((fn) => fn());
+        }
+      }
       // 虚拟机档那一步：选的是**虚拟机**（虚拟根），并且按所选模块预判"可能要缺什么"。
-      const radios = all.filter((n) => n.type === "radio" && n.name === "wf-tier");
+      const now = [];
+      (function walk(n) { for (const c of (n.children || [])) { now.push(c); walk(c); } })(root);
+      const radios = now.filter((n) => n.type === "radio" && n.name === "wf-tier");
       const vmRadio = radios[1];
       if (!vmRadio) {
         loadErrors.push("向导虚拟根检查：没有找到虚拟机档 radio");
@@ -805,10 +827,10 @@ setTimeout(async () => {
   if (!loadErrors.length) {
     try {
       const r = vm.runInNewContext(
-        "(function () { const a = sessionNote({ mode: 'proxy', run: 'active' });" +
-          " const b = sessionNote({ mode: 'single', run: 'stopped' });" +
-          " const c = sessionNote({ mode: 'single', run: 'archived' });" +
-          " const d = sessionNote({ mode: 'single', run: 'active' });" +
+        "(function () { const a = sessionNote({ auto: true, run: 'active' });" +
+          " const b = sessionNote({ run: 'stopped' });" +
+          " const c = sessionNote({ run: 'archived' });" +
+          " const d = sessionNote({ run: 'active' });" +
           " return { a: !!a, aCls: a && a.className, aText: a && a.textContent," +
           "          bText: b && b.textContent, cText: c && c.textContent, d: d }; })()",
         sandbox
@@ -828,9 +850,9 @@ setTimeout(async () => {
         "(function () {" +
           " state.sessions.set('a', { sid: 'a', running: true, running_known: true });" +
           " state.history = [" +
-          "   { name: 'p', mode: 'proxy', ts: 1, done: false, run: 'stopped', tier: 'host', parent: null }," +
-          "   { name: 'c', mode: 'single', ts: 2, done: false, run: 'archived', tier: 'host', parent: 'p' }," +
-          "   { name: 'a', mode: 'single', ts: 3, done: false, run: 'active', tier: 'host', parent: null }];" +
+          "   { name: 'p', kind: 'proxy', auto: true, ts: 1, done: false, run: 'stopped', tier: 'host', parent: null }," +
+          "   { name: 'c', kind: 'single', ts: 2, done: false, run: 'archived', tier: 'host', parent: 'p' }," +
+          "   { name: 'a', kind: 'single', ts: 3, done: false, run: 'active', tier: 'host', parent: null }];" +
           " const box = document.querySelector('#history-list'); box.children.length = 0;" +
           " state.treeOpen.add('p'); renderHistory();" +
           " const all = []; (function walk(n) { for (const c of (n.children || [])) { all.push(c); walk(c); } })(box);" +
@@ -914,9 +936,9 @@ setTimeout(async () => {
       const r = vm.runInNewContext(
         "(function () {" +
           " state.history = [" +
-          "  { name: 'r', parent: null, mode: 'collab', run: 'active' }," +
-          "  { name: 'r--a', parent: 'r', mode: 'single', run: 'active' }," +
-          "  { name: 'r--a--n', parent: 'r--a', mode: 'single', run: 'active' }];" +
+          "  { name: 'r', parent: null, kind: 'collab', flows: true, run: 'active' }," +
+          "  { name: 'r--a', parent: 'r', kind: 'single', run: 'active' }," +
+          "  { name: 'r--a--n', parent: 'r--a', kind: 'single', run: 'active' }];" +
           " state.sessions.clear(); state.nodeBySid.clear();" +
           " state.sessions.set('r', { sid: 'r', title: 'r', parent: null, lines: [], live: [], fold: {}, scroll: {} });" +
           " state.sessions.set('r--a', { sid: 'r--a', title: 'r--a', parent: 'r', lines: [], live: [], fold: {}, scroll: {} });" +
@@ -981,9 +1003,9 @@ setTimeout(async () => {
           " const box = document.querySelector('#session-status');" +
           " function allText(n) { let t = String(n.textContent || ''); for (const c of (n.children || [])) t += ' ' + allText(c); return t; }" +
           " function chips() { const out = []; (function walk(n) { for (const c of (n.children || [])) { if (String(c.className).split(' ')[0] === 'status-chip') out.push(allText(c)); walk(c); } })(box); return out; }" +
-          " function run(sid, mode, ctx, head, shell, thinking) {" +
+          " function run(sid, kind, ctx, head, shell, thinking) {" +
           "   state.sessions.clear(); state.activeSid = sid;" +
-          "   const s = { sid: sid, mode: mode, lines: [], live: [], fold: {}, scroll: {}, context: ctx, shell: shell || null," +
+          "   const s = { sid: sid, kind: kind, flows: kind === 'collab', auto: kind === 'proxy', lines: [], live: [], fold: {}, scroll: {}, context: ctx, shell: shell || null," +
           "     thinking: thinking || null," +
           "     work: { head: head, commits: head ? [head] : [], total: head ? 1 : 0, truncated: false }," +
           "     workAt: 1, workDirty: false, workError: '', running: false, sending: false, readonly: false };" +
@@ -1098,7 +1120,7 @@ setTimeout(async () => {
       const r = vm.runInNewContext(
         "(function () {" +
           " state.sessions.clear();" +
-          " const s = { sid: 'sh', mode: 'single', lines: [], live: [], fold: {}, scroll: {}, context: null," +
+          " const s = { sid: 'sh', kind: 'single', lines: [], live: [], fold: {}, scroll: {}, context: null," +
           "   shell: { command: 'echo hi', cwd: '/w', started_at: Math.floor(Date.now()/1000) - 3," +
           "     finished_at: null, elapsed_secs: null, exit_code: null, status: null, ok: null, output: '', historical: false }," +
           "   work: null, workAt: 1, workDirty: false, workError: '', running: true, sending: false, readonly: false };" +

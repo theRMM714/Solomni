@@ -1,13 +1,18 @@
 # 会话类型表：一个会话类型就是一串流程与它们用到的身份角色。
-# 装配期会校验：与形态（single / collab / proxy）一一对应、流程已注册、每个流程有人出演、角色在册且席位放对。
-# flows 为空 = 没有流程，直接轮循环（single 与 proxy 就是这样）。
+# id = 命令与落盘用（只写 ASCII，CLI 里好敲）；name = 界面渲染用（侧栏、向导直接显示它）。
+# 装配期会校验：id 唯一且无空白、流程已注册、每个流程有人出演、角色在册且席位放对。
+# flows 为空 = 没有流程，直接轮循环（单机与代理就是这样）。
 # 每个流程：core = 核心通道出演的身份（不进成员表）；members = 成员席各要几员（角色: 最少人数）。
 profiles:
   - id: single
+    name: 单机
+    hint: 一个 agent 直接干活：选 1 个模块 = 直连式，选多个 = 组合式。
     roles: [solo]
     flows: []
 
   - id: collab
+    name: 会议
+    hint: 多个 agent 各自独立沙箱：先讨论收敛，核心写总结，再按任务链执行、统一验收。
     roles: [core_proxy, discussant, executor, planner, orchestrator]
     flows:
       # 讨论段：开会把需求谈清楚，由核心代理写一份总结（执行段的需求）。
@@ -22,5 +27,7 @@ profiles:
           executor: 1
 
   - id: proxy
+    name: 代理
+    hint: 决定权整块交给核心：它自己挑人、建子工作并代你回答关卡。
     roles: [core_proxy]
     flows: []

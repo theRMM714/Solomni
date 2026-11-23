@@ -5,6 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
+use crate::capabilities::conversation::session::api::{MEETING, SINGLE, SessionSpec};
 
 #[test]
 pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
@@ -22,10 +23,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
         Arc::new(InMemorySysIo::new()),
         Arc::new(InMemoryPackages::empty()),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     assert!(
         !core.session_config(&sid).unwrap().started,
         "单 agent 会话在用户开口之前还没内容：名字仍改得动"
@@ -126,7 +124,7 @@ pub(crate) fn edit_session_freezes_names_only_after_content() {
     seed_session(
         &hist,
         "raw",
-        Mode::Single,
+        SINGLE,
         vec![agent_meta("a", &["a"], None)],
         ExecSpec::default(),
     );
@@ -167,14 +165,14 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
     seed_session(
         &hist,
         "w",
-        Mode::Single,
+        SINGLE,
         vec![agent_meta("a", &["a"], None)],
         ExecSpec::default(),
     );
     seed_session(
         &hist,
         "c",
-        Mode::Collab,
+        MEETING,
         vec![agent_meta("a", &["a"], None), agent_meta("b", &["b"], None)],
         ExecSpec::default(),
     );
@@ -223,7 +221,7 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
     seed_session(
         &hist2,
         "c",
-        Mode::Collab,
+        MEETING,
         vec![agent_meta("x", &["a"], None)],
         ExecSpec {
             tier: Tier::Vm,
@@ -270,7 +268,7 @@ pub(crate) fn deleting_a_session_releases_its_fence_lease() {
     seed_session(
         &hist,
         "w",
-        Mode::Single,
+        SINGLE,
         vec![agent_meta("甲", &["a"], None)],
         ExecSpec::default(),
     );
@@ -338,7 +336,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
         context_freshness: false,
         freshness_keep_percent: 80,
         name: "w".to_string(),
-        mode: Mode::Single,
+        spec: SessionSpec::plain(SINGLE, "单机", "solo"),
         delegate: false,
         modules: vec!["a".to_string()],
         task: None,
@@ -382,7 +380,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
     assert_eq!(back.run, RunState::Stopped);
     // 缺 exec 段按当前默认读回：本机档、无虚拟根、无定版、正常运行。
     let defaulted: SessionMeta =
-        yaml_serde::from_str("name: w\nmode: single\nmodules: [a]\nts: 1\n")
+        yaml_serde::from_str("name: w\nspec:\n  kind: single\nmodules: [a]\nts: 1\n")
             .expect("缺 exec 段的 meta 必须可读");
     assert_eq!(defaulted.exec.tier, Tier::Host);
     assert!(defaulted.exec.guest.is_none());

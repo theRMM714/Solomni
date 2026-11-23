@@ -1,19 +1,30 @@
 //! 目的：会话类型表——一个会话类型就是一串流程与它们用到的身份角色；装配期的规则校验在这里。
-//! 管：`Profiles` / `Profile` / `FlowDecl` 的形状与校验（与形态一一对应、流程已注册、core/members 的席位与角色自洽）。
+//! 管：`Profiles` / `Profile` / `FlowDecl` / `SessionSpec` 的形状与校验（流程已注册、core/members 的席位与角色自洽）；
+//!   会话创建时把选中的类型**解析成** `SessionSpec` 落进 meta，装配只看那份声明。
 //! 不管：yaml 解析（在 `detail/yaml_profiles.rs`）；流程实现（在各流程能力）；会话装配（在 `turn` 的重建里）。
 //! 联动：组合根装载并在装配期调用 `validate` / `check_roles`；提示词册子的会话类型以 `ids` 为口径。
 
 use std::collections::BTreeMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::capabilities::conversation::session::domain::flow::REGISTERED;
-use crate::capabilities::conversation::session::domain::mode::Mode;
 use crate::capabilities::tools::api::Seat;
+
+/// 目的：产品自带的单机类型 id（一个 agent、没有流程）。
+pub const SINGLE: &str = "single";
+/// 目的：产品自带的会议类型 id（多个 agent，讨论后执行）。
+/// 约束：非测试代码不按它分支（按会话类型的流程走），只有产品自带的会话类型表与测试引用它。
+#[allow(dead_code)]
+pub const MEETING: &str = "collab";
+/// 目的：产品自带的代理类型 id（核心代理在该会话里工作，可以建子会话）。
+pub const PROXY: &str = "proxy";
+/// 目的：核心代理坐的角色名（角色表里的名字；代理式会话没有流程、坐这个席）。
+pub const PROXY_ROLE: &str = "core_proxy";
 
 /// 目的：一个流程声明：跑哪个已注册的流程、核心席用哪些身份、成员席各要几个。
 /// 约束：`core` 必须是核心席角色，`members` 必须是成员席角色；产物按声明顺序一条一条接（上一条的输出就是下一条的输入）。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FlowDecl {
     /// 目的：流程的注册 id（必须在 `flow::REGISTERED` 里）。
     pub id: String,
@@ -25,11 +36,61 @@ pub struct FlowDecl {
     pub members: BTreeMap<String, usize>,
 }
 
+/// 目的：一条会话落盘的**解析后声明**：哪一类会话、这条会话自己坐哪个角色、按顺序跑哪些流程。
+/// 约束：装配只看这份声明（不按类型名分岔）；`flows` 空 = 没有调度者，直接轮循环。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionSpec {
+    /// 目的：会话类型 id（命令与落盘用；表里的预设 id，如 single / collab / proxy）。
+    pub kind: String,
+    /// 目的：会话类型的显示名（界面渲染用，如 单机 / 会议 / 代理）。
+    #[serde(default)]
+    pub name: String,
+    /// 目的：这条会话自己的身份角色（流程在回合里另换身份，这里是它静止时的身份）。
+    #[serde(default)]
+    pub role: String,
+    /// 目的：按顺序串起来的流程；空表示没有人调度，直接轮循环。
+    #[serde(default)]
+    pub flows: Vec<FlowDecl>,
+}
+
+impl SessionSpec {
+    /// 目的：造一条没有流程的声明（单 agent 或代理会话）。
+    pub fn plain(kind: &str, name: &str, role: &str) -> SessionSpec {
+        SessionSpec {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            role: role.to_string(),
+            flows: Vec::new(),
+        }
+    }
+
+    /// 目的：这条会话有没有流程在推进（界面据此决定能不能自由发言）。
+    pub fn is_proxy_spec(&self) -> bool {
+        !self.driven() && self.role == PROXY_ROLE
+    }
+
+    /// 目的：这条声明要不要由流程推进（有流程 = 由流程推；没有 = 直接轮循环）。
+    pub fn driven(&self) -> bool {
+        !self.flows.is_empty()
+    }
+
+    /// 目的：要跑的流程 id，按声明顺序。
+    pub fn flow_ids(&self) -> Vec<String> {
+        self.flows.iter().map(|f| f.id.clone()).collect()
+    }
+}
+
 /// 目的：一个会话类型：身份角色，以及按顺序串起来的流程（空 = 没有流程，直接轮循环）。
 #[derive(Debug, Clone, Deserialize)]
 pub struct Profile {
-    /// 目的：会话类型名——必须与 `Mode` 的三个词一一对应。
+    /// 目的：会话类型 id（命令与落盘用，如 single / collab / proxy；提示词册按它配对）。
     pub id: String,
+    /// 目的：显示名（界面渲染用，如 单机 / 会议 / 代理）。
+    #[serde(default)]
+    pub name: String,
+    /// 目的：给界面的一句说明（选类型时显示这句差别；空 = 不额外解释）。
+    #[serde(default)]
+    pub hint: String,
     /// 目的：这个类型用到的全部身份角色（流程里的角色是它的子集）。
     pub roles: Vec<String>,
     /// 目的：按顺序串起来的流程；空表示没有人调度，直接轮循环。
@@ -50,12 +111,37 @@ impl Profiles {
         self.profiles.iter().map(|p| p.id.clone()).collect()
     }
 
-    /// 目的：一个会话类型按顺序要跑的流程 id（装配按它逐段造；没有这个类型返回 `None`）。
-    pub fn flows_of(&self, id: &str) -> Option<Vec<String>> {
+    /// 目的：把一个类型解析成落盘声明（root 角色取类型里的第一个角色）；没有这个类型返回 `None`。
+    pub fn spec_of(&self, kind: &str) -> Option<SessionSpec> {
         self.profiles
             .iter()
-            .find(|p| p.id == id)
-            .map(|p| p.flows.iter().map(|f| f.id.clone()).collect())
+            .find(|p| p.id == kind)
+            .map(|p| SessionSpec {
+                kind: p.id.clone(),
+                name: p.name.clone(),
+                role: p.roles.first().cloned().unwrap_or_default(),
+                flows: p.flows.clone(),
+            })
+    }
+
+    /// 目的：显示名（界面要按预设名字渲染；找不到这个类型就退回 id）。
+    pub fn label_of(&self, kind: &str) -> String {
+        self.profiles
+            .iter()
+            .find(|p| p.id == kind)
+            .map(|p| {
+                if p.name.trim().is_empty() {
+                    p.id.clone()
+                } else {
+                    p.name.clone()
+                }
+            })
+            .unwrap_or_else(|| kind.to_string())
+    }
+
+    /// 目的：这个类型是不是表里的一个预设（临时拼装另走校验，不算预设）。
+    pub fn known(&self, kind: &str) -> bool {
+        self.profiles.iter().any(|p| p.id == kind)
     }
 
     /// 目的：装配期校验：每个形态恰好一个类型、流程都注册过且不重复、每个流程有人出演、用到的角色都在类型里。
@@ -70,9 +156,12 @@ impl Profiles {
             if seen.contains(&p.id.as_str()) {
                 return Err(format!("会话类型重复：{}（systools/profiles.yaml）", p.id));
             }
-            if Mode::parse(&p.id).is_err() {
+            if p.id.trim().is_empty() {
+                return Err("会话类型的 id 是空的（systools/profiles.yaml）".to_string());
+            }
+            if p.id.chars().any(|c| c.is_whitespace()) {
                 return Err(format!(
-                    "会话类型不是会话形态：{}（只能是 single / collab / proxy，systools/profiles.yaml）",
+                    "会话类型 id 不能含空白：{}（systools/profiles.yaml）",
                     p.id
                 ));
             }
@@ -122,14 +211,6 @@ impl Profiles {
                         ));
                     }
                 }
-            }
-        }
-        for mode in [Mode::Single, Mode::Collab, Mode::Proxy] {
-            if !self.profiles.iter().any(|p| p.id == mode.as_str()) {
-                return Err(format!(
-                    "会话类型表缺一个会话形态：{}（systools/profiles.yaml）",
-                    mode.as_str()
-                ));
             }
         }
         Ok(())
@@ -223,12 +304,16 @@ mod tests {
         Profiles {
             profiles: vec![
                 Profile {
-                    id: "single".to_string(),
+                    id: SINGLE.to_string(),
+                    name: "单机".to_string(),
+                    hint: "一个 agent 直接干活。".to_string(),
                     roles: vec!["solo".to_string()],
                     flows: Vec::new(),
                 },
                 Profile {
-                    id: "collab".to_string(),
+                    id: MEETING.to_string(),
+                    name: "会议".to_string(),
+                    hint: "先讨论再执行。".to_string(),
                     roles: vec![
                         "discussant".to_string(),
                         "executor".to_string(),
@@ -238,7 +323,9 @@ mod tests {
                     flows: vec![flow("discuss"), flow("execute")],
                 },
                 Profile {
-                    id: "proxy".to_string(),
+                    id: PROXY.to_string(),
+                    name: "代理".to_string(),
+                    hint: "决定权交给核心。".to_string(),
                     roles: vec!["core_proxy".to_string()],
                     flows: Vec::new(),
                 },
@@ -267,28 +354,36 @@ mod tests {
         let collab = p
             .profiles
             .iter()
-            .find(|x| x.id == Mode::Collab.as_str())
-            .expect("协作类型");
+            .find(|x| x.id == MEETING)
+            .expect("会议类型");
         assert_eq!(collab.flows[0].id, "discuss");
         assert_eq!(collab.flows[0].members["discussant"], 2);
         assert_eq!(collab.flows[1].id, "execute");
-        assert_eq!(p.ids(), vec!["single", "collab", "proxy"]);
+        assert_eq!(p.ids(), vec![SINGLE, MEETING, PROXY]);
+        assert_eq!(p.label_of(MEETING), "会议");
+        assert_eq!(p.spec_of(MEETING).expect("会议类型").name, "会议");
+        assert_eq!(
+            p.spec_of(MEETING).expect("会议类型").flow_ids(),
+            vec!["discuss", "execute"]
+        );
+        assert!(p.spec_of(SINGLE).expect("单机").flows.is_empty());
+        assert!(p.spec_of("临时").is_none(), "没声明的类型解析不出声明");
     }
 
     #[test]
-    fn a_profile_per_mode_and_only_the_three_words() {
+    fn a_type_id_must_be_unique_and_not_empty() {
         let mut p = base();
-        p.profiles.remove(2);
+        p.profiles[0].id = "  ".to_string();
         let err = p.validate().unwrap_err();
-        assert!(err.contains("缺一个会话形态：proxy"), "{}", err);
+        assert!(err.contains("会话类型的 id 是空的"), "{}", err);
 
         let mut p = base();
-        p.profiles[0].id = "solo".to_string();
+        p.profiles[0].id = "单 机".to_string();
         let err = p.validate().unwrap_err();
-        assert!(err.contains("不是会话形态：solo"), "{}", err);
+        assert!(err.contains("不能含空白"), "{}", err);
 
         let mut p = base();
-        p.profiles[2].id = "single".to_string();
+        p.profiles[2].id = SINGLE.to_string();
         let err = p.validate().unwrap_err();
         assert!(err.contains("会话类型重复"), "{}", err);
     }

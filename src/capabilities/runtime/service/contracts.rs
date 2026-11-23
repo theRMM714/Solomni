@@ -120,9 +120,10 @@ impl WorkOps for Handle {
         self.call(|core| Ok(core.tier_choices()))
     }
 
-    fn suggest_models(&self, task: &str, mode: WorkMode) -> Result<Vec<AgentSuggestion>, String> {
+    fn suggest_models(&self, task: &str, kind: &str) -> Result<Vec<AgentSuggestion>, String> {
         let task = task.to_string();
-        let (agents, rows) = self.call(move |core| core.suggest_models(&task, mode))?;
+        let kind = kind.to_string();
+        let (agents, rows) = self.call(move |core| core.suggest_models(&task, &kind))?;
         // 核心的行**照推**（推是底层收发消息的统一定律，一次推荐也不例外），推到系统会话：
         // 它不在任何会话表里，前端因此不会为它建标签页；落盘策略是 Drop（只推不留）。
         if !rows.is_empty() {
@@ -132,6 +133,10 @@ impl WorkOps for Handle {
             );
         }
         Ok(agents)
+    }
+
+    fn session_types(&self) -> Result<Vec<SessionTypeView>, String> {
+        self.call(|core| Ok(core.session_types()))
     }
 }
 
@@ -152,13 +157,13 @@ impl TurnOps for Handle {
             let s = sid.to_string();
             move |core| core.turn.resume_subtree(&s)
         })?;
-        let mode = self
+        let spec = self
             .call({
                 let s = sid.to_string();
-                move |core| Ok(core.session_mode(&s))
+                move |core| Ok(core.session_spec(&s))
             })
             .unwrap_or_default();
-        if mode == Some(crate::capabilities::conversation::session::api::Mode::Collab) {
+        if spec.is_some_and(|s| s.driven()) {
             return crate::capabilities::turn::turn::api::collab_generation(
                 self,
                 sid,

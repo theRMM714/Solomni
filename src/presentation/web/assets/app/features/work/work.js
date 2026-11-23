@@ -232,8 +232,8 @@ function openContextCard(s, anchor) {
 /* 手动压缩：协作主会话没有一条持续对话，由成员会话各自压。 */
 function compactNow(s) {
   if (!s) return;
-  if (s.mode === 'collab') {
-    ui.notice('协作会话不直接压缩', '协作主会话没有一条持续发给模型的对话；打开成员会话再用工具菜单压缩。', 'info');
+  if (s.flows) {
+    ui.notice('有流程的会话不直接压缩', '协作主会话没有一条持续发给模型的对话；打开成员会话再用工具菜单压缩。', 'info');
     return;
   }
   act('compact');
@@ -243,8 +243,8 @@ function compactNow(s) {
 function openToolsMenu(chip, s) {
   const keep = Number((state.settings && state.settings.compact_keep_percent) || 0);
   const model = (state.settings && state.settings.compact_model) || '默认（会话同模型）';
-  const blocked = s.mode === 'collab'
-    ? '协作主会话没有持续对话；成员会话各自压缩'
+  const blocked = s.flows
+    ? '有流程的会话没有持续对话；成员会话各自压缩'
     : (app.isBusy(s) ? '生成中，先停止或等这一轮结束' : (s.readonly ? '历史回放为只读' : ''));
   ui.menu(chip, [
     {

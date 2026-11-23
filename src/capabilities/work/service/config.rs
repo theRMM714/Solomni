@@ -46,7 +46,7 @@ impl Work {
         );
         Ok(SessionConfig {
             sid: meta.name.clone(),
-            mode: meta.mode,
+            kind: meta.spec.kind.clone(),
             started: session_started(&events),
             agents: meta
                 .agents
@@ -123,12 +123,9 @@ impl Work {
             }
         }
         let (meta, events) = self.history_open(sid)?;
-        match meta.mode {
-            WorkMode::Single | WorkMode::Collab => {}
-            // 代理会话没有名单可编辑（决定权整块交给核心）：如实说明。
-            WorkMode::Proxy => {
-                return Err("代理会话没有可编辑的名单：它不是一个 agent 工作".to_string());
-            }
+        // 代理会话没有名单可编辑（决定权整块交给核心）：如实说明。
+        if meta.is_proxy() {
+            return Err("代理会话没有可编辑的名单：它不是一个 agent 工作".to_string());
         }
         // 共享 guest 的子会话也可以编辑：写回该 agent 的唯一配置，保存后重新加入同一台 guest。
         // 旧 guest / 旧树的装配在下面与编辑后的树比对，只有装配真的变了才重建。
@@ -176,8 +173,8 @@ impl Work {
         if metas.is_empty() {
             return Err("至少要有一个 agent".to_string());
         }
-        if meta.mode == WorkMode::Single && metas.len() != 1 {
-            return Err("单 agent 形态只接受一个 agent（模块数不限）".to_string());
+        if !meta.spec.driven() && metas.len() != 1 {
+            return Err("没有流程的会话只接受一个 agent（模块数不限）".to_string());
         }
         // 子会话的名单是主名单的一份视图：只能改这一席的模块 / 模型 / 权限，不能在子会话里增删或改名。
         if owner.name != meta.name {
@@ -493,7 +490,7 @@ impl Work {
         let ev = serde_json::json!({
             "type": "config",
             "ts": crate::kernel::api::procs::unix_seconds(),
-            "mode": meta.mode,
+            "kind": meta.spec.kind,
             "tier": meta.exec.tier.as_str(),
             "guest": meta.exec.guest,
             "net": crate::capabilities::turn::env::api::network_allowed(registry.app()),

@@ -71,6 +71,9 @@ export function boot(g) {
     }),
   };
   Object.assign(app, format);
+  // 会话类型是后端给的数据：名字与说明都查表，界面不复制一份类型知识。
+  app.typeOf = (kind) => stateStore.typeOf(state, kind);
+  app.typeLabel = (kind) => stateStore.typeLabel(state, kind);
   for (const mount of MOUNTS) mount(app, deps);
   // 提示框与叠层弹窗是 ui 层的入口：功能统一从 ui 取，不直接依赖 dialog/modal 两个模块。
   Object.assign(ui, {

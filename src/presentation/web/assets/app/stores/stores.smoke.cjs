@@ -13,13 +13,14 @@ check(st.sessions instanceof Map && st.activeSid === null && st.settings.compact
 const snap = {
   modules: [{ id: "m" }],
   sessions: [
-    { sid: "w1", running: true, mode: "collab", continue: { id: "c" } },
+    { sid: "w1", running: true, kind: "collab", flows: true, continue: { id: "c" } },
     { sid: "w2", running: false },
   ],
   history: [{ name: "w1", parent: null, done: false }, { name: "w3--甲", running: true }],
 };
 const opened = s.projectSnapshot(st, snap);
-check(opened.length === 1 && opened[0].sid === "w1" && opened[0].mode === "collab", "只为在跑的会话建条目");
+check(opened.length === 1 && opened[0].sid === "w1" && opened[0].kind === "collab" && opened[0].flows,
+  "只为在跑的会话建条目");
 check(st.sessions.has("w1") && !st.sessions.has("w2"), "不在跑的会话不建条目");
 check(opened[0].continue_action && opened[0].continue_action.id === "c", "上下文继续取自后端视图");
 check(opened[0].running === true && opened[0].running_known === false, "新条目按快照对账运行态");

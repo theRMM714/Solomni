@@ -387,7 +387,7 @@ pub(super) fn pick_guest(
 pub(crate) fn create_session_action(
     faces: &Faces,
     name: &str,
-    mode: &str,
+    kind: &str,
     agents: &[AgentMeta],
     task: Option<&str>,
     tier: Tier,
@@ -406,7 +406,7 @@ pub(crate) fn create_session_action(
         .collect();
     let mut args = serde_json::json!({
         "name": name,
-        "mode": mode,
+        "kind": kind,
         "agents": agents,
         "tier": tier.as_str(),
     });

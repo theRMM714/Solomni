@@ -8,9 +8,9 @@ use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work};
 use super::support::spawn;
 use crate::capabilities::runtime::api::{Acted, ActionCall, Caller, SessionEvent};
-use crate::capabilities::work::api::WorkMode;
 use crate::presentation::faces::Faces;
 
+use crate::capabilities::conversation::session::api::MEETING;
 use crate::capabilities::runtime::api::{Handle, Output};
 use std::sync::Arc;
 
@@ -99,7 +99,7 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
     let faces = Faces::from_handle(&handle);
     let agents = faces
         .work
-        .suggest_models("做个东西", WorkMode::Collab)
+        .suggest_models("做个东西", MEETING)
         .expect("核心推荐");
     assert_eq!(agents.len(), 1, "回包只给名单（渲染那一步的契约不变）");
     let (batches, _head, _oldest) = handle.events().snapshot(
@@ -392,11 +392,11 @@ fn action_table_rejects_unknown_id_value_and_caller() {
         .actions
         .act(call(
             "create_session",
-            serde_json::json!({ "mode": "三个和尚", "agents": [] }),
+            serde_json::json!({ "kind": "三个和尚", "agents": [] }),
             Caller::User,
         ))
         .unwrap_err();
-    assert!(err.contains("mode"), "{}", err);
+    assert!(err.contains("会话类型表"), "{}", err);
     // 授权：动作表说 user 不能调只给核心代理的动作。
     let err = faces
         .actions

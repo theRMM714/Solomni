@@ -485,12 +485,9 @@ impl Core {
         &mut self,
         spec: &d::NewSession,
     ) -> Result<(PreparedSession, Option<GuestBoot>), String> {
-        // 形态词汇只有一套：代理协议的入参解析结果就是落盘形态。
-        let mode = spec.mode;
+        // 会话类型是数据：这里只交**原始事实**，要不要需求、要不要名单由工作能力按类型表判。
+        let kind = spec.kind.clone();
         let parent = spec.parent.clone();
-        if mode == WorkMode::Proxy && parent.is_some() {
-            return Err("代理不能往里套代理".to_string());
-        }
         let agents: Vec<AgentMeta> = spec
             .agents
             .iter()
@@ -526,21 +523,14 @@ impl Core {
         // 环境属于主会话：有父就整段沿用父会话的 ExecSpec（档位 / 虚拟根 / 网络 / 定版），
         // 不给子会话留任何单独覆盖的入口。顶层仍由人经呈现层给档位与虚拟根。
         let (tier, vm_guest) = self.resolve_env(spec)?;
-        // 本次需求：协作必须有；单 agent 的"开头"由调用方在开工那一刻给（见 create_session_call）。
-        let task = if mode == WorkMode::Collab {
-            let t = spec.task.trim();
-            if t.is_empty() {
-                return Err("协作模式必须填写本次需求（task）".to_string());
-            }
-            Some(t.to_string())
-        } else {
-            None
-        };
-        // 委托代拟由形态派生：协作、又没给名单 = 交给核心按需求拟名单（不再是一个参数）。
-        let delegate = mode == WorkMode::Collab && agents.is_empty();
+        // 本次需求：给了就带上（有流程的会话必须有，判定在 work 的准备段）。
+        let task = spec.task.trim();
+        let task = (!task.is_empty()).then(|| task.to_string());
+        // 没给名单 = 交给核心按需求拟名单（只有有流程的会话能这么建，同上）。
+        let delegate = agents.is_empty();
         let work = WorkSpec {
             name,
-            mode,
+            kind,
             agents,
             task,
             delegate,

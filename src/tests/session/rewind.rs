@@ -5,6 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
+use crate::capabilities::conversation::session::api::{MEETING, SINGLE};
 
 #[test]
 pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
@@ -26,10 +27,7 @@ pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
         Arc::clone(&hist),
         Arc::new(InMemorySysIo::new()),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -129,10 +127,7 @@ pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
         Arc::clone(&hist),
         Arc::new(InMemorySysIo::new()),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -240,10 +235,7 @@ pub(crate) fn delete_rewrites_the_file_for_real() {
         Arc::clone(&hist),
         Arc::new(InMemorySysIo::new()),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -296,10 +288,7 @@ pub(crate) fn rewind_keeps_only_lines_before_the_mark() {
         ],
     );
     let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -383,10 +372,7 @@ pub(crate) fn repeated_delete_to_zero_keeps_derived_state_in_sync() {
         vec!["{\"type\":\"say\",\"text\":\"答一\"}".to_string()],
     );
     let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -465,10 +451,7 @@ pub(crate) fn rebuilt_context_keeps_tool_result() {
         Arc::clone(&hist),
         Arc::clone(&io),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -535,10 +518,7 @@ pub(crate) fn rebuild_restores_the_last_shell_snapshot_from_the_transcript() {
         Arc::clone(&hist),
         Arc::clone(&io),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     hist.append(
         &sid,
         &[serde_json::json!({
@@ -588,10 +568,7 @@ pub(crate) fn rebuild_reads_the_structured_shell_facts() {
         Arc::clone(&hist),
         Arc::clone(&io),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     hist.append(
         &sid,
         &[serde_json::json!({
@@ -665,10 +642,7 @@ pub(crate) fn rewind_never_splits_a_reply() {
         Arc::clone(&io),
     );
     core.registry_mut().probe_model_tools("m").expect("探测");
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -715,7 +689,9 @@ pub(crate) fn history_list_is_ordered_as_a_tree() {
     let hv = |name: &str, parent: Option<&str>, ts: i64| {
         crate::capabilities::conversation::session::api::HistoryView {
             name: name.to_string(),
-            mode: Mode::Collab,
+            kind: MEETING.to_string(),
+            flows: true,
+            auto: false,
             ts,
             done: false,
             exec: Default::default(),

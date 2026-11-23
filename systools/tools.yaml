@@ -292,29 +292,31 @@ tools:
     capability: none              # 不碰文件：建的是会话，不是路径
     callers: [user, core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
-      建一场工作（形态 + 名单 + 本次需求）：single 单 agent / collab 多 agent 协作 / proxy 把决定权整块交给核心。
+      建一场工作（会话类型 + 名单 + 本次需求）：类型来自会话类型表（systools/profiles.yaml），
+      没有流程的类型（如 single）是一个 agent 直接干活，有流程的类型（如 collab）按声明的流程跑；
+      代理类型（proxy）没有名单，决定权整块交给核心。
       人经呈现层调用时先建出会话、由用户后续发言推进；核心代理调用时**建好就开工**——
-      single 以 task 为第一句干活，collab 以 task 作为**本次需求**并开始讨论。
-      会话落在父会话目录的 children/ 下、与父共用同一个 work/。授权与父会话由机制提供，不接受模型自授；
+      没有流程时 task 是它的第一句，有流程时 task 是**本次需求**。
+      会话落在父会话目录的 children/ 下、与父共用同一个 work/。授权与父会话由会话类型提供，不接受模型自授；
       创建失败不留半成品；同一个 request_id 重放不会重复创建、也不会重复开工。
     params:
-      mode:
+      kind:
         type: string
         required: true
         non_empty: true
-        desc: single（一个 agent）/ collab（多 agent 协作，至少两个）/ proxy（没有名单：核心自己挑人，只有人经呈现层能建）
+        desc: 会话类型（systools/profiles.yaml 里的一条 id，如 single / collab / proxy）；没有流程的类型直接一个 agent 干活，有流程的类型按声明的流程跑
       agents:
         type: array
         desc: |-
           agent 数组（只写**身份**，不写任务）：复用登记处的 {"ref":"已存agent名"}，
           或临时组装 {"name":"新名字","modules":["模块id"],"model":"模型id","chara":"人设"}——`modules` 可省略或为空：
           零模块 agent 只用内建文件工具（读写、搜索）；`chara` 可省略（留空 = 不产生人设块），复用项取登记处自己的人设。
-          proxy 给空数组（或省略）；collab 省略 = 委托核心按 task 代拟名单。
+          代理类型给空数组（或省略）；有流程且要讨论的类型省略 = 委托核心按 task 代拟名单。
           **model 填 catalog_agents 回的 `id`（不是 `name`）**；同一模块可以出现在多个 agent 里（共用，各自独立调用）。
       task:
         type: string
         desc: |-
-          这个会话的**开头 / 本次需求**：single 是它的第一句，collab 是本次需求。
+          这个会话的**开头 / 本次需求**：没有流程时是它的第一句，有流程时是本次需求。
           核心代理调用时必填（建好就开工）；人经呈现层可省（single 先建空会话，稍后再发言）。
       name:
         type: string

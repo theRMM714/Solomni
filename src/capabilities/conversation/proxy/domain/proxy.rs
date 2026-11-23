@@ -116,9 +116,6 @@ impl CatalogScope {
     }
 }
 
-/// 目的：create_session 的形态——就是会话落盘那一套词（`session::api::Mode`）；代理不能往代理里套。
-pub use crate::capabilities::conversation::session::api::Mode as SessionMode;
-
 /// 目的：send_session_message 的消息种类。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -337,7 +334,8 @@ pub struct ControlState {
 /// 目的：建会话的规整载荷（工具层解析完交给宿主；宿主不再解析模型参数）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewSession {
-    pub mode: SessionMode,
+    /// 目的：会话类型名（会话类型表里的一个；装配时按它解析成落盘声明）。
+    pub kind: String,
     pub agents: Vec<AgentMeta>,
     /// 目的：**这个会话的开头 / 本次需求**：single = 它的第一句（点火用的派发），collab = 本次需求。
     ///   建好就开始——不是"给某个 agent 的任务"（见宿主实现的 `create_session`）。
@@ -377,7 +375,8 @@ pub struct CatalogArgs {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateArgs {
-    pub mode: String,
+    /// 目的：会话类型名（会话类型表里的一个；代理不能往代理里套）。
+    pub kind: String,
     /// 目的：每项是对象，形状在 parse_agents 里逐条校验（数组元素形状声明层表达不了）；省略 = 空（代理形态 / 代拟）。
     #[serde(default)]
     pub agents: Vec<serde_json::Value>,
@@ -450,9 +449,9 @@ pub fn catalog_scope(args: &CatalogArgs) -> Result<CatalogScope, String> {
 /// 目的：create_session——把模型给的名字/模块/模型与登记处事实核对后规整成载荷。
 ///   失败一律如实报错——调用方据此拒绝整次调用，不留半成品。
 pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSession, String> {
-    let mode = SessionMode::parse(args.mode.trim())?;
-    if mode == SessionMode::Proxy {
-        return Err("代理不能往里套代理：mode 只能是 single 或 collab".to_string());
+    let kind = args.kind.trim().to_string();
+    if kind.is_empty() {
+        return Err("kind 不能为空（要会话类型表里的一个）".to_string());
     }
     let request_id = args.request_id.trim().to_string();
     if request_id.is_empty() {
@@ -461,7 +460,8 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
     let task = args.task.clone().unwrap_or_default().trim().to_string();
     if task.is_empty() {
         return Err(
-            "task 不能为空（这个会话的开头：single 是它的第一句，collab 是本次需求）".to_string(),
+            "task 不能为空（这个会话的开头：没有流程就是它的第一句，有流程就是本次需求）"
+                .to_string(),
         );
     }
     let name = args
@@ -472,15 +472,6 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
     // 环境参数只属于人经呈现层的主会话：核心代理建出的子会话整段继承父会话的环境，
     // 这里不接受模型自选档位 / 虚拟根（父会话由机制填，子会话由 prepare_session 继承）。
     let agents = parse_agents(&args.agents)?;
-    match mode {
-        SessionMode::Single if agents.len() != 1 => {
-            return Err("mode=single 只接受一个 agent".to_string());
-        }
-        SessionMode::Collab if agents.len() < 2 => {
-            return Err("mode=collab 至少要两个 agent".to_string());
-        }
-        _ => {}
-    }
     let mut resolved: Vec<AgentMeta> = Vec::new();
     for (i, a) in agents.into_iter().enumerate() {
         let (name, modules, model, chara, transient) = if a.reuse {
@@ -547,7 +538,7 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
         .map(crate::capabilities::permission::api::ProfileId::parse)
         .transpose()?;
     Ok(NewSession {
-        mode,
+        kind,
         agents: resolved,
         task,
         request_id,
@@ -764,6 +755,8 @@ fn reject_extra(
 mod tests {
     use super::*;
 
+    use crate::capabilities::conversation::session::api::SINGLE;
+
     fn facts() -> Catalog {
         Catalog {
             agents: vec![crate::capabilities::catalog::registry::api::AgentView {
@@ -797,14 +790,14 @@ mod tests {
     fn resolve_new_session_checks_against_the_catalog() {
         let c = facts();
         let ok: CreateArgs = serde_json::from_value(serde_json::json!({
-            "mode": "single",
+            "kind": "single",
             "agents": [{"name": "a", "modules": ["m1"], "model": "gpt"}],
             "task": "做事",
             "request_id": "r1"
         }))
         .unwrap();
         let spec = resolve_new_session(&ok, &c).expect("合法声明");
-        assert_eq!(spec.mode, SessionMode::Single);
+        assert_eq!(spec.kind, SINGLE);
         assert_eq!(spec.agents[0].modules, vec!["m1".to_string()]);
         assert!(spec.agents[0].transient);
         assert_eq!(spec.task, "做事");
@@ -812,7 +805,7 @@ mod tests {
 
         // 临时项可以带人设；这是核心代理建子会话时唯一能传人设的地方。
         let with_chara: CreateArgs = serde_json::from_value(serde_json::json!({
-            "mode": "single",
+            "kind": "single",
             "agents": [{"name": "带人设", "modules": ["m1"], "chara": " 严谨的整理者 "}],
             "task": "做事",
             "request_id": "r0c"
@@ -823,7 +816,7 @@ mod tests {
 
         // modules 可以省略：零模块 agent 只用内建文件工具。
         let no_modules: CreateArgs = serde_json::from_value(serde_json::json!({
-            "mode": "single",
+            "kind": "single",
             "agents": [{"name": "纯写作", "model": "gpt"}],
             "task": "写一篇稿",
             "request_id": "r0"
@@ -833,7 +826,7 @@ mod tests {
         assert!(spec.agents[0].modules.is_empty(), "缺省 modules = 空");
 
         let unknown_module: CreateArgs = serde_json::from_value(serde_json::json!({
-            "mode": "single",
+            "kind": "single",
             "agents": [{"name": "a", "modules": ["nope"]}],
             "task": "做事",
             "request_id": "r2"
@@ -845,7 +838,7 @@ mod tests {
 
         // 模型名（display name）不是 id：如实拒绝，并列出在册 id。
         let model_name: CreateArgs = serde_json::from_value(serde_json::json!({
-            "mode": "single",
+            "kind": "single",
             "agents": [{"name": "a", "modules": ["m1"], "model": "GPT"}],
             "task": "做事",
             "request_id": "r2b"
@@ -856,7 +849,7 @@ mod tests {
         assert!(err.contains("gpt"), "失败要把在册模型 id 列回去：{}", err);
 
         let empty_task: CreateArgs = serde_json::from_value(serde_json::json!({
-            "mode": "single",
+            "kind": "single",
             "agents": [{"name": "a", "modules": ["m1"]}],
             "task": "   ",
             "request_id": "r2c"
@@ -870,7 +863,7 @@ mod tests {
 
         // 身份项不接受任务字段（任务是会话级的 task）。
         let extra: CreateArgs = serde_json::from_value(serde_json::json!({
-            "mode": "single",
+            "kind": "single",
             "agents": [{"ref": "a", "objective": "做事"}],
             "task": "做事",
             "request_id": "r2d"
@@ -883,7 +876,7 @@ mod tests {
         );
 
         let dup: CreateArgs = serde_json::from_value(serde_json::json!({
-            "mode": "collab",
+            "kind": "collab",
             "agents": [
                 {"name": "a", "modules": ["m1"]},
                 {"name": "b", "modules": ["m1"]}
@@ -901,22 +894,9 @@ mod tests {
                 .all(|a| a.modules == vec!["m1".to_string()])
         );
 
-        let one: CreateArgs = serde_json::from_value(serde_json::json!({
-            "mode": "collab",
-            "agents": [{"name": "a", "modules": ["m1"]}],
-            "task": "一起做",
-            "request_id": "r4"
-        }))
-        .unwrap();
-        assert!(
-            resolve_new_session(&one, &c)
-                .unwrap_err()
-                .contains("至少要两个 agent")
-        );
-
         // 复用登记处的 agent：模块与模型取它自己的，核心不代拟。
         let reuse: CreateArgs = serde_json::from_value(serde_json::json!({
-            "mode": "single",
+            "kind": "single",
             "agents": [{"ref": "a"}],
             "task": "做事",
             "request_id": "r5"
@@ -928,7 +908,7 @@ mod tests {
         assert_eq!(spec.agents[0].chara, "已存人设", "复用项的人设取登记处事实");
 
         let missing: CreateArgs = serde_json::from_value(serde_json::json!({
-            "mode": "single",
+            "kind": "single",
             "agents": [{"ref": "nope"}],
             "task": "做事",
             "request_id": "r6"

@@ -8,6 +8,7 @@ use crate::presentation::faces::Faces;
 
 use crate::capabilities::conversation::proxy::api as d;
 use crate::capabilities::conversation::proxy::api::ProxyTools;
+use crate::capabilities::conversation::session::api::{PROXY, SINGLE};
 
 fn rig() -> (Arc<FakeProxyHost>, ProxyTools) {
     let host = Arc::new(FakeProxyHost::new());
@@ -108,7 +109,7 @@ pub(crate) fn without_a_grant_nothing_reaches_the_host() {
         (d::CATALOG, r#"{"scope":"all"}"#),
         (
             d::CREATE,
-            r#"{"mode":"single","agents":[{"ref":"a"}],"task":"做事","request_id":"r1"}"#,
+            r#"{"kind":"single","agents":[{"ref":"a"}],"task":"做事","request_id":"r1"}"#,
         ),
         (
             d::SEND,
@@ -148,7 +149,7 @@ pub(crate) fn grant_scope_expiry_and_bounds_are_enforced() {
     let out = tools.call(
         &c,
         d::CREATE,
-        r#"{"mode":"single","agents":[{"ref":"a"}],"task":"做事","request_id":"r1"}"#,
+        r#"{"kind":"single","agents":[{"ref":"a"}],"task":"做事","request_id":"r1"}"#,
     );
     assert!(
         !out.ok && out.output.contains("不包含这个工具"),
@@ -174,7 +175,7 @@ pub(crate) fn grant_scope_expiry_and_bounds_are_enforced() {
     let out = tools.call(
         &model_scoped,
         d::CREATE,
-        r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"model":"other"}],"task":"做事","request_id":"r2"}"#,
+        r#"{"kind":"single","agents":[{"name":"x","modules":["m1"],"model":"other"}],"task":"做事","request_id":"r2"}"#,
     );
     assert!(
         !out.ok && out.output.contains("不覆盖这个模型"),
@@ -205,7 +206,7 @@ pub(crate) fn grant_scope_expiry_and_bounds_are_enforced() {
 pub(crate) fn create_session_validates_then_creates_once() {
     let (host, mut tools) = rig();
     let c = ctx(Some(full_grant()));
-    let args = r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"model":"gpt"}],"task":"做事","request_id":"r1"}"#;
+    let args = r#"{"kind":"single","agents":[{"name":"x","modules":["m1"],"model":"gpt"}],"task":"做事","request_id":"r1"}"#;
     let out = tools.call(&c, d::CREATE, args);
     assert!(out.ok, "{}", out.output);
     assert!(out.output.contains("work-r1"), "{}", out.output);
@@ -221,31 +222,23 @@ pub(crate) fn create_session_validates_then_creates_once() {
 
     for (bad, why) in [
         (
-            r#"{"mode":"single","agents":[{"name":"x","modules":["nope"]}],"task":"做事","request_id":"b1"}"#,
+            r#"{"kind":"single","agents":[{"name":"x","modules":["nope"]}],"task":"做事","request_id":"b1"}"#,
             "无此模块",
         ),
         (
-            r#"{"mode":"collab","agents":[{"name":"x","modules":["m1"]}],"task":"做事","request_id":"b3"}"#,
-            "至少要两个 agent",
-        ),
-        (
-            r#"{"mode":"single","agents":[{"name":"x","modules":["m1"]},{"name":"y","modules":["m2"]}],"task":"做事","request_id":"b4"}"#,
-            "只接受一个 agent",
-        ),
-        (
-            r#"{"mode":"single","agents":[{"ref":"nope"}],"task":"做事","request_id":"b5"}"#,
+            r#"{"kind":"single","agents":[{"ref":"nope"}],"task":"做事","request_id":"b5"}"#,
             "不在登记处",
         ),
         (
-            r#"{"mode":"single","agents":[{"name":"a/b","modules":["m1"]}],"task":"做事","request_id":"b6"}"#,
+            r#"{"kind":"single","agents":[{"name":"a/b","modules":["m1"]}],"task":"做事","request_id":"b6"}"#,
             "名字不合法",
         ),
         (
-            r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"extra":1}],"task":"做事","request_id":"b7"}"#,
+            r#"{"kind":"single","agents":[{"name":"x","modules":["m1"],"extra":1}],"task":"做事","request_id":"b7"}"#,
             "不认识的键",
         ),
         (
-            r#"{"mode":"single","agents":[{"name":"x","modules":["m1"]}],"request_id":"b8"}"#,
+            r#"{"kind":"single","agents":[{"name":"x","modules":["m1"]}],"request_id":"b8"}"#,
             "task",
         ),
     ] {
@@ -265,7 +258,7 @@ pub(crate) fn create_session_validates_then_creates_once() {
     let out = tools.call(
         &c,
         d::CREATE,
-        r#"{"mode":"single","agents":[{"ref":"a"}],"task":"做事","request_id":"r9"}"#,
+        r#"{"kind":"single","agents":[{"ref":"a"}],"task":"做事","request_id":"r9"}"#,
     );
     assert!(!out.ok && out.output.contains("磁盘满"), "{}", out.output);
     assert_eq!(host.created().len(), 1);
@@ -273,7 +266,7 @@ pub(crate) fn create_session_validates_then_creates_once() {
     let out = tools.call(
         &c,
         d::CREATE,
-        r#"{"mode":"single","agents":[{"ref":"a"}],"task":"做事","request_id":"r9"}"#,
+        r#"{"kind":"single","agents":[{"ref":"a"}],"task":"做事","request_id":"r9"}"#,
     );
     assert!(out.ok, "失败不记账，重放要再试：{}", out.output);
     assert_eq!(host.created().len(), 2);
@@ -453,7 +446,7 @@ pub(crate) fn the_proxy_session_runs_a_turn_through_the_generic_loop() {
     faces.turn.say(&sid, "开始", Output::Final).expect("跑一轮");
 
     let (meta, events) = faces.history.open(&sid).expect("打开代理会话");
-    assert_eq!(meta.mode, Mode::Proxy);
+    assert_eq!(meta.spec.kind, PROXY);
     assert!(meta.delegation.is_some(), "代理会话带全权委托");
     let text = serde_json::to_string(&events).expect("转录");
     assert!(
@@ -490,7 +483,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
         .call(|core| {
             let spec = d::NewSession {
                 freshness: None,
-                mode: d::SessionMode::Single,
+                kind: SINGLE.to_string(),
                 agents: vec![AgentMeta {
                     name: "c1".to_string(),
                     transient: true,
@@ -597,7 +590,7 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
     assert!(!plain.contains("派完活就让出回合"), "{}", plain);
 }
 
-/// 目的：用户入口的第三人形态：`create_work(WorkMode::Proxy)` 建出**代理会话**——
+/// 目的：用户入口的第三人形态：`create_work(PROXY)` 建出**代理会话**——
 ///   没有名单、带全权委托、运行态正常；名单 / 需求与形态不符时整条拒绝、不留半成品。
 #[test]
 pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
@@ -605,7 +598,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
     let spec = crate::capabilities::work::api::WorkSpec {
         freshness: None,
         name: "w-user-proxy".to_string(),
-        mode: WorkMode::Proxy,
+        kind: PROXY.to_string(),
         agents: Vec::new(),
         task: None,
         delegate: false,
@@ -617,7 +610,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
     let (opened, _head) = faces.work.create_work(spec.clone()).expect("建代理会话");
     assert!(opened.agents.is_empty(), "代理会话没有名单");
     let (meta, _) = faces.history.open(&opened.sid).expect("落盘");
-    assert_eq!(meta.mode, Mode::Proxy);
+    assert_eq!(meta.spec.kind, PROXY);
     assert!(meta.delegation.is_some(), "选代理形态 = 授予全权");
     assert!(meta.agents.is_empty() && meta.parent.is_none());
     assert_eq!(meta.run, RunState::Active);
@@ -639,7 +632,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         .iter()
         .find(|v| v.sid == opened.sid)
         .expect("代理会话在列表里");
-    assert_eq!(v.mode, Mode::Proxy);
+    assert_eq!(v.kind, PROXY);
     assert_eq!(v.run, "active");
     assert!(!v.can_update_task, "代理会话没有本次需求");
 
@@ -700,7 +693,7 @@ pub(crate) fn proxy_session_exposes_context_usage() {
     let spec = crate::capabilities::work::api::WorkSpec {
         freshness: None,
         name: "w-proxy-ctx".to_string(),
-        mode: WorkMode::Proxy,
+        kind: PROXY.to_string(),
         agents: Vec::new(),
         task: None,
         delegate: false,
@@ -745,7 +738,7 @@ pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
             move |core| {
                 let spec = d::NewSession {
                     freshness: None,
-                    mode: d::SessionMode::Single,
+                    kind: SINGLE.to_string(),
                     agents: vec![AgentMeta {
                         name: "a".to_string(),
                         transient: true,

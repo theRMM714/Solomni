@@ -3,6 +3,9 @@
 //! 不管：真实传输（L4 端到端）。
 //! 联动：web::route、路由目录、docs/、演示脚本、FakeFaces。
 
+use crate::capabilities::conversation::session::api::{
+    HistoryOps, HistoryView, MEETING, SINGLE, SessionMeta, SessionSpec,
+};
 use crate::capabilities::runtime::api::DecisionQueue;
 use crate::capabilities::runtime::api::{
     Acted, ActionCall, ActionOps, ActionView, Advance, Caller, Output, RuntimeOps,
@@ -10,7 +13,8 @@ use crate::capabilities::runtime::api::{
 use crate::capabilities::turn::turn::api::{Events, TurnOps};
 use crate::capabilities::work::api::{
     AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, RuntimeReport,
-    SessionConfig, SessionEdit, SessionView, TierChoices, WorkMode, WorkOpened, WorkOps, WorkSpec,
+    SessionConfig, SessionEdit, SessionTypeView, SessionView, TierChoices, WorkOpened, WorkOps,
+    WorkSpec,
 };
 use crate::presentation::faces::Faces;
 
@@ -18,7 +22,6 @@ use crate::capabilities::catalog::modules::api::{ModulesOps, Roster};
 use crate::capabilities::catalog::registry::api::AgentView;
 use crate::capabilities::catalog::registry::api::RegistryOps;
 use crate::capabilities::catalog::registry::api::{AppSettings, ModelView, ProviderView};
-use crate::capabilities::conversation::session::api::{HistoryOps, HistoryView, Mode, SessionMeta};
 use crate::kernel::api::types::Tier;
 use crate::presentation::web::routes::{self, ROUTES};
 use crate::presentation::web::{self, FenceInfo};
@@ -262,7 +265,7 @@ fn meta(name: &str) -> SessionMeta {
         usage_totals: Default::default(),
         context_freshness: false,
         name: name.to_string(),
-        mode: Mode::Single,
+        spec: SessionSpec::plain(SINGLE, "单机", "solo"),
         delegate: false,
         modules: vec!["m".to_string()],
         task: None,
@@ -281,6 +284,9 @@ fn meta(name: &str) -> SessionMeta {
 }
 
 impl WorkOps for FakeFaces {
+    fn session_types(&self) -> Result<Vec<SessionTypeView>, String> {
+        Ok(Vec::new())
+    }
     fn create_work(&self, _spec: WorkSpec) -> Result<(WorkOpened, u64), String> {
         self.guard()?;
         Ok((
@@ -300,7 +306,7 @@ impl WorkOps for FakeFaces {
             context_freshness: false,
             freshness_keep_percent: 80,
             sid: "w1".to_string(),
-            mode: Mode::Single,
+            kind: SINGLE.to_string(),
             started: true,
             agents: vec![ConfigAgent {
                 name: "甲".to_string(),
@@ -459,7 +465,9 @@ impl WorkOps for FakeFaces {
                 freshness_stats: None,
                 usage_totals: Default::default(),
                 sid: h.name.clone(),
-                mode: h.mode,
+                kind: h.kind.clone(),
+                flows: h.flows,
+                auto: h.auto,
                 done: h.done,
                 tier: h.exec.tier.as_str().to_string(),
                 tier_ready: true,
@@ -477,7 +485,7 @@ impl WorkOps for FakeFaces {
                 permission_narrowed: false,
                 permission_parent: None,
                 running: false,
-                can_update_task: h.mode == Mode::Collab,
+                can_update_task: h.kind == MEETING,
                 run: h.run.as_str().to_string(),
                 pending: None,
                 continue_action: None,
@@ -503,7 +511,7 @@ impl WorkOps for FakeFaces {
             available: BTreeMap::new(),
         })
     }
-    fn suggest_models(&self, _task: &str, _mode: WorkMode) -> Result<Vec<AgentSuggestion>, String> {
+    fn suggest_models(&self, _task: &str, _kind: &str) -> Result<Vec<AgentSuggestion>, String> {
         self.guard()?;
         Ok(vec![AgentSuggestion {
             name: "甲".to_string(),
@@ -574,7 +582,9 @@ impl RuntimeOps for FakeFaces {
             freshness_stats: None,
             usage_totals: Default::default(),
             sid: "w1".to_string(),
-            mode: Mode::Single,
+            kind: SINGLE.to_string(),
+            flows: false,
+            auto: false,
             done: false,
             tier: "host".to_string(),
             tier_ready: true,
@@ -759,7 +769,9 @@ impl HistoryOps for FakeFaces {
         self.guard()?;
         Ok(vec![HistoryView {
             name: "w1".to_string(),
-            mode: Mode::Single,
+            kind: SINGLE.to_string(),
+            flows: false,
+            auto: false,
             ts: 1,
             done: false,
             exec: Default::default(),
@@ -875,8 +887,8 @@ fn shape_matches(pattern: &str, url: &str) -> bool {
 /// 每条路由给一个**合法**请求体，好让错误路径真的落到能力上（而不是先死在解析上）。
 fn sample_body(route: &routes::Route) -> &'static str {
     match route.id {
-        "action" => r#"{"mode":"single","agents":[]}"#,
-        "suggest" => r#"{"task":"t","mode":"single"}"#,
+        "action" => r#"{"kind":"single","agents":[]}"#,
+        "suggest" => r#"{"task":"t","kind":"single"}"#,
         "storage.clean" => r#"{"kind":"build-cache","confirm":true}"#,
         _ => "{}",
     }
@@ -1288,7 +1300,7 @@ fn success_shapes_are_pinned_per_route() {
         (
             "POST",
             "/api/actions/create_session",
-            r#"{"mode":"single","agents":[{"name":"a","modules":["m"]}]}"#,
+            r#"{"kind":"single","agents":[{"name":"a","modules":["m"]}]}"#,
             200,
             "\"sid\"",
         ),
@@ -1355,7 +1367,7 @@ fn success_shapes_are_pinned_per_route() {
         (
             "POST",
             "/api/suggest-models",
-            r#"{"task":"t","mode":"single"}"#,
+            r#"{"task":"t","kind":"single"}"#,
             200,
             "\"agents\"",
         ),

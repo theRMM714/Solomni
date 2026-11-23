@@ -171,14 +171,11 @@ pub(crate) fn run_prepared<H: TurnHost>(
     })?;
     // 这是**子会话**完成：叫醒父会话推进任务链（脱离本次调用，不等它跑完）。
     if let Some(parent) = parent {
-        // 代理模式的父：叫醒它去判断下一步（不替它决定）；协作的父：推进任务链。
+        // 代理父：叫醒它去判断下一步（不替它决定）；别的父（有流程的会话）：推进流程。
         let is_proxy = host
             .core({
                 let p = parent.clone();
-                move |turn| {
-                    use crate::capabilities::conversation::session::api::Mode;
-                    Ok(turn.session_mode(&p) == Some(Mode::Proxy))
-                }
+                move |turn| Ok(turn.session_spec(&p).is_some_and(|s| s.is_proxy_spec()))
             })
             .unwrap_or(false);
         if is_proxy {

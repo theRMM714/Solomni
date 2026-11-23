@@ -5,6 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
+use crate::capabilities::conversation::session::api::SINGLE;
 /// 目的：**改形态不必重建会话**：会话里存的是**参数**（`SessionParams`），身份块每次调用现渲染。
 ///   判据：同一个会话（没被重建）在建好之后，把登记处里的形态探测成 native——
 ///   下一回合的请求已经换了一套调用约定，而对话（此前说过的话）一条没丢。
@@ -22,10 +23,7 @@ pub(crate) fn tool_mode_change_needs_no_session_rebuild() {
         Arc::clone(&hist),
         Arc::clone(&io),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let before = core.single_identity(&sid).expect("身份块");
     assert!(
         before.contains("只输出一个 JSON 信封"),
@@ -523,7 +521,7 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
         .create_work(WorkSpec {
             freshness: None,
             name: "w".to_string(),
-            mode: WorkMode::Single,
+            kind: SINGLE.to_string(),
             agents: vec![AgentMeta {
                 name: "a".to_string(),
                 transient: true,

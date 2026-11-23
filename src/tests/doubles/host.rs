@@ -4,6 +4,7 @@
 //! 联动：`src/kernel/ports.rs` 与 `src/capabilities/packages/ports.rs`。
 
 use super::*;
+use crate::capabilities::conversation::session::api::MEETING;
 
 /// 目的：记录型围栏端口：记录按会话（`lease_releases`）与按次（`released` / `leases`）两类释放请求。
 pub(crate) struct RecordingFence {
@@ -155,8 +156,8 @@ pub(crate) fn agents_of(modules: &[&str]) -> Vec<AgentMeta> {
 }
 
 /// 目的：测试用工作规格（模型留空 = 走核心默认 m）。单 agent 形态：1 个 agent（模块数不限；单模块时以模块名给 agent 起名，便于断言说话人）；协作形态：每模块一个 agent（成员 id = agent 名 = 模块名）。
-pub(crate) fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
-    let agents = if mode == WorkMode::Collab {
+pub(crate) fn work(name: &str, kind: &str, modules: &[&str]) -> WorkSpec {
+    let agents = if kind == MEETING {
         agents_of(modules)
     } else {
         let agent_name = if modules.len() == 1 {
@@ -175,7 +176,7 @@ pub(crate) fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
     WorkSpec {
         freshness: None,
         name: name.to_string(),
-        mode,
+        kind: kind.to_string(),
         agents,
         task: None,
         delegate: false,
@@ -284,7 +285,7 @@ pub(crate) fn installed_dep(
 
 /// 目的：协作工作规格（含需求）。
 pub(crate) fn collab_work(name: &str, modules: &[&str], delegate: bool, task: &str) -> WorkSpec {
-    let mut w = work(name, WorkMode::Collab, modules);
+    let mut w = work(name, MEETING, modules);
     w.delegate = delegate;
     w.task = Some(task.to_string());
     w

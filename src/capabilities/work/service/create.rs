@@ -77,7 +77,7 @@ impl Work {
         &self,
         registry: &dyn Registry,
         metas: &[AgentMeta],
-        mode: WorkMode,
+        need_core: bool,
     ) -> Result<(BTreeMap<String, Channel>, Option<Channel>), String> {
         let mut channels = BTreeMap::new();
         for a in metas {
@@ -86,7 +86,7 @@ impl Work {
                 .map_err(|e| format!("agent {} 没有可用模型通道：{}", a.name, e))?;
             channels.insert(a.name.clone(), c);
         }
-        let core = if mode == WorkMode::Collab {
+        let core = if need_core {
             Some(
                 registry
                     .core_channel()
@@ -138,6 +138,14 @@ impl Work {
     ) -> Result<(PreparedWork, Option<GuestBoot>), String> {
         let host: &dyn HostProbe = probe.as_ref();
         validate_work_name(&spec.name)?;
+        // 选中的会话类型在这里**解析成声明**：后面所有分岔只看声明（流程 / 角色），不看名字。
+        let decl = self.flows.book().spec_of(&spec.kind).ok_or_else(|| {
+            format!(
+                "会话类型表里没有「{}」这个类型（systools/profiles.yaml）",
+                spec.kind
+            )
+        })?;
+        let driven = decl.driven();
         if turn.holds(&spec.name)
             || self.history.load(&spec.name).is_ok()
             || turn.is_starting(&spec.name)
@@ -148,14 +156,14 @@ impl Work {
             self.resolve_workspace_binding(host, spec.workspace.as_deref(), spec.tier, parent)?;
         // **代理形态**（第三人形态）：没有名单、没有需求——用户选这一形态就是**授予全权**。
         // 它不是一个 agent 工作，装配与其余形态没有共同点，所以在这里就地分岔、不往下走。
-        if spec.mode == WorkMode::Proxy {
+        if !driven && decl.role == crate::capabilities::conversation::session::api::PROXY_ROLE {
             if !spec.agents.is_empty() || spec.task.is_some() {
                 return Err(
-                    "代理形态不接受 agent 名单或本次需求：决定权是整块交给核心的".to_string(),
+                    "代理类型不接受 agent 名单或本次需求：决定权是整块交给核心的".to_string(),
                 );
             }
             if parent.is_some() {
-                return Err("子工作不能建成代理形态：代理不能往里套代理".to_string());
+                return Err("子工作不能建成代理类型：代理不能往里套代理".to_string());
             }
             // 代理会话跑在核心默认模型上：没有它就不建（工作区都还没有，失败什么都不留）。
             registry
@@ -167,6 +175,7 @@ impl Work {
                 host,
                 ProxySeed {
                     name: &spec.name,
+                    kind: &spec.kind,
                     granted_at: crate::kernel::api::procs::unix_seconds(),
                     tier: spec.tier,
                     guest: spec.guest.as_deref(),
@@ -193,7 +202,7 @@ impl Work {
         // **单模式的组合语义**：点名了多个 agent = 把它们的模块并成一个**临时组合**（去重、保序；
         // 模型取核心默认）。规则只有这一处——前端不再自己拼（见 docs/architecture/layers.md）。
         let mut spec = spec;
-        if spec.mode == WorkMode::Single && spec.agents.len() > 1 {
+        if !driven && spec.agents.len() > 1 {
             spec.agents = vec![merge_into_one(&spec.agents, &spec.name)];
         }
         let roster = self.modules.roster();
@@ -214,20 +223,14 @@ impl Work {
                 registry.resolve(mid)?;
             }
         }
-        // 形态约束（模块可以为空，上面只校验真实存在与归属不冲突）
-        match spec.mode {
-            WorkMode::Single => {
-                if spec.agents.len() != 1 {
-                    return Err("单 agent 形态只接受一个 agent（模块数不限）".to_string());
-                }
+        // 类型约束（模块可以为空，上面只校验真实存在与归属不冲突）
+        if driven {
+            if spec.task.as_deref().unwrap_or("").trim().is_empty() {
+                return Err("有流程的会话必须填写本次需求".to_string());
             }
-            // 代理形态在函数开头就返回了（它没有 agent 名单）；这里只为穷尽，不产生行为。
-            WorkMode::Proxy => {}
-            WorkMode::Collab => {
-                if spec.task.as_deref().unwrap_or("").trim().is_empty() {
-                    return Err("协作模式必须填写本次需求".to_string());
-                }
-            }
+        } else if spec.agents.len() != 1 {
+            // 代理式会话在函数开头就返回了（它没有 agent 名单）。
+            return Err("没有流程的会话只接受一个 agent（模块数不限）".to_string());
         }
         // 工作根：顶层会话就是自己；子会话沿父链走到顶（整棵树只有一个 work/）。
         let root = match parent {
@@ -252,7 +255,7 @@ impl Work {
         }
         // **模型通道前置判据**：合并后的名单里每个 agent 都要有确定通道；协作还要求核心通道。
         // 放在建工作区 / 起 guest 之前——失败就不留下任何半成品。
-        let (channels, core_channel) = self.resolve_channels(registry, &metas, spec.mode)?;
+        let (channels, core_channel) = self.resolve_channels(registry, &metas, driven)?;
         // 模块扁平清单（展示用；顺序按 agent 名单展开，同一模块被多个 agent 共用时只留一份）
         let module_ids = flat_modules(&metas);
         // 代拟：给了 agent 就不再代拟（名单已经有了，不让核心盖掉用户的选择）。
@@ -267,7 +270,7 @@ impl Work {
             context_freshness: freshness_on,
             freshness_keep_percent: freshness_keep,
             name: name.clone(),
-            mode: spec.mode,
+            spec: decl,
             delegate,
             modules: module_ids.clone(),
             task: spec.task.clone(),
@@ -441,7 +444,6 @@ impl Work {
         Ok((
             PreparedWork::Pending(Box::new(PendingWork {
                 meta: Box::new(meta),
-                mode: spec.mode,
                 metas,
                 task: spec.task,
                 delegate,
@@ -472,7 +474,6 @@ impl Work {
         };
         let PendingWork {
             meta,
-            mode,
             metas,
             task,
             delegate,
@@ -485,11 +486,9 @@ impl Work {
         } = *pending;
         let roster = self.modules.roster();
 
-        let (session, mut events) = match mode {
-            // 代理形态在函数开头就建好返回了：它没有 agent 名单，不走这条装配路。
-            WorkMode::Proxy => return Err("代理形态没有 agent 名单，不经这条装配路".to_string()),
-            // 单 agent（模块数不限）。
-            WorkMode::Single => {
+        let (session, mut events) = if !meta.spec.driven() {
+            // 没有流程：单 agent（模块数不限）。代理式会话在准备段就建好返回了，不走这条装配路。
+            {
                 let a = metas.first().ok_or("至少要有一个 agent")?;
                 let sb = sandboxes
                     .for_agent(&a.name)
@@ -549,20 +548,15 @@ impl Work {
                 s.set_freshness_keep_percent(meta.freshness_keep_percent);
                 (Session::Single(s), opened)
             }
-            WorkMode::Collab => {
+        } else {
+            {
                 let task = task.as_deref().unwrap_or("").trim().to_string();
                 // 裁决队按会话 id 取：核心各关卡与这一席的工具级确认共用同一条队。
                 let door = self.desk_of(turn, &name);
                 let core_channel =
-                    core_channel.ok_or_else(|| "协作会话缺少核心模型通道".to_string())?;
-                // 按会话类型表里声明的流程序列装配：本层不认识任何具体流程（工厂是组合根注入的）。
-                let ids = self
-                    .flows
-                    .book()
-                    .flows_of(WorkMode::Collab.as_str())
-                    .ok_or_else(|| {
-                        "会话类型表里没有「协作」这个类型（systools/profiles.yaml）".to_string()
-                    })?;
+                    core_channel.ok_or_else(|| "有流程的会话缺少核心模型通道".to_string())?;
+                // 按这条会话声明里的流程序列装配：本层不认识任何具体流程（工厂是组合根注入的）。
+                let ids = meta.spec.flow_ids();
                 let setup = crate::capabilities::conversation::session::api::FlowSetup {
                     settings: registry.snapshot(),
                     core_channel: Some(core_channel),
@@ -706,6 +700,7 @@ impl Work {
     ) -> Result<(String, Vec<SessionEvent>), String> {
         let ProxySeed {
             name,
+            kind,
             granted_at,
             tier,
             guest,
@@ -742,7 +737,11 @@ impl Work {
             context_freshness: freshness_on,
             freshness_keep_percent: freshness_keep,
             name: name.to_string(),
-            mode: WorkMode::Proxy,
+            spec: crate::capabilities::conversation::session::api::SessionSpec::plain(
+                kind,
+                &self.flows.book().label_of(kind),
+                crate::capabilities::conversation::session::api::PROXY_ROLE,
+            ),
             delegate: false,
             modules: Vec::new(),
             task: None,

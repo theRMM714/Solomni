@@ -53,7 +53,7 @@ export function statusPrintOf(s) {
     (state.settings && state.settings.compact_at_percent) || 0,
     (state.settings && state.settings.compact_keep_percent) || 0,
     (state.settings && state.settings.compact_model) || '',
-    s && s.mode,
+    s && [s.kind, s.flows ? 1 : 0, s.auto ? 1 : 0],
     s && s.permission_profile, s && s.permission_label, s && s.permission_narrowed ? 1 : 0,
     s && s.permission_parent,
     s && s.thinking ? [s.thinking.level, s.thinking.default_level, s.thinking.label, (s.thinking.options || []).length] : 0,

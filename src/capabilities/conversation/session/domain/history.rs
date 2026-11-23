@@ -5,7 +5,7 @@
 //! 联动：由 `service.rs` 与 `ports.rs` 使用，`api.rs` 对外重导出。
 
 use crate::capabilities::catalog::registry::api::AgentMeta;
-use crate::capabilities::conversation::session::domain::mode::Mode;
+use crate::capabilities::conversation::session::domain::profile::SessionSpec;
 use serde::{Deserialize, Serialize};
 
 /// 目的：会话元信息：创建工作时由用户决定的身份（形态 / 名单 / 档位 / 归属），
@@ -15,9 +15,10 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 pub struct SessionMeta {
     pub name: String,
-    /// 目的：工作形态（界面标签与 `rebuild_session` 的装配依据同源；词汇归 `mode::Mode`）。
+    /// 目的：这条会话的**解析后声明**（类型名 / 自己的角色 / 按顺序跑的流程）。
     ///   它是落盘事实（**不在内存里留影子状态**）：拿不到它就无法判断怎么重建这条会话。
-    pub mode: Mode,
+    ///   约束：落的是解析结果而不是对表的引用——改那张表不影响已建会话的重建。
+    pub spec: SessionSpec,
     /// 目的：代拟（协作）时为 true：创建时没有名单，确认名单后才写回 agents。
     #[serde(default)]
     pub delegate: bool,
@@ -166,6 +167,12 @@ pub struct Delegation {
 }
 
 impl SessionMeta {
+    /// 目的：这条会话是不是代理会话：没有流程、也没有自己的人员名单——活交给子会话，核心代理在此工作。
+    /// 约束：判据只看落盘声明与名单（不看类型名），自定的代理式预设同样算；单机与会议都有名单或流程。
+    pub fn is_proxy(&self) -> bool {
+        self.spec.is_proxy_spec() && self.agents.is_empty()
+    }
+
     /// 目的：允许被派发 / 唤醒吗？停止与归档都拒绝——**运行态的唯一判据只有这一处**
     ///   （派发入口、代理转达、叫醒都问它，不各写一份）。None = 放行。
     pub fn dispatch_refusal(&self) -> Option<String> {
@@ -187,7 +194,12 @@ impl SessionMeta {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct HistoryView {
     pub name: String,
-    pub mode: Mode,
+    /// 目的：会话类型名（单机 / 会议 / 代理，或用户自定的预设名）。
+    pub kind: String,
+    /// 目的：这条会话有没有流程在推进（界面据此决定能不能自由发言）。
+    pub flows: bool,
+    /// 目的：决定权是不是整块交给核心（没有名单、没有需求：界面上叫代理式）。
+    pub auto: bool,
     pub ts: i64,
     pub done: bool,
     /// 目的：这条会话记的执行档位与选型（meta.yaml 的 exec 段；缺字段按默认 = 本机档读回）。

@@ -5,6 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
+use crate::capabilities::conversation::session::api::SINGLE;
 
 /// 目的：设置是流式的**上限**：设置关掉时，调用方要流式也拿不到（全局通用）。
 #[test]
@@ -26,10 +27,7 @@ pub(crate) fn core_direct_seeds_system_prompt() {
         vec!["{\"type\":\"say\",\"text\":\"你好\"}".to_string()],
     );
     let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     // 回归：单 agent 会话的身份块带能力摘要与工具用法（由会话参数现渲染，不进对话列表）。
     let identity = core.single_identity(&sid).expect("身份块");
     assert!(identity.contains("能力：a 的能力"), "{}", identity);
@@ -79,11 +77,11 @@ pub(crate) fn single_mode_accepts_multi_module_agent_and_converses() {
         gw(member, vec!["[]".into()]),
     );
     let sid = core
-        .create_work(work("w", WorkMode::Single, &["a", "b"]))
+        .create_work(work("w", SINGLE, &["a", "b"]))
         .unwrap()
         .sid;
     let meta = core.lifecycle.history_open("w").unwrap().0;
-    assert_eq!(meta.mode, Mode::Single);
+    assert_eq!(meta.spec.kind, SINGLE);
     assert_eq!(meta.agents.len(), 1);
     assert_eq!(
         meta.agents[0].modules,
@@ -172,10 +170,7 @@ pub(crate) fn core_files_view_carries_lists_and_real_roots() {
         gw(BTreeMap::new(), vec!["[]".into()]),
         Arc::clone(&ws),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     ws.seed("w", "work", "投喂.txt");
     ws.seed("w", "a", "note.txt");
     ws.seed("w", "b", "别人的.txt"); // 不属于本工作的 agent → 不该出现
@@ -244,10 +239,7 @@ pub(crate) fn core_direct_tool_flow_injects_result_into_history() {
         gw(member, vec!["[]".into()]),
         Arc::clone(&runner),
     );
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,

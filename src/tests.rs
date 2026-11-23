@@ -170,7 +170,7 @@ pub(crate) fn single_work(
     crate::capabilities::work::api::WorkSpec {
         freshness: None,
         name: name.to_string(),
-        mode: crate::capabilities::work::api::WorkMode::Single,
+        kind: crate::capabilities::conversation::session::api::SINGLE.to_string(),
         agents: vec![crate::capabilities::catalog::registry::api::AgentMeta {
             name: modules[0].to_string(),
             transient: true,

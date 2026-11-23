@@ -48,17 +48,17 @@ impl Handle {
         }
         let (created, facts) = self.call(move |core| core.commit_session(prepared))?;
         self.publish(&created.session, facts);
-        // 有父 = 核心代理建的子工作：**建好就开工**（single 以 task 为第一句；collab 开始讨论）。
+        // 有父 = 核心代理建的子工作：**建好就开工**（没有流程以 task 为第一句；有流程开始跑流程）。
         if spec.parent.is_some() {
             self.record_notice(
                 &created.session,
                 SessionEvent::Notice(d::relay_note(d::MessageKind::Task)),
             );
-            let mode = self.call({
+            let decl = self.call({
                 let c = created.session.clone();
                 move |core| core.turn.dispatch_target(&c)
             })?;
-            if mode == crate::capabilities::conversation::session::api::Mode::Collab {
+            if decl.driven() {
                 crate::capabilities::turn::turn::api::start_child_collab(self, &created.session);
             } else {
                 crate::capabilities::turn::turn::api::spawn_detached_node(
@@ -118,24 +118,16 @@ impl Handle {
                         move |core| core.turn.resume_subtree(&s)
                     })?;
                     if resumed {
-                        let mode = self.call({
+                        let decl = self.call({
                             let s = sid.to_string();
-                            move |core| Ok(core.session_mode(&s))
+                            move |core| Ok(core.session_spec(&s))
                         })?;
-                        match mode {
-                            Some(crate::capabilities::conversation::session::api::Mode::Collab) => {
-                                crate::capabilities::turn::turn::api::spawn_detached_collab(
-                                    self, sid,
-                                )
-                            }
-                            Some(crate::capabilities::conversation::session::api::Mode::Proxy) => {
-                                crate::capabilities::turn::turn::api::spawn_detached_proxy(
-                                    self, sid,
-                                )
-                            }
-                            _ => crate::capabilities::turn::turn::api::spawn_detached_continue(
-                                self, sid,
-                            ),
+                        if decl.as_ref().is_some_and(|d| d.driven()) {
+                            crate::capabilities::turn::turn::api::spawn_detached_collab(self, sid)
+                        } else if decl.as_ref().is_some_and(|d| d.is_proxy_spec()) {
+                            crate::capabilities::turn::turn::api::spawn_detached_proxy(self, sid)
+                        } else {
+                            crate::capabilities::turn::turn::api::spawn_detached_continue(self, sid)
                         }
                     }
                     "active".to_string()
@@ -160,7 +152,15 @@ impl Handle {
         &self,
         args: &serde_json::Value,
     ) -> Result<d::NewSession, String> {
-        let mode = d::SessionMode::parse(args.get("mode").and_then(|v| v.as_str()).unwrap_or(""))?;
+        let kind = args
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if kind.is_empty() {
+            return Err("kind 不能为空（要会话类型表里的一个）".to_string());
+        }
         let mut agents: Vec<crate::capabilities::catalog::registry::api::AgentMeta> = Vec::new();
         if let Some(arr) = args.get("agents").and_then(|v| v.as_array()) {
             for (i, a) in arr.iter().enumerate() {
@@ -219,7 +219,7 @@ impl Handle {
             }
         }
         Ok(d::NewSession {
-            mode,
+            kind,
             agents,
             task: args
                 .get("task")

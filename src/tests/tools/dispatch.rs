@@ -5,6 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
+use crate::capabilities::conversation::session::api::{MEETING, SINGLE};
 #[test]
 pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
     let mut a = module_of("a");
@@ -20,7 +21,7 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
     let one_agent = WorkSpec {
         freshness: None,
         name: "w".to_string(),
-        mode: WorkMode::Single,
+        kind: SINGLE.to_string(),
         agents: vec![AgentMeta {
             name: "组合".to_string(),
             transient: true,
@@ -43,7 +44,7 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
     let cross = WorkSpec {
         freshness: None,
         name: "cross".to_string(),
-        mode: WorkMode::Collab,
+        kind: MEETING.to_string(),
         agents: vec![
             AgentMeta {
                 name: "甲".to_string(),
@@ -116,7 +117,7 @@ pub(crate) fn same_named_tools_in_two_modules_run_in_their_own_root() {
     );
     // 跨模块同名不再算冲突：照样能建工作。
     let sid = core
-        .create_work(work("w", WorkMode::Single, &["a", "b"]))
+        .create_work(work("w", SINGLE, &["a", "b"]))
         .unwrap()
         .sid;
     // 模块工具清单**不在系统提示里**（随回合注入）：分组形态由
@@ -200,7 +201,7 @@ pub(crate) fn external_tool_without_module_is_refused_when_agent_has_many_module
         Arc::clone(&runner),
     );
     let sid = core
-        .create_work(work("w", WorkMode::Single, &["a", "b"]))
+        .create_work(work("w", SINGLE, &["a", "b"]))
         .unwrap()
         .sid;
     let events = with_turn_io(|io, cancel, emit| {
@@ -269,10 +270,7 @@ pub(crate) fn tool_call_event_is_emitted_before_the_next_round() {
         ok: true,
     });
     let mut core = core_with_runner(vec![mod_a], gw(member, vec!["[]".into()]), runner);
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let mut seen: Vec<&str> = Vec::new();
     {
         let mut emit = |e: SessionEvent| {
@@ -316,10 +314,7 @@ pub(crate) fn tool_type_mention_in_plain_speech_is_not_misjudged() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![say]);
     let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -350,10 +345,7 @@ pub(crate) fn tool_type_mention_in_plain_speech_is_not_misjudged() {
         vec!["写法示例：{\"type\":\"tool\"} 就是这样".to_string()],
     );
     let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,
@@ -385,10 +377,7 @@ pub(crate) fn tool_type_mention_in_plain_speech_is_not_misjudged() {
         vec!["格式是 {\"type\":\"tool\"}".to_string()],
     );
     let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = with_turn_io(|io, cancel, emit| {
         core.turn.single_say(
             &sid,

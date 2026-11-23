@@ -64,9 +64,8 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
   // 身份与冻结事实
   const head = ui.div('cfg-sec');
   head.appendChild(ui.div('cfg-sec-title', '会话 ' + (cfg.sid || sid)));
-  head.appendChild(ui.div('cfg-line', '形态：' + (cfg.mode === 'collab'
-    ? '协作（N 个 agent，各自独立沙箱）'
-    : '单 agent（恰好 1 个 agent，模块数不限）')));
+  head.appendChild(ui.div('cfg-line', '会话类型：' + app.typeLabel(cfg.kind) +
+    (cfg.flows ? '（按流程推进）' : '（没有流程，直接轮循环）')));
   head.appendChild(frozen
     ? ui.detail(sessionConfigCopy.frozen)
     : ui.hint('这轮会话还没有内容：agent 名单与形态都还改得动。'));
