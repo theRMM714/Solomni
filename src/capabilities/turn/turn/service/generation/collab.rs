@@ -3,8 +3,7 @@
 //! 不管：单个成员回合的实现、会话装配。
 //! 联动：`generation/member.rs`、`turn::api::TurnHost`、docs/session/session-model.md
 
-use crate::capabilities::conversation::collab::api::AfterTurn;
-use crate::capabilities::conversation::session::api::SessionEvent;
+use crate::capabilities::conversation::session::api::{Handback, Mechanism, SessionEvent};
 use crate::capabilities::turn::turn::api::{Advance, AskReq, CollabWork, TurnHost};
 
 /// 目的：协作的长步骤（开始讨论 / 回答 / 继续）：与单 agent 同一条 own-and-return—— 队列只占"取/交"两步，泵在工作线程上跑；事件**边产边送**事件台，界面因此能看着讨论推进。  **核心驱动**（见 docs/session/session-model.md 二之二）：泵只决定"该问谁"， 成员回合由主线程取该 agent 的会话去跑（它才拿得到那些会话）。所以泵线程与主线程**握手**： 泵让出 → 发 AskReq → 主线程跑完回 MemberTurn → 泵继续。
@@ -30,17 +29,15 @@ pub(crate) fn collab_generation<H: TurnHost>(
     };
     // 把「停止」接到泵上：它在每次模型调用前与**调用中途**都看这个标志。
     let mut session = session;
-    session.set_cancel(std::sync::Arc::clone(&cancel));
+    {
+        let m: &mut dyn Mechanism = &mut session;
+        m.set_cancel(std::sync::Arc::clone(&cancel));
+    }
     // 增量落盘手柄：泵产出一条定稿事件就落一条，中途刷新页面因此能看到已产生的部分。
     let persister = host.core({
         let sid = sid.to_string();
         move |turn| Ok(turn.persister(&sid))
     })?;
-    // 提醒上限由设置来（用户可调，见 session-model.md 二）：起线程前问一次核心。
-    // 调用次数**没有上限**：模型继续核实就继续跑，直到它给出表态（或用户点停止）。
-    let remind_cap = host
-        .core_env(|_turn, registry, _probe| Ok(registry.app().discuss_remind_cap))
-        .unwrap_or(3);
     let handle = host.clone();
     // 握手通道：泵 → 主线程（要一个成员回合）；主线程 → 泵（回合结果）。
     let (ask_tx, ask_rx) = std::sync::mpsc::channel::<AskReq>();
@@ -50,6 +47,8 @@ pub(crate) fn collab_generation<H: TurnHost>(
     let worker = {
         let sid = sid.to_string();
         let bus = std::sync::Arc::clone(&bus);
+        // 泵线程自己拿一份停止开关（机制那份由 set_cancel 交出去，登记的那份留给收尾）。
+        let cancel = std::sync::Arc::clone(&cancel);
         std::thread::Builder::new()
                 .name("solomni-collab".to_string())
                 .spawn(move || {
@@ -74,24 +73,35 @@ pub(crate) fn collab_generation<H: TurnHost>(
                                     sink(SessionEvent::Notice(format!("[裁决] {}", e)));
                                 }
                             }
-                            CollabWork::Resume => c.resume(&mut sink),
+                            CollabWork::Resume => {
+                                let m: &mut dyn Mechanism = &mut c;
+                                m.resume(&mut sink);
+                            }
                         }
-                        // 核心驱动：泵让出"该问谁"就回头找主线程（它才拿得到各 agent 的会话）。
+                        // 核心驱动：机制让出"该问谁"就回头找主线程（它才拿得到各 agent 的会话）。
+                        // 这里只认机制面：推一步 / 取走让出的事 / 交回处置——不认识协作的任何字段。
+                        let mech: &mut dyn Mechanism = &mut c;
+                        // 这一步是这一趟的第一次推进（已走过「继续」的，就从断点接着推）。
+                        let mut opening = !matches!(&work, CollabWork::Resume);
                         loop {
                             // 先看有没有已经让出的那一步；没有就推一步（推完再看一次）。
-                            let ask = match c.take_ask() {
+                            let ask = match mech.take_ask() {
                                 Some(a) => Some(a),
                                 None => {
-                                    c.pump_with(&mut sink);
-                                    c.take_ask()
+                                    if opening {
+                                        mech.start(&mut sink);
+                                    } else {
+                                        mech.step(&mut sink);
+                                    }
+                                    mech.take_ask()
                                 }
                             };
-                            let Some((i, identity, turn)) = ask else {
+                            opening = false;
+                            let Some(ask) = ask else {
                                 break;
                             };
-                            let Some(agent) = c.member_id(i) else { break };
                             // 提醒时要往它自己的会话里写（那边用的是同一个名字）。
-                            let agent_name = agent.clone();
+                            let agent_name = ask.member.clone();
                             // 主会话据此显示"某某正在工作"（按钮切换与占位动画都读它）。
                             bus.push(
                                 &sid,
@@ -108,16 +118,15 @@ pub(crate) fn collab_generation<H: TurnHost>(
                                 }],
                             );
                             let req = AskReq {
-                                agent,
-                                identity,
-                                turn,
-                                systools: c.systools(),
-                                cancel: c.disc_cancel(),
-                                opts: c.disc_opts(),
-                                round: c.round(),
-                                turn_id: c.next_turn_id(),
+                                agent: ask.member.clone(),
+                                identity: ask.identity.clone(),
+                                turn: ask.turn.clone(),
+                                systools: std::sync::Arc::clone(&ask.systools),
+                                cancel: std::sync::Arc::clone(&cancel),
+                                opts: ask.opts.clone(),
+                                round: ask.round,
+                                turn_id: ask.turn_id,
                             };
-                            let turn_id = req.turn_id;
                             if ask_tx.send(req).is_err() {
                                 break;
                             }
@@ -125,19 +134,13 @@ pub(crate) fn collab_generation<H: TurnHost>(
                             let Ok(res) = turn_rx.recv() else { break };
                             match res {
                                 Ok(turn) => {
-                                    // **核心只提醒、不强制**（见 session-model.md 二）：
-                                    // 没表态时按计数决定"注入提醒后重问"还是"记未回应后放过"。
-                                    let after = c.after_member_turn(
-                                        i,
-                                        turn.verb.is_some(),
-                                        c.cancelled(),
-                                        remind_cap,
-                                    );
+                                    // **交回机制的策略**（见 session-model.md 二）：
+                                    // 吸收继续 / 注入提醒后重问 / 记未回应后放过，驱动只照机制的判定做。
+                                    let after = mech.handback(&ask, &turn);
                                     match after {
-                                        AfterTurn::Done => c.feed_with(i, turn, turn_id, &mut sink),
-                                        AfterTurn::Remind => {
+                                        Handback::Fed => mech.feed(&ask, turn, &mut sink),
+                                        Handback::Remind(text) => {
                                             // 提醒进**它自己的会话**（系统消息）；不 feed——泵重问同一个人。
-                                            let text = c.reminder_text();
                                             let child = format!("{}--{}", sid, agent_name);
                                             let target = child.clone();
                                             if let Ok(evs) = handle
@@ -150,7 +153,7 @@ pub(crate) fn collab_generation<H: TurnHost>(
                                                 }
                                             }
                                         }
-                                        AfterTurn::Unanswered => c.pass_over(i, &mut sink),
+                                        Handback::PassOver => mech.pass_over(&ask, &mut sink),
                                     }
                                     // 安全网：提醒/重问必须有终点（计数有上限，这里再兜一层）。
                                     guard += 1;
@@ -163,9 +166,9 @@ pub(crate) fn collab_generation<H: TurnHost>(
                                     }
                                 }
                                 Err(err) => {
-                                    // 如实交回（由泵统一外送中断通知），不再往下推。
-                                    c.note_turn_failure(err);
-                                    c.pump_with(&mut sink);
+                                    // 如实交回（由机制统一外送中断通知），不再往下推。
+                                    mech.failed(&err);
+                                    mech.step(&mut sink);
                                     break;
                                 }
                             }

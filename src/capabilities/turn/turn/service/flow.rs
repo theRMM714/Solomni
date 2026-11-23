@@ -6,11 +6,10 @@
 
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::Registry;
-use crate::capabilities::conversation::collab::api::AfterTurn;
 use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::conversation::session::api::{
-    Answered, DecisionQueue, GateTicket, Mode, RunState, SessionEvent, SessionMeta, TurnIo,
-    UsageTotals, flat_modules, work_root,
+    Answered, DecisionQueue, GateTicket, Handback, Mechanism, Mode, RunState, SessionEvent,
+    SessionMeta, TurnIo, UsageTotals, flat_modules, work_root,
 };
 use crate::capabilities::prompt::api::Segment;
 use crate::capabilities::turn::turn::api::{Prepared, RestoreRequest, Session};
@@ -67,31 +66,41 @@ impl Turn {
         probe: &dyn HostProbe,
     ) -> Result<Vec<SessionEvent>, String> {
         let mut out = Vec::new();
+        // 同步驱动没有作业级停止信号（与单 agent 同步派活同一条路）：用本地开关。
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         // 安全网计数（见循环尾）：提醒/重问必须有终点，不能让驱动空转。
         let mut guard = 0usize;
+        // 这一步是这一趟的第一次推进（开场与后续推进在机制面是两个动作）。
+        let mut opening = true;
         loop {
-            // ① 泵推一步：协作会话**裸搬**（不碰任务链派发那套副作用）。
-            let (ask, systools, cancel, opts, member, turn_id) = {
+            // ① 机制推一步：已有让出的事就取走，否则推进一步再看（驱动不认识任何具体机制）。
+            let ask = {
                 let mut c = self.take_collab_raw(sid)?;
-                c.start_if_needed();
-                c.pump_with(&mut |e| out.push(e));
-                let ask = c.take_ask();
-                let member = ask.as_ref().and_then(|(i, _, _)| c.member_id(*i));
-                // 角色表按值带出来（小表）：驱动要它来发放工具面与校验越权。
-                let systools = c.systools();
-                let cancel = c.disc_cancel();
-                let opts = c.disc_opts();
-                let turn_id = if ask.is_some() { c.next_turn_id() } else { 0 };
+                let ask = {
+                    let m: &mut dyn Mechanism = &mut c;
+                    match m.take_ask() {
+                        Some(ask) => Some(ask),
+                        None => {
+                            if opening {
+                                m.start(&mut |e| out.push(e));
+                            } else {
+                                m.step(&mut |e| out.push(e));
+                            }
+                            m.take_ask()
+                        }
+                    }
+                };
+                opening = false;
                 self.put(sid.to_string(), Session::Collab(c));
-                (ask, systools, cancel, opts, member, turn_id)
+                ask
             };
-            let (Some((i, identity, turn)), Some(agent), turn_id) = (ask, member, turn_id) else {
+            let Some(ask) = ask else {
                 break;
             };
             // ② 该 agent 的会话：没有就按需建（名单确认时已建，这里兜底）。
-            let child = format!("{}--{}", sid, agent);
+            let child = ask.child_of(sid);
             if self.history.load(&child).is_err() {
-                self.spawn_agent_session(sid, &agent, registry, probe)?;
+                self.spawn_agent_session(sid, &ask.member, registry, probe)?;
             }
             // ③ 跑这一回合：**与单 agent 同一条轮循环**（身份块 + 本回合工具面 + 对话 + 本回合提示 + 表态）。
             // 工具面由角色表发放（讨论席 = 动词 + 只读核实）；产出逐轮落进**它自己的会话**。
@@ -99,26 +108,30 @@ impl Turn {
             // 思考强度是**工作根**的会话级事实：成员回合也按它解析（成员模型各自映射）。
             let thinking = self.thinking_fragment_for(registry, &child)?;
             s.set_thinking(thinking.clone());
-            let round = match self.session(sid) {
-                Some(Session::Collab(c)) => c.round(),
-                _ => 0,
-            };
             let (ran, notes) = {
                 // 两个出口（流式短暂事件 / 定稿事件）都收进同一份事件流。
                 let notes = std::cell::RefCell::new(Vec::new());
                 let io = TurnIo {
                     llm: crate::capabilities::llm::api::LlmOpts {
-                        stream: opts.stream,
-                        timeout_secs: opts.timeout_secs,
+                        stream: ask.opts.stream,
+                        timeout_secs: ask.opts.timeout_secs,
                         thinking,
                     },
                     ask: None,
                 };
                 let mut emit = |e: SessionEvent| notes.borrow_mut().push(e);
                 let mut sink = |e: SessionEvent| notes.borrow_mut().push(e);
-                let face = systools.role_face("discussant");
+                let face = ask.systools.role_face("discussant");
                 let t = s.discussion_turn(
-                    &identity, face, turn, turn_id, round, &io, &cancel, &mut emit, &mut sink,
+                    &ask.identity,
+                    face,
+                    ask.turn.clone(),
+                    ask.turn_id,
+                    ask.round,
+                    &io,
+                    &cancel,
+                    &mut emit,
+                    &mut sink,
                 );
                 (t, notes.into_inner())
             };
@@ -135,30 +148,36 @@ impl Turn {
                         crate::capabilities::conversation::session::api::interrupted_note(&err)
                     };
                     out.extend(self.notice_row(sid, &note));
+                    // 机制如实记下这次失败：下次推一步时由它交回中断，而不是当成功继续。
+                    let mut c = self.take_collab_raw(sid)?;
+                    {
+                        let m: &mut dyn Mechanism = &mut c;
+                        m.failed(&err);
+                    }
+                    self.put(sid.to_string(), Session::Collab(c));
                     break;
                 }
             };
-            // ④ **核心只提醒、不强制**（见 session-model.md 二）：没表态时按计数决定提醒还是放过。
-            let user_stopped = cancel.load(std::sync::atomic::Ordering::Relaxed);
-            let (after, reminder) = {
+            // ④ **交回机制的策略**（见 session-model.md 二）：吸收继续 / 提醒重问 / 放过，驱动只照做。
+            let handback = {
                 let mut c = self.take_collab_raw(sid)?;
-                let a = c.after_member_turn(
-                    i,
-                    turn.verb.is_some(),
-                    user_stopped,
-                    registry.app().discuss_remind_cap,
-                );
-                let text = c.reminder_text();
+                let hb = {
+                    let m: &mut dyn Mechanism = &mut c;
+                    m.handback(&ask, &turn)
+                };
                 self.put(sid.to_string(), Session::Collab(c));
-                (a, text)
+                hb
             };
-            match after {
-                AfterTurn::Done => {
+            match handback {
+                Handback::Fed => {
                     let mut c = self.take_collab_raw(sid)?;
-                    c.feed_with(i, turn, turn_id, &mut |e| out.push(e));
+                    {
+                        let m: &mut dyn Mechanism = &mut c;
+                        m.feed(&ask, turn, &mut |e| out.push(e));
+                    }
                     self.put(sid.to_string(), Session::Collab(c));
                 }
-                AfterTurn::Remind => {
+                Handback::Remind(reminder) => {
                     // 提醒注入**它自己的会话**（系统消息：用户看到的是系统行），然后**不 feed**——
                     // 泵会重问同一个人（提醒后调用计数自然重来）。
                     let evs = {
@@ -170,10 +189,13 @@ impl Turn {
                     self.persister(&child).persist(&evs);
                     out.extend(evs);
                 }
-                AfterTurn::Unanswered => {
+                Handback::PassOver => {
                     // 提醒到顶：主会话记一行"未回应"（系统消息），本轮放过它，整轮继续。
                     let mut c = self.take_collab_raw(sid)?;
-                    c.pass_over(i, &mut |e| out.push(e));
+                    {
+                        let m: &mut dyn Mechanism = &mut c;
+                        m.pass_over(&ask, &mut |e| out.push(e));
+                    }
                     self.put(sid.to_string(), Session::Collab(c));
                 }
             }
@@ -215,7 +237,10 @@ impl Turn {
         // **用户那一步**先做：重派核心指名没过的节点（唤醒不会替用户做这个决定，见 pump_with 的闸）。
         {
             let mut c = self.take_collab_raw(sid)?;
-            c.resume(&mut |e| out.push(e));
+            {
+                let m: &mut dyn Mechanism = &mut c;
+                m.resume(&mut |e| out.push(e));
+            }
             self.put(sid.to_string(), Session::Collab(c));
         }
         // 泵（讨论回合 / 总验收）→ 派发并跑完就绪节点 → 再泵一步（总验收 → 交付）。

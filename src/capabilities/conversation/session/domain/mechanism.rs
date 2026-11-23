@@ -1,0 +1,73 @@
+//! 目的：机制面——会话流程的插件契约：驱动只认「推一步 / 让出一回合 / 交回」这三件事，机制自己决定下一步问谁。
+//! 管：`Mechanism`（驱动一侧的接口）、`MemberAsk`（让出的那一步）与 `Handback`（交回后的处置）。
+//! 不管：机制内部的状态机；会话表、落盘与呈现（分别归 turn 的会话表、session 的历史与 presentation）。
+//! 联动：`turn` 的驱动循环与 `turn::generation` 的工作线程按这套接口推进任何机制；协作的实现见 `collab`。
+
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
+use crate::capabilities::conversation::session::api::{MemberTurn, SessionEvent};
+use crate::capabilities::llm::api::{CompleteOpts, Msg};
+use crate::capabilities::tools::api::Tools;
+
+/// 目的：机制让出的那一步——请驱动取某个成员会话跑一回合。
+/// 约束：机制**不自己调模型**（它拿不到别的会话）；这里只交出「问谁、带什么、按什么参数」。
+pub struct MemberAsk {
+    /// 目的：该成员在机制名单里的下标（交回结果时按它认人）。
+    pub index: usize,
+    /// 目的：成员 agent 名——它的会话名是「<工作>--<成员>」。
+    pub member: String,
+    /// 目的：本回合的身份块（机制决定它怎么理解这一步）。
+    pub identity: String,
+    /// 目的：本回合要喂给模型的上下文。
+    pub turn: Vec<Msg>,
+    /// 目的：整场工作的回合号（与会话的回合标记同一套）。
+    pub turn_id: u64,
+    /// 目的：机制的轮次序号（机制自己解释，驱动只透传）。
+    pub round: usize,
+    /// 目的：本回合的工具面（由机制按角色发放）。
+    pub systools: Arc<dyn Tools>,
+    /// 目的：本回合的调用参数（流式与预算）。
+    pub opts: CompleteOpts<'static>,
+}
+
+impl MemberAsk {
+    /// 目的：这个成员自己的会话名（讨论与执行共用一个会话）。
+    pub fn child_of(&self, sid: &str) -> String {
+        format!("{}--{}", sid, self.member)
+    }
+}
+
+/// 目的：成员回合交回后机制的处置——驱动照它做，不替机制判定。
+pub enum Handback {
+    /// 目的：吸收这一回合，继续往下推。
+    Fed,
+    /// 目的：这一回合不算数：把这句话注入它的会话后重问同一个人。
+    Remind(String),
+    /// 目的：提醒到顶：记一行未回应，放过这个人，本轮继续。
+    PassOver,
+}
+
+/// 目的：机制——会话流程的插件面：驱动只按这七个动作推进，不再认识任何具体机制的字段。
+/// 约束：同一会话同一时刻只属于一个机制；进入 / 退出由落盘转录派生，不是内存标志。
+pub trait Mechanism: Send {
+    /// 目的：把「停止」接到机制上（生成线程登记后交给它）。
+    fn set_cancel(&mut self, cancel: Arc<AtomicBool>);
+    /// 目的：开场：还没开始过就先开始（驱动循环的第一步）。
+    fn start(&mut self, sink: &mut dyn FnMut(SessionEvent));
+    /// 目的：继续：从断点推进（用户点「继续」走这条，不需要用户发言）。
+    fn resume(&mut self, sink: &mut dyn FnMut(SessionEvent));
+    /// 目的：推进一步（开场、喂回、放过之后都走这条）。
+    fn step(&mut self, sink: &mut dyn FnMut(SessionEvent));
+    /// 目的：取走这一步让出的事；`None` = 没有要问的人，驱动收工。
+    fn take_ask(&mut self) -> Option<MemberAsk>;
+    /// 目的：成员回合交回后的处置：吸收继续、提醒重问、还是放过（策略在机制里）。
+    /// 约束：只借看这一回合——真正的吸收在随后的 `feed`（回合本体归 `feed` 消费）。
+    fn handback(&mut self, ask: &MemberAsk, turn: &MemberTurn) -> Handback;
+    /// 目的：吸收这一回合（`Handback::Fed` 之后驱动调用）。
+    fn feed(&mut self, ask: &MemberAsk, turn: MemberTurn, sink: &mut dyn FnMut(SessionEvent));
+    /// 目的：放过这个人、本轮继续（`Handback::PassOver` 之后驱动调用）。
+    fn pass_over(&mut self, ask: &MemberAsk, sink: &mut dyn FnMut(SessionEvent));
+    /// 目的：成员回合失败：如实记下，下一步推一步时由机制交回中断（不静默吞掉）。
+    fn failed(&mut self, err: &str);
+}

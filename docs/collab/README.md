@@ -13,6 +13,7 @@
 
 - 入站面：`api::CollabSession`——讨论与执行引擎、回合与验收词汇、协作状态派生的对外名字；协作自己的事件（`CollabEvent`）与裁决关（`Pending`、`OPT_*`）也从 `api` 出。
 - 词汇归属：协作事件与关卡在 `src/capabilities/conversation/collab/domain/`（`events.rs` / `gates.rs`），会话只提供「机制事件」通道与不解释 `kind` 的裁决队——改协作流程不改会话文件。
+- 机制面：协作在 `src/capabilities/conversation/collab/service/mechanism.rs` 实现 `session::api::Mechanism`（推一步 / 让出一回合 / 交回处置）；`turn` 的驱动只认机制面，认不出这是协作。
 - 状态归属：会话对象及其状态只有它写；「转录即状态」的派生在 `src/capabilities/conversation/collab/domain/collab_state.rs`（纯函数、可回放）。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）

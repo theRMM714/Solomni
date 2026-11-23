@@ -350,11 +350,6 @@ impl Discussion {
         self.members.get(i).map(|m| m.id.as_str())
     }
 
-    /// 目的：「停止」标志（与核心共享同一个）。
-    pub fn cancel_flag(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
-        std::sync::Arc::clone(&self.cancel)
-    }
-
     /// 目的：开场还没开始过（核心驱动的第一步据此调 start）。
     pub fn not_started(&self) -> bool {
         matches!(self.cursor, Cursor::Fresh) && self.round == 0
