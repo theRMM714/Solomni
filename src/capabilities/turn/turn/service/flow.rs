@@ -7,7 +7,7 @@
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::conversation::session::api::{
-    Answered, DecisionQueue, Gate, GateTicket, Handback, Mechanism, Mode, RunState, SessionEvent,
+    Answered, DecisionQueue, Flow, Gate, GateTicket, Handback, Mode, RunState, SessionEvent,
     SessionMeta, TurnIo, UsageTotals, flat_modules, work_root,
 };
 use crate::capabilities::prompt::api::Segment;
@@ -69,14 +69,14 @@ impl Turn {
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         // 安全网计数（见循环尾）：提醒/重问必须有终点，不能让驱动空转。
         let mut guard = 0usize;
-        // 这一步是这一趟的第一次推进（开场与后续推进在机制面是两个动作）。
+        // 这一步是这一趟的第一次推进（开场与后续推进在流程面是两个动作）。
         let mut opening = true;
         loop {
-            // ① 机制推一步：已有让出的事就取走，否则推进一步再看（驱动不认识任何具体机制）。
+            // ① 流程推一步：已有让出的事就取走，否则推进一步再看（驱动不认识任何具体流程）。
             let ask = {
-                let mut c = self.take_mech_raw(sid)?;
+                let mut c = self.take_flow_raw(sid)?;
                 let ask = {
-                    let m: &mut dyn Mechanism = &mut *c;
+                    let m: &mut dyn Flow = &mut *c;
                     match m.take_ask() {
                         Some(ask) => Some(ask),
                         None => {
@@ -90,7 +90,7 @@ impl Turn {
                     }
                 };
                 opening = false;
-                self.put(sid.to_string(), Session::Mech(c));
+                self.put(sid.to_string(), Session::Flow(c));
                 ask
             };
             let Some(ask) = ask else {
@@ -147,34 +147,34 @@ impl Turn {
                         crate::capabilities::conversation::session::api::interrupted_note(&err)
                     };
                     out.extend(self.notice_row(sid, &note));
-                    // 机制如实记下这次失败：下次推一步时由它交回中断，而不是当成功继续。
-                    let mut c = self.take_mech_raw(sid)?;
+                    // 流程如实记下这次失败：下次推一步时由它交回中断，而不是当成功继续。
+                    let mut c = self.take_flow_raw(sid)?;
                     {
-                        let m: &mut dyn Mechanism = &mut *c;
+                        let m: &mut dyn Flow = &mut *c;
                         m.failed(&err);
                     }
-                    self.put(sid.to_string(), Session::Mech(c));
+                    self.put(sid.to_string(), Session::Flow(c));
                     break;
                 }
             };
-            // ④ **交回机制的策略**（见 session-model.md 二）：吸收继续 / 提醒重问 / 放过，驱动只照做。
+            // ④ **交回流程的策略**（见 session-model.md 二）：吸收继续 / 提醒重问 / 放过，驱动只照做。
             let handback = {
-                let mut c = self.take_mech_raw(sid)?;
+                let mut c = self.take_flow_raw(sid)?;
                 let hb = {
-                    let m: &mut dyn Mechanism = &mut *c;
+                    let m: &mut dyn Flow = &mut *c;
                     m.handback(&ask, &turn)
                 };
-                self.put(sid.to_string(), Session::Mech(c));
+                self.put(sid.to_string(), Session::Flow(c));
                 hb
             };
             match handback {
                 Handback::Fed => {
-                    let mut c = self.take_mech_raw(sid)?;
+                    let mut c = self.take_flow_raw(sid)?;
                     {
-                        let m: &mut dyn Mechanism = &mut *c;
+                        let m: &mut dyn Flow = &mut *c;
                         m.feed(&ask, turn, &mut |e| out.push(e));
                     }
-                    self.put(sid.to_string(), Session::Mech(c));
+                    self.put(sid.to_string(), Session::Flow(c));
                 }
                 Handback::Remind(reminder) => {
                     // 提醒注入**它自己的会话**（系统消息：用户看到的是系统行），然后**不 feed**——
@@ -190,12 +190,12 @@ impl Turn {
                 }
                 Handback::PassOver => {
                     // 提醒到顶：主会话记一行"未回应"（系统消息），本轮放过它，整轮继续。
-                    let mut c = self.take_mech_raw(sid)?;
+                    let mut c = self.take_flow_raw(sid)?;
                     {
-                        let m: &mut dyn Mechanism = &mut *c;
+                        let m: &mut dyn Flow = &mut *c;
                         m.pass_over(&ask, &mut |e| out.push(e));
                     }
-                    self.put(sid.to_string(), Session::Mech(c));
+                    self.put(sid.to_string(), Session::Flow(c));
                 }
             }
             // 安全网：提醒/重问必须有终点（计数有上限，这里再兜一层，防实现走偏时空转）。
@@ -211,13 +211,13 @@ impl Turn {
         Ok(out)
     }
 
-    /// 目的：裸搬一个机制（不触发任务链派发那套副作用）：驱动循环每步都要搬一次。
-    pub(crate) fn take_mech_raw(&mut self, sid: &str) -> Result<Box<dyn Mechanism>, String> {
+    /// 目的：裸搬一个流程（不触发任务链派发那套副作用）：驱动循环每步都要搬一次。
+    pub(crate) fn take_flow_raw(&mut self, sid: &str) -> Result<Box<dyn Flow>, String> {
         match self.take(sid) {
-            Some(Session::Mech(m)) => Ok(m),
+            Some(Session::Flow(m)) => Ok(m),
             Some(other) => {
                 self.put(sid.to_string(), other);
-                Err("该会话不是机制会话".to_string())
+                Err("该会话不是流程会话".to_string())
             }
             None => Err("无此会话".to_string()),
         }
@@ -235,12 +235,12 @@ impl Turn {
         let mut out = Vec::new();
         // **用户那一步**先做：重派核心指名没过的节点（唤醒不会替用户做这个决定，见 pump_with 的闸）。
         {
-            let mut c = self.take_mech_raw(sid)?;
+            let mut c = self.take_flow_raw(sid)?;
             {
-                let m: &mut dyn Mechanism = &mut *c;
+                let m: &mut dyn Flow = &mut *c;
                 m.resume(&mut |e| out.push(e));
             }
-            self.put(sid.to_string(), Session::Mech(c));
+            self.put(sid.to_string(), Session::Flow(c));
         }
         // 泵（讨论回合 / 总验收）→ 派发并跑完就绪节点 → 再泵一步（总验收 → 交付）。
         out.extend(self.collab_advance(sid, registry, probe)?);
@@ -642,10 +642,10 @@ impl Turn {
         probe: &dyn HostProbe,
     ) -> Result<Vec<SessionEvent>, String> {
         let mut out = Vec::new();
-        // 关卡归发起它的机制：驱动只把票交回机制面，不解释这是哪一关。
+        // 关卡归发起它的流程：驱动只把票交回流程面，不解释这是哪一关。
         let settled = {
-            let Some(m) = self.session_mut(sid).and_then(|s| s.mech_mut()) else {
-                return Err("该会话不是机制会话".to_string());
+            let Some(m) = self.session_mut(sid).and_then(|s| s.flow_mut()) else {
+                return Err("该会话不是流程会话".to_string());
             };
             m.settle(ticket, &mut |e| out.push(e))?
         };
@@ -659,10 +659,10 @@ impl Turn {
         self.collab_tail(sid, out, settled.roster, registry, probe)
     }
 
-    /// 目的：这一关要不要**就地收尾**（在核心线程上同步写完再放行）：由机制说了算，驱动不认关卡种类。
+    /// 目的：这一关要不要**就地收尾**（在核心线程上同步写完再放行）：由流程说了算，驱动不认关卡种类。
     pub fn settles_inline(&self, sid: &str, gate: &Gate) -> bool {
         self.session(sid)
-            .and_then(|s| s.mech())
+            .and_then(|s| s.flow())
             .is_some_and(|m| m.settles_inline(gate))
     }
 
@@ -824,7 +824,7 @@ impl Turn {
         if !self.holds(sid) {
             return Err("无此会话".to_string());
         }
-        // 队列只搬 Gate（kind + payload + 卡）：这一关是哪一种由协作机制自己解释。
+        // 队列只搬 Gate（kind + payload + 卡）：这一关是哪一种由协作流程自己解释。
         Ok(self.desk().peek_gate(sid).and_then(|d| {
             d.head()
                 .and_then(|(_, gate)| {

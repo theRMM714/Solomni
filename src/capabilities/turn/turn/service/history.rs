@@ -1,5 +1,5 @@
 //! 目的：事件收编与增量落盘手柄——记录事件、派生落盘器，以及子树运行态与派发闸的口径。
-//! 管：什么时候写、写什么（落盘机制在 session 的 HistoryStore 端口后面）；停止 / 继续时整棵子树的运行态。
+//! 管：什么时候写、写什么（落盘流程在 session 的 HistoryStore 端口后面）；停止 / 继续时整棵子树的运行态。
 //! 不管：历史列出 / 打开 / 删除与回档（在 lifecycle）；会话对象怎么建（在 assemble 与 rebuild）。
 //! 联动：回合推进的所有方法族的事件都经 `record_events` 落盘（见 docs/session/session-model.md）。
 
@@ -53,7 +53,7 @@ impl Turn {
             Some(crate::capabilities::turn::turn::api::Session::Single(s)) => {
                 out.extend(s.note_notice(text))
             }
-            Some(crate::capabilities::turn::turn::api::Session::Mech(m)) => {
+            Some(crate::capabilities::turn::turn::api::Session::Flow(m)) => {
                 m.notice(text, &mut |e| out.push(e))
             }
             None => out.push(SessionEvent::Notice(text.to_string())),

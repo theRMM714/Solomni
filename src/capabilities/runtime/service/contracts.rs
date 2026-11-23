@@ -209,7 +209,7 @@ impl TurnOps for Handle {
             Answered::Waiting(_) => Ok(Advance { head }),
             Answered::Gate(ticket, _) => {
                 // 短步骤（就地收尾）：这一关要不要现在写完再放行，由发起它的机制说了算——
-                // 驱动不认关卡种类（机制面 `settles_inline`）。
+                // 驱动不认关卡种类（流程面 `settles_inline`）。
                 let inline = {
                     let sid = sid.to_string();
                     let gate = ticket.gate.clone();

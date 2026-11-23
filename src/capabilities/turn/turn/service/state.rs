@@ -1,5 +1,5 @@
 //! 目的：回合状态——会话在核心线程里的在世表、运行态与创建占位、裁决队、每会话的 shell 活进程槽。
-//! 管：`Session` 两种在世形态（单 agent / 一个机制槽）的在世表；运行态与创建占位的标记；每会话的裁决通道；
+//! 管：`Session` 两种在世形态（单 agent / 一个流程槽）的在世表；运行态与创建占位的标记；每会话的裁决通道；
 //!   每会话的 shell 活进程槽（同一会话的多次 shell 调用共用一份活进程）。
 //! 不管：会话本体（`session` / `collab`）、生成驱动、落盘；谁在什么时候放取会话由 `runtime` 的用例决定。
 //! 联动：`runtime` 经 `api` 读写；裁决通道来自 `session::api`，shell 槽是 `session::api::ShellSlot`。
@@ -9,34 +9,34 @@ use std::sync::{Arc, Mutex};
 
 use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::conversation::session::api::{
-    AgentSession, Decisions, Gates, Mechanism, ShellSlot, decisions,
+    AgentSession, Decisions, Flow, Gates, ShellSlot, decisions,
 };
 use crate::kernel::api::types::SessionId;
 
-/// 目的：一份在世会话的两种形态：单 agent（含代理会话与子会话）与一个**机制**（协作只是已注册的一个机制）。
-/// 约束：机制槽是装箱的 trait 对象——会话形态不再是一张封闭清单，新机制不改这里。
+/// 目的：一份在世会话的两种形态：单 agent（含代理会话与子会话）与一个**流程**（协作只是已注册的一个流程）。
+/// 约束：流程槽是装箱的 trait 对象——会话形态不再是一张封闭清单，新流程不改这里。
 ///   两变体大小仍差得远（见 docs/testing/quality-isolation.md 的 allow 清单）。
 #[allow(clippy::large_enum_variant)]
 pub enum Session {
     /// 目的：单 agent 会话本体。
     Single(AgentSession),
-    /// 目的：机制槽（协作、以后的评审机制都装在这里）。
-    Mech(Box<dyn Mechanism>),
+    /// 目的：流程槽（协作、以后的评审流程都装在这里）。
+    Flow(Box<dyn Flow>),
 }
 
 impl Session {
-    /// 目的：机制自己判定整场工作已收尾（单 agent 会话永远没有这个状态）。
+    /// 目的：流程自己判定整场工作已收尾（单 agent 会话永远没有这个状态）。
     pub(crate) fn is_done(&self) -> bool {
         match self {
-            Session::Mech(m) => m.is_done(),
+            Session::Flow(m) => m.is_done(),
             Session::Single(_) => false,
         }
     }
 
-    /// 目的：机制自己的业务面（任务链、名单、沙箱）取回具体类型；驱动路径（机制面）不用它。
+    /// 目的：流程自己的业务面（任务链、名单、沙箱）取回具体类型；驱动路径（流程面）不用它。
     pub(crate) fn collab(&self) -> Option<&CollabSession> {
         match self {
-            Session::Mech(m) => m.as_any().downcast_ref::<CollabSession>(),
+            Session::Flow(m) => m.as_any().downcast_ref::<CollabSession>(),
             _ => None,
         }
     }
@@ -44,23 +44,23 @@ impl Session {
     /// 目的：同上（可写一份）。
     pub(crate) fn collab_mut(&mut self) -> Option<&mut CollabSession> {
         match self {
-            Session::Mech(m) => m.as_any_mut().downcast_mut::<CollabSession>(),
+            Session::Flow(m) => m.as_any_mut().downcast_mut::<CollabSession>(),
             _ => None,
         }
     }
 
-    /// 目的：机制面（只读）：驱动处置裁决票、问「这一关要不要就地收尾」都走它。
-    pub(crate) fn mech(&self) -> Option<&dyn Mechanism> {
+    /// 目的：流程面（只读）：驱动处置裁决票、问「这一关要不要就地收尾」都走它。
+    pub(crate) fn flow(&self) -> Option<&dyn Flow> {
         match self {
-            Session::Mech(m) => Some(&**m),
+            Session::Flow(m) => Some(&**m),
             Session::Single(_) => None,
         }
     }
 
-    /// 目的：机制面（可写一份）。
-    pub(crate) fn mech_mut(&mut self) -> Option<&mut dyn Mechanism> {
+    /// 目的：流程面（可写一份）。
+    pub(crate) fn flow_mut(&mut self) -> Option<&mut dyn Flow> {
         match self {
-            Session::Mech(m) => Some(&mut **m),
+            Session::Flow(m) => Some(&mut **m),
             Session::Single(_) => None,
         }
     }

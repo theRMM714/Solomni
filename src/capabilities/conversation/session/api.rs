@@ -15,14 +15,14 @@ pub use crate::capabilities::conversation::session::domain::events::{
     Gate, LineView, OptionView, SessionEvent, ToolCallView, idle, interrupted_note,
     last_compaction, qualify, stopped_note, tool_ask, working,
 };
-// 机制面：驱动只认这三个名字（推一步 / 让出一回合 / 交回后的处置）。
+// 流程面：驱动只认这三个名字（推一步 / 让出一回合 / 交回后的处置）。
+pub use crate::capabilities::conversation::session::domain::flow::{
+    Flow, Handback, MemberAsk, Settle,
+};
 pub use crate::capabilities::conversation::session::domain::history::{
     Delegation, HistoryView, RunState, SessionMeta, UsageTotals, WorkspaceBinding,
 };
-pub use crate::capabilities::conversation::session::domain::mechanism::{
-    Handback, Mechanism, MemberAsk, Settle,
-};
-// 会话类型表：组合根装载它，装配期用它校验角色与机制。
+// 会话类型表：组合根装载它，装配期用它校验角色与流程。
 pub use crate::capabilities::conversation::session::domain::profile::Profiles;
 // 工具面：角色面 → 实际可调的工具（档位只管网络，不再逐工具裁剪）。
 #[allow(unused_imports)]

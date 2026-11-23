@@ -3,7 +3,7 @@
 //! 不管：单个成员回合的实现、会话装配。
 //! 联动：`generation/member.rs`、`turn::api::TurnHost`、docs/session/session-model.md
 
-use crate::capabilities::conversation::session::api::{Handback, Mechanism, SessionEvent};
+use crate::capabilities::conversation::session::api::{Flow, Handback, SessionEvent};
 use crate::capabilities::turn::turn::api::{Advance, AskReq, CollabWork, TurnHost};
 
 /// 目的：协作的长步骤（开始讨论 / 回答 / 继续）：与单 agent 同一条 own-and-return—— 队列只占"取/交"两步，泵在工作线程上跑；事件**边产边送**事件台，界面因此能看着讨论推进。  **核心驱动**（见 docs/session/session-model.md 二之二）：泵只决定"该问谁"， 成员回合由主线程取该 agent 的会话去跑（它才拿得到那些会话）。所以泵线程与主线程**握手**： 泵让出 → 发 AskReq → 主线程跑完回 MemberTurn → 泵继续。
@@ -19,7 +19,7 @@ pub(crate) fn collab_generation<H: TurnHost>(
     let cancel = host.register_job(sid);
     let session = match host.core_env({
         let sid = sid.to_string();
-        move |turn, registry, probe| turn.take_mech(&sid, registry, probe)
+        move |turn, registry, probe| turn.take_flow(&sid, registry, probe)
     }) {
         Ok(s) => s,
         Err(e) => {
@@ -30,7 +30,7 @@ pub(crate) fn collab_generation<H: TurnHost>(
     // 把「停止」接到泵上：它在每次模型调用前与**调用中途**都看这个标志。
     let mut session = session;
     {
-        let m: &mut dyn Mechanism = &mut *session;
+        let m: &mut dyn Flow = &mut *session;
         m.set_cancel(std::sync::Arc::clone(&cancel));
     }
     // 增量落盘手柄：泵产出一条定稿事件就落一条，中途刷新页面因此能看到已产生的部分。
@@ -47,7 +47,7 @@ pub(crate) fn collab_generation<H: TurnHost>(
     let worker = {
         let sid = sid.to_string();
         let bus = std::sync::Arc::clone(&bus);
-        // 泵线程自己拿一份停止开关（机制那份由 set_cancel 交出去，登记的那份留给收尾）。
+        // 泵线程自己拿一份停止开关（流程那份由 set_cancel 交出去，登记的那份留给收尾）。
         let cancel = std::sync::Arc::clone(&cancel);
         std::thread::Builder::new()
                 .name("solomni-collab".to_string())
@@ -69,33 +69,33 @@ pub(crate) fn collab_generation<H: TurnHost>(
                         match &work {
                             // 处置一张已经出队的回答：落定（校验 / 出队 / 记账）已在核心线程上做完。
                             CollabWork::Dispose(ticket) => {
-                                // 关卡归发起它的机制：驱动只把票交回机制面，不解释这是哪一关。
-                                let m: &mut dyn Mechanism = &mut *c;
+                                // 关卡归发起它的流程：驱动只把票交回流程面，不解释这是哪一关。
+                                let m: &mut dyn Flow = &mut *c;
                                 if let Err(e) = m.settle(ticket, &mut sink) {
                                     sink(SessionEvent::Notice(format!("[裁决] {}", e)));
                                 }
                             }
                             CollabWork::Resume => {
-                                let m: &mut dyn Mechanism = &mut *c;
+                                let m: &mut dyn Flow = &mut *c;
                                 m.resume(&mut sink);
                             }
                         }
-                        // 核心驱动：机制让出"该问谁"就回头找主线程（它才拿得到各 agent 的会话）。
-                        // 这里只认机制面：推一步 / 取走让出的事 / 交回处置——不认识协作的任何字段。
-                        let mech: &mut dyn Mechanism = &mut *c;
+                        // 核心驱动：流程让出"该问谁"就回头找主线程（它才拿得到各 agent 的会话）。
+                        // 这里只认流程面：推一步 / 取走让出的事 / 交回处置——不认识协作的任何字段。
+                        let flow: &mut dyn Flow = &mut *c;
                         // 这一步是这一趟的第一次推进（已走过「继续」的，就从断点接着推）。
                         let mut opening = !matches!(&work, CollabWork::Resume);
                         loop {
                             // 先看有没有已经让出的那一步；没有就推一步（推完再看一次）。
-                            let ask = match mech.take_ask() {
+                            let ask = match flow.take_ask() {
                                 Some(a) => Some(a),
                                 None => {
                                     if opening {
-                                        mech.start(&mut sink);
+                                        flow.start(&mut sink);
                                     } else {
-                                        mech.step(&mut sink);
+                                        flow.step(&mut sink);
                                     }
-                                    mech.take_ask()
+                                    flow.take_ask()
                                 }
                             };
                             opening = false;
@@ -136,11 +136,11 @@ pub(crate) fn collab_generation<H: TurnHost>(
                             let Ok(res) = turn_rx.recv() else { break };
                             match res {
                                 Ok(turn) => {
-                                    // **交回机制的策略**（见 session-model.md 二）：
-                                    // 吸收继续 / 注入提醒后重问 / 记未回应后放过，驱动只照机制的判定做。
-                                    let after = mech.handback(&ask, &turn);
+                                    // **交回流程的策略**（见 session-model.md 二）：
+                                    // 吸收继续 / 注入提醒后重问 / 记未回应后放过，驱动只照流程的判定做。
+                                    let after = flow.handback(&ask, &turn);
                                     match after {
-                                        Handback::Fed => mech.feed(&ask, turn, &mut sink),
+                                        Handback::Fed => flow.feed(&ask, turn, &mut sink),
                                         Handback::Remind(text) => {
                                             // 提醒进**它自己的会话**（系统消息）；不 feed——泵重问同一个人。
                                             let child = format!("{}--{}", sid, agent_name);
@@ -155,7 +155,7 @@ pub(crate) fn collab_generation<H: TurnHost>(
                                                 }
                                             }
                                         }
-                                        Handback::PassOver => mech.pass_over(&ask, &mut sink),
+                                        Handback::PassOver => flow.pass_over(&ask, &mut sink),
                                     }
                                     // 安全网：提醒/重问必须有终点（计数有上限，这里再兜一层）。
                                     guard += 1;
@@ -168,9 +168,9 @@ pub(crate) fn collab_generation<H: TurnHost>(
                                     }
                                 }
                                 Err(err) => {
-                                    // 如实交回（由机制统一外送中断通知），不再往下推。
-                                    mech.failed(&err);
-                                    mech.step(&mut sink);
+                                    // 如实交回（由流程统一外送中断通知），不再往下推。
+                                    flow.failed(&err);
+                                    flow.step(&mut sink);
                                     break;
                                 }
                             }

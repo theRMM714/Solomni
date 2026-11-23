@@ -10,7 +10,7 @@
 ## 一、形态
 - **执行席按 agent 一会话**（含同 agent 串行）、**讨论回合开工具循环**（能只读核实、拿不到模块工具）、**讨论由核心驱动**（泵只决定"该问谁"，成员回合在它自己的会话里跑，核实行与回合标记都落进那个会话；主会话只留"谁说了什么"）。
 - **形态词汇只有一套**：`Mode`（`single` / `collab` / `proxy`）定义在会话领域（`src/capabilities/conversation/session/domain/mode.rs`），落盘就是这三个小写词（`meta.yaml` 的 `mode`）。`work` 侧的 `WorkMode` 与 `proxy` 侧的 `SessionMode` 都只是它的别名，外部词一律经 `Mode::parse` 或 `parse_mode` 转成值；写进 meta 的形态不可能是第四种词，读回时 serde 直接拒掉未知值，所以构建会话时不再有「未知形态」分支。
-- **会话类型是数据**：一个会话类型就是一串流程与它们用到的身份角色，声明在 `systools/profiles.yaml`（三个形态各一条；`flows` 为空 = 没有流程、直接轮循环）。每个流程写清 `core`（核心通道出演的身份，不进成员表）与 `members`（成员席各要几员）。装配期校验：与 `Mode` 一一对应、流程在 `session/domain/mechanism.rs` 的 `REGISTERED` 里、每个流程有人出演、引用的角色都在角色表且没有坐错席（`core` 只收 `seat: core`，`members` 只收 `seat: member`；`session::domain::profile::Profiles`，加载在 `session/detail/yaml_profiles.rs`）。
+- **会话类型是数据**：一个会话类型就是一串流程与它们用到的身份角色，声明在 `systools/profiles.yaml`（三个形态各一条；`flows` 为空 = 没有流程、直接轮循环）。每个流程写清 `core`（核心通道出演的身份，不进成员表）与 `members`（成员席各要几员）。装配期校验：与 `Mode` 一一对应、流程在 `session/domain/flow.rs` 的 `REGISTERED` 里、每个流程有人出演、引用的角色都在角色表且没有坐错席（`core` 只收 `seat: core`，`members` 只收 `seat: member`；`session::domain::profile::Profiles`，加载在 `session/detail/yaml_profiles.rs`）。
 - **agent 会话在第一个回合按需建**。
 - 主会话投影行带 `turn`（回档按回合同步截断）；角色表机制化（工具面与越权校验同出一份表）；压缩：`compact` 工具 + `compacted` 转录行 + 发送视图，按模型窗口百分比自动触发。
 
@@ -109,7 +109,7 @@ session/<工作名>/
 - 短暂事件（`Delta` 增量 / `Working` 运行态 / `ToolCall` 实时工具卡）**任何会话都不落**——它们只给在场的前端看；`/api/state` 与推来的事件已经把"当前该显示什么"说清。
 
 - **上下文用量是独立事件**：`usage` 记录最近一次模型调用的 prompt / completion / total、当时的窗口与"精确还是估算"。
-- 它**不落成转录行、不进模型上下文**，随会话流水落盘（刷新/重建可恢复）；`line` 是这次调用产出第一行的行号，回档折叠到它之前时这条用量随之失效。`SessionView.context` 是同一份事实的快照，**只给有持续对话的 `Session::Single`**（single / proxy / 协作的 agent 子会话）；协作主会话是机制会话（`Session::Mech`），没有这个字段。
+- 它**不落成转录行、不进模型上下文**，随会话流水落盘（刷新/重建可恢复）；`line` 是这次调用产出第一行的行号，回档折叠到它之前时这条用量随之失效。`SessionView.context` 是同一份事实的快照，**只给有持续对话的 `Session::Single`**（single / proxy / 协作的 agent 子会话）；协作主会话是流程会话（`Session::Flow`），没有这个字段。
 - **累计花费是 meta 事实**：`SessionMeta.usage_totals`（calls / prompt / completion / cache_read / cache_creation）跨回合、跨压缩累加供应商**精确报回**的用量——每次模型调用都记，压缩调用也记；字符估算不进账，回档不清零（花出去的钱退不回来）。`SessionView.usage_totals` 是同一份事实的快照，面板的「累计输入 / 输出」与「缓存（累计）读 · 命中率」读它；「已用 / 占用」仍跟随当前发送视图。
 - **shell 状态也是快照**：`SessionView.shell` 取该会话最近一次 shell 的运行槽（命令、cwd（本环境写法：本机档是宿主路径，虚拟机档是 guest 内路径）、起止、耗时、退出码、状态 `status` 与回执预览；`status` 取 `exit` / `timeout` / `stopped` / `signal`，None = 运行中 / 未执行 / 没跑成），由工具循环写、状态栏读；它只服务界面，不进模型上下文，也不替代转录里的 shell 工具行。**重建 / 回放按转录派生**：`last_shell(events)` 取最后一条带命令、带结构化事实的 shell 工具行（`tool.shell`：cwd / 耗时毫秒 / 围栏准备 / 退出码 / 状态 / 是否截断），不解析回执正文——标 `historical`、不伪造起止时间；回档折叠掉的行不参与派生。`/api/history` 在响应里带同一份快照，前端本地没有时才填。首次按会话授权的外部工作区，其围栏授权等待计入这条回执的总耗时（粒度见「外部工作区绑定」的 `workspace.grant`）。
 - **裁决卡与回答是例外**：`DecisionCard` / `DecisionAnswer` 按上表落盘（单 agent 与协作会话都留、系统会话不留）——"用户答过什么"是会话的事实，重启后卡与答案都要在（见"请用户裁决"一节）。
@@ -134,8 +134,8 @@ session/<工作名>/
 
 - 理由是会话归属：生成期间协作会话被**移出核心表**（own-and-return），它碰不到表里的 agent 会话；而 agent 会话必须留在表里，用户才能随时进去发言。所以**驱动权归核心**（它同时看得到两边）（`src/capabilities/turn/turn/service/flow.rs`）。
 
-- **驱动只认机制面**：核心驱动（`src/capabilities/turn/turn/service/flow.rs` 与 `src/capabilities/turn/turn/service/generation/collab.rs`）与具体流程之间只隔一层 `session::api::Mechanism`——开场 / 推进一步（`start` / `step`）、取走让出的一步（`take_ask` 交出 `MemberAsk`）、交回处置（`handback` 判为 `Handback`，再由 `feed` / `pass_over` 落地）、处置自己发的关卡（`settle` 把出队的票交回机制，`settles_inline` 决定这一关要不要就地收尾）。协作的实现只有 `src/capabilities/conversation/collab/service/mechanism.rs` 一处；换一套流程只换一个机制实现，驱动不动。
-- **关卡归发起它的机制**：队列只认卡、卡号与选项（`Gate`），不解释 `kind` 是哪一关；回答出队后驱动把 `GateTicket` 交回机制面的 `settle`，由机制自己落定并说要不要接着推进（`Settle`）。所以 `runtime` 与 `turn` 里不再有「这是代拟名单那一关」这类判断。
+- **驱动只认流程面**：核心驱动（`src/capabilities/turn/turn/service/flow.rs` 与 `src/capabilities/turn/turn/service/generation/collab.rs`）与具体流程之间只隔一层 `session::api::Flow`——开场 / 推进一步（`start` / `step`）、取走让出的一步（`take_ask` 交出 `MemberAsk`）、交回处置（`handback` 判为 `Handback`，再由 `feed` / `pass_over` 落地）、处置自己发的关卡（`settle` 把出队的票交回流程，`settles_inline` 决定这一关要不要就地收尾）。协作的实现只有 `src/capabilities/conversation/collab/service/flow.rs` 一处；换一套流程只换一个实现，驱动不动。
+- **关卡归发起它的流程**：队列只认卡、卡号与选项（`Gate`），不解释 `kind` 是哪一关；回答出队后驱动把 `GateTicket` 交回流程面的 `settle`，由流程自己落定并说要不要接着推进（`Settle`）。所以 `runtime` 与 `turn` 里不再有「这是代拟名单那一关」这类判断。
 
 ### 看不见的回合：运行态与逐片外送
 

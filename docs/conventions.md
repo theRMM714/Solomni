@@ -43,7 +43,7 @@
 | 业务边界（`src/capabilities/<单元>/<子业务>/`；独立业务的判据见 `docs/architecture/boundaries.md`） | **子业务**（能力 / capability） | 业务模块、模块 |
 | 一次任务里"用谁、怎么组合、谁拍板" | **形态**（single / collab / proxy） | 模式、架构、拓扑 |
 | 一个形态的具体组成（身份角色 + 流程序列 + 每个流程的核心席 / 成员席） | **会话类型**（`Profiles`；数据在 `systools/profiles.yaml`） | 会话模板、流程模板 |
-| 驱动与具体流程之间的插件契约（推一步 / 让出一步 / 交回 / 处置自己发的关卡） | **机制**（`Mechanism`；id 登记在 `src/capabilities/conversation/session/domain/mechanism.rs` 的 `REGISTERED`） | 流程引擎、编排器 |
+| 驱动与具体流程之间的插件契约（推一步 / 让出一步 / 交回 / 处置自己发的关卡） | **流程**（`Flow`；id 登记在 `src/capabilities/conversation/session/domain/flow.rs` 的 `REGISTERED`） | 流程引擎、编排器 |
 | 一次运行与它的落盘单元 | **会话**（session） | 对话、聊天 |
 | 挂在父会话 `children/` 下的会话 | **子会话**（强调"它是一场完整工作"时可写**子工作**） | 子 agent、子任务 |
 | 用户投喂与成品的地方 | **共享区**（`work/`；整棵树只有一个） | 工作区、workspace（除非确指 `session/<工作名>/` 这个目录） |
