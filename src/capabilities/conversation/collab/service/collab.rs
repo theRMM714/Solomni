@@ -552,6 +552,13 @@ impl CollabSession {
         sink(SessionEvent::Transcript(vec![line]));
     }
 
+    /// 目的：记一条**核心写下的记录行**（计划 / 验收清单 / 交付）：带说话人、只给人看、**不进模型上下文**。
+    ///   为什么落行：这些是协作的裁决事实，刷新与回档后要照样读得到；瞬时事件只作增量（流程视图用）。
+    pub(crate) fn record(&mut self, speaker: &str, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
+        let line = self.view(LineView::record(speaker, text.to_string()));
+        sink(SessionEvent::Transcript(vec![line]));
+    }
+
     /// 目的：名单里的 agent 名（顺序即名单）。
     pub(crate) fn names(&self) -> Vec<String> {
         self.roster.iter().map(|a| a.name.clone()).collect()

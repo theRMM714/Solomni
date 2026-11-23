@@ -60,7 +60,7 @@ function buildTurn(group, s) {
   if (text.trim()) {
     const t = doc.createElement('div');
     t.className = 'turn-text';
-    appendBody(t, head.cls, text);
+    appendBody(t, text);
     body.appendChild(t);
   }
   // 原文是**回复级事实**：一条回复只显示一次；原生模式与可见正文相同，不重复。

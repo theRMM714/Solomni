@@ -196,6 +196,8 @@ impl CollabSession {
                     self.plan = Some(plan.clone());
                     self.chain = Some(chain);
                     sink(CollabEvent::Plan(plan.clone()).push());
+                    // 方案正文同次落一条转录行：刷新与回档后照样读得到（事件只作增量，流程视图要用）。
+                    self.record("核心整理", &plan, sink);
                 }
                 // 整理被停止 / 失败 / 回执不合法：都不落方案、不往下走，如实告知并交回用户。
                 Err(err) => {
@@ -494,6 +496,8 @@ impl CollabSession {
                 table
             ));
         }
+        // 清单同样先落行再推事件：行给人看（Markdown 一条一行），事件给流程视图与状态派生。
+        self.record("验收清单", &review_text(&exec), sink);
         sink(review_event(&exec));
         // 没过 = 只把这些节点退回待办，等用户点「继续」后重派（不交付）。
         let bad = exec.rework_targets();
@@ -522,9 +526,17 @@ impl CollabSession {
             self.ask_user(Pending::NodeBlocked { nodes: bad }, sink);
             return;
         }
+        let ok = exec.all_pass();
+        // 交付结论也落行：这是"这次协作怎么收的"的事实，不能只靠推的那条事件。
+        let text = if ok {
+            "全部节点通过总验收，交付用户。"
+        } else {
+            "总验收没全过（清单里有非通过项），交用户裁决。"
+        };
+        self.record("交付", text, sink);
         sink(
             CollabEvent::Delivery {
-                ok: exec.all_pass(),
+                ok,
                 over_rework: false,
             }
             .push(),

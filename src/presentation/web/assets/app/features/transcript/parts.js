@@ -26,18 +26,13 @@ function mdNode(text) {
   return d;
 }
 
-/// 正文：AI/用户发言按 Markdown 渲染，系统提示保持纯文本。
-function appendBody(el, cls, text) {
+/// 正文：**所有行同一条渲染路径**（Markdown）。
+///   为什么不分两套：协作事实（计划 / 验收清单 / 交付）本身就是 Markdown，系统提示也可能是多行；
+///   按种类分渲染只会让同一份事实在转录里长得不一样（用户读到的"系统行是另一种东西"）。
+function appendBody(el, text) {
   // 正文必须**追加**，不能 el.innerHTML = …：那会把上面刚挂的身份标题（.who）一起抹掉，
   // 于是 agree（绿框）这类非 line 类的消息就"没了说话人"——用户不知道这句来自谁。
-  if (cls === 'line' || cls === 'plan' || cls === 'user') {
-    el.appendChild(mdNode(text));
-    return;
-  }
-  const body = doc.createElement('div');
-  body.className = 'body';
-  body.innerHTML = shortPath(app.escHtml(text)); // 系统/验收等行：纯文本转义后同样缩写长路径
-  el.appendChild(body);
+  el.appendChild(mdNode(text));
 }
 
 /* 折叠状态：会话级 store（key → bool）。renderStream 每次全量重建 DOM，
@@ -213,7 +208,7 @@ function lineBlock(p, s, key, live) {
   }
   let txt = null;
   if (String(p.text == null ? '' : p.text).length) {
-    appendBody(el, cls, p.text);
+    appendBody(el, p.text);
     txt = el.children[el.children.length - 1] || null;
   }
   return { node: el, txt: txt, cot: cot };

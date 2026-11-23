@@ -17,13 +17,17 @@ const tool = model.lineParts({ kind: "tool", speaker: "甲", tool: { speaker: "�
 check(tool.cls === "tool" && tool.who === "乙" && tool.text === "" && tool.reply === 3, "工具行取视图里的说话人");
 
 const compacted = model.lineParts({ kind: "compacted", line: "摘要", payload: { up_to: 12 } })[0];
-check(compacted.cls === "sys compacted" && compacted.text.indexOf("[压缩] 第 12 行") === 0, "压缩行带保留起点");
+check(compacted.cls === "sys compacted" && compacted.who === "压缩"
+  && compacted.text.indexOf("第 12 行之前已压成摘要") === 0, "压缩行：身份与正文分开");
 
-check(model.lineParts({ kind: "notice", speaker: "核心" })[0].cls === "sys notice", "notice 行");
+// 核心写下的记录行（计划 / 验收清单 / 交付）：同一个 notice 种类，有说话人 = 署名的记录。
+const rec = model.lineParts({ kind: "notice", speaker: "核心整理", line: "- 做事" })[0];
+check(rec.cls === "sys notice record" && rec.who === "核心整理" && rec.text === "- 做事", "记录行带署名");
+check(model.lineParts({ kind: "notice", line: "提示" })[0].cls === "sys notice", "无署名的提示行");
 check(model.lineParts({ kind: "system", line: "x" })[0].cls === "sys system", "system 行");
 check(model.lineParts({ line: "x", system: true })[0].cls === "sys system", "system 标志行");
 const round = model.lineParts({ kind: "round", speaker: "轮次", line: "2" })[0];
-check(round.cls === "sys system" && round.text === "[轮次 2]", "轮次分隔行");
+check(round.cls === "sys round" && round.text === "轮次 2" && round.who === "", "轮次分隔行：身份与正文分开");
 check(model.lineParts({ kind: "user", line: "做吧" })[0].who === "用户", "用户行");
 check(model.lineParts({ line: "同意", verb: "agree" })[0].cls === "ok", "同意行");
 check(model.lineParts({ line: "先撤", verb: "leave" })[0].cls === "sys", "离席行");
@@ -97,6 +101,16 @@ check(s1.done === true && s1.running === false && s1.live.length === 0, "结束�
 
 events.absorb(s1, { type: "usage", total_tokens: 5, window: 9 });
 check(s1.context.total_tokens === 5 && s1.context.g === 9, "用量只更新状态栏，不进转录");
+
+/* ---------- 协作的裁决事实不自造行：计划 / 验收清单 / 交付由后端落成带 id 的行 ---------- */
+const sx = mkSession("sx");
+for (const ev of [
+  { type: "discussion_done", round: 3, over_cap: true },
+  { type: "plan", text: "方案" },
+  { type: "review", items: [{ item: "甲", status: "pass" }], raw: "原文" },
+  { type: "delivery", ok: true, over_rework: false },
+]) events.absorb(sx, ev);
+check(sx.lines.length === 0, "协作事件不造转录行（事实只来自后端落下的行）");
 
 /* ---------- 回档：按回档后的活动视图整体重建 ---------- */
 s1.lines = [{ cls: "line", text: "旧的" }];
