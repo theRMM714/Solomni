@@ -671,7 +671,11 @@ await journey('ref-collab', async () => {
 const name1e = 'e2e-refcollab-' + Date.now();
 const c1e = await api('POST', '/api/actions/create_session', {
   name: name1e, kind: 'collab', task: '@sandbox:甲/秘密.md 只看这个',
-  agents: [{ name: '甲', transient: true, modules: ['summarizer'], model: 'm1' }],
+  // 会议要够人数（讨论席两员）：第二个只是凑席，不参与这条断言。
+  agents: [
+    { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
+    { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
+  ],
 });
 assert(c1e.status === 200, '建引用私沙的协作工作', c1e.text.slice(0, 200));
 const le = await lines(name1e);
