@@ -19,10 +19,8 @@ use crate::capabilities::catalog::packages::api as pkgs;
 use crate::capabilities::catalog::packages::api::Packages;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::Registry;
-use crate::capabilities::conversation::collab::api::{CollabSession, Phase};
 use crate::capabilities::conversation::session::api::{
-    Delegation, Gates, History, HistoryView, OptionView, RunState, Sequence, SessionEvent,
-    SessionMeta,
+    Delegation, Gates, History, HistoryView, OptionView, RunState, SessionEvent, SessionMeta,
 };
 use crate::capabilities::llm::api::{Channel, Llm};
 use crate::capabilities::prompt::api::Prompt;
@@ -72,6 +70,8 @@ pub struct Work {
     /// 工具总表与角色表的能力面（授权两张表）：表本体在工具能力里，与册子互不依赖。
     systools: Arc<dyn Tools>,
     log: Arc<dyn Log + Send + Sync>,
+    /// 目的：流程工厂（组合根注入）：建工作按会话类型表里的流程序列逐段造，本层不认识任何具体流程。
+    flows: Arc<dyn crate::capabilities::conversation::session::api::Flows>,
 }
 
 impl Work {
@@ -92,6 +92,7 @@ impl Work {
         prompt: Arc<dyn Prompt>,
         systools: Arc<dyn Tools>,
         log: Arc<dyn Log + Send + Sync>,
+        flows: Arc<dyn crate::capabilities::conversation::session::api::Flows>,
     ) -> Work {
         Work {
             root,
@@ -106,6 +107,7 @@ impl Work {
             prompt,
             systools,
             log,
+            flows,
         }
     }
 }

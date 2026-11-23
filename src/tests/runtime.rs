@@ -43,6 +43,7 @@ fn runtime_rooted(
         crate::tests::doubles::test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        crate::tests::doubles::test_profiles(),
     )
 }
 
@@ -81,6 +82,7 @@ fn runtime_for_vm(
         probe,
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        crate::tests::doubles::test_profiles(),
     )
 }
 

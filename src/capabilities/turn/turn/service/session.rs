@@ -58,6 +58,8 @@ pub struct Turn {
     pub(super) modules: Arc<dyn Modules + Send + Sync>,
     /// 目的：包管理面：重建会话时按档位取库根与基础包根。
     pub(super) packages: Arc<dyn Packages + Send + Sync>,
+    /// 目的：流程工厂（组合根注入）：重建会话按会话类型表里的流程序列逐段造，本层不认识任何具体流程。
+    pub(super) flows: Arc<dyn crate::capabilities::conversation::session::api::Flows>,
 }
 
 /// 目的：`Turn` 的构造与取用。
@@ -82,6 +84,7 @@ impl Turn {
         history: Arc<dyn History + Send + Sync>,
         modules: Arc<dyn Modules + Send + Sync>,
         packages: Arc<dyn Packages + Send + Sync>,
+        flows: Arc<dyn crate::capabilities::conversation::session::api::Flows>,
     ) -> Turn {
         Turn {
             state: TurnState::new(),
@@ -100,6 +103,7 @@ impl Turn {
             history,
             modules,
             packages,
+            flows,
         }
     }
 

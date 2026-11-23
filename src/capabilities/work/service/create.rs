@@ -555,32 +555,35 @@ impl Work {
                 let door = self.desk_of(turn, &name);
                 let core_channel =
                     core_channel.ok_or_else(|| "协作会话缺少核心模型通道".to_string())?;
-                // 两段共用同一份落盘事实：讨论段开会并写总结，执行段拿总结拟计划、派活、验收、交付。
-                let make = |phase| {
-                    CollabSession::start(
-                        Arc::clone(&self.llm),
-                        Arc::clone(&self.vm),
-                        Arc::clone(&self.modules),
-                        registry.snapshot(),
-                        core_channel.clone(),
-                        Arc::clone(&self.prompt),
-                        Arc::clone(&self.systools),
-                        Arc::clone(&self.tools),
-                        Arc::clone(&self.log),
-                        metas.clone(),
-                        delegate,
-                        sandboxes.clone(),
-                        phase,
-                        Arc::clone(&door),
-                    )
+                // 按会话类型表里声明的流程序列装配：本层不认识任何具体流程（工厂是组合根注入的）。
+                let ids = self
+                    .flows
+                    .book()
+                    .flows_of(WorkMode::Collab.as_str())
+                    .ok_or_else(|| {
+                        "会话类型表里没有「协作」这个类型（systools/profiles.yaml）".to_string()
+                    })?;
+                let setup = crate::capabilities::conversation::session::api::FlowSetup {
+                    settings: registry.snapshot(),
+                    core_channel: Some(core_channel),
+                    roster: metas.clone(),
+                    delegated: delegate,
+                    sandboxes: sandboxes.clone(),
+                    desk: Arc::clone(&door),
+                    restore: None,
                 };
-                let mut disc = make(Phase::Discuss)?;
-                let exec = make(Phase::Execute)?;
+                let mut pipeline = crate::capabilities::conversation::session::api::sequence_of(
+                    &ids,
+                    &setup,
+                    &*self.flows,
+                )?;
                 let mut out = Vec::new();
-                disc.set_task(&task, &mut |e| out.push(e));
-                let steps: Vec<Box<dyn crate::capabilities::conversation::session::api::Flow>> =
-                    vec![Box::new(disc), Box::new(exec)];
-                (Session::Flow(Box::new(Sequence::new(steps))), out)
+                crate::capabilities::conversation::session::api::Flow::begin_with(
+                    &mut pipeline,
+                    &task,
+                    &mut |e| out.push(e),
+                );
+                (Session::Flow(Box::new(pipeline)), out)
             }
         };
         // 会话身份落盘：失败即失败（名字即目录，这是承诺，不假装已保存）。

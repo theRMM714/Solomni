@@ -179,6 +179,7 @@ pub(crate) fn core_with_services(
         test_host_probe(),
         residents,
         secrets,
+        test_profiles(),
     )
 }
 
@@ -220,6 +221,7 @@ pub(crate) fn core_with_workspace(
         test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        test_profiles(),
     )
 }
 
@@ -258,6 +260,7 @@ pub(crate) fn core_with_workdirs(
         test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        test_profiles(),
     )
 }
 
@@ -321,6 +324,7 @@ pub(crate) fn core_with_workdirs_vm(
         vm_capable_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        test_profiles(),
     )
 }
 
@@ -373,6 +377,7 @@ pub(crate) fn core_with_builds(
         test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        test_profiles(),
     )
 }
 
@@ -502,6 +507,7 @@ pub(crate) fn core_with_pkgs_probe(
         probe,
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        test_profiles(),
     )
 }
 
@@ -540,6 +546,7 @@ pub(crate) fn core_with_settings_modules(store: InMemorySettings, modules: Vec<M
         test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        test_profiles(),
     )
 }
 
@@ -581,6 +588,7 @@ pub(crate) fn core_with_io_gateway(
         test_host_probe(),
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        test_profiles(),
     )
 }
 
@@ -626,5 +634,6 @@ pub(crate) fn core_with_gateway_probe(
         probe,
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        test_profiles(),
     )
 }

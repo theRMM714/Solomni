@@ -19,4 +19,5 @@ pub use crate::capabilities::conversation::collab::domain::gates::{
     OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM,
 };
 pub use crate::capabilities::conversation::collab::service::collab::CollabSession;
-pub use crate::capabilities::conversation::collab::service::collab::Phase;
+// 流程工厂：组合根拿它注入 turn / work（装配点只认 session::api::Flows，不认这个类型）。
+pub use crate::capabilities::conversation::collab::service::flows::CollabFlows;

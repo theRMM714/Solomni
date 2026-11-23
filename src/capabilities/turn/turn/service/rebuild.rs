@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use crate::capabilities::catalog::modules::api::Module;
 use crate::capabilities::catalog::registry::api::Registry;
-use crate::capabilities::conversation::collab::api::{CollabSession, Phase};
 use crate::capabilities::conversation::session::api::{
     AgentSession, Mode, SessionMeta, SessionParams, guest_lease_for, role_of, session_kind_of,
     work_root, work_root_of,
@@ -93,32 +92,30 @@ impl Turn {
         desk.rebuild(issued);
         let built = match meta.mode {
             Mode::Collab => {
-                // 两段共用同一份落盘事实：讨论段按转录恢复讨论现场，执行段按总结恢复计划与任务链。
-                let make = |phase| {
-                    CollabSession::restore(
-                        Arc::clone(&self.llm),
-                        Arc::clone(&self.vm),
-                        Arc::clone(&self.modules),
-                        registry.snapshot(),
-                        Arc::clone(&self.prompt),
-                        Arc::clone(&self.systools),
-                        Arc::clone(&self.tools),
-                        Arc::clone(&self.log),
-                        meta,
-                        events,
-                        sandboxes.clone(),
-                        phase,
-                        // 重建出来的整队进**同一条队**（按转录里已发出的卡号续号，已答过的不重问）。
-                        Arc::clone(&desk),
-                    )
+                // 按会话类型表里声明的流程序列重建：本层不认识任何具体流程（工厂是组合根注入的）。
+                let ids = self
+                    .flows
+                    .book()
+                    .flows_of(Mode::Collab.as_str())
+                    .ok_or_else(|| {
+                        "会话类型表里没有「协作」这个类型（systools/profiles.yaml）".to_string()
+                    })?;
+                let setup = crate::capabilities::conversation::session::api::FlowSetup {
+                    settings: registry.snapshot(),
+                    core_channel: None,
+                    roster: meta.agents.clone(),
+                    delegated: meta.delegate,
+                    sandboxes: sandboxes.clone(),
+                    // 重建出来的整队进**同一条队**（按转录里已发出的卡号续号，已答过的不重问）。
+                    desk: Arc::clone(&desk),
+                    restore: Some((meta, events)),
                 };
-                let steps: Vec<Box<dyn crate::capabilities::conversation::session::api::Flow>> = vec![
-                    Box::new(make(Phase::Discuss)?),
-                    Box::new(make(Phase::Execute)?),
-                ];
-                Session::Flow(Box::new(
-                    crate::capabilities::conversation::session::api::Sequence::new(steps),
-                ))
+                let pipeline = crate::capabilities::conversation::session::api::sequence_of(
+                    &ids,
+                    &setup,
+                    &*self.flows,
+                )?;
+                Session::Flow(Box::new(pipeline))
             }
             // 单 agent：按 meta.agents[0] 重建（名单是唯一真相；模块数不限）。
             Mode::Single => {

@@ -32,6 +32,7 @@
 | `src/capabilities/conversation/session/domain/history.rs` | 会话元信息、运行态（`RunState`）与历史视图的内存形态 |
 | `src/capabilities/conversation/session/domain/flow.rs` | 流程面：驱动一侧的插件契约 `Flow`（推一步 / 取走让出的一步 / 交回处置 / 处置自己发的关卡）、让出的那一步 `MemberAsk`、交回后的处置 `Handback` 与关卡落定 `Settle`；不实现任何流程 |
 | `src/capabilities/conversation/session/domain/sequence.rs` | 复合流程：按会话类型表把多个流程串成一条（前一段 `is_done` 就把 `output` 交给下一段 `intake`）；驱动仍只认 `Flow`，业务面（`part`）指向当前这一段 |
+| `src/capabilities/conversation/session/domain/flows.rs` | 流程工厂面：`Flows`（id → 造一段）、装配用的 `FlowSetup`（会话参数、成员、裁决队与可选的恢复事实）与按类型表串段的 `sequence_of`；不实现任何流程，实现由组合根注入 |
 | `src/capabilities/conversation/session/domain/profile.rs` | 会话类型表：`Profiles` / `Profile` / `FlowDecl` 的形状与装配期校验（与形态一一对应、流程已注册、每个流程的核心席 / 成员席与角色表席位一致）；不解析 yaml，不实现流程 |
 | `src/capabilities/conversation/session/detail/yaml_profiles.rs` | 会话类型表的磁盘实现：读 `systools/profiles.yaml`（缺文件 / 语法坏 / 规则不过都如实报），装载后交组合根 |
 | `src/capabilities/conversation/session/domain/mode.rs` | 工作形态的词汇（`Mode`）：三个取值、与外部词的互转、落盘小写形态 |
