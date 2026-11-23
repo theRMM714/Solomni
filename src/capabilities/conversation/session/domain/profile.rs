@@ -1,49 +1,40 @@
-//! 目的：会话类型表——一个会话类型就是一串机制与它们用到的身份角色；装配期的规则校验在这里。
-//! 管：`Profiles` / `Profile` / `MechDecl` 的形状与校验（与形态一一对应、机制已注册、产物按顺序接得上、角色在册）。
-//! 不管：yaml 解析（在 `detail/yaml_profiles.rs`）；机制实现（在各机制能力）；会话装配（在 `turn` 的重建里）。
+//! 目的：会话类型表——一个会话类型就是一串流程与它们用到的身份角色；装配期的规则校验在这里。
+//! 管：`Profiles` / `Profile` / `FlowDecl` 的形状与校验（与形态一一对应、流程已注册、core/members 的席位与角色自洽）。
+//! 不管：yaml 解析（在 `detail/yaml_profiles.rs`）；流程实现（在各流程能力）；会话装配（在 `turn` 的重建里）。
 //! 联动：组合根装载并在装配期调用 `validate` / `check_roles`；提示词册子的会话类型以 `ids` 为口径。
+
+use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
 use crate::capabilities::conversation::session::domain::mechanism::REGISTERED;
 use crate::capabilities::conversation::session::domain::mode::Mode;
+use crate::capabilities::tools::api::Seat;
 
-/// 目的：会话开场那条输入的产物名：第一条机制的 `takes` 只能接它。
-pub const SESSION_START: &str = "text";
-
-/// 目的：一个会话类型的成员数：`one` 只有一个 agent，`many` 至少两个、必须有机制调度。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Agents {
-    One,
-    Many,
-}
-
-/// 目的：会话类型里串着的一个机制：谁被拉进来、吃什么产物、交出什么产物。
+/// 目的：一个流程声明：跑哪个已注册的流程、核心席用哪些身份、成员席各要几个。
+/// 约束：`core` 必须是核心席角色，`members` 必须是成员席角色；产物按声明顺序一条一条接（上一条的输出就是下一条的输入）。
 #[derive(Debug, Clone, Deserialize)]
-pub struct MechDecl {
-    /// 目的：机制的注册 id（必须在 `mechanism::REGISTERED` 里）。
+pub struct FlowDecl {
+    /// 目的：流程的注册 id（必须在 `mechanism::REGISTERED` 里）。
     pub id: String,
-    /// 目的：这个机制用到的身份角色（都会被拉进会话，各自获得该机制的身份块）。
-    pub roles: Vec<String>,
-    /// 目的：进来吃的产物类型名：会话开场那条输入，或更早某个机制的 `gives`。
-    pub takes: String,
-    /// 目的：交出去的产物类型名：后面的机制按它接线。
-    pub gives: String,
+    /// 目的：核心席用到的身份（核心通道出演，不进成员表）。
+    #[serde(default)]
+    pub core: Vec<String>,
+    /// 目的：成员席要几员：角色 → 最少人数。
+    #[serde(default)]
+    pub members: BTreeMap<String, usize>,
 }
 
-/// 目的：一个会话类型：成员数、身份角色，以及按顺序串起来的机制（空 = 没有机制，直接轮循环）。
+/// 目的：一个会话类型：身份角色，以及按顺序串起来的流程（空 = 没有流程，直接轮循环）。
 #[derive(Debug, Clone, Deserialize)]
 pub struct Profile {
     /// 目的：会话类型名——必须与 `Mode` 的三个词一一对应。
     pub id: String,
-    /// 目的：成员数。
-    pub agents: Agents,
-    /// 目的：这个类型用到的全部身份角色（机制的 roles 是它的子集）。
+    /// 目的：这个类型用到的全部身份角色（流程里的角色是它的子集）。
     pub roles: Vec<String>,
-    /// 目的：按顺序串起来的机制；空表示没有人调度，直接轮循环。
+    /// 目的：按顺序串起来的流程；空表示没有人调度，直接轮循环。
     #[serde(default)]
-    pub mechanisms: Vec<MechDecl>,
+    pub flows: Vec<FlowDecl>,
 }
 
 /// 目的：会话类型总表（`systools/profiles.yaml` 的顶层形状）。
@@ -59,7 +50,7 @@ impl Profiles {
         self.profiles.iter().map(|p| p.id.clone()).collect()
     }
 
-    /// 目的：装配期校验：每个形态恰好一个类型、机制都注册过、产物按顺序接得上、角色与成员数自洽。
+    /// 目的：装配期校验：每个形态恰好一个类型、流程都注册过且不重复、每个流程有人出演、用到的角色都在类型里。
     /// 返回：`Ok(())` 表示这张表可以拿去装配。
     /// 错误：文案点名 `systools/profiles.yaml` 与出问题的那一项。
     pub fn validate(&self) -> Result<(), String> {
@@ -84,49 +75,45 @@ impl Profiles {
                     p.id
                 ));
             }
-            if p.agents == Agents::Many && p.mechanisms.is_empty() {
-                return Err(format!(
-                    "会话类型 {} 是多个 agent，却没有机制调度他们（systools/profiles.yaml）",
-                    p.id
-                ));
-            }
-            let mut made: Vec<String> = vec![SESSION_START.to_string()];
-            let mut mechs: Vec<&str> = Vec::new();
-            for m in &p.mechanisms {
-                if !REGISTERED.contains(&m.id.as_str()) {
+            let mut flows: Vec<&str> = Vec::new();
+            for f in &p.flows {
+                if !REGISTERED.contains(&f.id.as_str()) {
                     return Err(format!(
-                        "会话类型 {} 的机制没注册：{}（已注册：{}；systools/profiles.yaml）",
+                        "会话类型 {} 的流程没注册：{}（已注册：{}；systools/profiles.yaml）",
                         p.id,
-                        m.id,
+                        f.id,
                         REGISTERED.join(" / ")
                     ));
                 }
-                if mechs.contains(&m.id.as_str()) {
+                if flows.contains(&f.id.as_str()) {
                     return Err(format!(
-                        "会话类型 {} 里同一个机制出现了两次：{}（systools/profiles.yaml）",
-                        p.id, m.id
+                        "会话类型 {} 里同一个流程出现了两次：{}（systools/profiles.yaml）",
+                        p.id, f.id
                     ));
                 }
-                mechs.push(&m.id);
-                if m.roles.is_empty() {
+                flows.push(&f.id);
+                if f.core.is_empty() && f.members.is_empty() {
                     return Err(format!(
-                        "会话类型 {} 的机制 {} 没有声明身份角色（systools/profiles.yaml）",
-                        p.id, m.id
+                        "会话类型 {} 的流程 {} 没有声明任何身份（systools/profiles.yaml）",
+                        p.id, f.id
                     ));
                 }
-                if !made.contains(&m.takes) {
-                    return Err(format!(
-                        "会话类型 {} 的机制 {} 要吃 {}，但前面没有机制产出它（systools/profiles.yaml）",
-                        p.id, m.id, m.takes
-                    ));
+                for (role, min) in &f.members {
+                    if *min == 0 {
+                        return Err(format!(
+                            "会话类型 {} 的流程 {} 给 {} 要 0 个成员（systools/profiles.yaml）",
+                            p.id, f.id, role
+                        ));
+                    }
                 }
-                if m.gives.trim().is_empty() {
-                    return Err(format!(
-                        "会话类型 {} 的机制 {} 没有交出产物（systools/profiles.yaml）",
-                        p.id, m.id
-                    ));
+                for role in f.core.iter().chain(f.members.keys()) {
+                    if !p.roles.iter().any(|r| r == role) {
+                        return Err(format!(
+                            "会话类型 {} 的流程 {} 用了类型里没声明的角色：{}（systools/profiles.yaml）",
+                            p.id, f.id, role
+                        ));
+                    }
                 }
-                made.push(m.gives.clone());
             }
         }
         for mode in [Mode::Single, Mode::Collab, Mode::Proxy] {
@@ -140,32 +127,69 @@ impl Profiles {
         Ok(())
     }
 
-    /// 目的：装配期校验角色：每个会话类型与它每个机制引用的角色都得在角色表里。
-    /// 参数：`known` = 角色表的全部角色名（组合根从工具能力问来）。
-    /// 错误：逐个点名「会话类型 / 机制 → 角色」。
-    pub fn check_roles(&self, known: &[String]) -> Result<(), String> {
-        let has = |role: &str| known.iter().any(|r| r == role);
+    /// 目的：装配期校验角色与席位：类型与流程引用的角色都得在角色表里，且核心席 / 成员席不能放反。
+    /// 参数：`seats` = 角色表的全部角色与坐席（组合根从工具能力问来）。
+    /// 错误：逐个点名「会话类型 / 流程 → 角色」。
+    pub fn check_roles(&self, seats: &[(String, Seat)]) -> Result<(), String> {
+        let seat_of = |role: &str| {
+            seats
+                .iter()
+                .find(|(name, _)| name == role)
+                .map(|(_, seat)| *seat)
+        };
         for p in &self.profiles {
             for role in &p.roles {
-                if !has(role) {
+                if seat_of(role).is_none() {
                     return Err(format!(
                         "会话类型 {} 引用的角色不在角色表里：{}（systools/roles.yaml）",
                         p.id, role
                     ));
                 }
             }
-            for m in &p.mechanisms {
-                for role in &m.roles {
-                    if !has(role) {
-                        return Err(format!(
-                            "会话类型 {} 的机制 {} 引用的角色不在角色表里：{}（systools/roles.yaml）",
-                            p.id, m.id, role
-                        ));
+            for f in &p.flows {
+                for role in &f.core {
+                    match seat_of(role) {
+                        None => {
+                            return Err(format!(
+                                "会话类型 {} 的流程 {} 引用的角色不在角色表里：{}（systools/roles.yaml）",
+                                p.id, f.id, role
+                            ));
+                        }
+                        Some(Seat::Member) => {
+                            return Err(format!(
+                                "会话类型 {} 的流程 {} 把成员席角色 {} 放在核心席（systools/roles.yaml）",
+                                p.id, f.id, role
+                            ));
+                        }
+                        Some(Seat::Core) => {}
                     }
                     if !p.roles.iter().any(|r| r == role) {
                         return Err(format!(
-                            "会话类型 {} 的机制 {} 用了类型里没声明的角色：{}（systools/profiles.yaml）",
-                            p.id, m.id, role
+                            "会话类型 {} 的流程 {} 用了类型里没声明的角色：{}（systools/profiles.yaml）",
+                            p.id, f.id, role
+                        ));
+                    }
+                }
+                for role in f.members.keys() {
+                    match seat_of(role) {
+                        None => {
+                            return Err(format!(
+                                "会话类型 {} 的流程 {} 引用的角色不在角色表里：{}（systools/roles.yaml）",
+                                p.id, f.id, role
+                            ));
+                        }
+                        Some(Seat::Core) => {
+                            return Err(format!(
+                                "会话类型 {} 的流程 {} 把核心席角色 {} 放在成员席（systools/roles.yaml）",
+                                p.id, f.id, role
+                            ));
+                        }
+                        Some(Seat::Member) => {}
+                    }
+                    if !p.roles.iter().any(|r| r == role) {
+                        return Err(format!(
+                            "会话类型 {} 的流程 {} 用了类型里没声明的角色：{}（systools/profiles.yaml）",
+                            p.id, f.id, role
                         ));
                     }
                 }
@@ -174,17 +198,17 @@ impl Profiles {
         Ok(())
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn mechanisms(id: &str) -> Vec<MechDecl> {
-        vec![MechDecl {
+    fn flow(id: &str) -> FlowDecl {
+        FlowDecl {
             id: id.to_string(),
-            roles: vec!["discussant".to_string()],
-            takes: SESSION_START.to_string(),
-            gives: "TaskChain".to_string(),
-        }]
+            core: vec!["planner".to_string()],
+            members: BTreeMap::from([("discussant".to_string(), 2)]),
+        }
     }
 
     fn base() -> Profiles {
@@ -192,45 +216,53 @@ mod tests {
             profiles: vec![
                 Profile {
                     id: "single".to_string(),
-                    agents: Agents::One,
                     roles: vec!["solo".to_string()],
-                    mechanisms: Vec::new(),
+                    flows: Vec::new(),
                 },
                 Profile {
                     id: "collab".to_string(),
-                    agents: Agents::Many,
-                    roles: vec!["discussant".to_string()],
-                    mechanisms: mechanisms("collab"),
+                    roles: vec![
+                        "discussant".to_string(),
+                        "executor".to_string(),
+                        "planner".to_string(),
+                        "core_proxy".to_string(),
+                    ],
+                    flows: vec![flow("collab")],
                 },
                 Profile {
                     id: "proxy".to_string(),
-                    agents: Agents::One,
                     roles: vec!["core_proxy".to_string()],
-                    mechanisms: Vec::new(),
+                    flows: Vec::new(),
                 },
             ],
         }
     }
 
-    fn roles() -> Vec<String> {
-        ["solo", "discussant", "executor", "core_proxy"]
-            .iter()
-            .map(|r| r.to_string())
-            .collect()
+    fn seats() -> Vec<(String, Seat)> {
+        [
+            ("solo", Seat::Member),
+            ("discussant", Seat::Member),
+            ("executor", Seat::Member),
+            ("core_proxy", Seat::Core),
+            ("planner", Seat::Core),
+        ]
+        .iter()
+        .map(|(role, seat)| (role.to_string(), *seat))
+        .collect()
     }
 
     #[test]
     fn the_shape_it_documents_validates() {
         let p = base();
         assert_eq!(p.validate(), Ok(()), "基准表必须合法");
-        assert_eq!(p.check_roles(&roles()), Ok(()), "基准表的角色都在册");
+        assert_eq!(p.check_roles(&seats()), Ok(()), "基准表的角色都在册");
         let collab = p
             .profiles
             .iter()
             .find(|x| x.id == Mode::Collab.as_str())
             .expect("协作类型");
-        assert_eq!(collab.agents, Agents::Many);
-        assert_eq!(collab.mechanisms[0].id, "collab");
+        assert_eq!(collab.flows[0].id, "collab");
+        assert_eq!(collab.flows[0].members["discussant"], 2);
         assert_eq!(p.ids(), vec!["single", "collab", "proxy"]);
     }
 
@@ -253,11 +285,11 @@ mod tests {
     }
 
     #[test]
-    fn mechanisms_must_be_registered_and_wired_in_order() {
+    fn flows_must_be_registered_and_declared_once() {
         let mut p = base();
-        p.profiles[1].mechanisms = mechanisms("review");
+        p.profiles[1].flows = vec![flow("review")];
         let err = p.validate().unwrap_err();
-        assert!(err.contains("机制没注册：review"), "{}", err);
+        assert!(err.contains("流程没注册：review"), "{}", err);
         assert!(
             err.contains("已注册：collab"),
             "报错要给出已注册清单：{}",
@@ -265,53 +297,56 @@ mod tests {
         );
 
         let mut p = base();
-        p.profiles[1].mechanisms[0].takes = "plan".to_string();
+        p.profiles[1].flows.push(flow("collab"));
         let err = p.validate().unwrap_err();
-        assert!(err.contains("前面没有机制产出它"), "{}", err);
-
-        // 第二个机制可以接第一个的产物。
-        let mut p = base();
-        p.profiles[1].mechanisms.push(MechDecl {
-            id: "collab".to_string(),
-            roles: vec!["discussant".to_string()],
-            takes: "TaskChain".to_string(),
-            gives: "Report".to_string(),
-        });
-        let err = p.validate().unwrap_err();
-        assert!(err.contains("同一个机制出现了两次"), "{}", err);
-
-        let mut p = base();
-        p.profiles[1].mechanisms[0].gives = " ".to_string();
-        let err = p.validate().unwrap_err();
-        assert!(err.contains("没有交出产物"), "{}", err);
+        assert!(err.contains("同一个流程出现了两次"), "{}", err);
     }
 
     #[test]
-    fn members_and_roles_must_be_self_consistent() {
+    fn every_flow_needs_a_seat_and_declared_roles() {
         let mut p = base();
-        p.profiles[1].mechanisms.clear();
+        p.profiles[1].flows[0].core.clear();
+        p.profiles[1].flows[0].members.clear();
         let err = p.validate().unwrap_err();
-        assert!(err.contains("却没有机制调度"), "{}", err);
+        assert!(err.contains("没有声明任何身份"), "{}", err);
 
         let mut p = base();
-        p.profiles[0].roles.clear();
+        p.profiles[1].flows[0]
+            .members
+            .insert("executor".to_string(), 0);
         let err = p.validate().unwrap_err();
-        assert!(err.contains("没有声明身份角色"), "{}", err);
+        assert!(err.contains("要 0 个成员"), "{}", err);
 
         let mut p = base();
-        p.profiles[1].mechanisms[0].roles.clear();
+        p.profiles[1].flows[0]
+            .members
+            .insert("executor".to_string(), 1);
+        p.profiles[1].roles.retain(|r| r != "executor");
         let err = p.validate().unwrap_err();
-        assert!(err.contains("机制 collab 没有声明身份角色"), "{}", err);
-
-        // 机制用了类型里没声明的角色：装配错误，不静默多拉一个人进来。
-        let mut p = base();
-        p.profiles[1].mechanisms[0].roles = vec!["executor".to_string()];
-        let err = p.check_roles(&roles()).unwrap_err();
         assert!(err.contains("用了类型里没声明的角色：executor"), "{}", err);
+    }
+
+    #[test]
+    fn seats_must_match_the_role_table() {
+        // 成员席角色放进核心席：装配错误。
+        let mut p = base();
+        p.profiles[1].flows[0].core = vec!["discussant".to_string()];
+        let err = p.check_roles(&seats()).unwrap_err();
+        assert!(err.contains("成员席角色 discussant 放在核心席"), "{}", err);
+
+        // 核心席角色放进成员席：同样是装配错误。
+        let mut p = base();
+        p.profiles[1].flows[0]
+            .members
+            .insert("planner".to_string(), 1);
+        let err = p.check_roles(&seats()).unwrap_err();
+        assert!(err.contains("核心席角色 planner 放在成员席"), "{}", err);
 
         // 角色表里没有这个名字：装配错误。
-        let err = base().check_roles(&["solo".to_string()]).unwrap_err();
-        assert!(err.contains("不在角色表里：discussant"), "{}", err);
+        let mut p = base();
+        p.profiles[1].roles.push("reviewer".to_string());
+        let err = p.check_roles(&seats()).unwrap_err();
+        assert!(err.contains("不在角色表里：reviewer"), "{}", err);
     }
 
     #[test]

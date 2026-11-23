@@ -38,13 +38,15 @@ tools:
 ```yaml
 roles:
   discussant:
+    seat: member               # core = 核心通道出演（不进成员表）；member = 成员会话出演
     prompt: roles/discussant   # 提示词与工具面**同处声明**
     tools: [say, agree, leave, ask, read, list, grep]
 ```
 
 - **角色 = 场景绑定的身份**：`discussant` 只存在于讨论阶段，`orchestrator` 只存在于任务链推进阶段；**不引入"阶段 → 工具"的第二张表**。
 - **角色表只引用系统工具**：模块工具是"这个 agent 的能力"，不是"这个角色的属性"。
-- **哪些角色被哪个会话类型用到**声明在 `systools/profiles.yaml`，装配期校验角色都在角色表里（`systools/roles.yaml`）；角色表本身不写会话类型。
+- **哪些角色被哪个会话类型用到**声明在 `systools/profiles.yaml`，装配期校验角色都在角色表里（`systools/roles.yaml`）且席位对得上：流程的 `core` 只收 `seat: core`，`members` 只收 `seat: member`；角色表本身不写会话类型。
+- **席位是数据不是特判**：`seat: core` 由会话的核心通道出演（核心代理 / 计划 / 验收），不进成员表、不得授模块工具（装配期 `SystemTools::problems` 挡下）；`seat: member` 才是成员会话。核心席坐在哪条流程由该流程声明的 `core` 决定。
 - **不做角色继承**：重复列几个 id 没有代价，继承会引入隐式耦合。
 
 ## 二、可用工具面（运行时合成）

@@ -31,7 +31,7 @@
 | `src/capabilities/conversation/session/domain/persist.rs` | 落盘策略：哪种会话留档、哪些事件算定稿（`PersistPolicy`）、系统会话的识别与拟名单会话号 |
 | `src/capabilities/conversation/session/domain/history.rs` | 会话元信息、运行态（`RunState`）与历史视图的内存形态 |
 | `src/capabilities/conversation/session/domain/mechanism.rs` | 机制面：驱动一侧的插件契约 `Mechanism`（推一步 / 取走让出的一步 / 交回处置 / 处置自己发的关卡）、让出的那一步 `MemberAsk`、交回后的处置 `Handback` 与关卡落定 `Settle`；不实现任何机制 |
-| `src/capabilities/conversation/session/domain/profile.rs` | 会话类型表：`Profiles` / `Profile` / `MechDecl` 的形状与装配期校验（与形态一一对应、机制已注册、产物按顺序接得上、角色在册）；不解析 yaml，不实现机制 |
+| `src/capabilities/conversation/session/domain/profile.rs` | 会话类型表：`Profiles` / `Profile` / `FlowDecl` 的形状与装配期校验（与形态一一对应、流程已注册、每个流程的核心席 / 成员席与角色表席位一致）；不解析 yaml，不实现流程 |
 | `src/capabilities/conversation/session/detail/yaml_profiles.rs` | 会话类型表的磁盘实现：读 `systools/profiles.yaml`（缺文件 / 语法坏 / 规则不过都如实报），装载后交组合根 |
 | `src/capabilities/conversation/session/domain/mode.rs` | 工作形态的词汇（`Mode`）：三个取值、与外部词的互转、落盘小写形态 |
 | `src/capabilities/conversation/session/domain/events.rs` | 呈现侧线格式词汇：通用事件与机制事件通道 `Push`（`SessionEvent`）、裁决卡信封、裁决关 `Gate` 与出队票；不解任何机制的关卡 |

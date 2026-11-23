@@ -473,7 +473,7 @@ fn main() {
     let systools: Arc<dyn capabilities::tools::api::Tools + Send + Sync> = tools_svc;
 
     // 会话类型引用的角色必须在角色表里（悬空引用是装配错误）：与机制 id 的校验同一条时机。
-    if let Err(e) = profiles.check_roles(&capabilities::tools::api::Tools::roles(&*systools)) {
+    if let Err(e) = profiles.check_roles(&capabilities::tools::api::Tools::role_seats(&*systools)) {
         eprintln!("[装配失败] {}", e);
         std::process::exit(1);
     }

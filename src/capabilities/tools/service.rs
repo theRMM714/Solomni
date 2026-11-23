@@ -73,8 +73,8 @@ impl Tools for ToolsService {
         self.catalog.allows_module_tools(role)
     }
 
-    fn roles(&self) -> Vec<String> {
-        self.catalog.roles.keys().cloned().collect()
+    fn role_seats(&self) -> Vec<(String, crate::capabilities::tools::api::Seat)> {
+        self.catalog.seats()
     }
 
     fn book(&self) -> ToolBook {

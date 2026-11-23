@@ -19,10 +19,23 @@ pub fn action_audit(caller: &str, action: &str, ok: bool, detail: &str) -> Strin
     format!("[动作] {} 调 {}：{}", caller, action, tail)
 }
 
+/// 目的：角色坐哪一席：`core` 由会话的核心通道出演（不进成员表），`member` 由成员会话出演。
+/// 约束：核心席不得授模块工具——它们不拥有模块。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Seat {
+    /// 目的：核心席（核心代理 / 计划 / 验收这类由核心通道出演的身份）。
+    Core,
+    /// 目的：成员席（讨论者 / 执行者这类由成员会话出演的身份）。
+    Member,
+}
+
 /// 目的：一个角色——引用的系统工具 id + 提示词（提示词与工具面**同处声明**）。
 ///    为什么同处：**信封模式**下该角色能用的信封清单要渲染进提示词——提示词与工具面分开声明必然漂。
 #[derive(Debug, Clone, Deserialize)]
 pub struct RoleDecl {
+    /// 目的：坐哪一席（核心通道出演 / 成员会话出演）：装配期校验会话类型的 core 与 members 用对了席位。
+    pub seat: Seat,
     /// 目的：提示词在册子里的位置（`prompts/roles/<名字>.yaml`）。
     #[serde(default)]
     pub prompt: String,
@@ -84,6 +97,14 @@ impl SystemTools {
         (ids, self.allows_module_tools(role))
     }
 
+    /// 目的：角色表的全部角色与坐席（装配期校验会话类型表的引用，不暴露表本体）。
+    pub fn seats(&self) -> Vec<(String, Seat)> {
+        self.roles
+            .iter()
+            .map(|(name, decl)| (name.clone(), decl.seat))
+            .collect()
+    }
+
     /// 目的：这个身份能不能用它自己模块的工具（论据：角色表的 module_tools）。
     pub fn allows_module_tools(&self, role: &str) -> bool {
         self.roles
@@ -101,6 +122,11 @@ impl SystemTools {
     /// 约束：`callers`（谁能调）与角色表的工具面是**同一关系的两面**——这里双向比对，任何一边漏写 / 多写都当场报错；由测试门禁消费，不靠人看。
     pub fn problems(&self) -> Vec<String> {
         let mut out = Vec::new();
+        for (role, decl) in &self.roles {
+            if decl.seat == Seat::Core && decl.module_tools {
+                out.push(format!("角色 {} 是核心席，不得授模块工具", role));
+            }
+        }
         for (id, schema) in &self.tools {
             if schema.capability.trim().is_empty() {
                 out.push(format!("工具 {} 没声明 capability（权限标签）", id));

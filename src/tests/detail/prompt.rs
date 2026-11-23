@@ -148,10 +148,9 @@ fn mechanism_book_matches_session_kinds_and_roles() {
         .load()
         .expect("读提示词册");
     let kinds = profiles.ids();
-    let known: Vec<String> = st.roles.keys().cloned().collect();
     profiles
-        .check_roles(&known)
-        .expect("会话类型引用的角色必须在角色表里");
+        .check_roles(&st.seats())
+        .expect("会话类型引用的角色必须在角色表里，席位也要放对");
     let role_ids: Vec<&String> = st.roles.keys().collect();
     assert!(!prompts.core.mechanisms.is_empty(), "机制册不能为空");
     for m in &prompts.core.mechanisms {

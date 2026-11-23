@@ -18,10 +18,9 @@ fn the_shipped_table_covers_the_three_modes_and_its_roles_exist() {
     let st = YamlSystools::new(root.join("systools"))
         .load()
         .expect("读角色表");
-    let known: Vec<String> = st.roles.keys().cloned().collect();
     profiles
-        .check_roles(&known)
-        .expect("会话类型引用的角色必须在角色表里");
+        .check_roles(&st.seats())
+        .expect("会话类型引用的角色必须在角色表里，席位也要放对");
 }
 
 #[test]
@@ -54,7 +53,7 @@ fn a_missing_or_broken_table_is_an_assembly_error() {
     // 语法对、规则不对：同样装配失败，文案点名文件。
     std::fs::write(
         broken.join("profiles.yaml"),
-        "profiles:\n  - id: single\n    agents: one\n    roles: [solo]\n    mechanisms: []\n",
+        "profiles:\n  - id: single\n    roles: [solo]\n    flows: []\n",
     )
     .expect("造缺类型的表");
     let err = YamlProfiles::new(broken).load().unwrap_err();
