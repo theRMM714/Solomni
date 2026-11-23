@@ -67,7 +67,7 @@
   同一个理由也适用于输入区的「启用会话」：它只解冻、不跑模型，回包即真相）。
 - **一次命令 panic 不带垮核心**：接住并继续服务（回包通道断开，调用方得到「无回应」）。
 - **传输的线格式归呈现层**：请求形状、路由、错误码在 `src/presentation/web/routes.rs`；**事实**的线格式（`SessionEvent`、`*View`）
-  仍在协调业务。两者不混——混在一起就是「到处内联 JSON 拼装」的成因。
+  仍在协调业务：通用事件在 `session`，机制自己的事件走 `SessionEvent::Push`、词汇归各自能力（协作在 `collab`）。两者不混——混在一起就是「到处内联 JSON 拼装」的成因。
 - **工具卡按结构化轻重上色，说明书由词表渲染**：工具行带 `severity`（`info` / `warning` / `error`）与 `notes`（稳定码 + 类型化参数），
   卡片据此三色（绿勾 / 黄叹号 / 红叉）并把 `notes` 逐行接在正文后（`src/presentation/web/assets/app/features/transcript/parts.js`）；
   **呈现层不解析回执正文**——结束状态、退出码、落点、耗时都是工具行里的结构化字段。

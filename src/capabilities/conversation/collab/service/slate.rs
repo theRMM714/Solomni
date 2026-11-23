@@ -6,9 +6,10 @@
 use super::collab::*;
 use crate::capabilities::catalog::modules::api::Modules;
 use crate::capabilities::catalog::registry::api::Settings;
+use crate::capabilities::conversation::collab::domain::gates::Pending;
 use crate::capabilities::conversation::collab::service::discussion::Discussion;
 use crate::capabilities::conversation::session::api::SessionMeta;
-use crate::capabilities::conversation::session::api::{Gates, LineView, Pending, SessionEvent};
+use crate::capabilities::conversation::session::api::{Gates, LineView, SessionEvent};
 use crate::capabilities::llm::api::{CompleteOpts, Llm};
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::tools::api::ToolExec;
@@ -168,8 +169,12 @@ impl CollabSession {
         }
         // 用户点「继续」= **重派核心指名没过的那几个节点**（只退这些；同阶段已通过的保持已通过，
         // 不整阶段重来）。放在这里而不是泵里：唤醒（子会话完成）不能替用户做这个决定。
-        let blocked = match self.door.head().map(|(_, p, _)| p) {
-            Some(Pending::NodeBlocked { nodes }) => Some(nodes),
+        let blocked = match self
+            .door
+            .head()
+            .and_then(|(_, gate)| Pending::from_gate(&gate))
+        {
+            Some((Pending::NodeBlocked { nodes }, _)) => Some(nodes),
             _ => None,
         };
         if let Some(nodes) = blocked {
@@ -332,7 +337,8 @@ impl CollabSession {
         // 或被停会话整队作废时，按状态续新卡号接着问（已答过的不重问，见 session-model.md「请用户裁决」）。
         for (id, p, advice) in derive_gates(&st) {
             // 没人回答的那张沿用它自己的卡号；状态派生出来的那一关还没有卡号，由队列续号。
-            s.door.raise(id.as_deref(), p, &advice);
+            s.door
+                .raise(id.as_deref(), p.gate(id.as_deref().unwrap_or(""), &advice));
         }
         Ok(s)
     }

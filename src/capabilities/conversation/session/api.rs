@@ -11,10 +11,9 @@ pub use crate::capabilities::conversation::session::domain::decisions::{
     Answered, Decisions, GateTicket, Gates, SlotWake, decisions, issued_in,
 };
 pub use crate::capabilities::conversation::session::domain::events::{
-    CheckView, ContextUsage, DecisionCard, DecisionQueue, DecisionWaiter, LineView, OPT_ASK_REPLY,
-    OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY, OPT_PLAN_START,
-    OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM, OptionView, Pending, SessionEvent, ToolCallView, idle,
-    interrupted_note, last_compaction, qualify, stopped_note, working,
+    ContextUsage, DecisionCard, DecisionEnvelope, DecisionMessage, DecisionQueue, DecisionWaiter,
+    Gate, LineView, OptionView, SessionEvent, ToolCallView, idle, interrupted_note,
+    last_compaction, qualify, stopped_note, tool_ask, working,
 };
 pub use crate::capabilities::conversation::session::domain::history::{
     Delegation, HistoryView, RunState, SessionMeta, UsageTotals, WorkspaceBinding,

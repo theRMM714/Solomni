@@ -335,11 +335,14 @@ impl Turn {
                     if let Some(Session::Collab(c)) = self.session_mut(sid) {
                         c.mark_node_started(&node, &child);
                     }
-                    out.push(SessionEvent::NodeStarted {
-                        node: node.clone(),
-                        sid: child.clone(),
-                        assignee,
-                    });
+                    out.push(
+                        crate::capabilities::conversation::collab::api::CollabEvent::NodeStarted {
+                            node: node.clone(),
+                            sid: child.clone(),
+                            assignee,
+                        }
+                        .push(),
+                    );
                     todo.push((node, child, objective));
                 }
                 Err(e) => out
@@ -782,14 +785,17 @@ impl Turn {
     pub fn collab_pending(
         &self,
         sid: &str,
-    ) -> Result<Option<crate::capabilities::conversation::session::api::Pending>, String> {
+    ) -> Result<Option<crate::capabilities::conversation::collab::api::Pending>, String> {
         if !self.holds(sid) {
             return Err("无此会话".to_string());
         }
-        Ok(self
-            .desk()
-            .peek_gate(sid)
-            .and_then(|d| d.head())
-            .map(|(_, p, _)| p))
+        // 队列只搬 Gate（kind + payload + 卡）：这一关是哪一种由协作机制自己解释。
+        Ok(self.desk().peek_gate(sid).and_then(|d| {
+            d.head()
+                .and_then(|(_, gate)| {
+                    crate::capabilities::conversation::collab::api::Pending::from_gate(&gate)
+                })
+                .map(|(p, _)| p)
+        }))
     }
 }

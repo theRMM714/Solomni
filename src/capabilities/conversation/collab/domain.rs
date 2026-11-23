@@ -4,3 +4,5 @@
 //! 联动：由本能力的 `service/` 消费。
 
 pub mod collab_state;
+pub mod events;
+pub mod gates;

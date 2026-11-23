@@ -78,7 +78,7 @@ TaskNode { id, title, objective, assignee, deps, status, sub_session, acceptance
 ## 七、验收与返工
 
 - **阶段边界**：本阶段全部跑完才判这一阶段（一次调用），通过即解锁下一阶段。
-- 整理完停在待审（`Pending::PlanReview`，推 `Decision`、快照带同一份）。
+- 整理完停在待审（`Pending::PlanReview`，推 `decision_card`、快照带同一份）。
 - 就绪节点各建一个普通单 agent 会话（`parent` / `node`，沙箱锚在**顶层工作**上——整棵树共用一个 `work/`）；侧栏按 `meta.parent` 把子会话缩进挂在父会话下。
 - 调度器是纯函数，`taskchain` 的单测覆盖串 / 并 / 混合 / 环拒绝 / 悬空依赖。
 

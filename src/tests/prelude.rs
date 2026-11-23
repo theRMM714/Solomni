@@ -45,10 +45,10 @@ pub use crate::capabilities::workspace::ports::Workdirs;
 pub use crate::capabilities::runtime::api::SessionEvent;
 pub use crate::capabilities::work::api::{ConfigAgent, SessionEdit, WorkMode, WorkSpec};
 
-pub use crate::capabilities::conversation::session::api::Pending;
+pub use crate::capabilities::conversation::collab::api::{CollabEvent, Pending};
 
 /// 目的：裁决卡的选项 id（契约）：测试按它作答，不按文案。
-pub use crate::capabilities::conversation::session::api::{
+pub use crate::capabilities::conversation::collab::api::{
     OPT_BEGIN, OPT_PLAN_SAY, OPT_SLATE_CONFIRM,
 };
 

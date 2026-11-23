@@ -92,7 +92,7 @@ pub(crate) fn start_child_collab<H: TurnHost>(host: &H, sid: &str) {
             else {
                 return;
             };
-            let allow = crate::capabilities::conversation::session::api::OPT_BEGIN_ALLOW;
+            let allow = crate::capabilities::conversation::collab::api::OPT_BEGIN_ALLOW;
             let option = if queue.card.options.iter().any(|o| o.id == allow) {
                 allow.to_string()
             } else {

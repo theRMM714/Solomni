@@ -1,7 +1,7 @@
 # 单元地图 · session
 
 > 定位：session（会话）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-17｜依据：`src/capabilities/conversation/session/api.rs`
+> 效力：契约｜核对：2026-11-23｜依据：`src/capabilities/conversation/session/api.rs`
 
 > 本文是 **session** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -31,5 +31,5 @@
 | `src/capabilities/conversation/session/domain/persist.rs` | 落盘策略：哪种会话留档、哪些事件算定稿（`PersistPolicy`）、系统会话的识别与拟名单会话号 |
 | `src/capabilities/conversation/session/domain/history.rs` | 会话元信息、运行态（`RunState`）与历史视图的内存形态 |
 | `src/capabilities/conversation/session/domain/mode.rs` | 工作形态的词汇（`Mode`）：三个取值、与外部词的互转、落盘小写形态 |
-| `src/capabilities/conversation/session/domain/events.rs` | 呈现侧事件与裁决卡信封等线格式词汇（`SessionEvent` / `LineView` 等） |
+| `src/capabilities/conversation/session/domain/events.rs` | 呈现侧线格式词汇：通用事件与机制事件通道 `Push`（`SessionEvent`）、裁决卡信封、裁决关 `Gate` 与出队票；不解任何机制的关卡 |
 | `src/capabilities/conversation/session/domain/rewind.rs` | 回档的行 / 事件算术（纯函数，不碰 IO） |

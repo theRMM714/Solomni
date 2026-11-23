@@ -17,9 +17,8 @@ use crate::capabilities::catalog::registry::api::{
     AgentView, AppSettings, ModelDraft, RegistryOps,
 };
 use crate::capabilities::catalog::registry::domain::agents::Agent;
-use crate::capabilities::conversation::session::api::{
-    CheckView, ContextUsage, LineView, ToolCallView,
-};
+use crate::capabilities::conversation::collab::api::{CheckView, CollabEvent};
+use crate::capabilities::conversation::session::api::{ContextUsage, LineView, ToolCallView};
 use crate::capabilities::conversation::session::domain::events::{
     DecisionAnswer, DecisionEnvelope, DecisionMessage,
 };
@@ -164,54 +163,64 @@ fn vocabulary() -> Vec<SessionEvent> {
     vec![
         SessionEvent::Notice("通告".into()),
         SessionEvent::Transcript(transcript()),
-        SessionEvent::DiscussionDone {
+        CollabEvent::DiscussionDone {
             round: 1,
             over_cap: false,
-        },
-        SessionEvent::Plan("第一步\n第二步".into()),
-        SessionEvent::PlanReview {
+        }
+        .push(),
+        CollabEvent::Plan("第一步\n第二步".into()).push(),
+        CollabEvent::PlanReview {
             plan: "方案".into(),
             chain: chain(),
-        },
-        SessionEvent::NodeStarted {
+        }
+        .push(),
+        CollabEvent::NodeStarted {
             node: "n1".into(),
             sid: "s1".into(),
             assignee: "a".into(),
-        },
-        SessionEvent::Report {
+        }
+        .push(),
+        CollabEvent::Report {
             id: "r1".into(),
             text: "做完了".into(),
             rework: 0,
-        },
-        SessionEvent::Report {
+        }
+        .push(),
+        CollabEvent::Report {
             id: "r2".into(),
             text: "改好了".into(),
             rework: 1,
-        },
-        SessionEvent::Review {
+        }
+        .push(),
+        CollabEvent::Review {
             items: Vec::new(),
             raw: "原文".into(),
-        },
-        SessionEvent::Review {
+        }
+        .push(),
+        CollabEvent::Review {
             items: vec![
                 check("清单", "pass"),
                 check("第二条", "fail"),
                 check("第三条", "待定"),
             ],
             raw: String::new(),
-        },
-        SessionEvent::Delivery {
+        }
+        .push(),
+        CollabEvent::Delivery {
             ok: true,
             over_rework: false,
-        },
-        SessionEvent::Delivery {
+        }
+        .push(),
+        CollabEvent::Delivery {
             ok: false,
             over_rework: true,
-        },
-        SessionEvent::Delivery {
+        }
+        .push(),
+        CollabEvent::Delivery {
             ok: false,
             over_rework: false,
-        },
+        }
+        .push(),
         SessionEvent::Ended,
         SessionEvent::DecisionCard {
             card: DecisionCard {

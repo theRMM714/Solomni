@@ -6,9 +6,11 @@
 use super::collab::CollabSession;
 use super::lines::*;
 use crate::capabilities::catalog::modules::api::Module;
+use crate::capabilities::conversation::collab::domain::events::CollabEvent;
+use crate::capabilities::conversation::collab::domain::gates::Pending;
 use crate::capabilities::conversation::collab::service::discussion::{MAX_ROUNDS, Member, TurnOut};
 use crate::capabilities::conversation::collab::service::synthesis::Execution;
-use crate::capabilities::conversation::session::api::{Pending, SessionEvent};
+use crate::capabilities::conversation::session::api::SessionEvent;
 
 impl CollabSession {
     /// 目的：泵：推进讨论直至暂停（ask）或收敛并走完整理/执行/验收/交付；事件逐条经 sink 外送。
@@ -80,7 +82,7 @@ impl CollabSession {
                         if over_cap {
                             self.notice("[上限] 讨论轮次超限，交用户裁决。", sink);
                         }
-                        sink(SessionEvent::DiscussionDone { round, over_cap });
+                        sink(CollabEvent::DiscussionDone { round, over_cap }.push());
                         break;
                     }
                 }
@@ -134,7 +136,7 @@ impl CollabSession {
                     chain.renumber_by_stage();
                     self.plan = Some(plan.clone());
                     self.chain = Some(chain);
-                    sink(SessionEvent::Plan(plan));
+                    sink(CollabEvent::Plan(plan.clone()).push());
                 }
                 // 整理被停止 / 失败 / 回执不合法：都不落方案、不往下走，如实告知并交回用户。
                 Err(err) => {
@@ -152,10 +154,13 @@ impl CollabSession {
         // **审查关卡**：整理完不自动开工——方案与链先交用户审查，点「同意」才推进。
         // 为什么闸门在这里：整理之后就是花钱的执行（每个成员一轮工具循环），让用户先看一眼最省事。
         if !self.plan_approved {
-            sink(SessionEvent::PlanReview {
-                plan: plan.clone(),
-                chain: self.chain.clone().unwrap_or_default(),
-            });
+            sink(
+                CollabEvent::PlanReview {
+                    plan: plan.clone(),
+                    chain: self.chain.clone().unwrap_or_default(),
+                }
+                .push(),
+            );
             self.ask_user(Pending::PlanReview, sink);
             return;
         }
@@ -188,11 +193,14 @@ impl CollabSession {
             {
                 n.reported = true;
             }
-            sink(SessionEvent::Report {
-                id,
-                text,
-                rework: 0,
-            });
+            sink(
+                CollabEvent::Report {
+                    id,
+                    text,
+                    rework: 0,
+                }
+                .push(),
+            );
         }
         // 等用户的事挂着（请教 / 方案待审 / 节点没过）：**泵不往下推**——唤醒（子会话完成、别的客户端动作）
         // 也不能替用户点「继续」，否则"暂停"形同虚设；重派在**用户那一步**做（见 resume）。
@@ -455,10 +463,13 @@ impl CollabSession {
             self.ask_user(Pending::NodeBlocked { nodes: bad }, sink);
             return;
         }
-        sink(SessionEvent::Delivery {
-            ok: exec.all_pass(),
-            over_rework: false,
-        });
+        sink(
+            CollabEvent::Delivery {
+                ok: exec.all_pass(),
+                over_rework: false,
+            }
+            .push(),
+        );
         sink(SessionEvent::Ended);
         self.done = true;
     }

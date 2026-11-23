@@ -447,12 +447,13 @@ pub(crate) fn create_session_action(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capabilities::conversation::session::api::Pending;
+    use crate::capabilities::conversation::collab::api::Pending;
+    use crate::capabilities::conversation::session::api::tool_ask;
     use crate::kernel::api::types::Ask;
 
     /// 目的：用生产那一条派生造卡（工具层那一类：三段话与选项原样来自发起方）。
     fn card(title: &str, body: &str, detail: &str, options: &[(&str, &str)]) -> DecisionCard {
-        Pending::ToolAsk(Box::new(Ask {
+        tool_ask(&Ask {
             role: "tools".to_string(),
             name: "甲".to_string(),
             title: title.to_string(),
@@ -463,8 +464,8 @@ mod tests {
                 .map(|(id, label)| (id.to_string(), label.to_string()))
                 .collect(),
             on_unanswered: None,
-        }))
-        .card("card-1", "")
+        })
+        .card_with("card-1")
     }
 
     /// 目的：非 TTY 逐行原样：标题 / 正文 / 详情 / 选项各一行，空段不占行。
@@ -567,7 +568,10 @@ mod tests {
             member: "甲".to_string(),
             question: "选哪个？".to_string(),
         };
-        let waiting = vec![ask.waiter("d2", ""), Pending::ConfirmBegin.waiter("d3", "")];
+        let waiting = vec![
+            ask.gate("d2", "").waiter("d2"),
+            Pending::ConfirmBegin.gate("d3", "").waiter("d3"),
+        ];
         let (_, lines) = term::capture(|| print_waiting(&waiting));
         term::reset_ui();
         assert_eq!(lines, waiting_lines(&waiting));

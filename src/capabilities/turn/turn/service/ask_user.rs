@@ -4,7 +4,7 @@
 //! 联动：走的是**同一条通道**（同一条队、同一张卡、同一条回答命令），契约见 docs/session/session-model.md 的
 //!   「请用户裁决」；队列本体在 `capabilities/session/domain/decisions.rs`，本实现由宿主在生成线程上现造。
 
-use crate::capabilities::conversation::session::api::{Gates, Pending, SessionEvent, SlotWake};
+use crate::capabilities::conversation::session::api::{Gates, SessionEvent, SlotWake, tool_ask};
 use crate::kernel::api::types::Ask;
 use crate::kernel::api::types::AskOutcome;
 use crate::kernel::ports::AskUser;
@@ -77,11 +77,7 @@ impl AskUser for SessionAsk {
         };
         // 端口负责"先登记再推卡、外送卡片、不设超时地等"：回答、用户按停止（整队作废 = 拒绝）、
         // 会话被删 / 重建都会解开这一格。
-        let wake = self
-            .door
-            .ask(Pending::ToolAsk(Box::new(ask.clone())), &mut |e| {
-                (self.emit)(e)
-            });
+        let wake = self.door.ask(tool_ask(ask), &mut |e| (self.emit)(e));
         match wake {
             SlotWake::Answer(id) => AskOutcome::Chosen(id),
             // 停止是用户的动作（= 拒绝）：**不套用默认项**，否则"按停止"会被吞成放行。

@@ -5,9 +5,11 @@
 
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::conversation::collab::domain::collab_state::CollabState;
+use crate::capabilities::conversation::collab::domain::events::{CheckView, CollabEvent};
+use crate::capabilities::conversation::collab::domain::gates::Pending;
 use crate::capabilities::conversation::collab::service::discussion::Discussion;
 use crate::capabilities::conversation::collab::service::synthesis::Execution;
-use crate::capabilities::conversation::session::api::{CheckView, LineView, Pending, SessionEvent};
+use crate::capabilities::conversation::session::api::{LineView, SessionEvent};
 /// 目的：代拟行里的一项（只给人看）：复用项标出来，组装项带上模块与模型。
 pub(crate) fn slate_item(a: &AgentMeta, why: &str) -> String {
     if a.transient {
@@ -122,8 +124,9 @@ pub(crate) fn review_event(exec: &Execution) -> SessionEvent {
                 .unwrap_or_default(),
         })
         .collect();
-    SessionEvent::Review {
+    CollabEvent::Review {
         items,
         raw: exec.checklist_raw.clone(),
     }
+    .push()
 }
