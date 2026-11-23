@@ -1,23 +1,21 @@
-# 会话类型表：一个会话类型就是一串机制与它们用到的身份角色。
-# 装配期会校验：与形态（single / collab / proxy）一一对应、机制已注册、产物按顺序接得上、角色在角色表里。
-# agents: one = 只许一个 agent；many = 至少两个、必须有机制调度。
-# mechanisms 为空 = 没有机制，直接轮循环；takes 接会话开场（text）或更早机制的 gives。
+# 会话类型表：一个会话类型就是一串流程与它们用到的身份角色。
+# 装配期会校验：与形态（single / collab / proxy）一一对应、流程已注册、每个流程有人出演、角色在册且席位放对。
+# flows 为空 = 没有流程，直接轮循环（single 与 proxy 就是这样）。
+# 每个流程：core = 核心通道出演的身份（不进成员表）；members = 成员席各要几员（角色: 最少人数）。
 profiles:
   - id: single
-    agents: one
     roles: [solo]
-    mechanisms: []
+    flows: []
 
   - id: collab
-    agents: many
     roles: [discussant, executor, planner, orchestrator]
-    mechanisms:
+    flows:
       - id: collab
-        roles: [discussant, executor, planner, orchestrator]
-        takes: text
-        gives: TaskChain
+        core: [planner, orchestrator]
+        members:
+          discussant: 2
+          executor: 1
 
   - id: proxy
-    agents: one
     roles: [core_proxy]
-    mechanisms: []
+    flows: []
