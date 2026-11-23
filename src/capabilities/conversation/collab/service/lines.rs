@@ -130,3 +130,39 @@ pub(crate) fn review_event(exec: &Execution) -> SessionEvent {
     }
     .push()
 }
+
+/// 目的：总验收清单的**人看文本**（Markdown，一条一行）：以转录行落档，刷新与回档后照样读得到。
+///   约束：结论词只有"通过 / 未通过"两档，判据与 `Execution::all_pass` 同一条（只认 `pass`）；
+///   事件仍保留结构化条目（流程视图与状态派生读它，不解析这段文本）。
+pub(crate) fn review_text(exec: &Execution) -> String {
+    if exec.items.is_empty() {
+        return format!("清单解析失败，原文：\n{}", exec.checklist_raw);
+    }
+    let mut out = String::new();
+    for it in &exec.items {
+        if it.status.eq_ignore_ascii_case("pass") {
+            out.push_str(&format!("- **{}** · 通过", it.item));
+        } else {
+            match it
+                .rework
+                .as_deref()
+                .map(str::trim)
+                .filter(|r| !r.is_empty())
+            {
+                Some(who) => out.push_str(&format!("- **{}** · 未通过，返工 {who}", it.item)),
+                None => out.push_str(&format!("- **{}** · 未通过", it.item)),
+            }
+        }
+        let note = it
+            .reason
+            .as_deref()
+            .or_else(|| it.evidence.as_deref())
+            .map(str::trim)
+            .filter(|n| !n.is_empty());
+        if let Some(note) = note {
+            out.push_str(&format!(" —— {note}"));
+        }
+        out.push('\n');
+    }
+    out
+}

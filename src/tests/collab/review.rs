@@ -101,6 +101,164 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
     assert_eq!(cmeta.agents[0].name, "a");
 }
 
+/// 目的：协作的裁决事实（方案 / 验收清单 / 交付）落成**带 id 的转录行**，不是只推一条事件：
+///   刷新与回档后照样读得到；行种类是 `notice`（只给人看、不进模型上下文），身份在说话人里。
+///   管：三种事实各落一行、方案行排在闸门卡之前、行 id 互不相同。
+#[test]
+pub(crate) fn collab_facts_land_as_replayable_transcript_rows() {
+    // 从事件里读转录行（走线上同一条 to_json，再整行反序列化：判据读结构化字段）。
+    fn rows(
+        evs: &[SessionEvent],
+    ) -> Vec<crate::capabilities::conversation::session::api::LineView> {
+        let mut out = Vec::new();
+        for ev in evs {
+            let v = ev.to_json();
+            let Some(ls) = v.get("lines").and_then(|l| l.as_array()) else {
+                continue;
+            };
+            for l in ls {
+                if let Ok(line) = serde_json::from_value::<
+                    crate::capabilities::conversation::session::api::LineView,
+                >(l.clone())
+                {
+                    out.push(line);
+                }
+            }
+        }
+        out
+    }
+
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "{\"type\":\"say\",\"text\":\"我先说\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
+    let mut core = core_with(
+        vec![module_of("a")],
+        gw(
+            member,
+            vec![
+                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做 X\",\"status\":\"pass\"}]}}".to_string(),
+            ],
+        ),
+    );
+    let sid = core
+        .create_work(execute_work("w", &["a"], "做个东西"))
+        .unwrap()
+        .sid;
+    let mut evs = advance(&mut core, &sid);
+
+    // 方案行：正文就是核心整理出来的那份方案，身份是"核心整理"。
+    let plan_row = rows(&evs)
+        .into_iter()
+        .find(|l| l.speaker == "核心整理")
+        .expect("方案要落成转录行");
+    assert_eq!(plan_row.kind, "notice", "只给人看、不进模型上下文");
+    assert!(!plan_row.system, "不能变成上下文里的系统消息");
+    assert!(
+        plan_row.line.contains("方案：A 做 X"),
+        "行里是方案正文：{}",
+        plan_row.line
+    );
+    // 顺序：用户先读到方案，再看到"要不要现在开工"的闸门卡。
+    let mut plan_at = usize::MAX;
+    let mut gate_at = usize::MAX;
+    for (i, ev) in evs.iter().enumerate() {
+        if matches!(CollabEvent::of(ev), Some(CollabEvent::PlanReview { .. })) {
+            gate_at = i;
+        }
+        if ev
+            .to_json()
+            .get("lines")
+            .and_then(|l| l.as_array())
+            .is_some_and(|ls| {
+                ls.iter().any(|l| {
+                    serde_json::from_value::<
+                        crate::capabilities::conversation::session::api::LineView,
+                    >(l.clone())
+                    .is_ok_and(|x| x.speaker == "核心整理")
+                })
+            })
+        {
+            plan_at = plan_at.min(i);
+        }
+    }
+    assert!(
+        plan_at < gate_at,
+        "方案行要在闸门卡之前：{:?}",
+        shown_texts(&evs)
+    );
+
+    // 过审 → 派节点 → 阶段验收 → 总验收 → 交付：清单与交付各落一行。
+    evs.extend(answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap());
+    let all = rows(&evs);
+    let review_row = all
+        .iter()
+        .find(|l| l.speaker == "验收清单")
+        .expect("总验收清单要落成转录行");
+    assert_eq!(review_row.kind, "notice");
+    assert!(
+        review_row.line.contains("**做 X** · 通过"),
+        "清单一行一条、结论两档：{}",
+        review_row.line
+    );
+    let delivery_row = all
+        .iter()
+        .find(|l| l.speaker == "交付")
+        .expect("交付结论要落成转录行");
+    assert_eq!(delivery_row.kind, "notice");
+    assert!(
+        delivery_row.line.contains("交付用户"),
+        "全过就如实说交付：{}",
+        delivery_row.line
+    );
+    // 落盘可回放：刷新/回档后从历史里读得到同一批行（不是只活在这条事件流里）。
+    let (_, hist) = core.lifecycle.history_open(&sid).unwrap();
+    let persisted: Vec<crate::capabilities::conversation::session::api::LineView> = hist
+        .iter()
+        .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
+        .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
+        .flat_map(|ls| ls.to_vec())
+        .filter_map(|l| {
+            serde_json::from_value::<crate::capabilities::conversation::session::api::LineView>(l)
+                .ok()
+        })
+        .collect();
+    for who in ["核心整理", "验收清单", "交付"] {
+        assert!(
+            persisted
+                .iter()
+                .any(|l| l.speaker == who && l.kind == "notice" && l.id > 0),
+            "「{}」这一行要落档（带 id）：{:?}",
+            who,
+            persisted.iter().map(|l| l.render()).collect::<Vec<_>>()
+        );
+    }
+    // 行 id 互不相同（回档按 id 截断，撞号会切错地方）：三条事实各占一个号。
+    let mut ids: Vec<u64> = persisted
+        .iter()
+        .filter(|l| ["核心整理", "验收清单", "交付"].contains(&l.speaker.as_str()))
+        .map(|l| l.id)
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(
+        ids.len(),
+        3,
+        "三条事实行各占一个不同的 id：{:?}",
+        persisted
+            .iter()
+            .map(|l| format!("{}#{}:{}", l.speaker, l.id, l.kind))
+            .collect::<Vec<_>>()
+    );
+}
+
 /// 目的：同一个 agent 的多个节点**串行**（一个会话一次只能跑一轮）；不同 agent 照旧并发。
 #[test]
 pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {

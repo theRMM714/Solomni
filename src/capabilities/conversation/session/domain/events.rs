@@ -376,6 +376,19 @@ impl LineView {
         }
     }
 
+    /// 目的：**核心写下的记录行**：计划 / 验收清单 / 交付这类"核心的裁决事实"，带说话人，只给人看。
+    ///   约束：种类仍是 `notice`——"只给人看、不进模型上下文"的唯一判据就是它（重建按 kind 跳过，
+    ///   见 turn::turn::service::rebuild）；**不能**用 `system`，那会变成上下文里的系统消息。
+    ///   与 `notice` 的区别只有说话人：`notice` 是没有署名的系统提示，`record` 署名到核心的某个身份。
+    pub fn record(speaker: &str, line: String) -> LineView {
+        LineView {
+            speaker: speaker.to_string(),
+            kind: "notice".to_string(),
+            line,
+            ..Default::default()
+        }
+    }
+
     /// 目的：**讨论的轮次分隔行**：正文 = 轮次号（结构化，不再从"轮次 2"里抠数字）。
     pub fn round(n: usize) -> LineView {
         LineView {

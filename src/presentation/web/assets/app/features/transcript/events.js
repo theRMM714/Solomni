@@ -154,21 +154,13 @@ function absorb(s, ev) {
       // shell 跑完了：运行槽只经 /api/state 下发，立刻拉一次——chip 与打开的卡片不用等 3 秒轮询。
       if (ev.name === 'shell') progress.needState = true;
       return true; // 同上：卡片节点只 append，绝不重建
+    // 下面四种是**协作的裁决事实**（讨论收尾 / 方案 / 验收清单 / 交付）：前端不再自造转录行——
+    // 后端已经把正文与身份落成带 id 的转录行（刷新、回档后照样读得到），这里只让整帧重建一次
+    // 吃掉紧随其后的那几条行；事件本身留给流程视图（见 features/flow）。
     case 'discussion_done':
-      if (ev.over_cap) s.lines.push({ cls: 'sys', who: '', text: '讨论超轮次上限，进入裁决。' });
-      break;
-    case 'plan': s.lines.push({ cls: 'plan', who: '核心整理', text: ev.text }); break;
+    case 'plan':
     case 'review':
-      if (!ev.items || ev.items.length === 0) {
-        s.lines.push({ cls: 'bad', who: '验收', text: '清单解析失败，原文：\n' + ev.raw });
-      } else {
-        const txt = ev.items.map((i) => '[' + i.status.toUpperCase() + '] ' + i.item + (i.note ? ' —— ' + i.note : '')).join('\n');
-        s.lines.push({ cls: 'review', who: '验收清单', text: txt });
-      }
-      break;
     case 'delivery':
-      s.lines.push(ev.ok ? { cls: 'ok', who: '交付', text: '全部通过，交付用户。' }
-        : { cls: 'bad', who: '裁决', text: '返工超限仍未通过，交用户裁决。' });
       break;
     case 'decision_card':
       // **裁决卡**：与快照里的 pending 是同一个事实，只是到达得更快。

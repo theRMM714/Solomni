@@ -111,12 +111,16 @@ body {
   content: ""; position: absolute; left: 0; top: 4px; bottom: 4px; width: 1px;
   background: var(--color-border);
 }
-.line.sys {
-  align-self: center; max-width: var(--w-read); padding: 0;
-  background: transparent; border: none; color: var(--color-text-dim);
-  font-size: var(--fs-s); text-align: center;
-}
-.line.sys::before { display: none; }
+/* 系统与核心写下的行（提示 / 计划 / 验收清单 / 交付 / 轮次 / 压缩）与模型、用户行**同一几何**：
+ * 同一个阅读栏、同一段行首细线、同一套字号——差别只由那 1px 的颜色说，不再居中、不缩小、不加框。
+ * 颜色即性质：强调色 = 核心自己的记录，警示色 = 需要用户知道的提示，中性 = 轮次与压缩。
+ * 判据：transcript.smoke.cjs 的行映射断言；实机由 #stream 的渲染结果确认。 */
+.line.sys { color: var(--color-text); }
+.line.sys::before { background: var(--color-accent); }
+.line.sys.notice::before { background: var(--color-warn); }
+.line.sys.notice.record::before { background: var(--color-accent); }
+.line.sys.round, .line.sys.compacted { color: var(--color-text-dim); }
+.line.sys.round::before, .line.sys.compacted::before { background: var(--color-border-strong); }
 .line.user {
   align-self: center; width: 100%; max-width: var(--w-read);
   /* 用户消息只做浅底、不描边：它不该比 agent 的正文更抢眼。 */
@@ -192,10 +196,12 @@ body {
 }
 .turn:hover .turn-foot, .turn-foot:focus-within { opacity: 1; }
 @media (hover: none) { .turn-foot { opacity: 1; } }
-.line.plan { border-left: 3px solid var(--color-accent); }
-.line.ok { border-left: 3px solid var(--color-ok); }
-.line.warn { border-left: 3px solid var(--color-warn); }
-.line.bad { border-left: 3px solid var(--color-err); }
+/* 行的性质只由行首那 1px 说话（与系统行同一机制，不再另起一条 3px 边框）。 */
+.line.plan::before { background: var(--color-accent); }
+.line.ok::before { background: var(--color-ok); }
+.line.warn::before { background: var(--color-warn); }
+.line.bad::before { background: var(--color-err); }
+.line .md { white-space: normal; }
 .typing { align-self: center; width: 100%; max-width: var(--w-read); color: var(--color-text-dim); font-size: var(--fs-s); padding: 0 0 0 var(--sp-4); }
 .typing::after { content: "▍"; animation: blink var(--dur-pulse) infinite; }
 @keyframes blink { 50% { opacity: 0; } }

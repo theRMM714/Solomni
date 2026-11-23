@@ -28,21 +28,24 @@ function lineParts(l) {
     }];
   }
   // 压缩记录：转录里的一等行（有 id，可删除/留档/恢复）；摘要 + 从哪一行起保留原文。
+  // 身份与正文分开：说话人是"压缩"，正文只讲事实（不再自带 [压缩] 前缀——那是身份该说的事）。
   if (kind === 'compacted') {
     const upTo = (l.payload && l.payload.up_to) || 0;
     return [{
       cls: 'sys compacted',
-      who: '',
-      text: '[压缩] 第 ' + upTo + ' 行之前已压成摘要；此后原样保留（旧内容仍可查看）：\n' + text,
+      who: speaker || '压缩',
+      text: '第 ' + upTo + ' 行之前已压成摘要；此后原样保留（旧内容仍可查看）：\n' + text,
       reply: l.reply || 0,
     }];
   }
-  // 内容类系统提示：转录里的一等行（有 id，可回档/折叠），界面仍按系统行画。
-  if (kind === 'notice') return [{ cls: 'sys notice', who: speaker, text: text }];
+  // 内容类系统提示（含核心写下的记录行：计划 / 验收清单 / 交付）：转录里的一等行（有 id，可回档/折叠），
+  // 只给人看、不进模型上下文；身份在 speaker 里，正文照常 Markdown。
+  // 有说话人 = 核心署名的记录（色条用强调色），没有 = 无署名的提示（色条用警示色）。
+  if (kind === 'notice') return [{ cls: 'sys notice' + (speaker ? ' record' : ''), who: speaker, text: text }];
   // 系统行：系统注入的提醒/边界（没有说话人），或核心自己的行（代拟…）。
   if (kind === 'system' || l.system) return [{ cls: 'sys system', who: speaker, text: text }];
-  // 讨论的轮次分隔行：标签是"轮次 + 号"（号在正文里，结构化）。
-  if (kind === 'round') return [{ cls: 'sys system', who: '', text: '[' + speaker + ' ' + text + ']' }];
+  // 讨论的轮次分隔行：身份是"轮次"，正文是号（结构化字段，不从文本里拆括号）。
+  if (kind === 'round') return [{ cls: 'sys round', who: '', text: speaker + ' ' + text }];
   // 用户说的行：标签在字段里（需求/开始/撤回/名单…），界面上就是"用户 + 那句话"。
   if (kind === 'user') return [{ cls: 'user', who: '用户', text: text }];
   // 模型发言：动词决定样式；"降级"是结构化信号（不在正文里找说明文案）。
