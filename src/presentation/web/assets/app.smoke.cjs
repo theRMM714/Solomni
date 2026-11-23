@@ -36,6 +36,7 @@ function el(tag) {
     removeChild(c) { const i = node.children.indexOf(c); if (i >= 0) node.children.splice(i, 1); if (c) c.parentNode = null; return c; },
     contains(n) { return node.children.indexOf(n) >= 0; },
     getBoundingClientRect() { return { left: 0, top: 0, right: 0, bottom: 0 }; },
+    focus() {},
     onclick: null,
   };
   // 真实 DOM：innerHTML = '' 会清空子节点。桩不模拟这一条，整帧重建就会留着旧节点。
@@ -952,6 +953,36 @@ setTimeout(async () => {
       if (!flowView) loadErrors.push('流程视图检查：' + JSON.stringify(r));
     } catch (e) { loadErrors.push('流程视图检查失败：' + e.message); }
   }
+  // **切会话要重画流程视图**：flow 是整页的一部分，只换转录会把上一个会话的链留在状态栏上方。
+  let flowSwitch = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () {" +
+          " const fa = { sid: 'fa', title: 'fa', lines: [], live: [], fold: {}, scroll: {} };" +
+          " const fb = { sid: 'fb', title: 'fb', lines: [], live: [], fold: {}, scroll: {} };" +
+          " state.sessions.set('fa', fa); state.sessions.set('fb', fb);" +
+          " absorb(fa, { type: 'plan_review', plan: '方案', chain: { nodes: [" +
+          "   { id: 'n1-1', title: '做 Z', assignee: '甲', status: 'pending' } ] } });" +
+          " const box = document.querySelector('#flow');" +
+          " const rows = function () { let n = 0; (function walk(x) { for (const c of (x.children || [])) {" +
+          "   if (String(c.className).split(' ')[0] === 'flow-node') n++; walk(c); } })(box); return n; };" +
+          " setActive('fa');" +
+          " const onA = { cls: String(box.className), rows: rows() };" +
+          " setActive('fb');" +
+          " const onB = String(box.className);" +
+          " setActive('fa');" +
+          " const back = { cls: String(box.className), rows: rows() };" +
+          " return { onA: onA, onB: onB, back: back };" +
+          "})()",
+        sandbox
+      );
+      flowSwitch = r.onA.cls.indexOf('hidden') < 0 && r.onA.rows === 1
+        && r.onB === 'flow hidden'
+        && r.back.cls.indexOf('hidden') < 0 && r.back.rows === 1;
+      if (!flowSwitch) loadErrors.push('流程视图随会话切换：' + JSON.stringify(r));
+    } catch (e) { loadErrors.push('流程视图切换检查失败：' + e.message); }
+  }
   // **标签梯级**：根 / 子 / 子子三行，按活跃路径展开。
   let tabLadder = false;
   if (!loadErrors.length) {
@@ -1175,7 +1206,7 @@ setTimeout(async () => {
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
     && rewoundApplies && readonlyRule && continueBarRules
     && taskButtonRule && decisionCardRule && onlyLastStreams && liveMarkdown && lineRule && toolOnlyReasoning && incrementalAppend && pendingReplaced && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches && slashMenu
-    && wizardProxy && wizardBlocked && sessionNoteRule && historyRunTag && fenceBanner && flowView && tabLadder
+    && wizardProxy && wizardBlocked && sessionNoteRule && historyRunTag && fenceBanner && flowView && flowSwitch && tabLadder
     && statusBarRules && thinkingMenuRules && shellCardRules && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
@@ -1183,7 +1214,7 @@ setTimeout(async () => {
     console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 盘上转录已补:", hydratedHistory, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
     console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule, "| 只读条恢复入口:", continueBarRules, "| notice 行:", noticeRow, "| 弹层判据:", modalDismiss, "| 回档图标:", rewindIcon, "| tool-only 思维链:", toolOnlyReasoning, "| 增量追加:", incrementalAppend, "| 乐观替换:", pendingReplaced);
     console.log("流式 Markdown:", liveMarkdown, "| 运行态归一（事件为准 / 快照只对账）:", runningRules, "| @ 菜单每次重拉:", atMenuRefetches, "| / 命令菜单:", slashMenu);
-    console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag, "| 围栏横幅:", fenceBanner, "| 流程视图:", flowView, "| 标签梯级:", tabLadder, "| 状态栏:", statusBarRules);
+    console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag, "| 围栏横幅:", fenceBanner, "| 流程视图:", flowView, "| 流程随会话切换:", flowSwitch, "| 标签梯级:", tabLadder, "| 状态栏:", statusBarRules);
     console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));
     console.log("loadErrors:", JSON.stringify(loadErrors));
   }
