@@ -1,12 +1,16 @@
 /* 目的：流式区（打字指示、实时块、增量重画）与整帧重建的入口 renderStream。
- * 管：buildStreamBoxes / updateLiveGroup / renderLive / renderStream / 合并渲染节拍（scheduleLiveTick）。
- * 不管：不定义行的长相（./parts.js）、不定义气泡（./turn.js）、不决定整帧时机（./page.js）。
- * 联动：裁决门要整帧重画时经 app.renderGate 晚绑定，避免与本模块互相 import。 */
+ * 管：buildStreamBoxes / updateLiveGroup / renderLive / renderStream / 合并渲染节拍（scheduleLiveTick）/
+ *   跟随锁存与「回到底部」浮标。
+ * 不管：不定义行的长相（./parts.js）、不定义气泡（./turn.js）、不决定整帧时机（./page.js）、
+ *   跟随判定的边界（./scroll.js 的纯函数）。
+ * 联动：裁决门要整帧重画时经 app.renderGate 晚绑定，避免与本模块互相 import；
+ *   新增浮标节点要随 buildStreamBoxes 一起挂，否则整帧重建会把它清掉。 */
 
 import { mdNode, toolCard, reasoningBlock, shortPath, flushScroll } from './parts.js';
 import { renderDone } from './turn.js';
 import { boxes } from './dom.js';
 import { transcriptCopy } from './copy.js';
+import { followAfterScroll } from './scroll.js';
 
 let g, doc, state, ui, app;
 
@@ -23,8 +27,50 @@ function syncTyping(s) {
   boxes.typing.className = busy && !hasLive ? 'typing' : 'typing hidden';
 }
 
-/// 只有本来就在底部才自动跟随；用户往上滚时保持原位置（流式刷新不抢滚动条）。
-function nearBottom(box) { return box.scrollHeight - box.scrollTop - box.clientHeight < 80; }
+/// 跟随锁存：只由 #stream 的滚动事件推进（滚离底部解除、回到底部恢复）。
+/// 渲染路径只认这个锁存，不能每帧再按"距底多近"重判——容差以内的轻微上滚会被下一帧
+/// 立刻吃掉，用户就永远逃不出底部（边界算法见 ./scroll.js）。
+let follow = true;
+
+/// 浮标显隐：不跟随时才出现；显式 fresh 才点亮「新消息」（跟随期间清掉）。
+function syncJump(fresh) {
+  const btn = boxes.jump;
+  if (!btn) return;
+  const show = !follow && !!boxes.owner;
+  btn.classList.toggle('hidden', !show);
+  if (!show) btn.classList.remove('fresh');
+  else if (fresh) btn.classList.add('fresh');
+}
+
+/// 滚回底部：同一把锁存，所以之后的流式增量会继续跟随。
+function jumpToBottom() {
+  const box = $('#stream');
+  follow = true;
+  box.scrollTop = box.scrollHeight;
+  syncJump(false);
+}
+
+/// 滚动事件是锁存的唯一来源；程序写入 scrollTop 也会触发，回到底部时自然恢复跟随。
+function onStreamScroll() {
+  follow = followAfterScroll($('#stream'));
+  syncJump(false);
+}
+
+/// 浮标节点建一次、随容器重建搬过去（不重建，免得丢掉点击处理）。
+function makeJump() {
+  const btn = doc.createElement('button');
+  btn.type = 'button';
+  btn.className = 'jump-bottom hidden';
+  btn.title = transcriptCopy.jumpBottom;
+  btn.setAttribute('aria-label', transcriptCopy.jumpBottom);
+  btn.appendChild(ui.icon('chevron'));
+  const fresh = doc.createElement('span');
+  fresh.className = 'jump-fresh';
+  fresh.textContent = transcriptCopy.jumpFresh;
+  btn.appendChild(fresh);
+  btn.addEventListener('click', jumpToBottom);
+  return btn;
+}
 
 /// 建立两个容器 + 打字指示器（整帧重建时调用）。
 function buildStreamBoxes(sid) {
@@ -33,7 +79,9 @@ function buildStreamBoxes(sid) {
   boxes.done = doc.createElement('div'); boxes.done.className = 'stream-done';
   boxes.live = doc.createElement('div'); boxes.live.className = 'stream-live';
   boxes.typing = doc.createElement('div'); boxes.typing.className = 'typing hidden'; boxes.typing.textContent = 'agent 工作中';
+  boxes.jump = boxes.jump || makeJump();
   box.appendChild(boxes.done); box.appendChild(boxes.live); box.appendChild(boxes.typing);
+  box.appendChild(boxes.jump);
   boxes.owner = sid;
 }
 
@@ -154,10 +202,11 @@ function renderLive(s, full) {
 function renderStream(force) {
   const box = $('#stream');
   const prevTop = box.scrollTop;
-  const stick = force === true || nearBottom(box);
+  const prevCount = boxes.doneState.count;
   const s = app.activeSession();
   if (!s) {
     boxes.done = null; boxes.live = null; boxes.typing = null; boxes.owner = null;
+    follow = true; syncJump(false);
     boxes.doneState = { owner: null, count: 0, show: null, note: '', last: null };
     box.innerHTML = '<div class="empty">' +
       '<svg class="empty-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">' +
@@ -170,6 +219,7 @@ function renderStream(force) {
     if (empty) empty.appendChild(cta);
     return;
   }
+  if (boxes.owner !== s.sid) follow = true; // 切会话：从最新处看起
   const full = force === true || boxes.owner !== s.sid || !boxes.done || !boxes.live;
   if (full) {
     // 切会话 / 重置 / 开关变化：容器与全部行重建（折叠与 <pre> 滚动由 store 恢复）。
@@ -190,7 +240,9 @@ function renderStream(force) {
     }
   }
   syncTyping(s);
-  box.scrollTop = stick ? box.scrollHeight : prevTop;
+  if (follow) box.scrollTop = box.scrollHeight;
+  else if (full) box.scrollTop = prevTop; // 重建后保持视口，别把回看的人弹走
+  syncJump(boxes.doneState.count !== prevCount);
   app.syncSendButton(s);
 }
 
@@ -213,10 +265,11 @@ function renderLiveTick(s) {
   if (!boxes.live || boxes.owner !== s.sid) { renderStream(true); return; }
   const box = $('#stream');
   const prevTop = box.scrollTop;
-  const stick = nearBottom(box);
+  const prevHeight = box.scrollHeight;
   renderLive(s, false);
   syncTyping(s);
-  box.scrollTop = stick ? box.scrollHeight : prevTop;
+  if (follow) box.scrollTop = box.scrollHeight;
+  syncJump(follow ? false : box.scrollHeight !== prevHeight);
   app.syncSendButton(s);
   app.syncStatusbar(s);
   if (s.workDirty) { s.workDirty = false; app.loadWork(s.sid, true); }
@@ -224,8 +277,10 @@ function renderLiveTick(s) {
 
 export { renderStream, syncTyping, scheduleLiveTick, renderLiveTick, buildStreamBoxes };
 
-/// 挂载：装配依赖并把本模块的入口交给组装点。
+/// 挂载：装配依赖，挂滚动监听（锁存的唯一来源），并把本模块的入口交给组装点。
 export function mount(root, deps) {
   ({ g, doc, state, ui, app } = deps);
+  const box = $('#stream');
+  if (box && box.addEventListener) box.addEventListener('scroll', onStreamScroll, { passive: true });
   Object.assign(root, { renderStream, syncTyping, scheduleLiveTick, renderLiveTick, buildStreamBoxes });
 }

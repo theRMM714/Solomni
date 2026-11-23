@@ -5,6 +5,7 @@
  *   回档按「回档后的活动视图」整体重建；水位以下的批次丢掉而不是重放；裁剪后按历史重新对齐并作废实时运行态。 */
 const model = require("./model.js");
 const events = require("./events.js");
+const scroll = require("./scroll.js");
 
 async function main() {
 
@@ -137,6 +138,18 @@ await events.applyLines([{ seq: 10, sid: "s2", events: [{ type: "delta", kind: "
 check(calls.tick === before.tick + 1 && calls.renderAll === before.full, "纯流式增量只排合并渲染");
 await events.applyLines([{ seq: 11, sid: "s2", events: [{ type: "notice", text: "定稿" }] }]);
 check(calls.renderAll === before.full + 1, "定稿事件整帧重建");
+
+/* ---------- 滚动跟随：锁存只在滚动事件推进，容差以内的上滚也算离开底部 ---------- */
+check(scroll.bottomGap({ scrollHeight: 1000, scrollTop: 900, clientHeight: 100 }) === 0, "在底部时距底为 0");
+check(scroll.bottomGap({ scrollHeight: 1000, scrollTop: 880, clientHeight: 100 }) === 20, "距底按内容算");
+check(scroll.bottomGap({ scrollHeight: 500, scrollTop: 0, clientHeight: 500 }) === 0, "内容不满一屏算在底部");
+check(scroll.bottomGap({ scrollHeight: 500, scrollTop: 30, clientHeight: 520 }) === 0, "回弹越界不产生负距底");
+check(scroll.followAfterScroll({ scrollHeight: 1000, scrollTop: 900, clientHeight: 100 }) === true, "在底部就跟随");
+check(scroll.followAfterScroll({ scrollHeight: 1000, scrollTop: 898, clientHeight: 100 }) === true, "分数坐标仍算在底部");
+check(scroll.followAfterScroll({ scrollHeight: 1000, scrollTop: 880, clientHeight: 100 }) === false, "上滚 20px 立即解除跟随");
+check(scroll.followAfterScroll({ scrollHeight: 1000, scrollTop: 888, clientHeight: 100 }) === true, "容差边界之内仍算底部");
+check(scroll.followAfterScroll({ scrollHeight: 1000, scrollTop: 887, clientHeight: 100 }) === false, "越过容差即解除跟随");
+check(scroll.followAfterScroll({ scrollHeight: 500, scrollTop: 0, clientHeight: 500 }) === true, "短内容始终跟随");
 
   if (fails.length) {
     for (const f of fails) console.log("FAIL " + f);
