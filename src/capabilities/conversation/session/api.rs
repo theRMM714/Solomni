@@ -20,7 +20,7 @@ pub use crate::capabilities::conversation::session::domain::history::{
     Delegation, HistoryView, RunState, SessionMeta, UsageTotals, WorkspaceBinding,
 };
 pub use crate::capabilities::conversation::session::domain::mechanism::{
-    Handback, Mechanism, MemberAsk,
+    Handback, Mechanism, MemberAsk, Settle,
 };
 // 会话类型表：组合根装载它，装配期用它校验角色与机制。
 pub use crate::capabilities::conversation::session::domain::profile::Profiles;

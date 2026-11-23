@@ -208,17 +208,14 @@ impl TurnOps for Handle {
             // 等在工作线程上的那一关（工具级确认）：回答已经写进等待格，没有要推进的事。
             Answered::Waiting(_) => Ok(Advance { head }),
             Answered::Gate(ticket, _) => {
-                // 代拟名单这一关要写回 meta 并建沙箱：短步骤，留在核心线程上收尾。
-                // 「代拟名单待确认」是协作机制自己的一关：队列只搬 Gate，由机制解释（见 collab/domain/gates.rs）。
-                if matches!(
-                    crate::capabilities::conversation::collab::api::Pending::from_gate(
-                        &ticket.gate
-                    ),
-                    Some((
-                        crate::capabilities::conversation::collab::api::Pending::ConfirmSlate,
-                        _
-                    ))
-                ) {
+                // 短步骤（就地收尾）：这一关要不要现在写完再放行，由发起它的机制说了算——
+                // 驱动不认关卡种类（机制面 `settles_inline`）。
+                let inline = {
+                    let sid = sid.to_string();
+                    let gate = ticket.gate.clone();
+                    self.call(move |core| Ok(core.turn.settles_inline(&sid, &gate)))?
+                };
+                if inline {
                     let more = self.call({
                         let sid = sid.to_string();
                         move |core| {

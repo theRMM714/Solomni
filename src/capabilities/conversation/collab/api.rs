@@ -8,6 +8,8 @@ pub use crate::capabilities::conversation::collab::domain::collab_state::tool_ru
 #[cfg(test)]
 pub use crate::capabilities::conversation::collab::domain::events::CheckView;
 pub use crate::capabilities::conversation::collab::domain::events::CollabEvent;
+/// 目的：待决项的类型化形态（关卡的解释）；驱动与呈现都按 `Gate` 走，只有测试与状态推导用它。
+#[cfg(test)]
 pub use crate::capabilities::conversation::collab::domain::gates::Pending;
 // 选项 id：机制对外的作答词汇（驱动按字符串答、测试与前端按同一份字符串对），
 // 生产侧只用到其中一部分，故不逐个当作未用告警。

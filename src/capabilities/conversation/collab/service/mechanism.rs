@@ -7,10 +7,11 @@ use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use crate::capabilities::conversation::collab::domain::gates::Pending;
 use crate::capabilities::conversation::collab::service::collab::CollabSession;
 use crate::capabilities::conversation::collab::service::discussion::AfterTurn;
 use crate::capabilities::conversation::session::api::{
-    Handback, Mechanism, MemberAsk, MemberTurn, SessionEvent,
+    Gate, GateTicket, Handback, Mechanism, MemberAsk, MemberTurn, SessionEvent, Settle,
 };
 
 impl Mechanism for CollabSession {
@@ -90,5 +91,18 @@ impl Mechanism for CollabSession {
 
     fn notice(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
         CollabSession::notice(self, text, sink);
+    }
+
+    fn settle(
+        &mut self,
+        ticket: &GateTicket,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) -> Result<Settle, String> {
+        let (resume, roster) = CollabSession::dispose(self, ticket, sink)?;
+        Ok(Settle { resume, roster })
+    }
+
+    fn settles_inline(&self, gate: &Gate) -> bool {
+        matches!(Pending::from_gate(gate), Some((Pending::ConfirmSlate, _)))
     }
 }

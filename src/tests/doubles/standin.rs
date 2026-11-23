@@ -1,5 +1,5 @@
 //! 目的：测试替身机制——一个与协作无关的最小机制，用来钉住「驱动只认机制面」。
-//! 管：StandIn 的机制面实现（开场推一步、问一个人、吸收、收工）与它自己的事件。
+//! 管：StandIn 的机制面实现（开场推一步、问一个人、吸收、收工、处置自己的关卡）与它自己的事件。
 //! 不管：真实流程（在 collab）；本文件不碰 turn 的会话表、落盘与呈现。
 //! 联动：src/tests/mechanism.rs 把它塞进 `Session::Mech`，走 `Turn::collab_advance` 的同一条驱动。
 
@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use crate::capabilities::conversation::session::api::{
-    Handback, Mechanism, MemberAsk, MemberTurn, SessionEvent,
+    Gate, GateTicket, Handback, Mechanism, MemberAsk, MemberTurn, SessionEvent, Settle,
 };
 use crate::capabilities::llm::api::{CompleteOpts, Msg};
 use crate::capabilities::tools::api::Tools;
@@ -30,6 +30,8 @@ pub(crate) struct StandIn {
     cancel: Option<Arc<AtomicBool>>,
     /// 目的：最近一次成员回合失败的原文（替身只记下，不另作反应）。
     failed: Option<String>,
+    /// 目的：自己的那一关被处置过没有（用例的断言口）。
+    settled: bool,
 }
 
 impl StandIn {
@@ -43,12 +45,18 @@ impl StandIn {
             next_line: 0,
             cancel: None,
             failed: None,
+            settled: false,
         }
     }
 
     /// 目的：这一趟吸收过成员回合没有（用例的断言口）。
     pub(crate) fn has_fed(&self) -> bool {
         self.fed
+    }
+
+    /// 目的：自己的那一关被处置过没有（用例的断言口）。
+    pub(crate) fn has_settled(&self) -> bool {
+        self.settled
     }
 }
 
@@ -130,5 +138,26 @@ impl Mechanism for StandIn {
 
     fn is_done(&self) -> bool {
         self.done
+    }
+
+    fn settles_inline(&self, gate: &Gate) -> bool {
+        gate.kind == "standin"
+    }
+
+    fn settle(
+        &mut self,
+        ticket: &GateTicket,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) -> Result<Settle, String> {
+        // 替身的关卡只有一种处置：记下答案、推一条自己的事件、放行（不等异步步骤）。
+        self.settled = true;
+        sink(SessionEvent::push(
+            "standin",
+            serde_json::json!({ "step": "settled", "option": ticket.option }),
+        ));
+        Ok(Settle {
+            resume: false,
+            roster: None,
+        })
     }
 }

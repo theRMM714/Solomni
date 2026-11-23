@@ -52,7 +52,7 @@
 | `src/kernel/ports.rs:NoopLog` | 无声日志 Stub | 已存在；不用于验证日志内容 |
 | `src/tests/doubles/:FixedProbe` / `TestHostProbe` | 宿主探测 Fake（按声明回答路径 / 可执行文件 / 虚拟化）；`TestHostProbe` 用真实路径事实，但把平台共享工具视为在场 | `FixedProbe` 用于 T2 契约用例；Core 级装配用 `TestHostProbe`（要 scratch 目录的真实存在性，又不让测试依赖机器是否装了 smbd/virtiofsd） |
 | `src/tests/doubles/:NoopLogOps` | 日志能力 Stub（入站能力面） | 已用于路由契约测试（呈现层不需要它做判定） |
-| `src/tests/doubles/:StandIn` | 机制面替身：与协作无关的最小机制（让出一步 → 吸收 → 收工），只发自己的 `Push` 事件 | 已用于 `src/tests/mechanism.rs`：钉住"驱动只认 `session::api::Mechanism`，加机制不必改 turn / work / runtime / lifecycle / presentation / session" |
+| `src/tests/doubles/:StandIn` | 机制面替身：与协作无关的最小机制（让出一步 → 吸收 → 收工 → 处置自己的关卡），只发自己的 `Push` 事件 | 已用于 `src/tests/mechanism.rs`：钉住"驱动只认 `session::api::Mechanism`，加机制不必改 turn / work / runtime / lifecycle / presentation / session"；第二例钉住关卡处置也走机制面（`settle` / `settles_inline`） |
 | `tests/cross-platform/e2e/mock.js` | 本地假供应商服务 | 已用于 T5；应覆盖协议错误、断开、延迟等场景 |
 
 ### 1.3 Mock
