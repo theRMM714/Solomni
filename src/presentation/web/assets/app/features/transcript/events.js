@@ -22,6 +22,7 @@ function applySnapshot(s, events) {
   s.live = [];
   s.fold = {};
   s.scroll = {};
+  s.flow = null; // 回档后的链由快照里的事件重建；旧链不再成立（流程视图据此收起）
   s.forceFull = true;
   s.pending = null;
   s.done = false;

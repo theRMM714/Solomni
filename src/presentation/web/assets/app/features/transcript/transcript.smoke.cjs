@@ -92,6 +92,8 @@ check(sf.flow.review.pass === 1 && sf.flow.review.total === 2, "验收清单汇�
 events.absorb(sf, { type: "delivery", ok: false });
 check(sf.flow.delivery && sf.flow.delivery.ok === false, "交付结论进流程快照");
 check(sf.lines.length === 0, "节点进度不进转录");
+events.applySnapshot(sf, []);
+check(sf.flow === null, "回档清空旧的流程快照");
 
 check(events.absorb(s1, { type: "notice", text: "提示" }) === false, "系统提示要整帧重建");
 check(s1.lines.length === 1 && s1.lines[0].cls === "sys", "系统提示进转录");
