@@ -3,12 +3,16 @@
 //! 不管：机制内部的状态机；会话表、落盘与呈现（分别归 turn 的会话表、session 的历史与 presentation）。
 //! 联动：`turn` 的驱动循环与 `turn::generation` 的工作线程按这套接口推进任何机制；协作的实现见 `collab`。
 
+use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use crate::capabilities::conversation::session::api::{MemberTurn, SessionEvent};
 use crate::capabilities::llm::api::{CompleteOpts, Msg};
 use crate::capabilities::tools::api::Tools;
+
+/// 目的：已注册的机制 id：`systools/profiles.yaml` 只能引用这里的名字（新增机制在这里加一行）。
+pub const REGISTERED: &[&str] = &["collab"];
 
 /// 目的：机制让出的那一步——请驱动取某个成员会话跑一回合。
 /// 约束：机制**不自己调模型**（它拿不到别的会话）；这里只交出「问谁、带什么、按什么参数」。
@@ -48,7 +52,7 @@ pub enum Handback {
     PassOver,
 }
 
-/// 目的：机制——会话流程的插件面：驱动只按这七个动作推进，不再认识任何具体机制的字段。
+/// 目的：机制——会话流程的插件面：驱动只按这套动作推进，不再认识任何具体机制的字段。
 /// 约束：同一会话同一时刻只属于一个机制；进入 / 退出由落盘转录派生，不是内存标志。
 pub trait Mechanism: Send {
     /// 目的：把「停止」接到机制上（生成线程登记后交给它）。
@@ -70,4 +74,20 @@ pub trait Mechanism: Send {
     fn pass_over(&mut self, ask: &MemberAsk, sink: &mut dyn FnMut(SessionEvent));
     /// 目的：成员回合失败：如实记下，下一步推一步时由机制交回中断（不静默吞掉）。
     fn failed(&mut self, err: &str);
+    /// 目的：机制自己的业务面（任务链、名单、沙箱）取回具体类型；驱动路径不用它。
+    fn as_any(&self) -> &dyn Any;
+    /// 目的：同上（可写一份）。
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+    /// 目的：本机制转录的下一个行号（界面续号与回档重放都读它）。
+    fn next_line(&self) -> u64;
+    /// 目的：回档后重设行号（行号只增不退，值是全量最大 id + 1）。
+    fn set_next_line(&mut self, next: u64);
+    /// 目的：机制自己判定整场工作已收尾（界面据此显示完成）。
+    fn is_done(&self) -> bool {
+        false
+    }
+    /// 目的：把一条内容类系统提示记成机制自己的行（协作记成带行号的转录行）。
+    fn notice(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
+        sink(SessionEvent::Notice(text.to_string()));
+    }
 }

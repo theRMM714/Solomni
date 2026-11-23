@@ -8,6 +8,9 @@ cases:
   - id: cargo/tests::env
     tier: T1
     note: 环境快照
+  - id: cargo/tests::mechanism
+    tier: T1
+    note: 机制面：替身机制跑在同一条驱动循环上
   - id: cargo/tests::session::turn
     tier: T1
     note: 一轮对话推进

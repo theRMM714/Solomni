@@ -84,10 +84,7 @@ impl Work {
         let listed: Vec<(String, bool)> = turn
             .sessions_iter()
             .map(|(sid, s)| {
-                let done = match s {
-                    Session::Collab(c) => c.is_done(),
-                    Session::Single(_) => false,
-                };
+                let done = s.is_done();
                 (sid.clone(), done)
             })
             .chain(running)
@@ -118,7 +115,7 @@ impl Work {
                 // 「改需求」能力位：有本次需求行才给。在表里看会话种类；不在表里（生成中/未打开）
                 // 看落盘 meta 的形态（那是名单与形态的单一真相）。
                 let can_update_task = match turn.session(&sid) {
-                    Some(Session::Collab(_)) => true,
+                    Some(Session::Mech(_)) => true,
                     Some(Session::Single(_)) => false,
                     None => mode == WorkMode::Collab,
                 };
@@ -251,7 +248,7 @@ impl Work {
         // 锚到主会话当时的下一条行号，回档才能把这次投喂算进某个转录点。
         let line = match turn.session(sid) {
             Some(Session::Single(s)) => s.next_line,
-            Some(Session::Collab(c)) => c.next_line,
+            Some(Session::Mech(m)) => m.next_line(),
             None => 0,
         };
         self.workspace.work_commit_user(
@@ -423,7 +420,7 @@ impl Work {
         let mut out = Vec::new();
         match turn.session_mut(sid) {
             Some(Session::Single(s)) => out.extend(s.note_notice(text)),
-            Some(Session::Collab(c)) => c.notice(text, &mut |e| out.push(e)),
+            Some(Session::Mech(m)) => m.notice(text, &mut |e| out.push(e)),
             None => out.push(SessionEvent::Notice(text.to_string())),
         }
         out

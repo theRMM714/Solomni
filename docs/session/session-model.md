@@ -10,6 +10,7 @@
 ## 一、形态
 - **执行席按 agent 一会话**（含同 agent 串行）、**讨论回合开工具循环**（能只读核实、拿不到模块工具）、**讨论由核心驱动**（泵只决定"该问谁"，成员回合在它自己的会话里跑，核实行与回合标记都落进那个会话；主会话只留"谁说了什么"）。
 - **形态词汇只有一套**：`Mode`（`single` / `collab` / `proxy`）定义在会话领域（`src/capabilities/conversation/session/domain/mode.rs`），落盘就是这三个小写词（`meta.yaml` 的 `mode`）。`work` 侧的 `WorkMode` 与 `proxy` 侧的 `SessionMode` 都只是它的别名，外部词一律经 `Mode::parse` 或 `parse_mode` 转成值；写进 meta 的形态不可能是第四种词，读回时 serde 直接拒掉未知值，所以构建会话时不再有「未知形态」分支。
+- **会话类型是数据**：一个会话类型就是一串机制与它们用到的身份角色，声明在 `systools/profiles.yaml`（三个形态各一条；`mechanisms` 为空 = 没有机制、直接轮循环）。装配期校验：与 `Mode` 一一对应、机制在 `session/domain/mechanism.rs` 的 `REGISTERED` 里、产物按顺序接得上（第一条接 `text`）、引用的角色都在角色表（`session::domain::profile::Profiles`，加载在 `session/detail/yaml_profiles.rs`）。
 - **agent 会话在第一个回合按需建**。
 - 主会话投影行带 `turn`（回档按回合同步截断）；角色表机制化（工具面与越权校验同出一份表）；压缩：`compact` 工具 + `compacted` 转录行 + 发送视图，按模型窗口百分比自动触发。
 

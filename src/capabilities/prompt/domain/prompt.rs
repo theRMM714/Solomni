@@ -93,10 +93,11 @@ pub enum Segment {
 }
 
 /// 目的：把册子的多个文件合并成内存形态：各文件的**顶层键**合并后就是 `core:` 的内容。
+/// 参数：`sessions` = 会话类型表的全部类型名（`systools/profiles.yaml` 的口径，机制册按它校验）。
 ///    **别的能力不按字段路径读册子**：它们按名字取一段（`Prompt::text` / `Prompt::render`）。
 ///    所以"文件怎么分"与"某一段落在结构体的哪一格"都只有本能力知道——改版式不再牵动别的能力。
 ///    三条如实报错（不静默）：**键在两个文件里重复**（拆分时最可能犯的错）、**缺键**、**类型不对**。
-pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
+pub fn merge_book(docs: &[String], sessions: &[String]) -> Result<Prompts, String> {
     let mut merged = yaml_serde::Mapping::new();
     for doc in docs {
         let value: yaml_serde::Value =
@@ -114,11 +115,12 @@ pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
     // 剩下的键就是"核心段"（`core:` 的内容）。
     let core: CoreTexts = yaml_serde::from_value(yaml_serde::Value::Mapping(merged))
         .map_err(|e| format!("提示词册缺键或类型不对：{}", e))?;
-    // 机制册自检：条目挂的**会话使用类型**必须在全表里——缺了就是装配错误，不静默漏发一份机制。
+    // 机制册自检：条目挂的**会话使用类型**必须在类型表里——缺了就是装配错误，不静默漏发一份机制。
+    // 类型表是 `systools/profiles.yaml`（唯一声明处），这里吃的是组合根传进来的名单。
     for m in &core.mechanisms {
-        if !core.session_kinds.iter().any(|k| k == &m.session) {
+        if !sessions.iter().any(|k| k == &m.session) {
             return Err(format!(
-                "机制册非法：会话使用类型不在 session_kinds 里：{}",
+                "机制册非法：会话使用类型不在会话类型表里：{}（systools/profiles.yaml）",
                 m.session
             ));
         }
@@ -162,8 +164,6 @@ pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CoreTexts {
-    /// 目的：会话使用类型的**全表**：机制册的校验口径之一（另一处是角色表）。
-    pub session_kinds: Vec<String>,
     /// 目的：**机制说明册**：每条按（会话使用类型 × 适用角色）分发，见 `mechanisms_for`。
     ///    AI 不知道机制就只会写散文——所以哪一类会话由哪个角色拿哪一段，是**数据**，不是代码分支。
     pub mechanisms: Vec<Mechanism>,
@@ -278,7 +278,7 @@ pub struct EnvBlock {
 /// 目的：一条机制说明：**会话使用类型与适用角色同时对上**才注入（见 `CoreTexts::mechanisms_for`）。
 #[derive(Debug, Clone, Deserialize)]
 pub struct Mechanism {
-    /// 目的：会话使用类型（必须在 `session_kinds` 里）。
+    /// 目的：会话使用类型（必须在 `systools/profiles.yaml` 的会话类型表里）。
     pub session: String,
     /// 目的：适用角色（必须在角色表里存在——悬空引用由装配期 `SystemTools::problems()` 挡下）。
     pub roles: Vec<String>,

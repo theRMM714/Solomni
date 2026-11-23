@@ -1,5 +1,5 @@
 //! 目的：回合状态——会话在核心线程里的在世表、运行态与创建占位、裁决队、每会话的 shell 活进程槽。
-//! 管：`Session` 两种在世形态（单 agent / 协作）的在世表；运行态与创建占位的标记；每会话的裁决通道；
+//! 管：`Session` 两种在世形态（单 agent / 一个机制槽）的在世表；运行态与创建占位的标记；每会话的裁决通道；
 //!   每会话的 shell 活进程槽（同一会话的多次 shell 调用共用一份活进程）。
 //! 不管：会话本体（`session` / `collab`）、生成驱动、落盘；谁在什么时候放取会话由 `runtime` 的用例决定。
 //! 联动：`runtime` 经 `api` 读写；裁决通道来自 `session::api`，shell 槽是 `session::api::ShellSlot`。
@@ -9,19 +9,45 @@ use std::sync::{Arc, Mutex};
 
 use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::conversation::session::api::{
-    AgentSession, Decisions, Gates, ShellSlot, decisions,
+    AgentSession, Decisions, Gates, Mechanism, ShellSlot, decisions,
 };
 use crate::kernel::api::types::SessionId;
 
-/// 目的：一份在世会话的两种形态：单 agent（含代理会话与子会话）与协作会话。
-/// 约束：两变体大小差得远（协作带整份讨论状态），装箱只换来一次间接寻址、却把「会话本体可直接移动」改掉，
-///   故有意不装箱（见 docs/testing/quality-isolation.md 的 allow 清单）。
+/// 目的：一份在世会话的两种形态：单 agent（含代理会话与子会话）与一个**机制**（协作只是已注册的一个机制）。
+/// 约束：机制槽是装箱的 trait 对象——会话形态不再是一张封闭清单，新机制不改这里。
+///   两变体大小仍差得远（见 docs/testing/quality-isolation.md 的 allow 清单）。
 #[allow(clippy::large_enum_variant)]
 pub enum Session {
     /// 目的：单 agent 会话本体。
     Single(AgentSession),
-    /// 目的：协作会话本体（多 agent 的议场与任务链）。
-    Collab(CollabSession),
+    /// 目的：机制槽（协作、以后的评审机制都装在这里）。
+    Mech(Box<dyn Mechanism>),
+}
+
+impl Session {
+    /// 目的：机制自己判定整场工作已收尾（单 agent 会话永远没有这个状态）。
+    pub(crate) fn is_done(&self) -> bool {
+        match self {
+            Session::Mech(m) => m.is_done(),
+            Session::Single(_) => false,
+        }
+    }
+
+    /// 目的：机制自己的业务面（任务链、名单、沙箱）取回具体类型；驱动路径（机制面）不用它。
+    pub(crate) fn collab(&self) -> Option<&CollabSession> {
+        match self {
+            Session::Mech(m) => m.as_any().downcast_ref::<CollabSession>(),
+            _ => None,
+        }
+    }
+
+    /// 目的：同上（可写一份）。
+    pub(crate) fn collab_mut(&mut self) -> Option<&mut CollabSession> {
+        match self {
+            Session::Mech(m) => m.as_any_mut().downcast_mut::<CollabSession>(),
+            _ => None,
+        }
+    }
 }
 
 /// 目的：核心线程持有的回合状态；一个进程一份，只在核心线程上读写。

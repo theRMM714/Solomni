@@ -49,6 +49,7 @@ mod probe;
 mod proxy;
 mod registry;
 mod residents;
+mod standin;
 mod vm;
 mod workspace;
 
@@ -62,5 +63,6 @@ pub(crate) use probe::*;
 pub(crate) use proxy::*;
 pub(crate) use registry::*;
 pub(crate) use residents::*;
+pub(crate) use standin::*;
 pub(crate) use vm::*;
 pub(crate) use workspace::*;

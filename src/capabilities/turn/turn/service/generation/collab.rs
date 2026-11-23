@@ -3,6 +3,7 @@
 //! 不管：单个成员回合的实现、会话装配。
 //! 联动：`generation/member.rs`、`turn::api::TurnHost`、docs/session/session-model.md
 
+use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::conversation::session::api::{Handback, Mechanism, SessionEvent};
 use crate::capabilities::turn::turn::api::{Advance, AskReq, CollabWork, TurnHost};
 
@@ -19,7 +20,7 @@ pub(crate) fn collab_generation<H: TurnHost>(
     let cancel = host.register_job(sid);
     let session = match host.core_env({
         let sid = sid.to_string();
-        move |turn, registry, probe| turn.take_collab(&sid, registry, probe)
+        move |turn, registry, probe| turn.take_mech(&sid, registry, probe)
     }) {
         Ok(s) => s,
         Err(e) => {
@@ -30,7 +31,7 @@ pub(crate) fn collab_generation<H: TurnHost>(
     // 把「停止」接到泵上：它在每次模型调用前与**调用中途**都看这个标志。
     let mut session = session;
     {
-        let m: &mut dyn Mechanism = &mut session;
+        let m: &mut dyn Mechanism = &mut *session;
         m.set_cancel(std::sync::Arc::clone(&cancel));
     }
     // 增量落盘手柄：泵产出一条定稿事件就落一条，中途刷新页面因此能看到已产生的部分。
@@ -69,18 +70,21 @@ pub(crate) fn collab_generation<H: TurnHost>(
                         match &work {
                             // 处置一张已经出队的回答：落定（校验 / 出队 / 记账）已在核心线程上做完。
                             CollabWork::Dispose(ticket) => {
-                                if let Err(e) = c.dispose(ticket, &mut sink) {
+                                // 关卡归发起它的机制：这里把机制槽取回具体类型来处置。
+                                if let Some(collab) = c.as_any_mut().downcast_mut::<CollabSession>()
+                                    && let Err(e) = collab.dispose(ticket, &mut sink)
+                                {
                                     sink(SessionEvent::Notice(format!("[裁决] {}", e)));
                                 }
                             }
                             CollabWork::Resume => {
-                                let m: &mut dyn Mechanism = &mut c;
+                                let m: &mut dyn Mechanism = &mut *c;
                                 m.resume(&mut sink);
                             }
                         }
                         // 核心驱动：机制让出"该问谁"就回头找主线程（它才拿得到各 agent 的会话）。
                         // 这里只认机制面：推一步 / 取走让出的事 / 交回处置——不认识协作的任何字段。
-                        let mech: &mut dyn Mechanism = &mut c;
+                        let mech: &mut dyn Mechanism = &mut *c;
                         // 这一步是这一趟的第一次推进（已走过「继续」的，就从断点接着推）。
                         let mut opening = !matches!(&work, CollabWork::Resume);
                         loop {

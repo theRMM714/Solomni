@@ -22,6 +22,8 @@ pub use crate::capabilities::conversation::session::domain::history::{
 pub use crate::capabilities::conversation::session::domain::mechanism::{
     Handback, Mechanism, MemberAsk,
 };
+// 会话类型表：组合根装载它，装配期用它校验角色与机制。
+pub use crate::capabilities::conversation::session::domain::profile::Profiles;
 // 工具面：角色面 → 实际可调的工具（档位只管网络，不再逐工具裁剪）。
 #[allow(unused_imports)]
 pub use crate::capabilities::conversation::session::domain::assemble::face_tools;

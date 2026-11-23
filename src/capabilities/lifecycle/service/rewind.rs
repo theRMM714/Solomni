@@ -254,7 +254,7 @@ impl Lifecycle {
         let mut rebuilt = turn.rebuild_session(meta, &active, deps.registry, deps.probe)?;
         match &mut rebuilt {
             Session::Single(s) => s.next_line = next,
-            Session::Collab(c) => c.next_line = next,
+            Session::Mech(m) => m.set_next_line(next),
         }
         turn.put(sid.to_string(), rebuilt);
         Ok(active)

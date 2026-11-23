@@ -1,13 +1,11 @@
 # 机制说明册：**按（会话使用类型 × 适用角色）分发**。
-# - session：会话使用类型（必须是下面 session_kinds 里的一个）；
+# - session：会话使用类型（必须是会话类型表 systools/profiles.yaml 里的一个）；
 # - roles：适用角色（必须在 systools/roles.yaml 的角色表里存在——悬空引用由测试门禁挡下）；
 # - text：这一条要说的话。
 #
 # 一个会话的身份块把**同时**匹配它的类型与角色的条目按本文件声明顺序拼起来。
 # 所以"同一种会话给不同角色不同的机制"只要多写一条；校验口径（类型表、角色表）全在数据里，
 # 代码只做匹配，不写死任何一条对应关系。
-session_kinds: [single, collab, proxy]
-
 mechanisms:
   - session: single
     roles: [solo]

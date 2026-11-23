@@ -406,8 +406,23 @@ fn main() {
     if sandbox_mode.degraded() {
         eprintln!("[沙箱] 本进程已降级：缺失的强制项按如实降级执行；重启后重新评估");
     }
+    // **会话类型表**（systools/profiles.yaml）：一个会话类型就是一串机制与它用到的角色。
+    // 它是会话类型的唯一声明处：提示词册子的会话类型、机制册的校验都以它为口径；装配期就校验。
+    let profiles =
+        match capabilities::conversation::session::detail::yaml_profiles::YamlProfiles::new(
+            root.join("systools"),
+        )
+        .load()
+        {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[装配失败] {}", e);
+                std::process::exit(1);
+            }
+        };
     let prompt_source =
-        capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
+        capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"))
+            .sessions(profiles.ids());
     // **提示词册能力**：册子只在这里装载一次、也只被它持有；runtime 与工具执行
     // （回执里的那些收尾标记）要的"段"都经它的能力面拿——不再各存一份拷贝。
     let prompt = match capabilities::prompt::service::load(&prompt_source) {
@@ -456,6 +471,12 @@ fn main() {
     };
     let toolexec: Arc<dyn capabilities::tools::api::ToolExec + Send + Sync> = tools_svc.clone();
     let systools: Arc<dyn capabilities::tools::api::Tools + Send + Sync> = tools_svc;
+
+    // 会话类型引用的角色必须在角色表里（悬空引用是装配错误）：与机制 id 的校验同一条时机。
+    if let Err(e) = profiles.check_roles(&capabilities::tools::api::Tools::roles(&*systools)) {
+        eprintln!("[装配失败] {}", e);
+        std::process::exit(1);
+    }
 
     // 保留名表（内置工具名）由**组合根**问一次工具能力后交进去：清单校验归 modules，名字空间归 tools，
     // 两边不互相依赖。模块 id 还与产品命令词互斥（它是动作 id 前缀），命令词在这里并进同一份保留名。
