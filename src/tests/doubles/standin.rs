@@ -91,6 +91,7 @@ impl Flow for StandIn {
         Some(MemberAsk {
             index: 0,
             member: "a".to_string(),
+            role: "solo".to_string(),
             identity: "你是替身流程问出来的一步：说一句就行。".to_string(),
             turn: Vec::<Msg>::new(),
             turn_id: 1,

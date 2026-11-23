@@ -19,7 +19,7 @@ pub(crate) fn a_standin_flow_runs_on_the_same_driver() {
     );
     let mut core = core_with(vec![module_of("a")], gw(member, vec![]));
     let sid = core
-        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .create_work(execute_work("w", &["a"], "做个东西"))
         .unwrap()
         .sid;
     // 把在世会话换成替身流程：驱动除了流程面之外一个字段都不该看。
@@ -82,7 +82,7 @@ pub(crate) fn a_standin_flow_settles_its_own_gate() {
     );
     let mut core = core_with(vec![module_of("a")], gw(member, vec![]));
     let sid = core
-        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .create_work(execute_work("w", &["a"], "做个东西"))
         .unwrap()
         .sid;
     // 替身流程自己要工具面：拿产品同一份工具表（驱动不看它从哪来）。

@@ -182,7 +182,10 @@ fn resolve_new_session_accepts_an_inline_assembly() {
     }))
     .unwrap();
     let spec = resolve_new_session(&inline, &c).expect("临时拼装合法");
-    assert_eq!(spec.kind, CUSTOM, "临时拼装落成 custom 类型");
+    assert_eq!(
+        spec.kind, "",
+        "临时拼装没有预设类型：类型 id 留空，靠流程说话"
+    );
     assert_eq!(spec.flows.as_ref().map(Vec::len), Some(1));
     assert_eq!(spec.flows.unwrap()[0], "discuss");
 

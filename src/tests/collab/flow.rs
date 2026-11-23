@@ -15,8 +15,15 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
             "{\"type\":\"agree\",\"text\":\"同意方案\"}".to_string(),
         ],
     );
+    member.insert(
+        "b".to_string(),
+        vec![
+            "{\"type\":\"say\",\"text\":\"我也说一句\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意方案\"}".to_string(),
+        ],
+    );
     let mut core = core_with(
-        vec![module_of("a")],
+        vec![module_of("a"), module_of("b")],
         gw(
             member,
             vec![
@@ -30,7 +37,7 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
         ),
     );
     let sid = core
-        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .create_work(collab_work("w", &["a", "b"], false, "做个东西"))
         .unwrap()
         .sid;
     assert!(matches!(
@@ -67,9 +74,16 @@ pub(crate) fn core_collab_delegated_slate_flow() {
             "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
         ],
     );
-    let mut core = core_with(vec![module_of("a")], gw(member, vec![
-        // 代拟（组装一个 agent）→ 整理 → 验收。
-        "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"a\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}".to_string(),
+    member.insert(
+        "b".to_string(),
+        vec![
+            "{\"type\":\"say\",\"text\":\"我也说一句\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
+    let mut core = core_with(vec![module_of("a"), module_of("b")], gw(member, vec![
+        // 代拟（组装两个 agent：讨论席至少要两个）→ 整理 → 验收。
+        "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"a\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"},{\"name\":\"b\",\"modules\":[\"b\"],\"model\":\"m\",\"why\":\"搭把手\"}]}}".to_string(),
         // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
         "结论：由 a 按需求把事做完。".to_string(),
         "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
@@ -136,8 +150,15 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
             "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
         ],
     );
+    member.insert(
+        "复核员".to_string(),
+        vec![
+            "{\"type\":\"say\",\"text\":\"我也说一句\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
     let mut core = core_with(vec![module_of("a")], gw(member, vec![
-        "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"调研员\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}".to_string(),
+        "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"调研员\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"},{\"name\":\"复核员\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"复核\"}]}}".to_string(),
         // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
         "结论：由 a 按需求把事做完。".to_string(),
         // 负责人必须是**名单里真实存在的席位**（代拟出来的叫"调研员"）——否则链的自洽门禁会如实挡下。
@@ -175,7 +196,7 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
     answer_card(&mut core, &sid, OPT_SLATE_CONFIRM, "").unwrap();
     // 确认后名单写回 meta（重启/回档后的权威来源）。
     let meta = core.lifecycle.history_open("w").unwrap().0;
-    assert_eq!(meta.agents.len(), 1);
+    assert_eq!(meta.agents.len(), 2);
     assert_eq!(meta.agents[0].name, "调研员");
     assert_eq!(meta.agents[0].modules, vec!["a".to_string()]);
     assert_eq!(meta.agents[0].model.as_deref(), Some("m"));
@@ -225,7 +246,6 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
     member.insert(
         "a".to_string(),
         vec![
-            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
             TOOL_CALL.to_string(),
             "{\"type\":\"say\",\"text\":\"执行完毕\"}".to_string(),
         ],
@@ -240,8 +260,6 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
         gw(
             member,
             vec![
-                // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
-                "结论：由 a 按需求把事做完。".to_string(),
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：查证后回报\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".into(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".into(),
                 "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".into(),
@@ -250,12 +268,10 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
         ),
         Arc::clone(&runner),
     );
-    let opened = core
-        .create_work(collab_work("w", &["a"], false, "任务"))
-        .unwrap();
+    let opened = core.create_work(execute_work("w", &["a"], "任务")).unwrap();
     let sid = opened.sid;
     let mut events = opened.facts;
-    events.extend(answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap());
+    events.extend(advance(&mut core, &sid));
     // 整理完停在**审查关卡**：点「同意」才继续（P4b 起协作的必经一步）。
     events.extend(answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap());
     // 工具在**节点自己的子会话**里跑：那条 tool 转录行落在子会话的转录上（单 agent 行格式）。

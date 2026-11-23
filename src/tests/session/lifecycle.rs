@@ -84,12 +84,18 @@ pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
         "不存在的会话要回 false"
     );
     let parent = core
-        .create_work(collab_work("p", &["a"], false, "需求"))
+        .create_work(execute_work("p", &["a"], "需求"))
         .unwrap()
         .sid;
     let child = core
         .turn
-        .spawn_agent_session(&parent, "a", core.registry.as_ref(), core.probe.as_ref())
+        .spawn_agent_session(
+            &parent,
+            "a",
+            "executor",
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
         .unwrap();
     // 子会话不允许单独删，理由要明确，且拒绝后它仍在。
     let err = core
@@ -283,16 +289,28 @@ pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {
         Arc::new(InMemorySysIo::new()),
     );
     let top = core
-        .create_work(collab_work("p", &["a"], false, "需求"))
+        .create_work(execute_work("p", &["a"], "需求"))
         .unwrap()
         .sid;
     let mid = core
         .turn
-        .spawn_agent_session(&top, "a", core.registry.as_ref(), core.probe.as_ref())
+        .spawn_agent_session(
+            &top,
+            "a",
+            "executor",
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
         .unwrap();
     let low = core
         .turn
-        .spawn_agent_session(&mid, "a", core.registry.as_ref(), core.probe.as_ref())
+        .spawn_agent_session(
+            &mid,
+            "a",
+            "executor",
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
         .unwrap();
     let history = core.history_handle();
     let root_of = |sid: &str| {
@@ -344,12 +362,18 @@ pub(crate) fn history_delete_refuses_when_any_node_in_the_subtree_is_running() {
         Arc::new(InMemorySysIo::new()),
     );
     let parent = core
-        .create_work(collab_work("p", &["a"], false, "需求"))
+        .create_work(execute_work("p", &["a"], "需求"))
         .unwrap()
         .sid;
     let child = core
         .turn
-        .spawn_agent_session(&parent, "a", core.registry.as_ref(), core.probe.as_ref())
+        .spawn_agent_session(
+            &parent,
+            "a",
+            "executor",
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
         .unwrap();
     core.turn
         .take_single(&child)
@@ -464,7 +488,7 @@ pub(crate) fn create_work_validates_user_choices() {
     assert!(meta.agents[0].transient, "并出来的是临时 agent");
     let _ = core.lifecycle.history_delete(&mut core.turn, "x");
     assert!(
-        core.create_work(collab_work("x", &["a"], false, "  "))
+        core.create_work(execute_work("x", &["a"], "  "))
             .unwrap_err()
             .contains("必须填写本次需求")
     );

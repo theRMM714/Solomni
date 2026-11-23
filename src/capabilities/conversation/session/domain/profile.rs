@@ -10,14 +10,20 @@ use crate::capabilities::conversation::session::domain::flow::cast_of;
 use crate::capabilities::tools::api::Seat;
 
 /// 目的：产品自带的单机类型 id（一个 agent、没有流程）。
+/// 约束：只有产品自带的会话类型表与测试知道它——代码按声明分支，不按 id 分支。
+#[cfg(test)]
 pub const SINGLE: &str = "single";
 /// 目的：产品自带的会议类型 id（多个 agent，讨论后执行）。
-/// 约束：非测试代码不按它分支（按会话类型的流程走），只有产品自带的会话类型表与测试引用它。
-#[allow(dead_code)]
+/// 约束：只有产品自带的会话类型表与测试知道它——代码按声明分支，不按 id 分支。
+#[cfg(test)]
 pub const MEETING: &str = "collab";
 /// 目的：产品自带的代理类型 id（核心代理在该会话里工作，可以建子会话）。
+/// 约束：只有产品自带的会话类型表与测试知道它——代码按声明分支，不按 id 分支。
+#[cfg(test)]
 pub const PROXY: &str = "proxy";
 /// 目的：核心代理坐的角色名（角色表里的名字；代理式会话没有流程、坐这个席）。
+/// 约束：产品自带类型表里的代理项坐它；代码按声明里的 `auto` 判定，不认这个名字。
+#[cfg(test)]
 pub const PROXY_ROLE: &str = "core_proxy";
 /// 目的：临时拼装用的会话类型 id（没落进类型表，声明随会话一起落盘）。
 pub const CUSTOM: &str = "custom";
@@ -40,22 +46,35 @@ pub struct SessionSpec {
     /// 目的：按顺序串起来的流程 id；空表示没有人调度，直接轮循环。
     #[serde(default)]
     pub flows: Vec<String>,
+    /// 目的：整块交给核心代理（没有名单、没有本次需求，核心在该会话里工作并自己决定做什么）。
+    /// 约束：由会话类型声明，不按类型 id 或角色名判定；`true` 的类型不得再声明流程。
+    #[serde(default)]
+    pub auto: bool,
 }
 
 impl SessionSpec {
-    /// 目的：造一条没有流程的声明（单 agent 或代理会话）。
+    /// 目的：造一条没有流程的声明（单 agent 会话；代理式再用 `automatic` 打开 `auto`）。
     pub fn plain(kind: &str, name: &str, role: &str) -> SessionSpec {
         SessionSpec {
             kind: kind.to_string(),
             name: name.to_string(),
             role: role.to_string(),
             flows: Vec::new(),
+            auto: false,
         }
     }
 
-    /// 目的：这条会话是不是代理式（没有流程、坐核心代理席）。
+    /// 目的：造一条**整块交给核心**的声明（代理式会话：没有流程、没有静止需求）。
+    pub fn automatic(kind: &str, name: &str, role: &str) -> SessionSpec {
+        SessionSpec {
+            auto: true,
+            ..SessionSpec::plain(kind, name, role)
+        }
+    }
+
+    /// 目的：这条会话是不是代理式（整块交给核心：没有流程、没有名单）。
     pub fn is_proxy_spec(&self) -> bool {
-        !self.driven() && self.role == PROXY_ROLE
+        !self.driven() && self.auto
     }
 
     /// 目的：这条声明要不要由流程推进（有流程 = 由流程推；没有 = 直接轮循环）。
@@ -78,6 +97,7 @@ pub fn inline_spec(flows: Vec<String>) -> SessionSpec {
         name: CUSTOM_NAME.to_string(),
         role: String::new(),
         flows,
+        auto: false,
     }
 }
 
@@ -98,6 +118,9 @@ pub struct Profile {
     /// 目的：按顺序串起来的流程 id；空表示没有人调度，直接轮循环。
     #[serde(default)]
     pub flows: Vec<String>,
+    /// 目的：整块交给核心代理的类型（没有名单、没有需求；核心在该会话里自己决定做什么）。
+    #[serde(default)]
+    pub auto: bool,
 }
 
 /// 目的：会话类型总表（`systools/profiles.yaml` 的顶层形状）。
@@ -123,6 +146,7 @@ impl Profiles {
                     String::new()
                 },
                 flows: p.flows.clone(),
+                auto: p.auto,
             })
     }
 
@@ -178,6 +202,12 @@ impl Profiles {
                 ));
             }
             seen.push(&p.id);
+            if p.auto && !p.flows.is_empty() {
+                return Err(format!(
+                    "会话类型 {} 整块交给核心，不能再声明流程（systools/profiles.yaml）",
+                    p.id
+                ));
+            }
             if p.flows.is_empty() && p.roles.is_empty() {
                 return Err(format!(
                     "会话类型 {} 没有声明身份角色（没有流程的会话要一个静止身份；systools/profiles.yaml）",
@@ -328,6 +358,7 @@ mod tests {
                     hint: "一个 agent 直接干活。".to_string(),
                     roles: vec!["solo".to_string()],
                     flows: Vec::new(),
+                    auto: false,
                 },
                 Profile {
                     id: MEETING.to_string(),
@@ -335,6 +366,7 @@ mod tests {
                     hint: "先讨论再执行。".to_string(),
                     roles: Vec::new(),
                     flows: vec!["discuss".to_string(), "execute".to_string()],
+                    auto: false,
                 },
                 Profile {
                     id: PROXY.to_string(),
@@ -342,6 +374,7 @@ mod tests {
                     hint: "决定权交给核心。".to_string(),
                     roles: vec!["core_proxy".to_string()],
                     flows: Vec::new(),
+                    auto: true,
                 },
             ],
         }

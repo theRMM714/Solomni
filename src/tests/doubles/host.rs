@@ -284,6 +284,16 @@ pub(crate) fn installed_dep(
     }
 }
 
+/// 目的：只跑执行流程的临时拼装规格（执行席只要 1 个 agent，含需求）。
+pub(crate) fn execute_work(name: &str, modules: &[&str], task: &str) -> WorkSpec {
+    // 每个模块一个 agent：执行流程按负责人派节点，名字要能与脚本对上。
+    let mut w = work(name, "", modules);
+    w.agents = agents_of(modules);
+    w.flows = Some(vec!["execute".to_string()]);
+    w.task = Some(task.to_string());
+    w
+}
+
 /// 目的：协作工作规格（含需求）。
 pub(crate) fn collab_work(name: &str, modules: &[&str], delegate: bool, task: &str) -> WorkSpec {
     let mut w = work(name, MEETING, modules);

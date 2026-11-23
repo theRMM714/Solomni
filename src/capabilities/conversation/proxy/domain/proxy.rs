@@ -7,7 +7,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::capabilities::catalog::registry::api::AgentMeta;
-use crate::capabilities::conversation::session::api::CUSTOM;
 
 pub const CATALOG: &str = "catalog_agents";
 pub const CREATE: &str = "create_session";
@@ -460,7 +459,7 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
     let flows = match args.flows.as_deref() {
         Some([]) => return Err("临时拼装至少要有一个流程".to_string()),
         Some(flows) => {
-            if !wanted.is_empty() && wanted != CUSTOM {
+            if !wanted.is_empty() {
                 return Err("kind 与 flows 只能给一个（临时拼装省略 kind）".to_string());
             }
             Some(flows.to_vec())
@@ -468,7 +467,7 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
         None => None,
     };
     let kind = if flows.is_some() {
-        CUSTOM.to_string()
+        String::new()
     } else {
         if wanted.is_empty() {
             return Err("kind 不能为空（要会话类型表里的一个；临时拼装改用 flows）".to_string());

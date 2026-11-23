@@ -99,7 +99,7 @@ impl Turn {
             // ② 该 agent 的会话：没有就按需建（名单确认时已建，这里兜底）。
             let child = ask.child_of(sid);
             if self.history.load(&child).is_err() {
-                self.spawn_agent_session(sid, &ask.member, registry, probe)?;
+                self.spawn_agent_session(sid, &ask.member, &ask.role, registry, probe)?;
             }
             // ③ 跑这一回合：**与单 agent 同一条轮循环**（身份块 + 本回合工具面 + 对话 + 本回合提示 + 表态）。
             // 工具面由角色表发放（讨论席 = 动词 + 只读核实）；产出逐轮落进**它自己的会话**。
@@ -295,6 +295,12 @@ impl Turn {
         }
         // 派哪些、谁在忙由流程给事实（"只派当前阶段""一个成员一次跑一件"是流程自己的判据）。
         let (ready, busy) = (plan.ready(), plan.busy());
+        // 派节点的只能是带成员席的流程；席位由流程给（驱动不认识具体流程的席位）。
+        let role = self
+            .session(sid)
+            .and_then(|s| s.flow())
+            .and_then(|f| f.member_role())
+            .map(|r| r.to_string());
         let mut out = Vec::new();
         let mut todo = Vec::new();
         // 资源约束：**一个 agent 的会话一次只能跑一轮**——它已有在跑的节点（或本轮已派的）就跳过，
@@ -305,7 +311,7 @@ impl Turn {
                 continue;
             }
             taken.push(assignee.clone());
-            match self.spawn_sub_session(sid, &node, registry, probe) {
+            match self.spawn_sub_session(sid, &node, role.as_deref(), registry, probe) {
                 Ok(child) => {
                     // 派发文案用册子里的执行提示词模板渲染（objective 是核心 AI 写的那段任务提示词），
                     // 并附上上一次的验收结论（没有 = 首轮）：**返工必须知道上次错在哪**，否则只会原样重做。
@@ -344,6 +350,7 @@ impl Turn {
         &mut self,
         parent: &str,
         agent: &str,
+        role: &str,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
     ) -> Result<String, String> {
@@ -366,15 +373,9 @@ impl Turn {
             context_freshness: false,
             freshness_keep_percent: 80,
             name: child.clone(),
-            // 子会话是"一个 agent 在自己的沙箱里干活"：没有流程（单机类型），身份是执行者。
-            spec: SessionSpec::plain(
-                crate::capabilities::conversation::session::api::SINGLE,
-                &self
-                    .flows
-                    .book()
-                    .label_of(crate::capabilities::conversation::session::api::SINGLE),
-                "executor",
-            ),
+            // 子会话是"一个 agent 在自己的沙箱里干活"：没有流程，身份是流程给的那一席
+            //（驱动不认识具体流程的席位，所以由调用方把角色传进来）。
+            spec: SessionSpec::plain("", "", role),
             delegate: false,
             modules: a.modules.clone(),
             // 会话跨整场工作，所以记**工作的需求**（节点目标由链记着，随回合下发）。
@@ -403,14 +404,16 @@ impl Turn {
     }
 
     /// 目的：为任务链的一个节点建**子会话**：它就是该节点负责人的 agent 会话（一个 agent 一个会话）。
+    /// 参数：`role` = 这一席的角色（由流程给；驱动不认识具体流程的席位）。
     pub(crate) fn spawn_sub_session(
         &mut self,
         parent: &str,
         node: &str,
+        role: Option<&str>,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
     ) -> Result<String, String> {
-        let (pmeta, _) = self.history.load(parent)?;
+        let _ = self.history.load(parent)?;
         let assignee = self
             .session(parent)
             .and_then(|s| s.flow())
@@ -419,8 +422,9 @@ impl Turn {
             .ok_or_else(|| format!("本会话没有可派的活，或链里没有节点 {}", node))?;
         // 节点的会话**就是它负责人的 agent 会话**（一个 agent 一个会话，讨论与执行不分家）。
         // 节点本身不再记在 meta 里——哪个节点正跑在这个会话里，由链的 sub_session 认。
-        let _ = pmeta;
-        self.spawn_agent_session(parent, &assignee, registry, probe)
+        let role =
+            role.ok_or_else(|| format!("会话 {} 这一段流程没有成员席，不能派节点", parent))?;
+        self.spawn_agent_session(parent, &assignee, role, registry, probe)
     }
     /// 目的：代理模式：一个子会话停下了 → 往**代理会话**写一条通知行（只写这一条，不转发子会话转录）。
     ///  返回被通知的代理会话名；父不是代理会话（协作节点等）就返回 None、什么都不做。

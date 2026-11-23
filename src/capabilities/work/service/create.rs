@@ -165,7 +165,7 @@ impl Work {
             self.resolve_workspace_binding(host, spec.workspace.as_deref(), spec.tier, parent)?;
         // **代理形态**（第三人形态）：没有名单、没有需求——用户选这一形态就是**授予全权**。
         // 它不是一个 agent 工作，装配与其余形态没有共同点，所以在这里就地分岔、不往下走。
-        if !driven && decl.role == crate::capabilities::conversation::session::api::PROXY_ROLE {
+        if !driven && decl.auto {
             if !spec.agents.is_empty() || spec.task.is_some() {
                 return Err(
                     "代理类型不接受 agent 名单或本次需求：决定权是整块交给核心的".to_string(),
@@ -185,6 +185,7 @@ impl Work {
                 ProxySeed {
                     name: &spec.name,
                     kind: &spec.kind,
+                    role: &decl.role,
                     granted_at: crate::kernel::api::procs::unix_seconds(),
                     tier: spec.tier,
                     guest: spec.guest.as_deref(),
@@ -208,8 +209,24 @@ impl Work {
         if spec.agents.is_empty() && !spec.delegate {
             return Err("至少要有一个 agent".to_string());
         }
-        // **人数由流程自己报**（讨论至少两人、执行至少一人）：选名单的地方（向导、拟名单）按它凑够。
+        // **人数由流程自己报**（讨论至少两人、执行至少一人）：不够就建不出来；代拟路径留到确认名单时再查。
         // **单模式的组合语义**：点名了多个 agent = 模块并成一个**临时组合**（去重、保序；模型取核心默认）。
+        if !spec.delegate {
+            let need = self.flows.book().min_agents(&decl.flow_ids());
+            if spec.agents.len() < need {
+                let label = if decl.name.trim().is_empty() {
+                    decl.kind.clone()
+                } else {
+                    decl.name.clone()
+                };
+                return Err(format!(
+                    "{} 的流程至少要 {} 个 agent（现在 {} 个）：人数由流程的席位要求决定",
+                    label,
+                    need,
+                    spec.agents.len()
+                ));
+            }
+        }
         let mut spec = spec;
         if !driven && spec.agents.len() > 1 {
             spec.agents = vec![merge_into_one(&spec.agents, &spec.name)];
@@ -710,6 +727,7 @@ impl Work {
         let ProxySeed {
             name,
             kind,
+            role,
             granted_at,
             tier,
             guest,
@@ -746,10 +764,10 @@ impl Work {
             context_freshness: freshness_on,
             freshness_keep_percent: freshness_keep,
             name: name.to_string(),
-            spec: crate::capabilities::conversation::session::api::SessionSpec::plain(
+            spec: crate::capabilities::conversation::session::api::SessionSpec::automatic(
                 kind,
                 &self.flows.book().label_of(kind),
-                crate::capabilities::conversation::session::api::PROXY_ROLE,
+                role,
             ),
             delegate: false,
             modules: Vec::new(),

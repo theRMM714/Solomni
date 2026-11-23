@@ -121,6 +121,7 @@ pub(crate) fn collab_generation<H: TurnHost>(
                             );
                             let req = AskReq {
                                 agent: ask.member.clone(),
+                                role: ask.role.clone(),
                                 identity: ask.identity.clone(),
                                 turn: ask.turn.clone(),
                                 systools: std::sync::Arc::clone(&ask.systools),

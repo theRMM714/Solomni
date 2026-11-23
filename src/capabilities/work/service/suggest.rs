@@ -45,7 +45,7 @@ impl Work {
                         ));
                     }
                     // 代理类型没有名单可拟（核心自己挑人）；如实拒绝，不拿单席的清单糊弄。
-                    if kind == crate::capabilities::conversation::session::api::PROXY {
+                    if self.flows.book().spec_of(kind).is_some_and(|s| s.auto) {
                         return Err(
                             "代理形态没有名单：决定权整块交给核心，由它自己挑人".to_string()
                         );

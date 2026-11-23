@@ -62,6 +62,15 @@ impl CollabSession {
         self.disc.as_ref()?.member_id(i).map(|s| s.to_string())
     }
 
+    /// 目的：第 i 个成员这一席的角色（成员会话按它渲染身份块、发工具面）。
+    pub fn member_role_at(&self, i: usize) -> Option<String> {
+        self.disc
+            .as_ref()?
+            .members
+            .get(i)
+            .map(|m| m.params.role.clone())
+    }
+
     /// 目的：核实用的小工具环境（只读）：按角色现装一份，交给核心操作的 `verify` 形参。
     ///   为什么要它：核心操作（出方案 / 节点验收…）也常需要"先看看现场再下结论"，
     ///   而核心不是 member、手里没有工具环境——没有它，模型一想核实就被判"没调用 X"而整步中断。

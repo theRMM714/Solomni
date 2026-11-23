@@ -533,10 +533,10 @@ pub(crate) fn plan_review_carries_the_core_advice() {
         ),
     );
     let sid = core
-        .create_work(collab_work("w", &["a"], false, "任务"))
+        .create_work(execute_work("w", &["a"], "任务"))
         .unwrap()
         .sid;
-    let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
+    let events = advance(&mut core, &sid);
     let advice = events.iter().find_map(|e| match e {
         SessionEvent::DecisionCard { card, gate, .. } if gate == "plan_review" => {
             Some(card.message.detail.clone())
@@ -605,8 +605,15 @@ pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
             "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
         ],
     );
+    member.insert(
+        "b".to_string(),
+        vec![
+            "{\"type\":\"say\",\"text\":\"我也说一句\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
     let mut core = core_with(
-        vec![module_of("a")],
+        vec![module_of("a"), module_of("b")],
         gw(
             member,
             vec![
@@ -618,7 +625,7 @@ pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
         ),
     );
     let sid = core
-        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .create_work(collab_work("w", &["a", "b"], false, "做个东西"))
         .unwrap()
         .sid;
     answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
@@ -1435,11 +1442,15 @@ fn creating_a_proxy_without_core_default_is_refused() {
 /// 目的：协作的成员即使都显式指定了模型，核心自己还要通道（编排 / 整理 / 验收）。
 #[test]
 fn creating_a_collab_without_core_default_is_refused_even_with_explicit_models() {
-    let mut core =
-        core_with_settings_modules(InMemorySettings::without_core(), vec![module_of("a")]);
-    let mut spec = work("no-core-collab", MEETING, &["a"]);
+    let mut core = core_with_settings_modules(
+        InMemorySettings::without_core(),
+        vec![module_of("a"), module_of("b")],
+    );
+    let mut spec = work("no-core-collab", MEETING, &["a", "b"]);
     spec.task = Some("做个东西".to_string());
-    spec.agents[0].model = Some("m".to_string());
+    for a in &mut spec.agents {
+        a.model = Some("m".to_string());
+    }
     let err = core
         .create_work(spec)
         .expect_err("协作没有核心默认必须拒绝");

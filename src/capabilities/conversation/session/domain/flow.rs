@@ -56,6 +56,8 @@ pub struct MemberAsk {
     pub index: usize,
     /// 目的：成员 agent 名——它的会话名是「<工作>--<成员>」。
     pub member: String,
+    /// 目的：这一席的角色（成员会话按它取身份块与工具面；临时拼装的会话不套预设）。
+    pub role: String,
     /// 目的：本回合的身份块（流程决定它怎么理解这一步）。
     pub identity: String,
     /// 目的：本回合要喂给模型的上下文。
@@ -212,6 +214,10 @@ pub trait Flow: Send {
     }
     /// 目的：本流程自己发的卡上**默认答哪个选项**（核心代答它建的子会话时用；默认没有）。
     fn default_answer(&self) -> Option<String> {
+        None
+    }
+    /// 目的：这条流程此刻的成员席角色（派节点时给子会话定身份）；默认没有成员席。
+    fn member_role(&self) -> Option<&'static str> {
         None
     }
 }

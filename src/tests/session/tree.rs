@@ -382,12 +382,18 @@ pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
         Arc::new(InMemorySysIo::new()),
     );
     let parent = core
-        .create_work(collab_work("p", &["a"], false, "需求"))
+        .create_work(execute_work("p", &["a"], "需求"))
         .unwrap()
         .sid;
     let child = core
         .turn
-        .spawn_agent_session(&parent, "a", core.registry.as_ref(), core.probe.as_ref())
+        .spawn_agent_session(
+            &parent,
+            "a",
+            "executor",
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
         .unwrap();
     // 子：档位钉在离线（根的默认也是离线，属于合法收窄）+ 共享区只读 src。
     let mut child_edit = edit_of(vec![("a", &["a"], "")]);
@@ -489,12 +495,18 @@ pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
         Arc::clone(&hist),
         Arc::new(InMemorySysIo::new()),
     );
-    let mut spec = collab_work("p", &["a"], false, "需求");
+    let mut spec = execute_work("p", &["a"], "需求");
     spec.permission = Some(ProfileId::Online);
     let parent = core.create_work(spec).unwrap().sid;
     let child = core
         .turn
-        .spawn_agent_session(&parent, "a", core.registry.as_ref(), core.probe.as_ref())
+        .spawn_agent_session(
+            &parent,
+            "a",
+            "executor",
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
         .unwrap();
     core.set_permission_profile(&parent, ProfileId::Offline)
         .expect("根快速切档");

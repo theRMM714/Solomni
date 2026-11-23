@@ -119,11 +119,20 @@ pub(crate) fn discussion_member_can_inspect_before_speaking() {
             "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
         ],
     );
+    member.insert(
+        "b".to_string(),
+        vec![
+            "{\"type\":\"say\",\"text\":\"我也看过了\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
     let mut core = core_with(
-        vec![module_of("a")],
+        vec![module_of("a"), module_of("b")],
         gw(
             member,
             vec![
+                // 讨论收敛后，核心写一份总结——它就是执行段的需求。
+                "结论：由 a 按需求把事做完。".to_string(),
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
@@ -132,7 +141,7 @@ pub(crate) fn discussion_member_can_inspect_before_speaking() {
         ),
     );
     let sid = core
-        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .create_work(collab_work("w", &["a", "b"], false, "做个东西"))
         .unwrap()
         .sid;
     let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
@@ -168,11 +177,20 @@ pub(crate) fn discussion_member_cannot_call_a_builtin_outside_its_role_face() {
             "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
         ],
     );
+    member.insert(
+        "b".to_string(),
+        vec![
+            "{\"type\":\"say\",\"text\":\"我也看过了\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
     let mut core = core_with(
-        vec![module_of("a")],
+        vec![module_of("a"), module_of("b")],
         gw(
             member,
             vec![
+                // 讨论收敛后，核心写一份总结——它就是执行段的需求。
+                "结论：由 a 按需求把事做完。".to_string(),
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
@@ -181,7 +199,7 @@ pub(crate) fn discussion_member_cannot_call_a_builtin_outside_its_role_face() {
         ),
     );
     let sid = core
-        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .create_work(collab_work("w", &["a", "b"], false, "做个东西"))
         .unwrap()
         .sid;
     let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
@@ -205,11 +223,20 @@ pub(crate) fn discussion_member_cannot_use_module_tools() {
             "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
         ],
     );
+    member.insert(
+        "b".to_string(),
+        vec![
+            "{\"type\":\"say\",\"text\":\"我也看过了\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
     let mut core = core_with(
-        vec![module_of("a")],
+        vec![module_of("a"), module_of("b")],
         gw(
             member,
             vec![
+                // 讨论收敛后，核心写一份总结——它就是执行段的需求。
+                "结论：由 a 按需求把事做完。".to_string(),
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
@@ -218,7 +245,7 @@ pub(crate) fn discussion_member_cannot_use_module_tools() {
         ),
     );
     let sid = core
-        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .create_work(collab_work("w", &["a", "b"], false, "做个东西"))
         .unwrap()
         .sid;
     let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
@@ -245,11 +272,20 @@ pub(crate) fn discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_di
             "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
         ],
     );
+    member.insert(
+        "b".to_string(),
+        vec![
+            "{\"type\":\"say\",\"text\":\"我也看过了\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
     let mut core = core_with(
-        vec![module_of("a")],
+        vec![module_of("a"), module_of("b")],
         gw(
             member,
             vec![
+                // 讨论收敛后，核心写一份总结——它就是执行段的需求。
+                "结论：由 a 按需求把事做完。".to_string(),
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
@@ -258,7 +294,7 @@ pub(crate) fn discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_di
         ),
     );
     let sid = core
-        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .create_work(collab_work("w", &["a", "b"], false, "做个东西"))
         .unwrap()
         .sid;
     answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
