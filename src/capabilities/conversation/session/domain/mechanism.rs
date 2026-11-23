@@ -7,7 +7,8 @@ use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use crate::capabilities::conversation::session::api::{MemberTurn, SessionEvent};
+use crate::capabilities::catalog::registry::api::AgentMeta;
+use crate::capabilities::conversation::session::api::{Gate, GateTicket, MemberTurn, SessionEvent};
 use crate::capabilities::llm::api::{CompleteOpts, Msg};
 use crate::capabilities::tools::api::Tools;
 
@@ -52,6 +53,14 @@ pub enum Handback {
     PassOver,
 }
 
+/// 目的：一张裁决票处置完的结果：驱动照它决定还要不要接着跑流水线。
+pub struct Settle {
+    /// 目的：这一关放行了（开工 / 重派），驱动要接着跑整条流水线。
+    pub resume: bool,
+    /// 目的：这一答刚定下的名单（写回 meta 并建沙箱）；`None` = 名单没变。
+    pub roster: Option<Vec<AgentMeta>>,
+}
+
 /// 目的：机制——会话流程的插件面：驱动只按这套动作推进，不再认识任何具体机制的字段。
 /// 约束：同一会话同一时刻只属于一个机制；进入 / 退出由落盘转录派生，不是内存标志。
 pub trait Mechanism: Send {
@@ -89,5 +98,20 @@ pub trait Mechanism: Send {
     /// 目的：把一条内容类系统提示记成机制自己的行（协作记成带行号的转录行）。
     fn notice(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
         sink(SessionEvent::Notice(text.to_string()));
+    }
+    /// 目的：处置一张已经出队的裁决票（这一关是哪一种由机制解释）：返回驱动接着要做什么。
+    /// 错误：票不是本机制发的、选项不在这一关能分派的范围里，都如实拒绝。
+    fn settle(
+        &mut self,
+        ticket: &GateTicket,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) -> Result<Settle, String> {
+        let _ = sink;
+        Err(format!("这张卡不是本机制发的：{}", ticket.gate.kind))
+    }
+    /// 目的：这一关要不要**就地收尾**（在核心线程上同步写完再放行，不等工作线程）。
+    fn settles_inline(&self, gate: &Gate) -> bool {
+        let _ = gate;
+        false
     }
 }

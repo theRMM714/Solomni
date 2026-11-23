@@ -48,6 +48,22 @@ impl Session {
             _ => None,
         }
     }
+
+    /// 目的：机制面（只读）：驱动处置裁决票、问「这一关要不要就地收尾」都走它。
+    pub(crate) fn mech(&self) -> Option<&dyn Mechanism> {
+        match self {
+            Session::Mech(m) => Some(&**m),
+            Session::Single(_) => None,
+        }
+    }
+
+    /// 目的：机制面（可写一份）。
+    pub(crate) fn mech_mut(&mut self) -> Option<&mut dyn Mechanism> {
+        match self {
+            Session::Mech(m) => Some(&mut **m),
+            Session::Single(_) => None,
+        }
+    }
 }
 
 /// 目的：核心线程持有的回合状态；一个进程一份，只在核心线程上读写。

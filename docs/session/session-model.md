@@ -134,7 +134,8 @@ session/<工作名>/
 
 - 理由是会话归属：生成期间协作会话被**移出核心表**（own-and-return），它碰不到表里的 agent 会话；而 agent 会话必须留在表里，用户才能随时进去发言。所以**驱动权归核心**（它同时看得到两边）（`src/capabilities/turn/turn/service/flow.rs`）。
 
-- **驱动只认机制面**：核心驱动（`src/capabilities/turn/turn/service/flow.rs` 与 `src/capabilities/turn/turn/service/generation/collab.rs`）与具体流程之间只隔一层 `session::api::Mechanism`——开场 / 推进一步（`start` / `step`）、取走让出的一步（`take_ask` 交出 `MemberAsk`）、交回处置（`handback` 判为 `Handback`，再由 `feed` / `pass_over` 落地）。协作的实现只有 `src/capabilities/conversation/collab/service/mechanism.rs` 一处；换一套流程只换一个机制实现，驱动不动。
+- **驱动只认机制面**：核心驱动（`src/capabilities/turn/turn/service/flow.rs` 与 `src/capabilities/turn/turn/service/generation/collab.rs`）与具体流程之间只隔一层 `session::api::Mechanism`——开场 / 推进一步（`start` / `step`）、取走让出的一步（`take_ask` 交出 `MemberAsk`）、交回处置（`handback` 判为 `Handback`，再由 `feed` / `pass_over` 落地）、处置自己发的关卡（`settle` 把出队的票交回机制，`settles_inline` 决定这一关要不要就地收尾）。协作的实现只有 `src/capabilities/conversation/collab/service/mechanism.rs` 一处；换一套流程只换一个机制实现，驱动不动。
+- **关卡归发起它的机制**：队列只认卡、卡号与选项（`Gate`），不解释 `kind` 是哪一关；回答出队后驱动把 `GateTicket` 交回机制面的 `settle`，由机制自己落定并说要不要接着推进（`Settle`）。所以 `runtime` 与 `turn` 里不再有「这是代拟名单那一关」这类判断。
 
 ### 看不见的回合：运行态与逐片外送
 

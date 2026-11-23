@@ -3,7 +3,6 @@
 //! 不管：单个成员回合的实现、会话装配。
 //! 联动：`generation/member.rs`、`turn::api::TurnHost`、docs/session/session-model.md
 
-use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::conversation::session::api::{Handback, Mechanism, SessionEvent};
 use crate::capabilities::turn::turn::api::{Advance, AskReq, CollabWork, TurnHost};
 
@@ -70,10 +69,9 @@ pub(crate) fn collab_generation<H: TurnHost>(
                         match &work {
                             // 处置一张已经出队的回答：落定（校验 / 出队 / 记账）已在核心线程上做完。
                             CollabWork::Dispose(ticket) => {
-                                // 关卡归发起它的机制：这里把机制槽取回具体类型来处置。
-                                if let Some(collab) = c.as_any_mut().downcast_mut::<CollabSession>()
-                                    && let Err(e) = collab.dispose(ticket, &mut sink)
-                                {
+                                // 关卡归发起它的机制：驱动只把票交回机制面，不解释这是哪一关。
+                                let m: &mut dyn Mechanism = &mut *c;
+                                if let Err(e) = m.settle(ticket, &mut sink) {
                                     sink(SessionEvent::Notice(format!("[裁决] {}", e)));
                                 }
                             }

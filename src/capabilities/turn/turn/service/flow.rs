@@ -7,7 +7,7 @@
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::conversation::session::api::{
-    Answered, DecisionQueue, GateTicket, Handback, Mechanism, Mode, RunState, SessionEvent,
+    Answered, DecisionQueue, Gate, GateTicket, Handback, Mechanism, Mode, RunState, SessionEvent,
     SessionMeta, TurnIo, UsageTotals, flat_modules, work_root,
 };
 use crate::capabilities::prompt::api::Segment;
@@ -642,18 +642,28 @@ impl Turn {
         probe: &dyn HostProbe,
     ) -> Result<Vec<SessionEvent>, String> {
         let mut out = Vec::new();
-        let Some(collab) = self.session_mut(sid).and_then(|s| s.collab_mut()) else {
-            return Err("该会话不是协作模式".to_string());
+        // 关卡归发起它的机制：驱动只把票交回机制面，不解释这是哪一关。
+        let settled = {
+            let Some(m) = self.session_mut(sid).and_then(|s| s.mech_mut()) else {
+                return Err("该会话不是机制会话".to_string());
+            };
+            m.settle(ticket, &mut |e| out.push(e))?
         };
-        let (go, confirmed) = collab.dispose(ticket, &mut |e| out.push(e))?;
         // 放行类（开工 / 重派）：走**同步**那条（泵 + 派发并跑完就绪节点 + 验收）；
         // 其余（定名单 / 请教 / 继续讨论）只需推进一步泵。生产路径两条都在工作线程上跑。
-        if go {
+        if settled.resume {
             out.extend(self.collab_resume(sid, registry, probe)?);
         } else {
             out.extend(self.collab_advance(sid, registry, probe)?);
         }
-        self.collab_tail(sid, out, confirmed, registry, probe)
+        self.collab_tail(sid, out, settled.roster, registry, probe)
+    }
+
+    /// 目的：这一关要不要**就地收尾**（在核心线程上同步写完再放行）：由机制说了算，驱动不认关卡种类。
+    pub fn settles_inline(&self, sid: &str, gate: &Gate) -> bool {
+        self.session(sid)
+            .and_then(|s| s.mech())
+            .is_some_and(|m| m.settles_inline(gate))
     }
 
     /// 目的：当前挂着的那一队裁决（没有挂起 = None）：呈现层按它渲染，回答按**队首**认卡。
