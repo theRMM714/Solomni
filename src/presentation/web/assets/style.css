@@ -200,6 +200,21 @@ body {
 .typing::after { content: "▍"; animation: blink var(--dur-pulse) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 
+/* ---- 回到底部浮标（跟随锁存解除时钉在流式区右下角） ---- */
+.jump-bottom {
+  position: sticky; bottom: var(--sp-4); z-index: 2;
+  align-self: flex-end; display: inline-flex; align-items: center; gap: var(--sp-1);
+  height: 32px; padding: 0 var(--sp-3); margin-top: calc(var(--sp-4) * -1);
+  border: 1px solid var(--color-border-strong); border-radius: var(--r-pill);
+  background: var(--color-surface-3); color: var(--color-text);
+  font-size: var(--fs-s); cursor: pointer; box-shadow: var(--shadow-2);
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.jump-bottom:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.jump-bottom .ui-icon { width: 14px; height: 14px; }
+.jump-fresh { display: none; }
+.jump-bottom.fresh .jump-fresh { display: inline; color: var(--color-accent); }
+
 /* ---- 裁决门（确认/请教条） ---- */
 .gate { flex: none; }
 .gate-card {
