@@ -133,7 +133,8 @@ pub struct DecisionAnswer {
 }
 
 /// 目的：会话事件：驱动前端渲染；转录行为增量，前端按序累积。
-///   预留字段说明：DiscussionDone 的 round/over_cap 供 Web 前端做裁决确认页（CLI 暂不渲染）。
+///   通用词汇只在这里（notice / transcript / push / ended / tool_call / delta / 裁决 / 回档 / 运行态 / 用量）：
+///   某一机制的专有事件一律走 `Push`——`kind` 就是线上 `type`，`payload` 铺在顶层。
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum SessionEvent {
@@ -141,33 +142,12 @@ pub enum SessionEvent {
     Notice(String),
     /// 转录新增行（带会话内稳定 id，回档按它定位）。
     Transcript(Vec<LineView>),
-    /// 讨论收敛（over_cap = 轮次超限，需用户裁决）。
-    DiscussionDone { round: usize, over_cap: bool },
-    /// 整理方案就绪。
-    Plan(String),
-    /// 方案待审（审查关卡）：把方案交给用户，等他点「同意」才开工。
-    /// 与 \`Plan\` 的区别：\`Plan\` 是"整理好了"这个事实，\`PlanReview\` 是"请用户裁决"这个请求。
-    PlanReview {
-        plan: String,
-        /// 核心给出的任务链（审查关卡要连同链一起给用户看）。
-        chain: crate::capabilities::taskchain::api::TaskChain,
+    /// **机制自己的事件**（推 + 落盘）：线格式 = payload 铺平后插入 `type: kind`。
+    /// 为什么要有它：会话只提供通道，不认识任何机制的词汇；渲染与派生按 kind 解释。
+    Push {
+        kind: String,
+        payload: serde_json::Value,
     },
-    /// 任务链的一个节点开工：它跑在自己的**子会话**里（用户可进去干预）。
-    NodeStarted {
-        node: String,
-        sid: String,
-        assignee: String,
-    },
-    /// 成员执行回报（rework = 第几轮执行，0 为首轮）。
-    Report {
-        id: String,
-        text: String,
-        rework: usize,
-    },
-    /// 验收清单（raw = 解析失败时的原文）。
-    Review { items: Vec<CheckView>, raw: String },
-    /// 交付结论（over_rework = 返工超限交用户裁决）。
-    Delivery { ok: bool, over_rework: bool },
     /// 会话结束。
     Ended,
     /// 一次工具调用（短暂，不落盘）：与 tool 转录行同源，供活动会话实时刷新。
@@ -435,14 +415,6 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
-/// 目的：验收条目的呈现视图。
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct CheckView {
-    pub item: String,
-    pub status: String,
-    pub note: String,
-}
-
 /// 目的：取流水里**最后一次**压缩行（`up_to`、摘要、行 id）。
 /// 约束：回档到压缩行之前时它已随转录被截掉，所以「没有它」就是「回到压缩前」。
 pub fn last_compaction(events: &[serde_json::Value]) -> Option<(u64, String, u64)> {
@@ -478,35 +450,19 @@ impl SessionEvent {
     pub fn to_json(&self) -> serde_json::Value {
         match self {
             SessionEvent::Notice(n) => serde_json::json!({ "type": "notice", "text": n }),
-            SessionEvent::PlanReview { plan, chain } => {
-                serde_json::json!({ "type": "plan_review", "plan": plan, "chain": chain })
-            }
-            SessionEvent::NodeStarted {
-                node,
-                sid,
-                assignee,
-            } => serde_json::json!({
-                "type": "node_started",
-                "node": node,
-                "sid": sid,
-                "assignee": assignee
-            }),
             SessionEvent::Transcript(lines) => {
                 serde_json::json!({ "type": "transcript", "lines": lines })
             }
-            SessionEvent::DiscussionDone { round, over_cap } => {
-                serde_json::json!({ "type": "discussion_done", "round": round, "over_cap": over_cap })
-            }
-            SessionEvent::Plan(p) => serde_json::json!({ "type": "plan", "text": p }),
-            SessionEvent::Report { id, text, rework } => {
-                serde_json::json!({ "type": "report", "id": id, "text": text, "rework": rework })
-            }
-            SessionEvent::Review { items, raw } => {
-                serde_json::json!({ "type": "review", "items": items, "raw": raw })
-            }
-            SessionEvent::Delivery { ok, over_rework } => {
-                serde_json::json!({ "type": "delivery", "ok": ok, "over_rework": over_rework })
-            }
+            SessionEvent::Push { kind, payload } => match payload {
+                serde_json::Value::Object(m) => {
+                    let mut v = serde_json::Value::Object(m.clone());
+                    if let Some(o) = v.as_object_mut() {
+                        o.insert("type".to_string(), serde_json::json!(kind));
+                    }
+                    v
+                }
+                other => serde_json::json!({ "type": kind, "payload": other }),
+            },
             SessionEvent::Ended => serde_json::json!({ "type": "ended" }),
             SessionEvent::Delta {
                 speaker,
@@ -581,258 +537,108 @@ impl SessionEvent {
     }
 }
 
-/// 目的：用户介入请求：会话暂停，等前端回应。
-#[derive(Debug, Clone)]
-pub enum Pending {
-    /// 模块请教用户（yes,allow 自裁模式下不会出现）。
-    Ask { member: String, question: String },
-    /// 核心代拟名单待确认。
-    ConfirmSlate,
-    /// 名单已定，等用户确认开始讨论（可授权自裁）。
-    ConfirmBegin,
-    /// 方案待审：整理完**不自动开工**，等用户点「同意」（见 docs/collab/task-chain.md）。
-    PlanReview,
-    /// 节点验收没过：等用户点「继续」重派这些节点。
-    NodeBlocked { nodes: Vec<String> },
-    /// **工具层自己发起的一类**（围栏这一环装不上、今后任何底层 yes/no）：消息与选项**由发起方给**，
-    /// 通道不解释内容。与工具级确认同属**等在工作线程上**的那一类——发起方阻塞等回答，不点不继续。
-    /// 装箱：它比其它变体大得多，而这一关本来就只挂几条（不值得让整队每个格子都变宽）。
-    // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
-    #[allow(dead_code)]
-    ToolAsk(Box<crate::kernel::api::types::Ask>),
+impl SessionEvent {
+    /// 目的：造一条机制事件：`kind` 即线上 `type`，`payload` 铺在顶层（与落盘/长轮询同一形态）。
+    pub fn push(kind: &str, payload: serde_json::Value) -> SessionEvent {
+        SessionEvent::Push {
+            kind: kind.to_string(),
+            payload,
+        }
+    }
 }
 
-/// 目的：请教这一关的选项 id——附一句回话（id 是契约，改文案不改行为）。
-pub const OPT_ASK_REPLY: &str = "ask_reply";
-/// 目的：代拟名单这一关的选项 id——按此建组。
-pub const OPT_SLATE_CONFIRM: &str = "slate_confirm";
-/// 目的：代拟名单这一关的选项 id——取消这次工作。
-pub const OPT_SLATE_CANCEL: &str = "slate_cancel";
-/// 目的：开始讨论这一关的选项 id——开始。
-pub const OPT_BEGIN: &str = "begin";
-/// 目的：开始讨论这一关的选项 id——开始，并授权小组自裁细节。
-pub const OPT_BEGIN_ALLOW: &str = "begin_allow";
-/// 目的：方案待审这一关的选项 id——开工。
-pub const OPT_PLAN_START: &str = "plan_start";
-/// 目的：方案待审这一关的选项 id——先说一句，由核心 AI 判这句话够不够明确。
-pub const OPT_PLAN_SAY: &str = "plan_say";
-/// 目的：节点没过这一关的选项 id——重派没过的那些节点。
-pub const OPT_NODE_REWORK: &str = "node_rework";
-/// 目的：节点没过这一关的选项 id——先说一句，由核心 AI 判这句话够不够明确。
-pub const OPT_NODE_SAY: &str = "node_say";
+/// 目的：裁决队里的一关——**只装数据**：机制名、机制材料、卡、要附言的选项。
+/// 约束：队列只按卡校验、按 kind/payload 重建；它不解释这一关是哪一种（解释归发起方机制）。
+#[derive(Debug, Clone)]
+pub struct Gate {
+    /// 目的：这一关的机制名（落盘与重建按它认门）。
+    pub kind: String,
+    /// 目的：这一关的**机制载荷**（重启后重建这一关的材料），原样进裁决事件与等待者。
+    pub payload: serde_json::Value,
+    /// 目的：卡片（信封 + 消息 + 选项）；卡号由队列发，这里的不被信任。
+    pub card: DecisionCard,
+    /// 目的：要附言的选项——id → 要附言的原文（空 = 都不需要）。
+    pub notes: Vec<(String, String)>,
+}
+
+impl Gate {
+    /// 目的：这一关的某个选项**要不要附言**：要就给出"为什么"的原文（队列在出队前按它校验）。
+    pub fn note_requirement(&self, option: &str) -> Option<String> {
+        self.notes
+            .iter()
+            .find(|(id, _)| id == option)
+            .map(|(_, why)| why.clone())
+    }
+
+    /// 目的：这一关作为**等待者**的形态（谁在等、问的什么 + 它自己的重建材料）。
+    pub fn waiter(&self, id: &str) -> DecisionWaiter {
+        DecisionWaiter {
+            id: id.to_string(),
+            envelope: self.card.envelope.clone(),
+            title: self.card.message.title.clone(),
+            gate: self.kind.clone(),
+            payload: self.payload.clone(),
+        }
+    }
+
+    /// 目的：这一关的卡片，卡号以队列发的为准（卡内 id 只是占位）。
+    pub fn card_with(&self, id: &str) -> DecisionCard {
+        let mut card = self.card.clone();
+        card.id = id.to_string();
+        card
+    }
+
+    /// 目的：推给用户的裁决事件（卡片 + 机制自己的重建材料 + 后面还在等的那几张）。
+    /// 参数：waiting = 排在队首之后的等待者（先来后到）；队列里只有它一张就是空。
+    pub fn event(&self, id: &str, waiting: &[DecisionWaiter]) -> SessionEvent {
+        SessionEvent::DecisionCard {
+            card: self.card_with(id),
+            gate: self.kind.clone(),
+            payload: self.payload.clone(),
+            waiting: waiting.to_vec(),
+        }
+    }
+
+    /// 目的：快照形态（会话视图里的 pending）——与推的事件**同一份事实**。
+    pub fn to_json(&self, id: &str, waiting: &[DecisionWaiter]) -> serde_json::Value {
+        self.event(id, waiting).to_json()
+    }
+}
+
+/// 目的：工具层自己发起的一关（围栏这类）：消息与选项**由发起方给**，通道不解释内容。
+/// 约束：这一关不重建——它等在工作线程上，重启后等待方已不存在（重建出来也没人做主）。
+pub fn tool_ask(ask: &crate::kernel::api::types::Ask) -> Gate {
+    Gate {
+        kind: "tool_ask".to_string(),
+        payload: serde_json::to_value(ask).unwrap_or(serde_json::Value::Null),
+        card: DecisionCard {
+            id: String::new(),
+            envelope: DecisionEnvelope {
+                role: ask.role.clone(),
+                name: ask.name.clone(),
+            },
+            message: DecisionMessage {
+                title: ask.title.clone(),
+                body: ask.body.clone(),
+                detail: ask.detail.clone(),
+            },
+            options: ask
+                .options
+                .iter()
+                .map(|(id, label)| OptionView {
+                    id: id.clone(),
+                    label: label.clone(),
+                })
+                .collect(),
+        },
+        notes: Vec::new(),
+    }
+}
 
 /// 目的：工具的全名（内置 / 核心自有 = 工具名；模块工具 = 模块.工具）：卡片与记录都用这一种写法。
 pub fn qualify(module: Option<&str>, tool: &str) -> String {
     match module {
         Some(m) => format!("{}.{}", m, tool),
         None => tool.to_string(),
-    }
-}
-
-impl Pending {
-    /// 目的：这一关的机制名（落盘与重建按它认门）。
-    pub fn kind(&self) -> &'static str {
-        match self {
-            Pending::Ask { .. } => "ask",
-            Pending::ConfirmSlate => "confirm_slate",
-            Pending::ConfirmBegin => "confirm_begin",
-            Pending::PlanReview => "plan_review",
-            Pending::NodeBlocked { .. } => "node_blocked",
-            // 工具层自己发起的那一类（围栏这类）：机制名固定，重建材料就是那条问题本身。
-            Pending::ToolAsk(_) => "tool_ask",
-        }
-    }
-
-    /// 目的：这一关的**机制载荷**（重启后重建这一关的材料：谁在问、问的什么、哪些节点没过）。
-    /// 约束：它是机制自己的材料，不是渲染内容——呈现层不看它（见 session-model.md「请用户裁决」）。
-    pub fn payload(&self) -> serde_json::Value {
-        match self {
-            Pending::Ask { member, question } => {
-                serde_json::json!({ "member": member, "question": question })
-            }
-            Pending::NodeBlocked { nodes } => serde_json::json!({ "nodes": nodes }),
-            // 工具层那一类：重建材料就是那条问题（谁在问 + 消息 + 选项集）。
-            Pending::ToolAsk(ask) => serde_json::to_value(ask).unwrap_or(serde_json::Value::Null),
-            _ => serde_json::json!({}),
-        }
-    }
-
-    /// 目的：从落盘的机制名与载荷重建这一关（重启后按转录重建挂起，已答过的不再挂）。
-    /// 返回：认得出就是这一关；认不出就是 None——不猜、不硬凑一张卡出来。
-    pub fn from_payload(gate: &str, payload: &serde_json::Value) -> Option<Pending> {
-        let s = |k: &str| {
-            payload
-                .get(k)
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string()
-        };
-        Some(match gate {
-            "ask" => Pending::Ask {
-                member: s("member"),
-                question: s("question"),
-            },
-            "confirm_slate" => Pending::ConfirmSlate,
-            "confirm_begin" => Pending::ConfirmBegin,
-            "plan_review" => Pending::PlanReview,
-            "node_blocked" => Pending::NodeBlocked {
-                nodes: payload
-                    .get("nodes")
-                    .and_then(|v| v.as_array())
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            },
-            // **工具层自己发起的那一类不重建**：它等在工作线程上，
-            // 重启后那个等待方已经不存在——重建出来的卡没人能做主，等于拿一张答不了卡糊用户。
-            _ => return None,
-        })
-    }
-
-    /// 目的：这一关的选项集（有序）：id 是行为契约，label 只给渲染。
-    /// 约束：每一条都必须是真能执行的——通道里没有"置灰"这一说（见 session-model.md「请用户裁决」）。
-    pub fn options(&self) -> Vec<OptionView> {
-        let o = |id: &str, label: &str| OptionView {
-            id: id.to_string(),
-            label: label.to_string(),
-        };
-        match self {
-            Pending::Ask { .. } => vec![o(OPT_ASK_REPLY, "回话")],
-            Pending::ConfirmSlate => vec![
-                o(OPT_SLATE_CONFIRM, "确认建组"),
-                o(OPT_SLATE_CANCEL, "取消"),
-            ],
-            Pending::ConfirmBegin => vec![
-                o(OPT_BEGIN, "开始"),
-                o(OPT_BEGIN_ALLOW, "开始（授权小组自裁细节）"),
-            ],
-            Pending::PlanReview => vec![
-                o(OPT_PLAN_START, "开工"),
-                o(OPT_PLAN_SAY, "先说一句（核心判明确性）"),
-            ],
-            Pending::NodeBlocked { .. } => vec![
-                o(OPT_NODE_REWORK, "重派没过的节点"),
-                o(OPT_NODE_SAY, "先说一句（核心判明确性）"),
-            ],
-            // 工具层那一类：选项集**由发起方给**（它才知道每条选项真能不能执行），通道原样渲染。
-            Pending::ToolAsk(ask) => ask.options.iter().map(|(id, label)| o(id, label)).collect(),
-        }
-    }
-
-    /// 目的：这一关的某个选项**要不要附言**：要就给出"为什么"的原文（队列在出队前按它校验）。
-    /// 约束：判据属于发起方（这一关自己的规则）；校验只此一处——被拒的回答不出队、不落回答。
-    pub fn note_requirement(&self, option: &str) -> Option<String> {
-        match (self, option) {
-            (Pending::Ask { .. }, OPT_ASK_REPLY) => {
-                Some("这一关要附一句回话：把要说的话写在附言里。".to_string())
-            }
-            (Pending::PlanReview, OPT_PLAN_SAY) | (Pending::NodeBlocked { .. }, OPT_NODE_SAY) => {
-                Some("这一关要附一句你的想法：把要说的话写在附言里。".to_string())
-            }
-            _ => None,
-        }
-    }
-
-    /// 目的：这一关的卡片（id + 信封 + 消息 + 选项）——推的事件与快照**只从这一处**派生。
-    /// 参数：id = 会话内唯一的卡号；advice = 核心 AI 给的建议（随产生这一关的那次调用一起产出）。
-    pub fn card(&self, id: &str, advice: &str) -> DecisionCard {
-        let (role, name, title, body, detail): (&str, String, String, String, String) = match self {
-            Pending::Ask { member, question } => (
-                "member",
-                member.clone(),
-                format!("{} 在等你回话", member),
-                "你说的话会进主会话，所有成员都看得到。".to_string(),
-                question.clone(),
-            ),
-            Pending::ConfirmSlate => (
-                "core",
-                "核心".to_string(),
-                "是否按此建组？".to_string(),
-                "核心已代拟名单（见转录）。".to_string(),
-                advice.to_string(),
-            ),
-            Pending::ConfirmBegin => (
-                "core",
-                "核心".to_string(),
-                "现在开始讨论？".to_string(),
-                "名单已定。".to_string(),
-                advice.to_string(),
-            ),
-            Pending::PlanReview => (
-                "core",
-                "核心".to_string(),
-                "要不要现在开工？".to_string(),
-                "方案与任务链已备好；按规则不自动开工。".to_string(),
-                advice.to_string(),
-            ),
-            Pending::NodeBlocked { nodes } => (
-                "core",
-                "核心".to_string(),
-                "有节点没过验收，要不要重派？".to_string(),
-                format!("没过验收的节点：{}。", nodes.join("、")),
-                advice.to_string(),
-            ),
-            // 工具层那一类：**消息与选项原样来自发起方**——通道不解释内容，只把三段话与选项渲染出来。
-            Pending::ToolAsk(ask) => (
-                ask.role.as_str(),
-                ask.name.clone(),
-                ask.title.clone(),
-                ask.body.clone(),
-                ask.detail.clone(),
-            ),
-        };
-        DecisionCard {
-            id: id.to_string(),
-            envelope: DecisionEnvelope {
-                role: role.to_string(),
-                name,
-            },
-            message: DecisionMessage {
-                title,
-                body,
-                detail,
-            },
-            options: self.options(),
-        }
-    }
-
-    /// 目的：这一关作为**等待者**的形态（谁在等、问的什么 + 它自己的重建材料）。
-    /// 参数：id = 它自己的卡号；advice = 它那一关的建议（与队首同一来源，重建时要它）。
-    pub fn waiter(&self, id: &str, advice: &str) -> DecisionWaiter {
-        let card = self.card(id, advice);
-        let mut payload = self.payload();
-        if let Some(o) = payload.as_object_mut() {
-            o.insert("advice".to_string(), serde_json::json!(advice));
-        }
-        DecisionWaiter {
-            id: id.to_string(),
-            envelope: card.envelope,
-            title: card.message.title,
-            gate: self.kind().to_string(),
-            payload,
-        }
-    }
-
-    /// 目的：推给用户的裁决事件（卡片 + 机制自己的重建材料 + 后面还在等的那几张）。
-    /// 参数：waiting = 排在队首之后的等待者（先来后到）；队列里只有它一张就是空。
-    pub fn event(&self, id: &str, advice: &str, waiting: &[DecisionWaiter]) -> SessionEvent {
-        let mut payload = self.payload();
-        if let Some(o) = payload.as_object_mut() {
-            o.insert("advice".to_string(), serde_json::json!(advice));
-        }
-        SessionEvent::DecisionCard {
-            card: self.card(id, advice),
-            gate: self.kind().to_string(),
-            payload,
-            waiting: waiting.to_vec(),
-        }
-    }
-
-    /// 目的：快照形态（会话视图里的 pending）——与推的事件**同一份事实**。
-    pub fn to_json(&self, id: &str, advice: &str, waiting: &[DecisionWaiter]) -> serde_json::Value {
-        self.event(id, advice, waiting).to_json()
     }
 }

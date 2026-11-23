@@ -209,9 +209,15 @@ impl TurnOps for Handle {
             Answered::Waiting(_) => Ok(Advance { head }),
             Answered::Gate(ticket, _) => {
                 // 代拟名单这一关要写回 meta 并建沙箱：短步骤，留在核心线程上收尾。
+                // 「代拟名单待确认」是协作机制自己的一关：队列只搬 Gate，由机制解释（见 collab/domain/gates.rs）。
                 if matches!(
-                    ticket.pending,
-                    crate::capabilities::conversation::session::api::Pending::ConfirmSlate
+                    crate::capabilities::conversation::collab::api::Pending::from_gate(
+                        &ticket.gate
+                    ),
+                    Some((
+                        crate::capabilities::conversation::collab::api::Pending::ConfirmSlate,
+                        _
+                    ))
                 ) {
                     let more = self.call({
                         let sid = sid.to_string();

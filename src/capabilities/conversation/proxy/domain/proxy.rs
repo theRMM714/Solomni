@@ -1053,9 +1053,10 @@ mod tests {
     /// （猜会替用户做主：围栏卡的第一项正是"无围栏跑一次"）。
     #[test]
     fn relay_reply_only_accepts_an_option_id_from_that_card() {
-        use crate::capabilities::conversation::session::api::{
-            OPT_ASK_REPLY, OPT_BEGIN, OPT_SLATE_CANCEL, OptionView,
+        use crate::capabilities::conversation::collab::api::{
+            OPT_ASK_REPLY, OPT_BEGIN, OPT_SLATE_CANCEL,
         };
+        use crate::capabilities::conversation::session::api::OptionView;
         let o = |id: &str| OptionView {
             id: id.to_string(),
             label: id.to_string(),

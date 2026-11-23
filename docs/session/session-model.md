@@ -194,16 +194,8 @@ session/<工作名>/
 - **已答过的不得重问**；作废过的也不复活（那一关还挂在状态上时，`继续` 才**续一张新卡**接着问）（`src/capabilities/turn/turn/service/ask_user.rs`）。
 - 工具层那一类（`tool_ask`）与工具级确认一样**不重建**：它等在工作线程上，重启后那个等待方已经不在。
 - 会话被删除时整条队随会话一起没了——等待方与转录都不复存在，没有"留着作废记录"的地方。
-- **落地的形状**（线格式）：卡是 `{id, envelope{role,name}, message{title,body,detail}, options[{id,label}]}`；推的事件与快照的 `pending` 是**同一份 JSON**（多一个 `type: "decision_card"`、`gate`、机制载荷与 `waiting[{id,envelope,title,gate,payload}]`），回答是 `{type:"decision_answer", card, by, option, note}`，整队作废是 `{type:"decision_void", cards[], reason}`。选项 id 是契约（改文案不改行为）：
+- **落地的形状**（线格式）：卡是 `{id, envelope{role,name}, message{title,body,detail}, options[{id,label}]}`；推的事件与快照的 `pending` 是**同一份 JSON**（多一个 `type: "decision_card"`、`gate`、机制载荷与 `waiting[{id,envelope,title,gate,payload}]`），回答是 `{type:"decision_answer", card, by, option, note}`，整队作废是 `{type:"decision_void", cards[], reason}`。选项 id 是契约（改文案不改行为）；协作机制的关卡声明与九个选项 id 在 `src/capabilities/conversation/collab/domain/gates.rs`，别的机制另立自己的表。
 
-| 关卡 | 选项 id |
-| --- | --- |
-| 请教 | `ask_reply` |
-| 代拟名单 | `slate_confirm` / `slate_cancel` |
-| 开始讨论 | `begin` / `begin_allow` |
-| 方案待审 | `plan_start` / `plan_say`（先说一句，由核心判定明确性） |
-| 节点没过 | `node_rework` / `node_say`（同上） |
-| 工具层提问（围栏这一环装不上，`gate = tool_ask`） | `fence_unfenced_once` / `fence_abort`（见 [docs/kernel/README.md](../kernel/README.md) 的「围栏落点：必要与可选」） |
 - **没人答时的收场**：由**发起方**在自己那张卡上声明一个**选项 id**（`Ask.on_unanswered`）——通道不解释它的含义，只在"没人答"时按它收场，并如实标为"不是用户答的"；不声明就按 fail-closed（这一趟不执行）。
 - **"没人答"与"用户停止"是两回事**：停止 = 拒绝，不套用默认项。"没有可选项 = 停会话 + 落警告"是另一件事，两个都要有。
 - **代理转达不替用户猜**：`send_session_message` 要代答就**显式给选项 id**（`reply`）；给不出就不作代答、如实记一条，那一步按发起方自己的声明收场——绝不"取第一个选项"（围栏卡的第一项正是"无围栏跑一次"）。
@@ -216,6 +208,17 @@ session/<工作名>/
 - **方案待审 / 节点没过**：由**核心判定意图是否明确**——明确才开工 / 放行，模糊就不开（他的话进主会话当反馈，关卡继续等着，核心不自动往下推）。
 - **围栏这类底层**：按选项做它自己的事（例如"本轮无围栏跑一次"）。
 - **改需求不是裁决**：它是会话级动作（会话视图的能力位 `can_update_task`），用户自己点；没有"本次需求"的会话**根本不渲染**这个按钮，会话工作中不可点。
+
+**关卡归发起方机制**：会话只装 `kind`、载荷与卡（`src/capabilities/conversation/session/domain/events.rs` 的 `Gate`）；下表是协作的关卡。
+
+| 关卡 | 选项 id |
+| --- | --- |
+| 请教 | `ask_reply` |
+| 代拟名单 | `slate_confirm` / `slate_cancel` |
+| 开始讨论 | `begin` / `begin_allow` |
+| 方案待审 | `plan_start` / `plan_say`（先说一句，由核心判定明确性） |
+| 节点没过 | `node_rework` / `node_say`（同上） |
+| 工具层提问（围栏这一环装不上，`gate = tool_ask`） | `fence_unfenced_once` / `fence_abort`（见 [docs/kernel/README.md](../kernel/README.md) 的「围栏落点：必要与可选」） |
 
 ### 泵的状态机
 

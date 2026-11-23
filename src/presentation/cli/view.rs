@@ -4,6 +4,7 @@
 //! 联动：`cli.rs`、`cli/gate.rs`、`docs/presentation/contracts.md`
 
 use super::*;
+use crate::capabilities::conversation::collab::api::CollabEvent;
 use crate::presentation::faces::Faces;
 
 /// 目的：启动页副行：终端转录中心、版本与根路径。
@@ -213,6 +214,12 @@ fn head(glyph: &str, ink: theme::Ink, name: &str, verb: &str) -> String {
 
 fn render_rich(events: &[SessionEvent]) {
     for e in events {
+        // 协作机制自己的事件（整理 / 待审 / 节点 / 回报 / 验收 / 交付）：词汇归协作能力，
+        // 这里按它的 typed 视图画；认不出来的一律落回下面的通用臂。
+        if let Some(ce) = CollabEvent::of(e) {
+            render_collab_rich(&ce);
+            continue;
+        }
         match e {
             SessionEvent::Notice(n) => term::say(&format!(
                 "{} {}",
@@ -228,85 +235,6 @@ fn render_rich(events: &[SessionEvent]) {
                         term::ink(theme::Ink::Dim, &format!("{} 开始干活，稍等", a))
                     ));
                 }
-            }
-            SessionEvent::Plan(p) => {
-                term::say(&head("▸", theme::Ink::Ice2, "整理", ""));
-                for row in p.lines() {
-                    term::say(&format!("  {}", row));
-                }
-            }
-            SessionEvent::PlanReview { plan, chain } => {
-                term::say(&head("◈", theme::Ink::Amber, "待审", "同意之后才开工"));
-                for row in plan.lines() {
-                    term::say(&format!("  {}", row));
-                }
-                for n in &chain.nodes {
-                    term::say(&format!(
-                        "  {} {} {}",
-                        term::ink(theme::Ink::Dim, &format!("[{}]", n.id)),
-                        term::bold(theme::Ink::Fg2, &n.title),
-                        term::ink(theme::Ink::Dim, &format!("→ {}", n.assignee))
-                    ));
-                }
-            }
-            SessionEvent::NodeStarted {
-                node,
-                sid,
-                assignee,
-            } => term::say(&format!(
-                "{} {} {}",
-                term::ink(theme::Ink::Ice2, "→"),
-                term::bold(theme::Ink::Fg2, &format!("节点 {}", node)),
-                term::ink(
-                    theme::Ink::Dim,
-                    &format!("子会话 {} · 负责人 {}", sid, assignee)
-                )
-            )),
-            SessionEvent::Report { id, text, rework } => {
-                let verb = if *rework > 0 {
-                    format!("返工第 {} 轮", rework)
-                } else {
-                    String::new()
-                };
-                term::say(&head("◆", theme::Ink::Ice2, id, &verb));
-                for row in text.lines() {
-                    term::say(&format!("  {}", row));
-                }
-            }
-            SessionEvent::Review { items, raw } => {
-                term::say(&head("◈", theme::Ink::Ice2, "验收", ""));
-                if items.is_empty() {
-                    term::say(&format!(
-                        "  {}",
-                        term::ink(theme::Ink::Dim, "（清单解析失败，原文如下）")
-                    ));
-                    for row in raw.lines() {
-                        term::say(&format!("  {}", term::ink(theme::Ink::Dim, row)));
-                    }
-                }
-                for i in items {
-                    let (glyph, ink) = check_mark(&i.status);
-                    term::say(&format!(
-                        "  {} {} {}",
-                        term::ink(ink, glyph),
-                        i.item,
-                        term::ink(theme::Ink::Dim, &i.note)
-                    ));
-                }
-            }
-            SessionEvent::Delivery { ok, over_rework } => {
-                let (glyph, ink, text) = if *ok {
-                    ("✓", theme::Ink::Green, "全部通过，交付用户。")
-                } else if *over_rework {
-                    ("◈", theme::Ink::Amber, "返工超限仍未通过，交用户裁决。")
-                } else {
-                    ("✗", theme::Ink::Red, "未能通过，详见上面的验收清单。")
-                };
-                term::say(&format!(
-                    "{} {}",
-                    term::ink(ink, glyph),
-                    term::ink(ink, text)
-                ));
             }
             SessionEvent::DecisionCard { card, .. } => term::say(&format!(
                 "{} {} {}",
@@ -346,9 +274,150 @@ fn render_rich(events: &[SessionEvent]) {
             )),
             // 短暂事件（流式增量 / 工具调用）进的是同一份事件的实时副本：转录行随后就到，这里不重复打。
             SessionEvent::Delta { .. } | SessionEvent::ToolCall(_) => {}
-            SessionEvent::DiscussionDone { .. }
-            | SessionEvent::Ended
-            | SessionEvent::Rewound { .. } => {}
+            // 别的机制推来的行：本层不认识它的含义（渲染归发起方），这里不猜。
+            SessionEvent::Push { .. } | SessionEvent::Ended | SessionEvent::Rewound { .. } => {}
+        }
+    }
+}
+
+/// 目的：协作机制的富文本渲染：整理 / 待审 / 节点派发 / 回报 / 验收 / 交付（讨论结束不打）。
+/// 约束：这是**协作机制自己的呈现**，会话层不认识这些变体（见 session/domain/events.rs 的 Push 契约）。
+fn render_collab_rich(ce: &CollabEvent) {
+    match ce {
+        CollabEvent::Plan(plan) => {
+            term::say(&head("▸", theme::Ink::Ice2, "整理", ""));
+            for row in plan.lines() {
+                term::say(&format!("  {}", row));
+            }
+        }
+        CollabEvent::PlanReview { plan, chain } => {
+            term::say(&head("◈", theme::Ink::Amber, "待审", "同意之后才开工"));
+            for row in plan.lines() {
+                term::say(&format!("  {}", row));
+            }
+            for n in &chain.nodes {
+                term::say(&format!(
+                    "  {} {} {}",
+                    term::ink(theme::Ink::Dim, &format!("[{}]", n.id)),
+                    term::bold(theme::Ink::Fg2, &n.title),
+                    term::ink(theme::Ink::Dim, &format!("→ {}", n.assignee))
+                ));
+            }
+        }
+        CollabEvent::NodeStarted {
+            node,
+            sid,
+            assignee,
+        } => term::say(&format!(
+            "{} {} {}",
+            term::ink(theme::Ink::Ice2, "→"),
+            term::bold(theme::Ink::Fg2, &format!("节点 {}", node)),
+            term::ink(
+                theme::Ink::Dim,
+                &format!("子会话 {} · 负责人 {}", sid, assignee)
+            )
+        )),
+        CollabEvent::Report { id, text, rework } => {
+            let verb = if *rework > 0 {
+                format!("返工第 {} 轮", rework)
+            } else {
+                String::new()
+            };
+            term::say(&head("◆", theme::Ink::Ice2, id, &verb));
+            for row in text.lines() {
+                term::say(&format!("  {}", row));
+            }
+        }
+        CollabEvent::Review { items, raw } => {
+            term::say(&head("◈", theme::Ink::Ice2, "验收", ""));
+            if items.is_empty() {
+                term::say(&format!(
+                    "  {}",
+                    term::ink(theme::Ink::Dim, "（清单解析失败，原文如下）")
+                ));
+                for row in raw.lines() {
+                    term::say(&format!("  {}", term::ink(theme::Ink::Dim, row)));
+                }
+            }
+            for i in items {
+                let (glyph, ink) = check_mark(&i.status);
+                term::say(&format!(
+                    "  {} {} {}",
+                    term::ink(ink, glyph),
+                    i.item,
+                    term::ink(theme::Ink::Dim, &i.note)
+                ));
+            }
+        }
+        CollabEvent::Delivery { ok, over_rework } => {
+            let (glyph, ink, text) = if *ok {
+                ("✓", theme::Ink::Green, "全部通过，交付用户。")
+            } else if *over_rework {
+                ("◈", theme::Ink::Amber, "返工超限仍未通过，交用户裁决。")
+            } else {
+                ("✗", theme::Ink::Red, "未能通过，详见上面的验收清单。")
+            };
+            term::say(&format!(
+                "{} {}",
+                term::ink(ink, glyph),
+                term::ink(ink, text)
+            ));
+        }
+        CollabEvent::DiscussionDone { .. } => {}
+    }
+}
+
+/// 目的：协作机制的朴素渲染（非交互 / 管道）：只把事实逐行打出来。
+fn render_collab_plain(ce: &CollabEvent) {
+    match ce {
+        CollabEvent::DiscussionDone { .. } => {}
+        CollabEvent::NodeStarted {
+            node,
+            sid,
+            assignee,
+        } => term::say(&format!(
+            "[派发] 节点 {} → 子会话 {}（负责人 {}）",
+            node, sid, assignee
+        )),
+        CollabEvent::Plan(p) => term::say(&format!("[整理] \n{}", p)),
+        CollabEvent::PlanReview { plan, chain } => {
+            term::say(&format!("[待审] 方案如下，点「同意」才开工：\n{}", plan));
+            for n in &chain.nodes {
+                term::say(&format!(
+                    "  - {}（{}）负责人 {} 依赖 {:?}",
+                    n.id, n.title, n.assignee, n.deps
+                ));
+            }
+        }
+        CollabEvent::Report { id, text, rework } => {
+            if *rework > 0 {
+                term::say(&format!("[执行·返工{}] [{}] {}", rework, id, text));
+            } else {
+                term::say(&format!("[执行] [{}] {}", id, text));
+            }
+        }
+        CollabEvent::Review { items, raw } => {
+            term::say("[验收]");
+            if items.is_empty() {
+                term::say(&format!("（清单解析失败，原文如下）\n{}", raw));
+            }
+            for i in items {
+                term::say(&format!(
+                    "  [{}] {} {}",
+                    i.status.to_uppercase(),
+                    i.item,
+                    i.note
+                ));
+            }
+        }
+        CollabEvent::Delivery { ok, over_rework } => {
+            if *ok {
+                term::say("[交付] 全部通过，交付用户。");
+            } else if *over_rework {
+                term::say("[裁决] 返工超限仍未通过，交用户裁决。");
+            } else {
+                term::say("[交付] 未能通过。");
+            }
         }
     }
 }
@@ -467,6 +536,10 @@ fn tokens(n: u64) -> String {
 
 pub(super) fn render_plain(events: &[SessionEvent]) {
     for e in events {
+        if let Some(ce) = CollabEvent::of(e) {
+            render_collab_plain(&ce);
+            continue;
+        }
         match e {
             SessionEvent::Notice(n) => term::say(n),
             SessionEvent::Transcript(lines) => {
@@ -488,55 +561,6 @@ pub(super) fn render_plain(events: &[SessionEvent]) {
                     // 系统消息（提醒/"未回应"这类**不是谁说的**内容）标出来，别和用户/发言混在一起。
                     let mark = if l.system { "[系统] " } else { "" };
                     term::say(&format!("{}{}", mark, l.line));
-                }
-            }
-            SessionEvent::DiscussionDone { .. } => {}
-            SessionEvent::NodeStarted {
-                node,
-                sid,
-                assignee,
-            } => term::say(&format!(
-                "[派发] 节点 {} → 子会话 {}（负责人 {}）",
-                node, sid, assignee
-            )),
-            SessionEvent::Plan(p) => term::say(&format!("[整理] \n{}", p)),
-            SessionEvent::PlanReview { plan, chain } => {
-                term::say(&format!("[待审] 方案如下，点「同意」才开工：\n{}", plan));
-                for n in &chain.nodes {
-                    term::say(&format!(
-                        "  - {}（{}）负责人 {} 依赖 {:?}",
-                        n.id, n.title, n.assignee, n.deps
-                    ));
-                }
-            }
-            SessionEvent::Report { id, text, rework } => {
-                if *rework > 0 {
-                    term::say(&format!("[执行·返工{}] [{}] {}", rework, id, text));
-                } else {
-                    term::say(&format!("[执行] [{}] {}", id, text));
-                }
-            }
-            SessionEvent::Review { items, raw } => {
-                term::say("[验收]");
-                if items.is_empty() {
-                    term::say(&format!("（清单解析失败，原文如下）\n{}", raw));
-                }
-                for i in items {
-                    term::say(&format!(
-                        "  [{}] {} {}",
-                        i.status.to_uppercase(),
-                        i.item,
-                        i.note
-                    ));
-                }
-            }
-            SessionEvent::Delivery { ok, over_rework } => {
-                if *ok {
-                    term::say("[交付] 全部通过，交付用户。");
-                } else if *over_rework {
-                    term::say("[裁决] 返工超限仍未通过，交用户裁决。");
-                } else {
-                    term::say("[交付] 未能通过。");
                 }
             }
             SessionEvent::Ended => {}
@@ -563,6 +587,7 @@ pub(super) fn render_plain(events: &[SessionEvent]) {
             SessionEvent::Delta { .. }
             | SessionEvent::Working { .. }
             | SessionEvent::ToolCall(_)
+            | SessionEvent::Push { .. }
             | SessionEvent::Rewound { .. } => {}
             // 上下文用量是状态栏事实：Web 有状态栏，终端不逐次打。
             SessionEvent::Usage { .. } => {}

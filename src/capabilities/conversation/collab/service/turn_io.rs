@@ -5,11 +5,12 @@
 
 use super::collab::*;
 use crate::capabilities::catalog::registry::api::AgentMeta;
-use crate::capabilities::conversation::collab::service::discussion::TurnOut;
-use crate::capabilities::conversation::session::api::{
-    LineView, OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK, OPT_NODE_SAY,
-    OPT_PLAN_SAY, OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM, Pending, SessionEvent,
+use crate::capabilities::conversation::collab::domain::gates::{
+    OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY,
+    OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM, Pending,
 };
+use crate::capabilities::conversation::collab::service::discussion::TurnOut;
+use crate::capabilities::conversation::session::api::{LineView, SessionEvent};
 use std::sync::Arc;
 
 use super::lines::*;
@@ -137,7 +138,9 @@ impl CollabSession {
         let option = ticket.option.as_str();
         let note = ticket.note.trim().to_string();
         let empty_before = self.roster.is_empty();
-        let p = ticket.pending.clone();
+        // 这一关是哪一种由发起方解释：队列只搬 kind + payload（见 session/domain/events.rs 的 Gate）。
+        let (p, advice) = Pending::from_gate(&ticket.gate)
+            .ok_or_else(|| format!("这张卡不是本机制发的：{}", ticket.gate.kind))?;
         let nodes = match &p {
             Pending::NodeBlocked { nodes } => nodes.clone(),
             _ => Vec::new(),
@@ -173,7 +176,7 @@ impl CollabSession {
             }
             // "先说一句"：他的话进主会话当反馈，**由核心 AI 判这句话是否明确**——
             // 明确才开工 / 重派，模糊就不动、关卡继续挂着（见 session-model.md「请用户裁决」）。
-            OPT_PLAN_SAY | OPT_NODE_SAY => self.judge_note(&p, &ticket.advice, &note, sink),
+            OPT_PLAN_SAY | OPT_NODE_SAY => self.judge_note(&p, &advice, &note, sink),
             other => return Err(format!("这张卡上没有这个选项：{}", other)),
         };
         // 名单刚由这一答定下来：调用方要把 roster 写回 meta（重建与沙箱归属都读它）。

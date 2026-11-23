@@ -42,12 +42,15 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
         e.extend(answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap());
         e
     };
-    assert!(events.iter().any(|e| matches!(e, SessionEvent::Plan(_))));
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. }))
+            .any(|e| matches!(CollabEvent::of(e), Some(CollabEvent::Plan(_))))
     );
+    assert!(events.iter().any(|e| matches!(
+        CollabEvent::of(e),
+        Some(CollabEvent::Delivery { ok: true, .. })
+    )));
     // 终结会话已被中心回收（再查询挂起状态应报无此会话）。
     assert!(core.turn.collab_pending(&sid).is_err());
 }
@@ -94,11 +97,10 @@ pub(crate) fn core_collab_delegated_slate_flow() {
         e.extend(answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap());
         e
     };
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. }))
-    );
+    assert!(events.iter().any(|e| matches!(
+        CollabEvent::of(e),
+        Some(CollabEvent::Delivery { ok: true, .. })
+    )));
 }
 
 #[test]
@@ -195,9 +197,10 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
         e
     };
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. })),
+        events.iter().any(|e| matches!(
+            CollabEvent::of(e),
+            Some(CollabEvent::Delivery { ok: true, .. })
+        )),
         "重建出来的名单要能一路跑完：{:?}",
         events
     );
@@ -256,9 +259,10 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
         "节点执行里的工具调用应发 tool 转录行（子会话自己的转录）",
     );
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. })),
+        events.iter().any(|e| matches!(
+            CollabEvent::of(e),
+            Some(CollabEvent::Delivery { ok: true, .. })
+        )),
         "验收应通过"
     );
     assert_eq!(runner.calls.lock().expect("锁").len(), 1);

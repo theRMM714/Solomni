@@ -1,7 +1,7 @@
 # collab（协作会话）
 
 > 定位：从讨论走到交付的协作会话状态机。
-> 效力：规范｜核对：2026-11-17｜依据：`src/capabilities/conversation/collab/api.rs`
+> 效力：规范｜核对：2026-11-23｜依据：`src/capabilities/conversation/collab/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -11,7 +11,8 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api::CollabSession`——讨论与执行引擎、回合与验收词汇、协作状态派生的对外名字。
+- 入站面：`api::CollabSession`——讨论与执行引擎、回合与验收词汇、协作状态派生的对外名字；协作自己的事件（`CollabEvent`）与裁决关（`Pending`、`OPT_*`）也从 `api` 出。
+- 词汇归属：协作事件与关卡在 `src/capabilities/conversation/collab/domain/`（`events.rs` / `gates.rs`），会话只提供「机制事件」通道与不解释 `kind` 的裁决队——改协作流程不改会话文件。
 - 状态归属：会话对象及其状态只有它写；「转录即状态」的派生在 `src/capabilities/conversation/collab/domain/collab_state.rs`（纯函数、可回放）。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）

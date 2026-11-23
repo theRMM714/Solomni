@@ -53,12 +53,12 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
 
     let started: Vec<(String, String, String)> = after
         .iter()
-        .filter_map(|e| match e {
-            SessionEvent::NodeStarted {
+        .filter_map(|e| match CollabEvent::of(e) {
+            Some(CollabEvent::NodeStarted {
                 node,
                 sid,
                 assignee,
-            } => Some((node.clone(), sid.clone(), assignee.clone())),
+            }) => Some((node, sid, assignee)),
             _ => None,
         })
         .collect();
@@ -127,8 +127,8 @@ pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
     let evs = answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap();
     let order: Vec<String> = evs
         .iter()
-        .filter_map(|e| match e {
-            SessionEvent::NodeStarted { node, .. } => Some(node.clone()),
+        .filter_map(|e| match CollabEvent::of(e) {
+            Some(CollabEvent::NodeStarted { node, .. }) => Some(node),
             _ => None,
         })
         .collect();
@@ -177,8 +177,10 @@ pub(crate) fn stage_review_refills_until_the_ids_are_valid() {
         shown_texts(&evs)
     );
     assert!(
-        evs.iter()
-            .any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. })),
+        evs.iter().any(|e| matches!(
+            CollabEvent::of(e),
+            Some(CollabEvent::Delivery { ok: true, .. })
+        )),
         "重填对了就照常推进并交付"
     );
 }
@@ -232,7 +234,7 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
     assert!(
         !first
             .iter()
-            .any(|e| matches!(e, SessionEvent::Delivery { .. })),
+            .any(|e| matches!(CollabEvent::of(e), Some(CollabEvent::Delivery { .. }))),
         "没过就不交付"
     );
     assert!(
@@ -240,9 +242,12 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
         "如实说明只重派指名的那些"
     );
     // 用户看到的顺序：**完成**先报（节点提交那一刻），再是**返工提示**、最后那三句汇总。
-    let done_at = first
-        .iter()
-        .position(|e| matches!(e, SessionEvent::Report { id, .. } if id == "n1-1"));
+    let done_at = first.iter().position(|e| {
+        matches!(
+            CollabEvent::of(e),
+            Some(CollabEvent::Report { id, .. }) if id == "n1-1"
+        )
+    });
     let rework_at = shown_at(&first, "[返工] n1-1");
     let tail_at = shown_at(&first, "只重派这些");
     assert!(
@@ -266,7 +271,7 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
     assert!(
         !wake
             .iter()
-            .any(|e| matches!(e, SessionEvent::NodeStarted { .. })),
+            .any(|e| matches!(CollabEvent::of(e), Some(CollabEvent::NodeStarted { .. }))),
         "挂着等用户时，唤醒不能自己重派：{:?}",
         wake
     );
@@ -292,10 +297,10 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
         .turn
         .collab_resume(&sid, core.registry.as_ref(), core.probe.as_ref())
         .unwrap();
-    let redispatch: Vec<&String> = second
+    let redispatch: Vec<String> = second
         .iter()
-        .filter_map(|e| match e {
-            SessionEvent::NodeStarted { node, .. } => Some(node),
+        .filter_map(|e| match CollabEvent::of(e) {
+            Some(CollabEvent::NodeStarted { node, .. }) => Some(node),
             _ => None,
         })
         .collect();
@@ -305,9 +310,10 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
         redispatch
     );
     assert!(
-        second
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. })),
+        second.iter().any(|e| matches!(
+            CollabEvent::of(e),
+            Some(CollabEvent::Delivery { ok: true, .. })
+        )),
         "重派并验过之后才交付：{:?}",
         second
     );
@@ -357,7 +363,7 @@ pub(crate) fn failed_node_acceptance_pauses_then_continue_redispatches() {
     assert!(
         !first
             .iter()
-            .any(|e| matches!(e, SessionEvent::Delivery { .. })),
+            .any(|e| matches!(CollabEvent::of(e), Some(CollabEvent::Delivery { .. }))),
         "没过就不该交付：{:?}",
         first
     );
@@ -368,9 +374,10 @@ pub(crate) fn failed_node_acceptance_pauses_then_continue_redispatches() {
         .collab_resume(&sid, core.registry.as_ref(), core.probe.as_ref())
         .unwrap();
     assert!(
-        second
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. })),
+        second.iter().any(|e| matches!(
+            CollabEvent::of(e),
+            Some(CollabEvent::Delivery { ok: true, .. })
+        )),
         "重派后验过就该交付：{:?}",
         second
     );
@@ -408,14 +415,14 @@ pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, SessionEvent::PlanReview { .. })),
+            .any(|e| matches!(CollabEvent::of(e), Some(CollabEvent::PlanReview { .. }))),
         "整理完该停在**待审**：{:?}",
         events
     );
     assert!(
         !events.iter().any(|e| matches!(
-            e,
-            SessionEvent::Report { .. } | SessionEvent::Delivery { .. }
+            CollabEvent::of(e),
+            Some(CollabEvent::Report { .. } | CollabEvent::Delivery { .. })
         )),
         "没过审不该开工：{:?}",
         events
@@ -430,8 +437,8 @@ pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
     // 链随方案一起交给用户审查：节点、负责人、目标都在（审查关卡看的就是这张图）。
     let reviewed = events
         .iter()
-        .find_map(|e| match e {
-            SessionEvent::PlanReview { chain, .. } => Some(chain.clone()),
+        .find_map(|e| match CollabEvent::of(e) {
+            Some(CollabEvent::PlanReview { chain, .. }) => Some(chain),
             _ => None,
         })
         .expect("待审事件要带链");
@@ -444,14 +451,14 @@ pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
     assert!(
         after
             .iter()
-            .any(|e| matches!(e, SessionEvent::Report { .. })),
+            .any(|e| matches!(CollabEvent::of(e), Some(CollabEvent::Report { .. }))),
         "同意后该开工：{:?}",
         after
     );
     assert!(
         after
             .iter()
-            .any(|e| matches!(e, SessionEvent::Delivery { .. })),
+            .any(|e| matches!(CollabEvent::of(e), Some(CollabEvent::Delivery { .. }))),
         "同意后该走到交付：{:?}",
         after
     );

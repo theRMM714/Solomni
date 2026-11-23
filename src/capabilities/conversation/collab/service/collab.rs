@@ -10,9 +10,10 @@ use super::lines::push_delta;
 use crate::capabilities::catalog::modules::api::Modules;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::Settings;
+use crate::capabilities::conversation::collab::domain::gates::Pending;
 use crate::capabilities::conversation::collab::service::discussion::Discussion;
 use crate::capabilities::conversation::collab::service::synthesis::Execution;
-use crate::capabilities::conversation::session::api::{Gates, LineView, Pending, SessionEvent};
+use crate::capabilities::conversation::session::api::{Gates, LineView, SessionEvent};
 use crate::capabilities::llm::api::{Channel, Chat, Llm, Msg};
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::tools::api::ToolExec;
@@ -423,7 +424,8 @@ impl CollabSession {
     /// 约束：卡号与排队归队列（会话内唯一、跨重启稳定）；一次只有队首那张对用户可见 / 可答。
     pub(crate) fn ask_user(&mut self, p: Pending, sink: &mut dyn FnMut(SessionEvent)) {
         let advice = std::mem::take(&mut self.gate_advice);
-        let (_id, evs) = self.door.raise(None, p, &advice);
+        // 卡号由队列发（队列内唯一、跨重启稳定）：发起方给的 id 只是占位，进队时被覆盖。
+        let (_id, evs) = self.door.raise(None, p.gate("", &advice));
         for e in evs {
             sink(e);
         }
