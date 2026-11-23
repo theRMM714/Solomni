@@ -62,6 +62,10 @@ pub enum Segment {
     DiscussAutonomyNote,
     SynthesizeSystem,
     SynthesizeUser,
+    /// 讨论收敛后写总结：核心代理的一次普通生成（讨论段的产物）。
+    SummarizeSystem,
+    /// 讨论全文是唯一变量（transcript）。
+    SummarizeUser,
     ExecuteUser,
     ReviewSystem,
     ReviewUser,
@@ -170,6 +174,8 @@ pub struct CoreTexts {
     pub chat_protocol: String,
     pub discuss: DiscussPrompts,
     pub synthesize: SynthPrompts,
+    /// 目的：讨论收敛后由核心代理写总结（讨论段的产物，执行段的需求）。
+    pub summarize: SummarizePrompts,
     pub execute: ExecutePrompts,
     pub review: ReviewPrompts,
     /// 目的：节点级验收（任务链：逐节点核对当前目标）。
@@ -223,6 +229,13 @@ pub struct VerdictPrompts {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SynthPrompts {
+    pub system: String,
+    /// 目的：user 变量：transcript
+    pub user: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SummarizePrompts {
     pub system: String,
     /// 目的：user 变量：transcript
     pub user: String,
@@ -327,6 +340,8 @@ impl CoreTexts {
             Segment::DiscussAutonomyNote => &self.discuss.autonomy_note,
             Segment::SynthesizeSystem => &self.synthesize.system,
             Segment::SynthesizeUser => &self.synthesize.user,
+            Segment::SummarizeSystem => &self.summarize.system,
+            Segment::SummarizeUser => &self.summarize.user,
             Segment::ExecuteUser => &self.execute.user,
             Segment::ReviewSystem => &self.review.system,
             Segment::ReviewUser => &self.review.user,

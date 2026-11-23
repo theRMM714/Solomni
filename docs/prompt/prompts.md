@@ -29,6 +29,7 @@
 | `roles/executor.yaml` | `execute.user` | 执行任务 |
 | `roles/orchestrator.yaml` | `review.system` / `review.user` | 总验收与推进 |
 | `roles/core_proxy.yaml` | `proxy.system` | 核心代理的身份提示词（在用户授予的任务级授权范围内代用户决定与转达；工具面由角色表按回合注入）。代理会话**不是 agent**：它的身份块渲染这一段（`{{mechanism}}` 取 `mechanisms.proxy`，`{{env}}` / `{{tool_calling}}` 与 agent 身份同一份口径，见 session 的角色身份块 `session::domain::session::role_system`），不是模块能力包 |
+| | `summarize.system` / `summarize.user` | **讨论收尾的总结**：讨论段的产物、执行段的需求（`user` 的变量：transcript）。由核心代理的一次普通生成写出，落成转录一条 `[总结]` 与一条 `summary` 事件 |
 
 > 运行时回执**不在册子**：工具回执与参数/补丁错误在 `tools`，信封不合法的修法在 `llm`，围栏/进程收尾在 `kernel`，模块分派与轮次标注在 `collab`，清单行在 `registry` / `modules` / `tools`，`@` 引用说明在 `prompt/domain/refs.rs`。**路径校验与权限拒绝由 workspace 代码直接返回。**
 

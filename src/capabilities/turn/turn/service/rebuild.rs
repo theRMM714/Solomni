@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::capabilities::catalog::modules::api::Module;
 use crate::capabilities::catalog::registry::api::Registry;
-use crate::capabilities::conversation::collab::api::CollabSession;
+use crate::capabilities::conversation::collab::api::{CollabSession, Phase};
 use crate::capabilities::conversation::session::api::{
     AgentSession, Mode, SessionMeta, SessionParams, guest_lease_for, role_of, session_kind_of,
     work_root, work_root_of,
@@ -92,21 +92,34 @@ impl Turn {
         let desk = self.desk_for(&meta.name, issued);
         desk.rebuild(issued);
         let built = match meta.mode {
-            Mode::Collab => Session::Flow(Box::new(CollabSession::restore(
-                Arc::clone(&self.llm),
-                Arc::clone(&self.vm),
-                Arc::clone(&self.modules),
-                registry.snapshot(),
-                Arc::clone(&self.prompt),
-                Arc::clone(&self.systools),
-                Arc::clone(&self.tools),
-                Arc::clone(&self.log),
-                meta,
-                events,
-                sandboxes,
-                // 重建出来的整队进**同一条队**（按转录里已发出的卡号续号，已答过的不重问）。
-                Arc::clone(&desk),
-            )?)),
+            Mode::Collab => {
+                // 两段共用同一份落盘事实：讨论段按转录恢复讨论现场，执行段按总结恢复计划与任务链。
+                let make = |phase| {
+                    CollabSession::restore(
+                        Arc::clone(&self.llm),
+                        Arc::clone(&self.vm),
+                        Arc::clone(&self.modules),
+                        registry.snapshot(),
+                        Arc::clone(&self.prompt),
+                        Arc::clone(&self.systools),
+                        Arc::clone(&self.tools),
+                        Arc::clone(&self.log),
+                        meta,
+                        events,
+                        sandboxes.clone(),
+                        phase,
+                        // 重建出来的整队进**同一条队**（按转录里已发出的卡号续号，已答过的不重问）。
+                        Arc::clone(&desk),
+                    )
+                };
+                let steps: Vec<Box<dyn crate::capabilities::conversation::session::api::Flow>> = vec![
+                    Box::new(make(Phase::Discuss)?),
+                    Box::new(make(Phase::Execute)?),
+                ];
+                Session::Flow(Box::new(
+                    crate::capabilities::conversation::session::api::Sequence::new(steps),
+                ))
+            }
             // 单 agent：按 meta.agents[0] 重建（名单是唯一真相；模块数不限）。
             Mode::Single => {
                 let a = meta

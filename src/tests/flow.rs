@@ -26,7 +26,7 @@ pub(crate) fn a_standin_flow_runs_on_the_same_driver() {
     // 把在世会话换成替身流程：驱动除了流程面之外一个字段都不该看。
     let old = core.turn.take_flow_raw(&sid).expect("取在世会话");
     let systools = old
-        .as_any()
+        .part()
         .downcast_ref::<CollabSession>()
         .expect("协作会话")
         .systools();
@@ -91,7 +91,7 @@ pub(crate) fn a_standin_flow_settles_its_own_gate() {
         .sid;
     let old = core.turn.take_flow_raw(&sid).expect("取在世会话");
     let systools = old
-        .as_any()
+        .part()
         .downcast_ref::<CollabSession>()
         .expect("协作会话")
         .systools();

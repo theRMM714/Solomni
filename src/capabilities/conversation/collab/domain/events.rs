@@ -1,5 +1,5 @@
 //! 目的：协作自己的会话事件（**只属于协作**）：线上 kind/payload 与类型化视图的互转。
-//! 管：`CollabEvent` 七种事件、`CheckView`、以及它们与 `SessionEvent::Push` 的双向映射。
+//! 管：`CollabEvent` 八种事件、`CheckView`、以及它们与 `SessionEvent::Push` 的双向映射。
 //! 不管：事件的产生时机（在本能力的 `service/`）、会话通道本身（在会话能力）。
 //! 联动：`service/` 造事件时用 `push`；呈现层与测试用 `of` 认回来（按 kind 解释，不认 Rust 枚举位置）。
 
@@ -19,6 +19,8 @@ pub struct CheckView {
 pub enum CollabEvent {
     /// 讨论收敛（over_cap = 轮次超限，需用户裁决）。
     DiscussionDone { round: usize, over_cap: bool },
+    /// 讨论的总结（核心代理写的那一份）：讨论段的产物，执行段的需求。
+    Summary(String),
     /// 整理方案就绪。
     Plan(String),
     /// 方案待审（审查关卡）：把方案交给用户，等他点「同意」才开工。
@@ -58,6 +60,7 @@ impl CollabEvent {
                 round: n("round"),
                 over_cap: b("over_cap"),
             },
+            "summary" => CollabEvent::Summary(s("text")),
             "plan" => CollabEvent::Plan(s("text")),
             "plan_review" => CollabEvent::PlanReview {
                 plan: s("plan"),
@@ -100,6 +103,9 @@ impl CollabEvent {
                 "discussion_done",
                 serde_json::json!({ "round": round, "over_cap": over_cap }),
             ),
+            CollabEvent::Summary(text) => {
+                SessionEvent::push("summary", serde_json::json!({ "text": text }))
+            }
             CollabEvent::Plan(text) => {
                 SessionEvent::push("plan", serde_json::json!({ "text": text }))
             }

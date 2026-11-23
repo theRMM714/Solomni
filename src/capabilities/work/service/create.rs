@@ -555,24 +555,32 @@ impl Work {
                 let door = self.desk_of(turn, &name);
                 let core_channel =
                     core_channel.ok_or_else(|| "协作会话缺少核心模型通道".to_string())?;
-                let mut cs = CollabSession::start(
-                    Arc::clone(&self.llm),
-                    Arc::clone(&self.vm),
-                    Arc::clone(&self.modules),
-                    registry.snapshot(),
-                    core_channel,
-                    Arc::clone(&self.prompt),
-                    Arc::clone(&self.systools),
-                    Arc::clone(&self.tools),
-                    Arc::clone(&self.log),
-                    metas.clone(),
-                    delegate,
-                    sandboxes.clone(),
-                    door,
-                )?;
+                // 两段共用同一份落盘事实：讨论段开会并写总结，执行段拿总结拟计划、派活、验收、交付。
+                let make = |phase| {
+                    CollabSession::start(
+                        Arc::clone(&self.llm),
+                        Arc::clone(&self.vm),
+                        Arc::clone(&self.modules),
+                        registry.snapshot(),
+                        core_channel.clone(),
+                        Arc::clone(&self.prompt),
+                        Arc::clone(&self.systools),
+                        Arc::clone(&self.tools),
+                        Arc::clone(&self.log),
+                        metas.clone(),
+                        delegate,
+                        sandboxes.clone(),
+                        phase,
+                        Arc::clone(&door),
+                    )
+                };
+                let mut disc = make(Phase::Discuss)?;
+                let exec = make(Phase::Execute)?;
                 let mut out = Vec::new();
-                cs.set_task(&task, &mut |e| out.push(e));
-                (Session::Flow(Box::new(cs)), out)
+                disc.set_task(&task, &mut |e| out.push(e));
+                let steps: Vec<Box<dyn crate::capabilities::conversation::session::api::Flow>> =
+                    vec![Box::new(disc), Box::new(exec)];
+                (Session::Flow(Box::new(Sequence::new(steps))), out)
             }
         };
         // 会话身份落盘：失败即失败（名字即目录，这是承诺，不假装已保存）。

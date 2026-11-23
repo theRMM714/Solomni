@@ -108,10 +108,6 @@ pub struct Discussion {
     pub(crate) allow_autonomy: bool,
     /// 目的：提示词册能力面：**不是册子本体**（持有者只有提示词能力一处），这里只按名字取段。
     pub(crate) prompts: Arc<dyn Prompt>,
-    /// 目的：工具总表与角色表的能力面（**表本体在工具能力里**）。
-    pub(crate) systools: Arc<dyn crate::capabilities::tools::api::Tools>,
-    /// 目的：本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
-    pub(crate) llm: crate::capabilities::llm::api::LlmOpts,
     /// 目的：讨论席的**机制说明 + 讨论约定**（开场与轮转都带它）：只说约定不说机制，AI 会空转。
     ///   能用哪些工具**不在这里**——随回合注入（见会话工具面的 tools_block）。
     pub(crate) protocol: String,
@@ -168,7 +164,7 @@ impl Discussion {
         turn: Vec<Msg>,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<MemberTurn, String> {
-        let opts = self.opts();
+        let opts = crate::capabilities::llm::api::CompleteOpts::plain(false);
         let speaker = self.members[i].id.clone();
         let turn = {
             let chat = self.members[i].chat.as_mut().expect("测试通道");
@@ -301,8 +297,6 @@ impl Discussion {
         members: Vec<Member>,
         allow_autonomy: bool,
         prompts: Arc<dyn Prompt>,
-        systools: Arc<dyn crate::capabilities::tools::api::Tools>,
-        llm: crate::capabilities::llm::api::LlmOpts,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
         protocol: String,
     ) -> Discussion {
@@ -314,8 +308,6 @@ impl Discussion {
             closed: false,
             allow_autonomy,
             prompts,
-            systools,
-            llm,
             cancel,
             protocol,
             reminded: std::collections::BTreeMap::new(),
@@ -358,12 +350,6 @@ impl Discussion {
     /// 目的：是否已被要求停止。
     pub(crate) fn cancelled(&self) -> bool {
         self.cancel.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    /// 目的：本轮的调用选项：流式与预算都取全局设置（讨论也走同一份）。
-    pub(crate) fn opts(&self) -> crate::capabilities::llm::api::CompleteOpts<'static> {
-        crate::capabilities::llm::api::CompleteOpts::plain(self.llm.stream)
-            .with_timeout(self.llm.timeout_secs)
     }
 
     /// 目的：首轮：聊天约定 + 用户需求（文案经提示词册渲染）。

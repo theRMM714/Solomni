@@ -135,6 +135,7 @@ session/<工作名>/
 - 理由是会话归属：生成期间协作会话被**移出核心表**（own-and-return），它碰不到表里的 agent 会话；而 agent 会话必须留在表里，用户才能随时进去发言。所以**驱动权归核心**（它同时看得到两边）（`src/capabilities/turn/turn/service/flow.rs`）。
 
 - **驱动只认流程面**：核心驱动（`src/capabilities/turn/turn/service/flow.rs` 与 `src/capabilities/turn/turn/service/generation/collab.rs`）与具体流程之间只隔一层 `session::api::Flow`——开场 / 推进一步（`start` / `step`）、取走让出的一步（`take_ask` 交出 `MemberAsk`）、交回处置（`handback` 判为 `Handback`，再由 `feed` / `pass_over` 落地）、处置自己发的关卡（`settle` 把出队的票交回流程，`settles_inline` 决定这一关要不要就地收尾）。协作的实现只有 `src/capabilities/conversation/collab/service/flow.rs` 一处；换一套流程只换一个实现，驱动不动。
+- **流程可以串起来**：会话类型表里的 `flows` 是一串，装配期用 `session::api::Sequence`（`src/capabilities/conversation/session/domain/sequence.rs`）串成一条——前一段 `is_done` 就把自己的 `output` 交给下一段的 `intake`（行号一路传下去），驱动仍只认一条 `Flow`。业务面（`part` / `part_mut`）指向**当前这一段**，所以派节点、改需求这类动作不必知道自己是第几段。会话级事实由驱动同时通知每一段（`adopt_roster`：代拟的名单一确认，后面那一段也要认得出谁能出演）。协作就是这样拆成两段的：`discuss` 交出的总结成为 `execute` 的需求。
 - **关卡归发起它的流程**：队列只认卡、卡号与选项（`Gate`），不解释 `kind` 是哪一关；回答出队后驱动把 `GateTicket` 交回流程面的 `settle`，由流程自己落定并说要不要接着推进（`Settle`）。所以 `runtime` 与 `turn` 里不再有「这是代拟名单那一关」这类判断。
 
 ### 看不见的回合：运行态与逐片外送

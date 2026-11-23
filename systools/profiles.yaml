@@ -8,12 +8,17 @@ profiles:
     flows: []
 
   - id: collab
-    roles: [discussant, executor, planner, orchestrator]
+    roles: [core_proxy, discussant, executor, planner, orchestrator]
     flows:
-      - id: collab
-        core: [planner, orchestrator]
+      # 讨论段：开会把需求谈清楚，由核心代理写一份总结（执行段的需求）。
+      - id: discuss
+        core: [core_proxy]
         members:
           discussant: 2
+      # 执行段：核心拟计划与任务链，执行席逐个节点干，核心逐阶段验收后交付。
+      - id: execute
+        core: [planner, orchestrator]
+        members:
           executor: 1
 
   - id: proxy

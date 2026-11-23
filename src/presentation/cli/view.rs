@@ -280,7 +280,7 @@ fn render_rich(events: &[SessionEvent]) {
     }
 }
 
-/// 目的：协作机制的富文本渲染：整理 / 待审 / 节点派发 / 回报 / 验收 / 交付（讨论结束不打）。
+/// 目的：协作机制的富文本渲染：整理 / 待审 / 节点派发 / 回报 / 验收 / 交付（讨论结束与总结不打：它们有自己的转录行）。
 /// 约束：这是**协作机制自己的呈现**，会话层不认识这些变体（见 session/domain/events.rs 的 Push 契约）。
 fn render_collab_rich(ce: &CollabEvent) {
     match ce {
@@ -363,14 +363,16 @@ fn render_collab_rich(ce: &CollabEvent) {
                 term::ink(ink, text)
             ));
         }
-        CollabEvent::DiscussionDone { .. } => {}
+        // 总结有自己的一行转录（[总结]），这里不重复打。
+        CollabEvent::DiscussionDone { .. } | CollabEvent::Summary(_) => {}
     }
 }
 
 /// 目的：协作机制的朴素渲染（非交互 / 管道）：只把事实逐行打出来。
 fn render_collab_plain(ce: &CollabEvent) {
     match ce {
-        CollabEvent::DiscussionDone { .. } => {}
+        // 总结有自己的一行转录（[总结]），这里不重复打。
+        CollabEvent::DiscussionDone { .. } | CollabEvent::Summary(_) => {}
         CollabEvent::NodeStarted {
             node,
             sid,

@@ -227,7 +227,7 @@ mod tests {
                         "planner".to_string(),
                         "core_proxy".to_string(),
                     ],
-                    flows: vec![flow("collab")],
+                    flows: vec![flow("discuss"), flow("execute")],
                 },
                 Profile {
                     id: "proxy".to_string(),
@@ -261,8 +261,9 @@ mod tests {
             .iter()
             .find(|x| x.id == Mode::Collab.as_str())
             .expect("协作类型");
-        assert_eq!(collab.flows[0].id, "collab");
+        assert_eq!(collab.flows[0].id, "discuss");
         assert_eq!(collab.flows[0].members["discussant"], 2);
+        assert_eq!(collab.flows[1].id, "execute");
         assert_eq!(p.ids(), vec!["single", "collab", "proxy"]);
     }
 
@@ -291,13 +292,13 @@ mod tests {
         let err = p.validate().unwrap_err();
         assert!(err.contains("流程没注册：review"), "{}", err);
         assert!(
-            err.contains("已注册：collab"),
+            err.contains("已注册：discuss / execute"),
             "报错要给出已注册清单：{}",
             err
         );
 
         let mut p = base();
-        p.profiles[1].flows.push(flow("collab"));
+        p.profiles[1].flows.push(flow("discuss"));
         let err = p.validate().unwrap_err();
         assert!(err.contains("同一个流程出现了两次"), "{}", err);
     }

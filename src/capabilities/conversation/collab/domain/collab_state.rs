@@ -1,5 +1,5 @@
 //! 目的：协作会话的「转录即状态」派生——从会话事件流水纯函数地算出当前状态。
-//! 管：CollabState 的字段与 derive 的判定（名单 / 表态 / 关门 / 方案 / 审查 / 裁决卡 / 交付）；工具执行次数计数 tool_runs。
+//! 管：CollabState 的字段与 derive 的判定（名单 / 表态 / 关门 / 总结 / 方案 / 审查 / 裁决卡 / 交付）；工具执行次数计数 tool_runs。
 //! 不管：IO、端口与驱动（在 service/）；事件本身的产生与落盘；任何影子状态。
 //! 联动：被 src/capabilities/collab/service/collab.rs 与 src/capabilities/collab/api.rs 消费；事件与行形状见 docs/session/session-model.md。
 
@@ -26,6 +26,8 @@ pub struct CollabState {
     pub agreed: BTreeMap<String, bool>,
     /// 目的：讨论已收敛或超限（discussion_done）。
     pub closed: bool,
+    /// 目的：讨论的总结（核心写的那一份）：讨论段的产物，执行段的需求。
+    pub summary: Option<String>,
     /// 目的：用户在审查关卡点过「同意」（[用户:同意方案]）：方案过关，可以开工。
     pub plan_approved: bool,
     pub plan: Option<String>,
@@ -125,6 +127,12 @@ pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabSt
                 }
             }
             "discussion_done" => st.closed = true,
+            "summary" => {
+                st.summary = ev
+                    .get("text")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string())
+            }
             "plan" => {
                 st.plan = ev
                     .get("text")

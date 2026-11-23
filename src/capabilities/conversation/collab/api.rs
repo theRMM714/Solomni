@@ -19,3 +19,4 @@ pub use crate::capabilities::conversation::collab::domain::gates::{
     OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM,
 };
 pub use crate::capabilities::conversation::collab::service::collab::CollabSession;
+pub use crate::capabilities::conversation::collab::service::collab::Phase;

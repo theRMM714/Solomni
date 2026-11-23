@@ -703,6 +703,10 @@ impl Turn {
             if let Some(c) = self.session_mut(sid).and_then(|s| s.collab_mut()) {
                 c.set_sandboxes(sandboxes);
             }
+            // 名单是会话级事实，复合流程里每一段都要认得出成员（后一段不再是同一个对象）。
+            if let Some(m) = self.session_mut(sid).and_then(|s| s.flow_mut()) {
+                m.adopt_roster(&roster);
+            }
         }
         // 方案过审后：就绪节点各建一个子会话——**与生产路径同一处置**，只在一边接会漏。
         // 必须在"终结后移出中心"之前做：会话一移出，链就找不到了。

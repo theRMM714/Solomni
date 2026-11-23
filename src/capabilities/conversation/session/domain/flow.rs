@@ -13,7 +13,7 @@ use crate::capabilities::llm::api::{CompleteOpts, Msg};
 use crate::capabilities::tools::api::Tools;
 
 /// 目的：已注册的流程 id：`systools/profiles.yaml` 只能引用这里的名字（新增流程在这里加一行）。
-pub const REGISTERED: &[&str] = &["collab"];
+pub const REGISTERED: &[&str] = &["discuss", "execute"];
 
 /// 目的：流程让出的那一步——请驱动取某个成员会话跑一回合。
 /// 约束：流程**不自己调模型**（它拿不到别的会话）；这里只交出「问谁、带什么、按什么参数」。
@@ -87,10 +87,31 @@ pub trait Flow: Send {
     fn as_any(&self) -> &dyn Any;
     /// 目的：同上（可写一份）。
     fn as_any_mut(&mut self) -> &mut dyn Any;
+    /// 目的：这一段的业务面：单段流程是自己，复合流程是**当前这一段**（工作视图与派活按它取类型）。
+    fn part(&self) -> &dyn Any {
+        self.as_any()
+    }
+    /// 目的：同上（可写一份）。
+    fn part_mut(&mut self) -> &mut dyn Any {
+        self.as_any_mut()
+    }
     /// 目的：本流程转录的下一个行号（界面续号与回档重放都读它）。
     fn next_line(&self) -> u64;
     /// 目的：回档后重设行号（行号只增不退，值是全量最大 id + 1）。
     fn set_next_line(&mut self, next: u64);
+    /// 目的：会话名册落定（用户确认代拟的名单之后由驱动通知）：默认什么都不做，要成员出演的流程据此记下谁能上。
+    /// 约束：名册是会话级事实（落 meta.agents）；复合流程要转发给每一段，否则后一段不知道有谁。
+    fn adopt_roster(&mut self, roster: &[AgentMeta]) {
+        let _ = roster;
+    }
+    /// 目的：上一段流程交来的产物（复合流程的第一段收到的是用户需求）。
+    fn intake(&mut self, text: String) {
+        let _ = text;
+    }
+    /// 目的：本段流程的产物（交给下一段；`None` = 没交出东西）。
+    fn output(&self) -> Option<String> {
+        None
+    }
     /// 目的：流程自己判定整场工作已收尾（界面据此显示完成）。
     fn is_done(&self) -> bool {
         false

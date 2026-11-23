@@ -1,74 +1,9 @@
 //! 目的：通道替身——记录调用参数、按脚本回话或失败，覆盖流式、截断、中止与原生调用。
-//! 管：OptsChat/Reasoning/Trunc/Abort/Probe/Native 各类网关与脚本。
+//! 管：Reasoning/Trunc/Abort/Probe/Native 各类网关与脚本。
 //! 不管：内存替身库（`doubles/`）、runner（`runners.rs`）。
 //! 联动：`src/capabilities/llm/ports.rs` 的 `ChatGateway` 与 `Chat`。
 
 use super::*;
-
-/// 目的：记录调用参数、并能按脚本失败的通道替身。 用来钉两件机器可判的事实：**流式与预算来自全局设置**、**调用失败 = 中断而不是发言**。
-pub(crate) struct OptsChat {
-    pub(crate) seen: OptsLog,
-    /// 目的：每次调用的结果：None = 回一个 agree 信封；Some(原因) = 失败。
-    pub(crate) results: Vec<Option<String>>,
-}
-
-/// 目的：调用参数账本：(流式, 预算秒)。
-pub(crate) type OptsLog = Arc<Mutex<Vec<(bool, u64)>>>;
-
-impl crate::capabilities::llm::api::Chat for OptsChat {
-    fn complete(
-        &mut self,
-        _m: &[crate::capabilities::llm::api::Msg],
-        opts: crate::capabilities::llm::api::CompleteOpts<'_>,
-        _on: &mut dyn FnMut(crate::capabilities::llm::api::Chunk) -> bool,
-    ) -> crate::capabilities::llm::api::Completion {
-        self.seen
-            .lock()
-            .expect("锁")
-            .push((opts.stream, opts.timeout_secs));
-        let r = if self.results.len() > 1 {
-            self.results.remove(0)
-        } else {
-            self.results.first().cloned().unwrap_or(None)
-        };
-        match r {
-            Some(reason) => crate::capabilities::llm::api::Completion::failure(reason),
-            // 默认回**发言**而不是同意：同意是粘住的，开场就同意会让后面几轮被跳过，
-            // 那些用例（预算 / 失败中断）要的是"还在讨论中"。
-            None => crate::capabilities::llm::api::Completion::text(
-                "{\"type\":\"say\",\"text\":\"我先说\"}",
-            ),
-        }
-    }
-}
-
-pub(crate) fn opts_discussion(
-    results: Vec<Option<String>>,
-    llm: crate::capabilities::llm::api::LlmOpts,
-) -> (Discussion, OptsLog) {
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let members = vec![Member::new(
-        "m0",
-        crate::tests::doubles::test_params("m0"),
-        crate::capabilities::llm::api::ToolMode::Envelope,
-        Box::new(OptsChat {
-            seen: Arc::clone(&seen),
-            results,
-        }),
-    )];
-    (
-        Discussion::new(
-            members,
-            false,
-            std::sync::Arc::new(test_prompts()),
-            test_tools_svc(),
-            llm,
-            Default::default(),
-            String::new(),
-        ),
-        seen,
-    )
-}
 
 pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Discussion {
     let members: Vec<Member> = scripts
@@ -88,8 +23,6 @@ pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Dis
         members,
         allow,
         std::sync::Arc::new(test_prompts()),
-        test_tools_svc(),
-        Default::default(),
         Default::default(),
         String::new(),
     )

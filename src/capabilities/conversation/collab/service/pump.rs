@@ -1,20 +1,30 @@
-//! 目的：讨论泵——把讨论推进一步（pump_with）并装配成员（assemble_members）。
-//! 管：该问谁与上下文装配；行外送与增量（emit_new_lines / push_delta / review_event / derive_gate）。
+//! 目的：流程泵——按相位推进（讨论段 pump_discuss、执行段 pump_execute）并装配成员（assemble_members）。
+//! 管：该问谁与上下文装配；讨论收敛后由核心代理写总结（summarize）；行外送与增量（emit_new_lines / push_delta / review_event / derive_gate）。
 //! 不管：模型调用（泵不自己调模型，把「该问谁、带什么上下文」交回协调业务）；状态机步骤的判定（discussion.rs）。
-//! 联动：由 CollabSession 驱动；约定见 docs/session/session-model.md。
+//! 联动：由 CollabSession 驱动；两段由 `session::domain::sequence::Sequence` 串起来；约定见 docs/session/session-model.md。
 
-use super::collab::CollabSession;
+use super::collab::{CollabSession, Phase};
 use super::lines::*;
 use crate::capabilities::catalog::modules::api::Module;
 use crate::capabilities::conversation::collab::domain::events::CollabEvent;
 use crate::capabilities::conversation::collab::domain::gates::Pending;
 use crate::capabilities::conversation::collab::service::discussion::{MAX_ROUNDS, Member, TurnOut};
-use crate::capabilities::conversation::collab::service::synthesis::Execution;
-use crate::capabilities::conversation::session::api::SessionEvent;
+use crate::capabilities::conversation::collab::service::synthesis::{Execution, draft_plan};
+use crate::capabilities::conversation::session::api::{LineView, SessionEvent};
+use crate::capabilities::llm::api::Msg;
+use crate::capabilities::prompt::api::Segment;
 
 impl CollabSession {
-    /// 目的：泵：推进讨论直至暂停（ask）或收敛并走完整理/执行/验收/交付；事件逐条经 sink 外送。
+    /// 目的：泵：按本段流程的相位推进（讨论段收敛后写总结；执行段拟计划、派活、验收、交付）。
     pub fn pump_with(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
+        match self.phase {
+            Phase::Discuss => self.pump_discuss(sink),
+            Phase::Execute => self.pump_execute(sink),
+        }
+    }
+
+    /// 目的：讨论段：推进讨论直至让出一步或收敛；收敛后由核心代理把讨论上下文收成一份总结。
+    fn pump_discuss(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
         if self.done || self.disc.is_none() {
             return;
         }
@@ -22,7 +32,6 @@ impl CollabSession {
         if self.awaiting_user() {
             return;
         }
-        let prompts = self.prompts.clone();
         // 讨论阶段：只在未收敛时步进（回档/重启后可从中途接着走）。
         if !self.disc.as_ref().expect("disc 已确认存在").closed {
             loop {
@@ -88,17 +97,75 @@ impl CollabSession {
                 }
             }
         }
-        // 整理：只在还没有方案（或没有链）时做——回档/重启后沿用已记的，不重复花钱。
+        // 收敛之后：这一段交出的是**一份需求说明**——由核心代理（不是成员）把讨论上下文收成它，
+        // 交给下一步（执行流程）当输入；它同时落成一条转录行，回档/重启后按它派生。
+        if self.summary.is_some() {
+            self.done = true;
+            return;
+        }
+        sink(crate::capabilities::conversation::session::api::working(
+            "核心",
+        ));
+        let made = self.summarize(sink);
+        sink(crate::capabilities::conversation::session::api::idle());
+        match made {
+            Ok(text) => {
+                let line = self.view(LineView::system("总结", text.clone()));
+                sink(SessionEvent::Transcript(vec![line]));
+                sink(CollabEvent::Summary(text.clone()).push());
+                self.summary = Some(text);
+                self.done = true;
+            }
+            Err(err) => {
+                let note = if self.cancelled() {
+                    crate::capabilities::conversation::session::api::stopped_note()
+                } else {
+                    crate::capabilities::conversation::session::api::interrupted_note(&err)
+                };
+                self.notice(&note, sink);
+            }
+        }
+    }
+
+    /// 目的：执行段：从交来的需求起步，拟计划、等审批、派节点、阶段验收、总验收与交付。
+    fn pump_execute(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
+        if self.done {
+            return;
+        }
+        // 队列里还挂着等用户答的卡：一步都不推（与讨论段同一条规则）。
+        if self.awaiting_user() {
+            return;
+        }
+        if self.task.trim().is_empty() {
+            self.notice(
+                "[错误] 执行这一步没有拿到要做的需求：先交一份讨论总结或需求说明。",
+                sink,
+            );
+            return;
+        }
+        let prompts = self.prompts.clone();
+        // 拟计划：只在还没有方案（或没有链）时做——回档/重启后沿用已记的，不重复花钱。
         if self.plan.is_none() || self.chain.is_none() {
             sink(crate::capabilities::conversation::session::api::working(
                 "核心",
             ));
+            // 交给核心代理的输入就是**交来的那份需求说明**（讨论的总结）：讨论与执行的对接只有这一条消息。
+            let roster = self.names().join("、");
+            let task = self.task.clone();
+            let opts = self.disc_opts();
+            let cancel = std::sync::Arc::clone(&self.cancel);
             let made = {
                 let mut verify_box = self.verify_env("planner");
                 let verify = verify_box.as_deref_mut();
-                self.disc.as_ref().expect("disc 存在").synthesize(
+                draft_plan(
+                    &*self.prompts,
+                    &*self.systools,
+                    &roster,
+                    &task,
                     self.core_chat.as_mut(),
                     self.core_mode,
+                    opts,
+                    &cancel,
                     verify,
                     sink,
                 )
@@ -108,17 +175,9 @@ impl CollabSession {
                 Ok((plan, chain, advice)) => {
                     // 核心 AI 的建议随方案一起来（同一批产出，不额外花一次调用）。
                     self.gate_advice = advice;
-                    // **装配期门禁**：链必须自洽（悬空依赖 / 环 / 未知负责人 / 空目标）——
-                    // 不静默开工；挡下时如实说明，用户点「继续」会重新整理。
-                    let roster: Vec<String> = self
-                        .disc
-                        .as_ref()
-                        .expect("disc 存在")
-                        .members
-                        .iter()
-                        .filter(|m| m.present)
-                        .map(|m| m.id.clone())
-                        .collect();
+                    // **装配期门禁**：链必须自洽（悬空依赖 / 环 / 未知负责人 / 空目标），不静默开工；
+                    // 挡下时如实说明，用户点「继续」会重新整理。能接活的是**在组名单**（名单就是它）。
+                    let roster = self.names();
                     let problems = chain.problems(&roster);
                     if !problems.is_empty() {
                         self.notice(
@@ -472,6 +531,80 @@ impl CollabSession {
         );
         sink(SessionEvent::Ended);
         self.done = true;
+    }
+
+    /// 目的：核心代理的一次普通生成：把讨论上下文收成一份需求说明（讨论这一步的产物，交给执行流程）。
+    /// 错误：被停、调用失败、回复为空都如实报错——不编一份假的总结往下交。
+    fn summarize(&mut self, sink: &mut dyn FnMut(SessionEvent)) -> Result<String, String> {
+        let transcript = self
+            .disc
+            .as_ref()
+            .map(|d| {
+                d.transcript
+                    .iter()
+                    .map(|l| l.render())
+                    .collect::<Vec<String>>()
+                    .join("\n")
+            })
+            .unwrap_or_default();
+        let msgs = vec![
+            Msg::system(self.prompts.text(Segment::SummarizeSystem).to_string()),
+            Msg::user(
+                self.prompts
+                    .render(Segment::SummarizeUser, &[("transcript", transcript)]),
+            ),
+        ];
+        let mut opts = self.disc_opts();
+        opts.cancel = Some(crate::capabilities::llm::api::cancel_flag(
+            std::sync::Arc::clone(&self.cancel),
+        ));
+        let mut acc = String::new();
+        let stop = std::sync::Arc::clone(&self.cancel);
+        let made = {
+            let mut on = |chunk: crate::capabilities::llm::api::Chunk| {
+                let mut kind = "text";
+                let mut piece = String::new();
+                match &chunk {
+                    crate::capabilities::llm::api::Chunk::Start => {
+                        acc.clear();
+                        kind = "start";
+                    }
+                    crate::capabilities::llm::api::Chunk::Text(t) => {
+                        let (send, next) =
+                            crate::capabilities::conversation::session::api::stream_piece(&acc, t);
+                        piece = send;
+                        acc = next;
+                    }
+                    crate::capabilities::llm::api::Chunk::Reasoning(r) => {
+                        kind = "reasoning";
+                        piece = r.clone();
+                    }
+                }
+                // 空片段不刷事件流（与各回合同一条规则）。
+                if crate::capabilities::conversation::session::api::delta_visible(kind, &piece) {
+                    sink(
+                        crate::capabilities::conversation::session::api::SessionEvent::Delta {
+                            speaker: "核心".to_string(),
+                            kind: kind.to_string(),
+                            text: piece,
+                        },
+                    );
+                }
+                !stop.load(std::sync::atomic::Ordering::Relaxed)
+            };
+            self.core_chat.complete(&msgs, opts, &mut on)
+        };
+        if made.cancelled || self.cancelled() {
+            return Err("已停止".to_string());
+        }
+        if let Some(err) = made.error {
+            return Err(err);
+        }
+        let text = made.raw.trim().to_string();
+        if text.is_empty() {
+            return Err("核心没有给出总结（回复为空）".to_string());
+        }
+        Ok(text)
     }
 
     /// 目的：从在组名单装配成员（策略在 runtime：该 agent 的模型 > 核心默认；缺了就如实报错）。

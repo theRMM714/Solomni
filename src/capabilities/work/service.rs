@@ -19,9 +19,10 @@ use crate::capabilities::catalog::packages::api as pkgs;
 use crate::capabilities::catalog::packages::api::Packages;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::Registry;
-use crate::capabilities::conversation::collab::api::CollabSession;
+use crate::capabilities::conversation::collab::api::{CollabSession, Phase};
 use crate::capabilities::conversation::session::api::{
-    Delegation, Gates, History, HistoryView, OptionView, RunState, SessionEvent, SessionMeta,
+    Delegation, Gates, History, HistoryView, OptionView, RunState, Sequence, SessionEvent,
+    SessionMeta,
 };
 use crate::capabilities::llm::api::{Channel, Llm};
 use crate::capabilities::prompt::api::Prompt;

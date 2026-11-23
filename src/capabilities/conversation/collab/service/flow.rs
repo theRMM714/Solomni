@@ -7,6 +7,7 @@ use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::conversation::collab::domain::gates::Pending;
 use crate::capabilities::conversation::collab::service::collab::CollabSession;
 use crate::capabilities::conversation::collab::service::discussion::AfterTurn;
@@ -83,6 +84,20 @@ impl Flow for CollabSession {
 
     fn set_next_line(&mut self, next: u64) {
         self.next_line = next;
+    }
+
+    fn adopt_roster(&mut self, roster: &[AgentMeta]) {
+        // 名单是会话级事实：代拟的名单刚被确认时，后面那一段也要认得出谁能出演。
+        self.roster = roster.to_vec();
+    }
+
+    fn intake(&mut self, text: String) {
+        // 上一段交来的产物就是这一段的需求（讨论段的总结 → 执行段要做的需求）。
+        self.task = text;
+    }
+
+    fn output(&self) -> Option<String> {
+        self.summary.clone()
     }
 
     fn is_done(&self) -> bool {
