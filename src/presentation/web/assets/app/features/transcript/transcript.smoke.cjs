@@ -6,6 +6,7 @@
 const model = require("./model.js");
 const events = require("./events.js");
 const scroll = require("./scroll.js");
+const flow = require("../flow/flow.js");
 
 async function main() {
 
@@ -58,6 +59,7 @@ const api = async (method, url) => {
   return {};
 };
 const app = {
+  flowApply: flow.flowApply,
   renderStream: () => { calls.renderStream += 1; },
   renderAll: () => { calls.renderAll += 1; },
   scheduleLiveTick: () => { calls.tick += 1; },
@@ -76,6 +78,20 @@ const mkSession = (sid) => {
 };
 const s1 = mkSession("s1");
 state.activeSid = "s1";
+
+/* ---------- 流程视图：节点进度只进流程快照，不进转录 ---------- */
+const sf = mkSession("sf");
+events.absorb(sf, { type: "plan_review", chain: { nodes: [{ id: "n1-1", title: "做 X", assignee: "甲", status: "pending", sub_session: "sf--a" }] } });
+check(sf.flow && sf.flow.nodes.length === 1 && sf.flow.nodes[0].status === "pending", "方案审查给出整条链");
+events.absorb(sf, { type: "node_started", node: "n1-1", sid: "sf--a", assignee: "甲" });
+check(sf.flow.nodes[0].status === "running" && sf.flow.nodes[0].sid === "sf--a", "开工把节点置为进行中");
+events.absorb(sf, { type: "report", id: "n1-1", rework: 1, text: "做完了" });
+check(sf.flow.nodes[0].status === "done" && sf.flow.nodes[0].rework === 1, "回报把节点置为完成并记返工");
+events.absorb(sf, { type: "review", items: [{ item: "做 X", status: "pass" }, { item: "做 Y", status: "fail" }], raw: "" });
+check(sf.flow.review.pass === 1 && sf.flow.review.total === 2, "验收清单汇总到流程结论");
+events.absorb(sf, { type: "delivery", ok: false });
+check(sf.flow.delivery && sf.flow.delivery.ok === false, "交付结论进流程快照");
+check(sf.lines.length === 0, "节点进度不进转录");
 
 check(events.absorb(s1, { type: "notice", text: "提示" }) === false, "系统提示要整帧重建");
 check(s1.lines.length === 1 && s1.lines[0].cls === "sys", "系统提示进转录");

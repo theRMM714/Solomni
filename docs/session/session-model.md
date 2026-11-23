@@ -122,6 +122,7 @@ session/<工作名>/
 
 - **历史与实时合流，前端不合并两个来源**：`GET /api/history/{name}` 一次给全盘上转录 + 事件台上它之外的尾巴，并给出合流时的头部序号当**水位**；此后 `seq ≤ 水位` 的批次丢掉、之上的按序 append（见 [contracts.md](../presentation/contracts.md)）。
 - 判据是结构化相等而不是行 id——`node_started`/`report` 与瞬时提示没有行 id（内容类系统提示已经是 `transcript` 里的 `notice` 行，有 id）。
+- **节点进度不落转录行**：`plan_review` / `node_started` / `report` / `review` / `delivery` 只是事件台里的进程事实，界面把它们画成状态栏上方的流程视图（展开后列出整条链，按状态着色），转录里没有「节点」这一种行；刷新与回放靠同一批事件重建（`src/presentation/web/assets/app/features/flow/flow.js`）。
 - **回档会推进重置水印**：水印之前的批次已被盘上转录取代，`live` 只取水印之后；前端收到 `rewound` 时清空重建。
 
 - **行身份是结构化字段**：一行带 `speaker`（谁说的）/ `verb`（动词：say / agree / 需求 / 开始…）/ `kind`（`msg` 模型发言 / `user` 用户说的 / `system` 系统注入或核心自己的行 / `notice` 内容类系统提示 / `tool` 工具行 / `round` 轮次分隔行），**正文里不带 `[谁:动词]` 标签**。`LineView::render()` 是"字段 → 文本"的**唯一**拼法：提示词里的转录（`{{transcript}}`）与回放比较都读它；呈现层按 `kind` 换样式、按 `speaker`/`verb` 显示身份，不解析文本（见 [contracts.md](../presentation/contracts.md) 的推的事实）。

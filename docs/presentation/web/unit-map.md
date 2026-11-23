@@ -1,7 +1,7 @@
 # 单元地图 · presentation/web
 
 > 定位：presentation/web（本地 HTTP 呈现）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-10｜依据：`src/presentation/web.rs`
+> 效力：契约｜核对：2026-11-23｜依据：`src/presentation/web.rs`
 
 > 本文是 **presentation/web** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -22,4 +22,4 @@
 | `src/presentation/web/assets/app/core/` | 不依赖其它层的原语：`http.js` HTTP 封装（JSON 进出、统一错误形状、按 `timeoutMs` 有界等待）、`events.js` 长轮询传输、`dom.js` 的 DOM 原语、`format.js` 纯格式化函数 |
 | `src/presentation/web/assets/app/stores/` | API 回包与事件的投影（只由回包与事件写入）：`state.js` 快照、`sessions.js` 会话读法、`settings.js` 思考档位与权限文案 |
 | `src/presentation/web/assets/app/ui/` | 组件库（只收参数、发回调，只依赖 `core/`）：`index.js` 组装，`icons` / `buttons` / `forms` / `overlays`（含 `detail` 三段文案）/ `dialog` / `modal` |
-| `src/presentation/web/assets/app/features/` | 各功能区（每个导出 `mount(root, deps)`，功能之间互不 import）：`sidebar` / `wizard` / `session-config` / `tabs` / `status-bar` / `composer` / `transcript` / `actions` / `work` / `shell` / `settings` / `agents` / `files` / `setup` / `modules` |
+| `src/presentation/web/assets/app/features/` | 各功能区（每个导出 `mount(root, deps)`，功能之间互不 import）：`sidebar` / `wizard` / `session-config` / `tabs` / `status-bar` / `composer` / `transcript` / `flow` / `actions` / `work` / `shell` / `settings` / `agents` / `files` / `setup` / `modules` |
