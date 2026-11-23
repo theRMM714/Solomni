@@ -14,7 +14,7 @@ const $ = (sel) => doc.querySelector(sel);
 
 function renderAll() {
   const s = app.activeSession();
-  app.renderTabs(); renderStream(); renderGate(s); app.syncComposer(s);
+  app.renderTabs(); renderStream(); renderGate(s); app.renderFlow(s); app.syncComposer(s);
   if (s && s.workDirty) { s.workDirty = false; app.loadWork(s.sid, true); }
 }
 

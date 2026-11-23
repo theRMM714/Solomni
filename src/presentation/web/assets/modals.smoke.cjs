@@ -418,13 +418,13 @@ if (!loadErrors.length) {
     );
     return out.length === 1 && out[0].cls === "sys system" && out[0].text.indexOf("回合") >= 0;
   });
-  // ④ 轮次分隔行同样（两种标签都要认）。
-  check("轮次分隔行解析成系统行", () => {
+  // ④ 轮次分隔行同样（两种标签都要认），但它是流程行、不是系统注入行。
+  check("轮次分隔行解析成流程行", () => {
     const out = vm.runInNewContext(
       "lineParts({ kind: 'round', speaker: '轮次', line: '2' })",
       sandbox
     );
-    return out.length === 1 && out[0].cls === "sys system";
+    return out.length === 1 && out[0].cls === "sys round" && out[0].text === "轮次 2" && out[0].who === "";
   });
   // ⑤ 批次按 seq 应用，游标**单调前进**（事实只有一条来路：事件台）。
   check("批次按 seq 应用，游标只前进", () => {
@@ -441,21 +441,22 @@ if (!loadErrors.length) {
     return got.applied === 2 && got.lines.length === 2 &&
       got.lines[0].indexOf("第一") >= 0 && got.lines[1].indexOf("第二") >= 0;
   });
-  // ⑥ 节点回报要与"开工"配成同一张完成卡（不再是一条系统文本行）。
-  check("节点回报配成完成卡", () => {
+  // ⑥ 节点进度只进流程视图，不在转录里占行（不回退成系统文本行、也不再是节点卡）。
+  check("节点回报进流程视图而不是转录行", () => {
     const snippet = [
       "(() => {",
       '  state.sessions.set("s2", { sid: "s2", lines: [], live: [], pending: null, sending: false, done: false, fold: {}, scroll: {} });',
-      '  absorb(state.sessions.get("s2"), { type: "node_started", node: "n1", sid: "w--a", assignee: "甲" });',
-      '  absorb(state.sessions.get("s2"), { type: "report", id: "n1", rework: 2, text: "语料抽好了\\n第二行也留着" });',
-      '  const l = state.sessions.get("s2").lines[0] || {};',
-      '  return { n: state.sessions.get("s2").lines.length, cls: l.cls, state: l.state, id: l.node && l.node.id, sid: l.node && l.node.sid, rework: l.rework, report: l.report };',
+      '  const s = state.sessions.get("s2");',
+      '  absorb(s, { type: "plan_review", plan: "P", chain: { nodes: [{ id: "n1", title: "抽语料", assignee: "甲", status: "pending", sub_session: "w--a" }] } });',
+      '  absorb(s, { type: "node_started", node: "n1", sid: "w--a", assignee: "甲" });',
+      '  absorb(s, { type: "report", id: "n1", rework: 2, text: "语料抽好了\\n第二行也留着" });',
+      '  const n = s.flow.nodes[0] || {};',
+      '  return { lines: s.lines.length, status: n.status, sid: n.sid, rework: n.rework, report: n.report };',
       "})()",
     ].join("\n");
     const got = vm.runInNewContext(snippet, sandbox);
-    return got.n === 1 && got.cls === "node" && got.state === "done" &&
-      got.id === "n1" && got.sid === "w--a" && got.rework === 2 &&
-      String(got.report).indexOf("语料抽好了") === 0;
+    return got.lines === 0 && got.status === "done" && got.sid === "w--a" &&
+      got.rework === 2 && String(got.report).indexOf("语料抽好了") === 0;
   });
   // ⑦ 模块与服务面板只管启停与服务；调用在动作页（参数按声明现渲染）。
   check("模块页不含调用入口，动作页按声明渲染参数表单", () => {

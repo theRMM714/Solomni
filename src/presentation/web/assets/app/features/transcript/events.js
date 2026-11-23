@@ -64,46 +64,16 @@ function absorb(s, ev) {
       applySnapshot(s, ev.events || []);
       break;
     // 任务链的进展：节点开工/回报/验收/交付——主会话也要看得到，不必点进子会话。
+    // 节点是执行进度，不是转录内容：进度落在状态栏上方的流程视图（features/flow），转录里不留行。
     case 'node_started':
-      // 节点是执行进度，不是转录内容：独立的卡片（有状态 / 执行人 / 进入子会话），不复用系统消息。
       if (ev.sid) state.nodeBySid.set(ev.sid, { node: ev.node || '', assignee: ev.assignee || '' });
-      s.lines.push({
-        cls: 'node',
-        node: { id: ev.node || '', sid: ev.sid || '', assignee: ev.assignee || '' },
-        state: 'started',
-        report: '',
-        rework: 0,
-        who: '',
-        text: '',
-      });
+      app.flowApply(s, ev);
       break;
-    // 节点回报 = **它把活交回来了**：找到同一节点的卡标完成，不另起一行。
+    // 节点回报 = **它把活交回来了**：流程视图里标完成，不另起一行。
     // 失败的节点由核心的验收结论另行如实说明（这里只显示"交回"这个事实，不替验收下判）。
-    case 'report': {
-      const id = ev.id || '';
-      let hit = null;
-      for (let i = s.lines.length - 1; i >= 0; i -= 1) {
-        const l = s.lines[i];
-        if (l.cls === 'node' && l.node && l.node.id === id) { hit = l; break; }
-      }
-      if (hit) {
-        hit.state = 'done';
-        hit.report = ev.text || '';
-        hit.rework = ev.rework || 0;
-      } else {
-        s.lines.push({
-          cls: 'node',
-          node: { id, sid: '', assignee: '' },
-          state: 'done',
-          report: ev.text || '',
-          rework: ev.rework || 0,
-          who: '',
-          text: '',
-        });
-      }
-      s.forceFull = true; // 卡在原位更新：报告不频繁，整帧重建比维护节点映射更稳
+    case 'report':
+      app.flowApply(s, ev);
       break;
-    }
     case 'transcript':
       // 服务端权威转录：每行带会话内稳定 id（回档按 id 定位）。
       // 权威行到达：撤掉乐观回显与流式块，改用服务端的行；带 tool 的行渲染成工具卡片。
@@ -157,10 +127,12 @@ function absorb(s, ev) {
     // 下面四种是**协作的裁决事实**（讨论收尾 / 方案 / 验收清单 / 交付）：前端不再自造转录行——
     // 后端已经把正文与身份落成带 id 的转录行（刷新、回档后照样读得到），这里只让整帧重建一次
     // 吃掉紧随其后的那几条行；事件本身留给流程视图（见 features/flow）。
+    case 'plan_review':
     case 'discussion_done':
     case 'plan':
     case 'review':
     case 'delivery':
+      app.flowApply(s, ev);
       break;
     case 'decision_card':
       // **裁决卡**：与快照里的 pending 是同一个事实，只是到达得更快。

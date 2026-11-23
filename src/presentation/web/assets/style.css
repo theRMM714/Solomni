@@ -163,33 +163,6 @@ body {
 .turn-tools { margin-top: 6px; }
 .turn .tool-card { max-width: none; margin-top: 6px; }
 .turn .tool-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
-
-/* ---- 节点卡：执行进度（状态 / 执行人 / 返工 / 回报 / 进入子会话） ---- */
-.node-card {
-  max-width: 82%; align-self: flex-start; display: flex; flex-direction: column; gap: 4px;
-  background: var(--color-surface-2); border: 1px solid var(--color-border);
-  border-left: 3px solid var(--color-accent); border-radius: var(--r-2); padding: 8px 12px;
-}
-.node-card.done { border-left-color: var(--color-ok); }
-.node-head { display: flex; align-items: center; gap: 8px; }
-.node-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-accent); flex: none; }
-.node-card.done .node-dot { background: var(--color-ok); }
-.node-title { font-weight: 600; font-size: var(--fs-s); }
-.node-badge { font-size: var(--fs-s); color: var(--color-text-dim); }
-.node-open {
-  margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
-  padding: 2px 8px; font-size: var(--fs-s); background: none; border: 1px solid var(--color-border);
-  border-radius: var(--r-1); color: var(--color-text-dim); cursor: pointer;
-}
-.node-open:hover { color: var(--color-accent); border-color: var(--color-accent); }
-.node-sub { font-size: var(--fs-s); color: var(--color-text-dim); }
-.node-preview { font-size: var(--fs-s); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.node-report { margin-top: 2px; }
-.node-report-text {
-  margin: 4px 0 0; padding: 6px 8px; max-height: 200px; overflow: auto;
-  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--r-1);
-  font-size: var(--fs-s); white-space: pre-wrap; word-break: break-word;
-}
 .turn-foot {
   display: flex; align-items: center; gap: 2px; margin-top: 2px;
   opacity: 0; transition: opacity var(--dur-fast) var(--ease-out);
@@ -238,6 +211,51 @@ body {
   border: 1px solid var(--color-border); border-radius: var(--r-2); background: var(--color-surface); color: var(--color-text);
 }
 .gate-card .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---- 流程视图：任务链节点一次列全（可展开收起），状态栏上方的一条执行进度 ---- */
+.flow {
+  flex: none; padding: 0 var(--sp-4); background: var(--color-bg);
+  border-top: 1px solid var(--color-border);
+}
+.flow.hidden { display: none; }
+.flow > * { width: 100%; max-width: var(--w-read); margin: 0 auto; }
+.flow-head {
+  display: flex; align-items: center; gap: var(--sp-2); width: 100%; height: 32px;
+  padding: 0; background: none; border: 0; color: var(--color-text);
+  font: inherit; font-size: var(--fs-s); text-align: left; cursor: pointer;
+}
+.flow-head:hover .flow-title { color: var(--color-accent); }
+.flow-mark { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-dim); }
+.flow-mark.run { background: var(--color-accent); animation: rail-pulse var(--dur-pulse) infinite; }
+.flow-mark.ok { background: var(--color-ok); }
+.flow-mark.bad { background: var(--color-err); }
+.flow-title { font-weight: 600; }
+.flow-count { color: var(--color-text-dim); font-variant-numeric: tabular-nums; }
+.flow-note { color: var(--color-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-chev {
+  margin-left: auto; display: inline-flex; color: var(--color-text-dim);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.flow.closed .flow-chev { transform: rotate(-90deg); }
+.flow-list {
+  display: flex; flex-direction: column; gap: 2px; padding: 0 0 var(--sp-2);
+  list-style: none; max-height: 32vh; overflow-y: auto;
+}
+.flow-node {
+  display: flex; align-items: center; gap: var(--sp-2); min-height: 28px;
+  padding: 0 var(--sp-1); border-radius: var(--r-1);
+  font-size: var(--fs-s); color: var(--color-text-dim); cursor: default;
+}
+.flow-node.link { cursor: pointer; }
+.flow-node.link:hover { background: var(--color-surface-2); }
+.flow-node-mark { flex: none; display: inline-flex; color: var(--color-text-dim); }
+.flow-node-mark .ui-icon { width: 14px; height: 14px; }
+.flow-node-title { color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-node-id, .flow-node-who { color: var(--color-text-dim); font-variant-numeric: tabular-nums; }
+.flow-node-badge { margin-left: auto; color: var(--color-text-dim); }
+.flow-node.running .flow-node-mark, .flow-node.running .flow-node-badge { color: var(--color-accent); }
+.flow-node.done .flow-node-mark, .flow-node.done .flow-node-badge { color: var(--color-ok); }
+.flow-node.failed .flow-node-mark, .flow-node.failed .flow-node-badge { color: var(--color-err); }
 
 /* ---- 会话状态栏：上下文用量 / 共享区提交；点 chip 看详情 ---- */
 .session-status {
@@ -390,7 +408,7 @@ body {
     background: var(--color-mask);
   }
   .drawer-mask.show { display: block; }
-  .line, .turn, .node-card { max-width: none; }
+  .line, .turn, .flow > * { max-width: none; }
   /* 移动端：输入区铺满，输入框更高更好点 */
   .composer-inner { max-width: none; }
   .composer textarea { min-height: 58px; max-height: 180px; }

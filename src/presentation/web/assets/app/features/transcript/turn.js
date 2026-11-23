@@ -1,5 +1,5 @@
-/* 目的：定稿的「一轮」气泡（正文 / 思维链 / 工具组 / 节点卡）与只追加的增量渲染。
- * 管：buildTurn / nodeCard / appendFinalRow / appendFinalLine / renderDone，以及 DOM 归属（boxes.owner 等）。
+/* 目的：定稿的「一轮」气泡（正文 / 思维链 / 工具组）与只追加的增量渲染。
+ * 管：buildTurn / appendFinalRow / appendFinalLine / renderDone，以及 DOM 归属（boxes.owner 等）。
  * 不管：不吸收事件、不做整帧策略、不处理裁决卡（见 ./events.js 与 ./cards.js）。
  * 联动：行部件来自 ./parts.js，纯映射来自 ./model.js。 */
 
@@ -117,67 +117,7 @@ function buildTurn(group, s) {
   return { node: el, reply: group.reply, parts, key };
 }
 
-/// 节点卡：执行进度，不是转录内容。状态 / 执行人 / 返工轮次 / 回报 / 进入子会话。
-function nodeCard(l, s) {
-  const n = l.node || {};
-  const el = doc.createElement('article');
-  el.className = 'node-card ' + (l.state === 'done' ? 'done' : 'started');
-  const head = doc.createElement('div');
-  head.className = 'node-head';
-  const dot = doc.createElement('span');
-  dot.className = 'node-dot';
-  head.appendChild(dot);
-  const title = doc.createElement('span');
-  title.className = 'node-title';
-  title.textContent = '节点 · ' + (n.id || '（未命名）');
-  head.appendChild(title);
-  const badge = doc.createElement('span');
-  badge.className = 'node-badge';
-  badge.textContent = l.state === 'done'
-    ? '完成' + (l.rework ? ' · 第 ' + l.rework + ' 轮返工' : '')
-    : '进行中';
-  head.appendChild(badge);
-  if (n.sid) {
-    const go = doc.createElement('button');
-    go.type = 'button';
-    go.className = 'node-open';
-    go.title = '进入这个节点的子会话';
-    go.appendChild(ui.icon('folder'));
-    const label = doc.createElement('span');
-    label.textContent = '子会话';
-    go.appendChild(label);
-    go.onclick = () => app.openPath(n.sid);
-    head.appendChild(go);
-  }
-  el.appendChild(head);
-  if (n.assignee) {
-    const sub = doc.createElement('div');
-    sub.className = 'node-sub';
-    sub.textContent = '执行：' + n.assignee;
-    el.appendChild(sub);
-  }
-  if (l.report) {
-    const prev = doc.createElement('div');
-    prev.className = 'node-preview';
-    prev.textContent = String(l.report).split('\n')[0].slice(0, 96);
-    el.appendChild(prev);
-    const d = doc.createElement('details');
-    d.className = 'fold node-report';
-    foldBind(s, 'N' + (n.id || ''), d);
-    const sum = doc.createElement('summary');
-    sum.textContent = '回报全文';
-    d.appendChild(sum);
-    const pre = doc.createElement('pre');
-    pre.className = 'node-report-text';
-    pre.textContent = l.report;
-    d.appendChild(pre);
-    el.appendChild(d);
-  }
-  return el;
-}
-
 function appendFinalRow(l, s) {
-  if (l.cls === 'node') { boxes.done.appendChild(nodeCard(l, s)); return; }
   const bodyless = !String(l.text == null ? '' : l.text).trim();
   if (bodyless && !l.reasoning) return;
   const built = lineBlock(l, s, 'L' + l.id, false);
@@ -240,10 +180,10 @@ function renderDone(s, full) {
   flushScroll(s);
 }
 
-export { buildTurn, nodeCard, appendFinalRow, appendFinalLine, renderDone };
+export { buildTurn, appendFinalRow, appendFinalLine, renderDone };
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
   ({ g, doc, state, ui, app } = deps);
-  Object.assign(root, { buildTurn, nodeCard, appendFinalRow, appendFinalLine, renderDone });
+  Object.assign(root, { buildTurn, appendFinalRow, appendFinalLine, renderDone });
 }
