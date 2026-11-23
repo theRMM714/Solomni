@@ -55,6 +55,29 @@ function historyMenu(h) {
   return items;
 }
 
+/// 状态灯的词表：颜色 + 一句 title/aria（颜色之外还有一种可读的说法）。
+const LAMP_TIP = { run: '进行中', wait: '等你裁决', stop: '已停止', idle: '闲置', archived: '已归档' };
+
+/* 会话状态灯：归并与停止是持久事实，等裁决其次，再看"这一刻在不在跑"，剩下是闲置。
+ * 纯函数（不碰 DOM）——颜色判据能在冒烟里直接钉住。 */
+export function lampOf(h, live, runningNames) {
+  if (!h) return 'idle';
+  if (h.run === 'archived') return 'archived';
+  if (h.run === 'stopped') return 'stop';
+  if (live && live.pending) return 'wait';
+  const running = !!(live && live.running) || !!(runningNames && runningNames.has(h.name));
+  return running && !h.done ? 'run' : 'idle';
+}
+
+/// 行首那颗灯：颜色表状态，title 与 aria-label 给同一句可读说明。
+function lampDot(lamp) {
+  const dot = doc.createElement('span');
+  dot.className = 'hdot ' + lamp;
+  dot.title = LAMP_TIP[lamp];
+  dot.setAttribute('aria-label', LAMP_TIP[lamp]);
+  return dot;
+}
+
 function renderHistory() {
   const box = $('#history-list');
   if (!box) return;
@@ -111,16 +134,14 @@ function renderHistory() {
       const name = doc.createElement('span');
       name.className = 'hname'; name.textContent = h.name; name.title = h.name;
       const mode = doc.createElement('span'); mode.className = 'hmode';
-      // 持久事实（停止）与"这一刻在不在跑"分开：只有确实在跑才标「进行中」，
-      // 否则重启前没结束的旧会话会一直冒充在跑。
+      // 运行状态改由行首的灯表达（颜色 + title），文字只留类型与不可用原因。
       const live = state.sessions.get(h.name);
-      const running = !!(live && live.running) || !!(state.running && state.running.has(h.name));
-      const stateTag = h.run === 'stopped' ? '·已停止' : (running && !h.done ? '·进行中 ' : '');
-      mode.textContent = stateTag + app.typeLabel(h.kind) +
+      mode.textContent = app.typeLabel(h.kind) +
         (h.tier === 'vm' && h.tier_ready === false ? '·虚拟机档不可用' : '') +
         (h.workspace_missing ? '·工作区不存在' : '');
       const pencil = ui.iconButton({ icon: 'pencil', label: '会话操作', tip: '', cls: 'hpen' });
       pencil.onclick = (e) => { e.stopPropagation(); ui.menu(pencil, historyMenu(h)); };
+      row.appendChild(lampDot(lampOf(h, live, state.running)));
       row.appendChild(name); row.appendChild(mode); row.appendChild(pencil);
       into.appendChild(row);
       if (kids.length && open) {
@@ -185,6 +206,7 @@ function archivedRow(it) {
   mode.textContent = '·已归档 ' + app.typeLabel(it.kind);
   const pencil = ui.iconButton({ icon: 'pencil', label: '会话操作', tip: '', cls: 'hpen' });
   pencil.onclick = (e) => { e.stopPropagation(); ui.menu(pencil, historyMenu(it)); };
+  row.appendChild(lampDot('archived'));
   row.appendChild(name); row.appendChild(mode); row.appendChild(pencil);
   return row;
 }
@@ -452,5 +474,5 @@ function setupSidebar() {
 export function mount(root, deps) {
   ({ g, doc, state, api, ui, app } = deps);
   ({ fold, h, icon } = ui);
-  Object.assign(root, { historyMenu, renderHistory, warnIfTierUnavailable, hydrateHistory, openHistory, deleteHistory, renderSidebar, RAIL_KEY, isNarrow, readRail, saveRail, applyRail, openDrawer, closeDrawer, toggleSidebar, setupSidebar });
+  Object.assign(root, { lampOf, historyMenu, renderHistory, warnIfTierUnavailable, hydrateHistory, openHistory, deleteHistory, renderSidebar, RAIL_KEY, isNarrow, readRail, saveRail, applyRail, openDrawer, closeDrawer, toggleSidebar, setupSidebar });
 }

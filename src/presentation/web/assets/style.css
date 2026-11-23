@@ -571,6 +571,12 @@ body {
 }
 .history-toggle .ui-icon { width: 12px; height: 12px; transition: transform var(--dur-fast) var(--ease-out); }
 .history-toggle.open .ui-icon { transform: rotate(90deg); }
+/* 会话状态灯：绿=进行中、琥珀=等你裁决、空心=已停止、灰白=闲置、更暗=已归档（title 里同一句话）。 */
+.hdot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-dim); }
+.hdot.run { background: var(--color-ok); animation: rail-pulse var(--dur-pulse) infinite; }
+.hdot.wait { background: var(--color-warn); }
+.hdot.stop { background: transparent; box-shadow: inset 0 0 0 1.5px var(--color-text-dim); }
+.hdot.archived { opacity: .55; }
 .history-item .icon-btn { width: 32px; height: 32px; }
 .history-item .hname { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-item .hmode { flex: none; color: var(--color-text-dim); font-size: var(--fs-s); }

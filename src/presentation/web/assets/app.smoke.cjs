@@ -858,14 +858,19 @@ setTimeout(async () => {
           " const all = []; (function walk(n) { for (const c of (n.children || [])) { all.push(c); walk(c); } })(box);" +
           " const tags = all.map(function (el) {" +
           "   return (el.children || []).map(function (x) { return String(x.textContent); }).join('|'); });" +
+          " const dots = all.map(function (el) {" +
+          "   return (el.children || []).map(function (x) { return String(x.className || ''); })" +
+          "     .filter(function (c) { return c.indexOf('hdot') === 0; }).join(','); });" +
           " const archBox = []; (function walk(n) { for (const c of (n.children || [])) { archBox.push(String(c.textContent)); walk(c); } })(box);" +
-          " return { tags: tags, arch: archBox }; })()",
+          " return { tags: tags, dots: dots, arch: archBox }; })()",
         sandbox
       );
-      const j = JSON.stringify(r.tags);
+      const j = JSON.stringify(r.dots);
       const arch = JSON.stringify(r.arch);
-      historyRunTag = j.indexOf("已停止") >= 0 && j.indexOf("进行中") >= 0
-        && j.indexOf("已归档") >= 0 && j.indexOf("已关闭") < 0
+      // 状态改由行首的灯表达：停止 / 在跑各一颗，文字里不再重复；归档段仍按主会话名归类。
+      const tags = JSON.stringify(r.tags);
+      historyRunTag = j.indexOf("hdot stop") >= 0 && j.indexOf("hdot run") >= 0
+        && j.indexOf("hdot archived") >= 0 && tags.indexOf("进行中") < 0
         && arch.indexOf("主会话：p") >= 0 && arch.indexOf("c") >= 0;
       if (!historyRunTag) loadErrors.push("侧栏运行态检查：" + j + " / 归档段：" + arch);
     } catch (e) { loadErrors.push("侧栏运行态检查失败：" + e.message); }
@@ -905,29 +910,47 @@ setTimeout(async () => {
       loadErrors.push("围栏横幅检查失败：" + e.message);
     }
   }
-  // **节点卡**：开工/回报配成一张卡，带状态、执行人与进入子会话。
-  let nodeCard = false;
+  // **流程视图**：任务链节点一次列全、按状态上色、可展开收起；节点不再进转录。
+  let flowView = false;
   if (!loadErrors.length) {
     try {
       const r = vm.runInNewContext(
         "(function () {" +
-          " const s = { sid: 'nd', lines: [], live: [], fold: {}, scroll: {} };" +
-          " state.sessions.set('nd', s); state.activeSid = 'nd';" +
-          " absorb(s, { type: 'node_started', node: 'n1', sid: 'nd--a', assignee: '甲' });" +
-          " absorb(s, { type: 'report', id: 'n1', rework: 0, text: '做完了' });" +
-          " const box = document.querySelector('#stream'); box.children.length = 0; renderStream(true);" +
-          " const all = []; (function walk(n) { for (const c of (n.children || [])) { all.push(c); walk(c); } })(box);" +
-          " const cards = all.filter(function (n) { return String(n.className).split(' ')[0] === 'node-card'; });" +
-          " const card = cards[0] || { children: [] };" +
-          " const open = (card.children || []).some(function (c) {" +
-          "   return String(c.className) === 'node-head' && (c.children || []).some(function (x) { return String(x.className) === 'node-open'; }); });" +
-          " return { cards: cards.length, open: open };" +
+          " const s = { sid: 'fl', lines: [], live: [], fold: {}, scroll: {} };" +
+          " state.sessions.set('fl', s); state.activeSid = 'fl';" +
+          " absorb(s, { type: 'plan_review', plan: '方案', chain: { nodes: [" +
+          "   { id: 'n1-1', title: '做 X', assignee: '甲', status: 'pending', sub_session: 'fl--a' }," +
+          "   { id: 'n1-2', title: '做 Y', assignee: '乙', status: 'pending' } ] } });" +
+          " absorb(s, { type: 'node_started', node: 'n1-1', sid: 'fl--a', assignee: '甲' });" +
+          " absorb(s, { type: 'report', id: 'n1-1', rework: 0, text: '做完了' });" +
+          " const box = document.querySelector('#flow');" +
+          " const rows = function () {" +
+          "   const out = []; (function walk(n) { for (const c of (n.children || [])) {" +
+          "     if (String(c.className).split(' ')[0] === 'flow-node') out.push(c); walk(c); } })(box);" +
+          "   return out;" +
+          " };" +
+          " renderFlow(s);" +
+          " const first = rows();" +
+          " const classes = first.map(function (x) { return String(x.className); });" +
+          " const texts = first.map(function (x) { return x.children.map(function (c) { return String(c.textContent); }).join('|'); });" +
+          " const lines = s.lines.length;" +
+          " box.children[0].onclick();" +
+          " const closed = { cls: String(box.className), rows: rows().length };" +
+          " renderFlow({ sid: 'none' });" +
+          " const empty = String(box.className);" +
+          " return { rows: first.length, classes: classes, texts: texts, lines: lines, closed: closed, empty: empty };" +
           "})()",
         sandbox
       );
-      nodeCard = r.cards === 1 && r.open;
-      if (!nodeCard) loadErrors.push('节点卡检查：' + JSON.stringify(r));
-    } catch (e) { loadErrors.push('节点卡检查失败：' + e.message); }
+      flowView = r.rows === 2
+        && r.classes[0].indexOf('done') >= 0 && r.classes[0].indexOf('link') >= 0
+        && r.classes[1].indexOf('pending') >= 0 && r.classes[1].indexOf('link') < 0
+        && r.texts[0].indexOf('做 X') >= 0 && r.texts[0].indexOf('完成') >= 0
+        && r.lines === 0
+        && r.closed.cls.indexOf('closed') >= 0 && r.closed.rows === 0
+        && r.empty === 'flow hidden';
+      if (!flowView) loadErrors.push('流程视图检查：' + JSON.stringify(r));
+    } catch (e) { loadErrors.push('流程视图检查失败：' + e.message); }
   }
   // **标签梯级**：根 / 子 / 子子三行，按活跃路径展开。
   let tabLadder = false;
@@ -1152,7 +1175,7 @@ setTimeout(async () => {
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
     && rewoundApplies && readonlyRule && continueBarRules
     && taskButtonRule && decisionCardRule && onlyLastStreams && liveMarkdown && lineRule && toolOnlyReasoning && incrementalAppend && pendingReplaced && noticeRow && modalDismiss && rewindIcon && runningRules && atMenuRefetches && slashMenu
-    && wizardProxy && wizardBlocked && sessionNoteRule && historyRunTag && fenceBanner && nodeCard && tabLadder
+    && wizardProxy && wizardBlocked && sessionNoteRule && historyRunTag && fenceBanner && flowView && tabLadder
     && statusBarRules && thinkingMenuRules && shellCardRules && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
@@ -1160,7 +1183,7 @@ setTimeout(async () => {
     console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 盘上转录已补:", hydratedHistory, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
     console.log("回档重置:", rewoundApplies, "| 只读会话:", readonlyRule, "| 只读条恢复入口:", continueBarRules, "| notice 行:", noticeRow, "| 弹层判据:", modalDismiss, "| 回档图标:", rewindIcon, "| tool-only 思维链:", toolOnlyReasoning, "| 增量追加:", incrementalAppend, "| 乐观替换:", pendingReplaced);
     console.log("流式 Markdown:", liveMarkdown, "| 运行态归一（事件为准 / 快照只对账）:", runningRules, "| @ 菜单每次重拉:", atMenuRefetches, "| / 命令菜单:", slashMenu);
-    console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag, "| 围栏横幅:", fenceBanner, "| 节点卡:", nodeCard, "| 标签梯级:", tabLadder, "| 状态栏:", statusBarRules);
+    console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag, "| 围栏横幅:", fenceBanner, "| 流程视图:", flowView, "| 标签梯级:", tabLadder, "| 状态栏:", statusBarRules);
     console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));
     console.log("loadErrors:", JSON.stringify(loadErrors));
   }

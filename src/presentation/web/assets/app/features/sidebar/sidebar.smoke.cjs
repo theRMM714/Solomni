@@ -38,6 +38,16 @@ function node() {
     state: {}, api: {}, ui: {}, app: {},
   });
 
+  // 状态灯：颜色判据是纯函数，不必搭完整的会话树 DOM。
+  const lamp = mod.lampOf;
+  check("归档会话的灯", lamp({ name: "a", run: "archived" }) === "archived");
+  check("已停止会话的灯", lamp({ name: "b", run: "stopped" }) === "stop");
+  check("等裁决会话的灯", lamp({ name: "c", run: "open" }, { pending: { kind: "plan" } }) === "wait");
+  check("进行中会话的灯", lamp({ name: "d", run: "open" }, { running: true }) === "run");
+  check("跑完的会话回到闲置", lamp({ name: "e", run: "open", done: true }, { running: true }) === "idle");
+  check("会话表说在跑也算进行中", lamp({ name: "f", run: "open" }, null, new Set(["f"])) === "run");
+  check("没有会话视图时按闲置", lamp({ name: "g", run: "open" }) === "idle");
+
   root.toggleSidebar();
   check("第一次点开抽屉", sidebar.classList.contains("open") && mask.classList.contains("show"));
   check("点开后 aria-expanded=true", drawerBtn.attrs["aria-expanded"] === "true", drawerBtn.attrs["aria-expanded"]);
