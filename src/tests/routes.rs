@@ -287,10 +287,7 @@ impl WorkOps for FakeFaces {
     fn session_types(&self) -> Result<Vec<SessionTypeView>, String> {
         Ok(Vec::new())
     }
-    fn flow_decls(
-        &self,
-        _: &[String],
-    ) -> Result<Vec<crate::capabilities::conversation::session::api::FlowDecl>, String> {
+    fn flow_ids(&self, _: &[String]) -> Result<Vec<String>, String> {
         Ok(Vec::new())
     }
     fn create_work(&self, _spec: WorkSpec) -> Result<(WorkOpened, u64), String> {

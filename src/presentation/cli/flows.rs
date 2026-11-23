@@ -164,7 +164,7 @@ pub(super) fn proxy_flow(
 }
 
 /// 目的：协作会话：给需求、点名单（或让核心代拟），之后一律按裁决卡推进。
-/// 约束：给 `flows` 就是**临时拼装**——按列出的流程 id 现拼（声明取自会话类型表），不走预设类型。
+/// 约束：给 `flows` 就是**临时拼装**——按列出的流程 id 现拼（席位与人数由流程自己报），不走预设类型。
 pub(super) fn collab_flow(faces: &Faces, args: &Value) {
     let names = text(args, "agents").unwrap_or_default();
     let flow_arg = text(args, "flows").unwrap_or_default();
@@ -176,7 +176,7 @@ pub(super) fn collab_flow(faces: &Faces, args: &Value) {
     let flows = if ids.is_empty() {
         None
     } else {
-        match faces.work.flow_decls(&ids) {
+        match faces.work.flow_ids(&ids) {
             Ok(d) => Some(d),
             Err(e) => {
                 println!("[错误] {}", e);

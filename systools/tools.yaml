@@ -297,7 +297,7 @@ tools:
       代理类型（proxy）没有名单，决定权整块交给核心。
       人经呈现层调用时先建出会话、由用户后续发言推进；核心代理调用时**建好就开工**——
       没有流程时 task 是它的第一句，有流程时 task 是**本次需求**。
-      也可以**临时拼装**：省略 kind、用 flows 内联流程声明（流程与角色都必须在册）。
+      也可以**临时拼装**：省略 kind、用 flows 给一串流程 id（必须在册）。
       会话落在父会话目录的 children/ 下、与父共用同一个 work/。授权与父会话由会话类型提供，不接受模型自授；
       创建失败不留半成品；同一个 request_id 重放不会重复创建、也不会重复开工。
     params:
@@ -307,8 +307,8 @@ tools:
       flows:
         type: array
         desc: |-
-          临时拼装用的流程声明（与 kind 二选一）：[{"id":"discuss","core":["core_proxy"],"members":{"discussant":2}}]。
-          流程 id 必须已注册（discuss / execute），角色必须已在角色表里；core 只能坐核心席角色、members 只能坐成员席角色。
+          临时拼装用的流程 id 列表（与 kind 二选一），按执行顺序写，如 ["discuss","execute"]。
+          流程 id 必须已注册（discuss / execute）；席位与人数由流程自己报，不用在这里写角色。
           给了 flows 时不需要 kind（落盘类型记作 custom）
       agents:
         type: array

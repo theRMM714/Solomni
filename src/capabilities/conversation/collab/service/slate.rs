@@ -135,7 +135,7 @@ impl CollabSession {
         // **能用哪些表态不在这里列**：核心按这一回合的身份注入工具块（会话工具面的 tools_block），清单与越权校验同源。
         let protocol = format!(
             "{}\n{}",
-            self.prompts.mechanism("collab", "discussant"),
+            self.prompts.mechanism("discussant"),
             self.prompts.text(Segment::ChatProtocol)
         );
         let mut disc = Discussion::new(
@@ -320,7 +320,7 @@ impl CollabSession {
             // 恢复时与实时同一句：只有机制与约定，工具面随回合注入（见 tools_block）。
             let protocol = format!(
                 "{}\n{}",
-                s.prompts.mechanism("collab", "discussant"),
+                s.prompts.mechanism("discussant"),
                 s.prompts.text(Segment::ChatProtocol)
             );
 

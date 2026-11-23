@@ -11,9 +11,8 @@ fn the_shipped_table_covers_the_three_modes_and_its_roles_exist() {
     let profiles = YamlProfiles::new(root.join("systools"))
         .load()
         .expect("产品自带会话类型表必须合法");
-    let ids = profiles.ids();
-    for mode in ["single", "collab", "proxy"] {
-        assert!(ids.iter().any(|i| i == mode), "缺会话形态：{}", mode);
+    for kind in ["single", "collab", "proxy"] {
+        assert!(profiles.known(kind), "缺会话类型：{}", kind);
     }
     let st = YamlSystools::new(root.join("systools"))
         .load()
@@ -53,7 +52,7 @@ fn a_missing_or_broken_table_is_an_assembly_error() {
     // 语法对、规则不对：同样装配失败，文案点名文件与出问题的那一项。
     std::fs::write(
         broken.join("profiles.yaml"),
-        "profiles:\n  - id: single\n    roles: [solo]\n    flows:\n      - id: ghost\n        members: {solo: 1}\n",
+        "profiles:\n  - id: single\n    roles: [solo]\n    flows: [ghost]\n",
     )
     .expect("造没注册流程的表");
     let err = YamlProfiles::new(broken).load().unwrap_err();

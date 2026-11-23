@@ -183,7 +183,6 @@ pub(crate) fn test_prompts() -> Prompts {
     // 走**与产品同一条**装配路径（目录 + 合并）：替身与真机装配出同一册子，测试才有意义。
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     crate::capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"))
-        .sessions(test_profiles().ids())
         .load()
         .expect("内置提示词册必须合法")
 }

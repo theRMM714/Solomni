@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::capabilities::catalog::registry::api::AgentMeta;
-use crate::capabilities::conversation::session::api::{CUSTOM, FlowDecl};
+use crate::capabilities::conversation::session::api::CUSTOM;
 
 pub const CATALOG: &str = "catalog_agents";
 pub const CREATE: &str = "create_session";
@@ -337,8 +337,8 @@ pub struct ControlState {
 pub struct NewSession {
     /// 目的：会话类型名（会话类型表里的一个；装配时按它解析成落盘声明）；临时拼装固定是 `custom`。
     pub kind: String,
-    /// 目的：临时拼装内联的流程声明（None = 按 `kind` 查会话类型表）。
-    pub flows: Option<Vec<FlowDecl>>,
+    /// 目的：临时拼装选的流程 id 列表（None = 按 `kind` 查会话类型表）；席位与人数由流程自己报。
+    pub flows: Option<Vec<String>>,
     pub agents: Vec<AgentMeta>,
     /// 目的：**这个会话的开头 / 本次需求**：single = 它的第一句（点火用的派发），collab = 本次需求。
     ///   建好就开始——不是"给某个 agent 的任务"（见宿主实现的 `create_session`）。
@@ -381,9 +381,9 @@ pub struct CreateArgs {
     /// 目的：会话类型名（会话类型表里的一个；代理不能往代理里套）；临时拼装时省略。
     #[serde(default)]
     pub kind: String,
-    /// 目的：临时拼装内联的流程声明（与 `kind` 二选一；条目形状在 `resolve_new_session` 里校验）。
+    /// 目的：临时拼装选的流程 id 列表（与 `kind` 二选一；id 是否在册在装配期校验）。
     #[serde(default)]
-    pub flows: Option<Vec<FlowDecl>>,
+    pub flows: Option<Vec<String>>,
     /// 目的：每项是对象，形状在 parse_agents 里逐条校验（数组元素形状声明层表达不了）；省略 = 空（代理形态 / 代拟）。
     #[serde(default)]
     pub agents: Vec<serde_json::Value>,

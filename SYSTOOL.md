@@ -11,7 +11,8 @@
 | 系统工具与模块工具的分别：**系统工具**由核心实现（声明在上表的工具总表），**模块工具**由模块自己的外部命令实现；模块工具是动态动作（`module.<模块id>.<工具名>`），清单来自各模块 | `modules/*/module.yaml`；[MODULE_SPEC.md](MODULE_SPEC.md) |
 | 这个**身份有什么**：坐哪一席（核心 / 成员）+ 引用的系统工具 id + 提示词 + 是否给模块工具 | `systools/roles.yaml` |
 | 工作区布局**固定占用的目录名**（agent 实例名不得占用） | `systools/names.yaml` |
-| 一个**会话类型**的 id 与显示名、有哪些身份角色、按什么顺序跑哪些流程、每个流程的核心席与成员席（各要几员） | `systools/profiles.yaml` |
+| 一个**会话类型**的 id 与显示名、按什么顺序跑哪些流程、（没有流程的类型）坐哪些身份角色 | `systools/profiles.yaml` |
+| 一个**流程**的席位：核心席与成员席各是哪些角色、各要几员 | `src/capabilities/conversation/session/domain/flow.rs` 的 `FLOWS` |
 | 临时拼装的会话类型（请求里省略 `kind`、内联流程声明）落盘成什么 | 折成 `SessionSpec`，`kind` 记 `custom`（`src/capabilities/conversation/session/domain/profile.rs` 的 `inline_spec`） |
 | 已确认但尚未实施的系统工具与验收条件，**不限角色**（非当前工具表、非测试缺口账） | [systool_gaps.yaml](systool_gaps.yaml) |
 | 角色引用了表里不存在的 id 为什么硬失败、工具与角色的名单为什么在代码里没有第二份 | 装配期 `SystemTools::problems()`，由 `src/tests/detail/prompt.rs` 锁死 |
@@ -43,7 +44,7 @@
 - `systools/tools.yaml` → 加 / 改一个系统工具：唯一真相在这里，同次补实现、角色表按需引用与测试
 - `systools/roles.yaml` → 改角色：同次同步 `prompts/roles/<角色>`（提示词与工具面同处声明，分开必然漂）
 - `systools/names.yaml` → 加 / 改保留目录名：同次同步落盘布局文档 [docs/session/session-model.md](docs/session/session-model.md)
-- `systools/profiles.yaml` → 改会话类型 / 流程顺序 / 席位与人数：同次同步机制册 `prompts/shared/mechanisms.yaml` 的 `session`、`session/domain/flow.rs` 的 `REGISTERED` 与角色表的 `seat`（装配期校验，见 [docs/session/session-model.md](docs/session/session-model.md)）
-- `systools/roles.yaml` 的 `seat` → 改一个角色坐核心席还是成员席：同次检查它没有同时出现在另一席（装配期按 `systools/profiles.yaml` 的 `core` / `members` 校验）
+- `systools/profiles.yaml` → 改会话类型 / 流程顺序：同次确认流程已在 `session/domain/flow.rs` 的 `FLOWS` 注册（席位与人数在那边），并同步机制册 `prompts/shared/mechanisms.yaml` 的角色条目（装配期校验，见 [docs/session/session-model.md](docs/session/session-model.md)）
+- `systools/roles.yaml` 的 `seat` → 改一个角色坐核心席还是成员席：同次检查它没有同时出现在另一席（装配期按 `FLOWS` 各流程的 `core` / `members` 校验）
 - `docs/tools/tools-and-roles.md` → 改路径模型 / 围栏口径：同次同步 [ARCHITECTURE.md](ARCHITECTURE.md)
 - `src/tests/detail/prompt.rs` → 悬空引用由装配期 `SystemTools::problems()` 挡下，改表后保持它锁死

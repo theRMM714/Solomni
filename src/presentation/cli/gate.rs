@@ -388,7 +388,7 @@ pub(crate) fn create_session_action(
     faces: &Faces,
     name: &str,
     kind: &str,
-    flows: Option<&[crate::capabilities::conversation::session::api::FlowDecl]>,
+    flows: Option<&[String]>,
     agents: &[AgentMeta],
     task: Option<&str>,
     tier: Tier,

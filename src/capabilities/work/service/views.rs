@@ -29,36 +29,28 @@ impl Work {
                     flows: !p.flows.is_empty(),
                     roster: !auto,
                     needs_task: !p.flows.is_empty(),
+                    min_agents: self.flows.book().min_agents(&p.flows),
                 }
             })
             .collect()
     }
 
-    /// 目的：把流程 id 解析成完整声明（临时拼装用）——声明取会话类型表里同 id 的那份。
-    /// 约束：id 必须是表里声明过的流程（白名单由同一份表给出）；重复给同一个 id 如实拒绝。
-    pub(crate) fn flow_decls(
-        &self,
-        ids: &[String],
-    ) -> Result<Vec<crate::capabilities::conversation::session::api::FlowDecl>, String> {
-        use crate::capabilities::conversation::session::api::FlowDecl;
-        let book = self.flows.book();
-        let known: Vec<&FlowDecl> = book.profiles.iter().flat_map(|p| p.flows.iter()).collect();
-        let mut out: Vec<FlowDecl> = Vec::new();
+    /// 目的：临时拼装的白名单：只认已注册的流程 id，重复给同一个 id 如实拒绝。
+    /// 约束：名字来自流程面自己的登记表（`session::api` 的 `cast_of`），不另立一份清单。
+    pub(crate) fn flow_ids(&self, ids: &[String]) -> Result<Vec<String>, String> {
+        let mut out: Vec<String> = Vec::new();
         for id in ids {
-            if out.iter().any(|f| &f.id == id) {
+            if out.contains(id) {
                 return Err(format!("临时拼装里同一个流程出现了两次：{}", id));
             }
-            let decl = known.iter().copied().find(|f| &f.id == id).ok_or_else(|| {
-                let mut names: Vec<&str> = known.iter().map(|f| f.id.as_str()).collect();
-                names.sort_unstable();
-                names.dedup();
-                format!(
-                    "会话类型表里没有这个流程：{}（已注册的流程：{}；systools/profiles.yaml）",
+            if crate::capabilities::conversation::session::api::cast_of(id).is_none() {
+                return Err(format!(
+                    "会话类型表里没有这个流程：{}（已注册的流程：{}）",
                     id,
-                    names.join(" / ")
-                )
-            })?;
-            out.push(decl.clone());
+                    crate::capabilities::conversation::session::api::registered().join(" / ")
+                ));
+            }
+            out.push(id.clone());
         }
         Ok(out)
     }

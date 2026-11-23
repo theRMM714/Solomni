@@ -258,15 +258,10 @@ pub fn single_session(
         ),
     );
     // **会话参数**：身份块每回合由它现渲染（不存进消息列表）。
-    let params = SessionParams::from_workspace(
-        &a.name,
-        spec.member.sandbox,
-        spec.member.modules,
-        "single",
-        "solo",
-    )
-    .with_chara(a.chara.clone())
-    .with_guest(spec.guest);
+    let params =
+        SessionParams::from_workspace(&a.name, spec.member.sandbox, spec.member.modules, "solo")
+            .with_chara(a.chara.clone())
+            .with_guest(spec.guest);
     // 单 agent 工作：用户自己开的那场对话（不是任务链的节点）——身份是 solo。
     let tools = member_tools(ports, &spec.member);
     let mut s = AgentSession::new(

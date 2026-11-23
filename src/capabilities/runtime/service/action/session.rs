@@ -159,18 +159,17 @@ impl Handle {
             .trim()
             .to_string();
         // 临时拼装：给了 flows 就不查预设类型（白名单在 work 的准备段校验）。
-        let flows: Option<Vec<crate::capabilities::conversation::session::api::FlowDecl>> =
-            match args.get("flows") {
-                Some(v) => {
-                    let flows: Vec<_> = serde_json::from_value(v.clone())
-                        .map_err(|e| format!("flows 格式不对：{}", e))?;
-                    if flows.is_empty() {
-                        return Err("临时拼装至少要有一个流程".to_string());
-                    }
-                    Some(flows)
+        let flows: Option<Vec<String>> = match args.get("flows") {
+            Some(v) => {
+                let flows: Vec<_> = serde_json::from_value(v.clone())
+                    .map_err(|e| format!("flows 格式不对：{}", e))?;
+                if flows.is_empty() {
+                    return Err("临时拼装至少要有一个流程".to_string());
                 }
-                None => None,
-            };
+                Some(flows)
+            }
+            None => None,
+        };
         let kind = if flows.is_some() {
             if !wanted.is_empty()
                 && wanted != crate::capabilities::conversation::session::api::CUSTOM

@@ -17,7 +17,7 @@ pub use crate::capabilities::conversation::session::domain::events::{
 };
 // 流程面：驱动只认这几个名字（推一步 / 让出一回合 / 交回后的处置 / 可派的活）。
 pub use crate::capabilities::conversation::session::domain::flow::{
-    Flow, Handback, MemberAsk, Settle, WorkPlan,
+    Flow, Handback, MemberAsk, Settle, WorkPlan, cast_of, registered,
 };
 // 流程工厂面：组合根把实现注入 turn / work，装配点只按 id 取段。
 pub use crate::capabilities::conversation::session::domain::flows::{
@@ -30,8 +30,7 @@ pub use crate::capabilities::conversation::session::domain::history::{
 // 名字常量只给产品自带的类型表与测试引用：非测试代码按类型的流程走，不按名字分支。
 #[allow(unused_imports)]
 pub use crate::capabilities::conversation::session::domain::profile::{
-    CUSTOM, CUSTOM_NAME, FlowDecl, MEETING, PROXY, PROXY_ROLE, Profiles, SINGLE, SessionSpec,
-    inline_spec,
+    CUSTOM, CUSTOM_NAME, MEETING, PROXY, PROXY_ROLE, Profiles, SINGLE, SessionSpec, inline_spec,
 };
 // 工具面：角色面 → 实际可调的工具（档位只管网络，不再逐工具裁剪）。
 #[allow(unused_imports)]

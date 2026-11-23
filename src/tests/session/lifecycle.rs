@@ -303,36 +303,31 @@ pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {
     assert_eq!(root_of(&low).unwrap(), top, "第三层也锚在顶");
 }
 
-/// 目的：身份块里的机制说明按（**会话使用类型** × **角色**）取：对得上的拿，对不上的不拿。
+/// 目的：身份块里的机制说明按**角色**取：有这份说明的拿得到，没有的不拿。
 #[test]
-pub(crate) fn identity_takes_the_mechanism_of_its_session_and_role() {
+pub(crate) fn identity_takes_the_mechanism_of_its_role() {
     let prompt = test_prompts();
     let mode = crate::capabilities::llm::api::ToolMode::Envelope;
-    let identity = |kind: &str, role: &str| {
+    let identity = |role: &str| {
         let mut p = test_params("a");
-        p.session_kind = kind.to_string();
         p.role = role.to_string();
         p.identity(&prompt, mode)
     };
-    let solo = identity("single", "solo");
-    let discussant = identity("collab", "discussant");
-    let executor = identity("collab", "executor");
-    let proxy = identity("proxy", "core_proxy");
-    let mismatch = identity("single", "core_proxy");
+    let solo = identity("solo");
+    let discussant = identity("discussant");
+    let executor = identity("executor");
+    let proxy = identity("core_proxy");
+    let planner_role = identity("planner");
     assert!(solo.contains("单 agent 工作"), "{}", solo);
-    assert!(
-        discussant.contains("一个 agent = 一个会话"),
-        "{}",
-        discussant
-    );
-    assert!(executor.contains("一个 agent = 一个会话"), "{}", executor);
+    assert!(discussant.contains("动词"), "{}", discussant);
+    assert!(executor.contains("submit_report"), "{}", executor);
     assert!(proxy.contains("派完活就让出回合"), "{}", proxy);
-    assert!(!solo.contains("一个 agent = 一个会话"), "各拿自己那一份");
-    assert!(!proxy.contains("一个 agent = 一个会话"), "各拿自己那一份");
+    assert!(!solo.contains("派完活就让出回合"), "各拿自己那一份");
+    assert!(!discussant.contains("单 agent 工作"), "各拿自己那一份");
     assert!(
-        !mismatch.contains("单 agent 工作"),
-        "类型对不上就不发：{}",
-        mismatch
+        !planner_role.contains("== 这个系统怎么运转 =="),
+        "没配说明的角色不拿机制说明：{}",
+        planner_role
     );
 }
 
