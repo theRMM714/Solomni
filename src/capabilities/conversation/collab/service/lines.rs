@@ -156,7 +156,7 @@ pub(crate) fn review_text(exec: &Execution) -> String {
         let note = it
             .reason
             .as_deref()
-            .or_else(|| it.evidence.as_deref())
+            .or(it.evidence.as_deref())
             .map(str::trim)
             .filter(|n| !n.is_empty());
         if let Some(note) = note {
