@@ -139,12 +139,9 @@ impl WorkOps for Handle {
         self.call(|core| Ok(core.session_types()))
     }
 
-    fn flow_decls(
-        &self,
-        ids: &[String],
-    ) -> Result<Vec<crate::capabilities::conversation::session::api::FlowDecl>, String> {
+    fn flow_ids(&self, ids: &[String]) -> Result<Vec<String>, String> {
         let ids = ids.to_vec();
-        self.call(move |core| core.flow_decls(&ids))
+        self.call(move |core| core.flow_ids(&ids))
     }
 }
 

@@ -57,34 +57,32 @@ pub(crate) fn prompt_book_loads_from_yaml() {
     let p = test_prompts();
     // 语气约定；**能用哪些表态由角色表渲染**（见 systools/roles.yaml），不在这句话里。
     assert!(!p.core.chat_protocol.trim().is_empty());
-    // 机制册按（会话使用类型 × 角色）分发：每条非空、都写了适用角色（类型表归 systools/profiles.yaml）。
+    // 机制册按**适用角色**分发：每条非空、都写了适用角色（角色表归 systools/roles.yaml）。
     assert!(
-        p.core.mechanisms.len() >= 3,
-        "机制册至少要覆盖单 agent / 协作 / 代理"
+        p.core.mechanisms.len() >= 4,
+        "机制册至少要覆盖单机 / 讨论 / 执行 / 核心代理"
     );
     for m in &p.core.mechanisms {
-        assert!(!m.text.trim().is_empty(), "机制说明不能为空：{}", m.session);
+        assert!(!m.text.trim().is_empty(), "机制说明不能为空：{:?}", m.roles);
         assert!(!m.roles.is_empty(), "每条机制都要写清适用角色");
     }
+    assert!(p.core.mechanisms_for("solo").contains("单 agent 工作"));
     assert!(
-        p.core
-            .mechanisms_for("single", "solo")
-            .contains("单 agent 工作")
+        p.core.mechanisms_for("discussant").contains("动词"),
+        "讨论席要看到表态约定"
     );
-    let collab = p.core.mechanisms_for("collab", "discussant");
-    assert!(collab.contains("一个 agent = 一个会话"), "{}", collab);
-    assert!(collab.contains("动词"), "{}", collab);
+    assert!(
+        p.core.mechanisms_for("executor").contains("submit_report"),
+        "执行席要看到收尾回报"
+    );
     assert!(
         p.core
-            .mechanisms_for("proxy", "core_proxy")
+            .mechanisms_for("core_proxy")
             .contains("派完活就让出回合")
     );
     assert!(
-        p.core
-            .mechanisms_for("single", "core_proxy")
-            .trim()
-            .is_empty(),
-        "会话使用类型对不上就不发"
+        p.core.mechanisms_for("planner").trim().is_empty(),
+        "没配说明的角色拿到空串"
     );
     assert!(p.core.discuss.opener.contains("{{protocol}}"));
 }
@@ -292,7 +290,7 @@ pub(crate) fn session_at_roots_go_by_the_session_guest() {
     use crate::capabilities::conversation::session::api::SessionParams;
     // 会话的 @ 根由参数派生：没有 guest（本机档）就恒等，有 guest 就与同一 guest 造的桥给同一种写法。
     let sb = test_sandbox("甲", &["data"]);
-    let host = SessionParams::from_workspace("甲", &sb, &[], "single", "solo");
+    let host = SessionParams::from_workspace("甲", &sb, &[], "solo");
     let host_roots = host.ref_roots();
     assert!(host_roots.path_codec.is_some(), "会话的 @ 根要带翻译器");
     assert_eq!(
@@ -305,7 +303,7 @@ pub(crate) fn session_at_roots_go_by_the_session_guest() {
         crate::capabilities::vm::api::GuestOs::Macos,
         crate::capabilities::vm::api::GuestOs::Windows,
     ] {
-        let p = SessionParams::from_workspace("甲", &sb, &[], "single", "solo").with_guest(Some(g));
+        let p = SessionParams::from_workspace("甲", &sb, &[], "solo").with_guest(Some(g));
         let r = p.ref_roots();
         let codec = r.path_codec.as_ref().expect("带 guest 的会话要有翻译器");
         // 三种 guest 各自给的写法必须与各自方言的桥一致（提示词里的写法与转录里的写法同源）。

@@ -123,7 +123,6 @@ pub(crate) fn test_params(
         agent,
         &test_sandbox(agent, &[]),
         &[],
-        "single",
         "solo",
     )
 }

@@ -145,7 +145,6 @@ impl Turn {
                         &a.name,
                         &sb,
                         &modules,
-                        &meta.spec.kind,
                         &meta.spec.role,
                     )
                     .with_chara(a.chara.clone())
@@ -545,7 +544,7 @@ impl Turn {
         let tool_mode = registry.tool_mode(None);
         // 身份是**角色提示词**（core_proxy），不是某个 agent 的模块能力包：
         // 流程 / 环境 / 调用约定仍与 agent 身份同一份口径（见 workspace 的 render_system）。
-        let mut params = SessionParams::from_workspace(SPEAKER, &sb, &[], "proxy", "core_proxy");
+        let mut params = SessionParams::from_workspace(SPEAKER, &sb, &[], "core_proxy");
         params.role_system = Some(crate::capabilities::prompt::api::Segment::ProxySystem);
         let member = crate::capabilities::conversation::session::api::MemberSpec {
             modules: &[],

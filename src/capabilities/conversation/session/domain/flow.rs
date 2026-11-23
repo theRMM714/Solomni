@@ -12,8 +12,42 @@ use crate::capabilities::llm::api::{CompleteOpts, Msg};
 use crate::capabilities::tools::api::Tools;
 use crate::capabilities::workspace::api::Sandboxes;
 
-/// 目的：已注册的流程 id：`systools/profiles.yaml` 只能引用这里的名字（新增流程在这里加一行）。
-pub const REGISTERED: &[&str] = &["discuss", "execute"];
+/// 目的：一段流程要的席位：核心通道出演的身份 + 成员席各要几员（下限）。
+/// 约束：`core` 必须是角色表里的核心席角色，`members` 的键必须是成员席角色；
+///   人数是这段流程开跑时至少要有的人（讨论至少两人，执行至少一人）。
+pub struct Cast {
+    /// 目的：流程 id（`systools/profiles.yaml` 只能引用这里的名字）。
+    pub id: &'static str,
+    /// 目的：核心通道出演的身份（不进成员表）。
+    pub core: &'static [&'static str],
+    /// 目的：成员席：角色 → 最少人数。
+    pub members: &'static [(&'static str, usize)],
+}
+
+/// 目的：已注册的流程与各自要的席位——**席位只在这里声明一次**（会话类型表只选流程，不重复声明）。
+/// 约束：新增流程在这里加一行；角色名必须在 `systools/roles.yaml` 里、席别要对。
+pub const FLOWS: &[Cast] = &[
+    Cast {
+        id: "discuss",
+        core: &["core_proxy"],
+        members: &[("discussant", 2)],
+    },
+    Cast {
+        id: "execute",
+        core: &["planner", "orchestrator"],
+        members: &[("executor", 1)],
+    },
+];
+
+/// 目的：某段流程要的席位；没注册返回 `None`。
+pub fn cast_of(id: &str) -> Option<&'static Cast> {
+    FLOWS.iter().find(|c| c.id == id)
+}
+
+/// 目的：已注册的流程 id（校验与报错文案共用这一份）。
+pub fn registered() -> Vec<&'static str> {
+    FLOWS.iter().map(|c| c.id).collect()
+}
 
 /// 目的：流程让出的那一步——请驱动取某个成员会话跑一回合。
 /// 约束：流程**不自己调模型**（它拿不到别的会话）；这里只交出「问谁、带什么、按什么参数」。

@@ -936,7 +936,6 @@ mod tests {
             chara: String::new(),
             modules: Vec::new(),
             role_system: None,
-            session_kind: "single".to_string(),
             role: "solo".to_string(),
             guest: None,
         };

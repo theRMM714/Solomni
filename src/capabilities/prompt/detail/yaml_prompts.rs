@@ -9,28 +9,18 @@ use std::path::{Path, PathBuf};
 
 pub struct YamlPrompts {
     prompts: PathBuf,
-    sessions: Vec<String>,
 }
 
 impl YamlPrompts {
     /// 目的：prompts = 提示词册目录。
     pub fn new(prompts: PathBuf) -> YamlPrompts {
-        YamlPrompts {
-            prompts,
-            sessions: Vec::new(),
-        }
-    }
-
-    /// 目的：装上会话类型表的类型名：机制册的 `session` 按它校验（组合根从 `systools/profiles.yaml` 取）。
-    pub fn sessions(mut self, sessions: Vec<String>) -> Self {
-        self.sessions = sessions;
-        self
+        YamlPrompts { prompts }
     }
 }
 
 impl PromptSource for YamlPrompts {
     fn load(&self) -> Result<Prompts, String> {
-        merge_book(&self.read_docs()?, &self.sessions)
+        merge_book(&self.read_docs()?)
     }
 }
 

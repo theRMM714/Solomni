@@ -132,10 +132,10 @@ fn system_tools_and_roles_are_self_consistent() {
     );
 }
 
-/// 机制册必须与两张表自洽：**会话使用类型**在会话类型表里、**适用角色**在角色表里；
-/// 而且真实会话路径（类型 × 角色）都拿得到机制说明——对应关系是数据，这里只校验不写死。
+/// 机制册必须与角色表自洽：**适用角色**都在册；而且真实会话路径上每个角色都拿得到机制说明——
+/// 对应关系是数据，这里只校验不写死。
 #[test]
-fn mechanism_book_matches_session_kinds_and_roles() {
+fn mechanism_book_covers_every_role_in_play() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let st = YamlSystools::new(root.join("systools"))
         .load()
@@ -144,46 +144,29 @@ fn mechanism_book_matches_session_kinds_and_roles() {
         .load()
         .expect("读会话类型表");
     let prompts = YamlPrompts::new(root.join("prompts"))
-        .sessions(profiles.ids())
         .load()
         .expect("读提示词册");
-    let kinds = profiles.ids();
     profiles
         .check_roles(&st.seats())
         .expect("会话类型引用的角色必须在角色表里，席位也要放对");
     let role_ids: Vec<&String> = st.roles.keys().collect();
     assert!(!prompts.core.mechanisms.is_empty(), "机制册不能为空");
     for m in &prompts.core.mechanisms {
-        assert!(
-            kinds.iter().any(|k| k == &m.session),
-            "会话使用类型不在全表里：{}",
-            m.session
-        );
         assert!(!m.roles.is_empty(), "一条机制至少要有一个适用角色");
         for r in &m.roles {
             assert!(role_ids.contains(&r), "适用角色不在角色表里：{}", r);
         }
     }
-    for (kind, role) in [
-        ("single", "solo"),
-        ("collab", "discussant"),
-        ("collab", "executor"),
-        ("proxy", "core_proxy"),
-    ] {
+    for role in ["solo", "discussant", "executor", "core_proxy"] {
         assert!(
-            !prompts.core.mechanisms_for(kind, role).trim().is_empty(),
-            "{} × {} 没有机制说明",
-            kind,
+            !prompts.core.mechanisms_for(role).trim().is_empty(),
+            "{} 没有机制说明",
             role
         );
     }
     assert!(
-        prompts
-            .core
-            .mechanisms_for("single", "core_proxy")
-            .trim()
-            .is_empty(),
-        "类型与角色对不上就不发"
+        prompts.core.mechanisms_for("planner").trim().is_empty(),
+        "没配说明的角色拿到空串"
     );
 }
 
@@ -195,8 +178,8 @@ fn yaml_prompts_loads_the_shipped_book_and_reports_missing_or_broken_files() {
     let profiles = YamlProfiles::new(root_dir.join("systools"))
         .load()
         .expect("读会话类型表");
+    profiles.validate().expect("产品自带的会话类型表必须合法");
     let ok = YamlPrompts::new(real)
-        .sessions(profiles.ids())
         .load()
         .expect("产品自带提示词册必须合法");
     assert!(!ok.core.path_rules.is_empty());

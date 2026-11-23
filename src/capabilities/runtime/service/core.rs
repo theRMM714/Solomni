@@ -483,11 +483,8 @@ impl Core {
     }
 
     /// 目的：薄转发到 `work` 的同名方法（临时拼装时把流程 id 解析成声明）。
-    pub fn flow_decls(
-        &self,
-        ids: &[String],
-    ) -> Result<Vec<crate::capabilities::conversation::session::api::FlowDecl>, String> {
-        self.work.flow_decls(ids)
+    pub fn flow_ids(&self, ids: &[String]) -> Result<Vec<String>, String> {
+        self.work.flow_ids(ids)
     }
 
     /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。

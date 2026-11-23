@@ -48,7 +48,7 @@ const QUIET_POLLS = 5;
 const EXECUTE_GOAL = [
   "这件事只建一个**只有执行流程**的子会话，不要先讨论；人手一个就够，怎么派活由你和它定。",
   "用 create_session 这样建（省略 kind，用 flows 临时拼装）：",
-  "flows = [{\"id\":\"execute\",\"core\":[\"planner\",\"orchestrator\"],\"members\":{\"executor\":1}}]，agents 只给一个零模块的人（名字你定）。",
+  "flows = [\"execute\"]，agents 只给一个零模块的人（名字你定）。",
   "task 用下面这段需求：",
   "—— 让执行席在自己沙箱里写一份 notes.md（Markdown，正文不少于 200 字，说清「改配置前为什么要先备份」），写完用 submit_report 把结果回报出来。",
   "它停在方案审查那一关时你代答放行（选项 id 见卡片）。交付后告诉我：子会话名、产物路径、它的回报。",
@@ -58,7 +58,7 @@ const EXECUTE_GOAL = [
 const DISCUSS_GOAL = [
   "只建一个**只有讨论流程**的子会话：不拟计划、不派活、不建任务链。",
   "用 create_session 建（省略 kind，用 flows）：",
-  "flows = [{\"id\":\"discuss\",\"core\":[\"core_proxy\"],\"members\":{\"discussant\":2}}]，agents 给两个零模块的人（名字你定）。",
+  "flows = [\"discuss\"]，agents 给两个零模块的人（名字你定）。",
   "task 用：",
   "「讨论：一个本地优先的笔记工具，最该先做哪三个功能？各自说理由，收敛出三条结论。」",
   "讨论收敛后核心会写一份总结，流程到此为止。它停下就告诉我：子会话名、总结里的那三条是什么。",

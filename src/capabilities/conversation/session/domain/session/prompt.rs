@@ -14,7 +14,6 @@ pub fn agent_system(
     modules: &[ModulePrompt],
     env: &str,
     mode: crate::capabilities::llm::api::ToolMode,
-    session_kind: &str,
     role: &str,
 ) -> String {
     render_system(
@@ -25,7 +24,6 @@ pub fn agent_system(
         modules,
         env,
         mode,
-        session_kind,
         role,
     )
 }
@@ -38,20 +36,9 @@ pub fn role_system(
     agent: &str,
     env: &str,
     mode: crate::capabilities::llm::api::ToolMode,
-    session_kind: &str,
     role: &str,
 ) -> String {
-    render_system(
-        prompt,
-        segment,
-        agent,
-        "",
-        &[],
-        env,
-        mode,
-        session_kind,
-        role,
-    )
+    render_system(prompt, segment, agent, "", &[], env, mode, role)
 }
 
 /// 两处身份（agent / 角色）**共用这一份装配**：模板不同，变量与取值口径完全相同——
@@ -65,7 +52,6 @@ fn render_system(
     modules: &[ModulePrompt],
     env: &str,
     mode: crate::capabilities::llm::api::ToolMode,
-    session_kind: &str,
     role: &str,
 ) -> String {
     use crate::capabilities::prompt::api::Segment;
@@ -81,9 +67,9 @@ fn render_system(
         })
         .collect::<Vec<_>>()
         .join("");
-    // 机制说明**按（会话使用类型 × 角色）**从册子里取：对应关系是数据，这里只做匹配。
+    // 机制说明**按角色**从册子里取：对应关系是数据，这里只做匹配。
     //（AI 不知道机制就只会写散文。）
-    let mechanism = prompt.mechanism(session_kind, role);
+    let mechanism = prompt.mechanism(role);
     // 人设块是**独立指令段**：空人设不产生空标题；模板文案在册子里，不在代码里。
     let chara_block = if chara.trim().is_empty() {
         String::new()
@@ -145,9 +131,7 @@ pub struct SessionParams {
     pub modules: Vec<ModulePrompt>,
     /// 目的：**角色提示词段**：`None` = 普通 agent（模块能力包 + `AgentSystem`）； `Some(seg)` = 不是 agent 的核心身份（代理这类），身份块渲染 `seg` 那一段角色提示词。 存段名而不是渲染好的文本：身份块**每回合现渲染**（册子一改，下一次调用就生效）。
     pub role_system: Option<crate::capabilities::prompt::api::Segment>,
-    /// 目的：这个会话的**使用类型**（single / collab / proxy）：机制册的第一把钥匙。 与 `role` 一起按落盘形态派生，重建后是同一份。
-    pub session_kind: String,
-    /// 目的：这一席的**角色**（solo / executor / discussant / core_proxy…）：机制册的第二把钥匙。
+    /// 目的：这一席的**角色**（solo / executor / discussant / core_proxy…）：机制册按它取说明，工具面也按它发。
     pub role: String,
     /// 目的：这场会话跑在哪种 guest 里（本机档 = None）——工作环境块按它选 guest 档，路径按 guest 拼法渲染。
     pub guest: Option<crate::capabilities::vm::api::GuestOs>,
@@ -159,7 +143,6 @@ impl SessionParams {
         agent: &str,
         sb: &crate::capabilities::workspace::api::Sandbox,
         modules: &[crate::capabilities::catalog::modules::api::Module],
-        session_kind: &str,
         role: &str,
     ) -> SessionParams {
         SessionParams {
@@ -178,7 +161,6 @@ impl SessionParams {
                 })
                 .collect(),
             role_system: None,
-            session_kind: session_kind.to_string(),
             role: role.to_string(),
             guest: None,
         }
@@ -237,15 +219,7 @@ impl SessionParams {
         let env = env_block(prompt, self);
         match self.role_system {
             // 角色身份（代理这类不是 agent 的核心）：同一份机制 / 环境 / 调用约定口径。
-            Some(seg) => role_system(
-                prompt,
-                seg,
-                &self.agent,
-                &env,
-                mode,
-                &self.session_kind,
-                &self.role,
-            ),
+            Some(seg) => role_system(prompt, seg, &self.agent, &env, mode, &self.role),
             None => agent_system(
                 prompt,
                 &self.agent,
@@ -253,7 +227,6 @@ impl SessionParams {
                 &self.modules,
                 &env,
                 mode,
-                &self.session_kind,
                 &self.role,
             ),
         }

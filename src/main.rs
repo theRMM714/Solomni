@@ -421,8 +421,7 @@ fn main() {
             }
         };
     let prompt_source =
-        capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"))
-            .sessions(profiles.ids());
+        capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
     // **提示词册能力**：册子只在这里装载一次、也只被它持有；runtime 与工具执行
     // （回执里的那些收尾标记）要的"段"都经它的能力面拿——不再各存一份拷贝。
     let prompt = match capabilities::prompt::service::load(&prompt_source) {

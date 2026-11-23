@@ -208,8 +208,8 @@ impl Work {
         if spec.agents.is_empty() && !spec.delegate {
             return Err("至少要有一个 agent".to_string());
         }
-        // **单模式的组合语义**：点名了多个 agent = 把它们的模块并成一个**临时组合**（去重、保序；
-        // 模型取核心默认）。规则只有这一处——前端不再自己拼（见 docs/architecture/layers.md）。
+        // **人数由流程自己报**（讨论至少两人、执行至少一人）：选名单的地方（向导、拟名单）按它凑够。
+        // **单模式的组合语义**：点名了多个 agent = 模块并成一个**临时组合**（去重、保序；模型取核心默认）。
         let mut spec = spec;
         if !driven && spec.agents.len() > 1 {
             spec.agents = vec![merge_into_one(&spec.agents, &spec.name)];

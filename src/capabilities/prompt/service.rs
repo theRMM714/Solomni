@@ -18,8 +18,8 @@ impl Prompt for Prompts {
             .expect("提示词渲染失败：变量缺失属于装配错误，须修复 prompts/ 或调用方")
     }
 
-    fn mechanism(&self, session: &str, role: &str) -> String {
-        self.core.mechanisms_for(session, role)
+    fn mechanism(&self, role: &str) -> String {
+        self.core.mechanisms_for(role)
     }
 
     fn env(&self, host: &str, guest: Option<&str>, vars: Vars) -> String {

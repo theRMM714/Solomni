@@ -170,12 +170,12 @@ fn resolve_new_session_checks_against_the_catalog() {
     );
 }
 
-/// 临时拼装：省略 kind、用内联流程声明建会话；kind 与 flows 只能给一个。
+/// 临时拼装：省略 kind、只给流程 id 建会话；kind 与 flows 只能给一个。
 #[test]
 fn resolve_new_session_accepts_an_inline_assembly() {
     let c = facts();
     let inline: CreateArgs = serde_json::from_value(serde_json::json!({
-        "flows": [{"id": "discuss", "core": ["core_proxy"], "members": {"discussant": 2}}],
+        "flows": ["discuss"],
         "agents": [{"ref": "a"}],
         "task": "先讨论",
         "request_id": "r7"
@@ -184,11 +184,11 @@ fn resolve_new_session_accepts_an_inline_assembly() {
     let spec = resolve_new_session(&inline, &c).expect("临时拼装合法");
     assert_eq!(spec.kind, CUSTOM, "临时拼装落成 custom 类型");
     assert_eq!(spec.flows.as_ref().map(Vec::len), Some(1));
-    assert_eq!(spec.flows.unwrap()[0].id, "discuss");
+    assert_eq!(spec.flows.unwrap()[0], "discuss");
 
     let both: CreateArgs = serde_json::from_value(serde_json::json!({
         "kind": "collab",
-        "flows": [{"id": "discuss"}],
+        "flows": ["discuss"],
         "agents": [{"ref": "a"}],
         "task": "做事",
         "request_id": "r8"

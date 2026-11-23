@@ -6,9 +6,7 @@
 //! 联动：runtime 与呈现层都从这里取类型；guest 任务的 `run()` 在调用方线程上跑。
 
 use crate::capabilities::catalog::registry::api::AgentMeta;
-use crate::capabilities::conversation::session::api::{
-    FlowDecl, HistoryView, OptionView, SessionEvent,
-};
+use crate::capabilities::conversation::session::api::{HistoryView, OptionView, SessionEvent};
 use crate::capabilities::vm::api::{ExecPlan, GuestStop, Vm};
 use crate::capabilities::workspace::api::Sandboxes;
 use crate::kernel::api::types::SessionId;
@@ -24,8 +22,8 @@ pub struct WorkSpec {
     pub name: String,
     /// 目的：会话类型名（表里的预设，如 单机 / 会议 / 代理；创建时解析成 `SessionSpec` 落盘）；临时拼装时不用。
     pub kind: String,
-    /// 目的：临时拼装内联的流程声明（Some = 不走预设，按这份声明建；装配前过白名单校验）。
-    pub flows: Option<Vec<FlowDecl>>,
+    /// 目的：临时拼装的流程 id（Some = 不走预设，按这几个流程建；装配前过白名单校验）。
+    pub flows: Option<Vec<String>>,
     pub agents: Vec<AgentMeta>,
     /// 目的：协作：本次需求（必填）。
     pub task: Option<String>,
@@ -493,8 +491,8 @@ pub trait WorkOps: Send + Sync {
     /// 目的：会话类型表给界面看的那份（选类型时的名字与说明、要不要名单与需求）。
     /// 约束：按 systools/profiles.yaml 的声明顺序；界面渲染它，不自己复制类型知识。
     fn session_types(&self) -> Result<Vec<SessionTypeView>, String>;
-    /// 目的：把流程 id 解析成完整声明（临时拼装用）；只认会话类型表里声明过的流程。
-    fn flow_decls(&self, ids: &[String]) -> Result<Vec<FlowDecl>, String>;
+    /// 目的：临时拼装的白名单：只认已注册的流程 id，重复给同一个 id 如实拒绝。
+    fn flow_ids(&self, ids: &[String]) -> Result<Vec<String>, String>;
 }
 
 /// 目的：一个会话类型在界面上的样子（新建向导的逐个选项）。
@@ -512,4 +510,6 @@ pub struct SessionTypeView {
     pub roster: bool,
     /// 目的：要不要写本次需求（代理式不要：目标由核心自己拆）。
     pub needs_task: bool,
+    /// 目的：这个类型的流程至少要几个 agent（选名单的地方按它凑人；没有流程就是 0）。
+    pub min_agents: usize,
 }
