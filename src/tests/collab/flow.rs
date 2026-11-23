@@ -20,6 +20,8 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
         gw(
             member,
             vec![
+                // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
+                "结论：由 a 按需求把事做完。".to_string(),
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
@@ -68,6 +70,8 @@ pub(crate) fn core_collab_delegated_slate_flow() {
     let mut core = core_with(vec![module_of("a")], gw(member, vec![
         // 代拟（组装一个 agent）→ 整理 → 验收。
         "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"a\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}".to_string(),
+        // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
+        "结论：由 a 按需求把事做完。".to_string(),
         "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
         "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
         "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
@@ -134,6 +138,8 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
     );
     let mut core = core_with(vec![module_of("a")], gw(member, vec![
         "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"调研员\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}".to_string(),
+        // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
+        "结论：由 a 按需求把事做完。".to_string(),
         // 负责人必须是**名单里真实存在的席位**（代拟出来的叫"调研员"）——否则链的自洽门禁会如实挡下。
         "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"调研员\",\"deps\":[]}]}}".to_string(),
         "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
@@ -234,6 +240,8 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
         gw(
             member,
             vec![
+                // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
+                "结论：由 a 按需求把事做完。".to_string(),
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：查证后回报\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".into(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".into(),
                 "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".into(),

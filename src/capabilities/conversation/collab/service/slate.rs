@@ -131,12 +131,6 @@ impl CollabSession {
                 return;
             }
         };
-        // 讨论也走**全局设置**（流式 + 预算），与单 agent 共用同一份。
-        let llm = crate::capabilities::llm::api::LlmOpts {
-            stream: self.settings.app.streaming,
-            timeout_secs: self.settings.app.llm_timeout_secs,
-            thinking: None,
-        };
         // 讨论席的"协议" = **机制说明 + 讨论约定**：只说约定不说机制，AI 就不知道自己在什么流程里、该干什么。
         // **能用哪些表态不在这里列**：核心按这一回合的身份注入工具块（会话工具面的 tools_block），清单与越权校验同源。
         let protocol = format!(
@@ -148,8 +142,6 @@ impl CollabSession {
             members,
             self.allow,
             prompts,
-            Arc::clone(&self.systools),
-            llm,
             std::sync::Arc::clone(&self.cancel),
             protocol,
         );
@@ -185,6 +177,11 @@ impl CollabSession {
             }
         }
         if self.disc.is_some() {
+            self.pump_with(sink);
+            return;
+        }
+        // 执行段没有「名单确认 / 开始讨论」这两关：继续就是接着拟计划、派活、验收。
+        if self.phase == Phase::Execute {
             self.pump_with(sink);
             return;
         }
@@ -235,6 +232,8 @@ impl CollabSession {
         meta: &SessionMeta,
         events: &[serde_json::Value],
         sandboxes: Sandboxes,
+        // 这一段跑讨论还是执行（同一条会话按会话类型表各重建一份）。
+        phase: Phase,
         // 本会话的裁决队（核心按会话 id 与转录里已发出的卡号给）：重建出来的整队进它。
         door: Arc<dyn Gates>,
     ) -> Result<CollabSession, String> {
@@ -261,10 +260,17 @@ impl CollabSession {
         // 形态要在 settings 被移进结构体之前算出来。
         let core_mode = settings.tool_mode_for(None);
         let mut s = CollabSession {
+            phase,
+            // 总结是讨论段写在转录里的那条事实：执行段拿它当需求。
+            summary: st.summary.clone(),
             modules,
             delegated: meta.delegate,
             roster: meta.agents.clone(),
-            task: st.task.clone().unwrap_or_default(),
+            // 讨论段的需求是用户那条需求行；执行段的需求是上一段交来的总结。
+            task: match phase {
+                Phase::Discuss => st.task.clone().unwrap_or_default(),
+                Phase::Execute => st.summary.clone().unwrap_or_default(),
+            },
             slate_picks: Vec::new(),
             settings,
             door,
@@ -291,12 +297,17 @@ impl CollabSession {
             tools,
             log,
             sandboxes,
-            done: st.ended,
+            // 讨论段收尾 = 已收敛且总结已落；执行段收尾 = 已交付。
+            done: match phase {
+                Phase::Discuss => st.closed && st.summary.is_some(),
+                Phase::Execute => st.ended,
+            },
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             plan_approved: st.plan_approved,
             gate_advice: String::new(),
         };
-        if st.begun {
+        // 只有讨论段有成员讨论的现场；执行段看的是计划与任务链。
+        if phase == Phase::Discuss && st.begun {
             // 讨论转录 = 最后一条 [用户:开始] 之后的行。
             let start = all_lines
                 .iter()
@@ -306,7 +317,6 @@ impl CollabSession {
                 .unwrap_or(all_lines.len());
             let disc_lines = all_lines[start..].to_vec();
             let members = s.assemble_members()?;
-            let llm = s.llm_opts();
             // 恢复时与实时同一句：只有机制与约定，工具面随回合注入（见 tools_block）。
             let protocol = format!(
                 "{}\n{}",
@@ -318,8 +328,6 @@ impl CollabSession {
                 members,
                 st.allow,
                 prompts,
-                systools.clone(),
-                llm,
                 std::sync::Arc::clone(&s.cancel),
                 protocol,
             );
@@ -336,6 +344,10 @@ impl CollabSession {
         // **整队**由转录重建（先来后到）：每张没人回答的卡沿用它自己的卡号；卡连同那一段被回档截掉、
         // 或被停会话整队作废时，按状态续新卡号接着问（已答过的不重问，见 session-model.md「请用户裁决」）。
         for (id, p, advice) in derive_gates(&st) {
+            // 两段各只登记**自己这一段**的关：两段共用同一条裁决队，都登记就会把同一张卡问两遍。
+            if !gate_belongs_to(phase, &p) {
+                continue;
+            }
             // 没人回答的那张沿用它自己的卡号；状态派生出来的那一关还没有卡号，由队列续号。
             s.door
                 .raise(id.as_deref(), p.gate(id.as_deref().unwrap_or(""), &advice));
@@ -346,5 +358,20 @@ impl CollabSession {
     /// 目的：会话是否已终结。
     pub fn is_done(&self) -> bool {
         self.done
+    }
+}
+
+/// 目的：这一关归哪一段流程：两段共用同一条裁决队，重建时各登记自己那几张，免得同一张卡问两遍。
+/// 约束：工具级确认（`ToolAsk`）不认段——它等在工作线程上，由讨论段登记一次即可，答案由 `Sequence` 递给真正发起的那一段。
+fn gate_belongs_to(phase: Phase, p: &Pending) -> bool {
+    match phase {
+        Phase::Discuss => matches!(
+            p,
+            Pending::Ask { .. }
+                | Pending::ConfirmSlate
+                | Pending::ConfirmBegin
+                | Pending::ToolAsk(_)
+        ),
+        Phase::Execute => matches!(p, Pending::PlanReview | Pending::NodeBlocked { .. }),
     }
 }

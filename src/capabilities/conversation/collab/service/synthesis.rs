@@ -1,102 +1,91 @@
-//! 目的：整理与审查——核心整理讨论出方案与任务链（synthesize），以及总验收清单与返工判定（Execution / CheckItem）。
+//! 目的：整理与审查——核心把（讨论上下文 / 交来的需求）整理成方案与任务链（draft_plan），以及总验收清单与返工判定（Execution / CheckItem）。
 //! 管：从工具调用（plan / checklist）取载荷并解析；解析失败如实报错、不猜；review / rework_targets / all_pass 的判定。
 //! 不管：讨论状态机（discussion.rs）；任务链的驱动（collab.rs 与 kernel 的链驱动）。
 //! 联动：载荷来自 tools 的工具调用；任务链形状在 src/kernel/chain.rs。
 
-use super::discussion::*;
 use crate::capabilities::conversation::session::api::SessionEvent;
 use crate::capabilities::llm::api::{Chat, Msg};
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
-impl Discussion {
-    /// 目的：全员同意后：核心整理——总结讨论，为每个留下的成员写执行任务提示词。
-    ///   整理：核心 AI 总结讨论并出**任务链**（见 docs/collab/task-chain.md）。
-    ///   产出走 **plan 工具调用**（核心操作不手写 JSON）；没调用或载荷不合法就**如实报错**。
-    pub fn synthesize(
-        &self,
-        core_chat: &mut dyn Chat,
-        mode: crate::capabilities::llm::api::ToolMode,
-        verify: Option<
-            &mut (dyn crate::capabilities::conversation::session::api::CoreVerify + 'static),
-        >,
-        // 核心这一轮的行（工具行 + 思维链 + 正文）推给谁：落不落由那个会话模块定。
-        sink: &mut dyn FnMut(SessionEvent),
-    ) -> Result<
-        (
-            String,
-            crate::capabilities::taskchain::api::TaskChain,
-            String,
-        ),
+/// 目的：核心整理——把（讨论上下文 / 交来的需求）变成一份方案与任务链；讨论与执行两条流程共用它。
+/// 参数：`roster` = 能接活的成员名单（顿号分隔）；`transcript` = 交给核心看的全文。
+/// 错误：被停、核心操作失败、回执不合法都如实报错（不猜、不编一份假的）。
+// 参数是一组必须一路透传的出口（提示词册 / 工具表 / 回执去向 / 核实环境）：与 core_operation 同一取舍。
+#[allow(clippy::too_many_arguments)]
+pub fn draft_plan(
+    prompts: &dyn Prompt,
+    systools: &dyn crate::capabilities::tools::api::Tools,
+    roster: &str,
+    transcript: &str,
+    core_chat: &mut dyn Chat,
+    mode: crate::capabilities::llm::api::ToolMode,
+    opts: crate::capabilities::llm::api::CompleteOpts<'static>,
+    cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    verify: Option<
+        &mut (dyn crate::capabilities::conversation::session::api::CoreVerify + 'static),
+    >,
+    sink: &mut dyn FnMut(SessionEvent),
+) -> Result<
+    (
         String,
-    > {
-        let roster = self
-            .members
-            .iter()
-            .filter(|m| m.present)
-            .map(|m| m.id.clone())
-            .collect::<Vec<_>>()
-            .join("、");
-        let user = self.prompts.render(
-            Segment::SynthesizeUser,
-            &[
-                ("roster", roster),
-                (
-                    "transcript",
-                    self.transcript
-                        .iter()
-                        .map(|l| l.render())
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                ),
-            ],
-        );
-        let msgs = vec![
-            Msg::system(self.prompts.text(Segment::SynthesizeSystem).to_string()),
-            Msg::user(user),
-        ];
-        if self.cancelled() {
-            return Err("已停止".to_string());
-        }
-        // 核心操作走工具调用：载荷形状是 plan + nodes，入口是 plan 工具。
-        let payload = crate::capabilities::conversation::session::api::core_operation(
-            &*self.systools,
-            "planner",
-            "plan",
-            mode,
-            core_chat,
-            &msgs,
-            self.opts(),
-            Some(&self.cancel),
-            verify,
-            sink,
-        )?;
-        if self.cancelled() {
-            return Err("已停止".to_string());
-        }
-        let parsed: SynthReply = serde_json::from_value(payload)
-            .map_err(|e| format!("plan 工具的载荷不合法（{}）", e))?;
-        let chain = crate::capabilities::taskchain::api::TaskChain {
-            nodes: parsed
-                .nodes
-                .into_iter()
-                .map(|n| crate::capabilities::taskchain::api::TaskNode {
-                    id: n.id,
-                    title: n.title,
-                    objective: n.objective,
-                    assignee: n.assignee,
-                    deps: n.deps,
-                    status: crate::capabilities::taskchain::api::NodeStatus::Pending,
-                    sub_session: None,
-                    report: None,
-                    acceptance: None,
-                    reported: false,
-                })
-                .collect(),
-        };
-        Ok((parsed.plan, chain, parsed.advice))
+        crate::capabilities::taskchain::api::TaskChain,
+        String,
+    ),
+    String,
+> {
+    let user = prompts.render(
+        Segment::SynthesizeUser,
+        &[
+            ("roster", roster.to_string()),
+            ("transcript", transcript.to_string()),
+        ],
+    );
+    let msgs = vec![
+        Msg::system(prompts.text(Segment::SynthesizeSystem).to_string()),
+        Msg::user(user),
+    ];
+    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err("已停止".to_string());
     }
+    // 核心操作走工具调用：载荷形状是 plan + nodes，入口是 plan 工具。
+    let payload = crate::capabilities::conversation::session::api::core_operation(
+        systools,
+        "planner",
+        "plan",
+        mode,
+        core_chat,
+        &msgs,
+        opts,
+        Some(cancel),
+        verify,
+        sink,
+    )?;
+    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err("已停止".to_string());
+    }
+    let parsed: SynthReply =
+        serde_json::from_value(payload).map_err(|e| format!("plan 工具的载荷不合法（{}）", e))?;
+    let chain = crate::capabilities::taskchain::api::TaskChain {
+        nodes: parsed
+            .nodes
+            .into_iter()
+            .map(|n| crate::capabilities::taskchain::api::TaskNode {
+                id: n.id,
+                title: n.title,
+                objective: n.objective,
+                assignee: n.assignee,
+                deps: n.deps,
+                status: crate::capabilities::taskchain::api::NodeStatus::Pending,
+                sub_session: None,
+                report: None,
+                acceptance: None,
+                reported: false,
+            })
+            .collect(),
+    };
+    Ok((parsed.plan, chain, parsed.advice))
 }
 
 /// 核心整理的结构化回执（形状见 prompts/roles/planner.yaml 的 synthesize）。

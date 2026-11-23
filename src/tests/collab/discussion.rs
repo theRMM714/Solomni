@@ -340,8 +340,6 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
         members,
         true,
         std::sync::Arc::new(test_prompts()),
-        test_tools_svc(),
-        Default::default(),
         Default::default(),
         String::new(),
     );

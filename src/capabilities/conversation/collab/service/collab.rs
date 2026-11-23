@@ -87,7 +87,21 @@ impl CollabSession {
     }
 }
 
+/// 目的：同一条协作会话当前跑哪一段：讨论段（开会收敛、写一份总结）与执行段（拟计划、派活、验收、交付）。
+///   两段共用同一个类型与同一份落盘事实，装配期各造一份并由 `Sequence` 串起来。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    /// 目的：讨论段。
+    Discuss,
+    /// 目的：执行段。
+    Execute,
+}
+
 pub struct CollabSession {
+    /// 目的：这一段跑的是讨论还是执行（同一份事实，两个实例各看自己那一段）。
+    pub(crate) phase: Phase,
+    /// 目的：讨论段交给执行段的总结（核心代理写的那一份；讨论段收尾时置上）。
+    pub(crate) summary: Option<String>,
     /// 目的：是否代拟：显式传入（WorkSpec.delegate / meta.delegate），不从名单是否为空推断。
     pub(crate) delegated: bool,
     /// 目的：在组名单（agent 实例；代拟确认前为空）。
@@ -165,12 +179,16 @@ impl CollabSession {
         roster: Vec<AgentMeta>,
         delegated: bool,
         sandboxes: Sandboxes,
+        // 这一段跑讨论还是执行（装配期按会话类型表里的流程序列各造一份）。
+        phase: Phase,
         // 本会话的裁决队（核心按会话 id 给；与工具级确认共用同一条）。
         door: Arc<dyn Gates>,
     ) -> Result<CollabSession, String> {
         let core_chat = llm.core_channel(&core_channel);
         let core_mode = settings.tool_mode_for(None);
         Ok(CollabSession {
+            phase,
+            summary: None,
             core_mode,
             delegated,
             roster,
@@ -561,6 +579,10 @@ impl CollabSession {
         self.task = task.clone();
         let user = self.view(LineView::user("需求", task.clone()));
         sink(SessionEvent::Transcript(vec![user]));
+        // 执行段不从「名单确认 / 开始讨论」起步：需求到了就直接拟计划、派活。
+        if self.phase == Phase::Execute {
+            return;
+        }
         if self.delegated {
             self.draft_slate(sink);
         } else {

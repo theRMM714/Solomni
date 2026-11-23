@@ -10,8 +10,8 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/capabilities/conversation/collab/api.rs` | 入站能力面：`CollabSession`（讨论与执行引擎、回合与验收词汇、状态派生的对外名字） |
-| `src/capabilities/conversation/collab/service/collab.rs` | 协作会话状态机：名单 / 讨论 / 链 / 裁决队句柄与各关卡登记、处置、快照 |
-| `src/capabilities/conversation/collab/service/pump.rs` | 讨论泵：把讨论推进一步、装配成员（泵不自己调模型） |
+| `src/capabilities/conversation/collab/service/collab.rs` | 协作会话状态机：名单 / 讨论 / 链 / 裁决队句柄与各关卡登记、处置、快照；`Phase` 说明这一段跑讨论还是执行 |
+| `src/capabilities/conversation/collab/service/pump.rs` | 流程泵：按相位推进（讨论段 `pump_discuss`、执行段 `pump_execute`）、收敛后由核心代理写总结（`summarize`）、装配成员（泵不自己调模型） |
 | `src/capabilities/conversation/collab/service/lines.rs` | 行外送与待裁决关的派生：行 → 带稳定 id 的事件、状态 → 整队待答的关、增量与审查事件 |
 | `src/capabilities/conversation/collab/service/turn_io.rs` | 回合收发：成员回复喂回状态机、取出待问一步、回答落到业务；核实环境按 `session` 的 `VerifySpec` 递事实（`verify_env`），不自己造工具面 |
 | `src/capabilities/conversation/collab/service/slate.rs` | 代拟名单与确认、开工、断点续跑与终结判定 |

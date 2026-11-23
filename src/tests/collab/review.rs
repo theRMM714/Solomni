@@ -37,6 +37,8 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
         gw(
             member,
             vec![
+                // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
+                "结论：由 a 按需求把事做完。".to_string(),
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
@@ -112,6 +114,8 @@ pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
             member,
             vec![
                 // 三个节点都没有依赖：n1/n2 都归 a（该串行），n3 归 b（该和 n1 一起开工）。
+                // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
+                "结论：由 a 按需求把事做完。".to_string(),
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"一\",\"objective\":\"做一\",\"assignee\":\"a\",\"deps\":[]},{\"id\":\"n2\",\"title\":\"二\",\"objective\":\"做二\",\"assignee\":\"a\",\"deps\":[]},{\"id\":\"n3\",\"title\":\"三\",\"objective\":\"做三\",\"assignee\":\"b\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"},{\"node\":\"n1-2\",\"ok\":true,\"note\":\"够用\"},{\"node\":\"n1-3\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
@@ -156,6 +160,8 @@ pub(crate) fn stage_review_refills_until_the_ids_are_valid() {
         gw(
             member,
             vec![
+                // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
+                "结论：由 a 按需求把事做完。".to_string(),
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"把事做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 // 第一次把 id 写错（不在表里）→ 核心必须重填，而不是把判定丢掉或假装过了。
@@ -208,6 +214,8 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
         gw(
             member,
             vec![
+                // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
+                "结论：由 a 按需求把事做完。".to_string(),
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"把事做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
@@ -335,6 +343,8 @@ pub(crate) fn failed_node_acceptance_pauses_then_continue_redispatches() {
         gw(
             member,
             vec![
+                // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
+                "结论：由 a 按需求把事做完。".to_string(),
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 // 第一次节点验收：没过 → 该暂停等用户。
@@ -399,6 +409,8 @@ pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
         gw(
             member,
             vec![
+                // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
+                "结论：由 a 按需求把事做完。".to_string(),
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
