@@ -72,7 +72,9 @@ function run(cargoEnv) {
   // --yes 同时是 env.ensure 的同意开关与产品诊断命令（--provision 等）的确认开关，必须透传；
   // 只把构建档位参数留给启动器自己。
   const pass = process.argv.slice(2).filter((a) => a !== "--release");
-  const argv = [BIN, "."].concat(pass);
+  // 根目录只由 --root 或 cwd 决定（这里 cwd 就是仓库根）：位置参数在命令表上一次是命令词表里的词，
+  // 塞一个 "." 会被当成命令名（"未知命令或模块 ."）。
+  const argv = [BIN].concat(pass);
   log(process.argv.includes("--web")
     ? "starting Web UI (default 127.0.0.1:3081, open http://127.0.0.1:3081)"
     : "starting CLI (type web at the prompt for the Web UI, or start with --web)");
