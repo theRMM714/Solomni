@@ -334,6 +334,33 @@ function oneShotJsonIsPipeable() {
   return true;
 }
 
+/** 启动器的参数拼装：它给二进制塞的只能是旗语——位置参数在命令表里是命令词，
+ *  多塞一个 "." 就会被当成命令名（"未知命令或模块 ."），产品起不来。
+ *  这里真跑一次 `node start.js --version`：拿到版本行且没有"未知命令"才算过。 */
+function launcherBootsWithItsOwnArgv() {
+  const { spawnSync } = require("child_process");
+  const r = spawnSync(process.execPath, [path.join(PRODUCT_ROOT, "start.js"), "--version"], {
+    cwd: PRODUCT_ROOT,
+    encoding: "utf8",
+    timeout: 300000,
+  });
+  const out = ((r.stdout || "") + (r.stderr || "")).trim();
+  if (r.status !== 0) {
+    console.error("[e2e] node start.js --version 退出码 " + r.status + "（末尾：" + out.split(/\r?\n/).slice(-2).join(" / ") + "）");
+    return false;
+  }
+  if (out.includes("未知命令或模块")) {
+    console.error("[e2e] 启动器把位置参数传给了产品（" + out.split(/\r?\n/).slice(-1)[0] + "）");
+    return false;
+  }
+  if (!/solomni \d+\.\d+\.\d+/.test(out)) {
+    console.error("[e2e] node start.js --version 没给出版本行（末尾：" + out.split(/\r?\n/).slice(-2).join(" / ") + "）");
+    return false;
+  }
+  console.log("[e2e] 启动器只传旗语：node start.js --version 拿到版本行");
+  return true;
+}
+
 async function main() {
   if (!fs.existsSync(BIN)) {
     console.error("[e2e] 找不到二进制（" + path.relative(PRODUCT_ROOT, BIN) + "）：先 cargo build");
@@ -401,6 +428,10 @@ async function main() {
   }
   // 一次性命令也要能被脚本消费：stdout 只有 JSON，启动期诊断全在 stderr。
   if (!oneShotJsonIsPipeable()) {
+    return 1;
+  }
+  // 启动器（start.js / start.bat / start.sh 的共同入口）也要真跑一次：它是用户唯一的那条路。
+  if (!launcherBootsWithItsOwnArgv()) {
     return 1;
   }
 
