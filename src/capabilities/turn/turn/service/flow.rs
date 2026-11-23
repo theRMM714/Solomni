@@ -283,41 +283,18 @@ impl Turn {
         registry: &dyn Registry,
         probe: &dyn HostProbe,
     ) -> (Vec<SessionEvent>, Vec<(String, String, String)>) {
-        let Some(c) = self.session(sid).and_then(|s| s.collab()) else {
+        let Some(plan) = self
+            .session(sid)
+            .and_then(|s| s.flow())
+            .and_then(|f| f.plan())
+        else {
             return (Vec::new(), Vec::new());
         };
-        if !c.plan_approved() {
+        if !plan.approved() {
             return (Vec::new(), Vec::new());
         }
-        let (ready, busy): (Vec<(String, String)>, Vec<String>) = {
-            let chain = c.chain();
-            let busy = chain
-                .map(|ch| {
-                    ch.nodes
-                        .iter()
-                        .filter(|n| {
-                            matches!(
-                                n.status,
-                                crate::capabilities::taskchain::api::NodeStatus::Running
-                            )
-                        })
-                        .map(|n| n.assignee.clone())
-                        .collect()
-                })
-                .unwrap_or_default();
-            // **只派当前阶段**：同一阶段的节点并发跑，下一阶段要等本阶段整体验收通过。
-            let ready = chain
-                .map(|ch| {
-                    let stage = ch.current_stage().unwrap_or(1);
-                    ch.stage_ready(stage)
-                        .into_iter()
-                        .filter(|n| n.sub_session.is_none())
-                        .map(|n| (n.id.clone(), n.assignee.clone()))
-                        .collect()
-                })
-                .unwrap_or_default();
-            (ready, busy)
-        };
+        // 派哪些、谁在忙由流程给事实（"只派当前阶段""一个成员一次跑一件"是流程自己的判据）。
+        let (ready, busy) = (plan.ready(), plan.busy());
         let mut out = Vec::new();
         let mut todo = Vec::new();
         // 资源约束：**一个 agent 的会话一次只能跑一轮**——它已有在跑的节点（或本轮已派的）就跳过，
@@ -334,42 +311,24 @@ impl Turn {
                     // 并附上上一次的验收结论（没有 = 首轮）：**返工必须知道上次错在哪**，否则只会原样重做。
                     let (raw, rework) = self
                         .session(sid)
-                        .and_then(|s| s.collab())
-                        .and_then(|c| {
-                            c.chain().and_then(|ch| {
-                                ch.nodes.iter().find(|n| n.id == node).map(|n| {
-                                    let note = n
-                                        .acceptance
-                                        .as_ref()
-                                        .map(|a| a.note.clone())
-                                        .unwrap_or_default();
-                                    let rework = if note.trim().is_empty() {
-                                        String::new()
-                                    } else {
-                                        format!(
-                                            "\n== 上次没通过的原因 ==\n{}\n这次请针对上面的原因返工。\n",
-                                            note
-                                        )
-                                    };
-                                    (n.objective.clone(), rework)
-                                })
-                            })
-                        })
+                        .and_then(|s| s.flow())
+                        .and_then(|f| f.plan())
+                        .and_then(|p| p.objective(&node))
                         .unwrap_or_default();
                     let objective = self
                         .prompt
                         .render(Segment::ExecuteUser, &[("tasks", raw), ("rework", rework)]);
-                    if let Some(c) = self.session_mut(sid).and_then(|s| s.collab_mut()) {
-                        c.mark_node_started(&node, &child);
+                    // 记账与派活事件都归流程：驱动只把它原样外送，不解释它是哪一种事件。
+                    let mut started = None;
+                    if let Some(p) = self
+                        .session_mut(sid)
+                        .and_then(|s| s.flow_mut())
+                        .and_then(|f| f.plan_mut())
+                    {
+                        p.start(&node, &child);
+                        started = Some(p.started_event(&node, &child, &assignee));
                     }
-                    out.push(
-                        crate::capabilities::conversation::collab::api::CollabEvent::NodeStarted {
-                            node: node.clone(),
-                            sid: child.clone(),
-                            assignee,
-                        }
-                        .push(),
-                    );
+                    out.extend(started);
                     todo.push((node, child, objective));
                 }
                 Err(e) => out
@@ -444,16 +403,12 @@ impl Turn {
         probe: &dyn HostProbe,
     ) -> Result<String, String> {
         let (pmeta, _) = self.history.load(parent)?;
-        let assignee = {
-            let Some(c) = self.session(parent).and_then(|s| s.collab()) else {
-                return Err("无此协作会话".to_string());
-            };
-            let n = c
-                .chain()
-                .and_then(|ch| ch.nodes.iter().find(|n| n.id == node))
-                .ok_or_else(|| format!("链里没有节点 {}", node))?;
-            n.assignee.clone()
-        };
+        let assignee = self
+            .session(parent)
+            .and_then(|s| s.flow())
+            .and_then(|f| f.plan())
+            .and_then(|p| p.assignee(node))
+            .ok_or_else(|| format!("本会话没有可派的活，或链里没有节点 {}", node))?;
         // 节点的会话**就是它负责人的 agent 会话**（一个 agent 一个会话，讨论与执行不分家）。
         // 节点本身不再记在 meta 里——哪个节点正跑在这个会话里，由链的 sub_session 认。
         let _ = pmeta;
@@ -514,8 +469,9 @@ impl Turn {
         let note = self.node_note(sid);
         let node = self
             .session_mut(&parent)
-            .and_then(|s| s.collab_mut())
-            .and_then(|c| c.running_node_of(sid));
+            .and_then(|s| s.flow_mut())
+            .and_then(|f| f.plan())
+            .and_then(|p| p.running(sid));
         if let Some(node) = node {
             self.mark_node_done(&parent, &node, &note);
         }
@@ -577,10 +533,10 @@ impl Turn {
         let mut out = Vec::new();
         {
             let s = self.session_mut(sid).ok_or("无此会话")?;
-            let Some(c) = s.collab_mut() else {
-                return Err("该会话不是协作模式".to_string());
+            let Some(f) = s.flow_mut() else {
+                return Err("该会话不是流程会话".to_string());
             };
-            c.set_task(text, &mut |e| out.push(e));
+            f.begin_with(text, &mut |e| out.push(e));
         }
         out.extend(self.collab_advance(sid, registry, probe)?);
         self.collab_tail(sid, out, None, registry, probe)
@@ -700,11 +656,9 @@ impl Turn {
             self.history.create(&meta)?;
             let module_roster = self.modules.roster();
             let sandboxes = self.sandboxes(registry, probe, &meta, &module_roster)?;
-            if let Some(c) = self.session_mut(sid).and_then(|s| s.collab_mut()) {
-                c.set_sandboxes(sandboxes);
-            }
-            // 名单是会话级事实，复合流程里每一段都要认得出成员（后一段不再是同一个对象）。
+            // 名单与沙箱是会话级事实，复合流程里每一段都要认得出成员（后一段不再是同一个对象）。
             if let Some(m) = self.session_mut(sid).and_then(|s| s.flow_mut()) {
+                m.set_sandboxes(sandboxes);
                 m.adopt_roster(&roster);
             }
         }
@@ -740,10 +694,10 @@ impl Turn {
         }
         self.ensure_session(sid, registry, probe)?;
         // @ 引用按本会话沙箱改写（与首次提交需求同一口径）。
-        let Some(c) = self.session(sid).and_then(|s| s.collab()) else {
-            return Err("只有协作会话有「本次需求」".to_string());
+        let Some(f) = self.session(sid).and_then(|s| s.flow()) else {
+            return Err("只有流程会话能改「本次需求」".to_string());
         };
-        let text = c.retask_text(text);
+        let text = f.adapt_text(text);
         let (meta, raw) = self.history.load(sid)?;
         let next = crate::capabilities::conversation::session::api::next_line_id(&raw);
         let mut kept = Vec::with_capacity(raw.len() + 1);
@@ -808,10 +762,12 @@ impl Turn {
         let Some(s) = self.session_mut(sid) else {
             return Err("无此会话".to_string());
         };
-        let Some(c) = s.collab_mut() else {
-            return Err("只有协作会话有「同意」可撤回".to_string());
+        let Some(f) = s.flow_mut() else {
+            return Err("只有流程会话能撤回「同意」".to_string());
         };
-        c.withdraw_agree(agent, &mut |e| events.push(e));
+        if !f.withdraw_agree(agent, &mut |e| events.push(e)) {
+            return Err("本会话的流程没有「同意」可撤回".to_string());
+        }
         self.record_events(sid, &mut events);
         Ok(events)
     }

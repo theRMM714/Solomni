@@ -6,7 +6,7 @@
 
 ## 管什么 / 不管什么
 
-- 管：会话状态与簿记（行 / 回合 / 回复）、成员工具面与工具表、历史视图与元信息、回档的纯行算术、呈现侧事件契约（`SessionEvent` / `LineView` / 裁决关 `Gate`；机制专有事件走 `Push`，词汇归各自能力）、**流程面**（`Flow`：驱动只认「推一步 / 让出一回合 / 交回处置」，具体流程自己实现）、**会话类型表**（`Profiles`：一个类型就是一串流程与用到的角色，每个流程分核心席与成员席，声明在 `systools/profiles.yaml`，装配期校验）、核心操作回路（声明工具面 → 跑一次模型 → 取载荷 → 只读核实）。
+- 管：会话状态与簿记（行 / 回合 / 回复）、成员工具面与工具表、历史视图与元信息、回档的纯行算术、呈现侧事件契约（`SessionEvent` / `LineView` / 裁决关 `Gate`；机制专有事件走 `Push`，词汇归各自能力）、**流程面**（`Flow` 与可派的活 `WorkPlan`：驱动只认「推一步 / 让出一回合 / 交回处置 / 该派哪些节点」，具体流程自己实现）、**会话类型表**（`Profiles`：一个类型就是一串流程与用到的角色，每个流程分核心席与成员席，声明在 `systools/profiles.yaml`，装配期校验）、核心操作回路（声明工具面 → 跑一次模型 → 取载荷 → 只读核实）。
 - 不管：不编排跨会话（`runtime`）、不决定讨论流程（`collab`）、不实现工具机制（`tools`）。
 
 ## 入站契约与状态归属
@@ -25,7 +25,7 @@
 
 - 行与事件词汇（`src/capabilities/conversation/session/domain/events.rs`、`LineView` 字段）一改 → `collab` 的状态派生、`runtime` 的视图、`cli` / `web` 渲染、`src/tests/session/` 全跟。
 - 机制自己的事件与关卡（`Push` 的 `kind` / `payload`、`Gate`）改 → 对应机制的词汇文件（协作在 `src/capabilities/conversation/collab/domain/events.rs` 与 `src/capabilities/conversation/collab/domain/gates.rs`）与它的渲染；会话侧不跟着改。
-- 流程面（`src/capabilities/conversation/session/domain/flow.rs` 的 `Flow` / `MemberAsk` / `Handback`）一改 → 每个流程的实现（协作在 `src/capabilities/conversation/collab/service/flow.rs`）与驱动（`src/capabilities/turn/turn/service/flow.rs`、`src/capabilities/turn/turn/service/generation/collab.rs`）一起改。
+- 流程面（`src/capabilities/conversation/session/domain/flow.rs` 的 `Flow` / `MemberAsk` / `Handback` / `WorkPlan`）一改 → 每个流程的实现（协作在 `src/capabilities/conversation/collab/service/flow.rs`）与驱动（`src/capabilities/turn/turn/service/flow.rs`、`src/capabilities/turn/turn/service/generation/collab.rs`）一起改。
 - 复合流程（`src/capabilities/conversation/session/domain/sequence.rs` 的 `Sequence`）一改 → 装配点（`src/capabilities/work/service/create.rs`、`src/capabilities/turn/turn/service/rebuild.rs`）与流程自己的 `intake` / `output` / `part` 一起看：前一段交出的产物就是后一段的需求。
 - 流程工厂面（`src/capabilities/conversation/session/domain/flows.rs` 的 `Flows` / `FlowSetup` / `sequence_of`）一改 → 各流程工厂的实现（协作在 `src/capabilities/conversation/collab/service/flows.rs`）与组合根的注入（`src/capabilities/runtime/service/core.rs`）一起改：装配点只问 id 要段，不认识具体流程。
 - 会话类型表（`src/capabilities/conversation/session/domain/profile.rs` 的 `Profiles`，数据在 `systools/profiles.yaml`）一改 → 提示词册子的会话类型（`prompts/shared/mechanisms.yaml` 的 `session`）与机制册校验同跟；新增流程要在 `session/domain/flow.rs` 的 `REGISTERED` 加一行，角色换席要同改 `systools/roles.yaml` 的 `seat`。

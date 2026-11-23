@@ -30,7 +30,7 @@
 | `src/capabilities/conversation/session/domain/tools.rs` | 成员工具面：本回合可调的工具、观察账本与沙箱；只含值的 `ToolFace` 与核实用例端口 `CoreVerify`；shell 状态槽与按转录派生最近一次 shell（`last_shell`） |
 | `src/capabilities/conversation/session/domain/persist.rs` | 落盘策略：哪种会话留档、哪些事件算定稿（`PersistPolicy`）、系统会话的识别与拟名单会话号 |
 | `src/capabilities/conversation/session/domain/history.rs` | 会话元信息、运行态（`RunState`）与历史视图的内存形态 |
-| `src/capabilities/conversation/session/domain/flow.rs` | 流程面：驱动一侧的插件契约 `Flow`（推一步 / 取走让出的一步 / 交回处置 / 处置自己发的关卡）、让出的那一步 `MemberAsk`、交回后的处置 `Handback` 与关卡落定 `Settle`；不实现任何流程 |
+| `src/capabilities/conversation/session/domain/flow.rs` | 流程面：驱动一侧的插件契约 `Flow`（推一步 / 取走让出的一步 / 交回处置 / 处置自己发的关卡）、让出的那一步 `MemberAsk`、交回后的处置 `Handback` 、关卡落定 `Settle` 与可派的活 `WorkPlan`（该派哪些节点、节点提示词与返工提示、开跑收工记账、开工事件）；不实现任何流程 |
 | `src/capabilities/conversation/session/domain/sequence.rs` | 复合流程：按会话类型表把多个流程串成一条（前一段 `is_done` 就把 `output` 交给下一段 `intake`）；驱动仍只认 `Flow`，业务面（`part`）指向当前这一段 |
 | `src/capabilities/conversation/session/domain/flows.rs` | 流程工厂面：`Flows`（id → 造一段）、装配用的 `FlowSetup`（会话参数、成员、裁决队与可选的恢复事实）与按类型表串段的 `sequence_of`；不实现任何流程，实现由组合根注入 |
 | `src/capabilities/conversation/session/domain/profile.rs` | 会话类型表：`Profiles` / `Profile` / `FlowDecl` 的形状与装配期校验（与形态一一对应、流程已注册、每个流程的核心席 / 成员席与角色表席位一致）；不解析 yaml，不实现流程 |

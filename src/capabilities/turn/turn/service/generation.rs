@@ -87,22 +87,18 @@ pub(crate) fn start_child_collab<H: TurnHost>(host: &H, sid: &str) {
         .name("solomni-child-collab".to_string())
         .spawn(move || {
             let look = sid.clone();
-            let Ok(Some(queue)) =
-                me.core_env(move |turn, registry, probe| turn.open_queue(&look, registry, probe))
-            else {
+            let Ok(Some((queue, default))) = me.core_env(move |turn, registry, probe| {
+                let queue = turn.open_queue(&look, registry, probe)?;
+                // 该答哪个选项由流程自己说（"允许自裁"是流程的词汇，驱动不认）。
+                let default = turn.default_answer(&look);
+                Ok(queue.map(|q| (q, default)))
+            }) else {
                 return;
             };
-            let allow = crate::capabilities::conversation::collab::api::OPT_BEGIN_ALLOW;
-            let option = if queue.card.options.iter().any(|o| o.id == allow) {
-                allow.to_string()
-            } else {
-                queue
-                    .card
-                    .options
-                    .first()
-                    .map(|o| o.id.clone())
-                    .unwrap_or_default()
-            };
+            let option = default
+                .filter(|id| queue.card.options.iter().any(|o| &o.id == id))
+                .or_else(|| queue.card.options.first().map(|o| o.id.clone()))
+                .unwrap_or_default();
             if option.is_empty() {
                 return;
             }

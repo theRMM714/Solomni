@@ -1,5 +1,5 @@
 //! 目的：协作能力的入站面——对外导出的会话对象与回合处置。
-//! 管：CollabSession、机制词汇（事件 / 关卡 / 选项 id）与 collab_state::tool_runs 的再导出。
+//! 管：流程词汇（事件 / 关卡 / 选项 id）、流程工厂与 collab_state::tool_runs 的再导出。
 //! 不管：实现（在 service/ 与 domain/）；回合引擎（已迁 session，见 session::service::engine）；其它能力的内部；呈现层的渲染与布局。
 //! 联动：其它能力与呈现层只经本面使用协作；实现见 src/capabilities/conversation/collab/service/，状态派生见 src/capabilities/conversation/collab/domain/collab_state.rs。
 
@@ -18,6 +18,5 @@ pub use crate::capabilities::conversation::collab::domain::gates::{
     OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY,
     OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM,
 };
-pub use crate::capabilities::conversation::collab::service::collab::CollabSession;
 // 流程工厂：组合根拿它注入 turn / work（装配点只认 session::api::Flows，不认这个类型）。
 pub use crate::capabilities::conversation::collab::service::flows::CollabFlows;

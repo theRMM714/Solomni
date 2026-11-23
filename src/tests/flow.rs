@@ -4,7 +4,6 @@
 //! 联动：doubles/standin.rs 实现流程面；本文件不改 turn / work / runtime / lifecycle / presentation / session。
 
 use super::prelude::*;
-use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::conversation::session::api::{
     DecisionCard, DecisionEnvelope, DecisionMessage, Gate, GateTicket, OptionView,
 };
@@ -24,12 +23,9 @@ pub(crate) fn a_standin_flow_runs_on_the_same_driver() {
         .unwrap()
         .sid;
     // 把在世会话换成替身流程：驱动除了流程面之外一个字段都不该看。
-    let old = core.turn.take_flow_raw(&sid).expect("取在世会话");
-    let systools = old
-        .part()
-        .downcast_ref::<CollabSession>()
-        .expect("协作会话")
-        .systools();
+    // 替身流程自己要工具面：拿产品同一份工具表（驱动不看它从哪来）。
+    let systools = crate::tests::doubles::test_tools_svc();
+    let _old = core.turn.take_flow_raw(&sid).expect("取在世会话");
     core.turn.put(
         sid.to_string(),
         Session::Flow(Box::new(StandIn::new(systools))),
@@ -89,12 +85,9 @@ pub(crate) fn a_standin_flow_settles_its_own_gate() {
         .create_work(collab_work("w", &["a"], false, "做个东西"))
         .unwrap()
         .sid;
-    let old = core.turn.take_flow_raw(&sid).expect("取在世会话");
-    let systools = old
-        .part()
-        .downcast_ref::<CollabSession>()
-        .expect("协作会话")
-        .systools();
+    // 替身流程自己要工具面：拿产品同一份工具表（驱动不看它从哪来）。
+    let systools = crate::tests::doubles::test_tools_svc();
+    let _old = core.turn.take_flow_raw(&sid).expect("取在世会话");
     core.turn
         .put(sid.clone(), Session::Flow(Box::new(StandIn::new(systools))));
     let card = DecisionCard {

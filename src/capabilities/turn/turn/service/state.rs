@@ -7,7 +7,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
-use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::conversation::session::api::{
     AgentSession, Decisions, Flow, Gates, ShellSlot, decisions,
 };
@@ -30,22 +29,6 @@ impl Session {
         match self {
             Session::Flow(m) => m.is_done(),
             Session::Single(_) => false,
-        }
-    }
-
-    /// 目的：流程自己的业务面（任务链、名单、沙箱）取回具体类型；驱动路径（流程面）不用它。
-    pub(crate) fn collab(&self) -> Option<&CollabSession> {
-        match self {
-            Session::Flow(m) => m.part().downcast_ref::<CollabSession>(),
-            _ => None,
-        }
-    }
-
-    /// 目的：同上（可写一份）。
-    pub(crate) fn collab_mut(&mut self) -> Option<&mut CollabSession> {
-        match self {
-            Session::Flow(m) => m.part_mut().downcast_mut::<CollabSession>(),
-            _ => None,
         }
     }
 

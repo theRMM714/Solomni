@@ -3,7 +3,6 @@
 //! 不管：真实流程（在 collab）；本文件不碰 turn 的会话表、落盘与呈现。
 //! 联动：src/tests/flow.rs 把它塞进 `Session::Flow`，走 `Turn::collab_advance` 的同一条驱动。
 
-use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
@@ -118,14 +117,6 @@ impl Flow for StandIn {
 
     fn failed(&mut self, err: &str) {
         self.failed = Some(err.to_string());
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     fn next_line(&self) -> u64 {
