@@ -21,6 +21,7 @@ mod kernel;
 mod lifecycle;
 mod llm;
 mod mcp;
+mod mechanism;
 mod modules;
 mod op;
 mod packages;

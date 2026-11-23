@@ -7,6 +7,7 @@ mod fs;
 mod http;
 mod logs;
 mod modules;
+mod profiles;
 mod prompt;
 mod yaml;
 
@@ -20,6 +21,7 @@ use crate::capabilities::catalog::registry::detail::yaml_settings::YamlSettingsS
 use crate::capabilities::catalog::registry::ports::SettingsStore;
 use crate::capabilities::conversation::session::api::SessionMeta;
 use crate::capabilities::conversation::session::detail::fs_history::FsHistory;
+use crate::capabilities::conversation::session::detail::yaml_profiles::YamlProfiles;
 use crate::capabilities::conversation::session::ports::HistoryStore;
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{Chunk, CompleteOpts, Msg, ProbeOutcome};

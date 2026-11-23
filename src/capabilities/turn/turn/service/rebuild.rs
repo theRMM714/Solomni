@@ -92,7 +92,7 @@ impl Turn {
         let desk = self.desk_for(&meta.name, issued);
         desk.rebuild(issued);
         let built = match meta.mode {
-            Mode::Collab => Session::Collab(CollabSession::restore(
+            Mode::Collab => Session::Mech(Box::new(CollabSession::restore(
                 Arc::clone(&self.llm),
                 Arc::clone(&self.vm),
                 Arc::clone(&self.modules),
@@ -106,7 +106,7 @@ impl Turn {
                 sandboxes,
                 // 重建出来的整队进**同一条队**（按转录里已发出的卡号续号，已答过的不重问）。
                 Arc::clone(&desk),
-            )?),
+            )?)),
             // 单 agent：按 meta.agents[0] 重建（名单是唯一真相；模块数不限）。
             Mode::Single => {
                 let a = meta

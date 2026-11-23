@@ -53,8 +53,8 @@ impl Turn {
             Some(crate::capabilities::turn::turn::api::Session::Single(s)) => {
                 out.extend(s.note_notice(text))
             }
-            Some(crate::capabilities::turn::turn::api::Session::Collab(c)) => {
-                c.notice(text, &mut |e| out.push(e))
+            Some(crate::capabilities::turn::turn::api::Session::Mech(m)) => {
+                m.notice(text, &mut |e| out.push(e))
             }
             None => out.push(SessionEvent::Notice(text.to_string())),
         }

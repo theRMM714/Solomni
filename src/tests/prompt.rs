@@ -56,12 +56,11 @@ pub(crate) fn prompt_book_loads_from_yaml() {
     let p = test_prompts();
     // 语气约定；**能用哪些表态由角色表渲染**（见 systools/roles.yaml），不在这句话里。
     assert!(!p.core.chat_protocol.trim().is_empty());
-    // 机制册按（会话使用类型 × 角色）分发：每条非空、都写了适用角色，类型表非空。
+    // 机制册按（会话使用类型 × 角色）分发：每条非空、都写了适用角色（类型表归 systools/profiles.yaml）。
     assert!(
         p.core.mechanisms.len() >= 3,
         "机制册至少要覆盖单 agent / 协作 / 代理"
     );
-    assert!(!p.core.session_kinds.is_empty(), "会话使用类型的全表不能空");
     for m in &p.core.mechanisms {
         assert!(!m.text.trim().is_empty(), "机制说明不能为空：{}", m.session);
         assert!(!m.roles.is_empty(), "每条机制都要写清适用角色");

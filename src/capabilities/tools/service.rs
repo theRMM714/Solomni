@@ -73,6 +73,10 @@ impl Tools for ToolsService {
         self.catalog.allows_module_tools(role)
     }
 
+    fn roles(&self) -> Vec<String> {
+        self.catalog.roles.keys().cloned().collect()
+    }
+
     fn book(&self) -> ToolBook {
         self.catalog.tools.clone()
     }

@@ -1,8 +1,9 @@
-//! 目的：协作会话作为**一个机制**：把泵的「推一步 / 让出一回合 / 交回」翻译成机制面的七个动作。
+//! 目的：协作会话作为**一个机制**：把泵的「推一步 / 让出一回合 / 交回」翻译成机制面的动作。
 //! 管：`Mechanism for CollabSession` 的逐项实现（成员抽问、交回处置、失败记下）。
 //! 不管：泵与状态机本身（在 pump / discussion / turn_io）；驱动循环（在 turn）。
 //! 联动：`turn` 的驱动循环与 `turn::generation` 的工作线程只认 `Mechanism`，认不出这是协作。
 
+use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
@@ -65,5 +66,29 @@ impl Mechanism for CollabSession {
 
     fn failed(&mut self, err: &str) {
         self.note_turn_failure(err.to_string());
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn next_line(&self) -> u64 {
+        self.next_line
+    }
+
+    fn set_next_line(&mut self, next: u64) {
+        self.next_line = next;
+    }
+
+    fn is_done(&self) -> bool {
+        CollabSession::is_done(self)
+    }
+
+    fn notice(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
+        CollabSession::notice(self, text, sink);
     }
 }

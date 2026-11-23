@@ -572,7 +572,7 @@ impl Work {
                 )?;
                 let mut out = Vec::new();
                 cs.set_task(&task, &mut |e| out.push(e));
-                (Session::Collab(cs), out)
+                (Session::Mech(Box::new(cs)), out)
             }
         };
         // 会话身份落盘：失败即失败（名字即目录，这是承诺，不假装已保存）。

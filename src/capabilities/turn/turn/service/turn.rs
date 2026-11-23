@@ -1,5 +1,5 @@
 //! 目的：单 agent 的回合收发——工具形态刷新、生成前准备、节点派发准备、同步生成入口、继续；
-//!   以及会话的放取（单 agent / 协作）与交回时的收尾判据。
+//!   以及会话的放取（单 agent / 机制槽）与交回时的收尾判据。
 //! 管：一次单 agent 回合的判据（形态变了先提示、继续时末条必须是用户发言）、放取时的运行态闸门、
 //!   交回时按落盘运行态作废裁决队、压缩回合的身份块、系统消息注入、回合编号。
 //! 不管：拟名单、会话启用、协作链推进（在 `flow`）、模型调用本身（在 `collab` 与 `llm`）。
@@ -8,9 +8,8 @@
 use std::sync::Arc;
 
 use crate::capabilities::catalog::registry::api::Registry;
-use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::conversation::session::api::{
-    AgentSession, Gates, Mode, RunState, SessionEvent, subtree_of,
+    AgentSession, Gates, Mechanism, Mode, RunState, SessionEvent, subtree_of,
 };
 use crate::capabilities::turn::turn::api::{Prepared, Session};
 use crate::kernel::ports::HostProbe;
@@ -81,7 +80,7 @@ impl Turn {
     ) -> Result<Prepared, String> {
         // 还没装进内存的会话先从落盘重建（"继续"可能先于"打开"到达；真没这个会话仍然报无此会话）。
         self.ensure_session(sid, registry, probe)?;
-        if matches!(self.session(sid), Some(Session::Collab(_))) {
+        if matches!(self.session(sid), Some(Session::Mech(_))) {
             return Ok(Prepared::NotSingle);
         }
         let mut prefix: Vec<SessionEvent> = Vec::new();
@@ -130,7 +129,7 @@ impl Turn {
         probe: &dyn HostProbe,
     ) -> Result<Prepared, String> {
         self.ensure_session(child, registry, probe)?;
-        if matches!(self.session(child), Some(Session::Collab(_))) {
+        if matches!(self.session(child), Some(Session::Mech(_))) {
             return Ok(Prepared::NotSingle);
         }
         // 节点的生成跟随设置里的流式开关；思考强度按工作根解析（子会话共享）。
@@ -227,14 +226,10 @@ impl Turn {
                         vec![SessionEvent::Notice(NEED_USER.to_string())]
                     }
                 }
-                // 协作不需要用户发言：从断点推进流水线。
-                Session::Collab(c) => {
+                // 机制不需要用户发言：从断点推进流水线。
+                Session::Mech(m) => {
                     let mut out = Vec::new();
-                    {
-                        let m: &mut dyn crate::capabilities::conversation::session::api::Mechanism =
-                            c;
-                        m.resume(&mut |e| out.push(e));
-                    }
+                    m.resume(&mut |e| out.push(e));
                     out
                 }
             }
@@ -265,14 +260,14 @@ impl Turn {
         }
     }
 
-    /// 目的：把协作会话**交给工作线程**（核心表里留"生成中"）。
-    ///  会话还没装进内存时先从落盘重建：协作的"继续"可能先于"打开"到达。
-    pub(crate) fn take_collab(
+    /// 目的：把一个机制会话**交给工作线程**（核心表里留"生成中"）。
+    ///  会话还没装进内存时先从落盘重建：机制的"继续"可能先于"打开"到达。
+    pub(crate) fn take_mech(
         &mut self,
         sid: &str,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
-    ) -> Result<CollabSession, String> {
+    ) -> Result<Box<dyn Mechanism>, String> {
         // 同上：运行态闸门是第一道，先于"取出来"。
         self.dispatch_gate(sid)?;
         if self.is_running(sid) {
@@ -282,13 +277,13 @@ impl Turn {
             self.ensure_session(sid, registry, probe)?;
         }
         match self.take(sid) {
-            Some(Session::Collab(c)) => {
+            Some(Session::Mech(m)) => {
                 self.mark_running(sid.to_string());
-                Ok(c)
+                Ok(m)
             }
             Some(other) => {
                 self.put(sid.to_string(), other);
-                Err("该会话不是协作模式".to_string())
+                Err("该会话不是机制会话".to_string())
             }
             None => Err("无此会话".to_string()),
         }
@@ -369,12 +364,12 @@ impl Turn {
     pub(crate) fn put_collab(
         &mut self,
         sid: &str,
-        c: CollabSession,
+        c: Box<dyn Mechanism>,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
     ) -> (Vec<SessionEvent>, Vec<(String, String, String)>) {
         self.unmark_running(sid);
-        self.put(sid.to_string(), Session::Collab(c));
+        self.put(sid.to_string(), Session::Mech(c));
         // 交回时这段工作已被停 / 已关闭：队列里没答的卡**一律作废**（生成期间对象在别人手里，只能在这里补）。
         let mut voided = self.void_gates_of(sid);
         let (spawned, todo) = self.spawn_ready_nodes(sid, registry, probe);
@@ -424,7 +419,7 @@ impl Turn {
     /// 目的：标记节点完成并记下它的产出，供父会话做总验收。
     /// 参数：`sid` = 协作会话；`node` = 节点名；`note` = 该节点的产出摘要。
     pub(super) fn mark_node_done(&mut self, sid: &str, node: &str, note: &str) {
-        if let Some(Session::Collab(c)) = self.session_mut(sid) {
+        if let Some(c) = self.session_mut(sid).and_then(|s| s.collab_mut()) {
             c.mark_node_done(node, note);
         }
     }
@@ -479,10 +474,11 @@ impl Turn {
         let Some(parent) = parent else {
             return 0;
         };
-        let tid = match self.session_mut(&parent) {
-            Some(Session::Collab(c)) => c.next_turn_id(),
-            _ => 0,
-        };
+        let tid = self
+            .session_mut(&parent)
+            .and_then(|s| s.collab_mut())
+            .map(|c| c.next_turn_id())
+            .unwrap_or(0);
         if let Some(Session::Single(s)) = self.session_mut(child) {
             s.set_turn(tid);
         }

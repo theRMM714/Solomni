@@ -132,7 +132,7 @@ fn system_tools_and_roles_are_self_consistent() {
     );
 }
 
-/// 机制册必须与两张表自洽：**会话使用类型**在册、**适用角色**在角色表里；
+/// 机制册必须与两张表自洽：**会话使用类型**在会话类型表里、**适用角色**在角色表里；
 /// 而且真实会话路径（类型 × 角色）都拿得到机制说明——对应关系是数据，这里只校验不写死。
 #[test]
 fn mechanism_book_matches_session_kinds_and_roles() {
@@ -140,10 +140,18 @@ fn mechanism_book_matches_session_kinds_and_roles() {
     let st = YamlSystools::new(root.join("systools"))
         .load()
         .expect("读系统工具与角色");
+    let profiles = YamlProfiles::new(root.join("systools"))
+        .load()
+        .expect("读会话类型表");
     let prompts = YamlPrompts::new(root.join("prompts"))
+        .sessions(profiles.ids())
         .load()
         .expect("读提示词册");
-    let kinds = &prompts.core.session_kinds;
+    let kinds = profiles.ids();
+    let known: Vec<String> = st.roles.keys().cloned().collect();
+    profiles
+        .check_roles(&known)
+        .expect("会话类型引用的角色必须在角色表里");
     let role_ids: Vec<&String> = st.roles.keys().collect();
     assert!(!prompts.core.mechanisms.is_empty(), "机制册不能为空");
     for m in &prompts.core.mechanisms {
@@ -185,7 +193,11 @@ fn yaml_prompts_loads_the_shipped_book_and_reports_missing_or_broken_files() {
     let root = scratch("yaml-prompts");
     let root_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let real = root_dir.join("prompts");
+    let profiles = YamlProfiles::new(root_dir.join("systools"))
+        .load()
+        .expect("读会话类型表");
     let ok = YamlPrompts::new(real)
+        .sessions(profiles.ids())
         .load()
         .expect("产品自带提示词册必须合法");
     assert!(!ok.core.path_rules.is_empty());

@@ -456,6 +456,9 @@ pub trait Tools: Send + Sync {
     /// 这个身份能不能用它自己模块的工具（论据：角色表的 `module_tools`）。
     fn allows_module_tools(&self, role: &str) -> bool;
 
+    /// 角色表的全部角色名（装配期校验会话类型表的引用，不暴露表本体）。
+    fn roles(&self) -> Vec<String>;
+
     /// 内置工具总表（工具**是什么**的声明书）：调用方要持有它时拿走一份。
     fn book(&self) -> ToolBook;
 

@@ -6,7 +6,6 @@
 
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::catalog::registry::api::Registry;
-use crate::capabilities::conversation::collab::api::CollabSession;
 use crate::capabilities::conversation::session::api::{
     Answered, DecisionQueue, GateTicket, Handback, Mechanism, Mode, RunState, SessionEvent,
     SessionMeta, TurnIo, UsageTotals, flat_modules, work_root,
@@ -75,9 +74,9 @@ impl Turn {
         loop {
             // ① 机制推一步：已有让出的事就取走，否则推进一步再看（驱动不认识任何具体机制）。
             let ask = {
-                let mut c = self.take_collab_raw(sid)?;
+                let mut c = self.take_mech_raw(sid)?;
                 let ask = {
-                    let m: &mut dyn Mechanism = &mut c;
+                    let m: &mut dyn Mechanism = &mut *c;
                     match m.take_ask() {
                         Some(ask) => Some(ask),
                         None => {
@@ -91,7 +90,7 @@ impl Turn {
                     }
                 };
                 opening = false;
-                self.put(sid.to_string(), Session::Collab(c));
+                self.put(sid.to_string(), Session::Mech(c));
                 ask
             };
             let Some(ask) = ask else {
@@ -149,33 +148,33 @@ impl Turn {
                     };
                     out.extend(self.notice_row(sid, &note));
                     // 机制如实记下这次失败：下次推一步时由它交回中断，而不是当成功继续。
-                    let mut c = self.take_collab_raw(sid)?;
+                    let mut c = self.take_mech_raw(sid)?;
                     {
-                        let m: &mut dyn Mechanism = &mut c;
+                        let m: &mut dyn Mechanism = &mut *c;
                         m.failed(&err);
                     }
-                    self.put(sid.to_string(), Session::Collab(c));
+                    self.put(sid.to_string(), Session::Mech(c));
                     break;
                 }
             };
             // ④ **交回机制的策略**（见 session-model.md 二）：吸收继续 / 提醒重问 / 放过，驱动只照做。
             let handback = {
-                let mut c = self.take_collab_raw(sid)?;
+                let mut c = self.take_mech_raw(sid)?;
                 let hb = {
-                    let m: &mut dyn Mechanism = &mut c;
+                    let m: &mut dyn Mechanism = &mut *c;
                     m.handback(&ask, &turn)
                 };
-                self.put(sid.to_string(), Session::Collab(c));
+                self.put(sid.to_string(), Session::Mech(c));
                 hb
             };
             match handback {
                 Handback::Fed => {
-                    let mut c = self.take_collab_raw(sid)?;
+                    let mut c = self.take_mech_raw(sid)?;
                     {
-                        let m: &mut dyn Mechanism = &mut c;
+                        let m: &mut dyn Mechanism = &mut *c;
                         m.feed(&ask, turn, &mut |e| out.push(e));
                     }
-                    self.put(sid.to_string(), Session::Collab(c));
+                    self.put(sid.to_string(), Session::Mech(c));
                 }
                 Handback::Remind(reminder) => {
                     // 提醒注入**它自己的会话**（系统消息：用户看到的是系统行），然后**不 feed**——
@@ -191,12 +190,12 @@ impl Turn {
                 }
                 Handback::PassOver => {
                     // 提醒到顶：主会话记一行"未回应"（系统消息），本轮放过它，整轮继续。
-                    let mut c = self.take_collab_raw(sid)?;
+                    let mut c = self.take_mech_raw(sid)?;
                     {
-                        let m: &mut dyn Mechanism = &mut c;
+                        let m: &mut dyn Mechanism = &mut *c;
                         m.pass_over(&ask, &mut |e| out.push(e));
                     }
-                    self.put(sid.to_string(), Session::Collab(c));
+                    self.put(sid.to_string(), Session::Mech(c));
                 }
             }
             // 安全网：提醒/重问必须有终点（计数有上限，这里再兜一层，防实现走偏时空转）。
@@ -212,13 +211,13 @@ impl Turn {
         Ok(out)
     }
 
-    /// 目的：裸搬协作会话（不触发任务链派发那套副作用）：驱动循环每步都要搬一次。
-    pub(crate) fn take_collab_raw(&mut self, sid: &str) -> Result<CollabSession, String> {
+    /// 目的：裸搬一个机制（不触发任务链派发那套副作用）：驱动循环每步都要搬一次。
+    pub(crate) fn take_mech_raw(&mut self, sid: &str) -> Result<Box<dyn Mechanism>, String> {
         match self.take(sid) {
-            Some(Session::Collab(c)) => Ok(c),
+            Some(Session::Mech(m)) => Ok(m),
             Some(other) => {
                 self.put(sid.to_string(), other);
-                Err("该会话不是协作模式".to_string())
+                Err("该会话不是机制会话".to_string())
             }
             None => Err("无此会话".to_string()),
         }
@@ -236,12 +235,12 @@ impl Turn {
         let mut out = Vec::new();
         // **用户那一步**先做：重派核心指名没过的节点（唤醒不会替用户做这个决定，见 pump_with 的闸）。
         {
-            let mut c = self.take_collab_raw(sid)?;
+            let mut c = self.take_mech_raw(sid)?;
             {
-                let m: &mut dyn Mechanism = &mut c;
+                let m: &mut dyn Mechanism = &mut *c;
                 m.resume(&mut |e| out.push(e));
             }
-            self.put(sid.to_string(), Session::Collab(c));
+            self.put(sid.to_string(), Session::Mech(c));
         }
         // 泵（讨论回合 / 总验收）→ 派发并跑完就绪节点 → 再泵一步（总验收 → 交付）。
         out.extend(self.collab_advance(sid, registry, probe)?);
@@ -284,37 +283,40 @@ impl Turn {
         registry: &dyn Registry,
         probe: &dyn HostProbe,
     ) -> (Vec<SessionEvent>, Vec<(String, String, String)>) {
-        let (ready, busy): (Vec<(String, String)>, Vec<String>) = match self.session(sid) {
-            Some(Session::Collab(c)) if c.plan_approved() => {
-                let chain = c.chain();
-                let busy = chain
-                    .map(|ch| {
-                        ch.nodes
-                            .iter()
-                            .filter(|n| {
-                                matches!(
-                                    n.status,
-                                    crate::capabilities::taskchain::api::NodeStatus::Running
-                                )
-                            })
-                            .map(|n| n.assignee.clone())
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                // **只派当前阶段**：同一阶段的节点并发跑，下一阶段要等本阶段整体验收通过。
-                let ready = chain
-                    .map(|ch| {
-                        let stage = ch.current_stage().unwrap_or(1);
-                        ch.stage_ready(stage)
-                            .into_iter()
-                            .filter(|n| n.sub_session.is_none())
-                            .map(|n| (n.id.clone(), n.assignee.clone()))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                (ready, busy)
-            }
-            _ => return (Vec::new(), Vec::new()),
+        let Some(c) = self.session(sid).and_then(|s| s.collab()) else {
+            return (Vec::new(), Vec::new());
+        };
+        if !c.plan_approved() {
+            return (Vec::new(), Vec::new());
+        }
+        let (ready, busy): (Vec<(String, String)>, Vec<String>) = {
+            let chain = c.chain();
+            let busy = chain
+                .map(|ch| {
+                    ch.nodes
+                        .iter()
+                        .filter(|n| {
+                            matches!(
+                                n.status,
+                                crate::capabilities::taskchain::api::NodeStatus::Running
+                            )
+                        })
+                        .map(|n| n.assignee.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            // **只派当前阶段**：同一阶段的节点并发跑，下一阶段要等本阶段整体验收通过。
+            let ready = chain
+                .map(|ch| {
+                    let stage = ch.current_stage().unwrap_or(1);
+                    ch.stage_ready(stage)
+                        .into_iter()
+                        .filter(|n| n.sub_session.is_none())
+                        .map(|n| (n.id.clone(), n.assignee.clone()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            (ready, busy)
         };
         let mut out = Vec::new();
         let mut todo = Vec::new();
@@ -332,8 +334,9 @@ impl Turn {
                     // 并附上上一次的验收结论（没有 = 首轮）：**返工必须知道上次错在哪**，否则只会原样重做。
                     let (raw, rework) = self
                         .session(sid)
-                        .and_then(|s| match s {
-                            Session::Collab(c) => c.chain().and_then(|ch| {
+                        .and_then(|s| s.collab())
+                        .and_then(|c| {
+                            c.chain().and_then(|ch| {
                                 ch.nodes.iter().find(|n| n.id == node).map(|n| {
                                     let note = n
                                         .acceptance
@@ -350,14 +353,13 @@ impl Turn {
                                     };
                                     (n.objective.clone(), rework)
                                 })
-                            }),
-                            _ => None,
+                            })
                         })
                         .unwrap_or_default();
                     let objective = self
                         .prompt
                         .render(Segment::ExecuteUser, &[("tasks", raw), ("rework", rework)]);
-                    if let Some(Session::Collab(c)) = self.session_mut(sid) {
+                    if let Some(c) = self.session_mut(sid).and_then(|s| s.collab_mut()) {
                         c.mark_node_started(&node, &child);
                     }
                     out.push(
@@ -443,9 +445,8 @@ impl Turn {
     ) -> Result<String, String> {
         let (pmeta, _) = self.history.load(parent)?;
         let assignee = {
-            let c = match self.session(parent) {
-                Some(Session::Collab(c)) => c,
-                _ => return Err("无此协作会话".to_string()),
+            let Some(c) = self.session(parent).and_then(|s| s.collab()) else {
+                return Err("无此协作会话".to_string());
             };
             let n = c
                 .chain()
@@ -511,10 +512,10 @@ impl Turn {
         let (meta, _) = self.history.load(sid).ok()?;
         let parent = meta.parent.clone()?;
         let note = self.node_note(sid);
-        let node = match self.session_mut(&parent) {
-            Some(Session::Collab(c)) => c.running_node_of(sid),
-            _ => None,
-        };
+        let node = self
+            .session_mut(&parent)
+            .and_then(|s| s.collab_mut())
+            .and_then(|c| c.running_node_of(sid));
         if let Some(node) = node {
             self.mark_node_done(&parent, &node, &note);
         }
@@ -576,10 +577,10 @@ impl Turn {
         let mut out = Vec::new();
         {
             let s = self.session_mut(sid).ok_or("无此会话")?;
-            match s {
-                Session::Collab(c) => c.set_task(text, &mut |e| out.push(e)),
-                _ => return Err("该会话不是协作模式".to_string()),
-            }
+            let Some(c) = s.collab_mut() else {
+                return Err("该会话不是协作模式".to_string());
+            };
+            c.set_task(text, &mut |e| out.push(e));
         }
         out.extend(self.collab_advance(sid, registry, probe)?);
         self.collab_tail(sid, out, None, registry, probe)
@@ -641,9 +642,8 @@ impl Turn {
         probe: &dyn HostProbe,
     ) -> Result<Vec<SessionEvent>, String> {
         let mut out = Vec::new();
-        let collab = match self.session_mut(sid) {
-            Some(Session::Collab(c)) => c,
-            _ => return Err("该会话不是协作模式".to_string()),
+        let Some(collab) = self.session_mut(sid).and_then(|s| s.collab_mut()) else {
+            return Err("该会话不是协作模式".to_string());
         };
         let (go, confirmed) = collab.dispose(ticket, &mut |e| out.push(e))?;
         // 放行类（开工 / 重派）：走**同步**那条（泵 + 派发并跑完就绪节点 + 验收）；
@@ -690,7 +690,7 @@ impl Turn {
             self.history.create(&meta)?;
             let module_roster = self.modules.roster();
             let sandboxes = self.sandboxes(registry, probe, &meta, &module_roster)?;
-            if let Some(Session::Collab(c)) = self.session_mut(sid) {
+            if let Some(c) = self.session_mut(sid).and_then(|s| s.collab_mut()) {
                 c.set_sandboxes(sandboxes);
             }
         }
@@ -699,9 +699,7 @@ impl Turn {
         let (spawned, _) = self.spawn_ready_nodes(sid, registry, probe);
         out.extend(spawned);
         // 会话终结后移出中心（前端据 Ended 回收）。
-        if let Some(Session::Collab(c)) = self.session(sid)
-            && c.is_done()
-        {
+        if self.session(sid).is_some_and(|s| s.is_done()) {
             self.take(sid);
         }
         self.record_events(sid, &mut out);
@@ -728,10 +726,10 @@ impl Turn {
         }
         self.ensure_session(sid, registry, probe)?;
         // @ 引用按本会话沙箱改写（与首次提交需求同一口径）。
-        let text = match self.session(sid) {
-            Some(Session::Collab(c)) => c.retask_text(text),
-            _ => return Err("只有协作会话有「本次需求」".to_string()),
+        let Some(c) = self.session(sid).and_then(|s| s.collab()) else {
+            return Err("只有协作会话有「本次需求」".to_string());
         };
+        let text = c.retask_text(text);
         let (meta, raw) = self.history.load(sid)?;
         let next = crate::capabilities::conversation::session::api::next_line_id(&raw);
         let mut kept = Vec::with_capacity(raw.len() + 1);
@@ -793,11 +791,13 @@ impl Turn {
     ) -> Result<Vec<SessionEvent>, String> {
         self.ensure_session(sid, registry, probe)?;
         let mut events = Vec::new();
-        match self.session_mut(sid) {
-            Some(Session::Collab(c)) => c.withdraw_agree(agent, &mut |e| events.push(e)),
-            Some(_) => return Err("只有协作会话有「同意」可撤回".to_string()),
-            None => return Err("无此会话".to_string()),
-        }
+        let Some(s) = self.session_mut(sid) else {
+            return Err("无此会话".to_string());
+        };
+        let Some(c) = s.collab_mut() else {
+            return Err("只有协作会话有「同意」可撤回".to_string());
+        };
+        c.withdraw_agree(agent, &mut |e| events.push(e));
         self.record_events(sid, &mut events);
         Ok(events)
     }

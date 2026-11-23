@@ -34,6 +34,9 @@ cases:
   - id: cargo/tests::collab::review
     tier: T1
     note: 协作：审查关卡
+  - id: cargo/tests::detail::profiles
+    tier: T1
+    note: 会话类型表：产品自带表合法、缺文件 / 坏表是装配错误
   - id: cargo/tests::proxy
     tier: T1
     note: 代理形态会话
