@@ -79,7 +79,10 @@ pub(crate) fn spawn_detached_collab_answer<H: TurnHost>(
         });
 }
 
-/// 目的：子会话建好就开工——核心自己建的协作子会话按它此刻那张卡作答（有 begin_allow 就授权自裁）。 为什么按选项 id 而不是另走一条"开始"路径：同一个门只能有一条回答口（见 session-model.md）。
+/// 目的：子会话建好就开工——有开头关卡的流程按它此刻那张卡作答（有 begin_allow 就授权自裁）；
+///   没有开头关卡的流程（如只执行：从交来的需求直接拟计划）就推它一步。
+///   为什么作答按选项 id、推进走 Resume 而不是另开一条"开始"路径：同一个门只能有一条回答口，
+///   同一条流程只能有一条推进路（见 session-model.md）。
 pub(crate) fn start_child_collab<H: TurnHost>(host: &H, sid: &str) {
     let me = host.clone();
     let sid = sid.to_string();
@@ -87,12 +90,16 @@ pub(crate) fn start_child_collab<H: TurnHost>(host: &H, sid: &str) {
         .name("solomni-child-collab".to_string())
         .spawn(move || {
             let look = sid.clone();
-            let Ok(Some((queue, default))) = me.core_env(move |turn, registry, probe| {
+            let Ok(opened) = me.core_env(move |turn, registry, probe| {
                 let queue = turn.open_queue(&look, registry, probe)?;
                 // 该答哪个选项由流程自己说（"允许自裁"是流程的词汇，驱动不认）。
                 let default = turn.default_answer(&look);
                 Ok(queue.map(|q| (q, default)))
             }) else {
+                return;
+            };
+            let Some((queue, default)) = opened else {
+                spawn_detached_collab(&me, &sid);
                 return;
             };
             let option = default

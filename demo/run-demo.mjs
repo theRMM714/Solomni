@@ -104,7 +104,7 @@ async function main() {
   // ① 建工作：一个 agent、三个模块（抽取 / 呈现 / 检索各一个模块），模型用核心默认（也可用环境变量指定）。
   const agent = { name: "资料手", modules: ["harvest", "render", "indexer"] };
   if (MODEL) agent.model = MODEL;
-  const created = await api("POST", actUrl("create_session"), { name: WORK, mode: "single", agents: [agent] });
+  const created = await api("POST", actUrl("create_session"), { name: WORK, kind: "single", agents: [agent] });
   ok(created.status === 200, "建工作 " + WORK, created.text);
   const sid = (created.json && created.json.sid) || WORK;
 
