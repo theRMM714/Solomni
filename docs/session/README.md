@@ -1,12 +1,12 @@
 # session（会话）
 
 > 定位：会话状态、回合簿记与会话历史的唯一持有者。
-> 效力：规范｜核对：2026-11-04｜依据：`src/capabilities/conversation/session/api.rs`
+> 效力：规范｜核对：2026-11-23｜依据：`src/capabilities/conversation/session/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
-- 管：会话状态与簿记（行 / 回合 / 回复）、成员工具面与工具表、历史视图与元信息、回档的纯行算术、呈现侧事件契约（`SessionEvent` / `LineView` / 裁决关 `Gate`；机制专有事件走 `Push`，词汇归各自能力）、核心操作回路（声明工具面 → 跑一次模型 → 取载荷 → 只读核实）。
+- 管：会话状态与簿记（行 / 回合 / 回复）、成员工具面与工具表、历史视图与元信息、回档的纯行算术、呈现侧事件契约（`SessionEvent` / `LineView` / 裁决关 `Gate`；机制专有事件走 `Push`，词汇归各自能力）、**机制面**（`Mechanism`：驱动只认「推一步 / 让出一回合 / 交回处置」，流程实现归各机制）、核心操作回路（声明工具面 → 跑一次模型 → 取载荷 → 只读核实）。
 - 不管：不编排跨会话（`runtime`）、不决定讨论流程（`collab`）、不实现工具机制（`tools`）。
 
 ## 入站契约与状态归属
@@ -25,6 +25,7 @@
 
 - 行与事件词汇（`src/capabilities/conversation/session/domain/events.rs`、`LineView` 字段）一改 → `collab` 的状态派生、`runtime` 的视图、`cli` / `web` 渲染、`src/tests/session/` 全跟。
 - 机制自己的事件与关卡（`Push` 的 `kind` / `payload`、`Gate`）改 → 对应机制的词汇文件（协作在 `src/capabilities/conversation/collab/domain/events.rs` 与 `src/capabilities/conversation/collab/domain/gates.rs`）与它的渲染；会话侧不跟着改。
+- 机制面（`src/capabilities/conversation/session/domain/mechanism.rs` 的 `Mechanism` / `MemberAsk` / `Handback`）一改 → 每个机制的实现（协作在 `src/capabilities/conversation/collab/service/mechanism.rs`）与驱动（`src/capabilities/turn/turn/service/flow.rs`、`src/capabilities/turn/turn/service/generation/collab.rs`）一起改。
 
 ## 本目录
 

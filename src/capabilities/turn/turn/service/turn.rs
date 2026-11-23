@@ -230,7 +230,11 @@ impl Turn {
                 // 协作不需要用户发言：从断点推进流水线。
                 Session::Collab(c) => {
                     let mut out = Vec::new();
-                    c.resume(&mut |e| out.push(e));
+                    {
+                        let m: &mut dyn crate::capabilities::conversation::session::api::Mechanism =
+                            c;
+                        m.resume(&mut |e| out.push(e));
+                    }
                     out
                 }
             }

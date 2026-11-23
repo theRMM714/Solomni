@@ -19,4 +19,5 @@
 | `src/capabilities/conversation/collab/service/synthesis.rs` | 整理讨论出方案与任务链、总验收清单与返工判定 |
 | `src/capabilities/conversation/collab/domain/events.rs` | 协作的事件词汇：机制变体 → `SessionEvent::Push`、线上事件 → 机制变体，验收条目 `CheckView` 随它 |
 | `src/capabilities/conversation/collab/domain/gates.rs` | 协作的关卡词汇：待决项种类、选项 id、卡片与背景文案，并翻译成 `session` 的 `Gate`（队列不认这些） |
+| `src/capabilities/conversation/collab/service/mechanism.rs` | 协作作为机制：把泵的推进一步 / 让出成员回合 / 交回处置翻译成 `session` 的 `Mechanism`（驱动因此不认识协作） |
 | `src/capabilities/conversation/collab/domain/collab_state.rs` | 「转录即状态」派生：从事件流水纯函数地算出当前状态（可回放、可单测） |

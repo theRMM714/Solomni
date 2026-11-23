@@ -30,6 +30,7 @@
 | `src/capabilities/conversation/session/domain/tools.rs` | 成员工具面：本回合可调的工具、观察账本与沙箱；只含值的 `ToolFace` 与核实用例端口 `CoreVerify`；shell 状态槽与按转录派生最近一次 shell（`last_shell`） |
 | `src/capabilities/conversation/session/domain/persist.rs` | 落盘策略：哪种会话留档、哪些事件算定稿（`PersistPolicy`）、系统会话的识别与拟名单会话号 |
 | `src/capabilities/conversation/session/domain/history.rs` | 会话元信息、运行态（`RunState`）与历史视图的内存形态 |
+| `src/capabilities/conversation/session/domain/mechanism.rs` | 机制面：驱动一侧的插件契约 `Mechanism`（推一步 / 取走让出的一步 / 交回处置）、让出的那一步 `MemberAsk` 与交回后的处置 `Handback`；不实现任何机制 |
 | `src/capabilities/conversation/session/domain/mode.rs` | 工作形态的词汇（`Mode`）：三个取值、与外部词的互转、落盘小写形态 |
 | `src/capabilities/conversation/session/domain/events.rs` | 呈现侧线格式词汇：通用事件与机制事件通道 `Push`（`SessionEvent`）、裁决卡信封、裁决关 `Gate` 与出队票；不解任何机制的关卡 |
 | `src/capabilities/conversation/session/domain/rewind.rs` | 回档的行 / 事件算术（纯函数，不碰 IO） |

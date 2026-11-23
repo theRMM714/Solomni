@@ -1,4 +1,4 @@
-//! 目的：回合收发——把成员的回复喂回状态机（feed_with）、取出待问的一步（take_ask）、把一张已出队的回答落到业务上（dispose）以及核心的核实环境与通道参数（verify_env / disc_cancel / disc_opts）。
+//! 目的：回合收发——把成员的回复喂回状态机（feed_with）、取出待问的一步（take_pending_ask）、把一张已出队的回答落到业务上（dispose）以及核心的核实环境与通道参数（verify_env / disc_opts）。
 //! 管：成员回合结果进状态机的入口；提问取出与回答落地；核实环境与通道参数的取用。
 //! 不管：状态机本体（discussion.rs / collab.rs）；模型调用与工具执行机制。
 //! 联动：被 CollabSession 消费；裁决通道见 docs/session/session-model.md 的「请用户裁决：一条通道，消息 + 选项」。
@@ -49,8 +49,11 @@ impl CollabSession {
         self.pump_with(sink);
     }
 
-    /// 目的：泵让出的那一步（该问谁、给它什么上下文）——由核心取走并驱动。
-    pub fn take_ask(&mut self) -> Option<(usize, String, Vec<crate::capabilities::llm::api::Msg>)> {
+    /// 目的：泵让出的那一步（该问谁、给它什么上下文）——机制面在此取走并补齐驱动要的参数。
+    ///   约束：只有这一个出口；驱动不再自己拼「谁 / 什么参数」，见 `session::api::Mechanism`。
+    pub(crate) fn take_pending_ask(
+        &mut self,
+    ) -> Option<(usize, String, Vec<crate::capabilities::llm::api::Msg>)> {
         self.pending_ask.take()
     }
 
@@ -90,14 +93,6 @@ impl CollabSession {
     /// 目的：讨论回合的**工具面**（动词 + 只读核实）：核心驱动时交给 turn_with。
     pub fn systools(&self) -> Arc<dyn crate::capabilities::tools::api::Tools> {
         Arc::clone(&self.systools)
-    }
-
-    /// 目的：「停止」标志：与核心共享同一个（停止能在一个模型调用内收尾）。
-    pub fn disc_cancel(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
-        self.disc
-            .as_ref()
-            .map(|d| d.cancel_flag())
-            .unwrap_or_else(|| std::sync::Arc::clone(&self.cancel))
     }
 
     /// 目的：本回合的调用选项（流式 + 预算，取全局设置）。

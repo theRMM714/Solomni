@@ -133,6 +133,8 @@ session/<工作名>/
 
 - 理由是会话归属：生成期间协作会话被**移出核心表**（own-and-return），它碰不到表里的 agent 会话；而 agent 会话必须留在表里，用户才能随时进去发言。所以**驱动权归核心**（它同时看得到两边）（`src/capabilities/turn/turn/service/flow.rs`）。
 
+- **驱动只认机制面**：核心驱动（`src/capabilities/turn/turn/service/flow.rs` 与 `src/capabilities/turn/turn/service/generation/collab.rs`）与具体流程之间只隔一层 `session::api::Mechanism`——开场 / 推进一步（`start` / `step`）、取走让出的一步（`take_ask` 交出 `MemberAsk`）、交回处置（`handback` 判为 `Handback`，再由 `feed` / `pass_over` 落地）。协作的实现只有 `src/capabilities/conversation/collab/service/mechanism.rs` 一处；换一套流程只换一个机制实现，驱动不动。
+
 ### 看不见的回合：运行态与逐片外送
 
 - 成员回合跑在**它自己的会话**里，主会话在整回合里一个事件都收不到。所以核心要主动交代两件事，否则用户看到的界面就是"整回合不动、只有手动刷新才同步"：

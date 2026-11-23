@@ -15,8 +15,12 @@ pub use crate::capabilities::conversation::session::domain::events::{
     Gate, LineView, OptionView, SessionEvent, ToolCallView, idle, interrupted_note,
     last_compaction, qualify, stopped_note, tool_ask, working,
 };
+// 机制面：驱动只认这三个名字（推一步 / 让出一回合 / 交回后的处置）。
 pub use crate::capabilities::conversation::session::domain::history::{
     Delegation, HistoryView, RunState, SessionMeta, UsageTotals, WorkspaceBinding,
+};
+pub use crate::capabilities::conversation::session::domain::mechanism::{
+    Handback, Mechanism, MemberAsk,
 };
 // 工具面：角色面 → 实际可调的工具（档位只管网络，不再逐工具裁剪）。
 #[allow(unused_imports)]
