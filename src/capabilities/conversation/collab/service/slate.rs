@@ -117,6 +117,23 @@ impl CollabSession {
         if self.done || self.disc.is_some() {
             return;
         }
+        // 代拟的名单到这一步才定下来：人数不够就不开聊（席位是流程报的，见 session 的 cast_of）。
+        let need = crate::capabilities::conversation::session::api::cast_of("discuss")
+            .map(|c| c.members.iter().map(|(_, min)| *min).sum::<usize>())
+            .unwrap_or(0);
+        if self.roster.len() < need {
+            self.notice(
+                &format!(
+                    "[建组] 讨论至少要 {} 个 agent（现在 {} 个）：加人或换个类型",
+                    need,
+                    self.roster.len()
+                ),
+                sink,
+            );
+            sink(SessionEvent::Ended);
+            self.done = true;
+            return;
+        }
         self.allow = allow;
         let line = self.view(LineView::user(
             "开始",

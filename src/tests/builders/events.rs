@@ -27,6 +27,20 @@ pub(crate) fn answer_card(
     )
 }
 
+/// 目的：推流程一步（只执行的会话没有开头关卡：建好后由它自己去拟计划）。
+pub(crate) fn advance(core: &mut Core, sid: &str) -> Vec<SessionEvent> {
+    let events = core
+        .turn
+        .collab_advance(sid, core.registry.as_ref(), core.probe.as_ref())
+        .expect("推进流程");
+    // 与生产路径同口径：工作线程把这一步产生的事件一并落档。
+    let hist = core.history_handle();
+    for e in &events {
+        let _ = hist.append(sid, &[e.to_json()]);
+    }
+    events
+}
+
 /// 目的：从事件流里抽出转录行并**渲染成文本**（行怎么变文本只有 LineView::render 一处）。
 pub(crate) fn replay_lines(events: &[serde_json::Value]) -> Vec<String> {
     events

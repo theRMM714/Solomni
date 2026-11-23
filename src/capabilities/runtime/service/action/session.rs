@@ -170,13 +170,12 @@ impl Handle {
             }
             None => None,
         };
+        // 临时拼装时类型 id 留空——落盘声明由流程折成，入口不替它编一个名字。
         let kind = if flows.is_some() {
-            if !wanted.is_empty()
-                && wanted != crate::capabilities::conversation::session::api::CUSTOM
-            {
+            if !wanted.is_empty() {
                 return Err("kind 与 flows 只能给一个（临时拼装省略 kind）".to_string());
             }
-            crate::capabilities::conversation::session::api::CUSTOM.to_string()
+            String::new()
         } else {
             if wanted.is_empty() {
                 return Err("kind 不能为空（要会话类型表里的一个；临时拼装改用 flows）".to_string());

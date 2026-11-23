@@ -42,8 +42,7 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
             member,
             vec![
                 // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
-                "结论：由 a 按需求把事做完。".to_string(),
-                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+                                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做 X\",\"status\":\"pass\"}]}}".to_string(),
@@ -51,10 +50,10 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
         ),
     );
     let sid = core
-        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .create_work(execute_work("w", &["a"], "做个东西"))
         .unwrap()
         .sid;
-    answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
+    advance(&mut core, &sid);
     let after = answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap();
 
     let started: Vec<(String, String, String)> = after
@@ -85,7 +84,10 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
         cmeta.node.is_none(),
         "节点不再记在会话 meta 里：一个 agent 一个会话，哪个节点正跑在它里面由链的 sub_session 认"
     );
-    assert_eq!(cmeta.spec.kind, SINGLE);
+    assert_eq!(
+        cmeta.spec.kind, "",
+        "节点子会话不套预设类型：身份由流程的成员席给"
+    );
     assert_eq!(
         crate::capabilities::conversation::session::api::work_root(
             core.history_handle().as_ref(),
@@ -119,8 +121,7 @@ pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
             vec![
                 // 三个节点都没有依赖：n1/n2 都归 a（该串行），n3 归 b（该和 n1 一起开工）。
                 // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
-                "结论：由 a 按需求把事做完。".to_string(),
-                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"一\",\"objective\":\"做一\",\"assignee\":\"a\",\"deps\":[]},{\"id\":\"n2\",\"title\":\"二\",\"objective\":\"做二\",\"assignee\":\"a\",\"deps\":[]},{\"id\":\"n3\",\"title\":\"三\",\"objective\":\"做三\",\"assignee\":\"b\",\"deps\":[]}]}}".to_string(),
+                                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"一\",\"objective\":\"做一\",\"assignee\":\"a\",\"deps\":[]},{\"id\":\"n2\",\"title\":\"二\",\"objective\":\"做二\",\"assignee\":\"a\",\"deps\":[]},{\"id\":\"n3\",\"title\":\"三\",\"objective\":\"做三\",\"assignee\":\"b\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"},{\"node\":\"n1-2\",\"ok\":true,\"note\":\"够用\"},{\"node\":\"n1-3\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做\",\"status\":\"pass\"}]}}".to_string(),
@@ -128,10 +129,10 @@ pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
         ),
     );
     let sid = core
-        .create_work(collab_work("w", &["a", "b"], false, "做个东西"))
+        .create_work(execute_work("w", &["a", "b"], "做个东西"))
         .unwrap()
         .sid;
-    answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
+    advance(&mut core, &sid);
     let evs = answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap();
     let order: Vec<String> = evs
         .iter()
@@ -165,8 +166,7 @@ pub(crate) fn stage_review_refills_until_the_ids_are_valid() {
             member,
             vec![
                 // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
-                "结论：由 a 按需求把事做完。".to_string(),
-                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"把事做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+                                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"把事做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 // 第一次把 id 写错（不在表里）→ 核心必须重填，而不是把判定丢掉或假装过了。
                 "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n9\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
@@ -176,10 +176,10 @@ pub(crate) fn stage_review_refills_until_the_ids_are_valid() {
         ),
     );
     let sid = core
-        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .create_work(execute_work("w", &["a"], "做个东西"))
         .unwrap()
         .sid;
-    answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
+    advance(&mut core, &sid);
     let evs = answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap();
     assert!(
         shown_contains(&evs, "重填"),
@@ -219,8 +219,7 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
             member,
             vec![
                 // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
-                "结论：由 a 按需求把事做完。".to_string(),
-                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"把事做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+                                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"把事做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
                 // 总验收：没过，并**指名**要返工的节点（不写人名）。
@@ -232,10 +231,10 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
         ),
     );
     let sid = core
-        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .create_work(execute_work("w", &["a"], "做个东西"))
         .unwrap()
         .sid;
-    answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
+    advance(&mut core, &sid);
     let first = answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap();
     match core.turn.collab_pending(&sid).unwrap() {
         Some(Pending::NodeBlocked { nodes }) => {
@@ -348,8 +347,7 @@ pub(crate) fn failed_node_acceptance_pauses_then_continue_redispatches() {
             member,
             vec![
                 // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
-                "结论：由 a 按需求把事做完。".to_string(),
-                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+                                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 // 第一次节点验收：没过 → 该暂停等用户。
                 "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":false,\"note\":\"还差依据\"}]}}".to_string(),
@@ -360,10 +358,10 @@ pub(crate) fn failed_node_acceptance_pauses_then_continue_redispatches() {
         ),
     );
     let sid = core
-        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .create_work(execute_work("w", &["a"], "做个东西"))
         .unwrap()
         .sid;
-    answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
+    advance(&mut core, &sid);
 
     let first = answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap();
     assert!(
@@ -414,8 +412,7 @@ pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
             member,
             vec![
                 // 讨论段收敛后，核心先写一份总结——它就是执行段的需求。
-                "结论：由 a 按需求把事做完。".to_string(),
-                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+                                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做 X\",\"status\":\"pass\",\"evidence\":\"已做\"}]}}".to_string(),
@@ -423,11 +420,11 @@ pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
         ),
     );
     let sid = core
-        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .create_work(execute_work("w", &["a"], "做个东西"))
         .unwrap()
         .sid;
 
-    let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
+    let events = advance(&mut core, &sid);
     assert!(
         events
             .iter()

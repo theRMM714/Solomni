@@ -11,13 +11,12 @@ impl Work {
     /// 目的：会话类型表翻成界面要的样子（名字、一句说明、要不要名单与需求）。
     /// 约束：顺序照声明；要不要需求按声明里的流程（有流程才必填本次需求）；代理式（没有流程、坐核心代理席）不要名单。
     pub(crate) fn session_types(&self) -> Vec<SessionTypeView> {
-        use crate::capabilities::conversation::session::api::PROXY_ROLE;
         self.flows
             .book()
             .profiles
             .iter()
             .map(|p| {
-                let auto = p.flows.is_empty() && p.roles.iter().any(|r| r == PROXY_ROLE);
+                let auto = p.auto;
                 SessionTypeView {
                     kind: p.id.clone(),
                     name: if p.name.trim().is_empty() {
@@ -136,9 +135,7 @@ impl Work {
             .into_iter()
             .map(|(sid, done)| {
                 let entry = history.iter().find(|h| h.name == sid);
-                let kind = entry.map(|h| h.kind.clone()).unwrap_or_else(|| {
-                    crate::capabilities::conversation::session::api::SINGLE.to_string()
-                });
+                let kind = entry.map(|h| h.kind.clone()).unwrap_or_default();
                 let flows = entry.is_some_and(|h| h.flows);
                 let auto = entry.is_some_and(|h| h.auto);
                 // 运行态取落盘事实（不在内存里留影子状态）；拿不到（生成中 / 未落盘）按正常运行。

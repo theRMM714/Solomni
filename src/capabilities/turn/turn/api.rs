@@ -124,6 +124,8 @@ pub(crate) enum CollabWork {
 /// 目的：一次"要一个成员回合"的请求：泵在工作线程上让出，回头找主线程驱动（它才拿得到各 agent 的会话）。
 pub(crate) struct AskReq {
     pub(crate) agent: String,
+    /// 目的：这一席的角色（成员会话按它取身份块与工具面）。
+    pub(crate) role: String,
     /// 目的：本回合的**身份块**（由泵按当前提示词册现渲染）。
     pub(crate) identity: String,
     /// 目的：本回合的提示（开场词 / 轮转词）。

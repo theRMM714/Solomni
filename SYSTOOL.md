@@ -11,7 +11,7 @@
 | 系统工具与模块工具的分别：**系统工具**由核心实现（声明在上表的工具总表），**模块工具**由模块自己的外部命令实现；模块工具是动态动作（`module.<模块id>.<工具名>`），清单来自各模块 | `modules/*/module.yaml`；[MODULE_SPEC.md](MODULE_SPEC.md) |
 | 这个**身份有什么**：坐哪一席（核心 / 成员）+ 引用的系统工具 id + 提示词 + 是否给模块工具 | `systools/roles.yaml` |
 | 工作区布局**固定占用的目录名**（agent 实例名不得占用） | `systools/names.yaml` |
-| 一个**会话类型**的 id 与显示名、按什么顺序跑哪些流程、（没有流程的类型）坐哪些身份角色 | `systools/profiles.yaml` |
+| 一个**会话类型**的 id 与显示名、按什么顺序跑哪些流程、是否整块交给核心（`auto`）、（没有流程的类型）坐哪些身份角色 | `systools/profiles.yaml` |
 | 一个**流程**的席位：核心席与成员席各是哪些角色、各要几员 | `src/capabilities/conversation/session/domain/flow.rs` 的 `FLOWS` |
 | 临时拼装的会话类型（请求里省略 `kind`、内联流程声明）落盘成什么 | 折成 `SessionSpec`，`kind` 记 `custom`（`src/capabilities/conversation/session/domain/profile.rs` 的 `inline_spec`） |
 | 已确认但尚未实施的系统工具与验收条件，**不限角色**（非当前工具表、非测试缺口账） | [systool_gaps.yaml](systool_gaps.yaml) |

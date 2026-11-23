@@ -18,9 +18,11 @@ pub(crate) fn run_member_turn<H: TurnHost>(
     // 会话不存在就按需建（名单确认时已建，这里兜底）。
     {
         let (parent, agent) = (sid.to_string(), req.agent.clone());
+        let role = req.role.clone();
         host.core_env(move |turn, registry, probe| {
             // 建过就是幂等复用（同名会话已存在 = 直接返回它的名字）。
-            turn.spawn_agent_session(&parent, &agent, registry, probe)
+            let role = role.as_str();
+            turn.spawn_agent_session(&parent, &agent, role, registry, probe)
                 .map(|_| ())
         })?;
     }

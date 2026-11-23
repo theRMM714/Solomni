@@ -27,10 +27,13 @@ pub use crate::capabilities::conversation::session::domain::history::{
     Delegation, HistoryView, RunState, SessionMeta, UsageTotals, WorkspaceBinding,
 };
 // 会话类型表与解析后声明：组合根装载它，装配期用它校验角色与流程；meta 落 `SessionSpec`。
-// 名字常量只给产品自带的类型表与测试引用：非测试代码按类型的流程走，不按名字分支。
-#[allow(unused_imports)]
 pub use crate::capabilities::conversation::session::domain::profile::{
-    CUSTOM, CUSTOM_NAME, MEETING, PROXY, PROXY_ROLE, Profiles, SINGLE, SessionSpec, inline_spec,
+    Profiles, SessionSpec, inline_spec,
+};
+// 只有测试知道产品自带类型的名字；生产代码按声明里的 auto / flows 分支，不认这些 id。
+#[cfg(test)]
+pub use crate::capabilities::conversation::session::domain::profile::{
+    CUSTOM, MEETING, PROXY, PROXY_ROLE, SINGLE,
 };
 // 工具面：角色面 → 实际可调的工具（档位只管网络，不再逐工具裁剪）。
 #[allow(unused_imports)]

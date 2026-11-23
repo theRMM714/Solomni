@@ -42,7 +42,7 @@
 | 代码里按边界切分的一块（业务单元、地基库、根（入口层）、呈现层各算一个；业务单元即 `src/capabilities/<单元>/`，与 `layers.yaml` 一行对应） | **单元**（unit） | 模块、组件 |
 | 业务边界（`src/capabilities/<单元>/<子业务>/`；独立业务的判据见 `docs/architecture/boundaries.md`） | **子业务**（能力 / capability） | 业务模块、模块 |
 | 一次任务里"用谁、怎么组合、谁拍板" | **形态**（single / collab / proxy） | 模式、架构、拓扑 |
-| 一个会话类型的组成（id 与显示名、流程序列、没有流程时的静止身份） | **会话类型**（`Profiles`；数据在 `systools/profiles.yaml`；落盘是 `SessionSpec`） | 会话模板、流程模板 |
+| 一个会话类型的组成（id 与显示名、流程序列、是否整块交给核心、没有流程时的静止身份） | **会话类型**（`Profiles`；数据在 `systools/profiles.yaml`；落盘是 `SessionSpec`） | 会话模板、流程模板 |
 | 一个流程由哪些身份出演、核心席与成员席各要几员 | **席位**（`Cast`；声明在 `src/capabilities/conversation/session/domain/flow.rs` 的 `FLOWS`） | 角色组、角色表（那是 `systools/roles.yaml` 的 `roles`） |
 | 驱动与具体流程之间的插件契约（推一步 / 让出一步 / 交回 / 处置自己发的关卡） | **流程**（`Flow`；id 与席位登记在 `src/capabilities/conversation/session/domain/flow.rs` 的 `FLOWS`） | 流程引擎、编排器 |
 | 一次运行与它的落盘单元 | **会话**（session） | 对话、聊天 |
