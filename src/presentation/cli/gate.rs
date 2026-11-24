@@ -211,11 +211,15 @@ pub(super) fn answer_gates(faces: &Faces, sid: &str, cursor: &mut u64) {
         print_card(card);
         // 队首之后还在等的那几张：如实列出来（"谁在等、前面还排着几条"），但它们还不能答。
         print_waiting(&queue.waiting);
-        let Some(ans) = prompt_opt("选哪一项（序号 / 选项 id；回车 = 先不答）>")
-        else {
+        let ans = match term::ask("选哪一项（序号 / 选项 id；回车 = 先不答）>") {
+            term::Answer::Line(ans) => ans,
+            // Ctrl+C = 撤回答：等同空行「先不答」，卡留着、会话照等。
+            term::Answer::Interrupt => return,
             // 输入到尽头 = 前端答不了了：按**停止**（= 拒绝）收场，绝不把等待方永远吊在这里。
-            eof_stop(faces, sid);
-            return;
+            term::Answer::Eof => {
+                eof_stop(faces, sid);
+                return;
+            }
         };
         let ans = ans.trim();
         if ans.is_empty() {
@@ -225,7 +229,12 @@ pub(super) fn answer_gates(faces: &Faces, sid: &str, cursor: &mut u64) {
             term::say("  这张卡上没有这一项，请按上面的序号或 id 作答。");
             continue;
         };
-        let note = prompt("附言（可空；请教那一关必填）>");
+        let note = match term::ask("附言（可空；请教那一关必填）>") {
+            term::Answer::Line(note) => note,
+            // 附言这一步也能 Ctrl+C 撤回答：整次作答作废，卡还在。
+            term::Answer::Interrupt => return,
+            term::Answer::Eof => String::new(),
+        };
         let action = CliAction::Answer {
             card: card.id.clone(),
             option,
@@ -251,6 +260,11 @@ pub(super) fn wait_quiet(faces: &Faces, sid: &str, cursor: &mut u64) {
     let started = std::time::Instant::now();
     let mut tick = 0usize;
     loop {
+        if crate::presentation::signal::take() {
+            term::live_clear();
+            stop_work(faces, sid);
+            return;
+        }
         *cursor = drain(faces, sid, *cursor);
         let head = faces.events.head();
         if !faces.turn.is_running(sid) && head == last {
@@ -275,6 +289,25 @@ pub(super) fn wait_quiet(faces: &Faces, sid: &str, cursor: &mut u64) {
     }
 }
 
+/// 目的：用户在干活期间按了 Ctrl+C：**停掉这一轮在跑的东西，但不结束会话**。
+/// 参数：`sid` 是这条会话的 id（整棵子树一起停）。
+/// 约束：用的是 `interrupt`（撤回答 + 作废等待中的裁决），不是 `stop`——运行态不动，用户还能接着说话。
+fn stop_work(faces: &Faces, sid: &str) {
+    let undone = faces.runtime.interrupt(sid);
+    let what = if undone.is_empty() {
+        "本来就没在跑".to_string()
+    } else {
+        format!("停下了 {}", undone.join("、"))
+    };
+    term::line(&term::ink(
+        theme::Ink::Dim,
+        &format!(
+            "[提示] 已按 Ctrl+C 停止这一轮：{}；会话仍在（/exit 才退出产品）",
+            what
+        ),
+    ));
+}
+
 /// 目的：一次生成放**后台线程**；主线程一边渲染事件、一边就地按卡作答（工具级确认等在工作线程上）。 为什么：回答要在生成进行中读键盘，同步调用会把主线程堵在生成里，读不到输入。
 pub(super) fn act_interactive(
     faces: &Faces,
@@ -293,6 +326,17 @@ pub(super) fn act_interactive(
     let mut working: Option<String> = None;
     let mut tick = 0usize;
     loop {
+        if crate::presentation::signal::take() {
+            term::live_clear();
+            stop_work(faces, sid);
+            let r = match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                Ok(r) => r,
+                // 生成线程收尾慢：如实说这一轮是被停下的，不假装它自己结束了。
+                Err(_) => Err("已停止这一轮（生成线程还没收尾）".to_string()),
+            };
+            term::live_clear();
+            return r;
+        }
         let (lines, head, _oldest) = faces.events.snapshot(Some(sid), *cursor);
         // 这一批里出现了裁决卡就就地作答（工具级确认发生在生成中，不能等这一次生成收尾）。
         let mut carded = false;
@@ -323,7 +367,7 @@ pub(super) fn act_interactive(
                     tick += 1;
                     let who = working.clone().unwrap_or_else(|| "生成中".to_string());
                     term::live(&format!(
-                        "{} {} · {}s · Esc 只在问卡时可行",
+                        "{} {} · {}s · Ctrl+C 停止这一轮",
                         spin(tick),
                         who,
                         started.elapsed().as_secs()
@@ -642,6 +686,58 @@ mod tests {
             started.elapsed() < std::time::Duration::from_secs(2),
             "工作线程快速返回"
         );
+    }
+
+    /// 目的：裁决卡上按 Ctrl+C = 撤回答（等同空行「先不答」）：卡还挂着、会话照等；只有真 EOF 才按停止收场。
+    #[test]
+    fn interrupt_skips_a_card_while_eof_stops_it() {
+        use crate::capabilities::conversation::collab::api::Pending;
+        use crate::capabilities::conversation::session::api::{SINGLE, SlotWake};
+        use crate::tests::doubles::{module_of, work};
+
+        let (handle, faces) = crate::tests::ops_with(vec![module_of("a")], Vec::new());
+        let sid = "cli-ctrl-c-1";
+        faces
+            .work
+            .create_work(work(sid, SINGLE, &["a"]))
+            .expect("建会话");
+        let door = {
+            let s = sid.to_string();
+            handle
+                .call(move |core| Ok(core.turn.desk_of(&s)))
+                .expect("取裁决队")
+        };
+        let waiter = {
+            let door = std::sync::Arc::clone(&door);
+            std::thread::spawn(move || door.ask(Pending::ConfirmBegin.gate("", ""), &mut |_| {}))
+        };
+        let mut spins = 0;
+        while door.is_empty() && spins < 500 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            spins += 1;
+        }
+        assert!(!door.is_empty(), "卡片要先进队");
+        term::test_ui(false, 80, false, false, theme::Level::None);
+        let mut cursor = 0;
+        // 第一下 Ctrl+C：撤回答——卡还在，等待方还在等。
+        term::feed_answers(vec![term::Answer::Interrupt]);
+        let (_, lines) = term::capture(|| answer_gates(&faces, sid, &mut cursor));
+        assert!(
+            !lines.iter().any(|l| l.contains("输入已到尽头")),
+            "Ctrl+C 不是停止：{lines:?}"
+        );
+        assert!(!door.is_empty(), "卡不被消费，仍在等");
+        assert!(!waiter.is_finished(), "等待方没被解开，会话照等");
+        // 真 EOF：按停止（拒绝）收场。
+        term::feed_answers(vec![term::Answer::Eof]);
+        let _ = term::capture(|| answer_gates(&faces, sid, &mut cursor));
+        assert_eq!(
+            waiter.join().expect("等待线程"),
+            SlotWake::Stopped,
+            "EOF = 停止（拒绝）"
+        );
+        assert!(door.is_empty(), "停止后卡被作废");
+        term::reset_ui();
     }
 
     /// 目的：取不到裁决队（会话不存在）时如实提示后返回——这一步不碰输入。

@@ -11,8 +11,9 @@ use serde_json::{Value, json};
 
 /// 目的：会话里的提示符：一行输入的归属只在这里判一次——`/` 开头是命令，其余都是发给这条会话的消息。
 /// 参数：`cursor` 是事件台游标（跟读用）；`opts` 是同一个呈现选项（`/web` 之类要拿默认端口）。
-/// 返回：离开这条会话的去向（`/leave` 回转录中心、`/web` 转界面、`/exit` 退出进程）。
-/// 约束：空行不再结束会话（以前那是隐藏语义）；`//` 转义成字面的 `/`。
+/// 返回：离开这条会话的去向（Ctrl+C 两次回转录中心、`/web` 转界面、`/exit` 退出进程）。
+/// 约束：空行不再结束会话（以前那是隐藏语义）；`//` 转义成字面的 `/`；
+/// Ctrl+C 只是离开提示符，会话本身照跑（停活是另一回事）。
 fn talk(
     faces: &Faces,
     system: &dyn System,
@@ -21,15 +22,25 @@ fn talk(
     opts: &shell::Opts,
 ) -> Outcome {
     loop {
-        let Some(raw) = term::ask("你>") else {
-            eof_stop(faces, sid);
-            return Outcome::Done(0);
+        let raw = match term::ask_session("你>") {
+            term::Answer::Line(raw) => raw,
+            term::Answer::Interrupt => {
+                term::line(&term::ink(
+                    theme::Ink::Dim,
+                    "[提示] 已离开这条会话（会话还在，没停）",
+                ));
+                return Outcome::Done(0);
+            }
+            term::Answer::Eof => {
+                eof_stop(faces, sid);
+                return Outcome::Done(0);
+            }
         };
         let line = raw.trim();
         if line.is_empty() {
             term::line(&term::ink(
                 theme::Ink::Dim,
-                "[提示] 空行不发送任何东西：/leave 离开这条会话",
+                "[提示] 空行不发送任何东西：Ctrl+C 两次离开这条会话",
             ));
             continue;
         }
@@ -69,12 +80,12 @@ fn workspace_note(opts: &shell::Opts) {
 fn opened_line(what: &str, sid: &str, opts: &shell::Opts) -> String {
     match &opts.workspace {
         Some(root) => format!(
-            "（{} {} —— 工作区 {}，输入消息，/leave 离开）",
+            "（{} {} —— 工作区 {}，输入消息，Ctrl+C 两次离开）",
             what,
             sid,
             root.display()
         ),
-        None => format!("（{} {} —— 输入消息，/leave 离开）", what, sid),
+        None => format!("（{} {} —— 输入消息，Ctrl+C 两次离开）", what, sid),
     }
 }
 
@@ -87,7 +98,7 @@ fn say(faces: &Faces, sid: &str, cursor: &mut u64, text: &str) {
     }
 }
 
-/// 目的：单 agent 会话：点名的 agent 一起干同一件事，进转录提示符直到 `/leave`。
+/// 目的：单 agent 会话：点名的 agent 一起干同一件事，进转录提示符直到 Ctrl+C 两次或 `/exit`。
 pub(super) fn single_flow(
     faces: &Faces,
     system: &dyn System,
@@ -219,7 +230,15 @@ pub(super) fn collab_flow(faces: &Faces, args: &Value, opts: &shell::Opts) {
     };
     let trimmed = names.trim();
     let delegate = trimmed.is_empty() || trimmed == "?";
-    let task = prompt("需求>");
+    let task = match term::ask("需求>") {
+        term::Answer::Line(task) => task,
+        // Ctrl+C = 这一步不答了：不建会话。输入到尽头仍按老规矩用空需求（脚本口径不变）。
+        term::Answer::Interrupt => {
+            term::line(&term::ink(theme::Ink::Dim, "[提示] 已取消：没建成会话"));
+            return;
+        }
+        term::Answer::Eof => String::new(),
+    };
     // 代拟（无参或 ?）= 核心拟名单；点名 = 用登记处里的那几个 agent。
     let agents: Vec<AgentMeta> = if delegate {
         Vec::new()
@@ -502,9 +521,13 @@ pub(crate) fn eof_stop(faces: &Faces, sid: &str) -> bool {
     !faces.runtime.stop(sid).is_empty()
 }
 
-/// 目的：读一行输入；**读到尽头（EOF）给 `None`**——"用户不在键盘前"与"用户先不答"是两件事。
+/// 目的：读一行输入；**没读到行就给 `None`**——Ctrl+C 是「这一问不答了」，EOF 是「没人在键盘前」，
+///   两者收场不同，由调用方各自决定，这里只把「没拿到行」传出去。
 pub(super) fn prompt_opt(text: &str) -> Option<String> {
-    term::ask(text)
+    match term::ask(text) {
+        term::Answer::Line(line) => Some(line),
+        term::Answer::Eof | term::Answer::Interrupt => None,
+    }
 }
 
 pub(super) fn prompt(text: &str) -> String {

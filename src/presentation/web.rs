@@ -53,22 +53,27 @@ pub const RESTART_EXIT_CODE: i32 = 75;
 
 /// 目的：启动转录中心服务器：**可中断**——收到 Ctrl+C / SIGINT 就正常关闭回到 CLI（进程仍在）。
 /// 参数：`faces` 是入站能力面，`port` 默认 3081，`fence` 是本机围栏能力。
-/// 约束：只绑本机回环；进入前安装中断标志（Windows 控制台处理函数 / Unix SIGINT），返回前**恢复默认**，所以回到 CLI 提示符后 Ctrl+C 仍按"退出产品"的既有语义生效。
+/// 约束：只绑本机回环；中断处理器是进程级的（`presentation::signal`），装一次之后一直有效，
+///   这里只负责把「按过 Ctrl+C」翻译成「离开服务器」。
 pub fn serve(faces: Faces, port: u16, fence: FenceInfo) -> Result<(), String> {
-    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let guard = interrupt::install(Arc::clone(&stop))?;
-    let r = serve_until(&faces, port, &fence, &stop);
-    drop(guard);
-    r
+    crate::presentation::signal::install()?;
+    let stopped = std::cell::Cell::new(false);
+    let stop = || {
+        if crate::presentation::signal::take() {
+            stopped.set(true);
+        }
+        stopped.get()
+    };
+    serve_until(&faces, port, &fence, &stop)
 }
 
-/// 目的：服务器主循环（可注入中断判据，便于测试）：每次最多等 200ms 就回来看一次标志。
+/// 目的：服务器主循环（可注入中断判据，便于测试）：每次最多等 200ms 就回来看一次。
 /// 约束：每个请求仍是一线独立线程——长连接绝不阻塞其它请求（转录中心是多端并用的）。
 pub(crate) fn serve_until(
     faces: &Faces,
     port: u16,
     fence: &FenceInfo,
-    stop: &std::sync::atomic::AtomicBool,
+    stop: &dyn Fn() -> bool,
 ) -> Result<(), String> {
     // 日志经**入站能力面**（faces.log）取——呈现层不持有端口对象。
     let log = Arc::clone(&faces.log);
@@ -77,7 +82,7 @@ pub(crate) fn serve_until(
     let server = Server::http(addr.as_str()).map_err(|e| e.to_string())?;
     println!("Solomni 转录中心：http://{}（只监听本机）", addr);
     let fence = Arc::new(fence.clone());
-    while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+    while !stop() {
         let request = match server.recv_timeout(Duration::from_millis(200)) {
             Ok(Some(r)) => r,
             Ok(None) => continue,
@@ -112,100 +117,6 @@ pub(crate) fn serve_until(
     }
     println!("[提示] 已离开转录中心，回到终端。");
     Ok(())
-}
-
-/// Ctrl+C / SIGINT 的中断标志安装：机制按平台分，返回的守卫一放就恢复默认。
-mod interrupt {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, OnceLock};
-
-    static FLAG: OnceLock<Arc<AtomicBool>> = OnceLock::new();
-
-    fn set() {
-        if let Some(f) = FLAG.get() {
-            f.store(true, Ordering::SeqCst);
-        }
-    }
-
-    #[cfg(windows)]
-    mod imp {
-        use super::{Arc, AtomicBool, set};
-        use windows_sys::Win32::System::Console::{
-            CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler,
-        };
-
-        unsafe extern "system" fn handler(ctrl: u32) -> i32 {
-            // 只有 Ctrl+C / Ctrl+Break 是「回 CLI」；关窗、注销、关机要真的退出，
-            // 返回 FALSE 让视图盘的退出清理钩子与默认处理接手（否则进程被强杀、盘符留在 Explorer 里）。
-            if ctrl == CTRL_C_EVENT || ctrl == CTRL_BREAK_EVENT {
-                set();
-                return 1; // TRUE = 已处理，进程继续（不按默认终止）
-            }
-            0
-        }
-
-        pub struct Guard;
-
-        pub fn install(stop: Arc<AtomicBool>) -> Result<Guard, String> {
-            let _ = super::FLAG.set(stop);
-            let ok = unsafe { SetConsoleCtrlHandler(Some(handler), 1) };
-            if ok == 0 {
-                return Err("安装 Ctrl+C 处理失败".to_string());
-            }
-            Ok(Guard)
-        }
-
-        impl Drop for Guard {
-            fn drop(&mut self) {
-                unsafe {
-                    SetConsoleCtrlHandler(Some(handler), 0);
-                }
-            }
-        }
-    }
-
-    #[cfg(unix)]
-    mod imp {
-        use super::{Arc, AtomicBool, set};
-
-        extern "C" fn handler(_sig: libc::c_int) {
-            set();
-        }
-
-        pub struct Guard;
-
-        pub fn install(stop: Arc<AtomicBool>) -> Result<Guard, String> {
-            let _ = super::FLAG.set(stop);
-            // 函数项先转指针再转整数：直接转整数会被 clippy 判为 function_casts_as_integer。
-            let handler_ptr = handler as *const () as libc::sighandler_t;
-            let prev = unsafe { libc::signal(libc::SIGINT, handler_ptr) };
-            if prev == libc::SIG_ERR {
-                return Err("安装 Ctrl+C 处理失败".to_string());
-            }
-            Ok(Guard)
-        }
-
-        impl Drop for Guard {
-            fn drop(&mut self) {
-                unsafe {
-                    libc::signal(libc::SIGINT, libc::SIG_DFL);
-                }
-            }
-        }
-    }
-
-    #[cfg(not(any(windows, unix)))]
-    mod imp {
-        use super::{Arc, AtomicBool};
-
-        pub struct Guard;
-
-        pub fn install(_stop: Arc<AtomicBool>) -> Result<Guard, String> {
-            Ok(Guard)
-        }
-    }
-
-    pub use imp::install;
 }
 
 type Reply = (u16, Vec<(&'static str, String)>, String);

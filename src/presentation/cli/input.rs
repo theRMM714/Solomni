@@ -25,13 +25,14 @@ pub(crate) enum Key {
     Interrupt,
 }
 
-/// 目的：一键之后该做什么：继续编辑、提交、清空输入，或收摊（Ctrl+C）。
+/// 目的：一键之后该做什么：继续编辑、提交、清空输入，或中断（Ctrl+C）。
+/// 约束：Ctrl+C 与输入到尽头（EOF）是两件事——中断只放弃这一问，EOF 才可能是「没人再答了」。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Step {
     Edit,
     Submit,
     Cancel,
-    Quit,
+    Interrupt,
 }
 
 thread_local! {
@@ -189,7 +190,7 @@ impl Editor {
                 self.clear();
                 Step::Edit
             }
-            Key::Interrupt => Step::Quit,
+            Key::Interrupt => Step::Interrupt,
         }
     }
 
@@ -346,7 +347,7 @@ mod tests {
         assert_eq!(ed.line(), "abc", "Tab 不改行");
         assert_eq!(ed.key(Key::Enter), Step::Submit);
         assert_eq!(ed.key(Key::Escape), Step::Cancel);
-        assert_eq!(ed.key(Key::Interrupt), Step::Quit);
+        assert_eq!(ed.key(Key::Interrupt), Step::Interrupt);
         assert_eq!(ed.key(Key::KillLine), Step::Edit);
         assert_eq!(ed.line(), "", "KillLine 清空整行");
         type_line(&mut ed, "   ");

@@ -31,7 +31,7 @@
 
 - **唯一权威**：[inbound.yaml](inbound.yaml)。每一屏（一个 `.rs`）登记它能取哪几个能力单元（`work`、`catalog/registry` 这种粒度，与 [layers.yaml](../architecture/layers.yaml) 的顶层能力对齐）；**没有登记的屏 = 这一屏不直接取能力**，只吃 `Faces` 的字段。
 - **双向比对**：`tests/gates/structure/presentation-inbound.js`（T0 结构审查）把清单与源码对两遍——源码取了清单外的单元报「入站面外溢」，清单登记了源码没取报「清单过期」。要放行新依赖，改清单，不改门禁。
-- **同层不许互相依赖**：呈现层内部只能向上取根（`src/presentation.rs`、`faces.rs`、`cli.rs`、`web.rs`）；兄弟文件之间互相 `use` 一律失败（同层有边就是将来成环的入口）。现状是干净星形：两个渠道入口 + 面袋，其它屏都只取根。
+- **同层不许互相依赖**：呈现层内部只能向上取根（`src/presentation.rs`、`faces.rs`、`signal.rs`、`cli.rs`、`web.rs`）；兄弟文件之间互相 `use` 一律失败（同层有边就是将来成环的入口）。现状是干净星形：两个渠道入口 + 面袋 + 两渠道共用的进程级 Ctrl+C（`signal.rs`），其它屏都只取根。
 - **不替代**依赖方向门禁：[dependency.js](../../tests/gates/structure/dependency.js) 管「只能经 `::api`」，这张表管「能经**哪几个** `::api`」——两层判据各管一件事。
 - 回执只报不拦：门禁会把「最宽的三屏」写进回执（`faces.rs` 是面袋，本来就宽；某一屏悄悄变宽就是该拆面的信号）。
 
