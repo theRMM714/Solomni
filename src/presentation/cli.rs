@@ -12,6 +12,13 @@ use crate::capabilities::system::api::System;
 use crate::capabilities::tools::api::Op;
 use crate::presentation::faces::Faces;
 
+/// 目的：输入框下方命令列表的一行：补全用的写法（含前导 `/`）与一句说明。
+/// 约束：行类型放在这一层——`catalog` 只投影命令表，`term` 只管画，两边都不认识对方。
+pub(crate) struct MenuRow {
+    pub name: String,
+    pub brief: String,
+}
+
 /// 目的：离开转录中心时的去向：退出，或转入 Web 转录中心（端口）。
 pub enum CliExit {
     Exit,
@@ -30,6 +37,7 @@ pub fn run(
 ) -> CliExit {
     let interactive = term::init(plain, anim);
     term::set_completer(catalog::complete);
+    term::set_menu(catalog::menu);
     if interactive {
         term::banner(&startup_tagline(), &startup_facts(&faces));
     } else {
@@ -51,7 +59,7 @@ pub fn run(
             print_menu(&faces);
         }
         let label = if interactive { "转录中心" } else { ">" };
-        let Some(line) = term::ask(label) else {
+        let Some(line) = term::ask_command(label) else {
             break;
         };
         let line = line.trim().to_string();

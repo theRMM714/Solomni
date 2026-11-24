@@ -196,6 +196,30 @@ fn core_commands_match_cli_dispatch() {
     assert!(catalog::suggest("porxy").as_deref() == Some("proxy"));
 }
 
+/// 菜单：`/` 起头且还没敲空格时按前缀列转录相命令——顺序按声明、别名也命中、说明不为空；
+/// 普通消息、写完命令词带空格的、启动相写法都不给行（菜单只服务转录相命令）。
+#[test]
+fn menu_lists_core_commands_by_prefix() {
+    let all = catalog::menu("/");
+    let declared: Vec<&str> = phase(Phase::Core).iter().map(|op| op.id.as_str()).collect();
+    assert_eq!(all.len(), declared.len(), "没有前缀时列出全部转录相命令");
+    for (row, id) in all.iter().zip(&declared) {
+        assert_eq!(row.name, format!("/{}", id), "顺序按命令表的声明");
+        assert!(!row.brief.trim().is_empty(), "{} 没有一句说明", row.name);
+    }
+    assert_eq!(catalog::menu("/he").len(), 1, "前缀收窄到一条");
+    assert_eq!(catalog::menu("/he")[0].name, "/help");
+    assert_eq!(
+        catalog::menu("/?")[0].name,
+        "/help",
+        "别名命中，展示的仍是命令词本身"
+    );
+    assert!(catalog::menu("hello").is_empty(), "消息不给菜单");
+    assert!(catalog::menu("/web ").is_empty(), "写完命令词进入参数");
+    assert!(catalog::menu("/--doctor").is_empty(), "启动相命令不在这里");
+    assert!(catalog::menu("/nope").is_empty());
+}
+
 /// 机器回执：启动命令的说明里要写清 --json 会得到什么字段，且 --json 能被解析器认出来。
 #[test]
 fn boot_commands_declare_json_receipt() {

@@ -4,6 +4,7 @@
 //!   命令怎么执行（转录相在 `cli.rs`，启动相在 `boot.rs`）；终端与配色怎么画（`term.rs`、`view.rs`）。
 //! 联动：`cli.rs` 渲染 help 与提示；`term.rs` 的 Tab 补全取 `complete`；旗语正文取 `argv`。
 
+use super::MenuRow;
 use crate::capabilities::catalog::modules::api::ParamType;
 use crate::capabilities::tools::api::{
     CommandBook, Executor, Op, OpBook, Phase, complete_op, op_usage,
@@ -215,6 +216,30 @@ pub(crate) fn complete(prefix: &str) -> Vec<String> {
     }
     out.sort();
     out
+}
+
+/// 目的：输入框下方的实时菜单：`/` 起头且还没敲空格时，按前缀列出转录相命令。
+/// 参数：`prefix` 是当前整行（含前导 `/`）；不是命令写法时返回空。
+/// 约束：顺序按命令声明，不排序；别名也能命中，但一行只出现一次（展示的是命令词本身）。
+pub(crate) fn menu(prefix: &str) -> Vec<MenuRow> {
+    let Some(rest) = prefix.strip_prefix('/') else {
+        return Vec::new();
+    };
+    if rest.contains(' ') {
+        return Vec::new();
+    }
+    ops()
+        .ops()
+        .iter()
+        .filter(|op| op.phase == Phase::Core)
+        .filter(|op| {
+            op.id.starts_with(rest) || op.aliases.iter().any(|alias| alias.starts_with(rest))
+        })
+        .map(|op| MenuRow {
+            name: format!("/{}", op.id),
+            brief: op.brief.clone(),
+        })
+        .collect()
 }
 
 /// 目的：启动相命令在转录中心与命令行上的写法：长旗形式 `--名字`（别名里的前导 `/` 不算）。
