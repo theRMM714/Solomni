@@ -488,6 +488,15 @@ impl Core {
     }
 
     /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。
+    pub fn ambient_workspace(
+        &self,
+        raw: &std::path::Path,
+        tier: crate::kernel::api::types::Tier,
+    ) -> Result<std::path::PathBuf, String> {
+        self.work.ambient_workspace(self.probe.as_ref(), raw, tier)
+    }
+
+    /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。
     pub fn session_views(&self, history: &[HistoryView]) -> Vec<SessionView> {
         self.work.session_views(
             &self.turn,

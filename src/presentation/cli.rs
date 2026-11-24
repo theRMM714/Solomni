@@ -19,6 +19,53 @@ pub(crate) struct MenuRow {
     pub brief: String,
 }
 
+/// 目的：启动目录当外部工作区的结论：能当就记规范化后的根，不能当就记一句原因。
+/// 约束：组合根在启动时算一次（`startup_workspace`），主循环与一次性命令共用；会话建好后不再变。
+///   两个字段都空 = 明确不绑（`--no-workspace`），会话用产品内 work/，不必再解释。
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Startup {
+    pub(crate) workspace: Option<std::path::PathBuf>,
+    pub(crate) skip: Option<String>,
+}
+
+/// 目的：把启动目录收成外部工作区——默认「在哪个目录启动就把哪个目录当工作区」。
+/// 返回：可用的根，或一句为什么用不了（呈现层在建会话时原样说明，会话回退到产品内 work/）。
+/// 约束：判定在后端（`WorkOps::ambient_workspace`，与建会话同一把尺子），呈现层不自己判路径；
+///   `off`（`--no-workspace`）时连试探都不做；路径不是 UTF-8 时不绑（会话参数是 JSON 字符串）。
+pub(crate) fn startup_workspace(faces: &Faces, off: bool) -> Startup {
+    if off {
+        return Startup::default();
+    }
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
+        Err(e) => {
+            return Startup {
+                workspace: None,
+                skip: Some(format!("取不到启动目录（{}）", e)),
+            };
+        }
+    };
+    let tier = faces
+        .registry
+        .settings()
+        .map(|s| s.tier)
+        .unwrap_or(Tier::Host);
+    match faces.work.ambient_workspace(&cwd, tier) {
+        Ok(root) if root.to_str().is_some() => Startup {
+            workspace: Some(root),
+            skip: None,
+        },
+        Ok(_) => Startup {
+            workspace: None,
+            skip: Some("启动目录不是 UTF-8 路径，写不进会话参数".to_string()),
+        },
+        Err(why) => Startup {
+            workspace: None,
+            skip: Some(why),
+        },
+    }
+}
+
 /// 目的：离开转录中心时的去向：退出，或转入 Web 转录中心（端口）。
 pub enum CliExit {
     Exit,
@@ -27,12 +74,14 @@ pub enum CliExit {
 
 /// 目的：转录中心主循环：交互模式用固定输入框，非交互模式保持逐行输入（输出不变）。
 /// 参数：`web_default_port` 是会话内 `web` 命令不带端口时的默认值；`plain` 为真则强制纯文本；`anim` 为假则生成态不轮流刷帧；
-///   `system` 是启动相命令的执行面（与命令行共用同一份系统维护能力，见 `run_boot`）。
+///   `startup` 是启动目录当外部工作区的结论（组合根算一次，这里只用不判）；`system` 是启动相命令的执行面
+///   （与命令行共用同一份系统维护能力，见 `run_boot`）。
 pub fn run(
     faces: Faces,
     web_default_port: u16,
     plain: bool,
     anim: bool,
+    startup: Startup,
     system: &dyn System,
 ) -> CliExit {
     let interactive = term::init(plain, anim);
@@ -54,6 +103,16 @@ pub fn run(
     }
     term::status(&startup_status(&faces));
 
+    // 这一趟的呈现选项与工作区结论都是启动时定下的，整轮共用一份。
+    let opts = shell::Opts {
+        json: false,
+        help: false,
+        version: false,
+        interactive: true,
+        web_port: web_default_port,
+        workspace: startup.workspace,
+        workspace_skip: startup.skip,
+    };
     loop {
         if !interactive {
             print_menu(&faces);
@@ -68,13 +127,6 @@ pub fn run(
         }
         // 前缀即类型：/ 开头是命令（与命令行同一处判定），其余都是消息（顶层没有会话就开一条核心代理）。
         // // 转义成字面的一个斜杠（消息本身以斜杠开头时才用得上）。
-        let opts = shell::Opts {
-            json: false,
-            help: false,
-            version: false,
-            interactive: true,
-            web_port: web_default_port,
-        };
         let outcome = if let Some(literal) = line.strip_prefix("//") {
             proxy_flow(&faces, system, Some(literal.to_string()), &opts)
         } else if let Some(command) = line.strip_prefix('/') {
@@ -217,8 +269,8 @@ pub(crate) fn distance(a: &str, b: &str) -> usize {
 pub(crate) use flows::eof_stop;
 #[cfg(test)]
 pub(crate) use gate::{
-    NO_AGENTS, create_session_action, pick_agents, pick_option, spin_frames, split_names,
-    waiting_lines,
+    NO_AGENTS, SessionAsk, create_session_action, pick_agents, pick_option, spin_frames,
+    split_names, waiting_lines,
 };
 #[cfg(test)]
 pub(crate) use input::{Editor, Key, Step, clear_history};
@@ -254,7 +306,7 @@ mod tests {
         }
         let (handle, faces) = crate::tests::ops_with(vec![], vec![]);
         let system = crate::tests::boot::Fake::default();
-        let exit = run(faces, 49181, true, false, &system);
+        let exit = run(faces, 49181, true, false, Startup::default(), &system);
         assert!(matches!(exit, CliExit::Exit));
         drop(handle);
     }
@@ -310,6 +362,25 @@ mod tests {
         drop(handle);
     }
 
+    /// 目的：启动目录默认收成外部工作区；`--no-workspace` 连试探都不做。
+    /// 约束：两种结果都必须是明确的——要么绑上一个根，要么给一句为什么没绑（不许沉默地回退）。
+    #[test]
+    fn startup_workspace_binds_the_launch_directory_unless_turned_off() {
+        let (handle, faces) = crate::tests::ops_with(vec![], vec![]);
+        let off = startup_workspace(&faces, true);
+        assert!(off.workspace.is_none(), "--no-workspace 不绑");
+        assert!(off.skip.is_none(), "明确不绑，就没有「绑不上」的理由要解释");
+
+        let on = startup_workspace(&faces, false);
+        assert!(
+            on.workspace.is_some() != on.skip.is_some(),
+            "要么绑上启动目录，要么说清为什么没绑：{:?} / {:?}",
+            on.workspace,
+            on.skip
+        );
+        drop(handle);
+    }
+
     /// 目的：提示符里直接敲启动相旗语也走同一条执行路径——跑完回提示符，转录中心不退出。
     /// 约束：写操作就地一问；摇头只算预览（退出码归零），点头才真的带上确认。
     #[test]
@@ -317,13 +388,15 @@ mod tests {
         let (handle, faces) = crate::tests::ops_with(vec![], vec![]);
         let system = crate::tests::boot::Fake::default();
         term::feed(&["/--setup bogus", "/--gc", "n", "/--gc", "y", "/exit"]);
-        let (exit, _) = term::capture(|| run(faces, 49181, true, false, &system));
+        let (exit, _) =
+            term::capture(|| run(faces, 49181, true, false, Startup::default(), &system));
         assert!(matches!(exit, CliExit::Exit), "exit 之后才离开转录中心");
 
         // 问话没人答（输入到尽头）：按没点头算，不该把维护命令一直吊在确认上。
         let (handle2, ops2) = crate::tests::ops_with(vec![], vec![]);
         term::feed(&["/--gc"]);
-        let (exit, _) = term::capture(|| run(ops2, 49181, true, false, &system));
+        let (exit, _) =
+            term::capture(|| run(ops2, 49181, true, false, Startup::default(), &system));
         assert!(matches!(exit, CliExit::Exit));
         drop(handle2);
         drop(handle);
@@ -335,7 +408,8 @@ mod tests {
         let (handle, faces) = crate::tests::ops_with(vec![], vec![]);
         let system = crate::tests::boot::Fake::default();
         term::feed(&["/version", "/modules", "nope", "/exit"]);
-        let (exit, _) = term::capture(|| run(faces, 49181, true, false, &system));
+        let (exit, _) =
+            term::capture(|| run(faces, 49181, true, false, Startup::default(), &system));
         assert!(
             matches!(exit, CliExit::Exit),
             "未知命令只让那一行退 2，不结束转录中心"
@@ -354,6 +428,8 @@ mod tests {
             version: false,
             interactive: true,
             web_port: 49181,
+            workspace: None,
+            workspace_skip: None,
         };
         let (code, lines) =
             term::capture(
@@ -374,7 +450,8 @@ mod tests {
         let (handle, faces) = crate::tests::ops_with(vec![], vec![]);
         let system = crate::tests::boot::Fake::default();
         term::feed(&["你好", "", "//这一句以斜杠开头", "/leave", "/exit"]);
-        let (exit, lines) = term::capture(|| run(faces, 49181, true, false, &system));
+        let (exit, lines) =
+            term::capture(|| run(faces, 49181, true, false, Startup::default(), &system));
         assert!(matches!(exit, CliExit::Exit), "只有 /exit 离开进程");
         assert!(
             lines.iter().any(|l| l.contains("空行不发送任何东西")),

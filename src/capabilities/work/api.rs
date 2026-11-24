@@ -493,6 +493,10 @@ pub trait WorkOps: Send + Sync {
     fn session_types(&self) -> Result<Vec<SessionTypeView>, String>;
     /// 目的：临时拼装的白名单：只认已注册的流程 id，重复给同一个 id 如实拒绝。
     fn flow_ids(&self, ids: &[String]) -> Result<Vec<String>, String>;
+    /// 目的：把启动目录收成外部工作区根（"在哪个目录启动就用哪个目录"，建会话前判一次）。
+    /// 约束：与建会话时的 `resolve` 同一条阶梯但**不探可写**；不建目录、不落盘。
+    ///   Err 是「为什么不能当工作区」的整句文案，调用方据此回退到产品内 work/ 并说明。
+    fn ambient_workspace(&self, raw: &std::path::Path, tier: Tier) -> Result<PathBuf, String>;
 }
 
 /// 目的：一个会话类型在界面上的样子（新建向导的逐个选项）。

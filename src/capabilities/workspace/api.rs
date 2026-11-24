@@ -43,7 +43,9 @@ pub use crate::capabilities::workspace::domain::workstore::{
 
 /// 目的：外部工作区根的策略（判定 / 创建校验 / 加载复检）——`runtime` 建会话与重开时只经这里取。
 #[allow(unused_imports)] // 入站面：策略函数给调用方与测试取用
-pub use crate::capabilities::workspace::service::roots::{policy, product_root, recheck, resolve};
+pub use crate::capabilities::workspace::service::roots::{
+    ambient, policy, product_root, recheck, resolve,
+};
 
 /// 目的：`work_*` 工具执行者——`turn` 装配工具面时按席位面发放的工具 id 现取。
 #[allow(unused_imports)]

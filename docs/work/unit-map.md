@@ -16,7 +16,7 @@
 | `src/capabilities/work/api.rs` | 入站 DTO 与 guest 三类：`WorkSpec` / `WorkOpened` / `SessionTypeView` / 视图与报告、`GuestBoot` / `EditGuest` / `GuestDiagnose`、两段式中间结果 `PreparedActivation` / `ReadyActivation` |
 | `src/capabilities/work/domain.rs` | 建工作的纯逻辑：工作名校验、模块去重、单会话合并、工作形态文案、开场事实判定 |
 | `src/capabilities/work/service.rs` | 工作方法族的入口：`Work` 的能力面与两段结果（`PreparedWork` / `PendingWork` / `PreparedEdit`）、模块声明的能力表、运行包重建判据 |
-| `src/capabilities/work/service/create.rs` | 建工作两段与 guest 启动：占名、备工作区、装通道、起 guest、失败撤销；代理会话的创建也在这一处 |
+| `src/capabilities/work/service/create.rs` | 建工作两段与 guest 启动：占名、备工作区、装通道、起 guest、失败撤销；代理会话的创建与启动目录收成外部工作区的 `ambient_workspace` 也在这一处 |
 | `src/capabilities/work/service/config.rs` | 会话配置读写：配置视图、改配两段、权限档提交、围栏撤权、配置记录落盘 |
 | `src/capabilities/work/service/views.rs` | 会话与文件视图：在世会话 × 历史的并集、继续判据、文件视图 / 上传 / 日志 / 提交恢复 |
 | `src/capabilities/work/service/model.rs` | 调用参数与思考档：流式与预算取值、思考片段、树上可用思考档、按根设置 |

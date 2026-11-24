@@ -55,6 +55,29 @@ fn talk(
     }
 }
 
+/// 目的：工作区的一句话——绑到哪，没绑就用产品内 work/（原因另起一行说，不塞进括号）。
+fn workspace_note(opts: &shell::Opts) {
+    if let Some(why) = &opts.workspace_skip {
+        term::line(&term::ink(
+            theme::Ink::Dim,
+            &format!("[提示] {}；本次会话用产品内 work/", why),
+        ));
+    }
+}
+
+/// 目的：建完会话的第一行：会话名 + 这次的工作区（绑了才写路径；没绑由 `workspace_note` 说明）。
+fn opened_line(what: &str, sid: &str, opts: &shell::Opts) -> String {
+    match &opts.workspace {
+        Some(root) => format!(
+            "（{} {} —— 工作区 {}，输入消息，/leave 离开）",
+            what,
+            sid,
+            root.display()
+        ),
+        None => format!("（{} {} —— 输入消息，/leave 离开）", what, sid),
+    }
+}
+
 /// 目的：把一句话发给会话并跟读结果（终端只在最终结果上渲染）。
 fn say(faces: &Faces, sid: &str, cursor: &mut u64, text: &str) {
     let say = text.to_string();
@@ -107,7 +130,18 @@ pub(super) fn single_flow(
         .unwrap_or(Tier::Host);
     // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
     let mut cursor = faces.events.head();
-    let sid = match create_session_action(faces, None, "single", None, &picked, None, tier) {
+    let sid = match create_session_action(
+        faces,
+        SessionAsk {
+            name: None,
+            kind: "single",
+            flows: None,
+            agents: &picked,
+            task: None,
+            tier,
+            workspace: opts.workspace.as_deref(),
+        },
+    ) {
         Ok(sid) => sid,
         Err(e) => {
             println!("[错误] {}", e);
@@ -115,7 +149,8 @@ pub(super) fn single_flow(
         }
     };
     cursor = drain(faces, &sid, cursor);
-    println!("（单 agent {} —— 输入消息，/leave 离开）", sid);
+    workspace_note(opts);
+    println!("{}", opened_line("单 agent", &sid, opts));
     talk(faces, system, &sid, &mut cursor, opts)
 }
 
@@ -134,7 +169,18 @@ pub(super) fn proxy_flow(
         .unwrap_or(Tier::Host);
     // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
     let mut cursor = faces.events.head();
-    let sid = match create_session_action(faces, None, "proxy", None, &[], None, tier) {
+    let sid = match create_session_action(
+        faces,
+        SessionAsk {
+            name: None,
+            kind: "proxy",
+            flows: None,
+            agents: &[],
+            task: None,
+            tier,
+            workspace: opts.workspace.as_deref(),
+        },
+    ) {
         Ok(sid) => sid,
         Err(e) => {
             println!("[错误] {}", e);
@@ -142,7 +188,8 @@ pub(super) fn proxy_flow(
         }
     };
     cursor = drain(faces, &sid, cursor);
-    println!("（核心代理 {} —— 输入消息，/leave 离开）", sid);
+    workspace_note(opts);
+    println!("{}", opened_line("核心代理", &sid, opts));
     if let Some(seed) = seed {
         say(faces, &sid, &mut cursor, &seed);
     }
@@ -151,7 +198,7 @@ pub(super) fn proxy_flow(
 
 /// 目的：协作会话：给需求、点名单（或让核心代拟），之后一律按裁决卡推进。
 /// 约束：给 `flows` 就是**临时拼装**——按列出的流程 id 现拼（席位与人数由流程自己报），不走预设类型。
-pub(super) fn collab_flow(faces: &Faces, args: &Value) {
+pub(super) fn collab_flow(faces: &Faces, args: &Value, opts: &shell::Opts) {
     let names = text(args, "agents").unwrap_or_default();
     let flow_arg = text(args, "flows").unwrap_or_default();
     let ids: Vec<String> = flow_arg
@@ -195,15 +242,20 @@ pub(super) fn collab_flow(faces: &Faces, args: &Value) {
     let kind = if flows.is_some() { "" } else { "collab" };
     let sid = match create_session_action(
         faces,
-        None,
-        kind,
-        flows.as_deref(),
-        &agents,
-        Some(&task),
-        tier,
+        SessionAsk {
+            name: None,
+            kind,
+            flows: flows.as_deref(),
+            agents: &agents,
+            task: Some(&task),
+            tier,
+            workspace: opts.workspace.as_deref(),
+        },
     ) {
         Ok(sid) => {
             cursor = drain(faces, &sid, cursor);
+            workspace_note(opts);
+            println!("{}", opened_line("协作会话", &sid, opts));
             sid
         }
         Err(e) => {

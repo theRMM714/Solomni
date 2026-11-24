@@ -21,17 +21,32 @@ fn cli_session_creation_goes_through_the_action_table() {
     let picked = cli::pick_agents(&faces, &["甲".to_string()]).expect("点名");
     let sid = cli::create_session_action(
         &faces,
-        Some("cli-1"),
-        "single",
-        None,
-        &picked,
-        None,
-        Tier::Host,
+        cli::SessionAsk {
+            name: Some("cli-1"),
+            kind: "single",
+            flows: None,
+            agents: &picked,
+            task: None,
+            tier: Tier::Host,
+            workspace: None,
+        },
     )
     .expect("走动作表建会话");
     assert_eq!(sid, "cli-1");
     assert!(
-        cli::create_session_action(&faces, None, "乱来", None, &picked, None, Tier::Host).is_err(),
+        cli::create_session_action(
+            &faces,
+            cli::SessionAsk {
+                name: None,
+                kind: "乱来",
+                flows: None,
+                agents: &picked,
+                task: None,
+                tier: Tier::Host,
+                workspace: None,
+            }
+        )
+        .is_err(),
         "未知形态在分发处如实拒绝"
     );
 }
@@ -45,8 +60,19 @@ fn cli_takes_the_backend_derived_session_name() {
         .upsert_agent("甲", &["a".to_string()], "", "", "")
         .expect("建 agent");
     let picked = cli::pick_agents(&faces, &["甲".to_string()]).expect("点名");
-    let sid = cli::create_session_action(&faces, None, "single", None, &picked, None, Tier::Host)
-        .expect("建会话");
+    let sid = cli::create_session_action(
+        &faces,
+        cli::SessionAsk {
+            name: None,
+            kind: "single",
+            flows: None,
+            agents: &picked,
+            task: None,
+            tier: Tier::Host,
+            workspace: None,
+        },
+    )
+    .expect("建会话");
     let stamp = sid
         .strip_prefix("single-")
         .unwrap_or_else(|| panic!("缺省名该带预设 id：{sid}"));

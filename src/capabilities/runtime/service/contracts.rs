@@ -138,6 +138,15 @@ impl WorkOps for Handle {
         let ids = ids.to_vec();
         self.call(move |core| core.flow_ids(&ids))
     }
+
+    fn ambient_workspace(
+        &self,
+        raw: &std::path::Path,
+        tier: Tier,
+    ) -> Result<std::path::PathBuf, String> {
+        let raw = raw.to_path_buf();
+        self.call(move |core| core.ambient_workspace(&raw, tier))
+    }
 }
 
 impl TurnOps for Handle {
