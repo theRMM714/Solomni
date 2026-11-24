@@ -193,7 +193,7 @@ Mechanism { id: "discuss", flow: true, seats: &["core_proxy", "discussant"] }
 | --- | --- | --- |
 | `{{work_root}}` | 本次工作共享区根：默认 `session/<工作名>/work/`，根会话绑定外部工作区时是该目录的绝对路径（**主副本**）；虚拟机档由路径桥渲染成 guest 内写法（内部布局落在会话树挂载点下，外部绑定时落在外部工作区挂载点下） | 本工作内 agent 的内置文件工具（**只读**：写会被拒绝，写入走 `work_commit` + `work_push`）；容器里的进程（shell / 模块工具）读不到它，要就地处理先 `work_pull` |
 | `{{sandbox_root}}` | 该 agent 私有沙箱 `session/<工作名>/<agent实例名>/` 的绝对路径 | 只有它自己（**永远全权**） |
-| `{{module_roots}}` | 该 agent 使用的模块目录的绝对路径（一行一个） | 只有使用该模块的 agent（**对 agent 的内置文件工具永久只读，含 `userdata/`**：agent 只有使用权；模块工具 / 服务进程可写自己的 `userdata/`） |
+| `{{module_roots}}` | 该 agent 使用的模块目录的绝对路径（只读表头 + 一行一个；无模块时给「成员模块目录：无」） | 只有使用该模块的 agent（**对 agent 的内置文件工具永久只读，含 `userdata/`**：agent 只有使用权；模块工具 / 服务进程可写自己的 `userdata/`） |
 
 - **越界即拒绝**：
   - 路径必须是列出的真实根**之下**的绝对路径（`src/capabilities/tools/domain/fence.rs`）。
