@@ -1,7 +1,7 @@
-//! 目的：工具能力的**状态、用例与端口持有者**——按角色发放工具面、执行工具、释放围栏授权。
-//! 管：状态是 `domain` 的 `SystemTools`（工具总表、角色表与名字表）；出站端口是 `SysIo`（本能力私有）
+//! 目的：工具能力的**状态、用例与端口持有者**——执行工具、释放围栏授权。
+//! 管：状态是 `domain` 的 `SystemTools`（工具总表与名字表）；出站端口是 `SysIo`（本能力私有）
 //!   与 kernel 共享的 `ProcessRunner` / `FenceHost` / `FenceGate`——**只有这里持有它们**（R12）。
-//! 不管：纯规则（在 `domain/`）；`systools/` 三份 yaml 的加载机制在 `detail/yaml_systools.rs`；本文件不碰文件系统。
+//! 不管：纯规则（在 `domain/`）；`systools/` 的 yaml 加载在 `detail/yaml_systools.rs`；哪些席位拿哪些工具在会话能力的机制声明里。本文件不碰文件系统。
 //! 联动：对外两个面 `Tools` 与 `ToolExec`（见 `api.rs`）；装配在 `main.rs`。
 
 pub mod fence;
@@ -10,10 +10,10 @@ pub mod systool;
 
 use self::fence::ToolFenceGate;
 use crate::capabilities::tools::api::{
-    Observations, Recorded, ToolBook, ToolExec, ToolOutcome, ToolSchema, Tools,
+    Observations, Recorded, ToolBook, ToolExec, ToolOutcome, Tools,
 };
 use crate::capabilities::tools::domain::budget::{self, Continuation};
-use crate::capabilities::tools::domain::roles::SystemTools;
+use crate::capabilities::tools::domain::table::SystemTools;
 use crate::capabilities::tools::ports::{SysIo, SystoolsSource};
 use crate::kernel::ports::{FenceGate, FenceHost, ProcessRunner};
 use std::collections::BTreeMap;
@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 /// 目的：工具能力——持三张表与四个端口，按用例答话。
 pub struct ToolsService {
-    /// **状态**：工具总表与角色表。
+    /// **状态**：工具总表。
     catalog: SystemTools,
     runner: Arc<dyn ProcessRunner>,
     io: Arc<dyn SysIo + Send + Sync>,
@@ -61,22 +61,6 @@ impl ToolsService {
 }
 
 impl Tools for ToolsService {
-    fn tool_face(&self, role: &str) -> Result<Vec<(&str, &ToolSchema)>, String> {
-        self.catalog.tool_face(role)
-    }
-
-    fn role_face(&self, role: &str) -> (Vec<String>, bool) {
-        self.catalog.role_face(role)
-    }
-
-    fn allows_module_tools(&self, role: &str) -> bool {
-        self.catalog.allows_module_tools(role)
-    }
-
-    fn role_seats(&self) -> Vec<(String, crate::capabilities::tools::api::Seat)> {
-        self.catalog.seats()
-    }
-
     fn book(&self) -> ToolBook {
         self.catalog.tools.clone()
     }

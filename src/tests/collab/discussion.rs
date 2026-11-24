@@ -166,7 +166,7 @@ pub(crate) fn discussion_member_can_inspect_before_speaking() {
 
 /// 目的：讨论回合**按角色表校验**：面里没有的内置工具（write）被如实拒绝，不当表态吸收。
 #[test]
-pub(crate) fn discussion_member_cannot_call_a_builtin_outside_its_role_face() {
+pub(crate) fn discussion_member_cannot_call_a_builtin_outside_its_seat_face() {
     let mut member = BTreeMap::new();
     member.insert(
         "a".to_string(),

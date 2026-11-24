@@ -283,6 +283,16 @@ impl AgentSession {
         &self.params
     }
 
+    /// 目的：这一回合坐的席位 id（流程换段时由驱动按回合现换，跑完还原）。
+    pub fn seat(&self) -> &str {
+        &self.params.seat
+    }
+
+    /// 目的：换席——只在回合内由驱动调用，回合结束必须还原，否则下一回合会带着上一席的身份。
+    pub(crate) fn set_seat(&mut self, seat: &str) {
+        self.params.seat = seat.to_string();
+    }
+
     /// 目的：改写要用的真实根：由参数派生，不另存一份。写法与工作环境块**同一座桥**（虚拟机档 = guest 写法）。
     pub(crate) fn roots(&self) -> crate::capabilities::prompt::api::RefRoots {
         self.params.ref_roots()
@@ -936,7 +946,7 @@ mod tests {
             chara: String::new(),
             modules: Vec::new(),
             role_system: None,
-            role: "solo".to_string(),
+            seat: "solo".to_string(),
             guest: None,
         };
         AgentSession::new(

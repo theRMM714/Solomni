@@ -4,10 +4,10 @@
 //! 联动：由 `service.rs` 持有（R12）；kernel 端口见 `src/kernel/ports.rs`。
 
 use crate::capabilities::tools::api::LineRange;
-use crate::capabilities::tools::domain::roles::SystemTools;
+use crate::capabilities::tools::domain::table::SystemTools;
 use std::path::{Path, PathBuf};
 
-/// 目的：工具总表、角色表与名字表的加载端口：读 `systools/tools.yaml` + `systools/roles.yaml` + `systools/names.yaml`（机制在适配层）。
+/// 目的：工具总表与名字表的加载端口：读 `systools/tools.yaml` + `systools/names.yaml`（机制在适配层）。
 pub trait SystoolsSource {
     fn load(&self) -> Result<SystemTools, String>;
 }

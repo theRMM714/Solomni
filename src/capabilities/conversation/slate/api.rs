@@ -44,7 +44,7 @@ pub struct Proposal {
 pub struct Parties<'a> {
     /// 目的：提示词册（段与文案都在它的书里）。
     pub prompt: &'a dyn Prompt,
-    /// 目的：工具总表（按角色发放核心的工具面）。
+    /// 目的：工具总表（按席位合成核心的工具面）。
     pub tools: &'a dyn Tools,
     /// 目的：模块公地（本次工作的清单）。
     pub roster: &'a Roster,

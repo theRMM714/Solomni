@@ -6,6 +6,7 @@
 use crate::capabilities::conversation::session::api::{
     History, HistoryView, SessionEvent, SessionMeta,
 };
+use crate::capabilities::conversation::session::domain::mechanism;
 use crate::capabilities::conversation::session::domain::persist::persist_policy_for;
 use crate::capabilities::conversation::session::ports::HistoryStore;
 use std::sync::Arc;
@@ -164,7 +165,7 @@ pub fn reply_msgs(
     out
 }
 
-/// 核心 AI 的一次**操作**：声明该角色的工具面、跑一次模型、从**工具调用参数**里取载荷。
+/// 核心 AI 的一次**操作**：声明该席位的工具面、跑一次模型、从**工具调用参数**里取载荷。
 ///
 /// 为什么必须走工具调用（见 docs/tools/tools-and-roles.md）：核心操作会驱动核心走下一步
 /// （建任务链、判交付、确认名单、推进状态机），属于"操作"而不是"说话"——
@@ -178,7 +179,7 @@ pub fn reply_msgs(
 #[allow(clippy::too_many_arguments)]
 pub fn core_operation(
     systools: &dyn crate::capabilities::tools::api::Tools,
-    role: &str,
+    seat: &str,
     tool: &str,
     mode: crate::capabilities::llm::api::ToolMode,
     chat: &mut dyn crate::capabilities::llm::api::Chat,
@@ -192,8 +193,13 @@ pub fn core_operation(
     sink: &mut dyn FnMut(crate::capabilities::conversation::session::api::SessionEvent),
 ) -> Result<serde_json::Value, String> {
     // 声明面按**通道形态**给：原生通道才声明（信封通道的模型看提示词里的工具说明）。
+    // 席位面由机制声明按总表合成；席位没登记时退化成空面（装配期已由 `mechanism::problems` 拦下）。
+    let book = systools.book();
     let face_rows: Vec<(&str, &crate::capabilities::tools::api::ToolSchema)> =
-        systools.tool_face(role).unwrap_or_default();
+        match mechanism::seat(seat) {
+            Some(seat) => mechanism::resolve(seat, &book).unwrap_or_default(),
+            None => Vec::new(),
+        };
     let face_ids: Vec<String> = face_rows.iter().map(|(id, _)| id.to_string()).collect();
     // 声明面先备好：它被 opts 借走，**必须先于 opts 声明**（否则借用活得比它长）。
     let decls: Vec<crate::capabilities::llm::api::ToolDecl> =
@@ -329,7 +335,7 @@ pub fn core_operation(
             }
             return Ok(payload);
         }
-        // 没有目标调用：看它请求的是不是**该角色拿得到的只读核实工具**（read / grep）。
+        // 没有目标调用：看它请求的是不是**该席位拿得到的只读核实工具**（read / grep）。
         let calls: Vec<(String, String, String)> =
             if mode == crate::capabilities::llm::api::ToolMode::Native && !done.calls.is_empty() {
                 done.calls

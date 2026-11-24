@@ -4,17 +4,19 @@
 //! 联动：隔离根 `tests::scratch`。
 
 use super::*;
-/// 角色的工具面**来自角色表**（不是提示词里另写一遍）：给什么写什么，没给的不出现。
+/// 席位的工具面**来自机制声明**（不是提示词里另写一遍）：给什么写什么，没给的不出现。
 /// 这一份面同时喂三处：回合注入的工具块、原生声明槽、越权校验——所以判据只有它一个。
 #[test]
-fn role_face_comes_from_the_role_table() {
+fn a_seat_face_comes_from_the_mechanism_declaration() {
+    use crate::capabilities::conversation::session::api::{face, resolve, seat};
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let st = YamlSystools::new(root.join("systools"))
         .load()
-        .expect("读三张表");
-    let ids = |role: &str| -> Vec<String> {
-        st.tool_face(role)
-            .expect("角色表里的角色")
+        .expect("读工具总表");
+    let ids = |id: &str| -> Vec<String> {
+        let seat = seat(id).expect("机制声明里的席位");
+        resolve(seat, &st.tools)
+            .expect("席位面引用的工具都在总表里")
             .into_iter()
             .map(|(id, _)| id.to_string())
             .collect()
@@ -39,9 +41,8 @@ fn role_face_comes_from_the_role_table() {
         );
     }
     // 描述与参数也来自工具总表（模型侧说明与校验同源）。
-    let (_, schema) = st
-        .tool_face("discussant")
-        .expect("讨论者角色在")
+    let (_, schema) = resolve(seat("discussant").expect("讨论席在册"), &st.tools)
+        .expect("讨论席面引用的工具都在总表里")
         .into_iter()
         .find(|(id, _)| *id == "agree")
         .expect("agree 在讨论席面里");
@@ -53,7 +54,11 @@ fn role_face_comes_from_the_role_table() {
             .is_some_and(|p| p.contains_key("text")),
         "agree 的参数契约来自 tools.yaml"
     );
-    assert!(st.tool_face("不存在的角色").is_err(), "未知角色要如实报错");
+    assert!(seat("不存在的席位").is_none(), "未知席位要如实查不到");
+    assert!(
+        face(seat("solo").expect("单席在册")).contains(&"read"),
+        "单席该恒有沙箱面的读工具"
+    );
     // 单 agent 工作（solo）与任务链执行席（executor）差在**回报工具**：回报只有节点子会话有消费者。
     let solo = ids("solo");
     for tool in ["read", "list", "write", "edit", "patch", "grep"] {
@@ -96,65 +101,65 @@ fn names_table_lists_directory_reserved_names() {
     }
 }
 
-/// 两张表必须自洽：悬空引用 / 缺能力都会被挡下（不靠人看）。
+/// 总表与机制面必须自洽：悬空引用 / 缺能力都会被挡下（不靠人看）。
 #[test]
-fn system_tools_and_roles_are_self_consistent() {
+fn system_tools_and_mechanism_faces_are_self_consistent() {
+    use crate::capabilities::conversation::session::api::{mechanism_problems, seat};
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let st = YamlSystools::new(root.join("systools"))
         .load()
-        .expect("读系统工具与角色");
+        .expect("读系统工具与名字表");
     assert!(
         st.problems().is_empty(),
-        "两张表必须自洽：{:?}",
+        "总表必须自洽：{:?}",
         st.problems()
     );
-    // 越权判据只有一处：**这一回合的工具面**（角色表发放），给了的放行、没给的不放行。
-    let face = |role: &str| st.role_face(role).0;
-    let has = |role: &str, tool: &str| face(role).iter().any(|t| t == tool);
-    assert!(has("discussant", "read"), "discussant 该能读");
-    assert!(!has("discussant", "create_session"), "没给的工具必须不放行");
-    assert!(face("不存在的角色").is_empty(), "不存在的角色什么都不放行");
-    // 悬空引用会被 problems 逮到。
-    let mut broken = st.clone();
-    broken
-        .roles
-        .get_mut("discussant")
-        .expect("角色在")
-        .tools
-        .push("no_such_tool".to_string());
     assert!(
-        broken
-            .problems()
+        mechanism_problems(&st.tools).is_empty(),
+        "机制面与总表必须自洽：{:?}",
+        mechanism_problems(&st.tools)
+    );
+    // 越权判据只有一处：**这一回合的工具面**（机制按席位合成），给了的放行、没给的不放行。
+    let has = |id: &str, tool: &str| {
+        crate::capabilities::conversation::session::api::face(seat(id).expect("席位在册"))
+            .contains(&tool)
+    };
+    assert!(has("discussant", "read"), "讨论席该能读");
+    assert!(!has("discussant", "create_session"), "没给的工具必须不放行");
+    // 悬空引用会被 problems 逮到。
+    let mut broken = st.tools.clone();
+    broken.remove("agree");
+    assert!(
+        mechanism_problems(&broken)
             .iter()
-            .any(|p| p.contains("不存在的系统工具")),
+            .any(|p| p.contains("引用了不存在的系统工具")),
         "悬空引用必须被挡下：{:?}",
-        broken.problems()
+        mechanism_problems(&broken)
     );
 }
 
-/// 机制册必须与角色表自洽：**适用角色**都在册；而且真实会话路径上每个角色都拿得到机制说明——
+/// 机制册必须与席位声明自洽：**适用席位**都在册；而且真实会话路径上每个席位都拿得到机制说明——
 /// 对应关系是数据，这里只校验不写死。
 #[test]
-fn mechanism_book_covers_every_role_in_play() {
+fn mechanism_book_covers_every_seat_in_play() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let st = YamlSystools::new(root.join("systools"))
-        .load()
-        .expect("读系统工具与角色");
     let profiles = YamlProfiles::new(root.join("systools"))
         .load()
         .expect("读会话类型表");
+    for kind in ["single", "collab", "proxy"] {
+        assert!(profiles.known(kind), "缺会话类型：{}", kind);
+    }
     let prompts = YamlPrompts::new(root.join("prompts"))
         .load()
         .expect("读提示词册");
-    profiles
-        .check_roles(&st.seats())
-        .expect("会话类型引用的角色必须在角色表里，席位也要放对");
-    let role_ids: Vec<&String> = st.roles.keys().collect();
+    use crate::capabilities::conversation::session::api::SEATS;
+    // 会话类型表在装载时已校验机制与流程；这里只锁机制册的适用席位都在声明里。
+    let role_ids: Vec<&str> = SEATS.iter().map(|s| s.id).collect();
     assert!(!prompts.core.mechanisms.is_empty(), "机制册不能为空");
     for m in &prompts.core.mechanisms {
-        assert!(!m.roles.is_empty(), "一条机制至少要有一个适用角色");
-        for r in &m.roles {
-            assert!(role_ids.contains(&r), "适用角色不在角色表里：{}", r);
+        assert!(!m.seats.is_empty(), "一条机制至少要有一个适用席位");
+        for r in &m.seats {
+            assert!(role_ids.contains(&r.as_str()), "适用席位没在机制声明里：{}", r);
         }
     }
     for role in ["solo", "discussant", "executor", "core_proxy"] {
@@ -166,7 +171,7 @@ fn mechanism_book_covers_every_role_in_play() {
     }
     assert!(
         prompts.core.mechanisms_for("planner").trim().is_empty(),
-        "没配说明的角色拿到空串"
+        "没配说明的席位拿到空串"
     );
 }
 

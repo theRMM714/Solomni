@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 pub struct SessionMeta {
     pub name: String,
-    /// 目的：这条会话的**解析后声明**（类型名 / 自己的角色 / 按顺序跑的流程）。
+    /// 目的：这条会话的**解析后声明**（类型名 / 静止席位 / 按顺序跑的流程）。
     ///   它是落盘事实（**不在内存里留影子状态**）：拿不到它就无法判断怎么重建这条会话。
     ///   约束：落的是解析结果而不是对表的引用——改那张表不影响已建会话的重建。
     pub spec: SessionSpec,

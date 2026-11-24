@@ -523,10 +523,10 @@ pub fn arg_fault_text(name: &str, schema: &ToolSchema, fault: &ArgFault) -> Stri
     format!("{}。{}", why, signature)
 }
 
-/// 目的：越权调用：这个席位没有这个工具（角色表决定工具面）——**如实拒绝**，不执行。
+/// 目的：越权调用：这个席位没有这个工具（机制席位决定工具面）——**如实拒绝**，不执行。
 pub fn refuse(name: &str) -> ToolOutcome {
     fail(format!(
-        "这个席位没有工具 {}：角色表没发给它（越权调用一律不执行）。",
+        "这个席位没有工具 {}：机制席位没发给它（越权调用一律不执行）。",
         name
     ))
 }

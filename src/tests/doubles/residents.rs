@@ -277,7 +277,7 @@ pub(crate) fn member_with_service_tools(
             runtime_path: None,
             runtime_roots: Vec::new(),
             allowed: crate::capabilities::tools::api::names(),
-            role: "solo".to_string(),
+            seat: "solo".to_string(),
             with_modules: true,
             notes: Default::default(),
         },

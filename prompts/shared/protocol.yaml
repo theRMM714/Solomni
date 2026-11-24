@@ -1,4 +1,4 @@
-# 协议：讨论约定（跨角色共用）。
+# 协议：讨论约定（跨席位共用）。
 # **能用哪些工具不在这里列**：核心按这一回合的身份现渲染后随回合注入（见 docs/tools/tools-and-roles.md 二）。
-# **机制说明也不在这里**：它按（会话使用类型 × 角色）分发，在 prompts/shared/mechanisms.yaml。
+# **机制说明也不在这里**：它按（会话使用类型 × 席位）分发，在 prompts/shared/mechanisms.yaml。
 chat_protocol: "讨论约定：直接说事；只说自己知道的，不替别人发言。"

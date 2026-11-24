@@ -121,10 +121,9 @@ pub(crate) fn collab_generation<H: TurnHost>(
                             );
                             let req = AskReq {
                                 agent: ask.member.clone(),
-                                role: ask.role.clone(),
+                                seat: ask.seat.clone(),
                                 identity: ask.identity.clone(),
                                 turn: ask.turn.clone(),
-                                systools: std::sync::Arc::clone(&ask.systools),
                                 cancel: std::sync::Arc::clone(&cancel),
                                 opts: ask.opts.clone(),
                                 round: ask.round,
@@ -247,7 +246,7 @@ pub(crate) fn collab_generation<H: TurnHost>(
         }
     }
     // 派发：每个就绪节点在**它自己的子会话**里起一轮生成（脱离本次调用，不等它跑完）。
-    for (_node, child, objective) in todo {
+    for (_node, child, objective, _seat) in todo {
         super::spawn_detached_node(host, &child, &objective);
     }
     Ok(Advance { head: seq })

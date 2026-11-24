@@ -427,8 +427,8 @@ pub(crate) struct ProxySeed<'a> {
     pub(crate) name: &'a str,
     /// 目的：会话类型名（要在类型表里；解析成落盘声明）。
     pub(crate) kind: &'a str,
-    /// 目的：这条会话的静止身份（代理式会话坐核心代理席，由类型声明给出）。
-    pub(crate) role: &'a str,
+    /// 目的：这条会话的静止席位 id（代理式会话坐核心代理席，由类型声明解析出来）。
+    pub(crate) seat: &'a str,
     /// 目的：授予的秒级时间戳，写进 `meta.delegation`。
     pub(crate) granted_at: i64,
     /// 目的：用户选的档位；也是这条会话建子工作时的默认档位。

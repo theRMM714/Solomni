@@ -16,10 +16,10 @@ fn the_shipped_table_covers_the_three_modes_and_its_roles_exist() {
     }
     let st = YamlSystools::new(root.join("systools"))
         .load()
-        .expect("读角色表");
-    profiles
-        .check_roles(&st.seats())
-        .expect("会话类型引用的角色必须在角色表里，席位也要放对");
+        .expect("读工具总表");
+    // 会话类型表在装载时就校验了机制与流程；这里再锁一遍席位面与工具总表的一致性。
+    let problems = crate::capabilities::conversation::session::api::mechanism_problems(&st.tools);
+    assert!(problems.is_empty(), "机制面与系统工具总表不一致：{:?}", problems);
 }
 
 #[test]
@@ -52,7 +52,7 @@ fn a_missing_or_broken_table_is_an_assembly_error() {
     // 语法对、规则不对：同样装配失败，文案点名文件与出问题的那一项。
     std::fs::write(
         broken.join("profiles.yaml"),
-        "profiles:\n  - id: single\n    roles: [solo]\n    flows: [ghost]\n",
+        "profiles:\n  - id: single\n    flows: [ghost]\n",
     )
     .expect("造没注册流程的表");
     let err = YamlProfiles::new(broken).load().unwrap_err();

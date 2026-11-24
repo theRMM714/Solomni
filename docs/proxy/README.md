@@ -13,7 +13,7 @@
 - 管：**宿主契约** `ProxyHost`（`src/capabilities/conversation/proxy/api.rs`）：`catalog` / `create_session` / `send` / `observe` / `control` / `messages` 六个动作；方法注释即约束（只读动作不推进、建会话不留半成品、失败如实回报）。
 - 不管：真实会话动作、命令队列与生成——生产宿主是 `runtime` 的 `ProxyBridge`（`src/capabilities/runtime/service/bridge.rs`），装配在 `src/capabilities/runtime/service/handle.rs` 的 `inject_proxy_handler`。
 - 不管：会话本体与运行态（`turn`）、转录（`session`）、工作区（`workspace`）；授予读会话的 `meta.delegation`，本单元不另存一份。
-- 不管：工具声明、角色面与提示词——`systools/tools.yaml`、`systools/roles.yaml` 与 `prompts/roles/core_proxy.yaml` 是它们的唯一落点。
+- 不管：工具声明、席位面与提示词——`systools/tools.yaml`、`session/domain/mechanism.rs` 的 `SEATS` 与 `prompts/roles/core_proxy.yaml` 是它们的唯一落点。
 
 ## 入站契约与状态归属
 
@@ -39,7 +39,7 @@
 - `src/capabilities/conversation/proxy/domain/proxy.rs` 的拒绝文案、回执形状与 `*Args` → `src/tests/runtime/proxy.rs`、`src/tests/proxy.rs` 一起改（前者锁执行面与桥，后者锁三个请求校验器）。
 - `src/capabilities/conversation/proxy/api.rs` 的 `ProxyHost` → 生产宿主 `ProxyBridge`（`src/capabilities/runtime/service/bridge.rs`）与替身 `FakeProxyHost`（`src/tests/doubles/proxy.rs`）一起改；端口矩阵在 [docs/testing/doubles.md](../testing/doubles.md)。
 - `ProxyHandler` 的形状 → 装配点 `src/capabilities/runtime/service/handle.rs` 的 `inject_proxy_handler` 一起改。
-- 工具名或角色面 → `systools/tools.yaml`、`systools/roles.yaml` 与 [docs/tools/tools-and-roles.md](../tools/tools-and-roles.md) 一起改。
+- 工具名或席位面 → `systools/tools.yaml`、`session/domain/mechanism.rs` 与 [docs/tools/tools-and-roles.md](../tools/tools-and-roles.md) 一起改。
 
 ## 本目录
 

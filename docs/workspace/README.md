@@ -8,7 +8,7 @@
 
 - 管：工作区与沙箱寻址（含越界判定）、建工作与上传、文件视图、根会话的外部工作区绑定投影，以及**共享区版本化工作区**（内容寻址的提交记录、三条线（存档线自动快照 + 各 agent 的工作线 + 主线）、推送时的文件级三方合并、三方视图与显式冲突解决、按提交点还原）。
 - 管：**成员侧工作工具处理器**——`work_pull` / `work_commit` / `work_push` / `work_sync` / `work_status` / `work_ignore` / `work_versions` / `work_diff` / `work_resolve` / `work_reset` / `work_lost` 十一个工具名由 `src/capabilities/workspace/service/work_tools.rs` 的 `WorkHandler` 认领，回执文本由 `src/capabilities/workspace/domain/work_tools.rs` 渲染；`work_handlers` 按角色面发放的名单现取执行者。
-- 不管：模块清单与 `module.yaml`（在 `modules`，本能力只消费它给的模块事实）、不执行工具（`tools`）、不写会话流水（`session`）、不决定谁能用哪些工具（`tools` 的角色表）。
+- 不管：模块清单与 `module.yaml`（在 `modules`，本能力只消费它给的模块事实）、不执行工具（`tools`）、不写会话流水（`session`）、不决定谁能用哪些工具（`tools` 的总表与会话能力的机制席位）。
 
 ## 入站契约与状态归属
 

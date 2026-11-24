@@ -17,6 +17,7 @@ use crate::capabilities::conversation::session::api::{
 use crate::capabilities::conversation::session::domain::assemble::{
     face_tools, service_ops_of, serviced_tools,
 };
+use crate::capabilities::conversation::session::domain::mechanism;
 use crate::capabilities::conversation::session::domain::tools::MemberTools;
 use crate::capabilities::llm::api::{Channel, Llm, Msg, ToolMode};
 use crate::capabilities::prompt::api::{Prompt, Segment};
@@ -36,7 +37,7 @@ pub struct SessionPorts {
     pub log: Arc<dyn Log + Send + Sync>,
     /// 目的：提示词册：工具说明与压缩提示从它取段。
     pub prompt: Arc<dyn Prompt>,
-    /// 目的：工具总表与角色表：发放名单与内置工具表从它读。
+    /// 目的：工具总表：席位面合成与内置工具表都从它读。
     pub systools: Arc<dyn Tools>,
     /// 目的：工具执行面：一席的工具环境要它跑外部 / 内置工具。
     pub tools: Arc<dyn ToolExec + Send + Sync>,
@@ -65,7 +66,7 @@ pub struct MemberEnvParts {
     pub runtime_roots: Vec<PathBuf>,
 }
 
-/// 目的：装配一席工具面所需的全部事实（模块、沙箱、形态、档位、角色、shell 槽与工具环境事实）。
+/// 目的：装配一席工具面所需的全部事实（模块、沙箱、形态、档位、席位、shell 槽与工具环境事实）。
 pub struct MemberSpec<'a> {
     /// 目的：这一席挂的模块（工具表与隐私注入项按它算）。
     pub modules: &'a [Module],
@@ -75,8 +76,8 @@ pub struct MemberSpec<'a> {
     pub unavailable: BTreeMap<String, Vec<String>>,
     /// 目的：工具形态（原生 / 信封）。
     pub mode: ToolMode,
-    /// 目的：这一席的身份（用户建的单 agent 会话 = solo，协作子会话 = executor）。
-    pub role: &'a str,
+    /// 目的：这一席的席位 id（用户建的单 agent 会话 = solo，协作子会话 = executor）。
+    pub seat: &'a str,
     /// 目的：档位（本机 / 虚拟机）。
     pub tier: Tier,
     /// 目的：这一席的 guest 租约（本机档为空串）。
@@ -143,7 +144,7 @@ pub struct RebuildSpec<'a> {
 
 /// 目的：装配一条代理会话所需的全部事实（参数、席事实、通道、预算、模型与过期清理开关）。
 pub struct ProxySpec<'a> {
-    /// 目的：会话参数（身份是角色提示词 `core_proxy`）。
+    /// 目的：会话参数（身份是席位提示词 `core_proxy`）。
     pub params: SessionParams,
     /// 目的：这一席的工具面事实。
     pub member: MemberSpec<'a>,
@@ -162,20 +163,23 @@ pub struct ProxySpec<'a> {
 /// 目的：装配一席的工具环境：发放名单过滤 → 工作区工具执行者 → 模块工具表与已就绪服务 → 说明块 → 工具面。
 pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools {
     let sb = spec.sandbox;
-    // 角色表发放的系统工具 id 清单（工具面的名字部分），去掉总表里查不到的。
+    // 机制按席位发放的系统工具 id 清单（工具面的名字部分），去掉总表里查不到的。
+    // 席位没登记时装配期已由 `mechanism::problems` 拦下，这里退化成空面。
     let book = ports.systools.book();
-    let allowed = face_tools(
-        ports
-            .systools
-            .tool_face(spec.role)
-            .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
-            .unwrap_or_default(),
-        &book,
-    );
+    let seat = mechanism::seat(spec.seat);
+    let allowed = match seat {
+        Some(seat) => face_tools(
+            mechanism::resolve(seat, &book)
+                .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
+                .unwrap_or_default(),
+            &book,
+        ),
+        None => Vec::new(),
+    };
     let handlers =
         crate::capabilities::workspace::api::work_handlers(&ports.workspace, sb, &allowed);
     // 工具面：静态模块工具 + **已就绪**常驻服务的操作（操作是服务跑起来才发现的，按模块现填）。
-    let with_modules = ports.systools.allows_module_tools(spec.role);
+    let with_modules = seat.map(|s| s.module_tools).unwrap_or(false);
     let mut table = tool_table(spec.modules);
     // 服务清单是全局的：只把**这个 agent 工具面里**的模块服务写进提示词。
     let started = if with_modules {
@@ -211,10 +215,10 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
             module_env: spec.env.module_env.clone(),
             runtime_path: spec.env.runtime_path.clone(),
             runtime_roots: spec.env.runtime_roots.clone(),
-            // 这一席的系统工具面**由角色表发放**（越权校验的唯一判据）：给什么写什么，代码里不留第二份名单。
+            // 这一席的系统工具面**由机制按席位合成**（越权校验的唯一判据）：给什么写什么，代码里不留第二份名单。
             allowed,
-            role: spec.role.to_string(),
-            // 能不能用自己模块的工具由角色表发放；说明块素材在装配期算好（服务操作已在上面并进来）。
+            seat: spec.seat.to_string(),
+            // 能不能用自己模块的工具由席位声明；说明块素材在装配期算好（服务操作已在上面并进来）。
             with_modules,
             notes,
         },

@@ -370,7 +370,7 @@ impl Turn {
         c: Box<dyn Flow>,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
-    ) -> (Vec<SessionEvent>, Vec<(String, String, String)>) {
+    ) -> (Vec<SessionEvent>, Vec<(String, String, String, Option<String>)>) {
         self.unmark_running(sid);
         self.put(sid.to_string(), Session::Flow(c));
         // 交回时这段工作已被停 / 已关闭：队列里没答的卡**一律作废**（生成期间对象在别人手里，只能在这里补）。

@@ -45,7 +45,7 @@
 | `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8） |
 | `HistoryStore` | 会话历史：顶层会话一个目录，子会话落在**父会话目录内部**（meta + 事件流水） |
 | `PromptSource` | 提示词册加载（`prompts/`） |
-| `SystoolsSource` | 工具总表、角色表与保留名表的加载（`systools/`） |
+| `SystoolsSource` | 工具总表与保留名表的加载（`systools/`） |
 | `ProxyHost` | 核心代理工具的外部动作（清单 / 建会话 / 转达 / 观察 / 消息倒查 / 生命周期） |
 | `ProcessRunner` | 外部进程执行（围栏安装、拉起、stdin 送参、超时/取消杀树、一次性 shell）；**kernel 共享机制端口** |
 | `SessionHost`（产出 `Session`） | 起一条**外部进程会话**（一次性子进程 / 常驻服务的按行协议）：给规格拿一个可收发、可杀、可判活的会话；**kernel 共享机制端口** |

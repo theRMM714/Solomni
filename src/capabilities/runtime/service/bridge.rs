@@ -253,7 +253,7 @@ impl Core {
                 crate::capabilities::work::api::ProxySeed {
                     name,
                     kind: crate::capabilities::conversation::session::api::PROXY,
-                    role: crate::capabilities::conversation::session::api::PROXY_ROLE,
+                    seat: crate::capabilities::conversation::session::api::PROXY_SEAT,
                     granted_at,
                     tier: crate::kernel::api::types::Tier::Host,
                     guest: None,

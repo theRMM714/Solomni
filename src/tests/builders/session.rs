@@ -65,7 +65,7 @@ pub(crate) fn member_with_tools(
         tools: Some(MemberTools {
             face: crate::capabilities::conversation::session::api::ToolFace {
                 mode: crate::capabilities::llm::api::ToolMode::Envelope,
-                role: "solo".to_string(),
+                seat: "solo".to_string(),
                 modules,
                 tier: crate::kernel::api::types::Tier::Host,
                 guest_lease: String::new(),

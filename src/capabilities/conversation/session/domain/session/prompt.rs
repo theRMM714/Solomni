@@ -52,7 +52,7 @@ fn render_system(
     modules: &[ModulePrompt],
     env: &str,
     mode: crate::capabilities::llm::api::ToolMode,
-    role: &str,
+    seat: &str,
 ) -> String {
     use crate::capabilities::prompt::api::Segment;
     let parts = modules
@@ -67,9 +67,9 @@ fn render_system(
         })
         .collect::<Vec<_>>()
         .join("");
-    // 机制说明**按角色**从册子里取：对应关系是数据，这里只做匹配。
+    // 机制说明**按席位**从册子里取：对应关系是数据，这里只做匹配。
     //（AI 不知道机制就只会写散文。）
-    let mechanism = prompt.mechanism(role);
+    let mechanism = prompt.mechanism(seat);
     // 人设块是**独立指令段**：空人设不产生空标题；模板文案在册子里，不在代码里。
     let chara_block = if chara.trim().is_empty() {
         String::new()
@@ -131,8 +131,9 @@ pub struct SessionParams {
     pub modules: Vec<ModulePrompt>,
     /// 目的：**角色提示词段**：`None` = 普通 agent（模块能力包 + `AgentSystem`）； `Some(seg)` = 不是 agent 的核心身份（代理这类），身份块渲染 `seg` 那一段角色提示词。 存段名而不是渲染好的文本：身份块**每回合现渲染**（册子一改，下一次调用就生效）。
     pub role_system: Option<crate::capabilities::prompt::api::Segment>,
-    /// 目的：这一席的**角色**（solo / executor / discussant / core_proxy…）：机制册按它取说明，工具面也按它发。
-    pub role: String,
+    /// 目的：这一席的**席位**（solo / executor / discussant / core_proxy…）：机制册按它取说明，工具面也按席位发。
+    ///   约束：这是「当前坐的席位」——流程换席时驱动随回合换它、跑完还原（`TurnRun.seat`）。
+    pub seat: String,
     /// 目的：这场会话跑在哪种 guest 里（本机档 = None）——工作环境块按它选 guest 档，路径按 guest 拼法渲染。
     pub guest: Option<crate::capabilities::vm::api::GuestOs>,
 }
@@ -143,7 +144,7 @@ impl SessionParams {
         agent: &str,
         sb: &crate::capabilities::workspace::api::Sandbox,
         modules: &[crate::capabilities::catalog::modules::api::Module],
-        role: &str,
+        seat: &str,
     ) -> SessionParams {
         SessionParams {
             agent: agent.to_string(),
@@ -161,7 +162,7 @@ impl SessionParams {
                 })
                 .collect(),
             role_system: None,
-            role: role.to_string(),
+            seat: seat.to_string(),
             guest: None,
         }
     }
@@ -219,7 +220,7 @@ impl SessionParams {
         let env = env_block(prompt, self);
         match self.role_system {
             // 角色身份（代理这类不是 agent 的核心）：同一份机制 / 环境 / 调用约定口径。
-            Some(seg) => role_system(prompt, seg, &self.agent, &env, mode, &self.role),
+            Some(seg) => role_system(prompt, seg, &self.agent, &env, mode, &self.seat),
             None => agent_system(
                 prompt,
                 &self.agent,
@@ -227,7 +228,7 @@ impl SessionParams {
                 &self.modules,
                 &env,
                 mode,
-                &self.role,
+                &self.seat,
             ),
         }
     }
@@ -298,6 +299,9 @@ pub fn env_block(
 pub struct TurnRun<'a> {
     /// 目的：本回合的身份块（驱动按当前提示词册现渲染；不进对话）。
     pub identity: &'a str,
+    /// 目的：本回合坐的席位 id（机制说明按它取；与工具面同源）——**每回合必给**。
+    ///   讨论席 / 节点按回合给席位；单 agent 给会话自己的那一席。
+    pub seat: &'a str,
     /// 目的：本回合的工具面（发放的工具 id + 能不能用它自己模块的工具）——**每回合必给**，没有「用会话自己的」这一说。
     ///   讨论席按回合切面：同一个 agent 会话会用两种身份干活（说话 / 干活）；单 agent 与节点传会话自己的那一份。
     pub face: (Vec<String>, bool),

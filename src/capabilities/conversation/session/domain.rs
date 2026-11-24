@@ -9,6 +9,7 @@ pub mod events;
 pub mod flow;
 pub mod flows;
 pub mod history;
+pub mod mechanism;
 pub mod persist;
 pub mod profile;
 pub mod rewind;

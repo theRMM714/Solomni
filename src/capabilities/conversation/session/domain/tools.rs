@@ -1,6 +1,6 @@
 //! 目的：会话的成员工具面——一个成员这一回合能调什么（内置工具 + 自己模块的外部工具）。
 //! 管：`MemberTools`（工具面 + 观察账本 + sandbox 根）、只含值的 `ToolFace`、核实用例的端口 `CoreVerify`、按模块汇总的工具表（`tool_table` / `service_ops_for_modules`）与 shell 现场视图。
-//! 不管：工具总表与角色定义（在 tools 能力）；工具执行（在 `capabilities::tools`）。
+//! 不管：工具总表与席位声明（在 tools 能力与 `session::domain::mechanism`）；工具执行（在 `capabilities::tools`）。
 //! 联动：由 `session.rs` 装配进会话；执行经 `crate::capabilities::tools::api::ToolExec`。
 
 use crate::capabilities::tools::api::{ShellFacts, ToolExec};
@@ -240,12 +240,12 @@ pub struct ToolFace {
     /// 目的：shell 的只读工具链根：项目内基础 profile + 该 agent 模块的运行包根。
     /// 约束：只进 shell 的 per-call 围栏；模块工具的放行仍走它自己的命令解释器基线。
     pub runtime_roots: Vec<PathBuf>,
-    /// 目的：这个席位**可以调的系统工具 id**（由角色表发放：讨论席 = discussant；执行席按身份 = solo / executor）。
+    /// 目的：这个席位**可以调的系统工具 id**（由 `mechanism::face` 合成：讨论席 = discussant；执行席 = solo / executor）。
     ///   存在的理由：把"谁能用哪些工具"变成**校验**，而不是提示词里的一句话。
     pub allowed: Vec<String>,
-    /// 目的：这一席的角色 id（`systools/roles.yaml` 的键）——工具调用的审计记录用它当调用者身份。
-    pub role: String,
-    /// 目的：这个席位**能不能用它自己模块的工具**（角色表的 module_tools；执行席是，讨论席不是）。
+    /// 目的：这一席的席位 id（机制声明的席位）——工具调用的审计记录用它当调用者身份。
+    pub seat: String,
+    /// 目的：这个席位**能不能用它自己模块的工具**（席位的 module_tools；执行席是，讨论席不是）。
     pub with_modules: bool,
     /// 目的：工具说明块的素材（patch 语法 / 模块工具 / 模块工具参数）：装配期算一次，随回合注入。
     pub notes: crate::capabilities::tools::api::ToolNotes,
@@ -348,7 +348,7 @@ impl MemberTools {
             for id in ids {
                 if let Some(schema) = self.face.builtin_tools.get(id) {
                     // 环境参数只属于人经呈现层：核心代理的 create_session 工具面不列 tier / guest。
-                    let text = if self.face.role == "core_proxy" && id == "create_session" {
+                    let text = if self.face.seat == "core_proxy" && id == "create_session" {
                         schema.render_for_prompt_hiding(&["tier", "guest"])
                     } else {
                         schema.render_for_prompt()

@@ -35,18 +35,18 @@ impl Work {
     }
 
     /// 目的：临时拼装的白名单：只认已注册的流程 id，重复给同一个 id 如实拒绝。
-    /// 约束：名字来自流程面自己的登记表（`session::api` 的 `cast_of`），不另立一份清单。
+    /// 约束：名字来自机制的流程登记（`session::api` 的 `flow_ids`），不另立一份清单。
     pub(crate) fn flow_ids(&self, ids: &[String]) -> Result<Vec<String>, String> {
         let mut out: Vec<String> = Vec::new();
         for id in ids {
             if out.contains(id) {
                 return Err(format!("临时拼装里同一个流程出现了两次：{}", id));
             }
-            if crate::capabilities::conversation::session::api::cast_of(id).is_none() {
+            if crate::capabilities::conversation::session::api::mechanism_of(id).is_none() {
                 return Err(format!(
                     "会话类型表里没有这个流程：{}（已注册的流程：{}）",
                     id,
-                    crate::capabilities::conversation::session::api::registered().join(" / ")
+                    crate::capabilities::conversation::session::api::flow_ids().join(" / ")
                 ));
             }
             out.push(id.clone());

@@ -55,16 +55,16 @@ pub(crate) fn prompt_env_book_distributes_by_environment() {
 #[test]
 pub(crate) fn prompt_book_loads_from_yaml() {
     let p = test_prompts();
-    // 语气约定；**能用哪些表态由角色表渲染**（见 systools/roles.yaml），不在这句话里。
+    // 语气约定；**能用哪些表态由席位面渲染**（见 session/domain/mechanism.rs 的 SEATS），不在这句话里。
     assert!(!p.core.chat_protocol.trim().is_empty());
-    // 机制册按**适用角色**分发：每条非空、都写了适用角色（角色表归 systools/roles.yaml）。
+    // 机制册按**适用席位**分发：每条非空、都写了适用席位（席位归 session/domain/mechanism.rs 的 SEATS）。
     assert!(
         p.core.mechanisms.len() >= 4,
         "机制册至少要覆盖单机 / 讨论 / 执行 / 核心代理"
     );
     for m in &p.core.mechanisms {
-        assert!(!m.text.trim().is_empty(), "机制说明不能为空：{:?}", m.roles);
-        assert!(!m.roles.is_empty(), "每条机制都要写清适用角色");
+        assert!(!m.text.trim().is_empty(), "机制说明不能为空：{:?}", m.seats);
+        assert!(!m.seats.is_empty(), "每条机制都要写清适用席位");
     }
     assert!(p.core.mechanisms_for("solo").contains("单 agent 工作"));
     assert!(

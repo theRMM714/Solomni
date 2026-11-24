@@ -321,14 +321,14 @@ pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {
     assert_eq!(root_of(&low).unwrap(), top, "第三层也锚在顶");
 }
 
-/// 目的：身份块里的机制说明按**角色**取：有这份说明的拿得到，没有的不拿。
+/// 目的：身份块里的机制说明按**席位**取：有这份说明的拿得到，没有的不拿。
 #[test]
-pub(crate) fn identity_takes_the_mechanism_of_its_role() {
+pub(crate) fn identity_takes_the_mechanism_of_its_seat() {
     let prompt = test_prompts();
     let mode = crate::capabilities::llm::api::ToolMode::Envelope;
     let identity = |role: &str| {
         let mut p = test_params("a");
-        p.role = role.to_string();
+        p.seat = role.to_string();
         p.identity(&prompt, mode)
     };
     let solo = identity("solo");

@@ -9,45 +9,8 @@ use std::sync::atomic::AtomicBool;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::conversation::session::api::{Gate, GateTicket, MemberTurn, SessionEvent};
 use crate::capabilities::llm::api::{CompleteOpts, Msg};
-use crate::capabilities::tools::api::Tools;
 use crate::capabilities::workspace::api::Sandboxes;
 
-/// 目的：一段流程要的席位：核心通道出演的身份 + 成员席各要几员（下限）。
-/// 约束：`core` 必须是角色表里的核心席角色，`members` 的键必须是成员席角色；
-///   人数是这段流程开跑时至少要有的人（讨论至少两人，执行至少一人）。
-pub struct Cast {
-    /// 目的：流程 id（`systools/profiles.yaml` 只能引用这里的名字）。
-    pub id: &'static str,
-    /// 目的：核心通道出演的身份（不进成员表）。
-    pub core: &'static [&'static str],
-    /// 目的：成员席：角色 → 最少人数。
-    pub members: &'static [(&'static str, usize)],
-}
-
-/// 目的：已注册的流程与各自要的席位——**席位只在这里声明一次**（会话类型表只选流程，不重复声明）。
-/// 约束：新增流程在这里加一行；角色名必须在 `systools/roles.yaml` 里、席别要对。
-pub const FLOWS: &[Cast] = &[
-    Cast {
-        id: "discuss",
-        core: &["core_proxy"],
-        members: &[("discussant", 2)],
-    },
-    Cast {
-        id: "execute",
-        core: &["planner", "orchestrator"],
-        members: &[("executor", 1)],
-    },
-];
-
-/// 目的：某段流程要的席位；没注册返回 `None`。
-pub fn cast_of(id: &str) -> Option<&'static Cast> {
-    FLOWS.iter().find(|c| c.id == id)
-}
-
-/// 目的：已注册的流程 id（校验与报错文案共用这一份）。
-pub fn registered() -> Vec<&'static str> {
-    FLOWS.iter().map(|c| c.id).collect()
-}
 
 /// 目的：流程让出的那一步——请驱动取某个成员会话跑一回合。
 /// 约束：流程**不自己调模型**（它拿不到别的会话）；这里只交出「问谁、带什么、按什么参数」。
@@ -56,8 +19,8 @@ pub struct MemberAsk {
     pub index: usize,
     /// 目的：成员 agent 名——它的会话名是「<工作>--<成员>」。
     pub member: String,
-    /// 目的：这一席的角色（成员会话按它取身份块与工具面；临时拼装的会话不套预设）。
-    pub role: String,
+    /// 目的：这一席的席位 id（成员会话按它取身份块与工具面；临时拼装的会话不套预设）。
+    pub seat: String,
     /// 目的：本回合的身份块（流程决定它怎么理解这一步）。
     pub identity: String,
     /// 目的：本回合要喂给模型的上下文。
@@ -66,8 +29,6 @@ pub struct MemberAsk {
     pub turn_id: u64,
     /// 目的：流程的轮次序号（流程自己解释，驱动只透传）。
     pub round: usize,
-    /// 目的：本回合的工具面（由流程按角色发放）。
-    pub systools: Arc<dyn Tools>,
     /// 目的：本回合的调用参数（流式与预算）。
     pub opts: CompleteOpts<'static>,
 }
@@ -216,8 +177,8 @@ pub trait Flow: Send {
     fn default_answer(&self) -> Option<String> {
         None
     }
-    /// 目的：这条流程此刻的成员席角色（派节点时给子会话定身份）；默认没有成员席。
-    fn member_role(&self) -> Option<&'static str> {
+    /// 目的：这条流程此刻的成员席 id（派节点时给子会话定席位）；默认没有成员席。
+    fn member_seat(&self) -> Option<&'static str> {
         None
     }
 }

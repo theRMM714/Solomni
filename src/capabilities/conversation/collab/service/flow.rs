@@ -13,7 +13,7 @@ use crate::capabilities::conversation::collab::service::collab::{CollabSession, 
 use crate::capabilities::conversation::collab::service::discussion::AfterTurn;
 use crate::capabilities::conversation::session::api::{
     Flow, Gate, GateTicket, Handback, MemberAsk, MemberTurn, SessionEvent, Settle, WorkPlan,
-    cast_of,
+    mechanism_of, seat,
 };
 use crate::capabilities::taskchain::api::NodeStatus;
 use crate::capabilities::workspace::api::Sandboxes;
@@ -43,12 +43,11 @@ impl Flow for CollabSession {
         Some(MemberAsk {
             index,
             member,
-            role: self.member_role_at(index)?,
+            seat: self.member_seat_at(index)?,
             identity,
             turn,
             turn_id: self.next_turn_id(),
             round: self.round(),
-            systools: self.systools(),
             opts: self.disc_opts(),
         })
     }
@@ -152,14 +151,17 @@ impl Flow for CollabSession {
         Some(OPT_BEGIN_ALLOW.to_string())
     }
 
-    fn member_role(&self) -> Option<&'static str> {
+    fn member_seat(&self) -> Option<&'static str> {
         let id = match self.phase {
             Phase::Discuss => "discuss",
             Phase::Execute => "execute",
         };
-        cast_of(id)
-            .and_then(|c| c.members.first())
-            .map(|(role, _)| *role)
+        mechanism_of(id)?
+            .seats
+            .iter()
+            .filter_map(|id| seat(id))
+            .find(|s| !s.core)
+            .map(|s| s.id)
     }
 }
 
