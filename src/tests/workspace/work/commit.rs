@@ -3,7 +3,6 @@
 //! 不管：状态与版本视图（`work/status.rs`）、推送与差异（`work/push.rs`）。
 //! 联动：`docs/storage/README.md`。
 
-
 use crate::tests::workspace::support::*;
 
 /// 目的：三方比较的核心承诺：a、b 同基线各改同一文件，后者提交必须**报冲突**而不是覆盖；任一提交点都能还原出当时的共享区内容。

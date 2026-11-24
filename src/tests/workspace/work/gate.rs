@@ -3,7 +3,6 @@
 //! 不管：提交与历史（`work/commit.rs`）、推送与差异（`work/push.rs`）。
 //! 联动：`docs/storage/README.md`。
 
-
 use crate::tests::workspace::support::*;
 
 /// 目的：门禁快照只回答三件事——是否受管、基线版本、当前版本。

@@ -3,7 +3,6 @@
 //! 不管：重置后的冲突解法（`work/sync.rs`）、备份找回（`work/push.rs`）。
 //! 联动：`docs/storage/README.md`。
 
-
 use crate::tests::workspace::support::*;
 
 /// 目的：work_reset 两种形态——paths 把沙箱恢复成工作线头，to 把工作线移回去并重铺沙箱。
