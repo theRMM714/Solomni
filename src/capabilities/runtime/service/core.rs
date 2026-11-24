@@ -34,7 +34,7 @@ pub struct Core {
     /// 目的：项目内基础工具链的只读安装根（python / node / cc）——shell 每次调用都放行它们。
     ///  来源是组合根读到的 active.json；不按 agent 的模块重复注入。
     pub(super) base_roots: Vec<std::path::PathBuf>,
-    /// 目的：工具总表与角色表的能力面（授权两张表；名字表由组合根另取）——**表本体在工具能力里**，与册子互不依赖。
+    /// 目的：工具总表与机制席位的能力面（授权两张表；名字表由组合根另取）——**表本体在工具能力里**，与册子互不依赖。
     pub(super) systools: Arc<dyn Tools>,
     /// 目的：回合状态与会话本体——在世会话表、运行态与创建占位、裁决队、每会话的 shell 活进程槽，以及一席的装配（在 `turn`）。
     pub(crate) turn: crate::capabilities::turn::turn::api::Turn,

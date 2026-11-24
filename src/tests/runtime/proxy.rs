@@ -58,7 +58,8 @@ pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
         assert!(!schema.desc.trim().is_empty(), "{} 缺说明", name);
         assert!(schema.params.is_some(), "{} 缺参数契约", name);
     }
-    let seat = crate::capabilities::conversation::session::api::seat("core_proxy").expect("代理席在册");
+    let seat =
+        crate::capabilities::conversation::session::api::seat("core_proxy").expect("代理席在册");
     let face: Vec<String> = crate::capabilities::conversation::session::api::face(seat)
         .into_iter()
         .map(|s| s.to_string())
@@ -526,8 +527,8 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
     assert!(!text.contains("做事"), "不得把子会话的转录灌进来：{}", text);
 }
 
-/// 目的：代理会话的身份是**角色提示词**（core_proxy）+ 环境 + 调用约定，不是普通 agent 身份；
-///   反过来，普通 agent 会话也不会沾上代理角色的话。
+/// 目的：代理会话的身份是**席位提示词**（core_proxy）+ 环境 + 调用约定，不是普通 agent 身份；
+///   反过来，普通 agent 会话也不会沾上代理席的话。
 #[test]
 pub(crate) fn the_proxy_identity_is_the_role_prompt() {
     use crate::capabilities::catalog::modules::api::ModuleManifest;
@@ -561,7 +562,7 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
         .expect("代理会话在表里");
     assert!(
         identity.contains("你是核心代理"),
-        "角色提示词没进去：{}",
+        "席位提示词没进去：{}",
         identity
     );
     assert!(
@@ -576,7 +577,7 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
         identity
     );
 
-    // 普通 agent 会话：环境与调用约定同一份口径，但不含代理角色的话。
+    // 普通 agent 会话：环境与调用约定同一份口径，但不含代理席的话。
     let (work, _) = faces
         .work
         .create_work(super::super::single_work("w-role-plain", &["m1"]))
@@ -592,7 +593,7 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
     assert!(plain.contains("工具调用约定："), "{}", plain);
     assert!(
         !plain.contains("你是核心代理"),
-        "普通会话不该有代理角色：{}",
+        "普通会话不该有代理席：{}",
         plain
     );
     // 机制说明按**这个会话的类别**取：单 agent 工作拿单 agent 那一份，不沾代理那份。

@@ -280,11 +280,11 @@ fn global_flags_work_on_both_sides_of_a_boot_command() {
 /// 覆盖：人能经呈现层用的动作，要么在呈现层有入口，要么在下面登记豁免。
 ///
 /// 口径：`systools/tools.yaml` 的 `callers` 里写了 `user` 的工具算「人的动作面」；豁免表只放
-/// 只能由角色在会话里调用的工具面（文件工具与判定回报），它们没有、也不该有人的入口。
+/// 只能由席位在会话里调用的工具面（文件工具与判定回报），它们没有、也不该有人的入口。
 /// 新增动作时忘了给呈现层入口，这条会红——把 id 加进豁免表前先想清楚人到底怎么用它。
 #[test]
 fn user_actions_have_a_presentation_entry_or_are_exempt() {
-    /// 工具面：只给会话里的角色用，人不直接调。
+    /// 工具面：只给会话里的席位用，人不直接调。
     const TOOL_FACE: &[&str] = &[
         "read",
         "write",

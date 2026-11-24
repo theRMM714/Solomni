@@ -38,7 +38,7 @@ pub struct Turn {
     pub(super) secrets: Arc<dyn SecretOps + Send + Sync>,
     /// 目的：工具执行面：一席的工具环境要它跑外部 / 内置工具。
     pub(super) tools: Arc<dyn ToolExec + Send + Sync>,
-    /// 目的：工具总表与角色表：发放名单与内置工具表从它读。
+    /// 目的：工具总表与机制席位：发放名单与内置工具表从它读。
     pub(super) systools: Arc<dyn Tools>,
     /// 目的：提示词册：一席的工具说明与压缩提示从它取段。
     pub(super) prompt: Arc<dyn Prompt>,

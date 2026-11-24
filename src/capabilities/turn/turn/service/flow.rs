@@ -16,6 +16,10 @@ use crate::kernel::ports::HostProbe;
 
 use super::session::Turn;
 
+/// 目的：一个就绪节点要起的生成：节点名、子会话、这一回合的任务提示词、这一回合的席位。
+/// 约束：席位为 `None` 表示这套流程没给席位，生成按会话自己的席位跑。
+pub(crate) type NodeSpawn = (String, String, String, Option<String>);
+
 impl Turn {
     /// 目的：**同步**跑一个节点的子会话（CLI 与测试走这条；Web 生产路径由宿主起工作线程）。
     pub(crate) fn drive_node(
@@ -291,7 +295,7 @@ impl Turn {
         sid: &str,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
-    ) -> (Vec<SessionEvent>, Vec<(String, String, String, Option<String>)>) {
+    ) -> (Vec<SessionEvent>, Vec<NodeSpawn>) {
         let Some(plan) = self
             .session(sid)
             .and_then(|s| s.flow())

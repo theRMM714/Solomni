@@ -14,9 +14,9 @@ pub trait Prompt: Send + Sync {
     /// 按名字渲染一段（`{{key}}` 替换）；**缺变量 = 装配错误**，直接暴露，不静默兜底。
     fn render(&self, seg: Segment, vars: Vars) -> String;
 
-    /// 按**角色**取这个回合的机制说明：只拿适用角色匹配的条目，
+    /// 按**席位**取这个回合的机制说明：只拿适用席位匹配的条目，
     /// 按册子声明顺序拼接（没配 = 空串）。对应关系在 `prompts/shared/mechanisms.yaml`，这里只做匹配。
-    fn mechanism(&self, role: &str) -> String;
+    fn mechanism(&self, seat: &str) -> String;
 
     /// 按（**宿主平台**，**guest 的 os**）取工作环境块并渲染：虚拟机档传 guest，本机档传 None。
     /// 对应关系在 `prompts/shared/tools.yaml` 的 `envs`，这里只做匹配；变量与 `render` 同一套。

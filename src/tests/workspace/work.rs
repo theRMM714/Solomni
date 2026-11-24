@@ -1044,7 +1044,7 @@ pub(crate) fn work_commits_store_roots_and_deltas_but_read_full_tree() {
     );
 }
 
-/// 目的：验成员侧工作工具执行者按角色面发放的名单现取——没发任何 `work_*` 就一个都不装。
+/// 目的：验成员侧工作工具执行者按席位面发放的名单现取——没发任何 `work_*` 就一个都不装。
 #[test]
 pub(crate) fn work_handlers_are_taken_only_when_the_seat_face_allows_them() {
     use crate::capabilities::workspace::api::work_handlers;

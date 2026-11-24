@@ -945,7 +945,7 @@ mod tests {
             module_dirs: std::collections::BTreeMap::new(),
             chara: String::new(),
             modules: Vec::new(),
-            role_system: None,
+            seat_system: None,
             seat: "solo".to_string(),
             guest: None,
         };

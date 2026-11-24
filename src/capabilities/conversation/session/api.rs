@@ -20,13 +20,13 @@ pub use crate::capabilities::conversation::session::domain::flow::{
     Flow, Handback, MemberAsk, Settle, WorkPlan,
 };
 // 机制与席位：身份与工具面**只从这一处取**（流程登记、席位声明、按席位合成面、自洽断言）。
+#[cfg(test)]
+pub use crate::capabilities::conversation::session::domain::mechanism::PROXY_SEAT;
 #[allow(unused_imports)]
 pub use crate::capabilities::conversation::session::domain::mechanism::{
     Mechanism, SEATS, Seat, face, flow_ids, mechanism_of, problems as mechanism_problems, resolve,
     seat,
 };
-#[cfg(test)]
-pub use crate::capabilities::conversation::session::domain::mechanism::PROXY_SEAT;
 // 流程工厂面：组合根把实现注入 turn / work，装配点只按 id 取段。
 pub use crate::capabilities::conversation::session::domain::flows::{
     FlowSetup, Flows, sequence_of,

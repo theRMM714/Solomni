@@ -23,9 +23,9 @@ pub use crate::capabilities::workspace::domain::scope::{
 #[allow(unused_imports)]
 pub use crate::capabilities::workspace::domain::work_tools::{
     COMMIT, DIFF, IGNORE, IgnoreReport, LOST, PULL, PUSH, RESET, RESOLVE, STATUS, SYNC, VERSIONS,
-    WORK_TOOLS, is_work_tool, render_commit, render_diff, render_ignore, render_lost, render_pull, render_push,
-    render_reset, render_resolve, render_restore_lost, render_status, render_sync, render_versions,
-    str_arg, str_list,
+    WORK_TOOLS, is_work_tool, render_commit, render_diff, render_ignore, render_lost, render_pull,
+    render_push, render_reset, render_resolve, render_restore_lost, render_status, render_sync,
+    render_versions, str_arg, str_list,
 };
 pub use crate::capabilities::workspace::domain::workspace::{
     AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage, safe_file_name,
@@ -45,7 +45,7 @@ pub use crate::capabilities::workspace::domain::workstore::{
 #[allow(unused_imports)] // 入站面：策略函数给调用方与测试取用
 pub use crate::capabilities::workspace::service::roots::{policy, product_root, recheck, resolve};
 
-/// 目的：`work_*` 工具执行者——`turn` 装配工具面时按角色面发放的工具 id 现取。
+/// 目的：`work_*` 工具执行者——`turn` 装配工具面时按席位面发放的工具 id 现取。
 #[allow(unused_imports)]
 pub use crate::capabilities::workspace::service::work_tools::{WorkHandler, work_handlers};
 

@@ -407,8 +407,8 @@ fn commit_id(args: &serde_json::Value, key: &str) -> Result<Option<u64>, String>
     }
 }
 
-/// 目的：本席要装的工作区工具执行者——角色面没发任何 `work_*` 就一个都不装。
-/// 参数：workspace = 共享区用例面；sb = 这一席的沙箱；allowed = 角色面发放的工具 id。
+/// 目的：本席要装的工作区工具执行者——席位面没发任何 `work_*` 就一个都不装。
+/// 参数：workspace = 共享区用例面；sb = 这一席的沙箱；allowed = 席位面发放的工具 id。
 pub fn work_handlers(
     workspace: &Arc<dyn Workspace + Send + Sync>,
     sb: &Sandbox,

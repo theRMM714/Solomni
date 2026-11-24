@@ -1,4 +1,4 @@
-//! 目的：shell 的工具面与围栏契约——工具面只由角色面决定，档位只管网络开关与围栏 net。
+//! 目的：shell 的工具面与围栏契约——工具面只由席位面决定，档位只管网络开关与围栏 net。
 //! 管：两档都发放 shell、runtime roots 只进宿主成员工具面。
 //! 不管：真实进程 / 平台围栏（在 kernel 的 process 测试）与 VM 引擎实现。
 //! 联动：systools/tools.yaml 的 shell 声明、tools/domain/shell.rs、session 的 engine/tools。
@@ -13,7 +13,7 @@ pub(crate) fn profile_does_not_change_the_tool_face() {
     assert!(book.contains_key("shell"), "shell 要在工具书里");
     let face = vec!["shell".to_string()];
     let ids = crate::capabilities::conversation::session::api::face_tools(face, &book);
-    assert_eq!(ids, vec!["shell".to_string()], "角色面就是授权面");
+    assert_eq!(ids, vec!["shell".to_string()], "席位面就是授权面");
     let net = |profile: ProfileId| {
         PermissionDefaults { profile }
             .to_permission_set()

@@ -187,7 +187,7 @@ impl TaskChain {
     }
 
     /// 目的：装配期的自洽检查——**空 = 一切正常**，非空 = 逐条可读的原因。
-    ///   由装配期与测试双重消费（与工具总表/角色表同一套哲学：不靠人看）。
+    ///   由装配期与测试双重消费（与工具总表/机制席位同一套哲学：不靠人看）。
     pub fn problems(&self, roster: &[String]) -> Vec<String> {
         let mut out = Vec::new();
         if self.nodes.is_empty() {

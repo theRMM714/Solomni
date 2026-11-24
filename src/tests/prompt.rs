@@ -82,7 +82,7 @@ pub(crate) fn prompt_book_loads_from_yaml() {
     );
     assert!(
         p.core.mechanisms_for("planner").trim().is_empty(),
-        "没配说明的角色拿到空串"
+        "没配说明的席位拿到空串"
     );
     assert!(p.core.discuss.opener.contains("{{protocol}}"));
 }

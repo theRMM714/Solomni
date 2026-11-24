@@ -19,7 +19,7 @@ impl Handle {
         match caller {
             Caller::User => Ok(()),
             Caller::Role { .. } => Err(
-                "模块工具动作由用户直接调用；会话里的模块工具走成员循环（那条路由角色面授权）"
+                "模块工具动作由用户直接调用；会话里的模块工具走成员循环（那条路由席位面授权）"
                     .to_string(),
             ),
         }

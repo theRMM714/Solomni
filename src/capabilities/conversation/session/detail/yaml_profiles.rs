@@ -1,7 +1,7 @@
 //! 目的：会话类型表的装配输入——`systools/profiles.yaml`。
 //! 管：读文件、反序列化成 `Profiles`、做装配期校验；缺目录 / 缺文件 / 非法如实报错。
 //! 不管：表的形状与规则（在 `domain/profile.rs`）。
-//! 联动：只有入口层的组合根构造它；`ids()` 交给提示词册子，`check_roles` 吃工具能力的角色表。
+//! 联动：只有入口层的组合根构造它；`ids()` 交给提示词册子，`check_roles` 吃工具能力的机制席位。
 
 use std::path::PathBuf;
 

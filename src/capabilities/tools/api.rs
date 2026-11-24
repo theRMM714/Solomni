@@ -12,7 +12,6 @@ pub use crate::capabilities::tools::domain::op::{
     usage_named,
 };
 pub use crate::capabilities::tools::domain::patch::{EditFault, Fault};
-pub use crate::capabilities::tools::domain::table::{SystemTools, action_audit};
 pub use crate::capabilities::tools::domain::schema::{
     ArgFault, ToolBook, ToolSchema, json_schema_lines,
 };
@@ -24,6 +23,7 @@ pub use crate::capabilities::tools::domain::systool::{
     DELETE, EDIT, GREP, LIST, Observations, PATCH, READ, REPORT, SHELL, ToolNotes, ToolOutcome,
     WRITE, arg_fault_text, is_builtin, is_exec, is_freeform, names, patch_decl, refuse, tool_notes,
 };
+pub use crate::capabilities::tools::domain::table::{SystemTools, action_audit};
 
 pub use crate::capabilities::workspace::api::GateFile;
 use crate::capabilities::workspace::api::{ReadFact, Workspace};

@@ -1,5 +1,5 @@
 //! 目的：会话建立、校验、历史与删除。
-//! 管：创建/校验、树形历史、删除级联与运行态拒绝、工作根回溯、身份取机制与角色。
+//! 管：创建/校验、树形历史、删除级联与运行态拒绝、工作根回溯、身份取机制与席位。
 //! 不管：回合生成与回档。
 //! 联动：`tests::builders`；落盘见 docs/session/session-model.md。
 
@@ -344,7 +344,7 @@ pub(crate) fn identity_takes_the_mechanism_of_its_seat() {
     assert!(!discussant.contains("单 agent 工作"), "各拿自己那一份");
     assert!(
         !planner_role.contains("== 这个系统怎么运转 =="),
-        "没配说明的角色不拿机制说明：{}",
+        "没配说明的席位不拿机制说明：{}",
         planner_role
     );
 }

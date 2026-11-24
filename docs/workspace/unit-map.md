@@ -22,7 +22,7 @@
 | `src/capabilities/workspace/service/ignore.rs` | 过滤名单族：`work_ignore` 的 list / add / remove、逐条越界校验、行数与字节上限、整份规则的可编译校验与原子写回（只动版本库目录里的 `.workignore`） |
 | `src/capabilities/workspace/service/facade.rs` | `Workspace` 的唯一 trait 实现：七个基础用例直接委托 `Workdirs`，其余方法逐条转发到同级子模块（Rust 不允许 trait impl 分块） |
 | `src/capabilities/workspace/ports.rs` | 出站端口：`Workdirs`（目录布局）与 `WorkStore`（流式资产原语 + 按 `.workignore` 剪枝的清单 `list_visible` + 版本库小文本读 `read_text` / 写 `write_text` + 跨根复制 + 内容寻址对象 + 提交记录 + 拉取基线 + 待恢复事务 + 提交号 + 跨进程锁 + 对象枚举 / 删除） |
-| `src/capabilities/workspace/service/work_tools.rs` | 成员侧工作工具执行者：`WorkHandler` 认领 `work_pull` / `work_commit` / `work_push` / `work_sync` / `work_status` / `work_ignore` / `work_versions` / `work_diff` / `work_resolve` / `work_reset` / `work_lost`，参数解析与路径权限在这里收口；`work_handlers` 按角色面发放的 `allowed` 现取执行者 |
+| `src/capabilities/workspace/service/work_tools.rs` | 成员侧工作工具执行者：`WorkHandler` 认领 `work_pull` / `work_commit` / `work_push` / `work_sync` / `work_status` / `work_ignore` / `work_versions` / `work_diff` / `work_resolve` / `work_reset` / `work_lost`，参数解析与路径权限在这里收口；`work_handlers` 按席位面发放的 `allowed` 现取执行者 |
 | `src/capabilities/workspace/domain/workspace.rs` | 工作区与沙箱的纯数据与寻址（含越界判定）；`Sandbox.filter_rules` 指向版本库目录里的 `.workignore`——检索面（grep）与内容面共用这一份规则文件 |
 | `src/capabilities/workspace/domain/asset.rs` | 通用资产纯逻辑：分块扫描（指纹 / 大小 / NUL 与 UTF-8 判定 / 受限预览）、`FileVersion`、扩展名媒体类型提示与单文件上限 |
 | `src/capabilities/workspace/domain/freshness.rs` | 读取判决纯逻辑：读过的行在新版本里是否原样还在（按内容找连续行窗口，不看行号与时间），结论分 `SameVersion` / `Shifted` / `Changed` 三态 |

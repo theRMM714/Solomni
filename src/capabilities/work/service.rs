@@ -67,7 +67,7 @@ pub struct Work {
     tools: Arc<dyn ToolExec + Send + Sync>,
     /// 提示词册能力：只按名字取段。
     prompt: Arc<dyn Prompt>,
-    /// 工具总表与角色表的能力面（授权两张表）：表本体在工具能力里，与册子互不依赖。
+    /// 工具总表与机制席位的能力面（授权两张表）：表本体在工具能力里，与册子互不依赖。
     systools: Arc<dyn Tools>,
     log: Arc<dyn Log + Send + Sync>,
     /// 目的：流程工厂（组合根注入）：建工作按会话类型表里的流程序列逐段造，本层不认识任何具体流程。
