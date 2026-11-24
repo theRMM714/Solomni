@@ -4,92 +4,79 @@
 #
 # 工作环境按**环境**分发：本机档按宿主平台选（env_hosts），虚拟机档按 guest 的 os 选（env_guests）。
 # 每条只写 host 或 guest 之一；全表里每个值都必须有条目（装载时校验，不静默漏发一份环境）。
-# 环境块里给出的路径就是模型该用的**路径拼法**——虚拟机档给的是 guest 内路径。
+# 环境块只给事实（平台、根、身份）；工作流细节归 mechanisms 与 work_* 工具说明，不混进这里。
 env_hosts: [linux, windows, macos]
 env_guests: [linux, macos, windows]
 envs:
   - host: linux
     text: |-
-      【工作环境】
-      本次工作的共享区（**主副本，只读**）：{{work_root}}
-      你私有的沙箱（**你的工作副本，可写**）：{{sandbox_root}}
+      system: linux
+      共享工作区（只读主副本）：{{work_root}}
+      你的沙箱（可写工作副本）：{{sandbox_root}}
       {{module_roots}}
+      你的agent名：{{agent}}
+      当前工作：{{work_name}}
       {{path_rules}}
-      **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
-      文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），在沙箱里改完，核心只把它**记进你的存档线**（自动快照，供回档 / 删除 / 恢复对齐，不进共享区）；要让核心和别人看到，用 work_commit 记进自己的工作线、再用 work_push 推送进共享区（推送时三方合并，冲突如实报出、不会覆盖别人）。
-      冲突不自动合并：先用 work_status / work_versions 看三方（记下主副本提交 id）；文本可人工合并后用 work_resolve take=local head=<id>（预览截断先用 read 读全文），图片 / 视频 / 其它二进制只能选边（take=upstream 取主副本、会先备份本地；take=local 保留本地）。被覆盖的本地版本可用 work_lost 找回。要回退自己的改动先用 work_diff 看工作线头与沙箱的差异，再用 work_reset（paths 把沙箱恢复成基线版本，to 把工作线移回自己的某条提交）。
-      用 work_status 看共享区当前提交、你的工作线头与待推送的净改动数、逐条状态与沙箱里未跟踪的文件；用 work_log 看主线提交与你的工作线提交。**你的文件工具**对模块目录（含 userdata/）只读；userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），由模块工具 / 服务进程维护，不是本次工作的成品区，不要把任务成果往里写。
-      当前工作：{{work_name}}；agent 名：{{agent}}
+      共享区只读：资料 work_pull 进沙箱，产物 work_commit + work_push 发布（细节见 work_* 工具说明）。
   - host: windows
     text: |-
-      【工作环境】（Windows 宿主）
-      本次工作的共享区（**主副本，只读**）：{{work_root}}
-      你私有的沙箱（**你的工作副本，可写**）：{{sandbox_root}}
+      system: Windows
+      共享工作区（只读主副本）：{{work_root}}
+      你的沙箱（可写工作副本）：{{sandbox_root}}
       {{module_roots}}
+      你的agent名：{{agent}}
+      当前工作：{{work_name}}
       {{path_rules}}
-      本机 shell 跑 PowerShell：整条脚本的退出码 = 脚本显式 `exit N`，否则是**最后一次原生命令**的 `$LASTEXITCODE`——后面再跑成功的内置命令不会清零它（`$?` 只是布尔，不是退出码）。要看单条命令的退出码写 `cmd /c exit 3; echo exit=$LASTEXITCODE`；要让「关键步骤失败就整体失败」，在关键命令后写 `if (-not $?) { exit 1 }` 或 `exit $LASTEXITCODE`（bash 的 `cmd || exit $?` 在这里不成立）。丢弃输出写 `| Out-Null` 或 `2>$null`，别写 `>/dev/null`——PowerShell 会把 `/dev/null` 当成路径。
-      **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
-      文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），在沙箱里改完，核心只把它**记进你的存档线**（自动快照，供回档 / 删除 / 恢复对齐，不进共享区）；要让核心和别人看到，用 work_commit 记进自己的工作线、再用 work_push 推送进共享区（推送时三方合并，冲突如实报出、不会覆盖别人）。
-      冲突不自动合并：先用 work_status / work_versions 看三方（记下主副本提交 id）；文本可人工合并后用 work_resolve take=local head=<id>（预览截断先用 read 读全文），图片 / 视频 / 其它二进制只能选边（take=upstream 取主副本、会先备份本地；take=local 保留本地）。被覆盖的本地版本可用 work_lost 找回。要回退自己的改动先用 work_diff 看工作线头与沙箱的差异，再用 work_reset（paths 把沙箱恢复成基线版本，to 把工作线移回自己的某条提交）。
-      用 work_status 看共享区当前提交、你的工作线头与待推送的净改动数、逐条状态与沙箱里未跟踪的文件；用 work_log 看主线提交与你的工作线提交。**你的文件工具**对模块目录（含 userdata/）只读；userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），由模块工具 / 服务进程维护，不是本次工作的成品区，不要把任务成果往里写。
-      当前工作：{{work_name}}；agent 名：{{agent}}
+      本机 shell：PowerShell（退出码写法见 shell 工具说明）。
+      共享区只读：资料 work_pull 进沙箱，产物 work_commit + work_push 发布（细节见 work_* 工具说明）。
   - host: macos
     text: |-
-      【工作环境】（macOS 宿主）
-      本次工作的共享区（**主副本，只读**）：{{work_root}}
-      你私有的沙箱（**你的工作副本，可写**）：{{sandbox_root}}
+      system: macOS
+      共享工作区（只读主副本）：{{work_root}}
+      你的沙箱（可写工作副本）：{{sandbox_root}}
       {{module_roots}}
+      你的agent名：{{agent}}
+      当前工作：{{work_name}}
       {{path_rules}}
-      **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
-      文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），在沙箱里改完，核心只把它**记进你的存档线**（自动快照，供回档 / 删除 / 恢复对齐，不进共享区）；要让核心和别人看到，用 work_commit 记进自己的工作线、再用 work_push 推送进共享区（推送时三方合并，冲突如实报出、不会覆盖别人）。
-      冲突不自动合并：先用 work_status / work_versions 看三方（记下主副本提交 id）；文本可人工合并后用 work_resolve take=local head=<id>（预览截断先用 read 读全文），图片 / 视频 / 其它二进制只能选边（take=upstream 取主副本、会先备份本地；take=local 保留本地）。被覆盖的本地版本可用 work_lost 找回。要回退自己的改动先用 work_diff 看工作线头与沙箱的差异，再用 work_reset（paths 把沙箱恢复成基线版本，to 把工作线移回自己的某条提交）。
-      用 work_status 看共享区当前提交、你的工作线头与待推送的净改动数、逐条状态与沙箱里未跟踪的文件；用 work_log 看主线提交与你的工作线提交。**你的文件工具**对模块目录（含 userdata/）只读；userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），由模块工具 / 服务进程维护，不是本次工作的成品区，不要把任务成果往里写。
-      当前工作：{{work_name}}；agent 名：{{agent}}
+      共享区只读：资料 work_pull 进沙箱，产物 work_commit + work_push 发布（细节见 work_* 工具说明）。
   - guest: linux
     text: |-
-      【工作环境】（Linux guest）
-      你运行在一台 **Linux guest** 里：下面列出的路径都是 **guest 内路径**（POSIX 写法，/…），宿主路径在这里不存在。
-      本次工作的共享区（**主副本，只读**）：{{work_root}}
-      你私有的沙箱（**你的工作副本，可写**）：{{sandbox_root}}
+      system: Linux guest（虚拟机内；下列路径都是 guest 内 POSIX 写法，宿主路径不存在）
+      路径桥：宿主 D:\a\b → guest /solomni-host/d/a/b
+      共享工作区（只读主副本）：{{work_root}}
+      你的沙箱（可写工作副本）：{{sandbox_root}}
       {{module_roots}}
-      宿主文件在 guest 里的位置由路径桥决定（宿主 D:\a\b → guest /solomni-host/d/a/b）。
+      你的agent名：{{agent}}
+      当前工作：{{work_name}}
       {{path_rules}}
-      **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
-      文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），在沙箱里改完，核心只把它**记进你的存档线**（自动快照，供回档 / 删除 / 恢复对齐，不进共享区）；要让核心和别人看到，用 work_commit 记进自己的工作线、再用 work_push 推送进共享区（推送时三方合并，冲突如实报出、不会覆盖别人）。
-      冲突不自动合并：先用 work_status / work_versions 看三方（记下主副本提交 id）；文本可人工合并后用 work_resolve take=local head=<id>（预览截断先用 read 读全文），图片 / 视频 / 其它二进制只能选边（take=upstream 取主副本、会先备份本地；take=local 保留本地）。被覆盖的本地版本可用 work_lost 找回。要回退自己的改动先用 work_diff 看工作线头与沙箱的差异，再用 work_reset（paths 把沙箱恢复成基线版本，to 把工作线移回自己的某条提交）。
-      用 work_status 看共享区当前提交、你的工作线头与待推送的净改动数、逐条状态与沙箱里未跟踪的文件；用 work_log 看主线提交与你的工作线提交。**你的文件工具**对模块目录（含 userdata/）只读；userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），由模块工具 / 服务进程维护，不是本次工作的成品区，不要把任务成果往里写。
-      当前工作：{{work_name}}；agent 名：{{agent}}
+      共享区只读：资料 work_pull 进沙箱，产物 work_commit + work_push 发布（细节见 work_* 工具说明）。
   - guest: macos
     text: |-
-      【工作环境】（macOS guest）
-      你运行在一台 **macOS guest** 里：下面列出的路径都是 **guest 内路径**（POSIX 写法，/…），宿主路径在这里不存在。
-      本次工作的共享区（**主副本，只读**）：{{work_root}}
-      你私有的沙箱（**你的工作副本，可写**）：{{sandbox_root}}
+      system: macOS guest（虚拟机内；下列路径都是 guest 内 POSIX 写法，宿主路径不存在）
+      路径桥：宿主文件按路径桥映射进 guest。
+      共享工作区（只读主副本）：{{work_root}}
+      你的沙箱（可写工作副本）：{{sandbox_root}}
       {{module_roots}}
-      宿主文件在 guest 里的位置由路径桥决定。
+      你的agent名：{{agent}}
+      当前工作：{{work_name}}
       {{path_rules}}
-      **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
-      文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），改完只记进你的**存档线**（自动快照，不进共享区）；要进共享区用 work_commit 记进工作线、再用 work_push 推送；冲突不自动合并：先用 work_status / work_versions 看三方（记下主副本提交 id）；文本可人工合并后用 work_resolve take=local head=<id>（预览截断先用 read 读全文），图片 / 视频 / 其它二进制只能选边（take=upstream 取主副本、会先备份本地；take=local 保留本地）；被覆盖的本地版本可用 work_lost 找回。要回退自己的改动先用 work_diff 看工作线头与沙箱的差异，再用 work_reset（paths 把沙箱恢复成基线版本，to 把工作线移回自己的某条提交）。
-      用 work_status 看共享区当前提交、你的工作线头与待推送的净改动数、逐条状态与沙箱里未跟踪的文件；用 work_log 看主线提交与你的工作线提交。**你的文件工具**对模块目录（含 userdata/）只读；userdata/ 是模块自己的跨任务私有状态，由模块工具 / 服务进程维护，不要把任务成果往里写。
-      当前工作：{{work_name}}；agent 名：{{agent}}
+      共享区只读：资料 work_pull 进沙箱，产物 work_commit + work_push 发布（细节见 work_* 工具说明）。
   - guest: windows
     text: |-
-      【工作环境】（Windows guest）
-      你运行在一台 **Windows guest** 里：下面列出的路径都是 **guest 内路径**（Windows 写法，如 C:\work\x），宿主路径在这里不存在。
-      本次工作的共享区（**主副本，只读**）：{{work_root}}
-      你私有的沙箱（**你的工作副本，可写**）：{{sandbox_root}}
+      system: Windows guest（虚拟机内；下列路径都是 guest 内 Windows 写法，宿主路径不存在）
+      路径桥：宿主 /home/u/a → guest C:\solomni-host\home\u\a
+      共享工作区（只读主副本）：{{work_root}}
+      你的沙箱（可写工作副本）：{{sandbox_root}}
       {{module_roots}}
-      宿主文件在 guest 里的位置由路径桥决定（宿主 /home/u/a → guest C:\solomni-host\home\u\a）。
+      你的agent名：{{agent}}
+      当前工作：{{work_name}}
       {{path_rules}}
-      **共享区是版本化工作区，你不能直接写它**：要用的内容先 work_pull 拉进沙箱（同一相对路径，文件或文件夹；
-      文本、图片、视频与其它二进制都按字节处理，内容流式读写、不整份进上下文；单文件有上限，超限会明确拒绝），改完只记进你的**存档线**（自动快照，不进共享区）；要进共享区用 work_commit 记进工作线、再用 work_push 推送；冲突不自动合并：先用 work_status / work_versions 看三方（记下主副本提交 id）；文本可人工合并后用 work_resolve take=local head=<id>（预览截断先用 read 读全文），图片 / 视频 / 其它二进制只能选边（take=upstream 取主副本、会先备份本地；take=local 保留本地）；被覆盖的本地版本可用 work_lost 找回。要回退自己的改动先用 work_diff 看工作线头与沙箱的差异，再用 work_reset（paths 把沙箱恢复成基线版本，to 把工作线移回自己的某条提交）。
-      用 work_status 看共享区当前提交、你的工作线头与待推送的净改动数、逐条状态与沙箱里未跟踪的文件；用 work_log 看主线提交与你的工作线提交。**你的文件工具**对模块目录（含 userdata/）只读；userdata/ 是模块自己的跨任务私有状态，由模块工具 / 服务进程维护，不要把任务成果往里写。
-      当前工作：{{work_name}}；agent 名：{{agent}}
+      共享区只读：资料 work_pull 进沙箱，产物 work_commit + work_push 发布（细节见 work_* 工具说明）。
 
 # —— patch 通道的写法：让"改文件"不必把大段文本塞进 JSON（换行/引号/CJK 都不用转义）——
 patch_guide: |-
   【改文件：用 patch，别把大段文本塞进 JSON】
-  信封写成 {"type":"tool","name":"patch"}，**信封之后原样跟补丁文本**（不用转义、不用引号，直接写中文与换行）：
+  信封写成 {"type":"tool","name":"patch"}，信封之后原样跟补丁文本（不转义、不加引号，中文与换行直接写）：
   *** Update File: {{sandbox_root}}/note.txt
   *** SEARCH
   （从文件里原样抄来的连续几行）
@@ -99,30 +86,26 @@ patch_guide: |-
   （新文件的整份内容，原样写）
   *** End File
   规矩：
-  - **每一块都必须用 *** End File 收尾**；它后面再写什么都会被忽略（可以放心写"我改完了"）。
-  - 一次可以写多块：多块按顺序应用；同一个文件也可以写多块（后一块看到前一块的结果）。
-  - SEARCH 必须与文件里的原文**整行一致**（含缩进）；默认要求唯一命中（多处命中会报错并列出行号）。
-  - 任意一块不成立，核心**一个文件都不写**，只把第几块、为什么如实报回给你——改对了再发一次。
-  - *** 是保留前缀：内容里若必须出现以 *** 开头的行，请改写它（否则会被当成标记）。
-  - 新建文件用 *** Add File:；改已有文件用 *** Update File:（整份覆盖受管文件仍要求你当前上下文里能完整看到它这一版）。
-  - 内容**照你写的原样落盘**：想让文件末尾多一个空行，就在 *** End File 之前留一个空行（核心不替你加）。
-  - **删除文件用 `delete` 工具**（默认只删文件；删目录加 `recursive=true`）；patch 不认 `*** Delete File`。
+  - 每块以 *** End File 收尾；其后的文字被忽略。
+  - 一次可多块，按顺序应用；同一文件可多块（后块看到前块的结果）。
+  - SEARCH 与原文整行一致（含缩进），默认要求唯一命中（多处命中报错并列出行号）。
+  - 任一块不成立则一个文件都不写，只报回第几块、为什么；改对再发。
+  - *** 是保留前缀：内容里以 *** 开头的行必须改写。
+  - 新建用 *** Add File:；改已有用 *** Update File:（整份覆盖受管文件仍要求当前上下文能完整看到这一版）。
+  - 内容照写的原样落盘：要末尾空行就在 *** End File 前留一个空行（核心不替你加）。
+  - 删文件用 delete 工具（删目录加 recursive=true）；patch 不认 *** Delete File。
 
-# —— 内置工具的参数契约：模型侧的参数说明与调用校验都由这一份声明驱动（改参数只改这里）——
+# —— 调用约定：信封与原生两套互斥，由通道形态决定注入哪套 ——
 tool_calling_envelope: |-
-  工具调用约定：需要用工具时，只输出一个 JSON 信封（不要包裹其它文字）：
+  工具调用约定：需要用工具时，只输出一个 JSON 信封（不包裹其它文字）：
   {"type":"tool","module":"模块id","name":"工具名","args":{...参数对象...}}
-  外部工具要带上它所属的模块 id（见上面清单每行开头）；核心自己实现的系统工具
-  （read / write / edit / patch / delete / list / grep / work_pull / work_commit / work_push / work_status / work_ignore / work_versions / work_diff / work_resolve / work_reset / work_lost 等）不用写 module。
-  要一次发**多个**调用（互不依赖的那些），就把它们写进同一个信封的 calls 数组——核心按工具声明的并发性一起跑，
-  结果按你写的顺序发回：
+  模块工具带所属模块 id（见清单每行开头）；系统工具不写 module。
+  一次发多个互不依赖的调用：写进同一信封的 calls 数组，核心按声明的并发性一起跑，结果按你写的顺序发回：
   {"type":"tool","calls":[{"name":"read","args":{...参数对象...}},{"module":"模块id","name":"工具名","args":{...参数对象...}}]}
-  数组每一项的 name/module/args 与单数形态完全一样；**两种形态不能混用**（一封里要么写 name，要么写 calls）；
-  一次回复也只发**一个**信封（多段信封不会被拼起来）。patch 是唯一的例外：它只能单独发（补丁正文原样跟在它自己的信封之后）。
+  calls 每项的 name/module/args 与单数形态一样；两种形态不混用（一封里要么 name 要么 calls）；一次回复只发一个信封（多段不拼）。
+  patch 例外：只能单独发，补丁正文原样跟在它自己的信封之后。
 tool_calling_native: |-
-  工具调用约定：这条通道用**原生工具调用**——需要工具时直接发起工具调用（一次可以发起多个），
-  参数按每个工具的参数说明填在它自己的参数槽里。
-  **不要在正文里写 JSON 信封**：正文里的信封不会被当成调用执行，只会记成一条失败的工具行。
-  一次可以发起多个**互不依赖**的调用：核心按工具声明的并发性调度（只读类并发跑、写入类独占并按你给出的顺序生效），
-  结果一律按你发起的顺序发回。有前后依赖的步骤别挤在同一次回复里——先发前一步，拿到结果再发下一步。
-  收到结果后继续，直到能给出最终答复。
+  工具调用约定：本通道用原生工具调用——需要工具时直接发起调用（一次可多个），参数按各工具的参数说明填进参数槽。
+  不要在正文里写 JSON 信封：正文信封不会被执行，只记成一条失败的工具行。
+  互不依赖的调用可一次发起多个：核心按声明的并发性调度（只读并发跑、写入独占并按你给出的顺序生效），结果按发起顺序发回。
+  有前后依赖的步骤分步发：先发前一步，拿到结果再发下一步。

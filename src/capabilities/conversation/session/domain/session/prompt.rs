@@ -266,13 +266,16 @@ pub fn env_block(
     );
     let in_env = |path: &std::path::Path| -> String { env_path(view.as_deref(), &bridge, path) };
     let module_roots = if p.module_dirs.is_empty() {
-        "（你没有成员模块目录）".to_string()
+        "成员模块目录：无".to_string()
     } else {
-        p.module_dirs
-            .iter()
-            .map(|(id, root)| format!("- {}：{}", id, in_env(root)))
-            .collect::<Vec<_>>()
-            .join("\n")
+        format!(
+            "成员模块目录（只读）：\n{}",
+            p.module_dirs
+                .iter()
+                .map(|(id, root)| format!("- {}：{}", id, in_env(root)))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
     };
     let sandbox_root = in_env(&p.private);
     // 路径写法只有一处（册子里的 path_rules）：它自己也要用真实根渲染出例子，再插进环境块。
