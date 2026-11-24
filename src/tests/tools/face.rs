@@ -687,14 +687,21 @@ pub(crate) fn work_versioning_tools_are_granted_to_the_working_roles_only() {
     for id in ids {
         assert!(book.contains_key(id), "{} 必须在工具总表里", id);
     }
+    let face = |id: &str| -> Vec<String> {
+        let seat = crate::capabilities::conversation::session::api::seat(id).expect("席位在册");
+        crate::capabilities::conversation::session::api::face(seat)
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect()
+    };
     for role in ["executor", "solo"] {
-        let (face, _) = tools.role_face(role);
+        let face = face(role);
         for id in ids {
             assert!(face.contains(&id.to_string()), "{} 该有 {}", role, id);
         }
     }
     for role in ["discussant", "core_proxy", "planner", "orchestrator"] {
-        let (face, _) = tools.role_face(role);
+        let face = face(role);
         assert!(
             !face.iter().any(|t| t.starts_with("work_")),
             "{} 不该发共享区版本化工具：{:?}",

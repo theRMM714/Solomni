@@ -406,7 +406,7 @@ fn main() {
     if sandbox_mode.degraded() {
         eprintln!("[沙箱] 本进程已降级：缺失的强制项按如实降级执行；重启后重新评估");
     }
-    // **会话类型表**（systools/profiles.yaml）：一个会话类型就是一串流程与它用到的角色。
+    // **会话类型表**（systools/profiles.yaml）：一个会话类型就是一串流程与它的静止机制。
     // 它是会话类型的唯一声明处：提示词册子的会话类型、机制册的校验都以它为口径；装配期就校验。
     let profiles =
         match capabilities::conversation::session::detail::yaml_profiles::YamlProfiles::new(
@@ -431,7 +431,7 @@ fn main() {
             std::process::exit(1);
         }
     };
-    // 工具总表与角色表必须自洽（悬空引用 / 缺能力都是装配错误）：装配期就挡下，不拖到运行期。
+    // 工具总表与机制席位必须自洽（悬空引用 / 缺能力都是装配错误）：装配期就挡下，不拖到运行期。
     // 三张表归**工具能力**（加载器在它自己的 detail 里；装载后由它的 service 持有）。
     let systools_source =
         capabilities::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"));
@@ -458,7 +458,7 @@ fn main() {
         Ok(svc) if capabilities::tools::api::Tools::problems(&svc).is_empty() => Arc::new(svc),
         Ok(svc) => {
             eprintln!(
-                "[装配失败] 系统工具与角色表不自洽：{}",
+                "[装配失败] 系统工具总表不自洽：{}",
                 capabilities::tools::api::Tools::problems(&svc).join("；")
             );
             std::process::exit(1);
@@ -471,9 +471,16 @@ fn main() {
     let toolexec: Arc<dyn capabilities::tools::api::ToolExec + Send + Sync> = tools_svc.clone();
     let systools: Arc<dyn capabilities::tools::api::Tools + Send + Sync> = tools_svc;
 
-    // 会话类型引用的角色必须在角色表里（悬空引用是装配错误）：与机制 id 的校验同一条时机。
-    if let Err(e) = profiles.check_roles(&capabilities::tools::api::Tools::role_seats(&*systools)) {
-        eprintln!("[装配失败] {}", e);
+    // 机制席位与工具总表必须双向自洽（席位面里的工具都在总表、callers 与席位面一一对应）：
+    // 悬空引用是装配错误，与上面的工具总表自检同一条时机。
+    let mechanism_problems = capabilities::conversation::session::api::mechanism_problems(
+        &capabilities::tools::api::Tools::book(&*systools),
+    );
+    if !mechanism_problems.is_empty() {
+        eprintln!(
+            "[装配失败] 系统工具与机制面不自洽：{}",
+            mechanism_problems.join("；")
+        );
         std::process::exit(1);
     }
 

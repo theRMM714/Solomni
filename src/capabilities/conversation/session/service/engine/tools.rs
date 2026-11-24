@@ -193,7 +193,7 @@ pub(crate) fn commit_writes(
     }
 }
 
-/// 目的：这次调用在**本回合的工具面**里吗：内置按角色表发放的 id 清单，外部工具按"这一回合给不给模块工具"
+/// 目的：这次调用在**本回合的工具面**里吗：内置按席位面合成的 id 清单，外部工具按"这一回合给不给模块工具"
 ///   与模块归属（判据只有这一处——执行侧与"如实说一句越权"都读它）。
 pub(crate) fn face_has(ctx: &MemberTools, module: Option<&str>, name: &str) -> bool {
     // 系统工具册里的名字（含 `compact` 这类只由系统发起的工具）也按工具面校验：
@@ -420,7 +420,7 @@ pub(crate) fn run_batch(
             ctx.log.info(
                 "action",
                 &crate::capabilities::tools::api::action_audit(
-                    &ctx.face.role,
+                    &ctx.face.seat,
                     &name,
                     outcome.ok,
                     &outcome.output,
@@ -466,7 +466,7 @@ pub(crate) fn tool_decls(face: &ToolFace) -> ToolDecls {
         );
         decls.list.push(patch);
     }
-    // 模块工具按**成员归属**发放（不是角色属性）：拿不到模块工具的身份（讨论席）不声明它们。
+    // 模块工具按**成员归属**发放（不是席位的通用属性）：拿不到模块工具的身份（讨论席）不声明它们。
     for (id, mt) in face.modules.iter().filter(|_| face.with_modules) {
         for tool in mt.commands.keys() {
             let mut wire_name = format!("{}_{}", id, tool);

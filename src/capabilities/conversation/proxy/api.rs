@@ -1,6 +1,6 @@
 //! 目的：proxy 的唯一入口——值类型、宿主契约（`ProxyHost`）与成员侧执行面（`ProxyHandler` / `ProxyTools`）。
 //! 管：domain 的值类型与纯规则经这里转出；`ProxyHost` 的方法契约。
-//! 不管：真实会话动作（宿主动手）；工具声明与角色面（`systools/`）。
+//! 不管：真实会话动作（宿主动手）；工具声明与席位面（`systools/` 与 `session::domain::mechanism`）。
 //! 联动：runtime 只经这里取用；宿主实现在 runtime 的 `ProxyBridge`。
 
 pub use crate::capabilities::conversation::proxy::domain::proxy::*;

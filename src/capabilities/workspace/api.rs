@@ -23,7 +23,7 @@ pub use crate::capabilities::workspace::domain::scope::{
 #[allow(unused_imports)]
 pub use crate::capabilities::workspace::domain::work_tools::{
     COMMIT, DIFF, IGNORE, IgnoreReport, LOST, PULL, PUSH, RESET, RESOLVE, STATUS, SYNC, VERSIONS,
-    is_work_tool, render_commit, render_diff, render_ignore, render_lost, render_pull, render_push,
+    WORK_TOOLS, is_work_tool, render_commit, render_diff, render_ignore, render_lost, render_pull, render_push,
     render_reset, render_resolve, render_restore_lost, render_status, render_sync, render_versions,
     str_arg, str_list,
 };

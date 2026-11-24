@@ -145,7 +145,7 @@ impl Turn {
                         &a.name,
                         &sb,
                         &modules,
-                        &meta.spec.role,
+                        &meta.spec.seat,
                     )
                     .with_chara(a.chara.clone())
                     .with_guest(crate::capabilities::vm::api::guest_os_of(
@@ -161,8 +161,8 @@ impl Turn {
                     &meta.exec,
                     &modules,
                 );
-                // 角色取落盘声明里的那一席（成员 / 节点会话是 executor）——与实时同一个口径。
-                let role = meta.spec.role.clone();
+                // 席位取落盘声明里的那一席（成员 / 节点会话是 executor）——与实时同一个口径。
+                let seat = meta.spec.seat.clone();
                 let host_plan = if meta.exec.tier == crate::kernel::api::types::Tier::Host {
                     crate::capabilities::vm::api::host_plan_for(
                         &self.packages.library(),
@@ -181,8 +181,8 @@ impl Turn {
                     sandbox: &sb,
                     unavailable,
                     mode,
-                    // 身份与角色**同一把尺子**（重建与实时不能各写一份，见 Core::role_of）。
-                    role: &role,
+                    // 身份与席位**同一把尺子**（重建与实时不能各写一份）。
+                    seat: &seat,
                     tier: meta.exec.tier,
                     guest_lease: guest_lease_for(self.history.as_ref(), meta)?,
                     shell: self.shell_slot(&sb.session),
@@ -551,7 +551,7 @@ impl Turn {
             sandbox: &sb,
             unavailable: BTreeMap::new(),
             mode: tool_mode,
-            role: "core_proxy",
+            seat: "core_proxy",
             tier: crate::kernel::api::types::Tier::Host,
             guest_lease: String::new(),
             shell: self.shell_slot(&sb.session),

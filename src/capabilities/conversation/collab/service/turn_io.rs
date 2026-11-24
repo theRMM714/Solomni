@@ -62,46 +62,40 @@ impl CollabSession {
         self.disc.as_ref()?.member_id(i).map(|s| s.to_string())
     }
 
-    /// 目的：第 i 个成员这一席的角色（成员会话按它渲染身份块、发工具面）。
-    pub fn member_role_at(&self, i: usize) -> Option<String> {
+    /// 目的：第 i 个成员这一席的席位 id（成员会话按它渲染身份块、发工具面）。
+    pub fn member_seat_at(&self, i: usize) -> Option<String> {
         self.disc
             .as_ref()?
             .members
             .get(i)
-            .map(|m| m.params.role.clone())
+            .map(|m| m.params.seat.clone())
     }
 
-    /// 目的：核实用的小工具环境（只读）：按角色现装一份，交给核心操作的 `verify` 形参。
+    /// 目的：核实用的小工具环境（只读）：按席位现装一份，交给核心操作的 `verify` 形参。
     ///   为什么要它：核心操作（出方案 / 节点验收…）也常需要"先看看现场再下结论"，
     ///   而核心不是 member、手里没有工具环境——没有它，模型一想核实就被判"没调用 X"而整步中断。
     /// 约束：本能力不自己拼工具面——装配在 `session` 的 `verify_tools`（见 docs/session/session-model.md）。
     pub(crate) fn verify_env(
         &self,
-        role: &str,
+        seat: &str,
     ) -> Option<Box<dyn crate::capabilities::conversation::session::api::CoreVerify>> {
         let sb = self.sandboxes.list.first()?;
         crate::capabilities::conversation::session::api::verify_tools(
             &crate::capabilities::conversation::session::api::VerifySpec {
                 sandbox: sb,
-                role,
+                seat,
                 mode: self.core_mode,
                 net: self.settings.app.sandbox.policy.network,
                 book: self.systools.book(),
                 tools_this_turn: self
                     .prompts
                     .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn),
-                systools: Arc::clone(&self.systools),
                 llm: Arc::clone(&self.llm),
                 log: Arc::clone(&self.log),
                 tools: Arc::clone(&self.tools),
                 vm: Arc::clone(&self.vm),
             },
         )
-    }
-
-    /// 目的：讨论回合的**工具面**（动词 + 只读核实）：核心驱动时交给 turn_with。
-    pub fn systools(&self) -> Arc<dyn crate::capabilities::tools::api::Tools> {
-        Arc::clone(&self.systools)
     }
 
     /// 目的：本回合的调用选项（流式 + 预算，取全局设置）。

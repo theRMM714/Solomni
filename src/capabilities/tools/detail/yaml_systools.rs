@@ -1,9 +1,9 @@
-//! 目的：系统工具、角色与布局保留名的装配输入——`systools/tools.yaml`（工具是什么）+ `systools/roles.yaml`（身份有什么）+ `systools/names.yaml`（布局保留名）。
-//! 管：从目录读三份 yaml 并反序列化成 `ToolBook` / `RoleTable` / 保留名；缺目录 / 缺文件如实报错，不静默造默认。
+//! 目的：系统工具与布局保留名的装配输入——`systools/tools.yaml`（工具是什么）+ `systools/names.yaml`（布局保留名）。
+//! 管：从目录读两份 yaml 并反序列化成 `ToolBook` / 保留名；缺目录 / 缺文件如实报错，不静默造默认。
 //! 不管：表本体与校验规则（在 `domain`）；装配（在入口层组合根）。
 //! 联动：实现 `ports::SystoolsSource`；它属于工具能力（放提示词能力会让 `prompt → tools` 成环，见 docs/architecture/layers.md）。
 
-use crate::capabilities::tools::api::{RoleTable, SystemTools, ToolBook};
+use crate::capabilities::tools::api::{SystemTools, ToolBook};
 use crate::capabilities::tools::ports::SystoolsSource;
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -12,12 +12,6 @@ use std::path::PathBuf;
 #[derive(Deserialize)]
 struct ToolFile {
     tools: ToolBook,
-}
-
-/// 角色表的文件形状。
-#[derive(Deserialize)]
-struct RoleFile {
-    roles: RoleTable,
 }
 
 /// 名字表的文件形状：两块保留名——agent 实例名（布局目录）与模块 id（动作 id 前缀）。
@@ -41,7 +35,7 @@ impl YamlSystools {
 }
 
 impl SystoolsSource for YamlSystools {
-    /// 系统工具、角色与保留名：读 `tools.yaml`（工具是什么）、`roles.yaml`（身份有什么）与 `names.yaml`（布局保留名）。
+    /// 系统工具与保留名：读 `tools.yaml`（工具是什么）与 `names.yaml`（布局保留名）。
     fn load(&self) -> Result<SystemTools, String> {
         let path = self.dir.join("tools.yaml");
         let text = std::fs::read_to_string(&path)
@@ -51,11 +45,6 @@ impl SystoolsSource for YamlSystools {
         if tools.tools.is_empty() {
             return Err("工具总表里一个工具都没有（systools/tools.yaml）".to_string());
         }
-        let path = self.dir.join("roles.yaml");
-        let text = std::fs::read_to_string(&path)
-            .map_err(|e| format!("角色表读不了（systools/roles.yaml）：{}", e))?;
-        let roles: RoleFile = yaml_serde::from_str(&text)
-            .map_err(|e| format!("角色表非法（systools/roles.yaml）：{}", e))?;
         let path = self.dir.join("names.yaml");
         let text = std::fs::read_to_string(&path)
             .map_err(|e| format!("名字表读不了（systools/names.yaml）：{}", e))?;
@@ -73,7 +62,6 @@ impl SystoolsSource for YamlSystools {
         }
         Ok(SystemTools {
             tools: tools.tools,
-            roles: roles.roles,
             reserved_agents: names.agents,
             reserved_modules: names.modules,
         })

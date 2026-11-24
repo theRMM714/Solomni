@@ -296,7 +296,14 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
 #[test]
 pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     let systools = test_systools();
-    // 角色表把核心操作发给对应的核心身份（越权校验与工具面的判据都是它）。
+    // 机制声明把核心操作发给对应的核心席位（越权校验与工具面的判据都是它）。
+    let face = |id: &str| -> Vec<String> {
+        let seat = crate::capabilities::conversation::session::api::seat(id).expect("席位在册");
+        crate::capabilities::conversation::session::api::face(seat)
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect()
+    };
     for (role, tool) in [
         ("planner", "plan"),
         ("planner", "slate"),
@@ -304,26 +311,24 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
         ("orchestrator", "checklist"),
     ] {
         assert!(
-            systools.role_face(role).0.iter().any(|t| t == tool),
+            face(role).iter().any(|t| t == tool),
             "{} 该拿到 {} 工具",
             role,
             tool
         );
     }
     // 讨论席与执行席不拿核心操作（越权会被如实拒绝）。
-    let face = |role: &str| systools.role_face(role).0;
     assert!(!face("discussant").iter().any(|t| t == "plan"));
     assert!(!face("executor").iter().any(|t| t == "checklist"));
-    // 谁能用"自己模块的工具"也由角色表说了算：只有干活的那一席发（讨论席列出来等于请它去撞墙）。
-    assert!(
-        systools.allows_module_tools("executor"),
-        "执行席要能用自己模块的工具"
-    );
-    assert!(
-        !systools.allows_module_tools("discussant"),
-        "讨论席不发模块工具"
-    );
-    assert!(!systools.allows_module_tools("planner"));
+    // 谁能用"自己模块的工具"也由机制声明说了算：只有干活的那一席发（讨论席列出来等于请它去撞墙）。
+    let modules = |id: &str| {
+        crate::capabilities::conversation::session::api::seat(id)
+            .expect("席位在册")
+            .module_tools
+    };
+    assert!(modules("executor"), "执行席要能用自己模块的工具");
+    assert!(!modules("discussant"), "讨论席不发模块工具");
+    assert!(!modules("planner"));
     // 载荷是**数组**参数（嵌套结构），不是标量。
     let schema = systools.tools.get("plan").expect("plan 该在工具总表里");
     assert_eq!(
@@ -345,7 +350,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     let mut verify = MemberTools {
         face: crate::capabilities::conversation::session::api::ToolFace {
             mode: crate::capabilities::llm::api::ToolMode::Envelope,
-            role: "orchestrator".to_string(),
+            seat: "orchestrator".to_string(),
             modules: BTreeMap::new(),
             tier: crate::kernel::api::types::Tier::Host,
             guest_lease: String::new(),

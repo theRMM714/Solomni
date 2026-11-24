@@ -1,14 +1,14 @@
-# 会话类型表：一个会话类型就是一串要跑的流程；每个流程要哪些身份、要几个人，由流程自己报
-# （src/capabilities/conversation/session/domain/flow.rs 的 FLOWS）。
+# 会话类型表：一个会话类型就是一串要跑的流程；每个流程要哪些席位、要几个人，由机制自己报
+# （src/capabilities/conversation/session/domain/mechanism.rs 的 MECHANISMS）。
 # id = 命令与落盘用（只写 ASCII，CLI 里好敲）；name = 界面渲染用（侧栏、向导直接显示它）。
-# 装配期会校验：id 唯一且无空白、流程已注册且不重复、流程要的角色在册且席位放对、没有流程的类型要有静止身份。
-# flows 为空 = 没有流程，直接轮循环（单机与代理就是这样），这时 roles 是它的静止身份。
+# 装配期会校验：id 唯一且无空白、流程已注册且不重复、没有流程的类型要有静止机制。
+# flows 为空 = 没有流程，直接轮循环（单机与代理就是这样），这时 mechanism 是它的静止机制。
 # auto: true = 整块交给核心代理（没有名单、没有本次需求，核心在会话里自己决定做什么）；这类类型不能再有 flows。
 profiles:
   - id: single
     name: 单机
     hint: 一个 agent 直接干活：选 1 个模块 = 直连式，选多个 = 组合式。
-    roles: [solo]
+    mechanism: standard
     flows: []
 
   - id: collab
@@ -19,6 +19,6 @@ profiles:
   - id: proxy
     name: 代理
     hint: 决定权整块交给核心：它自己挑人、建子工作并代你回答关卡。
-    roles: [core_proxy]
+    mechanism: proxy
     auto: true
     flows: []

@@ -18,11 +18,11 @@ pub(crate) fn run_member_turn<H: TurnHost>(
     // 会话不存在就按需建（名单确认时已建，这里兜底）。
     {
         let (parent, agent) = (sid.to_string(), req.agent.clone());
-        let role = req.role.clone();
+        let seat = req.seat.clone();
         host.core_env(move |turn, registry, probe| {
             // 建过就是幂等复用（同名会话已存在 = 直接返回它的名字）。
-            let role = role.as_str();
-            turn.spawn_agent_session(&parent, &agent, role, registry, probe)
+            let seat = seat.as_str();
+            turn.spawn_agent_session(&parent, &agent, seat, registry, probe)
                 .map(|_| ())
         })?;
     }
@@ -43,11 +43,23 @@ pub(crate) fn run_member_turn<H: TurnHost>(
         thinking: thinking.clone(),
     };
     let cancel = std::sync::Arc::clone(&req.cancel);
-    let systools = req.systools.clone();
     let turn = req.turn.clone();
     let identity = req.identity.clone();
     let round = req.round;
     let turn_id = req.turn_id;
+    // 这一回合的工具面**由机制按席位合成**（讨论席：机制动词 + 沙箱面）。
+    let seat_in = req.seat.clone();
+    let face = {
+        let seat = crate::capabilities::conversation::session::api::seat(&seat_in)
+            .ok_or_else(|| format!("席位没登记：{}", seat_in))?;
+        (
+            crate::capabilities::conversation::session::api::face(seat)
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>(),
+            seat.module_tools,
+        )
+    };
     // 子会话自己的**权威行**（逐轮）与**运行态收尾**都走它自己的事件台，
     // 并且**边产边落盘**：这个会话不经过主会话那条 sink，落盘手柄随线程带过去。
     let persister = host.core({
@@ -86,11 +98,10 @@ pub(crate) fn run_member_turn<H: TurnHost>(
                     );
                 }
             };
-            // 这一回合的工具面**由角色表发放**（讨论席：动词 + 只读核实工具）。
-            let face = systools.role_face("discussant");
             // 这一回合：身份块（现渲染）+ 本回合工具面 + 该会话的**对话** + 开场/轮转词 + 表态。
             let ran = s.discussion_turn(
-                &identity, face, turn, turn_id, round, &io, &cancel, &mut emit, &mut sink,
+                &identity, &seat_in, face, turn, turn_id, round, &io, &cancel, &mut emit,
+                &mut sink,
             );
             (s, ran)
         })

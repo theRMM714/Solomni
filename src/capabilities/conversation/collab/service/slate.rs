@@ -117,9 +117,16 @@ impl CollabSession {
         if self.done || self.disc.is_some() {
             return;
         }
-        // 代拟的名单到这一步才定下来：人数不够就不开聊（席位是流程报的，见 session 的 cast_of）。
-        let need = crate::capabilities::conversation::session::api::cast_of("discuss")
-            .map(|c| c.members.iter().map(|(_, min)| *min).sum::<usize>())
+        // 代拟的名单到这一步才定下来：人数不够就不开聊（席位是机制报的，见 session 的 mechanism_of）。
+        let need = crate::capabilities::conversation::session::api::mechanism_of("discuss")
+            .map(|m| {
+                m.seats
+                    .iter()
+                    .filter_map(|id| crate::capabilities::conversation::session::api::seat(id))
+                    .filter(|s| !s.core)
+                    .map(|s| s.min)
+                    .sum::<usize>()
+            })
             .unwrap_or(0);
         if self.roster.len() < need {
             self.notice(

@@ -1,5 +1,5 @@
 //! 目的：工具能力的入站能力面——其它能力与呈现层只准用这里（不许碰 `domain` / `ports`）。
-//! 管：`Tools`（按角色发放工具面、拿总表、保留名）与 `ToolExec`（执行外部工具 / shell / 内置工具、释放围栏授权）两个 trait，并重导出领域共享类型。
+//! 管：`Tools`（拿总表与保留名）与 `ToolExec`（执行外部工具 / shell / 内置工具、释放围栏授权）两个 trait，并重导出领域共享类型；席位面由会话能力按总表合成。
 //! 不管：实现与机制（在 `service/` / `detail/`）；端口定义（在 `ports.rs`）。
 //! 联动：实现见 `service.rs`；`runtime` 等消费方只持 `Arc<dyn Tools>` / `Arc<dyn ToolExec>`。
 
@@ -12,7 +12,7 @@ pub use crate::capabilities::tools::domain::op::{
     usage_named,
 };
 pub use crate::capabilities::tools::domain::patch::{EditFault, Fault};
-pub use crate::capabilities::tools::domain::roles::{RoleTable, Seat, SystemTools, action_audit};
+pub use crate::capabilities::tools::domain::table::{SystemTools, action_audit};
 pub use crate::capabilities::tools::domain::schema::{
     ArgFault, ToolBook, ToolSchema, json_schema_lines,
 };
@@ -21,8 +21,8 @@ pub use crate::capabilities::tools::domain::shell::{
     truncated,
 };
 pub use crate::capabilities::tools::domain::systool::{
-    Observations, PATCH, REPORT, ToolNotes, ToolOutcome, arg_fault_text, is_builtin, is_exec,
-    is_freeform, names, patch_decl, refuse, tool_notes,
+    DELETE, EDIT, GREP, LIST, Observations, PATCH, READ, REPORT, SHELL, ToolNotes, ToolOutcome,
+    WRITE, arg_fault_text, is_builtin, is_exec, is_freeform, names, patch_decl, refuse, tool_notes,
 };
 
 pub use crate::capabilities::workspace::api::GateFile;
@@ -442,23 +442,10 @@ impl WriteGate for SessionWriteGate<'_> {
     }
 }
 
-/// 目的：工具总表、角色表与名字表的**能力面**：别的能力只问"这一席能用哪些工具"，**看不见三张表的字段**。
+/// 目的：系统工具总表与名字表的**能力面**：别的能力只拿声明书，**看不见表里的保留名与自检实现**。
 /// 约束：表本体（`SystemTools`）是纯数据、没有端口；组合根装载一次，`runtime` 只持 `Arc<dyn Tools>`
-///   并与协作会话共享（见 `service.rs`）。
+///   并与协作会话共享（见 `service.rs`）。**本能力不认识席位**：面由会话能力的机制声明按总表合成。
 pub trait Tools: Send + Sync {
-    /// 按角色组装工具面：角色引用的 id 逐个解析成工具声明（顺序即角色表里的顺序）；
-    /// 未知名**如实报错**（悬空引用是装配错误）。
-    fn tool_face(&self, role: &str) -> Result<Vec<(&str, &ToolSchema)>, String>;
-
-    /// 一个角色这一回合的**工具面**（id 清单 + 是否给它自己模块的工具）。
-    fn role_face(&self, role: &str) -> (Vec<String>, bool);
-
-    /// 这个身份能不能用它自己模块的工具（论据：角色表的 `module_tools`）。
-    fn allows_module_tools(&self, role: &str) -> bool;
-
-    /// 角色表的全部角色与坐席（装配期校验会话类型表的引用，不暴露表本体）。
-    fn role_seats(&self) -> Vec<(String, Seat)>;
-
     /// 内置工具总表（工具**是什么**的声明书）：调用方要持有它时拿走一份。
     fn book(&self) -> ToolBook;
 
@@ -469,7 +456,7 @@ pub trait Tools: Send + Sync {
     /// 模块保留名（同表 `modules` 块）：模块 id 不得占用。产品命令名与别名由 Op 目录在装配期并入。
     fn reserved_modules(&self) -> Vec<String>;
 
-    /// 悬空引用与缺能力（空 = 一切正常）：装配期自检与测试门禁读它。
+    /// 总表自身的自洽断言（空 = 一切正常）：装配期自检与测试门禁读它。
     fn problems(&self) -> Vec<String>;
 }
 

@@ -10,10 +10,10 @@
 ## 一、形态
 - **执行席按 agent 一会话**（含同 agent 串行）、**讨论回合开工具循环**（能只读核实、拿不到模块工具）、**讨论由核心驱动**（泵只决定"该问谁"，成员回合在它自己的会话里跑，核实行与回合标记都落进那个会话；主会话只留"谁说了什么"）。
 - **会话类型是落盘的声明，不是分支**：建会话时把类型表里那一条解析成 `SessionSpec`（`kind` / `name` / `role` / `flows` / `auto`）写进 `meta.yaml`，之后装配只看这份声明——有流程就按流程装配，没有就一个 agent 直接轮循环（`spec.driven()`）；代码里没有「形态枚举」，也不按 id 分支（「整块交给核心」看 `auto`，不看名字）。类型 id 同时是命令与落盘用的词（ASCII），`name` 只给界面显示，`hint` 是选类型时的一句说明。
-- **会话类型是数据**：一个会话类型就是一串流程 id，声明在 `systools/profiles.yaml`（自带 single / collab / proxy 三条；`flows` 为空 = 没有流程、直接轮循环）。每条写清 `id`（命令与落盘用）、`name`（界面显示）、`hint`（一句说明）、`flows`、`auto`（这个类型整块交给核心：没有名单也没有需求），以及**没有流程时**坐的身份角色 `roles`。**席位不在这里报**：一个流程由哪些身份出演（`core` = 核心通道，不进成员表；`members` = 成员席各几员）是流程自己的声明，在 `session/domain/flow.rs` 的 `FLOWS`（新增流程在那里加一条）。装配期校验：id 唯一且不含空白、流程已注册且不重复出现、没有流程的类型要有静止身份、每个流程的席位角色都在角色表且没坐错席（`core` 只收 `seat: core`，`members` 只收 `seat: member`）；各流程成员席人数取最大折成 `min_agents`：建会话时人数不够就直接拒绝，代拟名单由流程在建组时判（`session::domain::profile::Profiles`，加载在 `session/detail/yaml_profiles.rs`）。
-- **临时拼装**：流程也可以在请求里当场拼一条类型——`create_session` 省略 `kind`、给 `flows`（内联流程 id 数组；CLI 的 `collab` 命令用 `flows` 参数，写流程 id、逗号分隔）。它与预设走同一份白名单：只收已注册（`FLOWS`）的流程与角色表里的角色，席位规则照样判（`Profiles::check_inline`）；`inline_spec` 折成 `SessionSpec`，落盘 `kind` 记作 `custom`（显示名「临时组合」），装配与回档只看折出来的那份声明（`src/capabilities/conversation/session/domain/profile.rs`）。
+- **会话类型是数据**：一个会话类型就是一串流程 id，声明在 `systools/profiles.yaml`（自带 single / collab / proxy 三条；`flows` 为空 = 没有流程、直接轮循环）。每条写清 `id`（命令与落盘用）、`name`（界面显示）、`hint`（一句说明）、`flows`、`auto`（这个类型整块交给核心：没有名单也没有需求），以及**没有流程时**坐的静止机制 `mechanism`（如 `standard` / `proxy`，解析成它唯一那一席）。**席位不在这里报**：一个机制由哪些席位出演（`core: true` = 核心通道，不进成员表；其余是成员席，各报 `min` 员）是机制自己的声明，在 `session/domain/mechanism.rs` 的 `MECHANISMS`（新增机制在那里加一条，`flow: true` 的才能当流程）。装配期校验：id 唯一且不含空白、流程已注册且不重复出现、没有流程的类型要有静止机制且它不能是流程机制、有流程的类型不该再声明机制、每个流程至少各有一个核心席与成员席；各流程成员席人数取最大折成 `min_agents`：建会话时人数不够就直接拒绝，代拟名单由流程在建组时判（`session::domain::profile::Profiles`，加载在 `session/detail/yaml_profiles.rs`）。
+- **临时拼装**：流程也可以在请求里当场拼一条类型——`create_session` 省略 `kind`、给 `flows`（内联流程 id 数组；CLI 的 `collab` 命令用 `flows` 参数，写流程 id、逗号分隔）。它与预设走同一份白名单：只收已注册（`mechanism.rs` 的 `MECHANISMS`）的流程（`Profiles::check_inline`）；`inline_spec` 折成 `SessionSpec`，落盘 `kind` 记作 `custom`（显示名「临时组合」），装配与回档只看折出来的那份声明（`src/capabilities/conversation/session/domain/profile.rs`）。
 - **agent 会话在第一个回合按需建**。
-- 主会话投影行带 `turn`（回档按回合同步截断）；角色表机制化（工具面与越权校验同出一份表）；压缩：`compact` 工具 + `compacted` 转录行 + 发送视图，按模型窗口百分比自动触发。
+- 主会话投影行带 `turn`（回档按回合同步截断）；工具面由机制席位合成（工具面、身份与越权校验同出一份声明）；压缩：`compact` 工具 + `compacted` 转录行 + 发送视图，按模型窗口百分比自动触发。
 
 - 一次工作（work）有两类会话：
 
@@ -306,7 +306,7 @@ session/<工作名>/
 
 - **模块工具只在执行回合给**：讨论回合拿不到"干活"的手段——不是"被拒绝"，是**没有**。
 - **这一份工具面是随回合注入的**：核心查"这一回合的身份能用的工具"。信封通道把那一份（说明 + 参数）作为一条系统消息放进该回合的上下文；原生通道由**声明槽**下发名字 / 说明 / JSON Schema，不再重复文字清单（只保留 patch 这类声明表达不了的写法）。**整本工具总表不进提示词**——列了必然被拒的工具等于请模型去撞墙（细则见 [tools-and-roles.md](../tools/tools-and-roles.md) 二）。
-- 角色表（`systools/roles.yaml`）声明的工具面**由机制执行**：发放（提示词块与原生声明槽）与越权校验同出一份表，代码里不另写名单（见 [tools-and-roles.md](../tools/tools-and-roles.md) 三）。
+- 机制席位（`session/domain/mechanism.rs` 的 `SEATS`）声明的工具面**由同一个合成函数执行**：发放（提示词块与原生声明槽）与越权校验同出一份清单，代码里不另写名单；每回合驱动把席位与面一起装进 `TurnRun`，跑完一并还原（见 [tools-and-roles.md](../tools/tools-and-roles.md) 三）。
 - **派发三类来源同一条路径**：这一回合的工具面里，系统工具走 `ToolExec::run_builtin`，模块工具走 `dispatch_external`，**核心自有工具**（代理工具等）问注入的 `ToolHandler` 谁认领它——三类同一条路径（`src/kernel/ports.rs` 的 `ToolHandler`，见 [architecture/README.md](../architecture/README.md) §二）。加一类工具只注册一个 handler，不改循环。
 
 ### 四之一、会话参数与对话分开
@@ -447,7 +447,7 @@ session/<工作名>/
 ## 十一、联动
 
 - 任务链、审查关卡、验收与边界：见 [task-chain.md](../collab/task-chain.md)
-- 系统工具与角色（谁能用哪些工具）：见 [tools-and-roles.md](../tools/tools-and-roles.md)
+- 系统工具与机制席位（谁能用哪些工具）：见 [tools-and-roles.md](../tools/tools-and-roles.md)
 - 协作流程的产品视角：见 [PRODUCT.md](../../PRODUCT.md)
 
 ## 检查
@@ -457,7 +457,7 @@ session/<工作名>/
 
 ## 路由
 - 任务链与审查关卡：[../collab/task-chain.md](../collab/task-chain.md)
-- 工具与角色：[../tools/tools-and-roles.md](../tools/tools-and-roles.md)
+- 工具与机制席位：[../tools/tools-and-roles.md](../tools/tools-and-roles.md)
 - 呈现层契约：[../presentation/contracts.md](../presentation/contracts.md)
 - 权限语义：[../permission/README.md](../permission/README.md)
 - 架构约束：[architecture/README.md](../architecture/README.md)

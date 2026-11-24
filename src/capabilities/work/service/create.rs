@@ -144,7 +144,7 @@ impl Work {
             Some(flows) => {
                 self.flows
                     .book()
-                    .check_inline(flows, &self.systools.role_seats())?;
+                    .check_inline(flows)?;
                 crate::capabilities::conversation::session::api::inline_spec(flows.clone())
             }
             None => self.flows.book().spec_of(&spec.kind).ok_or_else(|| {
@@ -185,7 +185,7 @@ impl Work {
                 ProxySeed {
                     name: &spec.name,
                     kind: &spec.kind,
-                    role: &decl.role,
+                    seat: &decl.seat,
                     granted_at: crate::kernel::api::procs::unix_seconds(),
                     tier: spec.tier,
                     guest: spec.guest.as_deref(),
@@ -727,7 +727,7 @@ impl Work {
         let ProxySeed {
             name,
             kind,
-            role,
+            seat,
             granted_at,
             tier,
             guest,
@@ -736,6 +736,10 @@ impl Work {
             freshness,
         } = seed;
         validate_work_name(name)?;
+        // 落盘声明要的是**席位**（装配按席位发工具面）：调用方给的就是解析后的席位 id。
+        if crate::capabilities::conversation::session::api::seat(seat).is_none() {
+            return Err(format!("代理会话的席位没登记：{}", seat));
+        }
         if turn.holds(name) || self.history.load(name).is_ok() {
             return Err(format!("工作名已存在：{}", name));
         }
@@ -767,7 +771,7 @@ impl Work {
             spec: crate::capabilities::conversation::session::api::SessionSpec::automatic(
                 kind,
                 &self.flows.book().label_of(kind),
-                role,
+                seat,
             ),
             delegate: false,
             modules: Vec::new(),

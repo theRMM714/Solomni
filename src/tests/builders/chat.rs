@@ -272,7 +272,7 @@ pub(crate) fn native_member(
         tools: Some(MemberTools {
             face: crate::capabilities::conversation::session::api::ToolFace {
                 mode: crate::capabilities::llm::api::ToolMode::Native,
-                role: "solo".to_string(),
+                seat: "solo".to_string(),
                 modules,
                 tier: crate::kernel::api::types::Tier::Host,
                 guest_lease: String::new(),

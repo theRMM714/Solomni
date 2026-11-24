@@ -1,5 +1,5 @@
 //! 目的：提示词册的内存形态与 {{key}} 占位渲染（纯逻辑）。
-//! 管：render 占位替换；merge_book 合并册子；Segment / CoreTexts 与各角色提示词结构；缺键 / 缺变量报错。
+//! 管：render 占位替换；merge_book 合并册子；Segment / CoreTexts 与各席位提示词结构；缺键 / 缺变量报错。
 //! 不管：册子从哪加载（在 prompt/ports.rs 与 detail/yaml_prompts.rs）；`@` 引用改写（在 domain/refs.rs）。
 //! 联动：被 api.rs 重导出 Segment / Vars；service.rs 实现 Prompt 并调用 render / merge_book；提示词文本由 detail/yaml_prompts.rs 提供。
 
@@ -42,7 +42,7 @@ pub fn render(template: &str, vars: Vars) -> Result<String, String> {
 }
 
 /// 目的：装配输入的**内存形态**：**只有提示词文本**（`prompts/`）。
-///    工具总表与角色表是**另一个能力的东西**（`systools/`，见 `capabilities/tools/`）：
+///    工具总表与机制席位是**另一个能力的东西**（`systools/` 与 `session/domain/mechanism.rs`）：
 ///    挂进这里就等于让提示词能力反过来依赖工具能力，两边成环。
 ///    **持有者只有本能力**（`service.rs` 一处，R4）。运行时回执与清单行归各产生它们的代码，
 ///    不再从这里共享；这里只有提示词段。
@@ -158,8 +158,8 @@ pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CoreTexts {
-    /// 目的：**机制说明册**：每条按适用角色分发，见 `mechanisms_for`。
-    ///    AI 不知道机制就只会写散文——所以哪个角色拿哪一段，是**数据**，不是代码分支。
+    /// 目的：**机制说明册**：每条按适用席位分发，见 `mechanisms_for`。
+    ///    AI 不知道机制就只会写散文——所以哪个席位拿哪一段，是**数据**，不是代码分支。
     pub mechanisms: Vec<Mechanism>,
     pub chat_protocol: String,
     pub discuss: DiscussPrompts,
@@ -233,7 +233,7 @@ pub struct SummarizePrompts {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProxyPrompts {
-    /// 目的：核心代理的身份提示词（能用哪些工具由角色表按回合注入，不在这里列清单）。
+    /// 目的：核心代理的身份提示词（能用哪些工具由机制席位按回合注入，不在这里列清单）。
     pub system: String,
 }
 
@@ -278,11 +278,11 @@ pub struct EnvBlock {
     pub text: String,
 }
 
-/// 目的：一条机制说明：**适用角色对上**就注入（见 `CoreTexts::mechanisms_for`）。
+/// 目的：一条机制说明：**适用席位对上**就注入（见 `CoreTexts::mechanisms_for`）。
 #[derive(Debug, Clone, Deserialize)]
 pub struct Mechanism {
-    /// 目的：适用角色（必须在角色表里存在——悬空引用由装配期 `SystemTools::problems()` 挡下）。
-    pub roles: Vec<String>,
+    /// 目的：适用席位（必须是已登记的席位——悬空引用由装配期 `mechanism::problems()` 挡下）。
+    pub seats: Vec<String>,
     pub text: String,
 }
 
@@ -295,12 +295,12 @@ pub struct AgentPrompts {
 }
 
 impl CoreTexts {
-    /// 目的：按**角色**取这个回合的机制说明：只拿适用角色匹配的条目，
+    /// 目的：按**席位**取这个回合的机制说明：只拿适用席位匹配的条目，
     ///    按册子里的声明顺序拼接（一条都没配 = 空串）。对应关系全部写在 YAML 里，这里只做匹配。
-    pub fn mechanisms_for(&self, role: &str) -> String {
+    pub fn mechanisms_for(&self, seat: &str) -> String {
         self.mechanisms
             .iter()
-            .filter(|m| m.roles.iter().any(|r| r == role))
+            .filter(|m| m.seats.iter().any(|s| s == seat))
             .map(|m| m.text.trim().to_string())
             .collect::<Vec<_>>()
             .join("\n\n")

@@ -1,13 +1,13 @@
 # 动作表：一条动作**是什么**（唯一真相：说明、参数契约、能否并发、谁能调它）。
 # 改动作的参数或说明只改这里；模型侧说明、调用校验与授权都读这一份声明。
-# callers = 谁能调它：user（人经呈现层）/ 角色 id；它与 roles.yaml 的工具面是同一关系的两面，
-# 由 SystemTools::problems 双向锁死——任何一边漏写/多写都是装配错误。
+# callers = 谁能调它：user（人经呈现层）/ 席位 id；它与机制席位的工具面是同一关系的两面，
+# 由 session::domain::mechanism::problems 双向锁死——任何一边漏写/多写都是装配错误。
 # 与模块工具的区别：模块工具在各自 module.yaml（外部命令，动作 id = module.<模块id>.<工具名>）。
 
 tools:
   read:
     capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
-    callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 按行窗口读取文本文件（UTF-8）：默认从头读，可用 offset/limit 直接读任意一段；总行数与版本按整份文件统计，超过 1MB 也能读后半段。
     parallel: true                    # 只读、无副作用：同一回复里的多个读取**真的并发跑**
     params:
@@ -28,7 +28,7 @@ tools:
         desc: 本次最多返回的行数；省略即尽量多读
   write:
     capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 整份写入文本文件（UTF-8）：文件不存在则新建；已存在则整份覆盖。受管文件（主线或你的工作线里的路径）**要求你当前上下文里仍能完整看到它这一版**（读过、或你刚刚整份写过）；读后它又被改过会被拒绝（FS_STALE_VERSION），先重读。新建或未受管文件不要求先读；只改一处请用 edit。
     params:
       path:
@@ -41,7 +41,7 @@ tools:
         desc: 要写入的**完整**内容（会整份覆盖，不是追加、不是局部修改）
   edit:
     capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 对已存在的文本文件做一处精确替换（按字面匹配，不动别处）。受管文件要求你当前上下文里有它这一版；replace_all 要求看过全文。落盘前会在锁内按读到的版本再核一次，并对当前内容重新定位锚点：版本变了返回 FS_STALE_VERSION，锚点不存在/不唯一返回 FS_ANCHOR_NOT_FOUND / FS_ANCHOR_AMBIGUOUS。
     params:
       path:
@@ -62,11 +62,11 @@ tools:
         desc: 是否替换全部命中；省略 = 要求唯一命中（多处命中会报错并列出位置）
   patch:
     capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 用一段**自由格式**的补丁文本改文件（信封之后原样跟补丁；大段内容不要塞进 JSON）。多文件改动走一个写盘事务：先全部校验/暂存，再发布；任一文件失败就整体回滚，不会留下"前面已写"。语法见 patch_guide；删除文件用 delete，不要写 *** Delete File。
   delete:
     capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       删除**你自己沙箱里**的文件；默认只删文件，目录必须显式 recursive=true。
       共享区不在这里删（用 work_commit 的 deletes 记进工作线，work_push 后才从共享区去掉）；模块目录（含 userdata）由模块自己的工具 / 服务进程维护。
@@ -81,7 +81,7 @@ tools:
         desc: true = 路径是目录时连内容一起删；省略 = 只删文件，遇到目录会拒绝
   list:
     capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
-    callers: [user, discussant, executor, solo, core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 列一个目录（名字 / 是否目录 / 字节数，按名字排序）。**确认资料齐不齐、脚本在不在就用它**；read 只读文件，遇到目录会引导你用 list。
     parallel: true                    # 只读、无副作用
     params:
@@ -91,7 +91,7 @@ tools:
         desc: 要列出的目录
   grep:
     capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
-    callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 在文件或目录里按正则（或字面）找行，返回「路径:行号:正文」；目录递归，按 .gitignore / .workignore 与隐藏文件、二进制剪枝。
     parallel: true                    # 只读、无副作用
     params:
@@ -132,7 +132,7 @@ tools:
   # —— 执行类系统工具：一次性 shell ——
   shell:
     capability: exec
-    callers: [executor, solo, core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       在本环境跑一条一次性命令（构建 / 测试 / 跑脚本）：cwd 固定是你的私有沙箱，无交互 stdin / TTY；
       输出超限保留开头与结尾（按完整行取整）；回执末行是 cwd 与本次耗时、上一行是状态行（退出码 / 超时 / 用户停止），
@@ -173,7 +173,7 @@ tools:
   # —— 核心操作：核心 AI 的产出（驱动核心走下一步）必须走工具调用，不在正文里手写 JSON ——
   plan:
     capability: none
-    callers: [planner]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [planner]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 交出方案与任务链：总结讨论，把它拆成一张有向无环图。
     params:
       plan:
@@ -191,7 +191,7 @@ tools:
 
   node_verdict:
     capability: none
-    callers: [orchestrator]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [orchestrator]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       交出这一阶段的验收结论：逐节点核对产出够不够它的**当前目标**。
       后果（核心据此动作）：ok=false 的节点会被**退回待办**——用户点「继续」后**只重派这些**（同阶段其余节点保持"已通过"，不整阶段重来）；整阶段全部 ok 才解锁下一阶段。
@@ -207,7 +207,7 @@ tools:
 
   checklist:
     capability: none
-    callers: [orchestrator]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [orchestrator]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       交出总验收清单：按方案逐条核对各节点的回报。
       后果（核心据此动作）：status=fail 的条目**必须**填 rework = 要返工的**节点 id**（从提示词里那张"节点 id — 负责人"表里选）——
@@ -221,7 +221,7 @@ tools:
 
   verdict:
     capability: none
-    callers: [planner]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [planner]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 判定用户对裁决的回应是否**明确到可以开工 / 放行**。
     params:
       clear:
@@ -237,7 +237,7 @@ tools:
 
   slate:
     capability: none
-    callers: [planner]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [planner]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 交出这次工作的 agent 名单（推荐 / 代拟同一条协议）。
     params:
       picks:
@@ -247,7 +247,7 @@ tools:
 
   submit_report:
     capability: none              # 不碰文件：承载"这个节点做完了什么"
-    callers: [executor]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [executor]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 回报这个节点的产出：做完了什么、动了什么、还留什么问题。**收尾时用它**——它就是这一轮的最终答复。
     params:
       summary:
@@ -266,7 +266,7 @@ tools:
 
   compact:
     capability: none              # 不碰文件：改的是"发给模型什么"，不是"留下什么"
-    callers: [user]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [user]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 压缩上下文：把较早的内容写成一份 summary（此后不再发给模型，但用户仍可查看；保留段与之后的新内容不参与）。**只在压缩回合由系统发起时使用**。
     params:
       summary:
@@ -279,7 +279,7 @@ tools:
   # 真实会话宿主已落地：外部动作经 proxy 的 ProxyHost 端口，生产实现是 runtime 的 ProxyBridge（src/capabilities/runtime/service/bridge.rs）
   catalog_agents:
     capability: none              # 不碰文件：只读登记处与模块清单
-    callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 读取当前有效的 agent、模块与模型的公开登记信息（只读；agent 含人设 chara）。不返回密钥、真实私有路径或无关内容。
     parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
     params:
@@ -290,7 +290,7 @@ tools:
         desc: 要读的范围：agents（已存 agent）/ modules（模块公地）/ models（可用模型）/ all（全部）
   create_session:
     capability: none              # 不碰文件：建的是会话，不是路径
-    callers: [user, core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [user, core_proxy]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       建一场工作（会话类型 + 名单 + 本次需求）：类型来自会话类型表（systools/profiles.yaml），
       没有流程的类型（如 single）是一个 agent 直接干活，有流程的类型（如 collab）按声明的流程跑；
@@ -308,7 +308,7 @@ tools:
         type: array
         desc: |-
           临时拼装用的流程 id 列表（与 kind 二选一），按执行顺序写，如 ["discuss","execute"]。
-          流程 id 必须已注册（discuss / execute）；席位与人数由流程自己报，不用在这里写角色。
+          流程 id 必须已注册（discuss / execute）；席位与人数由机制自己报，不用在这里写席位名单。
           给了 flows 时不需要 kind（落盘类型记作 custom）
       agents:
         type: array
@@ -349,7 +349,7 @@ tools:
         desc: 幂等标识（核心代理必填）：同一个 request_id 重放不会重复创建
   send_session_message:
     capability: none              # 不碰文件：转达的是消息
-    callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       代替用户向子会话转达消息（后续补充 / 返工 / 代答门）。核心转达的每一条都留一条
       "由核心代理转达"的来源记录（不冒充用户原话）；多目标逐个回报成功与失败。
@@ -380,7 +380,7 @@ tools:
           用 observe_session 的 pending 看选项 id）；不写 = 不代答——核心不替用户选（那一问按它自己声明的收场走）。
   observe_session:
     capability: none              # 不碰文件：只读会话事实
-    callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       只读观察一个子会话的元信息（状态 / 待决问题 / 产物索引 / 消息条数），不隐式启动下一轮。
       **不回消息正文**：正文一律用 read_session_messages 主动倒查（子会话不把整份转录推给你）。
@@ -401,7 +401,7 @@ tools:
         desc: 上次观察拿到的 cursor（= 那条会话的消息条数）；给了就多回一个 new_messages（自那次以来新增几条）。观察回执本身始终是**当前事实的幂等快照**，不会因为给了它而变增量
   read_session_messages:
     capability: none              # 不碰文件：只读会话消息
-    callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       倒查一个子会话的消息：0 = 最新一条，1 = 倒数第二条，依次向更早翻。只读，不推进会话。
       需要看正文时用它，不要指望观察回执把整份转录带过来。
@@ -425,7 +425,7 @@ tools:
         desc: 本次取几条（1 到 50）；按新→旧排列
   control_session:
     capability: none              # 不碰文件：改的是会话生命周期
-    callers: [user, core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [user, core_proxy]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 控制一个代理子会话：interrupt（中断：只取消在跑的生成，运行态不变，之后照常派发与唤醒）/ stop（停止会话：整棵子树落成已停止，拦住派发与唤醒，并中断在跑的生成）/ continue（继续：解冻并按形态唤醒接着走）/ archive（归档：整棵子树从主列表收起，不再被派发或唤醒；不是终态）/ restore（恢复归档：把归档的整棵子树翻回 active，不唤醒）。
     params:
       session_id:
@@ -472,7 +472,7 @@ tools:
   work_pull:
     capability: none              # 由 workspace 能力执行（经核心自有工具的派发路径），不经 SysIo
     publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       把本次工作共享区（主副本）的指定路径拉进**你自己的沙箱**（同一相对路径），并记下拉取基线。
       路径以共享区为根、用 / 分隔；可以是文件，也可以是文件夹（整棵拉取）。
@@ -489,7 +489,7 @@ tools:
   work_commit:
     capability: none              # 由 workspace 能力执行；只写自己的工作线，共享区一个字都不动
     publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       同 git commit：把沙箱里点名的文件记成**你自己工作线**上的一条提交，共享区与主线都不变。
       write / edit / patch 落地后核心已自动记进你的存档线（回档用），工作线只记你显式提交的路径。
@@ -511,7 +511,7 @@ tools:
   work_push:
     capability: none              # 由 workspace 能力执行；共享区只由它（和 work_sync / 用户投喂）推进
     publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       同 git push：把你工作线上已提交的改动推送进共享区主线，落一条 squash 提交（不是你的每一条本地提交）。
       逐路径三方合并（两条线的**分叉点** / 你的工作线 / 主线当前）：有一边没动就取另一边；两边都动且结果不同 → **整次推送被拒**并逐条点名。
@@ -530,7 +530,7 @@ tools:
   work_status:
     capability: none              # 只读：不碰文件，读版本库与拉取基线
     publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
     desc: |
       读取共享区（主线）当前提交、你的工作线头与**待推送的净改动项数**（另报领先的空提交条数，以及现在推会不会冲突），以及你的沙箱逐条状态：
@@ -545,7 +545,7 @@ tools:
   work_ignore:
     capability: none              # 由 workspace 能力执行；只改版本库目录里的 .workignore，不碰 .gitignore
     publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       读写本次工作的**过滤名单** \`.workignore\`（放在版本库目录里，不进共享区，也不会被提交）：
       grep 与「哪些文件算工作区内容」（首次导入、work_status 的未跟踪清单、work_commit 的文件夹展开）共用这一份。
@@ -565,7 +565,7 @@ tools:
   work_sync:
     capability: none              # 由 workspace 能力执行；把工作区磁盘现状采纳成外部提交
     publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       把工作区磁盘上点名路径、还没被记录的变化采纳成一条 author=external 的主线提交，推进共享区 head；不改任何沙箱。
       用于用户在产品之外改了工作区（或 work_pull 回执提示“工作区有外部修改 / 独有文件”）之后：先把用户改的事实记进主线，再按它拉取或推送。
@@ -580,7 +580,7 @@ tools:
   work_versions:
     capability: none              # 只读：读基线对象、主副本对象与沙箱文件
     publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
     desc: |
       看一条路径的三方版本：基线（你上次拉取/提交的那一版）、主副本当前版、沙箱本地版。
@@ -596,7 +596,7 @@ tools:
   work_diff:
     capability: none              # 只读：读工作线对象与沙箱文件，不写任何东西
     publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
     desc: |
       同 git diff：逐行比较两边内容，带 3 行上下文，默认比较**工作线头**与**沙箱当前内容**。
@@ -618,7 +618,7 @@ tools:
   work_resolve:
     capability: none              # 改基线（take=upstream 还会改沙箱文件）；共享主副本不动
     publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       解决基线冲突或在两个版本之间显式选边。take=upstream：用主副本覆盖沙箱（主副本已删则删本地）；
       **覆盖/删除前会先把本地版本备份到版本库 lost/，回执给备份路径**；备份失败则整次拒绝。
@@ -642,7 +642,7 @@ tools:
   work_reset:
     capability: none              # 改工作线引用与私有沙箱；共享主副本不动
     publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       同 git restore / git reset：在**你自己**的工作线上回退，共享区不受影响。
       paths 形态：把这些沙箱路径恢复成基线版本（工作线头优先，没提交过的取拉取基线）；覆盖前备份进 lost/@reset-paths/，
@@ -664,7 +664,7 @@ tools:
   work_lost:
     capability: none              # 列备份只读；restore 只写自己的沙箱，不碰共享主副本
     publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       列出 / 恢复覆盖或删除前备份的**本地版本**（版本库 lost/ 下，按 agent 隔离）；来源是 work_resolve take=upstream、work_reset、回档 / 删除 / 留档。
       省略 path = 列出本 agent 的全部备份：**原路径**、备份位置（`@<来源>/<原路径>`）、来源、备份 hash/大小、当前沙箱 hash。
@@ -682,10 +682,10 @@ tools:
         type: string
         desc: restore 必填：当前沙箱文件的 hash；文件不存在传空串（列表回执会给当前 hash）
 
-  # —— 协作动词：讨论阶段的表态（声明式工具：声明在总表，由角色面按回合发放）——
+  # —— 协作动词：讨论阶段的表态（声明式工具：声明在总表，由 discussant 席位的 tools 发放）——
   say:
     capability: none
-    callers: [discussant]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [discussant]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 发表意见、提方案（讨论阶段的正常发言）。
     params:
       text:
@@ -694,7 +694,7 @@ tools:
         desc: 要说的话
   agree:
     capability: none
-    callers: [discussant]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [discussant]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 同意当前方案：认为方案没有缺口、你可以开工时用它。发过之后不再被追问，直到在场者全部同意。
     params:
       text:
@@ -703,7 +703,7 @@ tools:
         desc: 附一句同意理由（可短）
   leave:
     capability: none
-    callers: [discussant]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [discussant]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 退出讨论：你的模块与这件事无关时用它（离开的人不计入"在场者全部同意"）。
     params:
       text:
@@ -712,7 +712,7 @@ tools:
         desc: 为什么不再参与
   ask:
     capability: none
-    callers: [discussant]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
+    callers: [discussant]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 需要用户决定时用它（缺参数、需求有歧义、要在几条路线里选）：讨论暂停，等用户回答后继续。
     params:
       text:
@@ -839,7 +839,7 @@ tools:
       expect_head: { type: integer, required: true, min: 0, desc: 你看到提交历史时的 head 提交号；空共享区传 0（与当前不符会被拒绝） }
 
   # —— 登记处动作：产品级资源（供应商 / 密钥 / 模型 / agent / 设置）——
-  # callers **只给 user**：这些是产品级资源，默认不开放给任何角色（密钥与全局配置只由人操作）。
+  # callers **只给 user**：这些是产品级资源，默认不开放给任何席位（密钥与全局配置只由人操作）。
   upsert_provider:
     capability: none
     callers: [user]

@@ -35,7 +35,12 @@ pub const SYNC: &str = "work_sync";
 /// 目的：读写本工作的过滤名单 `.workignore`（`work_ignore`）。
 pub const IGNORE: &str = "work_ignore";
 
-/// 目的：判定这个名字是不是共享区版本化的工具面（角色表 executor / solo 引用它们）。
+/// 目的：共享区版本化工具面的完整名单——发布席（能改主副本的席位）按它整组发放。
+pub const WORK_TOOLS: &[&str] = &[
+    PULL, COMMIT, PUSH, STATUS, VERSIONS, DIFF, RESET, RESOLVE, LOST, SYNC, IGNORE,
+];
+
+/// 目的：判定这个名字是不是共享区版本化的工具面（发布席按 `WORK_TOOLS` 整组发放）。
 pub fn is_work_tool(name: &str) -> bool {
     matches!(
         name,

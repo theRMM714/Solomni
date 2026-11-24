@@ -137,7 +137,7 @@ pub struct CollabSession {
     pub(crate) core_mode: crate::capabilities::llm::api::ToolMode,
     /// 目的：提示词册能力面：**不是册子本体**（持有者只有提示词能力一处），这里只按名字取段。
     pub(crate) prompts: Arc<dyn Prompt>,
-    /// 目的：工具总表与角色表的能力面（**表本体在工具能力里**，与册子互不依赖）。
+    /// 目的：工具总表的能力面（**表本体在工具能力里**，与册子互不依赖）。
     pub(crate) systools: Arc<dyn crate::capabilities::tools::api::Tools>,
     /// 目的：llm 用例面（**不持它的端口**，R12）：按通道造句柄、修信封都走它。
     pub(crate) llm: Arc<dyn Llm + Send + Sync>,

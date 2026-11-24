@@ -1,5 +1,5 @@
 //! 目的：核心代理（core_proxy）工具的纯逻辑——入参解析、授权校验、载荷规整与回执拼装。
-//! 管：工具 id 与角色面判定、任务级授权校验（`Grant`）、各工具的参数语义校验与规整载荷，
+//! 管：工具 id 与席位面判定、任务级授权校验（`Grant`）、各工具的参数语义校验与规整载荷，
 //!   以及只读清单事实与回执的拼装（`Catalog` / `Snapshot` / `MessagesPage` / `ControlState`）。
 //! 不管：会话读写与外部动作（一律经 `api.rs` 的 `ProxyHost`，见 service/proxy.rs）；不碰端口、不认识会话。
 //! 联动：宿主实现（runtime 的 `ProxyBridge`）把事实填进这些结构，systools/tools.yaml 声明入参形状。
@@ -16,7 +16,7 @@ pub const CONTROL: &str = "control_session";
 /// 目的：消息查询——按“最新→更早”倒查子会话的消息（不把整份转录推给代理）。
 pub const MESSAGES: &str = "read_session_messages";
 
-/// 目的：这六个 id 就是“代理工具面”（角色表 core_proxy 引用它们）。
+/// 目的：这六个 id 就是“代理工具面”（`core_proxy` 席位的 `tools` 引用它们）。
 pub fn is_proxy_tool(name: &str) -> bool {
     name == CATALOG
         || name == CREATE
@@ -26,7 +26,7 @@ pub fn is_proxy_tool(name: &str) -> bool {
         || name == MESSAGES
 }
 
-/// 目的：任务级授权（真实用户授予，机制注入）：本轮只做**全权**——`tools` 用角色表发放的整套
+/// 目的：任务级授权（真实用户授予，机制注入）：本轮只做**全权**——`tools` 用席位面合成的整套
 ///   代理工具面构造，`models`/`sessions` 留空 = 不限制，无有效期。
 ///   核心不得自行授予或扩大；`tools` 仍是硬条件（不在里面 = 越范围）。
 ///   细粒度范围、期限与**撤销**属独立的“会话权限状态”能力，本轮不做

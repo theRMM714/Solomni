@@ -1,6 +1,6 @@
-//! 目的：会话装配的纯派生——角色工具面的过滤、已就绪服务操作的归组、模块工具行与服务参数行。
+//! 目的：会话装配的纯派生——席位工具面的过滤、已就绪服务操作的归组、模块工具行与服务参数行。
 //! 管：`face_tools` / `service_ops_of` / `serviced_tools` 三个纯函数（无 IO、无端口）。
-//! 不管：端口读取与最终对象拼装（在 `session::service::assemble`）；工具总表与角色表本身（在 `tools`）。
+//! 不管：端口读取与最终对象拼装（在 `session::service::assemble`）；工具总表与机制席位本身（在 `tools` 与 `session::domain::mechanism`）。
 //! 联动：`session::service::assemble` 装配一席工具面时调用；数据来自 `tools` / `residents` / `session` 的 api。
 
 use std::collections::BTreeMap;
@@ -9,12 +9,12 @@ use crate::capabilities::conversation::session::api::{ModuleTools, ServiceOp};
 use crate::capabilities::residents::api::{ServiceState, ServiceView};
 use crate::capabilities::tools::api::ToolBook;
 
-/// 目的：角色面发放的工具 id 再去掉总表里没有的（发放了却查不到，等于发了个空 id）。
-/// 参数：role_face = 角色表发放的 id 清单；book = 工具总表。
+/// 目的：席位面合成出的工具 id 再去掉总表里没有的（发放了却查不到，等于发了个空 id）。
+/// 参数：seat_face = 席位面合成的 id 清单；book = 工具总表。
 /// 返回：过滤后的 id 清单（发放顺序不变）。
-/// 约束：角色面**就是**授权面——档位只管网络开关，不再逐工具裁剪。
-pub fn face_tools(role_face: Vec<String>, book: &ToolBook) -> Vec<String> {
-    role_face
+/// 约束：席位面**就是**授权面——档位只管网络开关，不再逐工具裁剪。
+pub fn face_tools(seat_face: Vec<String>, book: &ToolBook) -> Vec<String> {
+    seat_face
         .into_iter()
         .filter(|id| book.get(id).is_some())
         .collect()
