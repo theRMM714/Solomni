@@ -44,8 +44,8 @@ http.createServer((req, res) => {
     // 整段对话里的用户消息：工具循环的后续轮里，任务原话已不在最后一条，只有从整段里才看得见。
     const allUser = msgs.filter((m) => m.role === 'user').map((m) => m.content || '').join('\n');
     // 从系统提示词里取真实根目录（工作环境块里固定有两行：共享区 / 沙箱）
-    const workRoot = (sys.match(/本次工作的共享区(?:（[^）\n]*）)?：([^\n]+)/) || [])[1];
-    const sandboxRoot = (sys.match(/你私有的沙箱(?:（[^）\n]*）)?：([^\n]+)/) || [])[1];
+    const workRoot = (sys.match(/共享工作区(?:（[^）\n]*）)?：([^\n]+)/) || [])[1];
+    const sandboxRoot = (sys.match(/你的沙箱(?:（[^）\n]*）)?：([^\n]+)/) || [])[1];
     // 已经跑过工具（手写信封走用户消息，原生通道走 role=tool 的结果消息）。
     const sawToolResult = msgs.some((m) => m.role === 'tool') || user.includes('[工具结果]');
     // 带工具声明、且声明的是探针工具 = 工具调用支持探测（不带声明的那条走普通分支，所以这里只在有 tools 时成立）。
