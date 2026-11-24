@@ -383,17 +383,30 @@ pub(super) fn pick_guest(
     }
 }
 
+/// 目的：一次建会话要交给动作表的决定（CLI 的交互结果 → `create_session` 的参数）。
+/// 约束：`name` 只在用户点名时给（缺省名归后端：预设 id + 本地到分钟）；`kind` 与 `flows` 二选一；
+///   `workspace` 是启动目录收成的工作区根（None = 会话用产品内 work/）。
+pub(crate) struct SessionAsk<'a> {
+    pub(crate) name: Option<&'a str>,
+    pub(crate) kind: &'a str,
+    pub(crate) flows: Option<&'a [String]>,
+    pub(crate) agents: &'a [AgentMeta],
+    pub(crate) task: Option<&'a str>,
+    pub(crate) tier: Tier,
+    pub(crate) workspace: Option<&'a std::path::Path>,
+}
+
 /// 目的：建会话走**动作表**——与 Web / agent 同一份声明、同一处授权，CLI 只把用户的选择变成参数。
-/// 参数：`name` 只在用户点名时给；不给就由后端派生（预设 id + 本地到分钟），CLI 不自己编名字。
-pub(crate) fn create_session_action(
-    faces: &Faces,
-    name: Option<&str>,
-    kind: &str,
-    flows: Option<&[String]>,
-    agents: &[AgentMeta],
-    task: Option<&str>,
-    tier: Tier,
-) -> Result<String, String> {
+pub(crate) fn create_session_action(faces: &Faces, ask: SessionAsk<'_>) -> Result<String, String> {
+    let SessionAsk {
+        name,
+        kind,
+        flows,
+        agents,
+        task,
+        tier,
+        workspace,
+    } = ask;
     let agents: Vec<serde_json::Value> = agents
         .iter()
         .map(|a| {
@@ -422,6 +435,10 @@ pub(crate) fn create_session_action(
     }
     if let Some(t) = task {
         args["task"] = serde_json::json!(t);
+    }
+    // 启动目录收成的工作区（`--no-workspace` 或判定不过时没有）：绑定与校验都在后端。
+    if let Some(w) = workspace {
+        args["workspace"] = serde_json::json!(w.to_string_lossy());
     }
     // 虚拟机档要选一个虚拟根（人默认是设置里的档位）：本机只有一个就自动用它，
     // 多个就如实说清有哪些（CLI 不代人挑），一个都没装就交给后端给"怎么补"。

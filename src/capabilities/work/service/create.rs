@@ -17,6 +17,19 @@ impl Work {
             turn.holds(n) || self.history.load(n).is_ok()
         })
     }
+
+    /// 目的：把启动目录收成外部工作区根——呈现层建会话前判一次（缺省把「在哪个目录启动」当工作区）。
+    /// 约束：与建会话的 `resolve` 同一条阶梯但**不探可写**；不建目录、不落盘。
+    ///   返回规范化后的根；Err 是「为什么不能当工作区」的整句文案（由呈现层回退并说明）。
+    pub(crate) fn ambient_workspace(
+        &self,
+        probe: &dyn HostProbe,
+        raw: &std::path::Path,
+        tier: crate::kernel::api::types::Tier,
+    ) -> Result<std::path::PathBuf, String> {
+        let product = crate::capabilities::workspace::api::product_root(&self.root, probe);
+        crate::capabilities::workspace::api::ambient(raw, tier, &product, probe)
+    }
 }
 
 impl Work {

@@ -50,6 +50,13 @@ pub(crate) const FLAGS: &[Flag] = &[
         hidden: false,
     },
     Flag {
+        long: "--no-workspace",
+        short: None,
+        value: None,
+        desc: "不把启动目录当外部工作区：这次启动的会话都用产品内 work/",
+        hidden: false,
+    },
+    Flag {
         long: "--json",
         short: None,
         value: None,
@@ -102,6 +109,8 @@ pub(crate) struct Flags {
     pub(crate) port: Option<u16>,
     pub(crate) plain: bool,
     pub(crate) no_anim: bool,
+    /// 目的：不把启动目录当外部工作区（会话沿用产品内 work/）。
+    pub(crate) no_workspace: bool,
     /// 目的：机器可读回执（启动命令按 JSON 输出）。
     pub(crate) json: bool,
     pub(crate) help: bool,
@@ -190,6 +199,10 @@ pub(crate) fn parse(args: &[String]) -> Result<Flags, String> {
             "--no-anim" => {
                 no_value(&inline, name)?;
                 flags.no_anim = true;
+            }
+            "--no-workspace" => {
+                no_value(&inline, name)?;
+                flags.no_workspace = true;
             }
             "--json" => {
                 no_value(&inline, name)?;
@@ -449,6 +462,24 @@ mod tests {
         assert!(
             run(&["--fence-ledger", "--human"]).is_ok(),
             "可读版修饰符要能解析"
+        );
+    }
+
+    /// 目的：`--no-workspace` 是布尔开关：写一次就关掉「启动目录当工作区」，带值要报错。
+    #[test]
+    fn no_workspace_is_a_boolean_switch() {
+        assert!(run(&["--no-workspace"]).expect("合法").no_workspace);
+        assert!(
+            !run(&["--web"]).expect("缺省不关").no_workspace,
+            "缺省仍把启动目录当工作区"
+        );
+        let err = run(&["--no-workspace=1"]).expect_err("布尔旗不带值");
+        assert!(err.contains("不带值"), "{err}");
+        assert!(
+            flag_rows(false)
+                .iter()
+                .any(|r| r.starts_with("  --no-workspace ")),
+            "手册里要能看见这个开关"
         );
     }
 

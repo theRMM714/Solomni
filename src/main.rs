@@ -800,6 +800,8 @@ fn main() {
 
     // 工具级确认要有地方被作答：网页有裁决卡，CLI 在生成中就地按选项答——两边都接上了。
     handle.allow_tool_cards();
+    // 启动目录当外部工作区：整趟只判一次，命令行的会话与转录中心里开的会话都用它。
+    let startup = presentation::cli::startup_workspace(&faces, flags.no_workspace);
     // 命令行上点名了一条转录相命令或模块工具：与转录中心走同一处分派，跑完就退。
     if !flags.positionals.is_empty() {
         let opts = presentation::cli::shell::Opts {
@@ -808,6 +810,8 @@ fn main() {
             version: flags.version,
             interactive: false,
             web_port: flags.port.unwrap_or(presentation::web::DEFAULT_PORT),
+            workspace: startup.workspace,
+            workspace_skip: startup.skip,
         };
         let words: Vec<&str> = flags.positionals.iter().map(String::as_str).collect();
         let code = match presentation::cli::shell::run_words(&faces, &system, &words, &opts) {
@@ -838,6 +842,7 @@ fn main() {
                 presentation::web::DEFAULT_PORT,
                 flags.plain,
                 !flags.no_anim,
+                startup.clone(),
                 &system,
             ) {
                 presentation::cli::CliExit::Exit => break,

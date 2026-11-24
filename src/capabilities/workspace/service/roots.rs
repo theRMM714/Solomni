@@ -58,24 +58,49 @@ pub fn resolve(
     product: &Path,
     probe: &dyn HostProbe,
 ) -> Result<PathBuf, String> {
-    policy(raw, tier)?;
-    let root = crate::kernel::api::path::native(
-        &probe
-            .canonicalize(raw)
-            .map_err(|e| format!("工作区不可达：{}（{}）", raw.display(), e))?,
-    );
-    policy(&root, tier)?;
-    let meta = probe
-        .host_metadata(&root)
-        .map_err(|e| format!("读工作区失败：{}（{}）", root.display(), e))?;
-    if !meta.is_dir {
-        return Err(format!("工作区不是目录：{}", root.display()));
-    }
-    check_bounds(&root, product)?;
+    let root = checked_dir(raw, tier, product, probe, "工作区")?;
     // 写探测：外部目录必须真的可写；探针由端口在根目录下建删。
     probe
         .probe_writable(&root)
         .map_err(|_| format!("工作区不可写：{}", root.display()))?;
+    Ok(root)
+}
+
+/// 目的：把「启动目录」收成外部工作区根——与 `resolve` 同一条判定阶梯，但**不探可写**。
+/// 约束：启动目录可不可写不阻塞建会话（真动手时才由具体动作如实报告）；越界、网络路径进本机档、
+///   共享根、非目录一律拒绝，原因原样交回调用方（呈现层据此回退到产品内 work/ 并说明）。
+pub fn ambient(
+    raw: &Path,
+    tier: Tier,
+    product: &Path,
+    probe: &dyn HostProbe,
+) -> Result<PathBuf, String> {
+    checked_dir(raw, tier, product, probe, "启动目录")
+}
+
+/// 目的：两条入口共用的阶梯——策略 → 规范化 → 再策略 → 必须存在且是目录 → 与产品根互不包含。
+/// 参数：`what` 只用于报错文案（「工作区」/「启动目录」），判定本身与来源无关。
+fn checked_dir(
+    raw: &Path,
+    tier: Tier,
+    product: &Path,
+    probe: &dyn HostProbe,
+    what: &str,
+) -> Result<PathBuf, String> {
+    policy(raw, tier)?;
+    let root = crate::kernel::api::path::native(
+        &probe
+            .canonicalize(raw)
+            .map_err(|e| format!("{}不可达：{}（{}）", what, raw.display(), e))?,
+    );
+    policy(&root, tier)?;
+    let meta = probe
+        .host_metadata(&root)
+        .map_err(|e| format!("读{}失败：{}（{}）", what, root.display(), e))?;
+    if !meta.is_dir {
+        return Err(format!("{}不是目录：{}", what, root.display()));
+    }
+    check_bounds(&root, product)?;
     Ok(root)
 }
 

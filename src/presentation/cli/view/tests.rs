@@ -285,6 +285,13 @@ impl WorkOps for FakeCore {
     fn flow_ids(&self, _: &[String]) -> Result<Vec<String>, String> {
         Err("没装流程表".into())
     }
+    fn ambient_workspace(
+        &self,
+        _: &std::path::Path,
+        _: Tier,
+    ) -> Result<std::path::PathBuf, String> {
+        Err("没装启动目录".into())
+    }
     fn create_work(&self, _: WorkSpec) -> Result<(WorkOpened, u64), String> {
         Err("没装建工作".into())
     }

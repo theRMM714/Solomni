@@ -12,7 +12,7 @@ use crate::capabilities::tools::api::{
 };
 use serde_json::{Value, json};
 
-/// 目的：这一次调用带进来的全局修饰：命令行与转录中心各自填，后面的分派只认这五个事实。
+/// 目的：这一次调用带进来的全局修饰：命令行与转录中心各自填，后面的分派只认这几个事实。
 pub(crate) struct Opts {
     /// 目的：回执给机器读（`--json`，命令行与行内都有）。
     pub(crate) json: bool,
@@ -24,6 +24,10 @@ pub(crate) struct Opts {
     pub(crate) interactive: bool,
     /// 目的：转录中心里 `web` 不带端口时的缺省值。
     pub(crate) web_port: u16,
+    /// 目的：启动目录收成的工作区根（None = 会话用产品内 work/）。
+    pub(crate) workspace: Option<std::path::PathBuf>,
+    /// 目的：没绑工作区的原因（启动目录不能当工作区时的一句话；`--no-workspace` 时为空）。
+    pub(crate) workspace_skip: Option<String>,
 }
 
 /// 目的：一条命令跑完之后屏幕该干什么。
@@ -201,7 +205,7 @@ fn dispatch(faces: &Faces, system: &dyn System, op: &Op, args: &Value, opts: &Op
     match op.id.as_str() {
         "single" => return single_flow(faces, system, args, opts),
         "collab" => {
-            collab_flow(faces, args);
+            collab_flow(faces, args, opts);
             return Outcome::Done(0);
         }
         "proxy" => return proxy_flow(faces, system, None, opts),

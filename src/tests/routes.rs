@@ -290,6 +290,13 @@ impl WorkOps for FakeFaces {
     fn flow_ids(&self, _: &[String]) -> Result<Vec<String>, String> {
         Ok(Vec::new())
     }
+    fn ambient_workspace(
+        &self,
+        _: &std::path::Path,
+        _: crate::kernel::api::types::Tier,
+    ) -> Result<std::path::PathBuf, String> {
+        Err("呈现层测试不定启动目录".into())
+    }
     fn create_work(&self, _spec: WorkSpec) -> Result<(WorkOpened, u64), String> {
         self.guard()?;
         Ok((

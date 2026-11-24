@@ -339,6 +339,41 @@ pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// 目的：启动目录收成工作区——在哪个目录启动就把哪个目录当工作区；产品根自身、不可达、非目录都如实拒绝。
+/// 约束：`ambient` 与建会话的 `resolve` 共用一条阶梯，但**不探可写**：启动目录可不可写不阻塞建会话。
+#[test]
+pub(crate) fn ambient_workspace_takes_the_startup_directory_through_the_same_ladder() {
+    use crate::capabilities::workspace::api::{ambient, product_root};
+    use crate::kernel::api::types::Tier;
+
+    let root = crate::tests::scratch("ambient-workspace");
+    let product = root.join("product");
+    let startup = root.join("proj");
+    std::fs::create_dir_all(&product).expect("建产品根");
+    std::fs::create_dir_all(&startup).expect("建启动目录");
+    let probe = crate::kernel::detail::host_probe::HostProbeAdapter;
+    let product = product_root(&product, &probe);
+
+    let got = ambient(&startup, Tier::Host, &product, &probe).expect("产品外的目录能当工作区");
+    assert_eq!(
+        got.file_name().and_then(|n| n.to_str()),
+        Some("proj"),
+        "{}",
+        got.display()
+    );
+
+    let err = ambient(&product, Tier::Host, &product, &probe).expect_err("产品根自身要拒");
+    assert!(err.contains("互相包含"), "{err}");
+    let err = ambient(&root.join("gone"), Tier::Host, &product, &probe).expect_err("不可达要拒");
+    assert!(err.contains("启动目录不可达"), "{err}");
+    let file = root.join("note.txt");
+    std::fs::write(&file, b"x").expect("建文件");
+    let err = ambient(&file, Tier::Host, &product, &probe).expect_err("文件不能当工作区");
+    assert!(err.contains("启动目录不是目录"), "{err}");
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// 目的：加载复检——手改 meta 塞进策略违例的绑定要如实拒绝；只是目录不可达不算违例。
 #[cfg(windows)]
 #[test]
