@@ -1,5 +1,5 @@
 //! 目的：一条路径在"基线 / 上游 / 本地"下的状态，以及状态、拉取、提交、同步的回执形状。
-//! 管：`StatusState`（同步面）/ `WorkState`（工作面）/ `status_of` / `work_state_of` / `StatusEntry` / `PullReport` / `CommitRequest` / `CommitReport` / `SyncReport` / `StatusReport`。
+//! 管：`StatusState`（同步面）/ `WorkState`（工作面）/ `status_of` / `work_state_of` / `StatusEntry` / `PullReport` / `CommitRequest` / `CommitReport` / `SyncReport` / `StatusReport` / `WorkLineEntry`。
 //! 不管：判定本身（提交侧在 `merge.rs`、解决侧在 `resolve.rs`）；回执渲染在呈现层。
 //! 联动：`work_status` / `work_pull` / `work_commit` / `work_sync` 的入参与回执（docs/workspace/README.md）。
 
@@ -215,6 +215,19 @@ pub struct SyncReport {
     pub missing: Vec<String>,
 }
 
+/// 目的：一条工作线提交（work_status 的「你的工作线最近提交」用）。
+/// 约束：沿调用方工作线的父链取，**不含**别人工作线上的提交；父提交可能是主线提交（工作线分叉点）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkLineEntry {
+    pub id: u64,
+    /// 目的：父提交 id——「撤回某条提交」与 work_reset to= 的目标都从这里取。
+    pub parent: Option<u64>,
+    pub time: i64,
+    pub message: String,
+    /// 目的：这条提交已经在主线里吗（主线提交本身，或已被某条主线提交的 sources 记下）。
+    pub pushed: bool,
+}
+
 /// 目的：work_status 的结果。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StatusReport {
@@ -235,6 +248,9 @@ pub struct StatusReport {
     pub missing: Vec<String>,
     /// 目的：工作区磁盘与 head 不一致的路径（外部改动 / 删除；先 work_sync）。
     pub external: Vec<String>,
-    /// 目的：最近几条提交（新→旧）。
+    /// 目的：最近几条主线提交（新→旧）。
     pub recent: Vec<CommitSummary>,
+    /// 目的：工作线与主线不一致时的最近几条工作线提交（新→旧，带父提交）；
+    ///   与主线一致时为空——那种情况下「最近提交」已经够看，不重复列。
+    pub work_recent: Vec<WorkLineEntry>,
 }

@@ -395,7 +395,8 @@ pub fn render_ignore(r: &IgnoreReport) -> String {
 }
 
 /// 目的：把 work_status 的结果说成人能读的几行。
-/// 返回：主线当前提交、你的工作线头与待推送净改动数（另含领先空提交条数与冲突数）、逐条五态、最近主线提交。
+/// 返回：主线当前提交、你的工作线头与待推送净改动数（另含领先空提交条数与冲突数）、
+///   工作线最近提交（带父提交，供 work_reset 定位）、逐条五态、最近主线提交。
 pub fn render_status(r: &StatusReport) -> String {
     let mut out = String::new();
     match &r.head {
@@ -431,6 +432,26 @@ pub fn render_status(r: &StatusReport) -> String {
             }
         }
         None => out.push_str("\n你的工作线：还没有提交（与主线一致）"),
+    }
+    if !r.work_recent.is_empty() {
+        out.push_str("\n你的工作线最近提交（新→旧；work_reset to=<父提交> 用它定位）：");
+        for c in &r.work_recent {
+            let parent = match c.parent {
+                Some(p) => format!("父 {}", p),
+                None => "无父提交".to_string(),
+            };
+            out.push_str(&format!(
+                "\n- {}（{}，{}）：{}",
+                c.id,
+                parent,
+                if c.pushed {
+                    "已进主线"
+                } else {
+                    "未进主线"
+                },
+                c.message
+            ));
+        }
     }
     if !r.tree.is_empty() {
         out.push_str(&format!("\n主副本路径：{}", paths(&r.tree)));
