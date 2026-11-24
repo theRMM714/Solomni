@@ -3,6 +3,7 @@
 //! 不管：各族用例的细节；内存替身与端口契约（见 docs/testing/doubles.md）。
 //! 联动：隔离根由 `tests::scratch` 提供；真实适配器清单见 docs/testing/doubles.md。
 
+mod clock;
 mod fs;
 mod http;
 mod logs;

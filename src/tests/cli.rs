@@ -19,14 +19,45 @@ fn cli_session_creation_goes_through_the_action_table() {
         .upsert_agent("甲", &["a".to_string()], "", "", "")
         .expect("建 agent");
     let picked = cli::pick_agents(&faces, &["甲".to_string()]).expect("点名");
-    let sid =
-        cli::create_session_action(&faces, "cli-1", "single", None, &picked, None, Tier::Host)
-            .expect("走动作表建会话");
+    let sid = cli::create_session_action(
+        &faces,
+        Some("cli-1"),
+        "single",
+        None,
+        &picked,
+        None,
+        Tier::Host,
+    )
+    .expect("走动作表建会话");
     assert_eq!(sid, "cli-1");
     assert!(
-        cli::create_session_action(&faces, "cli-2", "乱来", None, &picked, None, Tier::Host)
-            .is_err(),
+        cli::create_session_action(&faces, None, "乱来", None, &picked, None, Tier::Host).is_err(),
         "未知形态在分发处如实拒绝"
+    );
+}
+
+/// 目的：CLI 不自己编名字——不给名字时由后端派生 `{预设 id}-{本地到分钟}`，CLI 直接用回包的 sid。
+#[test]
+fn cli_takes_the_backend_derived_session_name() {
+    let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
+    faces
+        .registry
+        .upsert_agent("甲", &["a".to_string()], "", "", "")
+        .expect("建 agent");
+    let picked = cli::pick_agents(&faces, &["甲".to_string()]).expect("点名");
+    let sid = cli::create_session_action(&faces, None, "single", None, &picked, None, Tier::Host)
+        .expect("建会话");
+    let stamp = sid
+        .strip_prefix("single-")
+        .unwrap_or_else(|| panic!("缺省名该带预设 id：{sid}"));
+    assert_eq!(stamp.len(), 13, "时间戳到分钟：{sid}");
+    assert_eq!(&stamp[8..9], "-", "形如 YYYYMMDD-HHMM：{sid}");
+    assert!(
+        stamp
+            .chars()
+            .filter(|c| *c != '-')
+            .all(|c| c.is_ascii_digit()),
+        "年与时分都是数字：{sid}"
     );
 }
 

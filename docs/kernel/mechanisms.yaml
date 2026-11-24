@@ -13,6 +13,7 @@
 # 第 0 层
 contracts/fence: 0
 contracts/note: 0
+detail/clock: 0
 detail/fs_meta: 0
 detail/lock: 0
 detail/outbound: 0

@@ -478,8 +478,6 @@ pub trait WorkOps: Send + Sync {
     ) -> Result<crate::capabilities::workspace::api::CommitFileView, String>;
     #[allow(dead_code)]
     fn exists(&self, sid: &str) -> Result<bool, String>;
-    /// 目的：工作名的缺省与唯一化（命名策略归 `session`）：`base` 去空白、为空用 `fallback`、重名加尾号。
-    fn unique_work_name(&self, base: &str, fallback: &str) -> Result<String, String>;
     /// 目的：**在世会话 × 历史的并集**（界面上的会话列表）：只有会话中心同时知道两边，所以归这里。
     /// 落盘历史的列表 / 打开 / 删除归 `session::api::HistoryOps`。
     fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String>;

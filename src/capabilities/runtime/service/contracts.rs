@@ -102,11 +102,6 @@ impl WorkOps for Handle {
         self.call(move |core| Ok(core.session_exists(&sid)))
     }
 
-    fn unique_work_name(&self, base: &str, fallback: &str) -> Result<String, String> {
-        let (base, fallback) = (base.to_string(), fallback.to_string());
-        self.call(move |core| Ok(core.unique_work_name(&base, &fallback)))
-    }
-
     fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String> {
         let history = history.to_vec();
         self.call(move |core| Ok(core.session_views(&history)))

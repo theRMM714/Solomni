@@ -384,9 +384,10 @@ pub(super) fn pick_guest(
 }
 
 /// 目的：建会话走**动作表**——与 Web / agent 同一份声明、同一处授权，CLI 只把用户的选择变成参数。
+/// 参数：`name` 只在用户点名时给；不给就由后端派生（预设 id + 本地到分钟），CLI 不自己编名字。
 pub(crate) fn create_session_action(
     faces: &Faces,
-    name: &str,
+    name: Option<&str>,
     kind: &str,
     flows: Option<&[String]>,
     agents: &[AgentMeta],
@@ -407,10 +408,13 @@ pub(crate) fn create_session_action(
         .collect();
     // 预设类型给 kind；临时拼装给 flows（两者只能给一个，后端会再校验一遍）。
     let mut args = serde_json::json!({
-        "name": name,
         "agents": agents,
         "tier": tier.as_str(),
     });
+    // 没点名就不带 name：缺省名归后端（同一处派生，Web / 代理建子会话也走它）。
+    if let Some(n) = name.map(str::trim).filter(|n| !n.is_empty()) {
+        args["name"] = serde_json::json!(n);
+    }
     if let Some(flows) = flows {
         args["flows"] = serde_json::json!(flows);
     } else {

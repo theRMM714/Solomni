@@ -514,6 +514,10 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
             Ok(core.create_session(&spec)?.0.session)
         })
         .expect("建子工作");
+    assert_eq!(
+        child, "w-notify--c1",
+        "子会话名 = 父名 -- 席位名（不另起时间戳）"
+    );
     let notified = handle
         .call({
             let c = child.clone();

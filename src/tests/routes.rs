@@ -452,9 +452,6 @@ impl WorkOps for FakeFaces {
             too_large: false,
         })
     }
-    fn unique_work_name(&self, _base: &str, fallback: &str) -> Result<String, String> {
-        Ok(fallback.to_string())
-    }
     fn exists(&self, _sid: &str) -> Result<bool, String> {
         self.guard()?;
         Ok(true)
