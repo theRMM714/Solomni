@@ -21,6 +21,8 @@ impl ToolDecl {
                 capability: String::new(),
                 // 模块工具的调用者由**成员归属**决定（装了它的角色 + 用户直跑），不在这一层声明。
                 callers: Vec::new(),
+                // 模块工具不进发布面：改共享区只能走 core 的 work_* 动作。
+                publish: false,
             })
     }
 }

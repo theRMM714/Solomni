@@ -28,6 +28,11 @@ pub struct ToolSchema {
     /// 约束：它不再是授权依据——文件面与网络面的授予对所有工具固定，谁在哪一席能调由角色面决定。
     #[serde(default)]
     pub capability: String,
+    /// 目的：**发布面**标记——这个动作会改共享工作区（工作副本 ↔ 主副本），只有能发布的席位才发得到。
+    /// 约束：缺省 false = 只在会话 / 沙箱里起作用；置 true 的必须与 `workspace::api::is_work_tool` 一一对应
+    ///   （发布面就那 11 个 `work_*`，由 `src/tests/` 锁定）。它是席位 r/w 的唯一落点：写工具在沙箱里永远可用。
+    #[serde(default)]
+    pub publish: bool,
     /// 目的：谁能调这条动作——**调用者身份**清单（`user` = 人经呈现层调用；其余是角色 id）。
     /// 约束：它和 `systools/roles.yaml` 的（角色 → 工具面）是同一关系的两面，由 `SystemTools::problems` 双向锁死一致。
     #[serde(default)]
