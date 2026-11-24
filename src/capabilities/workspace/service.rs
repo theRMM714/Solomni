@@ -743,14 +743,14 @@ fn render_push_conflicts(conflicts: &[ConflictAt]) -> String {
     if !deleted_by_me.is_empty() {
         let names = push_conflict_paths(&deleted_by_me);
         out.push_str(&format!(
-            "\n\n本地删了、主线改了（{}）：删除不会覆盖主线已经改过的内容，work_pull 遇到这类冲突也不写文件，重新提交只会再被拒一次。二选一：\n1. 放弃删除、接受主线版本：work_resolve take=upstream paths=[{}] → work_commit paths=[{}] → work_push（内容回到主线版本，净改动为零）；\n2. 撤回那条删除提交：work_log 找到它的父提交，work_reset to=<父提交>，再 work_pull 取回主线版本，然后 work_push。",
+            "\n\n本地删了、主线改了（{}）：删除不会覆盖主线已经改过的内容，work_pull 遇到这类冲突也不写文件，重新提交只会再被拒一次。二选一：\n1. 放弃删除、接受主线版本：work_resolve take=upstream paths=[{}] → work_commit paths=[{}] → work_push（内容回到主线版本，净改动为零）；\n2. 撤回那条删除提交：work_status 看那条提交的父提交，work_reset to=<父提交>，再 work_pull 取回主线版本，然后 work_push。",
             names, names, names
         ));
     }
     if !deleted_upstream.is_empty() {
         let names = push_conflict_paths(&deleted_upstream);
         out.push_str(&format!(
-            "\n\n主线删了、你改了（{}）：修改不会让主线已经删掉的文件复活。二选一：\n1. 接受删除：work_resolve take=upstream paths=[{}]（沙箱里的本地版本会先备份进 lost/）→ work_commit deletes=[{}] → work_push（净改动为零）；\n2. 撤回那条修改提交：work_log 找到它的父提交，work_reset to=<父提交>，再 work_push。",
+            "\n\n主线删了、你改了（{}）：修改不会让主线已经删掉的文件复活。二选一：\n1. 接受删除：work_resolve take=upstream paths=[{}]（沙箱里的本地版本会先备份进 lost/）→ work_commit deletes=[{}] → work_push（净改动为零）；\n2. 撤回那条修改提交：work_status 看那条提交的父提交，work_reset to=<父提交>，再 work_push。",
             names, names, names
         ));
     }

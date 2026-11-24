@@ -38,7 +38,7 @@ pub use crate::capabilities::workspace::domain::workstore::{
     DiffRequest, DiffSign, LostEntry, LostReport, PullReport, PushReport, PushRequest, ResetReport,
     ResetRequest, ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake,
     ResolveWarning, ResolveWarningKind, RestoreLostReport, StatusEntry, StatusReport, SyncReport,
-    VersionView, WorkGcReport, WorkState,
+    VersionView, WorkGcReport, WorkLineEntry, WorkState,
 };
 
 /// 目的：外部工作区根的策略（判定 / 创建校验 / 加载复检）——`runtime` 建会话与重开时只经这里取。

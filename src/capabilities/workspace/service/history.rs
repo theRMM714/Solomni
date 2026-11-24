@@ -6,7 +6,7 @@
 use super::*;
 use crate::capabilities::workspace::api::{
     ChangeKind, ChangeView, CommitDetail, CommitFileView, CommitSummary, StatusEntry, StatusReport,
-    VERSION_TEXT_LIMIT, VersionView, WorkLog, WorkLogEntry, media_hint,
+    VERSION_TEXT_LIMIT, VersionView, WorkLineEntry, WorkLog, WorkLogEntry, media_hint,
 };
 use crate::capabilities::workspace::domain::workstore::work_state_of;
 
@@ -103,6 +103,39 @@ impl WorkspaceService {
                 recent.push(CommitSummary::from(&c));
             }
         }
+        // 工作线提交链：只在与主线不一致时给；work_commit 只回本条、work_status 只回线头，agent 拿不到父提交 id，work_reset 与撤回都无从定位。
+        let work_recent = if work_id.is_some() && work_id != head_id {
+            // 已进主线 = 主线提交本身，或已被某条主线提交的 sources 记下（squash 之后原工作线提交已不在线上）。
+            let mut published: BTreeSet<u64> = BTreeSet::new();
+            for id in self.store.list_commits(&store)? {
+                if let Some(c) = self.store.read_commit(&store, id)?
+                    && c.line == CommitLine::Main
+                {
+                    published.extend(c.sources.iter().copied());
+                }
+            }
+            let mut out = Vec::new();
+            let mut cur = work_id;
+            while let Some(id) = cur {
+                if out.len() >= RECENT_COMMITS {
+                    break;
+                }
+                let Some(c) = self.store.read_commit(&store, id)? else {
+                    break;
+                };
+                out.push(WorkLineEntry {
+                    id: c.id,
+                    parent: c.parent,
+                    time: c.time,
+                    message: c.message.clone(),
+                    pushed: c.line == CommitLine::Main || published.contains(&id),
+                });
+                cur = c.parent;
+            }
+            out
+        } else {
+            Vec::new()
+        };
         Ok(StatusReport {
             head,
             work_head,
@@ -115,6 +148,7 @@ impl WorkspaceService {
             missing,
             external,
             recent,
+            work_recent,
         })
     }
 

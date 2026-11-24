@@ -137,7 +137,7 @@ impl WorkspaceService {
             cur = self.store.read_commit(store, id)?.and_then(|c| c.parent);
         }
         Err(format!(
-            "只能退到自己的工作线提交上：{} 不在 {} 的祖先链里（先 work_log 看自己的线）。",
+            "只能退到自己的工作线提交上：{} 不在 {} 的祖先链里（先 work_status 看自己工作线的最近提交与父提交）。",
             target,
             match head {
                 Some(id) => format!("工作线 {}", id),
