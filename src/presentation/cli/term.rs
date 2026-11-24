@@ -3,6 +3,7 @@
 //! 不管：配色取值（`theme`）、编辑语义（`input`）、命令含义（`cli.rs`）。
 //! 联动：`cli.rs` 取用；`cli/view.rs` 提供启动页文案；`docs/presentation/cli/README.md`
 
+use super::MenuRow;
 use super::input::{Editor, Key, Step};
 use super::theme::{self, Ink, Level, Paint};
 use super::width;
@@ -26,13 +27,19 @@ const WORDMARK: [&str; 7] = [
 
 const HINT: &str = "Enter 发送 · Tab 补全 · Esc 清空 · Ctrl+U 清行 · ↑↓ 历史 · Ctrl+C 退出";
 
-const FRAME_LINES: u16 = 5;
+/// 命令菜单打开时，↑↓ 与 Esc 的含义变了，提示行跟着换。
+const HINT_MENU: &str = "Enter 发送 · Tab 补全选中 · ↑↓ 选择 · Esc 收菜单 · Ctrl+C 退出";
+
+/// 菜单最多画几行；再多就按选中项开窗，并提示还剩多少条。
+const MENU_ROWS: usize = 8;
 
 type Completer = fn(&str) -> Vec<String>;
+type MenuSource = fn(&str) -> Vec<MenuRow>;
 
 thread_local! {
     static UI: RefCell<Option<Ui>> = const { RefCell::new(None) };
     static COMPLETER: RefCell<Option<Completer>> = const { RefCell::new(None) };
+    static MENU_SOURCE: RefCell<Option<MenuSource>> = const { RefCell::new(None) };
     #[cfg(test)]
     static CAPTURE: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
     #[cfg(test)]
@@ -115,6 +122,11 @@ pub(super) fn line(text: &str) {
 /// 目的：登记 Tab 补全的候选来源：命令表由 `cli.rs` 注入，终端层不认识任何命令。
 pub(super) fn set_completer(f: Completer) {
     COMPLETER.with(|cell| *cell.borrow_mut() = Some(f));
+}
+
+/// 目的：登记命令菜单的来源（同样是 `cli.rs` 注入）：终端层只按前缀要行，不解释命令。
+pub(super) fn set_menu(f: MenuSource) {
+    MENU_SOURCE.with(|cell| *cell.borrow_mut() = Some(f));
 }
 
 /// 目的：是否交互终端：只有交互模式才用富渲染与活状态行，非 TTY 保持逐行原样。
@@ -323,6 +335,15 @@ pub(super) fn banner(tagline: &str, facts: &[String]) {
 /// 目的：读一行输入；交互模式下用固定输入框，非交互模式保持逐行回退（机器可解析）。
 /// 约束：用例可以用 feed 脚本化喂输入（先于 stdin），主循环的分发因此能被真跑一遍。
 pub(super) fn ask(label: &str) -> Option<String> {
+    read_line(label, false)
+}
+
+/// 目的：转录中心主提示的读行：`/` 起头时在输入框下列出匹配命令（其它提示不弹菜单）。
+pub(super) fn ask_command(label: &str) -> Option<String> {
+    read_line(label, true)
+}
+
+fn read_line(label: &str, with_menu: bool) -> Option<String> {
     #[cfg(test)]
     if let Some(line) = feed_next() {
         return Some(line);
@@ -331,7 +352,7 @@ pub(super) fn ask(label: &str) -> Option<String> {
     if !tty {
         return plain_ask(label);
     }
-    tty_ask(&paint, cols, label, &status_text())
+    tty_ask(&paint, cols, label, &status_text(), with_menu)
 }
 
 fn plain_ask(label: &str) -> Option<String> {
@@ -344,7 +365,13 @@ fn plain_ask(label: &str) -> Option<String> {
     }
 }
 
-fn tty_ask(paint: &Paint, cols: usize, label: &str, status: &str) -> Option<String> {
+fn tty_ask(
+    paint: &Paint,
+    cols: usize,
+    label: &str,
+    status: &str,
+    with_menu: bool,
+) -> Option<String> {
     if enable_raw_mode().is_err() {
         return plain_ask(label);
     }
@@ -352,21 +379,54 @@ fn tty_ask(paint: &Paint, cols: usize, label: &str, status: &str) -> Option<Stri
     let _ = execute!(out, Show);
     let mut frame = Frame::new(paint, cols, label, status);
     let mut editor = Editor::new();
-    frame.show(&mut out, &editor);
+    let mut menu: Vec<MenuRow> = Vec::new();
+    let mut sel = 0usize;
+    // 上一帧菜单是按哪一行文字算出来的：只有文字变了才重算，否则 ↑↓ 的选择会被打回第一行。
+    let mut asked = String::new();
+    frame.show(&mut out, &editor, &menu, sel);
     let answer = loop {
         let ev = match event::read() {
             Ok(e) => e,
             Err(_) => break None,
         };
         let step = match ev {
-            Event::Key(key) if key.kind != KeyEventKind::Release => match translate(key) {
-                Some(Key::Tab) => {
-                    complete(&mut editor);
-                    Step::Edit
+            Event::Key(key) if key.kind != KeyEventKind::Release => {
+                let Some(key) = translate(key) else {
+                    continue;
+                };
+                if menu.is_empty() {
+                    match key {
+                        Key::Tab => {
+                            complete(&mut editor);
+                            Step::Edit
+                        }
+                        other => editor.key(other),
+                    }
+                } else {
+                    // 菜单打开时 ↑↓ 选行、Tab 接受高亮项、Esc 先收菜单；其它键照常编进输入框。
+                    match key {
+                        Key::Up => {
+                            sel = sel.saturating_sub(1);
+                            Step::Edit
+                        }
+                        Key::Down => {
+                            sel = (sel + 1).min(menu.len() - 1);
+                            Step::Edit
+                        }
+                        Key::Escape => {
+                            menu.clear();
+                            sel = 0;
+                            Step::Edit
+                        }
+                        Key::Tab => {
+                            let pick = menu[sel].name.clone();
+                            editor.complete(&[pick]);
+                            Step::Edit
+                        }
+                        other => editor.key(other),
+                    }
                 }
-                Some(key) => editor.key(key),
-                None => Step::Edit,
-            },
+            }
             Event::Paste(text) => editor.key(Key::Paste(text)),
             Event::Resize(w, _) => {
                 frame.cols = (w as usize).max(24);
@@ -375,10 +435,26 @@ fn tty_ask(paint: &Paint, cols: usize, label: &str, status: &str) -> Option<Stri
             _ => continue,
         };
         match step {
-            Step::Edit => frame.show(&mut out, &editor),
+            Step::Edit => {
+                if with_menu {
+                    let line = editor.line();
+                    if line != asked {
+                        menu = command_menu(&line);
+                        sel = 0;
+                        asked = line;
+                    }
+                    if sel >= menu.len() {
+                        sel = 0;
+                    }
+                }
+                frame.show(&mut out, &editor, &menu, sel);
+            }
             Step::Cancel => {
                 editor.clear();
-                frame.show(&mut out, &editor);
+                menu.clear();
+                sel = 0;
+                asked.clear();
+                frame.show(&mut out, &editor, &menu, sel);
             }
             Step::Submit => break Some(editor.commit()),
             Step::Quit => break None,
@@ -408,6 +484,14 @@ fn complete(editor: &mut Editor) {
         None => Vec::new(),
     });
     editor.complete(&cands);
+}
+
+/// 目的：按当前整行问菜单来源；没有来源时为空（非主提示，或还没注入命令表）。
+fn command_menu(line: &str) -> Vec<MenuRow> {
+    MENU_SOURCE.with(|cell| match &*cell.borrow() {
+        Some(f) => f(line),
+        None => Vec::new(),
+    })
 }
 
 fn translate(key: KeyEvent) -> Option<Key> {
@@ -472,7 +556,7 @@ impl<'a> Frame<'a> {
         self.drawn = false;
     }
 
-    fn show(&mut self, out: &mut impl Write, editor: &Editor) {
+    fn show(&mut self, out: &mut impl Write, editor: &Editor, menu: &[MenuRow], sel: usize) {
         self.erase(out);
         let paint = self.paint;
         let total = self.cols.saturating_sub(1).max(24);
@@ -511,16 +595,37 @@ impl<'a> Frame<'a> {
                 )
             ),
         );
-        self.write_line(out, paint.paint(Ink::Dim, &width::cut(HINT, total)));
+        // 菜单就在输入框下沿：选中行冰青加粗，其余暗色；超过一屏就围绕选中项开窗并报剩余条数。
+        let (start, end, hidden) = menu_window(menu.len(), sel);
+        let picked = sel.min(menu.len().saturating_sub(1));
+        for (i, row) in menu.iter().enumerate().skip(start).take(end - start) {
+            let mark = if i == picked { "›" } else { " " };
+            let name = width::cut(&row.name, 18);
+            let gap = " ".repeat(19usize.saturating_sub(width::cols(&name)));
+            let body = format!("{} {}{}{}", mark, name, gap, row.brief);
+            let line = format!("  {}", width::cut(&body, total.saturating_sub(3)));
+            if i == picked {
+                self.write_line(out, paint.bold(Ink::Ice, &line));
+            } else {
+                self.write_line(out, paint.paint(Ink::Dim, &line));
+            }
+        }
+        if hidden > 0 {
+            let note = format!("  … 还有 {} 条，继续输入缩小范围", hidden);
+            self.write_line(out, paint.paint(Ink::Dim, &width::cut(&note, total)));
+        }
+        let hint = if menu.is_empty() { HINT } else { HINT_MENU };
+        self.write_line(out, paint.paint(Ink::Dim, &width::cut(hint, total)));
         let status = paint.paint(Ink::Dim, &width::cut(self.status, total));
         let status = if self.ascii { fold(&status) } else { status };
         let _ = write!(out, "{}", status);
         let _ = out.flush();
         self.drawn = true;
         let head = width::cols(&editor.head()).min(area);
+        let height = 5 + (end - start) + usize::from(hidden > 0);
         let _ = execute!(
             out,
-            MoveUp(FRAME_LINES - 1),
+            MoveUp(height as u16 - 1),
             MoveToColumn(0),
             MoveToColumn((4 + head) as u16),
             MoveDown(1)
@@ -528,6 +633,19 @@ impl<'a> Frame<'a> {
         let _ = out.flush();
     }
 }
+
+/// 目的：菜单的可见窗口：一屏放得下就全画，放不下就以选中项为末行往上取一屏。
+/// 返回：可见区间与窗口之外的条数。
+fn menu_window(len: usize, sel: usize) -> (usize, usize, usize) {
+    if len <= MENU_ROWS {
+        return (0, len, 0);
+    }
+    let sel = sel.min(len - 1);
+    let start = (sel + 1).saturating_sub(MENU_ROWS);
+    let end = start + MENU_ROWS;
+    (start, end, len - MENU_ROWS)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,7 +660,7 @@ mod tests {
             editor.key(Key::Char(c));
         }
         let mut buf: Vec<u8> = Vec::new();
-        frame.show(&mut buf, &editor);
+        frame.show(&mut buf, &editor, &[], 0);
         let text = String::from_utf8(buf).expect("utf8");
         let lines: Vec<&str> = text.split('\n').take(5).collect();
         assert_eq!(lines.len(), 5);
@@ -579,7 +697,7 @@ mod tests {
         };
         let editor = Editor::new();
         let mut buf: Vec<u8> = Vec::new();
-        frame.show(&mut buf, &editor);
+        frame.show(&mut buf, &editor, &[], 0);
         let text = String::from_utf8(buf).expect("utf8");
         for glyph in ["╭", "─", "│", "›", "●", "·", "↑", "↓"] {
             assert!(!text.contains(glyph), "TERM=dumb 下不出现画框字形：{glyph}");
@@ -596,10 +714,62 @@ mod tests {
         let mut frame = Frame::new(&paint, 40, "选哪一项（序号 / 选项 id；回车 = 先不答）", "");
         let editor = Editor::new();
         let mut buf: Vec<u8> = Vec::new();
-        frame.show(&mut buf, &editor);
+        frame.show(&mut buf, &editor, &[], 0);
         let text = String::from_utf8(buf).expect("utf8");
         let top = text.split('\n').next().expect("上边框");
         assert_eq!(width::cols(top), 39, "窄终端里标签被截断，框不换行");
+    }
+
+    /// 菜单画在输入框下沿：每行写法 + 说明，选中行带 `›`；帧高随菜单行数长，光标仍然回到输入行。
+    #[test]
+    fn frame_draws_the_command_menu_under_the_box() {
+        let paint = Paint::new(Level::None);
+        let mut frame = Frame::new(&paint, 80, "转录中心", "● 就绪");
+        let editor = Editor::new();
+        let menu = vec![
+            MenuRow {
+                name: "/web".to_string(),
+                brief: "转入 Web 转录中心".to_string(),
+            },
+            MenuRow {
+                name: "/help".to_string(),
+                brief: "命令手册与旗语规范".to_string(),
+            },
+        ];
+        let mut buf: Vec<u8> = Vec::new();
+        frame.show(&mut buf, &editor, &menu, 1);
+        let text = String::from_utf8(buf).expect("utf8");
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines[3].contains("/web"), "菜单紧跟下边框");
+        assert!(lines[3].contains("转入 Web"), "行内带一句说明");
+        assert!(lines[4].contains("› /help"), "选中行带游标");
+        assert!(lines[5].contains("Esc 收菜单"), "菜单打开时提示行换说法");
+        assert!(text.contains("\x1b[6A"), "七行帧从状态行上移六行回到顶边");
+    }
+
+    /// 一屏放不下时围绕选中项开窗，并报出窗口外还剩几条。
+    #[test]
+    fn menu_window_keeps_the_selected_row_visible() {
+        let paint = Paint::new(Level::None);
+        let mut frame = Frame::new(&paint, 80, "转录中心", "");
+        let editor = Editor::new();
+        let menu: Vec<MenuRow> = (0..12)
+            .map(|i| MenuRow {
+                name: format!("/c{}", i),
+                brief: "说明".to_string(),
+            })
+            .collect();
+        let mut buf: Vec<u8> = Vec::new();
+        frame.show(&mut buf, &editor, &menu, 11);
+        let text = String::from_utf8(buf).expect("utf8");
+        assert!(text.contains("› /c11"), "选中项留在窗口里");
+        assert!(text.contains("/c4"), "窗口从选中项往上取满一屏");
+        assert!(!text.contains("/c3"), "更早的行不画");
+        assert!(text.contains("还有 4 条"), "窗口外还有四条时提示");
+        assert!(
+            text.contains("\x1b[13A"),
+            "八行菜单加一行提示，从状态行上移十三行"
+        );
     }
 
     #[test]
@@ -760,9 +930,9 @@ mod tests {
         let mut frame = Frame::new(&paint, 60, "转录中心", "● 就绪");
         let editor = Editor::new();
         let mut buf: Vec<u8> = Vec::new();
-        frame.show(&mut buf, &editor);
+        frame.show(&mut buf, &editor, &[], 0);
         let first = buf.len();
-        frame.show(&mut buf, &editor);
+        frame.show(&mut buf, &editor, &[], 0);
         let text = String::from_utf8(buf).expect("utf8");
         assert!(text[first..].contains("\u{1b}[1A"), "第二次先上移擦掉旧帧");
         assert_eq!(

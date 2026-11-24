@@ -13,7 +13,7 @@
 | `src/presentation/cli/commands.rs` | 一次性命令：`diagnose` / `secret` / `resident` / `work` / `rewind`；取参与打印回执（参数已由声明解析成 JSON） |
 | `src/presentation/cli/shell.rs` | 词表先落到声明上：命令与模块工具走同一条入口（`--json` / `--help` / `--version` 摘取、模块清单与三级手册 `modules` / `<模块>` / `<模块> <工具>`）；命令行一次性调用与转录中心提示符共用 |
 | `src/presentation/cli/view.rs` | 渲染原语：启动页事实行、状态行、花名册、菜单（取自命令目录）；交互模式富渲染（角色行、工具行、验收/交付、上下文用量），非 TTY 保持原样文本 |
-| `src/presentation/cli/catalog.rs` | 命令手册的排版：把 `systools/commands.yaml`（经 `OpBook` 的 `Op`）投影成手册、菜单、Tab 补全与未知命令建议（两相都算，启动相给 `--名字`，写法由参数声明派生）；不持有一份自己的命令清单 |
+| `src/presentation/cli/catalog.rs` | 命令手册的排版：把 `systools/commands.yaml`（经 `OpBook` 的 `Op`）投影成手册、实时菜单（`/` 前缀）、Tab 补全与未知命令建议（两相都算，启动相给 `--名字`，写法由参数声明派生）；不持有一份自己的命令清单 |
 | `src/presentation/cli/boot.rs` | 启动相命令的执行：把操作数与命令名翻成系统维护能力的一次调用，排版回执与退出码，写操作就地确认（`Ask`：命令行用 `NeverAsk`、转录中心用终端问答）；便携维护 `setup` 的模式名在这里翻成 `SetupMode`；不解析命令表、不做业务判断 |
 | `src/presentation/cli/argv.rs` | 全局旗语的唯一解析器（含 `--no-anim`）：`--x v` 与 `--x=v` 等价、内部协议旗语原样透传、未知旗语给编辑距离建议 |
 | `src/presentation/cli/gate.rs` | 交互回合：跟读事件流、裁决卡问答、等安静与动作回显 |
