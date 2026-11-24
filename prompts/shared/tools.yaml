@@ -10,6 +10,7 @@ env_guests: [linux, macos, windows]
 envs:
   - host: linux
     text: |-
+      【工作环境】
       system: linux
       共享工作区（只读主副本）：{{work_root}}
       你的沙箱（可写工作副本）：{{sandbox_root}}
@@ -20,7 +21,8 @@ envs:
       共享区只读：资料 work_pull 进沙箱，产物 work_commit + work_push 发布（细节见 work_* 工具说明）。
   - host: windows
     text: |-
-      system: Windows
+      【工作环境】
+      system: Windows 宿主
       共享工作区（只读主副本）：{{work_root}}
       你的沙箱（可写工作副本）：{{sandbox_root}}
       {{module_roots}}
@@ -31,7 +33,8 @@ envs:
       共享区只读：资料 work_pull 进沙箱，产物 work_commit + work_push 发布（细节见 work_* 工具说明）。
   - host: macos
     text: |-
-      system: macOS
+      【工作环境】
+      system: macOS 宿主
       共享工作区（只读主副本）：{{work_root}}
       你的沙箱（可写工作副本）：{{sandbox_root}}
       {{module_roots}}
@@ -41,6 +44,7 @@ envs:
       共享区只读：资料 work_pull 进沙箱，产物 work_commit + work_push 发布（细节见 work_* 工具说明）。
   - guest: linux
     text: |-
+      【工作环境】
       system: Linux guest（虚拟机内；下列路径都是 guest 内 POSIX 写法，宿主路径不存在）
       路径桥：宿主 D:\a\b → guest /solomni-host/d/a/b
       共享工作区（只读主副本）：{{work_root}}
@@ -52,6 +56,7 @@ envs:
       共享区只读：资料 work_pull 进沙箱，产物 work_commit + work_push 发布（细节见 work_* 工具说明）。
   - guest: macos
     text: |-
+      【工作环境】
       system: macOS guest（虚拟机内；下列路径都是 guest 内 POSIX 写法，宿主路径不存在）
       路径桥：宿主文件按路径桥映射进 guest。
       共享工作区（只读主副本）：{{work_root}}
@@ -63,6 +68,7 @@ envs:
       共享区只读：资料 work_pull 进沙箱，产物 work_commit + work_push 发布（细节见 work_* 工具说明）。
   - guest: windows
     text: |-
+      【工作环境】
       system: Windows guest（虚拟机内；下列路径都是 guest 内 Windows 写法，宿主路径不存在）
       路径桥：宿主 /home/u/a → guest C:\solomni-host\home\u\a
       共享工作区（只读主副本）：{{work_root}}
