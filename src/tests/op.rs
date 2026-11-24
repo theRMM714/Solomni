@@ -301,6 +301,7 @@ fn broken_declarations_are_reported() {
             parallel: false,
             capability: String::new(),
             callers: Vec::new(),
+            publish: false,
         },
         json: None,
     };
@@ -345,6 +346,7 @@ fn required_named_flags_lose_their_brackets() {
             parallel: false,
             capability: String::new(),
             callers: Vec::new(),
+            publish: false,
         },
         json: None,
     };

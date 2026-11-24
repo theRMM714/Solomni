@@ -269,6 +269,7 @@ fn module_schema() -> ToolSchema {
         parallel: false,
         capability: "none".to_string(),
         callers: Vec::new(),
+        publish: false,
     }
 }
 
@@ -520,19 +521,23 @@ pub(crate) fn tool_decls(face: &ToolFace) -> ToolDecls {
     decls
 }
 
-/// 目的：可用的外部工具清单：逐条列成「模块.工具」，末尾补上内置工具。
+/// 目的：可用的外部工具清单：**只列这一回合工具面上真有的东西**（模块工具 + 系统工具），
 ///   三种失败（模块不存在 / 模块没这个工具 / 缺 module 且模块不唯一）都用它把可选范围说回去。
+/// 约束：模块工具按 `with_modules` 的发放口径列；系统工具只列 `allowed`——总表不是这一回合的面，
+///   列出去会让模型以为能调，同一句回执里再说「没有这个工具」就自相矛盾了。
 pub(crate) fn available_tools(face: &ToolFace) -> String {
     let mut list: Vec<String> = Vec::new();
-    for (id, mt) in &face.modules {
-        for name in mt.commands.keys() {
-            list.push(format!("{}.{}", id, name));
-        }
-        for name in mt.services.keys() {
-            list.push(format!("{}.{}", id, name));
+    if face.with_modules {
+        for (id, mt) in &face.modules {
+            for name in mt.commands.keys() {
+                list.push(format!("{}.{}", id, name));
+            }
+            for name in mt.services.keys() {
+                list.push(format!("{}.{}", id, name));
+            }
         }
     }
-    list.extend(crate::capabilities::tools::api::names());
+    list.extend(face.allowed.iter().cloned());
     list.join("、")
 }
 

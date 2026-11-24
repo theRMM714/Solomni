@@ -18,6 +18,7 @@
 tools:
   read:
     capability: fs-read   # 标签：说明与“核心先核实”筛选用；不再承担授权
+    publish: false        # 发布面标记：会不会改共享工作区（缺省 false）；只有能发布的席位才发得到 true 的那些
     callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 角色 id
     desc: 读取文本文件（UTF-8）。
     parallel: true        # 同一回复里的多个调用能否真的并发跑
@@ -29,6 +30,7 @@ tools:
 ```
 
 - **授权面 = 角色面，工具声明不再决定能不能调**：`capability` 只是标签（说明与“核心先核实”筛选用），没有 `effect` / `reach` / `scope` 三键。档位只管出站网络，不逐工具裁剪。
+- **唯一的逐工具面标记是 `publish`**：它只回答一件事——这个动作会不会改共享工作区。沙箱里的 `write` / `edit` / `patch` / `delete` / `shell` 都改不到共享区（围栏只给私有沙箱写权，见 [workspace](../workspace/README.md)），真正能改的只有 11 个 `work_*`，所以席位上的 r/w 塌缩成**能不能发布**这一个布尔。标记与 `workspace::api::is_work_tool` 一一对应（`src/tests/tools/face.rs` 锁定）。
 - **没有工具卡**：权限侧不产生 `ask`，因此没有 `allow` / `deny` / `allow_turn` 这套确认链路；需要人定夺的是核心各关卡（建会话、验收、定版）。
 - **`callers` 是授权判据**：`user` = 人经呈现层调用，其余是角色 id。它与角色表的（这个身份有什么）是**同一关系的两面**，由 `SystemTools::problems` 双向锁死——任何一边漏写 / 多写都是装配错误。
 - **列目录是"核实"的前提**：`read` 只读文件、`grep` 按模式找行，**没有 `list` 就确认不了"资料齐不齐"**；`read` 遇到目录会如实引导到 `list`。

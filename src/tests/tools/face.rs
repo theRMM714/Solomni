@@ -125,6 +125,69 @@ pub(crate) fn only_this_turns_tools_are_advertised() {
     );
 }
 
+/// 目的：**拒绝回执里的「可用」只列这一回合的面**：审计现场拿到的是
+///   「未知工具：ask 可用：read、write、edit、patch、delete、list、grep、submit_report、shell」——
+///   那一串是整本总表，不是它手里的工具；模型照着那串去调，就只能在「没有这个工具」和
+///   「以为能用」之间空转。
+#[test]
+pub(crate) fn a_refusal_lists_only_this_turns_face() {
+    use crate::capabilities::llm::api::ToolCall;
+    let io = Arc::new(InMemorySysIo::new());
+    let mut m = native_member(
+        "a",
+        Arc::clone(&io),
+        vec![
+            NativeStep::Calls(vec![ToolCall {
+                id: "c1".to_string(),
+                name: "ask".to_string(),
+                args_json: "{\"text\":\"在吗\"}".to_string(),
+            }]),
+            NativeStep::Text("{\"type\":\"say\",\"text\":\"好\"}".to_string()),
+        ],
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(Vec::new())),
+    );
+    // 这一回合发的是讨论席的面（审计现场拿到的那一份）：发放名单就是唯一判据。
+    let face = vec![
+        "say".to_string(),
+        "agree".to_string(),
+        "leave".to_string(),
+        "ask".to_string(),
+        "read".to_string(),
+        "list".to_string(),
+        "grep".to_string(),
+    ];
+    // 审计现场没有模块工具（回执里的「未知工具」走的就是这条路）：只留系统面。
+    let tools = m.tools.as_mut().expect("工具环境");
+    tools.face.allowed = face;
+    tools.face.modules.clear();
+    tools.face.with_modules = false;
+    let prompts = test_prompts();
+    let exec = run_execution(std::slice::from_mut(&mut m), "任务", &prompts);
+    let trace = exec.traces.get("a").expect("应记一条失败的工具行");
+    assert_eq!(trace.len(), 1);
+    assert!(!trace[0].ok, "没发出去的工具不执行");
+    assert!(
+        trace[0].output.contains("未知工具：ask"),
+        "如实说清没有这个工具：{}",
+        trace[0].output
+    );
+    assert!(
+        trace[0].output
+            .ends_with("可用：say、agree、leave、ask、read、list、grep"),
+        "回执只列这一回合真有的工具：{}",
+        trace[0].output
+    );
+    for absent in ["write", "shell", "submit_report", "work_commit", "patch"] {
+        assert!(
+            !trace[0].output.contains(absent),
+            "总表里的 {} 不在这一回合的面上，不该出现在回执里：{}",
+            absent,
+            trace[0].output
+        );
+    }
+}
+
 #[test]
 pub(crate) fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
     use crate::capabilities::llm::api::ToolCall;
@@ -641,6 +704,15 @@ pub(crate) fn work_versioning_tools_are_granted_to_the_working_roles_only() {
     }
     // 只读、无副作用的并发；pull / commit / resolve 会改状态，不并发。
     assert!(book["work_status"].parallel && book["work_versions"].parallel);
+    // **发布面就是这 11 个 work_***：会改共享工作区的动作只有它们，标记不许漏也不许多。
+    for (name, schema) in book.iter() {
+        assert_eq!(
+            schema.publish,
+            crate::capabilities::workspace::api::is_work_tool(name),
+            "{} 的发布面标记与 workspace 的动作面不一致",
+            name
+        );
+    }
     assert!(
         !book["work_pull"].parallel
             && !book["work_commit"].parallel

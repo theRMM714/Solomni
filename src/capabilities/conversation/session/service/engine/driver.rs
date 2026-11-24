@@ -214,7 +214,7 @@ impl AgentSession {
         }
         let spec = TurnRun {
             identity,
-            face: Some(face),
+            face,
             turn,
             verbs: true,
             turn_id: Some(turn_id),
@@ -271,7 +271,7 @@ impl AgentSession {
     }
 }
 
-/// 单 agent / 节点的一回合：**同一条轮循环**（见 TurnRun），工具面用会话自己的（执行席）。
+/// 单 agent / 节点的一回合：**同一条轮循环**（见 TurnRun），工具面就是会话自己装好的那一份（执行席）。
 /// 讨论席的成员回合（`discussion_turn`）只是换了 TurnRun 的几个参数——没有第二条循环。
 fn rounds_events(
     s: &mut AgentSession,
@@ -281,9 +281,15 @@ fn rounds_events(
     emit: &mut dyn FnMut(SessionEvent),
     sink: &mut dyn FnMut(SessionEvent),
 ) {
+    // 会话自己的面原样传回去（没有工具环境就是空面）：换与还原因此对任何回合都是同一个动作。
+    let face = s
+        .tools
+        .as_ref()
+        .map(|t| (t.face.allowed.clone(), t.face.with_modules))
+        .unwrap_or_default();
     let spec = TurnRun {
         identity,
-        face: None,
+        face,
         turn: Vec::new(),
         verbs: false,
         turn_id: None,
@@ -503,15 +509,14 @@ fn run(
 ) -> Vec<Round> {
     let label = s.id.clone();
     let llm = io.llm.clone();
-    // 本回合的工具面（角色表发放）：**按回合换**——同一个会话会用两种身份干活（说话 / 干活）。
+    // 本回合的工具面：**按回合换**——同一个会话会用两种身份干活（说话 / 干活）。
     // 装进这一回合的环境（声明与执行都读它），跑完还原。
-    let saved = match spec.face.as_ref().zip(s.tools.as_mut()) {
-        Some(((ids, with_modules), t)) => Some((
-            std::mem::replace(&mut t.face.allowed, ids.clone()),
-            std::mem::replace(&mut t.face.with_modules, *with_modules),
-        )),
-        None => None,
-    };
+    let saved = s.tools.as_mut().map(|t| {
+        (
+            std::mem::replace(&mut t.face.allowed, spec.face.0.clone()),
+            std::mem::replace(&mut t.face.with_modules, spec.face.1),
+        )
+    });
     // 两个回调（流式分片 / 工具完成）都要外送短暂事件：把 emit 借出来共享（顺序因此天然正确）。
     let emit = std::cell::RefCell::new(emit);
     let mut acc = String::new();
