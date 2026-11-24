@@ -13,6 +13,9 @@ mutation:
     - src/kernel/detail/unpack.rs
     - src/kernel/domain/path.rs
 cases:
+  - id: cargo/tests::detail::clock
+    tier: T1
+    note: 本地时间与到分钟流水戳
   - id: cargo/tests::detail::logs
     tier: T1
     note: 日志落盘

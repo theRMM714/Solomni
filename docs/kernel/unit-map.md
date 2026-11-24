@@ -1,7 +1,7 @@
 # 单元地图 · kernel
 
 > 定位：kernel（地基库）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-21｜依据：`src/kernel/api.rs`、`docs/kernel/mechanisms.yaml`
+> 效力：契约｜核对：2026-11-24｜依据：`src/kernel/api.rs`、`docs/kernel/mechanisms.yaml`
 
 > 本文是 **kernel** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -13,7 +13,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/kernel.rs` | 地基库的入口与公开面：`contracts` / `api` / `ports` / `domain` / `detail` 五个子模块的形状声明 |
-| `src/kernel/api.rs` | 地基库对外面的入口：只声明 `api/` 下的面模块。面按**对外概念**切（`fence` / `note` / `run` / `types` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `path` / `platform`），每个面只做重导出、不定义条目；能力与装配层经 `api::<面>` 取用，内核内部直取所属机制（见 [README](README.md) 的「六、对外面」） |
+| `src/kernel/api.rs` | 地基库对外面的入口：只声明 `api/` 下的面模块。面按**对外概念**切（`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `path` / `platform`），每个面只做重导出、不定义条目；能力与装配层经 `api::<面>` 取用，内核内部直取所属机制（见 [README](README.md) 的「六、对外面」） |
 | `src/kernel/ports.rs` | 全项目共享的机制端口：`Log` / `PathCodec` / `AskUser` / `ToolHandler` / `HostProbe` / `ProcessRunner` / `SessionHost` / `FenceHost` / `FenceGate` / `UserPath` 的 trait 定义与它们的纯数据形态（含 `ShellRun` 的 `gate`、用户 PATH 的 `PathValue`） |
 | `src/kernel/contracts.rs` | 跨层共享形状的入口：`fence` / `note` / `run` / `types` 四个子模块声明 |
 | `src/kernel/contracts/types.rs` | 跨层共享的形状（纯数据）：`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` / `JobState` 与默认预算、能力名文法 |
@@ -30,7 +30,10 @@
 | `src/kernel/domain/name.rs` | 会成为目录名的名字的两条纯规则：`validate_dir_name`（非空、无首尾空白、不含 Windows 非法字符与控制字符、不是设备保留名，主语只进报错）与 `dedup_suffix`（占用时依次试 `-2` / `-3`） |
 | `src/kernel/domain/layout.rs` | 产品根的布局名字（`.home` / `.vm` / `runtimes` / `guest.yaml`）与由根派生的四处路径：`home` / `vm` / `runtimes` / `guest_spec`，调用点不再各自拼字面量 |
 | `src/kernel/domain/receipt.rs` | host/guest 共用的 shell 回执装配：`ShellReceipt { payload, notes }`——stdout 与 `[stderr]` 区进正文、结束状态（退出码 / 信号 / 超时 / 用户停止）成说明；只装配不截断，预算在 `src/capabilities/tools/domain/budget.rs` |
-| `src/kernel/detail/file_log.rs` | `Log` 端口的文件实现：每次运行在 `logs/` 下按时间戳建文件并逐行追加（写经 `Mutex` 串行） |
+| `src/kernel/detail/clock.rs` | 本地时间机制（门面）：`Local`（本机时区的年月日时分秒毫秒）与此刻的 `local_now`、到分钟流水戳 `local_stamp`（`YYYYMMDD-HHMM`）；按平台选中 `src/kernel/detail/clock/{windows,unix}.rs` |
+| `src/kernel/detail/clock/windows.rs` | `clock` 的 Windows 后端：`GetLocalTime` 取本机时区的民用时间 |
+| `src/kernel/detail/clock/unix.rs` | `clock` 的非 Windows 后端：`localtime_r` 转本地民用时间，时区坏掉时退到 `gmtime_r` 的 UTC 值 |
+| `src/kernel/detail/file_log.rs` | `Log` 端口的文件实现：每次运行在 `logs/` 下按本地时间戳建文件并逐行追加（写经 `Mutex` 串行），时间字段取自 `clock` |
 | `src/kernel/detail/host_probe.rs` | `HostProbe` 端口的机制实现（门面）：查环境变量与 `PATH` 里的可执行文件、路径存在性；可执行位与虚拟化事实在 `src/kernel/detail/host_probe/{windows,linux,macos,other}.rs` |
 | `src/kernel/detail/host_probe/windows.rs` | `HostProbe` 的 Windows 虚拟化事实：系统目录有 `WinHvPlatform.dll` |
 | `src/kernel/detail/host_probe/linux.rs` | `HostProbe` 的 Linux 虚拟化事实：`/dev/kvm` 存在 |

@@ -99,13 +99,6 @@ pub(super) fn single_flow(
             }
         }
     };
-    let work_name = match faces.work.unique_work_name("single", "single") {
-        Ok(n) => n,
-        Err(e) => {
-            println!("[错误] {}", e);
-            return Outcome::Done(1);
-        }
-    };
     // 档位：CLI 不提供交互选择，用设置里的默认档（与 Web 向导的默认一致）。
     let tier = faces
         .registry
@@ -114,7 +107,7 @@ pub(super) fn single_flow(
         .unwrap_or(Tier::Host);
     // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
     let mut cursor = faces.events.head();
-    let sid = match create_session_action(faces, &work_name, "single", None, &picked, None, tier) {
+    let sid = match create_session_action(faces, None, "single", None, &picked, None, tier) {
         Ok(sid) => sid,
         Err(e) => {
             println!("[错误] {}", e);
@@ -134,13 +127,6 @@ pub(super) fn proxy_flow(
     seed: Option<String>,
     opts: &shell::Opts,
 ) -> Outcome {
-    let work_name = match faces.work.unique_work_name("proxy", "proxy") {
-        Ok(n) => n,
-        Err(e) => {
-            println!("[错误] {}", e);
-            return Outcome::Done(1);
-        }
-    };
     let tier = faces
         .registry
         .settings()
@@ -148,7 +134,7 @@ pub(super) fn proxy_flow(
         .unwrap_or(Tier::Host);
     // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
     let mut cursor = faces.events.head();
-    let sid = match create_session_action(faces, &work_name, "proxy", None, &[], None, tier) {
+    let sid = match create_session_action(faces, None, "proxy", None, &[], None, tier) {
         Ok(sid) => sid,
         Err(e) => {
             println!("[错误] {}", e);
@@ -199,18 +185,6 @@ pub(super) fn collab_flow(faces: &Faces, args: &Value) {
             }
         }
     };
-    let (base, fallback) = if flows.is_some() {
-        ("custom", "custom")
-    } else {
-        ("collab", "collab")
-    };
-    let work_name = match faces.work.unique_work_name(base, fallback) {
-        Ok(n) => n,
-        Err(e) => {
-            println!("[错误] {}", e);
-            return;
-        }
-    };
     let tier = faces
         .registry
         .settings()
@@ -221,7 +195,7 @@ pub(super) fn collab_flow(faces: &Faces, args: &Value) {
     let kind = if flows.is_some() { "" } else { "collab" };
     let sid = match create_session_action(
         faces,
-        &work_name,
+        None,
         kind,
         flows.as_deref(),
         &agents,

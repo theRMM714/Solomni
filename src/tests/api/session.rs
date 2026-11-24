@@ -256,34 +256,21 @@ fn restore_work_commit_is_non_destructive_and_records_a_notice() {
 
 #[test]
 fn unique_work_name_falls_back_and_appends_a_suffix() {
+    use crate::capabilities::conversation::session::api::unique_work_name;
     let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
-    assert_eq!(
-        faces.work.unique_work_name("", "single").expect("缺省名"),
-        "single"
-    );
-    assert_eq!(
-        faces
-            .work
-            .unique_work_name("  取名  ", "single")
-            .expect("去空白"),
-        "取名"
-    );
+    let exists = |n: &str| faces.work.exists(n).expect("查占用");
+    assert_eq!(unique_work_name("", "single", exists), "single");
+    assert_eq!(unique_work_name("  取名  ", "single", exists), "取名");
     faces
         .work
         .create_work(single_work("w", &["a"]))
         .expect("建会话");
-    assert_eq!(
-        faces.work.unique_work_name("w", "x").expect("重名加尾号"),
-        "w-2"
-    );
+    assert_eq!(unique_work_name("w", "x", exists), "w-2");
     faces
         .work
         .create_work(single_work("w-2", &["a"]))
         .expect("建会话");
-    assert_eq!(
-        faces.work.unique_work_name("w", "x").expect("再重名"),
-        "w-3"
-    );
+    assert_eq!(unique_work_name("w", "x", exists), "w-3");
 }
 
 #[test]

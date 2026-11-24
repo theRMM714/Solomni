@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::capabilities::catalog::registry::api::AgentMeta;
+use crate::kernel::api::clock;
 
 // 三个子模块各管一类动作：建会话 / 模块工具 / 登记处。
 mod module;
@@ -436,6 +437,44 @@ impl ActionOps for Handle {
     }
 }
 
+/// 目的：建会话的缺省名——顶层 `{预设 id}-{本地到分钟}`，子会话 `{父}--{席位名}`。
+/// 约束：预设只是数据（`systools/profiles.yaml` 会改会删），名字从载荷里取，不把模式名硬编码进代码；
+///   时间戳到分钟，同一分钟内的重名由 `unique_work_name` 加尾号解决。
+pub(crate) fn derived_session_name(spec: &d::NewSession) -> String {
+    let kind = spec.kind.trim();
+    let label = if !kind.is_empty() {
+        kind.to_string()
+    } else if let Some(flow) = spec
+        .flows
+        .as_ref()
+        .and_then(|f| f.first())
+        .map(|f| f.trim())
+        .filter(|f| !f.is_empty())
+    {
+        flow.to_string()
+    } else {
+        // 既没有预设也没有流程（临时拼装缺流程、纯机器请求）：退回请求号，再不行用通用词。
+        let request = spec.request_id.trim();
+        if request.is_empty() {
+            "work".to_string()
+        } else {
+            format!("w-{}", request)
+        }
+    };
+    match &spec.parent {
+        Some(parent) => {
+            let seat = spec
+                .agents
+                .first()
+                .map(|a| a.name.trim())
+                .filter(|n| !n.is_empty())
+                .unwrap_or(label.as_str());
+            format!("{}--{}", parent, seat)
+        }
+        None => format!("{}-{}", label, clock::local_stamp()),
+    }
+}
+
 /// 目的：一次建会话的准备结果（两段之间的交接物）。
 pub(crate) struct PreparedSession {
     work: crate::capabilities::work::api::PreparedWork,
@@ -501,16 +540,8 @@ impl Core {
                 )
             })
             .collect();
-        // 名字：点名就用它（撞名加尾号），否则派生（子会话按父 + agent 名，顶层按 agent 名）。
-        let base = spec
-            .agents
-            .first()
-            .map(|a| a.name.clone())
-            .unwrap_or_else(|| format!("w-{}", spec.request_id));
-        let derived = match &parent {
-            Some(p) => format!("{}--{}", p, base),
-            None => base,
-        };
+        // 名字：点名就用它（撞名加尾号），否则派生（子会话按父 + 席位名，顶层按预设 id + 本地到分钟）。
+        let derived = derived_session_name(spec);
         let name = match spec
             .name
             .as_ref()

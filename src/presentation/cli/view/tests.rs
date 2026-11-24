@@ -326,9 +326,6 @@ impl WorkOps for FakeCore {
     fn exists(&self, _: &str) -> Result<bool, String> {
         Err("没装存在检查".into())
     }
-    fn unique_work_name(&self, _: &str, _: &str) -> Result<String, String> {
-        Err("没装命名".into())
-    }
     fn session_views(
         &self,
         _: &[crate::capabilities::conversation::session::api::HistoryView],

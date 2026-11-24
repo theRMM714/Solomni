@@ -38,6 +38,7 @@ session/<工作名>/
 ```
 
 - **目录保留名**（`work` / `children` / `.proxy` / `.work` / `.work-root`）的名单在 `systools/names.yaml`：布局一改就改表，代码里不硬编码。
+- **缺省名由后端派生**：没显式给名字时，会话名 = 预设 id + 本机到分钟的时间戳（如 `single-20261124-2053`）；临时拼装没有预设 id 就取第一个流程 id，仍没有就退到 `work`；子会话是 `<父名>--<席位名>`，不另起时间戳。显式给了名字才用它，重名一律带 `-2` / `-3` 尾号（`src/capabilities/runtime/service/action.rs` 的 `derived_session_name` + `unique_work_name`，时间戳来自 `src/kernel/detail/clock.rs` 的 `local_stamp`）。
 - `meta.yaml` 的 `agents` 是名单的唯一真相（代拟路径在用户确认那一刻写回）；`exec` 段是执行选型的唯一真相（档位 / 虚拟根名 / 定版 `pins`；缺段按默认读回）。会话级权限层在 `sandbox.ceiling`（根）/ `sandbox.narrowing`（子）。
 - agent 会话**在第一个讨论回合按需建**（名单确认时不预建），命名 `<工作>--<agent>`。
 - agent 会话是**普通会话**：独立上下文、独立转录、独立围栏，复用同一套会话机制；**不新增会话类型**。

@@ -1,12 +1,12 @@
 # kernel（地基库）
 
 > 定位：没有领域语义的机制库；不是层，是依赖图最底层的地基。
-> 效力：规范｜核对：2026-11-21｜依据：`src/kernel/api.rs`、`docs/kernel/mechanisms.yaml`
+> 效力：规范｜核对：2026-11-24｜依据：`src/kernel/api.rs`、`docs/kernel/mechanisms.yaml`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；机制与机制之间的层号在 `docs/kernel/mechanisms.yaml`（门禁 `tests/gates/structure/kernel-mechanisms.js`），分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
-- 管：运行日志端口、宿主探测端口、**提问端口**（请用户裁决）。
+- 管：运行日志端口、宿主探测端口、**提问端口**（请用户裁决）、**本地时间**（`clock`：此刻的本机民用时间与到分钟流水戳）。
 - 管：生成中作业的取消表。
 - 管：跨层共享的**形状**（DTO，在 `contracts`）与路径的对外书写形式。
 - 管：**外部进程执行**——一次性的 `ProcessRunner` 与长驻的 `SessionHost`；围栏裁决经 `FenceGate` 原样转交，机制不解释裁决的业务变体。
@@ -18,7 +18,7 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api`（按对外概念分文件：`fence` / `note` / `run` / `types` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `path` / `platform`——见「六、对外面」）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`FenceHost`、`FenceGate`、`UserPath`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执与回执说明）、`domain`（路径书写、取消表、沙箱模式、回执装配）、`detail`（`file_log`、`host_probe`、`outbound`、`unpack`、`user_path`、`process`、`procs`、`session`、`i18n`、`confine`：门面 + `job` / `ledger` / `paths` / `prep`）。
+- 入站面：`api`（按对外概念分文件：`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `path` / `platform`——见「六、对外面」）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`FenceHost`、`FenceGate`、`UserPath`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执与回执说明）、`domain`（路径书写、取消表、沙箱模式、回执装配）、`detail`（`clock`、`file_log`、`host_probe`、`outbound`、`unpack`、`user_path`、`process`、`procs`、`session`、`i18n`、`confine`：门面 + `job` / `ledger` / `paths` / `prep`）。
 - `AskUser` 是「需要用户裁决的机制请用户裁决」的**唯一**入口（`src/kernel/ports.rs`），工具执行层与围栏用它。
   - 形状：`ask(问题) -> 选项 id`，**阻塞**。
   - `halt(为什么)` = 停会话 + 落警告；调用方只在有可回答前端时用它，没有前端按 fail-closed 收场。
@@ -152,13 +152,14 @@
 - `src/kernel/ports.rs` 定义 `Log`（`info` / `warn` / `error`），业务只**调用**；文件、时间戳与目录机制在 `src/kernel/detail/file_log.rs`。
 - **唯一实例**：组合根创建一个 `FileLog` 并注入协调业务与呈现层；测试用 `NoopLog`。
 - **按运行分文件**：每次运行在根目录 `logs/` 下按时间戳建一个 `.log` 文件；`logs/` 不入库。一次运行的因果链在同一份文件里，排查不跨文件拼。
+- **时间戳取本机时区**：文件名与行首时刻都由 `clock` 机制给出（`src/kernel/detail/clock.rs` 的 `local_now`），不再按固定偏移折算。
 - **关键节点必须埋点**：通道降级、HTTP 失败、会话动作失败、装配失败、工具执行异常（端口在 `src/kernel/ports.rs`，机制在 `src/kernel/detail/file_log.rs`）。出问题时**看日志定因**，不靠推理猜。
 
 ## 五、机制分层（`mechanisms.yaml`）
 
 - 按**机制**归层，一个机制管一种机制：`contracts/<名>`（共享形状）、`domain/<名>`（纯逻辑）、`detail/<名>`（实现）、`ports`（全项目共享的出站面）。表在 `docs/kernel/mechanisms.yaml`，判据在 `tests/gates/structure/kernel-mechanisms.js`。
 - 三条硬判：盘上每个机制都要归层、表里的机制也要在盘上；依赖边只许指向严格更低层（**同层互依赖判红**）；声明层号 == 按现有依赖重算的层号。第四条是环：机制之间成环时只报环路径，不拿层号糊过去。
-- 当前 32 个机制、12 层，读到顶的顺序是 `detail/launch`（5）→ `detail/container`（6）→ `detail/acl`（7）→ `detail/ledger`（8）→ `detail/confine`（9）→ `detail/process`（10）→ `detail/session`（11）：越往上越是装配别人的机制。
+- 当前 33 个机制、12 层，读到顶的顺序是 `detail/launch`（5）→ `detail/container`（6）→ `detail/acl`（7）→ `detail/ledger`（8）→ `detail/confine`（9）→ `detail/process`（10）→ `detail/session`（11）：越往上越是装配别人的机制。
 - 围栏这一族按职责切成五个机制，每个只依赖下一层：`launch`（命令怎么起：PATH 解析、环境白名单、程序名改写）、`container`（容器身份与容器内拉起）、`acl`（逐路径改 DACL、读完整性标签）、`ledger`（授权台账与按条回收）、`confine`（编排：授权→执行→收尾，平台后端的策略判据）。
 - 动过一条边就 `node tests/gates/structure/kernel-mechanisms.js --write` 重算全表；不想抬层就消掉那条边。层级理由写在 diff 里，不在散文里。
 - 粒度区别：能力（`layers.yaml`）按业务用例切、可以互相调用对方的 `api`；机制（本表）没有业务语义、只许单向。机制不因调用方多就升格成能力。
