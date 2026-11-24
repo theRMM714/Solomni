@@ -25,13 +25,32 @@ const WORDMARK: [&str; 7] = [
     " ███   ███  █████  ███  █   █ █   █ █████",
 ];
 
-const HINT: &str = "Enter 发送 · Tab 补全 · Esc 清空 · Ctrl+U 清行 · ↑↓ 历史 · Ctrl+C 退出";
+/// 输入框下方提示行的打字部分；Ctrl+C 的含义随提示符不同，由 `hint_line` 接在后面。
+const HINT: &str = "Enter 发送 · Tab 补全 · Esc 清空 · Ctrl+U 清行 · ↑↓ 历史";
 
 /// 命令菜单打开时，↑↓ 与 Esc 的含义变了，提示行跟着换。
-const HINT_MENU: &str = "Enter 发送 · Tab 补全选中 · ↑↓ 选择 · Esc 收菜单 · Ctrl+C 退出";
+const HINT_MENU: &str = "Enter 发送 · Tab 补全选中 · ↑↓ 选择 · Esc 收菜单";
 
 /// 菜单最多画几行；再多就按选中项开窗，并提示还剩多少条。
 const MENU_ROWS: usize = 8;
+
+/// 目的：一次读行的结果：读到一行、输入到尽头（EOF），或用户按了 Ctrl+C。
+/// 约束：`Interrupt` 与 `Eof` 必须分开——前者是「这一问我不答了」，后者可能是「没人再答了」（两边的收场完全不同）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum Answer {
+    Line(String),
+    Eof,
+    Interrupt,
+}
+
+/// 目的：这条提示符上 Ctrl+C 的含义：一问一答按一下放弃、转录中心按一下退产品、会话里要连按两下才离开。
+/// 约束：只管提示行文案与按几下才认；认了之后做什么由各调用方决定（会话里「离开」≠「停止」）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Quit {
+    Ask,
+    Repl,
+    Session,
+}
 
 type Completer = fn(&str) -> Vec<String>;
 type MenuSource = fn(&str) -> Vec<MenuRow>;
@@ -43,7 +62,7 @@ thread_local! {
     #[cfg(test)]
     static CAPTURE: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
     #[cfg(test)]
-    static FEED: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+    static FEED: RefCell<Option<Vec<Answer>>> = const { RefCell::new(None) };
 }
 
 struct Ui {
@@ -210,13 +229,24 @@ pub(super) fn capture<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
 /// 目的：仅测试：按脚本喂输入行，ask 按顺序取走（取完之后回退到真实 stdin 的 EOF）。
 #[cfg(test)]
 pub(super) fn feed(lines: &[&str]) {
+    feed_answers(
+        lines
+            .iter()
+            .map(|s| Answer::Line(s.to_string()))
+            .collect::<Vec<_>>(),
+    );
+}
+
+/// 目的：仅测试：按脚本喂「答案」（含 Ctrl+C 与 EOF），用来钉住按键之外的收场分支。
+#[cfg(test)]
+pub(super) fn feed_answers(answers: Vec<Answer>) {
     FEED.with(|cell| {
-        *cell.borrow_mut() = Some(lines.iter().map(|s| s.to_string()).collect());
+        *cell.borrow_mut() = Some(answers);
     });
 }
 
 #[cfg(test)]
-fn feed_next() -> Option<String> {
+fn feed_next() -> Option<Answer> {
     FEED.with(|cell| {
         let mut queue = cell.borrow_mut();
         let queue = queue.as_mut()?;
@@ -333,67 +363,85 @@ pub(super) fn banner(tagline: &str, facts: &[String]) {
 }
 
 /// 目的：读一行输入；交互模式下用固定输入框，非交互模式保持逐行回退（机器可解析）。
+/// 参数：`kind` 决定 Ctrl+C 在这条提示符上**按几下**才算数（一问一答一下、会话里两下）。
 /// 约束：用例可以用 feed 脚本化喂输入（先于 stdin），主循环的分发因此能被真跑一遍。
-pub(super) fn ask(label: &str) -> Option<String> {
-    read_line(label, false)
+pub(super) fn ask(label: &str) -> Answer {
+    read_line(label, Quit::Ask)
 }
 
 /// 目的：转录中心主提示的读行：`/` 起头时在输入框下列出匹配命令（其它提示不弹菜单）。
-pub(super) fn ask_command(label: &str) -> Option<String> {
-    read_line(label, true)
+pub(super) fn ask_command(label: &str) -> Answer {
+    read_line(label, Quit::Repl)
 }
 
-fn read_line(label: &str, with_menu: bool) -> Option<String> {
+/// 目的：会话提示符的读行：Ctrl+C 要连按两下才认（会话还在后台跑，手滑不该把输入框关掉）。
+pub(super) fn ask_session(label: &str) -> Answer {
+    read_line(label, Quit::Session)
+}
+
+fn read_line(label: &str, kind: Quit) -> Answer {
+    // 输入框一开就丢掉工作期留下的那一下：那不是冲着这条提示符来的。
+    crate::presentation::signal::clear();
     #[cfg(test)]
-    if let Some(line) = feed_next() {
-        return Some(line);
+    if let Some(answer) = feed_next() {
+        return answer;
     }
     let (paint, tty, cols) = current();
     if !tty {
         return plain_ask(label);
     }
-    tty_ask(&paint, cols, label, &status_text(), with_menu)
+    tty_ask(&paint, cols, label, &status_text(), kind)
 }
 
-fn plain_ask(label: &str) -> Option<String> {
+fn plain_ask(label: &str) -> Answer {
     print!("{} ", label);
     let _ = io::stdout().flush();
     let mut line = String::new();
     match io::stdin().read_line(&mut line) {
-        Ok(0) | Err(_) => None,
-        Ok(_) => Some(line.trim().to_string()),
+        Ok(0) | Err(_) => Answer::Eof,
+        Ok(_) => Answer::Line(line.trim().to_string()),
     }
 }
 
-fn tty_ask(
-    paint: &Paint,
-    cols: usize,
-    label: &str,
-    status: &str,
-    with_menu: bool,
-) -> Option<String> {
+fn tty_ask(paint: &Paint, cols: usize, label: &str, status: &str, kind: Quit) -> Answer {
     if enable_raw_mode().is_err() {
         return plain_ask(label);
     }
+    let with_menu = kind == Quit::Repl;
     let mut out = io::stdout();
     let _ = execute!(out, Show);
-    let mut frame = Frame::new(paint, cols, label, status);
+    let mut frame = Frame::new(paint, cols, label, status, kind);
     let mut editor = Editor::new();
     let mut menu: Vec<MenuRow> = Vec::new();
     let mut sel = 0usize;
+    // Ctrl+C 的第一下：会话里只记着、不认（别的键会把它复位）。
+    let mut armed = false;
     // 上一帧菜单是按哪一行文字算出来的：只有文字变了才重算，否则 ↑↓ 的选择会被打回第一行。
     let mut asked = String::new();
     frame.show(&mut out, &editor, &menu, sel);
     let answer = loop {
         let ev = match event::read() {
             Ok(e) => e,
-            Err(_) => break None,
+            Err(_) => break Answer::Eof,
         };
         let step = match ev {
             Event::Key(key) if key.kind != KeyEventKind::Release => {
                 let Some(key) = translate(key) else {
                     continue;
                 };
+                if key == Key::Interrupt {
+                    if press_once(kind, &mut armed) {
+                        break Answer::Interrupt;
+                    }
+                    // 第一下：只把提示行换成「再按一次」，输入框照旧能用。
+                    frame.pressing = true;
+                    frame.show(&mut out, &editor, &menu, sel);
+                    continue;
+                }
+                if armed {
+                    armed = false;
+                    frame.pressing = false;
+                }
                 if menu.is_empty() {
                     match key {
                         Key::Tab => {
@@ -456,14 +504,14 @@ fn tty_ask(
                 asked.clear();
                 frame.show(&mut out, &editor, &menu, sel);
             }
-            Step::Submit => break Some(editor.commit()),
-            Step::Quit => break None,
+            Step::Submit => break Answer::Line(editor.commit()),
+            Step::Interrupt => break Answer::Interrupt,
         }
     };
     frame.erase(&mut out);
     let _ = disable_raw_mode();
     let _ = execute!(io::stdout(), Show, ResetColor);
-    if let Some(text) = &answer {
+    if let Answer::Line(text) = &answer {
         let echo = format!(
             "{} {}",
             paint.paint(Ink::Ice, "›"),
@@ -522,17 +570,29 @@ struct Frame<'a> {
     cols: usize,
     label: &'a str,
     status: &'a str,
+    /// 这条提示符上 Ctrl+C 的含义：决定提示行怎么说、要不要提示「再按一次」。
+    kind: Quit,
+    /// 会话里已经按过一下、正在等第二下：提示行换成确认语。
+    pressing: bool,
     ascii: bool,
     drawn: bool,
 }
 
 impl<'a> Frame<'a> {
-    fn new(paint: &'a Paint, cols: usize, label: &'a str, status: &'a str) -> Frame<'a> {
+    fn new(
+        paint: &'a Paint,
+        cols: usize,
+        label: &'a str,
+        status: &'a str,
+        kind: Quit,
+    ) -> Frame<'a> {
         Frame {
             paint,
             cols,
             label,
             status,
+            kind,
+            pressing: false,
             ascii: ascii(),
             drawn: false,
         }
@@ -614,8 +674,8 @@ impl<'a> Frame<'a> {
             let note = format!("  … 还有 {} 条，继续输入缩小范围", hidden);
             self.write_line(out, paint.paint(Ink::Dim, &width::cut(&note, total)));
         }
-        let hint = if menu.is_empty() { HINT } else { HINT_MENU };
-        self.write_line(out, paint.paint(Ink::Dim, &width::cut(hint, total)));
+        let hint = hint_line(self.kind, !menu.is_empty(), self.pressing);
+        self.write_line(out, paint.paint(Ink::Dim, &width::cut(&hint, total)));
         let status = paint.paint(Ink::Dim, &width::cut(self.status, total));
         let status = if self.ascii { fold(&status) } else { status };
         let _ = write!(out, "{}", status);
@@ -632,6 +692,37 @@ impl<'a> Frame<'a> {
         );
         let _ = out.flush();
     }
+}
+
+/// 目的：提示行的完整文案：打字快捷键 + 这条提示符上 Ctrl+C 的含义。
+/// 约束：`pressing` 为真时只留确认语——此时用户已经按过一下，最该看见的是「再按一次会怎样」。
+fn hint_line(kind: Quit, menu: bool, pressing: bool) -> String {
+    if pressing {
+        return match kind {
+            Quit::Session => "再按一次 Ctrl+C 离开会话（其它键继续）".to_string(),
+            _ => "再按一次 Ctrl+C 退出".to_string(),
+        };
+    }
+    let keys = if menu { HINT_MENU } else { HINT };
+    let quit = match kind {
+        Quit::Ask => "Ctrl+C 取消",
+        Quit::Repl => "Ctrl+C 退出",
+        Quit::Session => "Ctrl+C 两次离开会话",
+    };
+    format!("{} · {}", keys, quit)
+}
+
+/// 目的：这一次 Ctrl+C 算不算真的离开。
+/// 返回：`Session` 要连按两下才认；`armed` 由调用方在别的键上复位（打字就是「我还在」）。
+fn press_once(kind: Quit, armed: &mut bool) -> bool {
+    if kind != Quit::Session {
+        return true;
+    }
+    if *armed {
+        return true;
+    }
+    *armed = true;
+    false
 }
 
 /// 目的：菜单的可见窗口：一屏放得下就全画，放不下就以选中项为末行往上取一屏。
@@ -654,7 +745,7 @@ mod tests {
     fn frame_keeps_one_width_for_every_line() {
         let paint = Paint::new(Level::None);
         let status = "● 就绪 · 模型 deepseek-flash · 档位 host";
-        let mut frame = Frame::new(&paint, 80, "转录中心", status);
+        let mut frame = Frame::new(&paint, 80, "转录中心", status, Quit::Ask);
         let mut editor = Editor::new();
         for c in "把 CLI 前端重做一下".chars() {
             editor.key(Key::Char(c));
@@ -692,6 +783,8 @@ mod tests {
             cols: 40,
             label: "转录中心",
             status: "● 就绪 · 模型 deepseek-flash",
+            kind: Quit::Ask,
+            pressing: false,
             ascii: true,
             drawn: false,
         };
@@ -711,7 +804,13 @@ mod tests {
     #[test]
     fn long_label_is_cut_not_wrapped() {
         let paint = Paint::new(Level::None);
-        let mut frame = Frame::new(&paint, 40, "选哪一项（序号 / 选项 id；回车 = 先不答）", "");
+        let mut frame = Frame::new(
+            &paint,
+            40,
+            "选哪一项（序号 / 选项 id；回车 = 先不答）",
+            "",
+            Quit::Ask,
+        );
         let editor = Editor::new();
         let mut buf: Vec<u8> = Vec::new();
         frame.show(&mut buf, &editor, &[], 0);
@@ -724,7 +823,7 @@ mod tests {
     #[test]
     fn frame_draws_the_command_menu_under_the_box() {
         let paint = Paint::new(Level::None);
-        let mut frame = Frame::new(&paint, 80, "转录中心", "● 就绪");
+        let mut frame = Frame::new(&paint, 80, "转录中心", "● 就绪", Quit::Ask);
         let editor = Editor::new();
         let menu = vec![
             MenuRow {
@@ -751,7 +850,7 @@ mod tests {
     #[test]
     fn menu_window_keeps_the_selected_row_visible() {
         let paint = Paint::new(Level::None);
-        let mut frame = Frame::new(&paint, 80, "转录中心", "");
+        let mut frame = Frame::new(&paint, 80, "转录中心", "", Quit::Ask);
         let editor = Editor::new();
         let menu: Vec<MenuRow> = (0..12)
             .map(|i| MenuRow {
@@ -927,7 +1026,7 @@ mod tests {
     #[test]
     fn repeated_show_erases_the_previous_frame() {
         let paint = Paint::new(Level::None);
-        let mut frame = Frame::new(&paint, 60, "转录中心", "● 就绪");
+        let mut frame = Frame::new(&paint, 60, "转录中心", "● 就绪", Quit::Ask);
         let editor = Editor::new();
         let mut buf: Vec<u8> = Vec::new();
         frame.show(&mut buf, &editor, &[], 0);
@@ -940,6 +1039,57 @@ mod tests {
             2,
             "两帧都完整写过（旧帧先被擦掉再重画）"
         );
+    }
+
+    #[test]
+    fn a_single_press_leaves_a_one_shot_prompt() {
+        let mut armed = false;
+        assert!(press_once(Quit::Ask, &mut armed), "一问一答按一下就算数");
+        assert!(!armed, "一问一答不留记忆");
+        let mut armed = false;
+        assert!(press_once(Quit::Repl, &mut armed), "转录中心按一下退产品");
+    }
+
+    #[test]
+    fn a_session_needs_two_presses() {
+        let mut armed = false;
+        assert!(!press_once(Quit::Session, &mut armed), "会话里第一下只记着");
+        assert!(armed);
+        assert!(press_once(Quit::Session, &mut armed), "第二下才离开");
+    }
+
+    #[test]
+    fn other_keys_disarm_the_pending_press() {
+        let mut armed = false;
+        assert!(!press_once(Quit::Session, &mut armed));
+        // 调用方在「别的键」上复位；复位后再按又回到第一下。
+        armed = false;
+        assert!(
+            !press_once(Quit::Session, &mut armed),
+            "复位后重新从第一下算"
+        );
+    }
+
+    #[test]
+    fn hint_names_what_ctrl_c_does_at_this_prompt() {
+        assert!(hint_line(Quit::Ask, false, false).contains("Ctrl+C 取消"));
+        assert!(hint_line(Quit::Repl, false, false).contains("Ctrl+C 退出"));
+        assert!(hint_line(Quit::Session, false, false).contains("Ctrl+C 两次离开会话"));
+        assert!(
+            hint_line(Quit::Ask, false, false).contains("Enter 发送"),
+            "打字提示仍在"
+        );
+        assert!(
+            hint_line(Quit::Repl, true, false).contains("Esc 收菜单"),
+            "菜单开着换一套"
+        );
+    }
+
+    #[test]
+    fn a_pending_press_only_asks_for_confirmation() {
+        let hint = hint_line(Quit::Session, false, true);
+        assert!(hint.contains("再按一次"), "第一下之后提示确认：{hint}");
+        assert!(!hint.contains("Enter 发送"), "这会儿最该看见的是确认语");
     }
 
     #[test]

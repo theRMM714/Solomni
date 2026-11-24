@@ -1473,7 +1473,7 @@ fn web_serve_returns_when_interrupted() {
         s2.store(true, Ordering::SeqCst);
     });
     let started = Instant::now();
-    let r = web::serve_until(&ops, 0, &fence(), &stop);
+    let r = web::serve_until(&ops, 0, &fence(), &|| stop.load(Ordering::SeqCst));
     assert!(r.is_ok(), "{:?}", r);
     assert!(
         started.elapsed() < Duration::from_secs(10),

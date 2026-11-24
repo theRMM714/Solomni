@@ -286,7 +286,7 @@ fn editor_history_down_and_cancel_keys() {
     ed.key(cli::Key::Char('y'));
     assert_eq!(ed.key(cli::Key::KillLine), cli::Step::Edit);
     assert_eq!(ed.line(), "");
-    assert_eq!(ed.key(cli::Key::Interrupt), cli::Step::Quit);
+    assert_eq!(ed.key(cli::Key::Interrupt), cli::Step::Interrupt);
 }
 
 /// 列宽：中日韩字符占 2 格，截断不劈开宽字符并留省略号。

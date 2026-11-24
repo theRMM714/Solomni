@@ -85,6 +85,16 @@ pub fn run(
     system: &dyn System,
 ) -> CliExit {
     let interactive = term::init(plain, anim);
+    // 干活时没人读键盘，Ctrl+C 得由进程级处理器接住：第一次停这一轮，没人取走再按一次才放行默认终止。
+    if interactive && let Err(e) = crate::presentation::signal::install() {
+        term::line(&term::ink(
+            theme::Ink::Dim,
+            &format!(
+                "[提示] 装不上 Ctrl+C 处理器（{}）：Ctrl+C 会直接结束进程",
+                e
+            ),
+        ));
+    }
     term::set_completer(catalog::complete);
     term::set_menu(catalog::menu);
     if interactive {
@@ -118,8 +128,10 @@ pub fn run(
             print_menu(&faces);
         }
         let label = if interactive { "转录中心" } else { ">" };
-        let Some(line) = term::ask_command(label) else {
-            break;
+        // Ctrl+C 与 EOF 都离开主循环：交互模式下两者都是「不在键盘前 / 不想再敲」。
+        let line = match term::ask_command(label) {
+            term::Answer::Line(line) => line,
+            term::Answer::Interrupt | term::Answer::Eof => break,
         };
         let line = line.trim().to_string();
         if line.is_empty() {
@@ -209,11 +221,12 @@ impl boot::Ask for TerminalAsk {
 
     fn confirm(&mut self, question: &str) -> bool {
         match term::ask(question) {
-            Some(line) => matches!(
+            term::Answer::Line(line) => matches!(
                 line.trim().to_ascii_lowercase().as_str(),
                 "y" | "yes" | "是"
             ),
-            None => false,
+            // Ctrl+C / 输入到尽头都算没点头。
+            term::Answer::Eof | term::Answer::Interrupt => false,
         }
     }
 }
@@ -444,18 +457,28 @@ mod tests {
         drop(handle);
     }
 
-    /// 目的：前缀即类型——裸文本开一条核心代理会话，空行不离开，// 把斜杠还给消息，/leave 回顶层。
+    /// 目的：前缀即类型——裸文本开一条核心代理会话，空行不离开，// 把斜杠还给消息，Ctrl+C 离开会话回顶层。
     #[test]
     fn bare_text_starts_a_proxy_session_and_double_slash_escapes() {
         let (handle, faces) = crate::tests::ops_with(vec![], vec![]);
         let system = crate::tests::boot::Fake::default();
-        term::feed(&["你好", "", "//这一句以斜杠开头", "/leave", "/exit"]);
+        term::feed_answers(vec![
+            term::Answer::Line("你好".to_string()),
+            term::Answer::Line(String::new()),
+            term::Answer::Line("//这一句以斜杠开头".to_string()),
+            term::Answer::Interrupt,
+            term::Answer::Line("/exit".to_string()),
+        ]);
         let (exit, lines) =
             term::capture(|| run(faces, 49181, true, false, Startup::default(), &system));
         assert!(matches!(exit, CliExit::Exit), "只有 /exit 离开进程");
         assert!(
             lines.iter().any(|l| l.contains("空行不发送任何东西")),
             "空行只是提示，不再结束会话：{lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("已离开这条会话")),
+            "会话里 Ctrl+C 是离开提示符、不是退出产品：{lines:?}"
         );
         drop(handle);
     }

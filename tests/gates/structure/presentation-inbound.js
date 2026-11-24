@@ -2,7 +2,7 @@
  * 结构审查·呈现层入站面门禁：每屏只许取清单里登记过的能力单元，且同层不许互相依赖。
  * 规则：① 清单（docs/presentation/inbound.yaml）是每屏入站面的唯一权威，源码与清单**双向比对**：
  *        源码取了清单外的单元＝入站面外溢（要放行就改清单），清单登记了但源码没取＝清单过期；
- *       ② 呈现层内部只许向上取根（presentation.rs / faces.rs / cli.rs / web.rs），
+ *       ② 呈现层内部只许向上取根（presentation.rs / faces.rs / signal.rs / cli.rs / web.rs），
  *        兄弟文件之间不得互相引用（同层互依赖＝将来成环的入口）。
  * 零豁免：不读基线文件，违规集合非空即失败。
  */
@@ -14,10 +14,11 @@ const { parseInboundText } = require("../../lib/presentation.js");
 
 const MANIFEST = "docs/presentation/inbound.yaml";
 const SRC = "src/presentation";
-// 呈现层内部允许被任何一屏取用的根文件：渠道入口与面袋。
+// 呈现层内部允许被任何一屏取用的根文件：渠道入口、面袋，与两渠道共用的进程级 Ctrl+C。
 const ROOTS = new Set([
   "src/presentation.rs",
   "src/presentation/faces.rs",
+  "src/presentation/signal.rs",
   "src/presentation/cli.rs",
   "src/presentation/web.rs",
 ]);
