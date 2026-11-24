@@ -24,8 +24,7 @@ pub use crate::capabilities::conversation::session::domain::flow::{
 pub use crate::capabilities::conversation::session::domain::mechanism::PROXY_SEAT;
 #[allow(unused_imports)]
 pub use crate::capabilities::conversation::session::domain::mechanism::{
-    Mechanism, SEATS, Seat, face, flow_ids, mechanism_of, problems as mechanism_problems, resolve,
-    seat,
+    Mechanism, SEATS, Seat, flow_ids, mechanism_of, problems as mechanism_problems, seat,
 };
 // 流程工厂面：组合根把实现注入 turn / work，装配点只按 id 取段。
 pub use crate::capabilities::conversation::session::domain::flows::{
@@ -45,7 +44,9 @@ pub use crate::capabilities::conversation::session::domain::profile::{
 };
 // 工具面：机制席位 → 实际可调的工具（档位只管网络，不再逐工具裁剪）。
 #[allow(unused_imports)]
-pub use crate::capabilities::conversation::session::domain::assemble::face_tools;
+pub use crate::capabilities::conversation::session::domain::assemble::{
+    face_tools, resolve, seat_face,
+};
 #[allow(unused_imports)]
 pub use crate::capabilities::conversation::session::domain::persist::{
     PersistPolicy, SYSTEM_SID_SUGGEST, is_system_session, persist_policy_for,
@@ -59,9 +60,9 @@ pub use crate::capabilities::conversation::session::domain::session::{
     SessionParams, TurnRun, delta_visible, freshness_view, keep_whole_replies, stream_piece,
     summary_message, unique_work_name,
 };
+#[allow(unused_imports)]
 pub use crate::capabilities::conversation::session::domain::tools::{
-    CoreVerify, ModuleTools, ServiceOp, ShellLive, ShellSlot, ToolFace, last_shell,
-    service_ops_for_modules, tool_table,
+    CoreVerify, ServiceOp, ShellLive, ShellSlot, ToolFace, last_shell, service_ops_for_modules,
 };
 // 会话装配：参数对象与三个整场入口（加上只取工具面值的 `member_face`）。
 // `MemberTools`（工具面的活对象）**不经这里转出**：跨能力只传值结构（R16）。

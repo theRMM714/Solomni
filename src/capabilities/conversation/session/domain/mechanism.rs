@@ -1,13 +1,11 @@
 //! 目的：会话的**机制**声明——机制是回合的身份来源，席位是它底下的具体身份组，工具面按席位合成。
-//! 管：`Seat` / `Mechanism` 两种声明与 `MECHANISMS` / `SEATS` 两张表；按席位合成工具面（`face` / `resolve`）；
-//!   席位与系统工具总表的自洽断言（`problems`）。
-//! 不管：工具的声明与执行（在 `tools`）；流程怎么调度回合（在 `collab` / `turn`）。
-//! 联动：会话类型表（`profile`）引用机制 id；`turn` 的每回合身份与工具面都从这里取，`assemble` 按席位装配。
+//! 管：`Seat` / `Mechanism` 两种声明与 `MECHANISMS` / `SEATS` 两张表；席位与系统工具总表的自洽断言（`problems`）。
+//! 不管：工具面怎么合成与装配（在 `assemble`）；工具的声明与执行（在 `tools`）；流程怎么调度回合（在 `collab` / `turn`）。
+//! 联动：会话类型表（`profile`）引用机制 id；`turn` 的每回合席位从这里取，工具面交给 `assemble` 现拼。
 
-use crate::capabilities::tools::api::{
-    DELETE, EDIT, GREP, LIST, PATCH, READ, SHELL, ToolBook, ToolSchema, WRITE,
-};
-use crate::capabilities::workspace::api::WORK_TOOLS;
+use crate::capabilities::tools::api::ToolBook;
+
+use crate::capabilities::conversation::session::domain::assemble::seat_face;
 
 /// 目的：一个**席位**——机制里的具体身份组：发哪些工具、能不能写、能不能发布、带哪段提示词。
 /// 约束：`core` 的席位由核心通道出演（不进成员表），其余由成员会话出演；核心席不得授模块工具。
@@ -174,51 +172,6 @@ pub fn seat(id: &str) -> Option<&'static Seat> {
     SEATS.iter().find(|s| s.id == id)
 }
 
-/// 目的：一个席位这一回合的**工具面**（id 清单，按四源并集）：
-///   读面恒发（`read` / `list` / `grep` / `shell`）→ `write` 决定写面 → `publish` 决定发布面 → 机制动作。
-/// 约束：读面恒发是安全的——围栏只给私有沙箱写权，`shell` 也改不到共享区；真正能改共享区的只有 `work_*`。
-pub fn face(seat: &Seat) -> Vec<&'static str> {
-    let mut out: Vec<&'static str> = Vec::new();
-    let mut push = |id: &'static str| {
-        if !out.contains(&id) {
-            out.push(id);
-        }
-    };
-    for id in [READ, LIST, GREP, SHELL] {
-        push(id);
-    }
-    if seat.write {
-        for id in [WRITE, EDIT, PATCH, DELETE] {
-            push(id);
-        }
-    }
-    if seat.publish {
-        for id in WORK_TOOLS {
-            push(id);
-        }
-    }
-    for id in seat.tools {
-        push(id);
-    }
-    out
-}
-
-/// 目的：把席位的工具面逐项解析成工具声明（顺序即 `face` 的顺序）——装配与会话包装只用这一个口径。
-/// 错误：席位引用了总表里没有的工具（装配错误，如实报错，不静默跳过）。
-pub fn resolve<'a>(
-    seat: &Seat,
-    book: &'a ToolBook,
-) -> Result<Vec<(&'static str, &'a ToolSchema)>, String> {
-    let mut out = Vec::new();
-    for id in face(seat) {
-        let schema = book
-            .get(id)
-            .ok_or_else(|| format!("席位 {} 的工具面引用了总表里没有的工具：{}", seat.id, id))?;
-        out.push((id, schema));
-    }
-    Ok(out)
-}
-
 /// 目的：机制与席位声明同系统工具总表的自洽检查，空 = 一切正常。
 /// 约束：每条都是机械断言（由装配期与测试门禁消费）。
 ///   1) 席位 id 全局唯一、提示词非空；2) 机制 id 唯一、席位都在册、流程机制核心席与成员席都有、静止机制恰好一席；
@@ -244,7 +197,7 @@ pub fn problems(book: &ToolBook) -> Vec<String> {
                 s.id
             ));
         }
-        for id in face(s) {
+        for id in seat_face(s) {
             if !book.contains_key(id) {
                 out.push(format!(
                     "席位 {} 的工具面引用了不存在的系统工具：{}",
@@ -291,7 +244,7 @@ pub fn problems(book: &ToolBook) -> Vec<String> {
                     "动作 {} 的 callers 里有不认识的席位：{}（只能是席位 id 或 user / user:…）",
                     id, c
                 )),
-                Some(s) if !face(s).contains(&id.as_str()) => out.push(format!(
+                Some(s) if !seat_face(s).contains(&id.as_str()) => out.push(format!(
                     "动作 {} 的 callers 里有席位 {}，但它的工具面里没有这条动作",
                     id, c
                 )),
@@ -299,7 +252,7 @@ pub fn problems(book: &ToolBook) -> Vec<String> {
             }
         }
         for s in SEATS {
-            if face(s).contains(&id.as_str()) && !schema.callers.iter().any(|c| c == s.id) {
+            if seat_face(s).contains(&id.as_str()) && !schema.callers.iter().any(|c| c == s.id) {
                 out.push(format!(
                     "席位 {} 的工具面有 {}，但动作表里 {} 的 callers 没有它",
                     s.id, id, id

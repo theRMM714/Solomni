@@ -60,14 +60,38 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
         CollabEvent::of(e),
         Some(CollabEvent::Delivery { ok: true, .. })
     )));
-    // 同一份 agent 会话跨段复用：讨论段坐讨论席，进执行段后落盘席位必须换成执行席——
-    // 否则重建出来的节点回合仍拿讨论席的工具面（"想写文件却只有 read"就是这么来的）。
+    // 同一份 agent 会话跨段复用：讨论段坐讨论席，进执行段后落盘席位必须换成执行席，
+    // 且在世会话的工具面也得跟着换——节点回合按会话现坐的席位现拼面。
     let child = format!("{}--a", sid);
     let (meta, _) = core
         .history_handle()
         .load(&child)
         .expect("agent 会话的声明已落盘");
     assert_eq!(meta.spec.seat, "executor", "执行段子会话的席位");
+    // 只改落盘声明不够：活体会话若仍坐讨论席，节点回合就拿不到写面与发布面，
+    // 模型一个字节也写不下去（"每次想调用 write，实际发出的仍是 read"）。
+    let live = core
+        .turn
+        .sessions_iter()
+        .find(|(id, _)| id.as_str() == child)
+        .map(|(_, s)| s)
+        .expect("成员会话仍在世");
+    let crate::capabilities::turn::turn::api::Session::Single(agent) = live else {
+        panic!("成员会话应是单 agent 会话");
+    };
+    let face = &agent.tools.as_ref().expect("成员会话有工具环境").face;
+    assert_eq!(face.seat, "executor", "在世会话的席位");
+    assert!(
+        face.allowed.iter().any(|t| t == "work_commit"),
+        "执行席该拿到发布面：{:?}",
+        face.allowed
+    );
+    assert!(
+        face.allowed.iter().any(|t| t == "submit_report"),
+        "执行席该拿到回报工具：{:?}",
+        face.allowed
+    );
+    assert!(face.with_modules, "执行席该能用自己的模块工具");
     // 终结会话已被中心回收（再查询挂起状态应报无此会话）。
     assert!(core.turn.collab_pending(&sid).is_err());
 }
@@ -307,7 +331,7 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     // 机制声明把核心操作发给对应的核心席位（越权校验与工具面的判据都是它）。
     let face = |id: &str| -> Vec<String> {
         let seat = crate::capabilities::conversation::session::api::seat(id).expect("席位在册");
-        crate::capabilities::conversation::session::api::face(seat)
+        crate::capabilities::conversation::session::api::seat_face(seat)
             .into_iter()
             .map(|s| s.to_string())
             .collect()
@@ -388,6 +412,9 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         reply_seq: 0,
         line: Default::default(),
         handlers: Vec::new(),
+        // 核实环境不换席：模块表与提示词面只备空值。
+        modules: Vec::new(),
+        prompt: Arc::new(test_prompts()),
     };
     // 第一轮：先核实（read）；第二轮：交出 plan。
     let seen = Arc::new(Mutex::new(Vec::new()));

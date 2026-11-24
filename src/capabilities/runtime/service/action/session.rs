@@ -65,6 +65,7 @@ impl Handle {
                     self,
                     &created.session,
                     &spec.task,
+                    None,
                 );
             }
         }

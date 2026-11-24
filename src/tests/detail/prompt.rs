@@ -8,7 +8,7 @@ use super::*;
 /// 这一份面同时喂三处：回合注入的工具块、原生声明槽、越权校验——所以判据只有它一个。
 #[test]
 fn a_seat_face_comes_from_the_mechanism_declaration() {
-    use crate::capabilities::conversation::session::api::{face, resolve, seat};
+    use crate::capabilities::conversation::session::api::{resolve, seat, seat_face};
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let st = YamlSystools::new(root.join("systools"))
         .load()
@@ -56,7 +56,7 @@ fn a_seat_face_comes_from_the_mechanism_declaration() {
     );
     assert!(seat("不存在的席位").is_none(), "未知席位要如实查不到");
     assert!(
-        face(seat("solo").expect("单席在册")).contains(&"read"),
+        seat_face(seat("solo").expect("单席在册")).contains(&"read"),
         "单席该恒有沙箱面的读工具"
     );
     // 单 agent 工作（solo）与任务链执行席（executor）差在**回报工具**：回报只有节点子会话有消费者。
@@ -121,7 +121,7 @@ fn system_tools_and_mechanism_faces_are_self_consistent() {
     );
     // 越权判据只有一处：**这一回合的工具面**（机制按席位合成），给了的放行、没给的不放行。
     let has = |id: &str, tool: &str| {
-        crate::capabilities::conversation::session::api::face(seat(id).expect("席位在册"))
+        crate::capabilities::conversation::session::api::seat_face(seat(id).expect("席位在册"))
             .contains(&tool)
     };
     assert!(has("discussant", "read"), "讨论席该能读");

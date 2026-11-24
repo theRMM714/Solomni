@@ -90,6 +90,7 @@ impl CollabSession {
                 tools_this_turn: self
                     .prompts
                     .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn),
+                prompt: Arc::clone(&self.prompts),
                 llm: Arc::clone(&self.llm),
                 log: Arc::clone(&self.log),
                 tools: Arc::clone(&self.tools),

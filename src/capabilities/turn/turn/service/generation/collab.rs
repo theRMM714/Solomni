@@ -246,8 +246,8 @@ pub(crate) fn collab_generation<H: TurnHost>(
         }
     }
     // 派发：每个就绪节点在**它自己的子会话**里起一轮生成（脱离本次调用，不等它跑完）。
-    for (_node, child, objective, _seat) in todo {
-        super::spawn_detached_node(host, &child, &objective);
+    for (_node, child, objective, seat) in todo {
+        super::spawn_detached_node(host, &child, &objective, seat.as_deref());
     }
     Ok(Advance { head: seq })
 }

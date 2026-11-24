@@ -47,19 +47,11 @@ pub(crate) fn run_member_turn<H: TurnHost>(
     let identity = req.identity.clone();
     let round = req.round;
     let turn_id = req.turn_id;
-    // 这一回合的工具面**由机制按席位合成**（讨论席：机制动词 + 沙箱面）。
+    // 这一回合坐的席位：**席位是回合的值**，工具面由会话在换席时现拼（讨论席：机制动词 + 沙箱面）。
     let seat_in = req.seat.clone();
-    let face = {
-        let seat = crate::capabilities::conversation::session::api::seat(&seat_in)
-            .ok_or_else(|| format!("席位没登记：{}", seat_in))?;
-        (
-            crate::capabilities::conversation::session::api::face(seat)
-                .into_iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>(),
-            seat.module_tools,
-        )
-    };
+    if crate::capabilities::conversation::session::api::seat(&seat_in).is_none() {
+        return Err(format!("席位没登记：{}", seat_in));
+    }
     // 子会话自己的**权威行**（逐轮）与**运行态收尾**都走它自己的事件台，
     // 并且**边产边落盘**：这个会话不经过主会话那条 sink，落盘手柄随线程带过去。
     let persister = host.core({
@@ -98,9 +90,9 @@ pub(crate) fn run_member_turn<H: TurnHost>(
                     );
                 }
             };
-            // 这一回合：身份块（现渲染）+ 本回合工具面 + 该会话的**对话** + 开场/轮转词 + 表态。
+            // 这一回合：身份块（现渲染）+ 本回合席位（工具面由它现拼）+ 该会话的**对话** + 开场/轮转词 + 表态。
             let ran = s.discussion_turn(
-                &identity, &seat_in, face, turn, turn_id, round, &io, &cancel, &mut emit, &mut sink,
+                &identity, &seat_in, turn, turn_id, round, &io, &cancel, &mut emit, &mut sink,
             );
             (s, ran)
         })

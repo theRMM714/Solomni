@@ -31,11 +31,15 @@ pub(crate) fn node_generation<H: TurnHost>(
     host: &H,
     child: &str,
     objective: &str,
+    seat: Option<&str>,
 ) -> Result<Advance, String> {
     host.ensure_guest(child)?;
     let prepared = host.core_env({
         let (child, objective) = (child.to_string(), objective.to_string());
-        move |turn, registry, probe| turn.prepare_node(&child, &objective, registry, probe)
+        let seat = seat.map(str::to_string);
+        move |turn, registry, probe| {
+            turn.prepare_node(&child, &objective, seat.as_deref(), registry, probe)
+        }
     })?;
     run_prepared(host, child, prepared, None)
 }

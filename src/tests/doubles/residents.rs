@@ -297,6 +297,9 @@ pub(crate) fn member_with_service_tools(
         reply_seq: 0,
         line: Default::default(),
         handlers: Vec::new(),
+        // 替身不换席：模块表与提示词面只备空值（换席另有专门用例走真装配机）。
+        modules: Vec::new(),
+        prompt: Arc::new(test_prompts()),
     }
 }
 

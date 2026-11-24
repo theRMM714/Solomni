@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::capabilities::catalog::registry::api::Registry;
 use crate::capabilities::conversation::session::api::{
-    AgentSession, Flow, Gates, RunState, SessionEvent, subtree_of,
+    AgentSession, Flow, Gates, RunState, SessionEvent, seat as seat_of, subtree_of,
 };
 use crate::capabilities::turn::turn::api::{Prepared, Session};
 use crate::kernel::ports::HostProbe;
@@ -126,6 +126,7 @@ impl Turn {
         &mut self,
         child: &str,
         objective: &str,
+        seat: Option<&str>,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
     ) -> Result<Prepared, String> {
@@ -142,6 +143,15 @@ impl Turn {
         let mut session = self.take_single(child)?;
         self.refresh_context_budget(registry, &mut session);
         session.set_thinking(llm.thinking.clone());
+        // 席位是**回合的值**：节点要坐的那一席由流程给（None = 会话自己的静止席位）。
+        // 先换席位再渲染身份——身份块按席位现取（与工具面同源），反过来会拿上一席的身份干活。
+        let seat = seat
+            .map(str::to_string)
+            .unwrap_or_else(|| session.seat().to_string());
+        if seat_of(&seat).is_none() {
+            return Err(format!("会话 {} 的席位没登记：{}", child, seat));
+        }
+        session.enter_seat(&seat);
         let identity = session
             .params()
             .identity(&*self.prompt, session.tool_mode());

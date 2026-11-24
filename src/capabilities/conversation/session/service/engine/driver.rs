@@ -191,7 +191,7 @@ impl AgentSession {
     }
 
     /// 目的：讨论席的一个**成员回合**：与单 agent / 节点**同一条轮循环**（见 TurnRun），
-    ///   差别只有三样：身份块、这一回合的工具面（席位面合成）、本回合提示；外加认协作表态（动词）。
+    ///   差别只有三样：身份块、这一回合的席位（工具面由它现拼）、本回合提示；外加认协作表态（动词）。
     ///   产出落进**本会话**（这是它在这场工作里的经历）：回合标记（系统行）+ 逐轮的权威行；
     ///   返回这一回合的结论（表态 / 正文 / 思维链）交主会话收下（核实行留在它自己的会话里）。
     #[allow(clippy::too_many_arguments)]
@@ -199,7 +199,6 @@ impl AgentSession {
         &mut self,
         identity: &str,
         seat: &str,
-        face: (Vec<String>, bool),
         turn: Vec<Msg>,
         turn_id: u64,
         round: usize,
@@ -216,7 +215,6 @@ impl AgentSession {
         let spec = TurnRun {
             identity,
             seat,
-            face,
             turn,
             verbs: true,
             turn_id: Some(turn_id),
@@ -273,7 +271,7 @@ impl AgentSession {
     }
 }
 
-/// 单 agent / 节点的一回合：**同一条轮循环**（见 TurnRun），工具面就是会话自己装好的那一份（执行席）。
+/// 单 agent / 节点的一回合：**同一条轮循环**（见 TurnRun），席位就是会话当前坐的那一席。
 /// 讨论席的成员回合（`discussion_turn`）只是换了 TurnRun 的几个参数——没有第二条循环。
 fn rounds_events(
     s: &mut AgentSession,
@@ -283,17 +281,11 @@ fn rounds_events(
     emit: &mut dyn FnMut(SessionEvent),
     sink: &mut dyn FnMut(SessionEvent),
 ) {
-    // 会话自己的面与席位原样传回去（没有工具环境就是空面）：换与还原因此对任何回合都是同一个动作。
-    let face = s
-        .tools
-        .as_ref()
-        .map(|t| (t.face.allowed.clone(), t.face.with_modules))
-        .unwrap_or_default();
+    // 会话当前坐的席位原样传回去：换与还原因此对任何回合都是同一个动作。
     let seat = s.seat().to_string();
     let spec = TurnRun {
         identity,
         seat: &seat,
-        face,
         turn: Vec::new(),
         verbs: false,
         turn_id: None,
@@ -513,16 +505,10 @@ fn run(
 ) -> Vec<Round> {
     let label = s.id.clone();
     let llm = io.llm.clone();
-    // 本回合的工具面与身份：**按回合一起换**。同一个会话会用两种身份干活（说话 / 干活），只换面不换身份
-    // 会让提示词还停在上一席；装进这一回合的环境（声明与执行都读它），跑完一并还原。
-    let saved_face = s.tools.as_mut().map(|t| {
-        (
-            std::mem::replace(&mut t.face.allowed, spec.face.0.clone()),
-            std::mem::replace(&mut t.face.with_modules, spec.face.1),
-        )
-    });
+    // 本回合的身份与工具面：**按席位一起换**。同一个会话会用两种身份干活（说话 / 干活），只换面不换身份
+    // 会让提示词还停在上一席；`enter_seat` 让会话的装配机现拼这一席（声明与执行都读它），跑完一并还原。
     let saved_seat = s.seat().to_string();
-    s.set_seat(spec.seat);
+    s.enter_seat(spec.seat);
     // 两个回调（流式分片 / 工具完成）都要外送短暂事件：把 emit 借出来共享（顺序因此天然正确）。
     let emit = std::cell::RefCell::new(emit);
     let mut acc = String::new();
@@ -579,10 +565,6 @@ fn run(
             spec.verbs,
         )
     };
-    if let (Some(t), Some((allowed, with_modules))) = (s.tools.as_mut(), saved_face) {
-        t.face.allowed = allowed;
-        t.face.with_modules = with_modules;
-    }
-    s.set_seat(&saved_seat);
+    s.enter_seat(&saved_seat);
     rounds
 }
