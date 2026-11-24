@@ -122,7 +122,14 @@ const SOLO: Seat = Seat {
 };
 
 /// 目的：全部席位的唯一定义处（席位 id 全局唯一：机制只引用 id，不复制声明）。
-pub const SEATS: &[Seat] = &[CORE_PROXY, DISCUSSANT, PLANNER, ORCHESTRATOR, EXECUTOR, SOLO];
+pub const SEATS: &[Seat] = &[
+    CORE_PROXY,
+    DISCUSSANT,
+    PLANNER,
+    ORCHESTRATOR,
+    EXECUTOR,
+    SOLO,
+];
 
 /// 目的：代理式会话坐的那一席（没有流程的会话按静止机制解析，桥接与测试造代理会话时直接用它）。
 #[cfg(test)]
@@ -187,7 +194,7 @@ pub fn face(seat: &Seat) -> Vec<&'static str> {
     }
     if seat.publish {
         for id in WORK_TOOLS {
-            push(*id);
+            push(id);
         }
     }
     for id in seat.tools {
@@ -204,9 +211,9 @@ pub fn resolve<'a>(
 ) -> Result<Vec<(&'static str, &'a ToolSchema)>, String> {
     let mut out = Vec::new();
     for id in face(seat) {
-        let schema = book.get(id).ok_or_else(|| {
-            format!("席位 {} 的工具面引用了总表里没有的工具：{}", seat.id, id)
-        })?;
+        let schema = book
+            .get(id)
+            .ok_or_else(|| format!("席位 {} 的工具面引用了总表里没有的工具：{}", seat.id, id))?;
         out.push((id, schema));
     }
     Ok(out)
@@ -232,11 +239,17 @@ pub fn problems(book: &ToolBook) -> Vec<String> {
             out.push(format!("席位 {} 是核心席，不得授模块工具", s.id));
         }
         if s.publish && !s.write {
-            out.push(format!("席位 {} 能发布却不能写：发布要先能写自己的沙箱", s.id));
+            out.push(format!(
+                "席位 {} 能发布却不能写：发布要先能写自己的沙箱",
+                s.id
+            ));
         }
         for id in face(s) {
             if !book.contains_key(id) {
-                out.push(format!("席位 {} 的工具面引用了不存在的系统工具：{}", s.id, id));
+                out.push(format!(
+                    "席位 {} 的工具面引用了不存在的系统工具：{}",
+                    s.id, id
+                ));
             }
         }
     }
@@ -262,7 +275,10 @@ pub fn problems(book: &ToolBook) -> Vec<String> {
             out.push(format!("流程机制 {} 要同时有核心席与成员席", m.id));
         }
         if !m.flow && m.seats.len() != 1 {
-            out.push(format!("静止机制 {} 只能有一个席位（它是没有流程的会话的静止身份）", m.id));
+            out.push(format!(
+                "静止机制 {} 只能有一个席位（它是没有流程的会话的静止身份）",
+                m.id
+            ));
         }
     }
     for (id, schema) in book {

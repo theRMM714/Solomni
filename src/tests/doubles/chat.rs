@@ -187,7 +187,7 @@ pub(crate) fn test_prompts() -> Prompts {
         .expect("内置提示词册必须合法")
 }
 
-/// 目的：测试用工具总表与角色表（走**与产品同一条**装配路径）。它与提示词册**分开**装配：两者互不依赖（见 capabilities/prompt 的 Prompts）。测试用的**会话历史面**（与生产同一条路：端口装进 `SessionService`）。
+/// 目的：测试用工具总表与机制席位（走**与产品同一条**装配路径）。它与提示词册**分开**装配：两者互不依赖（见 capabilities/prompt 的 Prompts）。测试用的**会话历史面**（与生产同一条路：端口装进 `SessionService`）。
 pub(crate) fn test_history()
 -> Arc<dyn crate::capabilities::conversation::session::api::History + Send + Sync> {
     test_history_of(Arc::new(InMemoryHistory::new()))

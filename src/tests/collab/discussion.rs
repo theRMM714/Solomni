@@ -1,5 +1,5 @@
 //! 目的：钉讨论泵与发言规则：表态、退场、自裁、提醒与回合上限。
-//! 管：成员先核实再发言、按角色表校验工具面、拿不到模块工具、逐轮定稿与回档同口径、无信封原文不算表态。
+//! 管：成员先核实再发言、按机制席位校验工具面、拿不到模块工具、逐轮定稿与回档同口径、无信封原文不算表态。
 //! 不管：协作状态派生/回档（state.rs）与端到端五阶段（flow.rs）。
 //! 联动：src/capabilities/collab/、docs/session/session-model.md、tests/doubles。
 
@@ -164,7 +164,7 @@ pub(crate) fn discussion_member_can_inspect_before_speaking() {
     );
 }
 
-/// 目的：讨论回合**按角色表校验**：面里没有的内置工具（write）被如实拒绝，不当表态吸收。
+/// 目的：讨论回合**按机制席位校验**：面里没有的内置工具（write）被如实拒绝，不当表态吸收。
 #[test]
 pub(crate) fn discussion_member_cannot_call_a_builtin_outside_its_seat_face() {
     let mut member = BTreeMap::new();
@@ -206,7 +206,7 @@ pub(crate) fn discussion_member_cannot_call_a_builtin_outside_its_seat_face() {
     assert!(
         events.iter().any(|e| matches!(e, SessionEvent::Notice(n)
             if n.contains("[越权]") && n.contains("write"))),
-        "角色表没发给讨论席的工具该被如实拒绝：{:?}",
+        "机制席位没发给讨论席的工具该被如实拒绝：{:?}",
         events
     );
 }

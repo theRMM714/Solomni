@@ -11,7 +11,6 @@ use crate::capabilities::conversation::session::api::{Gate, GateTicket, MemberTu
 use crate::capabilities::llm::api::{CompleteOpts, Msg};
 use crate::capabilities::workspace::api::Sandboxes;
 
-
 /// 目的：流程让出的那一步——请驱动取某个成员会话跑一回合。
 /// 约束：流程**不自己调模型**（它拿不到别的会话）；这里只交出「问谁、带什么、按什么参数」。
 pub struct MemberAsk {

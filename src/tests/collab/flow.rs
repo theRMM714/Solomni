@@ -60,6 +60,14 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
         CollabEvent::of(e),
         Some(CollabEvent::Delivery { ok: true, .. })
     )));
+    // 同一份 agent 会话跨段复用：讨论段坐讨论席，进执行段后落盘席位必须换成执行席——
+    // 否则重建出来的节点回合仍拿讨论席的工具面（"想写文件却只有 read"就是这么来的）。
+    let child = format!("{}--a", sid);
+    let (meta, _) = core
+        .history_handle()
+        .load(&child)
+        .expect("agent 会话的声明已落盘");
+    assert_eq!(meta.spec.seat, "executor", "执行段子会话的席位");
     // 终结会话已被中心回收（再查询挂起状态应报无此会话）。
     assert!(core.turn.collab_pending(&sid).is_err());
 }

@@ -157,7 +157,7 @@ fn guest_diagnose_is_user_only_in_the_catalog() {
     let cat = faces.actions.catalog(&role, None).expect("动作目录");
     assert!(
         !cat.iter().any(|a| a.id == "guest_diagnose"),
-        "角色面不该列出诊断动作"
+        "席位面不该列出诊断动作"
     );
     let err = faces
         .actions

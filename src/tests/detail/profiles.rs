@@ -1,7 +1,7 @@
 //! 目的：会话类型表的装载契约：产品自带的那份要合法，缺文件与坏规则都如实报。
 //! 管：`YamlProfiles::load` 的正反用例；表本身就是 product 的 `systools/profiles.yaml`。
 //! 不管：校验规则逐条（在 `session/domain/profile.rs` 的内联用例）。
-//! 联动：隔离根 `tests::scratch`；角色表从 `YamlSystools` 读。
+//! 联动：隔离根 `tests::scratch`；机制席位从 `YamlSystools` 读。
 
 use super::*;
 
@@ -19,7 +19,11 @@ fn the_shipped_table_covers_the_three_modes_and_its_roles_exist() {
         .expect("读工具总表");
     // 会话类型表在装载时就校验了机制与流程；这里再锁一遍席位面与工具总表的一致性。
     let problems = crate::capabilities::conversation::session::api::mechanism_problems(&st.tools);
-    assert!(problems.is_empty(), "机制面与系统工具总表不一致：{:?}", problems);
+    assert!(
+        problems.is_empty(),
+        "机制面与系统工具总表不一致：{:?}",
+        problems
+    );
 }
 
 #[test]

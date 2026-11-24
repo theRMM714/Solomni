@@ -100,8 +100,7 @@ pub(crate) fn run_member_turn<H: TurnHost>(
             };
             // 这一回合：身份块（现渲染）+ 本回合工具面 + 该会话的**对话** + 开场/轮转词 + 表态。
             let ran = s.discussion_turn(
-                &identity, &seat_in, face, turn, turn_id, round, &io, &cancel, &mut emit,
-                &mut sink,
+                &identity, &seat_in, face, turn, turn_id, round, &io, &cancel, &mut emit, &mut sink,
             );
             (s, ran)
         })

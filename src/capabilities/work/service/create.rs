@@ -138,13 +138,11 @@ impl Work {
     ) -> Result<(PreparedWork, Option<GuestBoot>), String> {
         let host: &dyn HostProbe = probe.as_ref();
         validate_work_name(&spec.name)?;
-        // 选中的会话类型在这里**解析成声明**：后面所有分岔只看声明（流程 / 角色），不看名字。
+        // 选中的会话类型在这里**解析成声明**：后面所有分岔只看声明（流程 / 席位），不看名字。
         // 临时拼装（内联 flows）不走预设：过一遍白名单校验后，就地折成声明。
         let decl = match spec.flows.as_ref() {
             Some(flows) => {
-                self.flows
-                    .book()
-                    .check_inline(flows)?;
+                self.flows.book().check_inline(flows)?;
                 crate::capabilities::conversation::session::api::inline_spec(flows.clone())
             }
             None => self.flows.book().spec_of(&spec.kind).ok_or_else(|| {

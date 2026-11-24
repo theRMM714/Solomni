@@ -83,7 +83,7 @@ pub(crate) fn member_with_tools(
                 module_env: Default::default(),
                 runtime_path: None,
                 runtime_roots: Vec::new(),
-                // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
+                // 测试替身按"执行席"发放全部内置工具（机制席位的越权校验另有专门用例）。
                 allowed: crate::capabilities::tools::api::names(),
                 with_modules: true,
                 notes: crate::tests::doubles::test_notes(&test_sandbox("m0", &[]), &[]),

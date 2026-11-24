@@ -70,7 +70,7 @@ pub trait LogOps: Send + Sync {
 pub enum Caller {
     /// 目的：人经呈现层（CLI / Web）调用。
     User,
-    /// 目的：会话里的某个身份（模型经工具调用发起）：角色 id + 它所在的工作与会话。
+    /// 目的：会话里的某个身份（模型经工具调用发起）：席位 id + 它所在的工作与会话。
     Role {
         role: String,
         work: String,

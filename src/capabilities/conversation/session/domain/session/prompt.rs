@@ -1,5 +1,5 @@
 //! 目的：会话的系统提示拼装：身份块、工具面、本回合提示、表态约定与回合号。
-//! 管：agent 身份与角色身份两条入口共用一份装配；模块提示与回合参数的类型也在这里。
+//! 管：agent 身份与席位身份两条入口共用一份装配；模块提示与回合参数的类型也在这里。
 //! 不管：会话状态与转录（`domain/session.rs`）、提示词模板与落盘（`prompt` 能力）。
 //! 联动：`domain/session.rs` 重导出，`api.rs` 对外给呈现层；模板在 `capabilities/prompt`。
 
@@ -14,7 +14,7 @@ pub fn agent_system(
     modules: &[ModulePrompt],
     env: &str,
     mode: crate::capabilities::llm::api::ToolMode,
-    role: &str,
+    seat: &str,
 ) -> String {
     render_system(
         prompt,
@@ -24,24 +24,24 @@ pub fn agent_system(
         modules,
         env,
         mode,
-        role,
+        seat,
     )
 }
 
-/// 目的：**角色身份块**（不是 agent 的核心身份）：渲染角色提示词段 + 环境 + 调用约定。 代理会话（core_proxy）用它：它的身份是角色提示词（`prompts/roles/core_proxy.yaml`）， 不是"某个 agent 的模块能力包"；机制 / 环境 / 调用约定与 agent 身份同一份口径。
+/// 目的：**席位身份块**（不是 agent 的核心身份）：渲染席位提示词段 + 环境 + 调用约定。 代理会话（core_proxy）用它：它的身份是席位提示词（`prompts/roles/core_proxy.yaml`）， 不是"某个 agent 的模块能力包"；机制 / 环境 / 调用约定与 agent 身份同一份口径。
 #[allow(clippy::too_many_arguments)]
-pub fn role_system(
+pub fn seat_system(
     prompt: &dyn crate::capabilities::prompt::api::Prompt,
     segment: crate::capabilities::prompt::api::Segment,
     agent: &str,
     env: &str,
     mode: crate::capabilities::llm::api::ToolMode,
-    role: &str,
+    seat: &str,
 ) -> String {
-    render_system(prompt, segment, agent, "", &[], env, mode, role)
+    render_system(prompt, segment, agent, "", &[], env, mode, seat)
 }
 
-/// 两处身份（agent / 角色）**共用这一份装配**：模板不同，变量与取值口径完全相同——
+/// 两处身份（agent / 席位）**共用这一份装配**：模板不同，变量与取值口径完全相同——
 /// 各写一份必然漂移。
 #[allow(clippy::too_many_arguments)]
 fn render_system(
@@ -129,8 +129,8 @@ pub struct SessionParams {
     pub chara: String,
     /// 目的：模块能力包：id + 能力摘要 + 工具用法（顺序即装配顺序）。
     pub modules: Vec<ModulePrompt>,
-    /// 目的：**角色提示词段**：`None` = 普通 agent（模块能力包 + `AgentSystem`）； `Some(seg)` = 不是 agent 的核心身份（代理这类），身份块渲染 `seg` 那一段角色提示词。 存段名而不是渲染好的文本：身份块**每回合现渲染**（册子一改，下一次调用就生效）。
-    pub role_system: Option<crate::capabilities::prompt::api::Segment>,
+    /// 目的：**席位提示词段**：`None` = 普通 agent（模块能力包 + `AgentSystem`）； `Some(seg)` = 不是 agent 的核心身份（代理这类），身份块渲染 `seg` 那一段席位提示词。 存段名而不是渲染好的文本：身份块**每回合现渲染**（册子一改，下一次调用就生效）。
+    pub seat_system: Option<crate::capabilities::prompt::api::Segment>,
     /// 目的：这一席的**席位**（solo / executor / discussant / core_proxy…）：机制册按它取说明，工具面也按席位发。
     ///   约束：这是「当前坐的席位」——流程换席时驱动随回合换它、跑完还原（`TurnRun.seat`）。
     pub seat: String,
@@ -161,7 +161,7 @@ impl SessionParams {
                     system: m.manifest.system.clone(),
                 })
                 .collect(),
-            role_system: None,
+            seat_system: None,
             seat: seat.to_string(),
             guest: None,
         }
@@ -218,9 +218,9 @@ impl SessionParams {
         mode: crate::capabilities::llm::api::ToolMode,
     ) -> String {
         let env = env_block(prompt, self);
-        match self.role_system {
-            // 角色身份（代理这类不是 agent 的核心）：同一份机制 / 环境 / 调用约定口径。
-            Some(seg) => role_system(prompt, seg, &self.agent, &env, mode, &self.seat),
+        match self.seat_system {
+            // 席位身份（代理这类不是 agent 的核心）：同一份机制 / 环境 / 调用约定口径。
+            Some(seg) => seat_system(prompt, seg, &self.agent, &env, mode, &self.seat),
             None => agent_system(
                 prompt,
                 &self.agent,

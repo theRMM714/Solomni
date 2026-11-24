@@ -1,5 +1,5 @@
-//! 目的：随包提示词书与角色表的自洽与加载契约。
-//! 管：角色面、目录保留名、系统工具与角色一致性、会话种类与机制书、`YamlPrompts` 的缺文件与坏文件。
+//! 目的：随包提示词书与机制席位的自洽与加载契约。
+//! 管：席位面、目录保留名、系统工具与机制席位的自洽、会话种类与机制书、`YamlPrompts` 的缺文件与坏文件。
 //! 不管：提示词渲染（见 src/tests/prompt.rs）。
 //! 联动：隔离根 `tests::scratch`。
 
@@ -159,7 +159,11 @@ fn mechanism_book_covers_every_seat_in_play() {
     for m in &prompts.core.mechanisms {
         assert!(!m.seats.is_empty(), "一条机制至少要有一个适用席位");
         for r in &m.seats {
-            assert!(role_ids.contains(&r.as_str()), "适用席位没在机制声明里：{}", r);
+            assert!(
+                role_ids.contains(&r.as_str()),
+                "适用席位没在机制声明里：{}",
+                r
+            );
         }
     }
     for role in ["solo", "discussant", "executor", "core_proxy"] {

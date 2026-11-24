@@ -254,7 +254,7 @@ fn module_tools_are_actions_users_can_run_directly() {
         _ => panic!("模块工具该给结构化结果"),
     }
 
-    // 角色不能从这个入口调：会话里的模块工具走成员循环（那条路由角色面授权）。
+    // 席位不能从这个入口调：会话里的模块工具走成员循环（那条路由席位面授权）。
     let err = faces
         .actions
         .act(ActionCall {
@@ -305,7 +305,7 @@ fn registry_actions_are_user_only_and_go_through_the_dispatcher() {
         "动作面把 chara 交给登记处"
     );
 
-    // 角色不能调登记处动作：供应商 / 密钥类是产品级资源，默认只给人。
+    // 席位不能调登记处动作：供应商 / 密钥类是产品级资源，默认只给人。
     let role = Caller::Role {
         role: "core_proxy".to_string(),
         work: "w".to_string(),
@@ -321,7 +321,7 @@ fn registry_actions_are_user_only_and_go_through_the_dispatcher() {
         })
         .unwrap_err();
     assert!(err.contains("不接受这个调用者"), "{}", err);
-    // 目录里对角色也不列出它们。
+    // 目录里对席位也不列出它们。
     let cat = faces.actions.catalog(&role, None).expect("动作目录");
     assert!(
         !cat.iter()

@@ -1,6 +1,6 @@
 //! 目的：提示词册的装配输入——prompts/ 目录加载成 Prompts（只有提示词文本）。
 //! 管：实现 ports::PromptSource；读目录与 yaml；缺目录 / 缺文件如实报装配错误。
-//! 不管：工具总表与角色表（在 capabilities/tools/detail）；渲染与 `@` 引用改写（在 domain）。
+//! 不管：工具总表与机制席位（在 capabilities/tools/detail）；渲染与 `@` 引用改写（在 domain）。
 //! 联动：实现 prompt/ports.rs 的 PromptSource，由组合根装配；加载结果交 service::load。
 
 use crate::capabilities::prompt::domain::prompt::{Prompts, merge_book};
