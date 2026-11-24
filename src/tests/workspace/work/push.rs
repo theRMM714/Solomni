@@ -3,7 +3,6 @@
 //! 不管：状态视图（`work/status.rs`）、冲突解法（`work/sync.rs`）。
 //! 联动：`docs/storage/README.md`。
 
-
 use crate::tests::workspace::support::*;
 
 /// 目的：自动提交是**存档**——它把沙箱改动记进该 agent 的存档线，共享区与主线一个字都不动。

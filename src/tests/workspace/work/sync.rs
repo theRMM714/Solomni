@@ -3,7 +3,6 @@
 //! 不管：提交与推送（`work/commit.rs`、`work/push.rs`）。
 //! 联动：`docs/storage/README.md`。
 
-
 use crate::tests::workspace::support::*;
 
 /// 目的：删除型冲突（本地删了、主线改了）被拒时，回执给的补救路径要真能走通。
