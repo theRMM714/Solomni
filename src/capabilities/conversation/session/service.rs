@@ -6,6 +6,7 @@
 use crate::capabilities::conversation::session::api::{
     History, HistoryView, SessionEvent, SessionMeta,
 };
+use crate::capabilities::conversation::session::domain::assemble as face_asm;
 use crate::capabilities::conversation::session::domain::mechanism;
 use crate::capabilities::conversation::session::domain::persist::persist_policy_for;
 use crate::capabilities::conversation::session::ports::HistoryStore;
@@ -197,7 +198,7 @@ pub fn core_operation(
     let book = systools.book();
     let face_rows: Vec<(&str, &crate::capabilities::tools::api::ToolSchema)> =
         match mechanism::seat(seat) {
-            Some(seat) => mechanism::resolve(seat, &book).unwrap_or_default(),
+            Some(seat) => face_asm::resolve(seat, &book).unwrap_or_default(),
             None => Vec::new(),
         };
     let face_ids: Vec<String> = face_rows.iter().map(|(id, _)| id.to_string()).collect();

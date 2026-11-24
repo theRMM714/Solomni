@@ -351,7 +351,9 @@ impl crate::capabilities::conversation::proxy::api::ProxyHost for ProxyBridge {
         }
         // 单 agent：以"核心派的活"注入（派发行是核心自己的行，**不冒充用户原话**），
         // 并**脱离调用方点火**——代理不等它跑完，靠 observe / messages 回头看。
-        crate::capabilities::turn::turn::api::spawn_detached_node(&*handle, &target, &msg.text);
+        crate::capabilities::turn::turn::api::spawn_detached_node(
+            &*handle, &target, &msg.text, None,
+        );
         Ok(())
     }
 

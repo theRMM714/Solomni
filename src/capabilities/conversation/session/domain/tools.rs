@@ -240,7 +240,7 @@ pub struct ToolFace {
     /// 目的：shell 的只读工具链根：项目内基础 profile + 该 agent 模块的运行包根。
     /// 约束：只进 shell 的 per-call 围栏；模块工具的放行仍走它自己的命令解释器基线。
     pub runtime_roots: Vec<PathBuf>,
-    /// 目的：这个席位**可以调的系统工具 id**（由 `mechanism::face` 合成：讨论席 = discussant；执行席 = solo / executor）。
+    /// 目的：这个席位**可以调的系统工具 id**（由会话装配机的 `assemble::seat_face` 合成：讨论席 = discussant；执行席 = solo / executor）。
     ///   存在的理由：把"谁能用哪些工具"变成**校验**，而不是提示词里的一句话。
     pub allowed: Vec<String>,
     /// 目的：这一席的席位 id（机制声明的席位）——工具调用的审计记录用它当调用者身份。
@@ -283,6 +283,10 @@ pub struct MemberTools {
     ///   循环只问“这一回合的工具面里有没有它、谁认领它”（见 `kernel::ports::ToolHandler`）。
     ///   空 = 这一席没有这类工具（讨论席与普通执行席都是空）。
     pub handlers: Vec<Arc<dyn crate::kernel::ports::ToolHandler>>,
+    /// 目的：这个成员的模块：换席时现拼工具面要用，与席位无关（席位只决定发不发模块工具）。
+    pub modules: Vec<crate::capabilities::catalog::modules::api::Module>,
+    /// 目的：提示词面（换席时现拼说明块的素材）：**不持它的端口**（R12）。
+    pub prompt: Arc<dyn crate::capabilities::prompt::api::Prompt>,
 }
 
 /// 目的：核心操作回路里「先核实」的那半个环境——判定一个名字是不是只读核实工具、把它跑一次。
@@ -328,6 +332,32 @@ impl CoreVerify for MemberTools {
 }
 
 impl MemberTools {
+    /// 目的：把这一席的活工具面**换成另一席**（回合换席的唯一入口）：发放名单、模块工具表、说明块与
+    ///   发布工具执行者都交给会话的装配机现拼，调用方不得自己改 `face.allowed`。
+    /// 约束：席位没变就原样返回；未知席位由装配机退化成空面（装配期已由 `mechanism::problems` 拦下）。
+    pub(crate) fn install_seat(&mut self, seat: &str) {
+        if self.face.seat == seat {
+            return;
+        }
+        let next = super::assemble::assemble(super::assemble::FaceInput {
+            seat,
+            modules: &self.modules,
+            sandbox: &self.face.sandbox,
+            book: &self.face.builtin_tools,
+            prompt: &*self.prompt,
+            residents: &*self.residents,
+            // 成员会话恒发自己模块的工具（席位说了算）。
+            modules_allowed: true,
+            workspace: self.workspace.as_ref(),
+        });
+        self.face.allowed = next.allowed;
+        self.face.modules = next.modules;
+        self.face.with_modules = next.with_modules;
+        self.face.notes = next.notes;
+        self.face.seat = next.seat;
+        self.handlers = next.handlers;
+    }
+
     /// 目的：取下一个回复 id（一次模型回复调用一次）。
     pub(crate) fn next_reply(&mut self) -> u64 {
         self.reply_seq += 1;

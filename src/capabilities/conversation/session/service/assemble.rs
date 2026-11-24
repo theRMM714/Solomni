@@ -12,17 +12,16 @@ use crate::capabilities::catalog::modules::api::Module;
 use crate::capabilities::catalog::registry::api::AgentMeta;
 use crate::capabilities::conversation::session::api::{
     AgentSession, CompactChatFactory, ContextUsage, SessionEvent, SessionParams, ShellSlot,
-    ToolFace, service_ops_for_modules, tool_table,
+    ToolFace,
 };
 use crate::capabilities::conversation::session::domain::assemble::{
-    face_tools, service_ops_of, serviced_tools,
+    FaceInput, assemble as assemble_face,
 };
-use crate::capabilities::conversation::session::domain::mechanism;
 use crate::capabilities::conversation::session::domain::tools::MemberTools;
 use crate::capabilities::llm::api::{Channel, Llm, Msg, ToolMode};
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::residents::api::ResidentOps;
-use crate::capabilities::tools::api::{ObservationFact, Observations, ToolExec, Tools, tool_notes};
+use crate::capabilities::tools::api::{ObservationFact, Observations, ToolExec, Tools};
 use crate::capabilities::vm::api::{GuestOs, Vm};
 use crate::capabilities::workspace::api::{ReadFact, Sandbox, Workspace};
 use crate::kernel::api::fence::FencePlan;
@@ -160,50 +159,24 @@ pub struct ProxySpec<'a> {
     pub freshness_keep_percent: u8,
 }
 
-/// 目的：装配一席的工具环境：发放名单过滤 → 工作区工具执行者 → 模块工具表与已就绪服务 → 说明块 → 工具面。
+/// 目的：装配一席的工具环境：把席位声明与端口面交给**会话唯一的装配机**（`domain::assemble`），再包成活的工具面对象。
 pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools {
     let sb = spec.sandbox;
-    // 机制按席位发放的系统工具 id 清单（工具面的名字部分），去掉总表里查不到的。
-    // 席位没登记时装配期已由 `mechanism::problems` 拦下，这里退化成空面。
-    let book = ports.systools.book();
-    let seat = mechanism::seat(spec.seat);
-    let allowed = match seat {
-        Some(seat) => face_tools(
-            mechanism::resolve(seat, &book)
-                .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
-                .unwrap_or_default(),
-            &book,
-        ),
-        None => Vec::new(),
-    };
-    let handlers =
-        crate::capabilities::workspace::api::work_handlers(&ports.workspace, sb, &allowed);
-    // 工具面：静态模块工具 + **已就绪**常驻服务的操作（操作是服务跑起来才发现的，按模块现填）。
-    let with_modules = seat.map(|s| s.module_tools).unwrap_or(false);
-    let mut table = tool_table(spec.modules);
-    // 服务清单是全局的：只把**这个 agent 工具面里**的模块服务写进提示词。
-    let started = if with_modules {
-        service_ops_for_modules(
-            service_ops_of(&ports.residents.services().unwrap_or_default()),
-            spec.modules,
-        )
-    } else {
-        BTreeMap::new()
-    };
-    let (module_tool_lines, service_param_lines) = serviced_tools(&started, &mut table);
-    let mut notes = tool_notes(
-        &*ports.prompt,
-        sb,
-        if with_modules { spec.modules } else { &[] },
-        &service_param_lines,
-    );
-    if !module_tool_lines.is_empty() {
-        notes.module_tools = format!("{}\n{}", notes.module_tools, module_tool_lines.join("\n"));
-    }
+    let seat = assemble_face(FaceInput {
+        seat: spec.seat,
+        modules: spec.modules,
+        sandbox: sb,
+        book: &ports.systools.book(),
+        prompt: &*ports.prompt,
+        residents: &*ports.residents,
+        // 成员会话恒发自己模块的工具（席位说了算）。
+        modules_allowed: true,
+        workspace: Some(&ports.workspace),
+    });
     MemberTools {
         face: ToolFace {
             mode: spec.mode,
-            modules: table,
+            modules: seat.modules,
             tier: spec.tier,
             guest_lease: spec.guest_lease.clone(),
             sandbox: sb.clone(),
@@ -215,12 +188,12 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
             module_env: spec.env.module_env.clone(),
             runtime_path: spec.env.runtime_path.clone(),
             runtime_roots: spec.env.runtime_roots.clone(),
-            // 这一席的系统工具面**由机制按席位合成**（越权校验的唯一判据）：给什么写什么，代码里不留第二份名单。
-            allowed,
-            seat: spec.seat.to_string(),
-            // 能不能用自己模块的工具由席位声明；说明块素材在装配期算好（服务操作已在上面并进来）。
-            with_modules,
-            notes,
+            // 这一席的系统工具面**由装配机按席位合成**（越权校验的唯一判据）：给什么写什么，代码里不留第二份名单。
+            allowed: seat.allowed,
+            seat: seat.seat,
+            // 能不能用自己模块的工具由席位声明；说明块素材在同一个装配机里算好（服务操作已并进模块表）。
+            with_modules: seat.with_modules,
+            notes: seat.notes,
         },
         llm: Arc::clone(&ports.llm),
         log: Arc::clone(&ports.log),
@@ -234,7 +207,10 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
         // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_single）。
         reply_seq: 0,
         line: Default::default(),
-        handlers,
+        handlers: seat.handlers,
+        // 换席要现拼一席：模块、席位与说明块素材都留在活对象上（不靠会话外再传一遍）。
+        modules: spec.modules.to_vec(),
+        prompt: Arc::clone(&ports.prompt),
     }
 }
 

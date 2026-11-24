@@ -293,6 +293,16 @@ impl AgentSession {
         self.params.seat = seat.to_string();
     }
 
+    /// 目的：**坐到另一席上**：身份与工具面同换（席位是回合的值，会话只是这一回合坐在它上面）。
+    ///   工具面交给会话自己的装配机现拼（`MemberTools::install_seat`），这里不另写一份名单。
+    /// 约束：会话没有工具环境时只换身份；席位没变时是 no-op。
+    pub(crate) fn enter_seat(&mut self, seat: &str) {
+        self.set_seat(seat);
+        if let Some(tools) = self.tools.as_mut() {
+            tools.install_seat(seat);
+        }
+    }
+
     /// 目的：改写要用的真实根：由参数派生，不另存一份。写法与工作环境块**同一座桥**（虚拟机档 = guest 写法）。
     pub(crate) fn roots(&self) -> crate::capabilities::prompt::api::RefRoots {
         self.params.ref_roots()

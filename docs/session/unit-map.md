@@ -26,12 +26,12 @@
 | `src/capabilities/conversation/session/domain/decisions.rs` | 裁决队列：先来后到、队首可见可答、回答校验、整队作废；对外只出窄端口 `Decisions`（会话表）与 `Gates`（一个会话的通道），队列结构与等待格不出单元 |
 | `src/capabilities/conversation/session/domain/session.rs` | 单 agent 会话：上下文、行 id、回合与回复簿记、压缩与回档 |
 | `src/capabilities/conversation/session/domain/session/prompt.rs` | 系统提示拼装：agent 与席位两条身份入口、模块提示、回合参数、环境块 |
-| `src/capabilities/conversation/session/domain/assemble.rs` | 装配用的纯派生：按总表过滤席位面的 `face_tools`、就绪服务的工具表 `service_ops_of`、服务参数与工具行的 `serviced_tools` |
+| `src/capabilities/conversation/session/domain/assemble.rs` | 工具面的**唯一装配机**：`assemble(FaceInput) -> SeatFace` 按席位现拼（席位需求展开 → 总表过滤 → 模块表与服务工具 → 说明块 → 发布工具执行者），另含纯派生 `face_tools` / `service_ops_of` / `serviced_tools` 与席位面展开 `seat_face` / `resolve` |
 | `src/capabilities/conversation/session/domain/tools.rs` | 成员工具面：本回合可调的工具、观察账本与沙箱；只含值的 `ToolFace` 与核实用例端口 `CoreVerify`；shell 状态槽与按转录派生最近一次 shell（`last_shell`） |
 | `src/capabilities/conversation/session/domain/persist.rs` | 落盘策略：哪种会话留档、哪些事件算定稿（`PersistPolicy`）、系统会话的识别与拟名单会话号 |
 | `src/capabilities/conversation/session/domain/history.rs` | 会话元信息、运行态（`RunState`）与历史视图的内存形态 |
 | `src/capabilities/conversation/session/domain/flow.rs` | 流程面：驱动一侧的插件契约 `Flow`（推一步 / 取走让出的一步 / 交回处置 / 处置自己发的关卡）、让出的那一步 `MemberAsk`、交回后的处置 `Handback` 、关卡落定 `Settle` 与可派的活 `WorkPlan`（该派哪些节点、节点提示词与返工提示、开跑收工记账、开工事件）；**席位**自报在 `mechanism.rs` 的 `MECHANISMS`（每个机制的核心席与成员席各要几员）；不实现任何流程 |
-| `src/capabilities/conversation/session/domain/mechanism.rs` | 机制与席位声明：`Seat` / `Mechanism` 两种形状、`SEATS` / `MECHANISMS` 两张表、按席位合成工具面（`face` / `resolve`），以及席位面与 `callers` 的双向自洽断言（`problems`）；不调度回合，不执行工具 |
+| `src/capabilities/conversation/session/domain/mechanism.rs` | 机制与席位**声明**：`Seat` / `Mechanism` 两种形状、`SEATS` / `MECHANISMS` 两张表、席位面与 `callers` 的双向自洽断言（`problems`）；只声明需求，不合成名单、不装配工具面（装配在 `assemble.rs`），不调度回合，不执行工具 |
 | `src/capabilities/conversation/session/domain/sequence.rs` | 复合流程：按会话类型表把多个流程串成一条（前一段 `is_done` 就把 `output` 交给下一段 `intake`）；驱动仍只认 `Flow`，业务面（`part`）指向当前这一段 |
 | `src/capabilities/conversation/session/domain/flows.rs` | 流程工厂面：`Flows`（id → 造一段）、装配用的 `FlowSetup`（会话参数、成员、裁决队与可选的恢复事实）与按类型表串段的 `sequence_of`；不实现任何流程，实现由组合根注入 |
 | `src/capabilities/conversation/session/domain/profile.rs` | 会话类型表：`Profiles` / `Profile` / `SessionSpec` 的形状与装配期校验（id 唯一且无空白、流程已注册且不重复、没有流程的类型要有静止机制且它不能是流程机制、有流程的类型不该再声明机制、每个流程核心席与成员席都不为空、成员席人数折成 `min_agents`）；机制与席位从 `mechanism.rs` 问，不另立一份；不解析 yaml，不实现流程 |

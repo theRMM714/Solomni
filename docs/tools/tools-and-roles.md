@@ -12,7 +12,7 @@
 
 - 工具**是什么**在 `systools/tools.yaml`；这个**身份有什么**在 `src/capabilities/conversation/session/domain/mechanism.rs` 的机制与席位声明（席位记着发哪些工具、能不能写、能不能发布、带哪段提示词）。
 - 授权只有这两处；`systools/names.yaml` 是布局的第三份（`session/<工作>/` 的保留目录名），不是工具或席位授权。
-- 代码里**不得**出现"哪个席位能调哪个工具"的名单：只有两个动作——**按席位合成工具面**（`mechanism::face` / `resolve`）、**按面校验调用**（`src/capabilities/conversation/session/service/engine/tools.rs` 的 `face_has`）。
+- 代码里**不得**出现"哪个席位能调哪个工具"的名单：只有三个动作——**机制只声明需求**（`Seat` 记着发哪些工具、能不能写、能不能发布、带哪段提示词）、**会话的装配机现拼这一席的面**（`src/capabilities/conversation/session/domain/assemble.rs` 的 `assemble`，唯一实现）、**按面校验调用**（`src/capabilities/conversation/session/service/engine/tools.rs` 的 `face_has`）。
 
 ```yaml
 tools:
@@ -84,8 +84,8 @@ Mechanism { id: "discuss", flow: true, seats: &["core_proxy", "discussant"] }
 | 核心代理回合 | `core_proxy` | 读面 + 六项代理动作，**不含模块工具**（它代用户决定，不替 agent 干活） |
 
 - 发放与校验是**同一份判据**：列出来的就是这一刻真能调的；没拿到的既不在提示词里、也不在声明槽里，真去调会被如实拒绝。
-- 发放只有一处：`mechanism::resolve`（按席位从总表取 schema；席位或工具没声明在装配期就如实报错）。
-- 驱动把它装进**这一回合**的工具环境（`session::TurnRun.face`）与身份（`session::TurnRun.seat`），跑完一并还原——同一个会话因此能用两种身份干活（讨论席说话 / 执行席干活）。
+- 发放只有一处：`session::domain::assemble`（按席位从总表取 schema、过滤、配模块表与说明块、取发布工具执行者；席位或工具没声明在装配期就如实报错）。机制声明里不再合成名单，也不再知道读面/写面/发布面各是哪些 id。
+- 回合只携带**席位**（`session::TurnRun.seat`）：驱动换席时由会话现拼这一席的面（`AgentSession::enter_seat` → `MemberTools::install_seat`），跑完一并还原——同一个会话因此能用两种身份干活（讨论席说话 / 执行席干活）。节点 / 单 agent 回合在准备段就把席位装进会话，不靠会话出生时的面。
 
 - **两条硬口径**（`systools/tools.yaml` 是唯一真相）：
 

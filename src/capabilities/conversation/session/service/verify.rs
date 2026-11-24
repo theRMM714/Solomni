@@ -6,10 +6,11 @@
 use std::sync::Arc;
 
 use crate::capabilities::conversation::session::api::{CoreVerify, ToolFace};
-use crate::capabilities::conversation::session::domain::mechanism;
+use crate::capabilities::conversation::session::domain::assemble::{FaceInput, assemble};
 use crate::capabilities::conversation::session::domain::tools::MemberTools;
 use crate::capabilities::llm::api::{Llm, ToolMode};
-use crate::capabilities::tools::api::{Observations, ToolBook, ToolExec, ToolNotes};
+use crate::capabilities::prompt::api::Prompt;
+use crate::capabilities::tools::api::{Observations, ToolBook, ToolExec};
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::workspace::api::Sandbox;
 use crate::kernel::api::fence::FencePlan;
@@ -30,6 +31,8 @@ pub struct VerifySpec<'a> {
     pub book: ToolBook,
     /// 目的：工具说明块的标题模板（来自提示词段 `tools_this_turn`）。
     pub tools_this_turn: &'a str,
+    /// 目的：提示词段面（工具说明块素材由装配机现取；核实环境与成员同源，不自己拼文案）。
+    pub prompt: Arc<dyn Prompt>,
     /// 目的：llm 用例面（核心操作的工具循环要造修信封的句柄）。
     pub llm: Arc<dyn Llm + Send + Sync>,
     /// 目的：运行日志：模型输出被长度截断这类"看不见的事实"要落盘。
@@ -49,22 +52,24 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
     sb.modules.clear();
     sb.modules_with_userdata.clear();
     let book = spec.book.clone();
-    let allowed: Vec<String> = match mechanism::seat(spec.seat) {
-        Some(seat) => mechanism::resolve(seat, &book)
-            .map(|f| {
-                f.into_iter()
-                    .map(|(id, _)| id.to_string())
-                    .filter(|id| book.contains_key(id))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        None => Vec::new(),
-    };
+    let residents = crate::capabilities::residents::api::NoResidents;
+    let seat = assemble(FaceInput {
+        seat: spec.seat,
+        modules: &[],
+        sandbox: &sb,
+        book: &book,
+        prompt: &*spec.prompt,
+        residents: &residents,
+        // 核心核实只发内置只读工具：不发模块工具表。
+        modules_allowed: false,
+        // 核心核实的工具面只读：没有共享区提交这回事。
+        workspace: None,
+    });
     Some(Box::new(MemberTools {
         face: ToolFace {
             mode: spec.mode,
-            seat: spec.seat.to_string(),
-            modules: std::collections::BTreeMap::new(),
+            seat: seat.seat,
+            modules: seat.modules,
             tier: Tier::Host,
             guest_lease: String::new(),
             sandbox: sb.clone(),
@@ -76,9 +81,9 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
             module_env: Default::default(),
             runtime_path: None,
             runtime_roots: Vec::new(),
-            allowed,
-            with_modules: false,
-            notes: ToolNotes::default(),
+            allowed: seat.allowed,
+            with_modules: seat.with_modules,
+            notes: seat.notes,
         },
         llm: Arc::clone(&spec.llm),
         log: Arc::clone(&spec.log),
@@ -91,6 +96,9 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
         shell_live: None,
         reply_seq: 0,
         line: Default::default(),
-        handlers: Vec::new(),
+        handlers: seat.handlers,
+        // 核实环境不换席（席位在装配时定死），模块表也恒空。
+        modules: Vec::new(),
+        prompt: Arc::clone(&spec.prompt),
     }))
 }

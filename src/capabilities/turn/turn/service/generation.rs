@@ -17,7 +17,12 @@ use crate::capabilities::conversation::session::api::GateTicket;
 use crate::capabilities::turn::turn::api::{CollabWork, Output, TurnHost};
 
 /// 目的：起一轮**脱离调用方**的节点执行：核心注入任务 + 不等它跑完。 完成后由叫醒逻辑推进父会话——所以这里只是"点火"。
-pub(crate) fn spawn_detached_node<H: TurnHost>(host: &H, sid: &str, objective: &str) {
+pub(crate) fn spawn_detached_node<H: TurnHost>(
+    host: &H,
+    sid: &str,
+    objective: &str,
+    seat: Option<&str>,
+) {
     // 节点执行也用整场工作的同一套回合计数（回档同步靠两边同一套编号）。
     let _ = host.core({
         let sid = sid.to_string();
@@ -28,10 +33,11 @@ pub(crate) fn spawn_detached_node<H: TurnHost>(host: &H, sid: &str, objective: &
     });
     let me = host.clone();
     let (sid, objective) = (sid.to_string(), objective.to_string());
+    let seat = seat.map(str::to_string);
     let _ = std::thread::Builder::new()
         .name("solomni-node".to_string())
         .spawn(move || {
-            let _ = node_generation(&me, &sid, &objective);
+            let _ = node_generation(&me, &sid, &objective, seat.as_deref());
         });
 }
 

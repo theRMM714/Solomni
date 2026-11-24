@@ -26,11 +26,12 @@ impl Turn {
         &mut self,
         child: &str,
         objective: &str,
+        seat: Option<&str>,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
     ) -> Vec<SessionEvent> {
         self.bump_turn_of_child(child);
-        match self.prepare_single(child, Some(objective), true, registry, probe) {
+        match self.prepare_node(child, objective, seat, registry, probe) {
             Ok(Prepared::Run {
                 session,
                 prefix,
@@ -105,8 +106,8 @@ impl Turn {
             if self.history.load(&child).is_err() {
                 self.spawn_agent_session(sid, &ask.member, &ask.seat, registry, probe)?;
             }
-            // ③ 跑这一回合：**与单 agent 同一条轮循环**（身份块 + 本回合工具面 + 对话 + 本回合提示 + 表态）。
-            // 工具面由机制按席位发放（讨论席 = 动词 + 沙箱面）；产出逐轮落进**它自己的会话**。
+            // ③ 跑这一回合：**与单 agent 同一条轮循环**（身份块 + 本回合席位 + 对话 + 本回合提示 + 表态）。
+            // 工具面由会话按席位现拼（讨论席 = 动词 + 沙箱面）；产出逐轮落进**它自己的会话**。
             let mut s = self.take_single(&child)?;
             // 思考强度是**工作根**的会话级事实：成员回合也按它解析（成员模型各自映射）。
             let thinking = self.thinking_fragment_for(registry, &child)?;
@@ -124,19 +125,12 @@ impl Turn {
                 };
                 let mut emit = |e: SessionEvent| notes.borrow_mut().push(e);
                 let mut sink = |e: SessionEvent| notes.borrow_mut().push(e);
-                let seat = crate::capabilities::conversation::session::api::seat(&ask.seat)
-                    .ok_or_else(|| format!("会话 {} 的席位没登记：{}", child, ask.seat))?;
-                let face = (
-                    crate::capabilities::conversation::session::api::face(seat)
-                        .into_iter()
-                        .map(|s| s.to_string())
-                        .collect::<Vec<_>>(),
-                    seat.module_tools,
-                );
+                if crate::capabilities::conversation::session::api::seat(&ask.seat).is_none() {
+                    return Err(format!("会话 {} 的席位没登记：{}", child, ask.seat));
+                }
                 let t = s.discussion_turn(
                     &ask.identity,
                     &ask.seat,
-                    face,
                     ask.turn.clone(),
                     ask.turn_id,
                     ask.round,
@@ -278,8 +272,8 @@ impl Turn {
             if todo.is_empty() {
                 break;
             }
-            for (node, child, objective, _seat) in todo {
-                out.extend(self.drive_node(&child, &objective, registry, probe));
+            for (node, child, objective, seat) in todo {
+                out.extend(self.drive_node(&child, &objective, seat.as_deref(), registry, probe));
                 let note = self.node_note(&child);
                 self.mark_node_done(sid, &node, &note);
             }
