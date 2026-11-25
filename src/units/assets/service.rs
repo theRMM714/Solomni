@@ -111,6 +111,6 @@ mod tests {
     fn missing_document_is_an_error() {
         let fs = FakeFs { files: vec![] };
         let assets = AssetsService::new(Path::new("product"), Box::new(fs));
-        assert!(assets.read(Doc::SystoolsTools).is_err());
+        assert!(assets.read(Doc::Tools).is_err());
     }
 }

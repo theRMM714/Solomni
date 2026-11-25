@@ -24,10 +24,10 @@ impl YamlProfiles {
     pub fn load(&self) -> Result<Profiles, String> {
         let text = self
             .assets
-            .read(Doc::SystoolsProfiles)
-            .map_err(|e| format!("会话类型表读不了（{}）：{}", Doc::SystoolsProfiles.label(), e))?;
+            .read(Doc::Profiles)
+            .map_err(|e| format!("会话类型表读不了（{}）：{}", Doc::Profiles.label(), e))?;
         let profiles: Profiles = yaml_serde::from_str(&text)
-            .map_err(|e| format!("会话类型表非法（{}）：{}", Doc::SystoolsProfiles.label(), e))?;
+            .map_err(|e| format!("会话类型表非法（{}）：{}", Doc::Profiles.label(), e))?;
         profiles.validate()?;
         Ok(profiles)
     }

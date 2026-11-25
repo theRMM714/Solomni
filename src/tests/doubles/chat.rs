@@ -179,8 +179,8 @@ pub(crate) fn test_prompts() -> Prompts {
     crate::units::prompt::detail::yaml_prompts::YamlPrompts::new(crate::tests::doubles::assets_at(
         &root,
     ))
-        .load()
-        .expect("内置提示词册必须合法")
+    .load()
+    .expect("内置提示词册必须合法")
 }
 
 /// 目的：测试用工具总表与机制席位（走**与产品同一条**装配路径）。它与提示词册**分开**装配：两者互不依赖（见 units/prompt 的 Prompts）。测试用的**会话历史面**（与生产同一条路：端口装进 `SessionService`）。
@@ -226,7 +226,7 @@ pub(crate) fn test_systools() -> crate::units::tools::api::SystemTools {
         &root,
     ))
     .load()
-        .expect("内置工具总表必须合法")
+    .expect("内置工具总表必须合法")
 }
 
 /// 目的：宿主探测替身：**只按给定答案回答**，不读真实环境（测试要确定性）。事实由用例显式声明；真实适配器的契约另有 T2 用例（见 docs/testing/doubles.md 端口矩阵）。

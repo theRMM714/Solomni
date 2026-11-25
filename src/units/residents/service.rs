@@ -178,7 +178,7 @@ impl ResidentOps for ResidentsService {
         fence.agent = format!("resident/{}/{}", module, name);
         // 本机档的运行包：与模块工具同一把尺子（HostProbe 提供事实，packages 给计划）。
         let (path, roots) = if let Some((packages, probe)) = &self.host {
-            let current_path = std::env::var_os("PATH").unwrap_or_default();
+            let current_path = probe.path();
             let base = packages.base();
             let facts = pkgs::Facts {
                 probe: &pkgs::HostExec(&**probe),

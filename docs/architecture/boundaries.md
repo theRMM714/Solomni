@@ -98,8 +98,10 @@
 - **coreCycles**：单元节点图无环；
 - **values**：api 面的公共签名（按完整签名判，跨行也算）不得有 `&mut` 参数，豁免 `&mut self`、端口借用 `&mut dyn Trait` 与泛型 / 回调边界里的 `&mut`；api 面声明或转出的值带内部可变、值里塞具名状态的可变借用或闭包（借端口不算）、跨能力同形结构只回执（`tests/gates/structure/values.js`）；
 - **layers**：单元必须在 `layers.yaml` 归环，跨单元边只能指向**严格更低的环**，同环只许指向 rank 更低的单元，环 1 不得有 IO / `ports/` / 可变全局（`tests/gates/structure/layers.js`）；环表形状、rank 序与扇出只回执，用 `node tests/gates/structure/layers.js` 看当前表；
-- **internal**（单元内部）：`service` 不引本单元 `detail` 或 `kernel::detail`；`service` 不直接做 IO（`std::fs` / `Command` / 网络 / `canonicalize`）；同能力的方法族之间不成环；覆盖 `api`（含 `api.rs` 与 `api/` 子目录）/ `service` / `domain` / `detail` 四个分区；
+- **internal**（单元内部）：`service` 不引本单元 `detail` 或 `kernel::detail`；`service` 不直接做 IO（`std::fs` / `Command` / 网络 / `canonicalize`）、不读环境变量（`std::env::var` 族）、不自己探测路径（`Path::is_dir` / `is_file` / `exists` / `read_dir`，经端口调用的不算）；同能力的方法族之间不成环；覆盖 `api`（含 `api.rs` 与 `api/` 子目录）/ `service` / `domain` / `detail` 四个分区；
 - **resourceNames**（介质名）：`.home` / `.vm` / `data` / `logs` / `session` / `runtimes` / `prompts` / `systools` 只在 `src/kernel/domain/layout.rs` 拼；业务代码写 `.join("<介质名>")` 即报错，改走 `kernel::api::layout` 的对应函数（`tests/gates/structure/resource-names.js`）；
+- **rootEntries**（根目录条目）：仓库根只许受版本管理的骨架条目；产品介质一律写 `data/`，旧位置（`.home` / `.vm` / `logs` / `session` / `runtimes`）出现即报错；`modules/<id>/userdata` 也算越界（源码树不长数据）（`tests/gates/structure/root-entries.js`）；
+- **diskOwners**（盘主）：一块盘一个主——`layout::<介质>()` 只许主人单元、组合根与内核调用，别的单元走主人单元 api / 端口；主人表与 `layout.rs` 双向比对，改了名不登记即报错（`tests/gates/structure/disk-owners.js`）；
 - **fileSize**（文件粒度）：按角色分档判行数（实现 / 测试用例 / 测试支撑）与内联测试块，软线只回执、硬线失败，无 `EXEMPT`（`tests/gates/structure/size.js`）；
 - **reverse** / **presentation**：单元不反向依赖根或呈现层；
 - **channelCross**：呈现层的两个渠道（`cli` 与 `web`）互不依赖；

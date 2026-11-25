@@ -84,7 +84,7 @@ pub fn host_plan_for(
     modules: &[Module],
     policy: PinPolicy,
 ) -> PackagePlan {
-    let current_path = std::env::var_os("PATH").unwrap_or_default();
+    let current_path = probe.path();
     let facts = pkgs::Facts {
         probe: &pkgs::HostExec(probe),
         current_path: &current_path,

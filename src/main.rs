@@ -233,8 +233,7 @@ fn main() {
     eprintln!("[围栏] {}", fence_cap.note);
     let store = entry::assembly::settings_store(&root);
     let sessions = entry::assembly::sessions(&root);
-    let history =
-        units::conversation::session::detail::fs_history::FsHistory::new(sessions.root());
+    let history = units::conversation::session::detail::fs_history::FsHistory::new(sessions.root());
     let workspace = units::workspace::detail::FsWorkspace::new(sessions.root());
     let workstore = units::workspace::detail::FsWorkStore::new();
     // 运行包能力：依赖文件夹 runtimes/（一个包 = 一个文件夹 + package.yaml）。
@@ -505,9 +504,8 @@ fn main() {
         entry::assembly::content(&root),
     );
     // **模块子业务**：清单来源与启停覆盖落盘只由它的 service 持有（R12）；它是模块事实的唯一上游。
-    let module_state = units::catalog::modules::detail::YamlModuleState::new(
-        entry::assembly::home_docs(&root),
-    );
+    let module_state =
+        units::catalog::modules::detail::YamlModuleState::new(entry::assembly::home_docs(&root));
     let modules: Arc<dyn units::catalog::modules::api::Modules + Send + Sync> =
         match units::catalog::modules::service::ModulesService::new(
             Arc::new(source),
@@ -555,8 +553,8 @@ fn main() {
                 units::vm::detail::QemuEngine::with_overlay_dir(
                     units::vmstore::api::paths(&root).overlays(),
                 )
-                    .with_book(std::sync::Arc::clone(&book))
-                    .with_log(log.clone()),
+                .with_book(std::sync::Arc::clone(&book))
+                .with_log(log.clone()),
             ),
             shares,
         ));

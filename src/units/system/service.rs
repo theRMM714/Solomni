@@ -15,8 +15,8 @@ use crate::units::maintenance::storage::api::{
     CleanKind, CleanOutcome, CleanRequest, GcReport, Storage,
 };
 use crate::units::provision::api::Provision;
-use crate::units::sessions::api::Sessions;
 use crate::units::pure::exec_model::api::JobState;
+use crate::units::sessions::api::Sessions;
 use crate::units::system::api::{
     BuildRequest, EnsureRequest, Facts, Fault, FenceFacts, GcRequest, ResetRequest, SetupMode,
     SetupOps, System, WorkGcRequest,

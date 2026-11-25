@@ -114,6 +114,8 @@ pub trait HostProbe: Send + Sync {
     }
     /// PATH 上有没有这个可执行文件（只查存在性，不执行它；平台扩展名由适配层处理）。
     fn has_exe(&self, name: &str) -> bool;
+    /// 当前进程的 PATH（合成生效 PATH 的尾部事实；服务层不许自己读环境变量）。
+    fn path(&self) -> std::ffi::OsString;
     /// 本机能不能起硬件虚拟化（只问事实，不起任何虚拟机）。
     fn hypervisor_available(&self) -> bool;
     /// 读一个小文本文件（清单这类）的全文；读不到（不在场或不可读）给 None。

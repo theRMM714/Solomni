@@ -85,15 +85,29 @@ mod tests {
     #[test]
     fn every_landing_sits_under_data() {
         let p = ContentPaths::at(Path::new("product"));
-        assert_eq!(p.modules_data(), Path::new("product").join("data").join("modules"));
-        assert_eq!(p.runtimes(), Path::new("product").join("data").join("runtimes"));
+        assert_eq!(
+            p.modules_data(),
+            Path::new("product").join("data").join("modules")
+        );
+        assert_eq!(
+            p.runtimes(),
+            Path::new("product").join("data").join("runtimes")
+        );
         assert_eq!(
             p.area("harvest").userdata(),
-            Path::new("product").join("data").join("modules").join("harvest").join("userdata")
+            Path::new("product")
+                .join("data")
+                .join("modules")
+                .join("harvest")
+                .join("userdata")
         );
         assert_eq!(
             p.area("harvest").build(),
-            Path::new("product").join("data").join("modules").join("harvest").join("build")
+            Path::new("product")
+                .join("data")
+                .join("modules")
+                .join("harvest")
+                .join("build")
         );
     }
 

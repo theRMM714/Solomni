@@ -28,6 +28,8 @@ const S = {
   values: require("./structure/values.js"),
   capability: require("./structure/capability.js"),
   resourceNames: require("./structure/resource-names.js"),
+  rootEntries: require("./structure/root-entries.js"),
+  diskOwners: require("./structure/disk-owners.js"),
   webLayers: require("./structure/webLayers.js"),
   size: require("./structure/size.js"),
   moduleFiles: require("./structure/module-files.js"),
@@ -127,6 +129,30 @@ const GATES = [
     inputs: ["src/kernel/domain/layout.rs", "src/**/*.rs"],
     run: (root, ctx) => {
       const r = S.resourceNames.resourceNames(root);
+      ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
+      return r.problems;
+    },
+  },
+  {
+    id: "structure/root-entries",
+    lane: "structure",
+    step: "T0 结构审查",
+    kind: "text",
+    inputs: [".gitignore", "modules/**", "src/kernel/domain/layout.rs"],
+    run: (root, ctx) => {
+      const r = S.rootEntries.rootEntries(root);
+      ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
+      return r.problems;
+    },
+  },
+  {
+    id: "structure/disk-owners",
+    lane: "structure",
+    step: "T0 结构审查",
+    kind: "text",
+    inputs: ["src/kernel/domain/layout.rs", "src/**/*.rs"],
+    run: (root, ctx) => {
+      const r = S.diskOwners.diskOwners(root);
       ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
       return r.problems;
     },
@@ -247,6 +273,7 @@ const LANE_ORDER = {
     "structure/deps-sha256",
     "structure/dependency",
     "structure/layers",
+    "structure/resource-names",
     "structure/kernel-mechanisms",
     "structure/presentation-inbound",
     "structure/entry-tiers",
@@ -256,6 +283,8 @@ const LANE_ORDER = {
     "structure/web-layers",
     "structure/file-size",
     "structure/capability-internal",
+    "structure/root-entries",
+    "structure/disk-owners",
     "structure/permission-values",
     "structure/import-names",
     "structure/dead-params",
