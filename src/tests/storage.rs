@@ -46,7 +46,7 @@ fn clean_requires_confirmation_and_real_service() {
 fn report_and_gc_delete_the_oldest_volume_in_a_scratch_root() {
     use crate::units::maintenance::storage::api::Storage;
     let root = crate::tests::scratch("storage-gc");
-    let cache = root.join(".vm").join("build-cache");
+    let cache = crate::kernel::domain::layout::vm(&root).join("build-cache");
     std::fs::create_dir_all(&cache).unwrap();
     for (id, used) in [("old", 1), ("new", 999)] {
         let f = cache.join(format!("{}.qcow2", id));
@@ -92,7 +92,7 @@ fn report_and_gc_delete_the_oldest_volume_in_a_scratch_root() {
 fn active_volume_is_protected_and_module_cleanup_is_queued() {
     use crate::units::maintenance::storage::api::Storage;
     let root = crate::tests::scratch("storage-active");
-    let cache = root.join(".vm").join("build-cache");
+    let cache = crate::kernel::domain::layout::vm(&root).join("build-cache");
     std::fs::create_dir_all(&cache).unwrap();
     std::fs::write(cache.join("busy.qcow2"), b"busy").unwrap();
     std::fs::write(
@@ -132,7 +132,7 @@ fn active_volume_is_protected_and_module_cleanup_is_queued() {
 fn clean_logs_deletes_all_but_the_active_file() {
     use crate::units::maintenance::storage::api::Storage;
     let root = crate::tests::scratch("storage-logs-clean");
-    let logs = root.join("logs");
+    let logs = crate::kernel::domain::layout::logs(&root);
     std::fs::create_dir_all(&logs).unwrap();
     std::fs::write(logs.join("old.log"), b"old").unwrap();
     std::fs::write(logs.join("mid.log"), b"mid").unwrap();
@@ -175,7 +175,7 @@ fn clean_logs_deletes_all_but_the_active_file() {
 fn clean_logs_without_a_running_file_deletes_everything() {
     use crate::units::maintenance::storage::api::Storage;
     let root = crate::tests::scratch("storage-logs-all");
-    let logs = root.join("logs");
+    let logs = crate::kernel::domain::layout::logs(&root);
     std::fs::create_dir_all(&logs).unwrap();
     std::fs::write(logs.join("a.log"), b"1234567890").unwrap();
     let svc = service(&root);

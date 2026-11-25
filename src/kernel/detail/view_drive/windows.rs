@@ -1,11 +1,11 @@
 //! 目的：产品根的视图盘——把产品根映射成一个盘符（如 Z:），容器 cwd 走视图写法，
 //!   于是容器只需要产品根这一级的读属性，不必再向产品根之外的祖先链写 ACL。
-//! 管：盘符分配与回收（DefineDosDeviceW / QueryDosDeviceW）、记录文件 .home/view-drive.json 的
+//! 管：盘符分配与回收（DefineDosDeviceW / QueryDosDeviceW）、记录文件 data/state/view-drive.json 的
 //!   清扫与多实例复用、进程级 active 视图、以及给沙箱用的路径编解码（PathCodec）。
 //! 不管：ACL 授权（confine/windows）、装配层在何时调用（入口层组合根与守门进程）。
 //! 联动：confine/windows.rs 的 prepare_fence 用 active_shell_view(spec) 判断祖先链边界，
 //!   container.rs 用它决定 CreateProcessW 的 cwd 与程序名写法；ports::PathCodec 的实现在这里。
-//!   记录文件 .home/view-drive.json 是 JSON 数组：
+//!   记录文件 data/state/view-drive.json 是 JSON 数组：
 //!   [{"letter":"Z:","root":"D:\\…","users":[{"pid":123,"created":133456789012345678}]}]。
 //!   每个进程启动时分配（同 root 复用字母、登记自己的 pid 与进程创建时刻），退出时注销；启动清扫
 //!   归属已死的条目、目标不存在或不匹配的条目，让残留的盘符映射不会越积越多。系统会复用 pid，
@@ -204,12 +204,17 @@ struct User {
     created: u64,
 }
 
-fn record_path(home: &Path) -> PathBuf {
-    home.join("view-drive.json")
+/// 目的：视图盘记录目录（`data/state`）——kernel 机制一律持产品安装根，介质子路径只在 layout 拼。
+fn state_dir(root: &Path) -> PathBuf {
+    crate::kernel::domain::layout::state(root)
 }
 
-fn lock_path(home: &Path) -> PathBuf {
-    home.join("view-drive.lock")
+fn record_path(root: &Path) -> PathBuf {
+    state_dir(root).join("view-drive.json")
+}
+
+fn lock_path(root: &Path) -> PathBuf {
+    state_dir(root).join("view-drive.lock")
 }
 
 /// 目的：常规路径（分配 / 清扫 / 正常退出）愿意为记录锁等多久。
@@ -223,26 +228,26 @@ struct ViewGuard {
 
 static VIEW_MUTEX: Mutex<()> = Mutex::new(());
 
-fn lock_view(home: &Path) -> Result<ViewGuard, String> {
-    lock_view_within(home, LOCK_WAIT)
+fn lock_view(root: &Path) -> Result<ViewGuard, String> {
+    lock_view_within(root, LOCK_WAIT)
 }
 
 /// 目的：同上，但跨进程锁的等待上限由调用方给——退出清理只肯等很短，不能堵住进程退出。
-fn lock_view_within(home: &Path, wait: std::time::Duration) -> Result<ViewGuard, String> {
+fn lock_view_within(root: &Path, wait: std::time::Duration) -> Result<ViewGuard, String> {
     let proc = VIEW_MUTEX
         .lock()
         .map_err(|_| "视图盘记录进程内锁已被毒化".to_string())?;
-    std::fs::create_dir_all(home).map_err(|e| format!("建私有区失败：{}", e))?;
+    std::fs::create_dir_all(state_dir(root)).map_err(|e| format!("建记录目录失败：{}", e))?;
     // 跨进程那半是内核的文件锁契约；等多久是本模块自己的策略。
-    let file = crate::kernel::detail::lock::lock_within(&lock_path(home), wait, "视图盘记录")?;
+    let file = crate::kernel::detail::lock::lock_within(&lock_path(root), wait, "视图盘记录")?;
     Ok(ViewGuard {
         _proc: proc,
         _file: file,
     })
 }
 
-fn load_entries(home: &Path) -> Vec<ViewEntry> {
-    std::fs::read_to_string(record_path(home))
+fn load_entries(root: &Path) -> Vec<ViewEntry> {
+    std::fs::read_to_string(record_path(root))
         .ok()
         .and_then(|t| serde_json::from_str::<Vec<ViewEntry>>(&t).ok())
         .unwrap_or_default()
@@ -250,17 +255,17 @@ fn load_entries(home: &Path) -> Vec<ViewEntry> {
 
 /// 目的：把条目落盘；没有条目就删掉记录文件——空数组也算残留，不留。
 /// 约束：调用方必须已持有 lock_view；文件本来就不存在时删除不算错。
-fn save_entries(home: &Path, entries: &[ViewEntry]) -> Result<(), String> {
+fn save_entries(root: &Path, entries: &[ViewEntry]) -> Result<(), String> {
     if entries.is_empty() {
-        return match std::fs::remove_file(record_path(home)) {
+        return match std::fs::remove_file(record_path(root)) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(format!("删视图盘记录失败：{}", e)),
         };
     }
-    std::fs::create_dir_all(home).map_err(|e| format!("建私有区失败：{}", e))?;
+    std::fs::create_dir_all(state_dir(root)).map_err(|e| format!("建记录目录失败：{}", e))?;
     let text = serde_json::to_string_pretty(entries).map_err(|e| e.to_string())?;
-    std::fs::write(record_path(home), text).map_err(|e| e.to_string())
+    std::fs::write(record_path(root), text).map_err(|e| e.to_string())
 }
 
 /// 目的：清扫后留下的条目，以及要撤掉的盘符映射（盘符 + 记录的根，撤映射时用它做精确匹配）。
@@ -510,8 +515,8 @@ mod imp {
 
     /// 目的：清扫记录并尽力撤掉孤儿映射，返回留下的条目与被撤掉的盘符。
     /// 约束：调用方必须已持有 lock_view；撤不掉的条目以空 users 保留，留给下次清扫。
-    fn sweep_locked(home: &Path) -> (Vec<ViewEntry>, Vec<String>) {
-        let entries = load_entries(home);
+    fn sweep_locked(root: &Path) -> (Vec<ViewEntry>, Vec<String>) {
+        let entries = load_entries(root);
         let sweep = sweep_entries(entries, user_alive, query_letter, |path| path.is_dir());
         let mut kept = sweep.kept;
         let mut removed = Vec::new();
@@ -531,12 +536,10 @@ mod imp {
         }
         // 兜底：记录里没有的孤儿映射（崩溃 / 强杀绕过 release，映射还在、记录已空）。
         // 只撤目标正好是本产品根的字母——别的程序占的字母、别的实例的根、根内子目录一律不碰。
-        if let Some(root) = home.parent().filter(|p| !p.as_os_str().is_empty()) {
-            for (letter, target) in orphan_mappings(root, &kept, query_letter) {
-                match remove_mapping(&letter, &target) {
-                    Ok(()) => removed.push(letter),
-                    Err(e) => eprintln!("[视图盘] {}", e),
-                }
+        for (letter, target) in orphan_mappings(root, &kept, query_letter) {
+            match remove_mapping(&letter, &target) {
+                Ok(()) => removed.push(letter),
+                Err(e) => eprintln!("[视图盘] {}", e),
             }
         }
         (kept, removed)
@@ -544,12 +547,12 @@ mod imp {
 
     /// 目的：只清扫记录、不分配盘符：摘死归属与目标不存在的条目、撤孤儿映射、落盘。
     /// 返回：撤掉的盘符个数（--fence-clean 据此报结论）。
-    pub(super) fn sweep(home: &Path) -> usize {
-        let Ok(_lock) = lock_view(home) else {
+    pub(super) fn sweep(root: &Path) -> usize {
+        let Ok(_lock) = lock_view(root) else {
             return 0;
         };
-        let (kept, removed) = sweep_locked(home);
-        if let Err(e) = save_entries(home, &kept) {
+        let (kept, removed) = sweep_locked(root);
+        if let Err(e) = save_entries(root, &kept) {
             eprintln!("[视图盘] 记录落盘失败：{}", e);
         }
         for letter in &removed {
@@ -559,10 +562,10 @@ mod imp {
     }
 
     /// 目的：分配/复用视图盘：清扫记录、同根复用、找空字母建映射；成功设进程级 active。
-    pub(super) fn ensure(root: &Path, home: &Path) -> Result<ViewDrive, String> {
+    pub(super) fn ensure(root: &Path) -> Result<ViewDrive, String> {
         let root = normalize_root(root)?;
-        let _lock = lock_view(home)?;
-        let (mut kept, _removed) = sweep_locked(home);
+        let _lock = lock_view(&root)?;
+        let (mut kept, _removed) = sweep_locked(&root);
         let me = self_owner()?;
         if let Some(pos) = kept
             .iter()
@@ -573,7 +576,7 @@ mod imp {
                 entry.users.push(me.clone());
             }
             let letter = entry.letter.clone();
-            save_entries(home, &kept)?;
+            save_entries(&root, &kept)?;
             let view = ViewDrive { letter, root };
             set_active(&view);
             return Ok(view);
@@ -598,7 +601,7 @@ mod imp {
             root: root.to_string_lossy().into_owned(),
             users: vec![me],
         });
-        if let Err(e) = save_entries(home, &entries) {
+        if let Err(e) = save_entries(&root, &entries) {
             let _ = remove_mapping(&letter, &root);
             return Err(e);
         }
@@ -608,10 +611,10 @@ mod imp {
     }
 
     /// 目的：守门进程只挂现成视图盘：读记录、要求映射仍指向记录的产品根，不登记 pid。
-    /// 约束：优先选 home 所属产品根的条目；找不到就退而取第一条映射有效的条目。
-    pub(super) fn attach(home: &Path) -> Option<ViewDrive> {
-        let entries = load_entries(home);
-        let preferred = home.parent().filter(|p| p.is_dir()).map(Path::to_path_buf);
+    /// 约束：优先选产品安装根本身的条目；找不到就退而取第一条映射有效的条目。
+    pub(super) fn attach(root: &Path) -> Option<ViewDrive> {
+        let entries = load_entries(root);
+        let preferred = root.is_dir().then(|| root.to_path_buf());
         let mut fallback: Option<ViewDrive> = None;
         for entry in entries {
             let Some(mapped) = query_letter(&entry.letter) else {
@@ -642,16 +645,16 @@ mod imp {
     }
 
     /// 目的：注销本进程并回收没人用的映射（撤不掉就留下空归属条目给下次启动清扫）。
-    pub(super) fn release(home: &Path) {
-        release_within(home, LOCK_WAIT)
+    pub(super) fn release(root: &Path) {
+        release_within(root, LOCK_WAIT)
     }
 
     /// 目的：同上，但锁等待有上限：控制台事件线程上退出时不能久等。
-    pub(super) fn release_within(home: &Path, wait: std::time::Duration) {
-        let Ok(_lock) = lock_view_within(home, wait) else {
+    pub(super) fn release_within(root: &Path, wait: std::time::Duration) {
+        let Ok(_lock) = lock_view_within(root, wait) else {
             return;
         };
-        let mut entries = load_entries(home);
+        let mut entries = load_entries(root);
         let pid = std::process::id();
         let mut changed = false;
         let mut removed_letters: Vec<String> = Vec::new();
@@ -680,7 +683,7 @@ mod imp {
                 .iter()
                 .any(|letter| letter.eq_ignore_ascii_case(&e.letter))
         });
-        if changed && let Err(e) = save_entries(home, &entries) {
+        if changed && let Err(e) = save_entries(root, &entries) {
             eprintln!("[视图盘] 记录落盘失败：{}", e);
         }
         for letter in removed_letters {
@@ -692,28 +695,28 @@ mod imp {
 /// 目的：只清扫视图盘记录、不分配盘符：摘死归属与目标不存在的条目、撤孤儿映射、落盘。
 /// 返回：撤掉的盘符个数（--fence-clean 据此报结论）。
 /// 约束：不登记本进程、不改 active。
-pub fn sweep_view_drive(home: &Path) -> usize {
-    imp::sweep(home)
+pub fn sweep_view_drive(root: &Path) -> usize {
+    imp::sweep(root)
 }
 
 /// 目的：分配（或复用）产品根的视图盘并设为进程级 active。
-pub fn ensure_view_drive(root: &Path, home: &Path) -> Result<ViewDrive, String> {
-    imp::ensure(root, home)
+pub fn ensure_view_drive(root: &Path) -> Result<ViewDrive, String> {
+    imp::ensure(root)
 }
 
 /// 目的：守门进程挂现成视图盘（读记录 + 校验映射），不分配、不登记 pid。
-pub fn attach_view_drive(home: &Path) -> Option<ViewDrive> {
-    imp::attach(home)
+pub fn attach_view_drive(root: &Path) -> Option<ViewDrive> {
+    imp::attach(root)
 }
 
 /// 目的：注销本进程的登记；该盘没有别的存活进程时撤映射并清条目。
-pub fn release_view_drive(home: &Path) {
-    imp::release(home)
+pub fn release_view_drive(root: &Path) {
+    imp::release(root)
 }
 
 /// 目的：同上，但跨进程记录锁最多等 wait：给进程退出清理用，不能堵在锁上不退出。
-pub fn release_view_drive_within(home: &Path, wait: std::time::Duration) {
-    imp::release_within(home, wait)
+pub fn release_view_drive_within(root: &Path, wait: std::time::Duration) {
+    imp::release_within(root, wait)
 }
 
 #[cfg(test)]
@@ -744,7 +747,7 @@ mod tests {
             .join("test")
             .join("test");
         let view = drive.view_of(&host).expect("根下路径要能译成视图写法");
-        assert_eq!(view, PathBuf::from(r"Z:\session\test\test"));
+        assert_eq!(view, PathBuf::from(r"Z:\data\session\test\test"));
         assert_eq!(drive.host_of(&view), Some(host.clone()));
         assert!(drive.is_view(&view));
         assert!(!drive.is_view(&host));

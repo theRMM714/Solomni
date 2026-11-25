@@ -14,7 +14,7 @@ fn file_log_writes_every_level_into_a_timestamped_file_under_logs() {
         log.warn("模块", "警示信息");
         log.error("模块", "错误信息");
     }
-    let dir = root.join("logs");
+    let dir = crate::kernel::domain::layout::logs(&root);
     let mut names: Vec<String> = std::fs::read_dir(&dir)
         .expect("日志目录要建出来")
         .flatten()

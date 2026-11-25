@@ -204,8 +204,8 @@ deps:
     os: linux
     arch: x86_64
     kind: appimage
-    install: .vm/qemu
-    probe: .vm/qemu/bin/qemu-system-x86_64
+    install: data/.vm/qemu
+    probe: data/.vm/qemu/bin/qemu-system-x86_64
     source: release:qemu/11.1.1-4/QEMU-11.1.1-4-anylinux-x86_64.AppImage
     size_mb: 165
     sha256: 61ab65257c2db116aa28489c725379ab147a3bd399535c823a10d485ebd70fbd
@@ -213,8 +213,8 @@ deps:
   - id: vm.virtiofsd.linux
     os: linux
     arch: x86_64
-    install: .vm/virtiofsd
-    probe: .vm/virtiofsd/virtiofsd
+    install: data/.vm/virtiofsd
+    probe: data/.vm/virtiofsd/virtiofsd
     source: release:virtiofsd/1.14.0/virtiofsd-4bfa7125.zip
     strip: 3
     size_mb: 3
@@ -223,8 +223,8 @@ deps:
   - id: vm.qemu.windows
     os: windows
     arch: x86_64
-    install: .vm/qemu
-    probe: .vm/qemu/bin/qemu-system-x86_64.exe
+    install: data/.vm/qemu
+    probe: data/.vm/qemu/bin/qemu-system-x86_64.exe
     source: release:qemu/11.1.1-4/qemu-windows-x86_64-11.1.1.tar.zst
     strip: 1
     size_mb: 32
@@ -238,8 +238,8 @@ deps:
     kind: guest-rootfs
     guest: debian-13
     family: debian
-    install: .vm/guest/debian-13
-    probe: .vm/guest/debian-13/rootfs.ext4
+    install: data/.vm/guest/debian-13
+    probe: data/.vm/guest/debian-13/rootfs.ext4
     source: guest.debian.image
     size_mb: 400
     note: Debian 13 虚拟根（cloud 镜像 → rootfs → 装 qemu-guest-agent 与通用内核 → 打包成 rootfs.ext4 磁盘镜像并按源镜像回填特权位 / 属主，目录中间产物清掉）；需要 sfdisk / dd / debugfs / ar / tar / unshare / mke2fs
@@ -248,8 +248,8 @@ deps:
     arch: x86_64
     kind: guest-runtime
     guest: debian-13
-    install: .vm/guest/debian-13
-    probe: .vm/guest/debian-13/.runtimes-ready
+    install: data/.vm/guest/debian-13
+    probe: data/.vm/guest/debian-13/.runtimes-ready
     source: guest.debian.image
     size_mb: 0
     note: Linux guest 的运行期编排（agent 已由 guest-rootfs 装进镜像，跳过首启；维护启动刷新 apt 并装 python3 与 C-C++，Node 用固定版本官方二进制，逐个自证后才写进 guest.yaml 的 runtimes）
@@ -258,8 +258,8 @@ deps:
     arch: x86_64
     kind: guest-disk
     guest: debian-13
-    install: .vm/guest/debian-13
-    probe: .vm/guest/debian-13/rootfs.qcow2
+    install: data/.vm/guest/debian-13
+    probe: data/.vm/guest/debian-13/rootfs.qcow2
     source: guest.debian.qcow2
     size_mb: 330
     note: Windows 宿主用的 Debian cloud qcow2（单文件直下 + 写 guest.yaml 画像）；agent 与运行包由 vm.guest-runtime.windows 的 Rust 编排装上
@@ -268,8 +268,8 @@ deps:
     arch: x86_64
     kind: guest-runtime
     guest: debian-13
-    install: .vm/guest/debian-13
-    probe: .vm/guest/debian-13/.runtimes-ready
+    install: data/.vm/guest/debian-13
+    probe: data/.vm/guest/debian-13/.runtimes-ready
     source: guest.debian.qcow2
     size_mb: 0
     note: Windows guest 的运行期编排（首启 cloud-init 装 qemu-guest-agent → 维护启动先整份刷新 apt lists，再装必需的 python3 / cifs-utils / C-C++ 与固定版本 Node → 逐个自证 python -V / node --version / gcc 编译，只把自证过的写进 guest.yaml 的 runtimes）；镜像源与 vm.guest.windows 同一份 qcow2（走缓存）
@@ -278,8 +278,8 @@ deps:
     os: windows
     arch: x86_64
     kind: file
-    install: .vm/smbd
-    probe: .vm/smbd/smbd.exe
+    install: data/.vm/smbd
+    probe: data/.vm/smbd/smbd.exe
     source: smbd.windows
     size_mb: 1
     note: 宿主侧用户态 SMB 共享服务（独立 fork 仓 rust-smb-server 的 smbd-v* release，基线上游 v0.12.1；Windows 没有 9p / virtiofs，SMB 经 guestfwd 做实时共享）。Windows 用户档的**硬前置**：缺它虚拟机档不可用，先补齐，不降级；不带任何上游补丁——Windows 侧走目录句柄、按父句柄逐名解析，共享根在 UNC 路径或映射盘上时枚举 / 建 / 改名 / 删都可用，卷拒绝 POSIX 删除时在共享根留隐藏的 `.smb-deleted` 兜底；校验值在 links.yaml 的 `smbd.windows.sha256`（该 release 的 `.sha256` 资产，由 pins.js 刷新）

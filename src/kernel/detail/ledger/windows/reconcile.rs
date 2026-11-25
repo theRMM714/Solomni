@@ -11,16 +11,16 @@ use std::path::{Path, PathBuf};
 /// 约束：不问用户；只回收归属明确已死的条目（活着的不动）；失败保留台账供下次重试。
 ///   **不做**孤儿清扫（sweep_orphan_aces / sweep_profiles）——那两条无归属，会误伤在跑实例，只归手动 --fence-clean；
 ///   但会**报告**台账之外的按次 profile（按次调用后数量随调用增长），处置入口仍是手动。
-pub fn reconcile(home: &Path) -> ReconcileReport {
+pub fn reconcile(root: &Path) -> ReconcileReport {
     let mut rep = ReconcileReport::default();
-    let _lock = match lock_ledger(home) {
+    let _lock = match lock_ledger(root) {
         Ok(l) => l,
         Err(e) => {
             rep.errors.push(e);
             return rep;
         }
     };
-    let mut rec = load_record(home);
+    let mut rec = load_record(root);
     // 台账外的本程序 profile：只列出来（没有归属证明，自动删会误伤在跑实例）。
     match our_profile_names() {
         Ok(names) => {
@@ -82,7 +82,7 @@ pub fn reconcile(home: &Path) -> ReconcileReport {
         return rep;
     }
     // 清理前先备份整份台账（审计 + 想重跑/核对的依据）。
-    match backup_record(home) {
+    match backup_record(root) {
         Ok(p) => rep.backup = p.map(|x| x.to_string_lossy().into_owned()),
         Err(e) => rep.errors.push(format!("台账备份失败（继续回收）：{}", e)),
     }
@@ -165,10 +165,10 @@ pub fn reconcile(home: &Path) -> ReconcileReport {
             .filter(|(_, st)| **st != OwnersState::Reclaim)
             .map(|(p, _)| p.clone())
             .collect();
-        if let Err(e) = save_record(home, &rec) {
+        if let Err(e) = save_record(root, &rec) {
             errors.push(format!("台账更新失败：{}", e));
         } else {
-            rec.drop_if_empty(home);
+            rec.drop_if_empty(root);
         }
     }
     rep.errors.extend(errors);

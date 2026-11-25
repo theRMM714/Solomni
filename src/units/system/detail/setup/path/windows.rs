@@ -87,14 +87,14 @@ pub(crate) fn info(root: &Path) -> PathInfo {
             .to_string(),
         shim_present,
         shim_current,
-        backup_present: backup_path(&layout::home(root)).exists(),
+        backup_present: backup_path(&layout::state(root)).exists(),
     }
 }
 
 /// 目的：path 模式的一句话结果（失败带上下文，交给呈现层排版）。
 pub(crate) fn path_line(root: &Path) -> Result<String, String> {
     let port = crate::kernel::detail::WindowsUserPath::new();
-    do_path(&port, &layout::home(root), root).map_err(|e| format!("改用户 PATH 失败：{}", e))
+    do_path(&port, &layout::state(root), root).map_err(|e| format!("改用户 PATH 失败：{}", e))
 }
 
 /// 目的：unset 模式的一句话结果。
@@ -106,5 +106,5 @@ pub(crate) fn unset_line(root: &Path) -> Result<String, String> {
 /// 目的：undo 模式的一句话结果。
 pub(crate) fn undo_line(root: &Path) -> Result<String, String> {
     let port = crate::kernel::detail::WindowsUserPath::new();
-    do_undo(&port, &layout::home(root)).map_err(|e| format!("还原 PATH 失败：{}", e))
+    do_undo(&port, &layout::state(root)).map_err(|e| format!("还原 PATH 失败：{}", e))
 }

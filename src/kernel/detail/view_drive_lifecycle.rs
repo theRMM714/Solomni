@@ -18,18 +18,18 @@ mod unix;
 use unix as backend;
 
 /// 目的：分配本实例的视图盘；返回是否真的分配了。
-pub fn begin(root: &Path, home: &Path) -> bool {
-    backend::begin(root, home)
+pub fn begin(root: &Path) -> bool {
+    backend::begin(root)
 }
 
 /// 目的：只清扫视图盘的崩溃残留（不分配盘符）；返回撤掉的盘符个数（没有视图盘恒 0）。
-pub fn sweep(home: &Path) -> usize {
-    backend::sweep(home)
+pub fn sweep(root: &Path) -> usize {
+    backend::sweep(root)
 }
 
 /// 目的：退出时注销本进程的视图盘登记。
-pub fn release(home: &Path) {
-    backend::release(home)
+pub fn release(root: &Path) {
+    backend::release(root)
 }
 
 /// 目的：沙箱用的路径编解码器；没有视图盘时给 `None`。

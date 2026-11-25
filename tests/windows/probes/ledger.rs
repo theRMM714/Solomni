@@ -24,8 +24,8 @@ fn ledger_listing_and_per_item_commands_are_machine_readable_and_honest() {
     let snap = root.join("inside");
     std::fs::create_dir_all(&snap).expect("建快照落点");
     let gone = root.join("gone");
-    let home = root.join(".home");
-    std::fs::create_dir_all(&home).expect("建私有区");
+    let home = root.join("data").join("state");
+    std::fs::create_dir_all(&home).expect("建台账目录");
     let esc = |p: &std::path::Path| p.to_string_lossy().replace('\\', "/");
     let ledger = format!(
         "{{\n  \"profiles\": [{{\"name\": \"Solomni.Agent.ProbeLedger\", \"at\": 11}}],\n  \"grants\": [{{\"sid\": \"S-1-15-2-1\", \"path\": \"{}\", \"rights\": 18, \"at\": 12}}],\n  \"snapshots\": [{{\"path\": \"{}\", \"at\": 13, \"bytes\": []}}]\n}}\n",
@@ -112,8 +112,8 @@ fn ledger_listing_and_per_item_commands_are_machine_readable_and_honest() {
 #[test]
 fn fence_reconcile_reclaims_dead_owners_and_reports_unjudgeable() {
     let root = scratch("reconcile-cli");
-    let home = root.join(".home");
-    std::fs::create_dir_all(&home).expect("建私有区");
+    let home = root.join("data").join("state");
+    std::fs::create_dir_all(&home).expect("建台账目录");
     let gone = root.join("gone").join("target");
     let esc = |p: &std::path::Path| p.to_string_lossy().replace('\\', "/");
     let gone_s = esc(&gone);

@@ -48,15 +48,17 @@ mod tools;
 mod vm;
 mod workspace;
 
-/// 目的：测试用的**产品根**——当前工作目录（测试在仓库根跑，虚拟根就解析到 `.vm/guest/<名>` 这条相对路径上）。
+/// 目的：测试用的**产品根**——当前工作目录（测试在仓库根跑，虚拟根就解析到 `data/.vm/guest/<名>` 这条相对路径上）。
 pub(crate) fn root_dir() -> std::path::PathBuf {
     std::env::current_dir().expect("取当前目录")
 }
 
-/// 目的：造一个测试用的**虚拟根**（`.vm/guest/<名>` + 过布局判定的占位磁盘镜像与内核），返回它的名字。
-/// 约束：只碰 `.vm/guest/` 下自己这一格，收尾删掉它（不清父目录——本机可能真装了别的虚拟根）。
+/// 目的：造一个测试用的**虚拟根**（`data/.vm/guest/<名>` + 过布局判定的占位磁盘镜像与内核），返回它的名字。
+/// 约束：只碰这一格，收尾删掉它（不清父目录——本机可能真装了别的虚拟根）。
 pub(crate) fn test_guest(name: &str) -> String {
-    let dir = root_dir().join(".vm").join("guest").join(name);
+    let dir = crate::kernel::domain::layout::vm(&root_dir())
+        .join("guest")
+        .join(name);
     std::fs::create_dir_all(&dir).expect("建虚拟根目录");
     std::fs::write(dir.join("rootfs.ext4"), b"img").expect("写占位磁盘镜像");
     std::fs::write(dir.join("vmlinuz"), b"stub").expect("写占位内核");

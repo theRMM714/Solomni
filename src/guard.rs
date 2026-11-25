@@ -3,7 +3,6 @@
 //! 不管：围栏与进程账的机制本身（在 `src/kernel/detail/confine` 与 `src/kernel/detail/procs.rs`）；启动形态。
 //! 联动：由工具进程按 `--fence-run` 拉起、由 `procs::watch` 按 `--proc-watchdog` 拉起；`src/main.rs` 负责分发。
 
-use crate::kernel::api::layout;
 /// 目的：`--fence-revoke` 的用法（SID + 路径）；返回 2 让调用方直接收场。
 fn revoke_usage() -> i32 {
     eprintln!("用法：solomni --fence-revoke <SID> <路径>（按 SID 撤一条授权，台账外残留也照撤）");
@@ -48,7 +47,6 @@ pub fn proc_watch(args: &[String], flag: usize) -> i32 {
 /// 约束：与 --fence-clean 共用同一份台账与同一套 ACE 读法（confine 的 catalog / restore_one / revoke_grant /
 ///   remove_profile_one）；**未指定的条目一概不动**。
 pub fn fence_grant(args: &[String], root: &std::path::Path) -> Option<i32> {
-    let home = layout::home(root);
     let after = |flag: &str| -> Option<String> {
         args.iter()
             .position(|a| a == flag)
@@ -57,7 +55,7 @@ pub fn fence_grant(args: &[String], root: &std::path::Path) -> Option<i32> {
     };
     // 启动对账的手动入口（与启动期同一份实现）：按台账回收归属明确已死的陈旧授权。
     if args.iter().any(|a| a == "--fence-reconcile") {
-        let rep = crate::kernel::detail::ledger::reconcile(&home);
+        let rep = crate::kernel::detail::ledger::reconcile(root);
         if rep.errors.is_empty() {
             println!("[围栏] {}", rep.summary());
             return Some(0);
@@ -85,7 +83,7 @@ pub fn fence_grant(args: &[String], root: &std::path::Path) -> Option<i32> {
             (Some(_), None) => return Some(revoke_usage()),
             (Some(sid), Some(path)) => {
                 return Some(report(crate::kernel::detail::ledger::revoke_grant(
-                    &home,
+                    root,
                     &sid,
                     &std::path::PathBuf::from(path),
                 )));
@@ -95,7 +93,7 @@ pub fn fence_grant(args: &[String], root: &std::path::Path) -> Option<i32> {
     }
     // 列清单：机器可读优先（默认 JSON）；--human 给一行一句的可读版。恒退出 0，判定归调用方。
     if args.iter().any(|a| a == "--fence-ledger") {
-        let view = crate::kernel::detail::ledger::ledger(&home);
+        let view = crate::kernel::detail::ledger::ledger(root);
         if args.iter().any(|a| a == "--human") {
             for line in ledger_lines(&view) {
                 println!("[围栏] {}", line);
@@ -118,7 +116,7 @@ pub fn fence_grant(args: &[String], root: &std::path::Path) -> Option<i32> {
             return Some(2);
         };
         return Some(report(crate::kernel::detail::ledger::restore_one(
-            &home,
+            root,
             &std::path::PathBuf::from(path),
         )));
     }
@@ -129,7 +127,7 @@ pub fn fence_grant(args: &[String], root: &std::path::Path) -> Option<i32> {
             return Some(2);
         };
         return Some(report(crate::kernel::detail::ledger::remove_profile_one(
-            &home, &name,
+            root, &name,
         )));
     }
     None
@@ -215,10 +213,9 @@ fn report(done: Result<String, String>) -> i32 {
 /// 目的：--fence-clean 的整体收尾——按台账回收陈旧授权（隐藏模式，用户经文档知道它）。
 /// 约束：台账可能不存在（探针、夹具的台账被删、进程被杀）；回收结果如实报告。
 pub fn fence_clean(root: &std::path::Path) -> i32 {
-    let home = layout::home(root);
     let mut lines: Vec<String> = Vec::new();
     let mut failed = false;
-    match crate::kernel::detail::ledger::clean_all(&home) {
+    match crate::kernel::detail::ledger::clean_all(root) {
         Ok(msg) => lines.push(msg),
         Err(e) => {
             lines.push(format!("台账回收未完成：{}", e));
@@ -248,7 +245,7 @@ pub fn fence_clean(root: &std::path::Path) -> i32 {
     // 视图盘是 Windows 独有的盘符映射：崩溃残留的映射与登记也在这次清扫里回收，
     // 不必等下一个实例启动时才被顺手清掉（否则 --fence-clean 之后盘符还挂着）。
     if crate::kernel::api::platform::IS_WINDOWS {
-        let reclaimed = crate::kernel::api::view_drive::view_drive_sweep(&home);
+        let reclaimed = crate::kernel::api::view_drive::view_drive_sweep(root);
         lines.push(match reclaimed {
             0 => "没有残留的视图盘盘符映射".to_string(),
             n => format!("撤掉 {} 个残留的视图盘盘符映射", n),

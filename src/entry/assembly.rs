@@ -58,7 +58,7 @@ pub(crate) fn provision_with_guest_vm(root: &Path) -> ProvisionService {
     provision_with_vm(
         root,
         provision_vm(crate::kernel::detail::procs::ProcessBook::open(
-            &layout::home(root),
+            &layout::state(root),
         )),
     )
 }
@@ -139,7 +139,7 @@ pub(crate) fn storage(
 ///   `copy` 是开发/应急通道，不装配；`none` 只给供给编排。
 pub(crate) fn build_vm(root: &Path) -> Arc<dyn Vm + Send + Sync> {
     let shares: Vec<Arc<dyn crate::units::vm::ports::ShareBackend + Send + Sync>> = {
-        let book = crate::kernel::detail::procs::ProcessBook::open(&layout::home(root));
+        let book = crate::kernel::detail::procs::ProcessBook::open(&layout::state(root));
         vec![
             Arc::new(crate::units::vm::detail::VirtioFsShare::new().with_book(Arc::clone(&book))),
             Arc::new(crate::units::vm::detail::NinePShare::new()),
@@ -160,7 +160,7 @@ pub(crate) fn build_runner(
 ) -> Result<crate::kernel::detail::process::ProcTools, String> {
     Ok(crate::kernel::detail::process::ProcTools::new(
         std::env::current_exe().unwrap_or_default(),
-        layout::home(root),
+        root.to_path_buf(),
         Arc::new(std::sync::atomic::AtomicBool::new(false)),
     ))
 }
@@ -203,7 +203,7 @@ pub(crate) fn build_service(root: &Path) -> Result<BuildsService, String> {
         runner,
         Arc::new(crate::units::tools::service::fence::ToolFenceGate),
         Arc::new(crate::kernel::detail::confine::FenceHostAdapter::new(
-            layout::home(root),
+            root.to_path_buf(),
         )),
         Arc::new(crate::kernel::detail::host_probe::HostProbeAdapter),
         Arc::new(crate::kernel::ports::NoopLog),

@@ -75,6 +75,6 @@ impl super::Confine for Backend {
         command: &str,
         policy: &crate::kernel::contracts::fence::FenceRunPolicy,
     ) -> i32 {
-        run_fenced(plan, prepared.prepared, prepared.home, command, policy)
+        run_fenced(plan, prepared.prepared, prepared.root, command, policy)
     }
 }

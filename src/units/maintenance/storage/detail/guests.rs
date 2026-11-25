@@ -9,25 +9,25 @@ use std::path::{Path, PathBuf};
 
 /// 目的：按进程台账判 guest 存活。
 pub struct ProcessGuests {
-    home: PathBuf,
+    state: PathBuf,
 }
 
 impl ProcessGuests {
-    /// 目的：组合根专用——取产品根（台账在 `<root>/.home`）。
+    /// 目的：组合根专用——取产品根（台账在 `<root>/data/state`）。
     pub fn new(root: &Path) -> ProcessGuests {
         ProcessGuests {
-            home: layout::home(root),
+            state: layout::state(root),
         }
     }
 }
 
 impl GuestLiveness for ProcessGuests {
     fn any_running(&self) -> bool {
-        live_in(&self.home)
+        live_in(&self.state)
     }
 }
 
-/// 目的：这个家目录的进程台账里有没有活着的 guest。
-pub fn live_in(home: &Path) -> bool {
-    crate::kernel::detail::procs::ProcessBook::open(home).has_live("guest")
+/// 目的：这个台账目录里有没有活着的 guest。
+pub fn live_in(state: &Path) -> bool {
+    crate::kernel::detail::procs::ProcessBook::open(state).has_live("guest")
 }

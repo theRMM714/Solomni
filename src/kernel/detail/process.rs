@@ -66,22 +66,23 @@ pub struct ProcTools {
     pub timeout: Duration,
     /// 目的：全局沙箱要求与本进程是否已同意降级。
     pub mode: std::sync::Arc<crate::kernel::domain::fence::SandboxMode>,
-    /// 目的：平台侧状态——Windows 持有私有区、写权限开关与 PowerShell 覆盖；其余平台为空。
+    /// 目的：平台侧状态——Windows 持有产品安装根、写权限开关与 PowerShell 覆盖；其余平台为空。
     platform: platform::State,
 }
 
 impl ProcTools {
-    /// 目的：组合根注入：当前可执行文件（守门进程就是它自己）、产品私有区与写权限开关。
+    /// 目的：组合根注入：当前可执行文件（守门进程就是它自己）、产品安装根与写权限开关。
+    /// 约束：安装根不是台账目录——台账（`data/state`）由内核机制自己从它派生。
     pub fn new(
         exe: PathBuf,
-        home: PathBuf,
+        root: PathBuf,
         write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> ProcTools {
         ProcTools {
             exe,
             timeout: Duration::from_secs(30),
             mode: std::sync::Arc::new(crate::kernel::domain::fence::SandboxMode::permissive()),
-            platform: platform::State::new(home, write_allowed),
+            platform: platform::State::new(root, write_allowed),
         }
     }
 
@@ -151,7 +152,7 @@ struct Prepared {
     stop: Option<RunOutcome>,
     prepared: bool,
     unfenced_note: Option<String>,
-    home: Option<std::path::PathBuf>,
+    root: Option<std::path::PathBuf>,
 }
 
 impl ProcTools {
@@ -177,7 +178,7 @@ impl ProcTools {
             stop,
             prepared,
             unfenced_note,
-            home,
+            root,
         } = platform::prepare(PrepareCtx {
             tools: self,
             fence,
@@ -213,7 +214,7 @@ impl ProcTools {
         let job = confine::FenceJob {
             plan: fence.clone(),
             prepared,
-            product_home: home,
+            product_home: root,
             policy,
         };
         let mut cmd = confine::launcher(&self.exe, &job, command);

@@ -152,15 +152,15 @@ fn print_slow_summary(prep: &FencePrep) {
 ///   容器数据边界按本次调用记（收尾可精确撤）；祖先链的只读属性、可信执行基座是**机器级**——授给本产品能力 SID、
 ///   跨会话复用（见 is_machine_target / is_trusted_base 与 record 的 GrantScope）。
 ///   台账锁只罩「读—改—写」（record/store.rs 的 with_ledger）：慢的 ACL 写在锁外，并发调用不互相排队。
-pub fn prepare_fence(spec: &FencePlan, command: &str, home: &Path) -> FencePrep {
+pub fn prepare_fence(spec: &FencePlan, command: &str, root: &Path) -> FencePrep {
     // 这一轮真正写下去的授权（用于如实打印足迹）。
     let mut written: Vec<(String, PathBuf, u32)> = Vec::new();
     let mut prep = FencePrep::default();
-    // 产品根 = .home 的父目录：根内路径存原始安全描述符收尾还原，根外只记 ACE 摘要精确撤销。
-    let root = product_root(home);
+    // 产品根 = 产品安装根：根内路径存原始安全描述符收尾还原，根外只记 ACE 摘要精确撤销。
+    let product = product_root(root);
     // 台账事务只罩「读—改—写」：先确认台账拿得到（拿不到就整次如实收尾），之后每条授权各自加锁，
     // 慢的 ACL 写不占锁——同进程并发调用不会因某一条 193 秒的整树重算互相排队。
-    if let Err(e) = with_ledger(home, |_| Ok::<(), String>(())) {
+    if let Err(e) = with_ledger(root, |_| Ok::<(), String>(())) {
         eprintln!("[围栏] 授权台账落盘失败：{}", e);
         record(&mut prep, FencePart::Ledger, PathBuf::new(), e);
         return prep;
@@ -172,8 +172,8 @@ pub fn prepare_fence(spec: &FencePlan, command: &str, home: &Path) -> FencePrep 
     let base_owner = current_owner();
     let container = container_name(spec);
     // profile 名先有主：这条落不下就不能动本机权限项。
-    if let Err(e) = with_ledger(home, |rec| {
-        journal_add_profile(home, rec, &container, container_owner.clone())
+    if let Err(e) = with_ledger(root, |rec| {
+        journal_add_profile(root, rec, &container, container_owner.clone())
     }) {
         eprintln!("[围栏] 授权台账落盘失败：{}", e);
         record(&mut prep, FencePart::Ledger, PathBuf::new(), e);
@@ -216,7 +216,14 @@ pub fn prepare_fence(spec: &FencePlan, command: &str, home: &Path) -> FencePrep 
         };
         prompt_first_write(&PROMPT_INTERPRETER, STEP_INTERPRETER);
         let started = Instant::now();
-        match grant_one_journaled(home, base, &base_text, &target, &root, base_owner.clone()) {
+        match grant_one_journaled(
+            root,
+            base,
+            &base_text,
+            &target,
+            &product,
+            base_owner.clone(),
+        ) {
             Ok(true) => {
                 push_step(&mut prep, STEP_INTERPRETER, started);
                 written.push((base_text.clone(), dir, RIGHTS_RO));
@@ -229,7 +236,7 @@ pub fn prepare_fence(spec: &FencePlan, command: &str, home: &Path) -> FencePrep 
         }
     }
     // **祖先链不用授穿过**：令牌自带 SeChangeNotifyPrivilege；给祖先授穿过要改写巨型目录 DACL（真机 ~90 s/条）。
-    // shell 例外只补 RIGHTS_STAT；视图盘生效时这条链止于产品根（见 grant_targets 的 root 参数）；base 在数据边界循环里还要用。
+    // shell 例外只补 RIGHTS_STAT；视图盘生效时这条链止于产品根（见 grant_targets 的 product 参数）；base 在数据边界循环里还要用。
     let sid = match container_sid(&container) {
         Ok(sid) => sid,
         Err(e) => {
@@ -253,7 +260,7 @@ pub fn prepare_fence(spec: &FencePlan, command: &str, home: &Path) -> FencePrep 
     // 视图盘只对 shell 这类 cwd == 私有沙箱的调用生效：祖先链只补到产品根（含）一级，根外一级都不写（那 193 秒）。
     // 模块工具的 cwd 是模块根，不走视图盘；它本来就不算深叶（deep 只对 cwd == private 成立），只补一条直接父目录 STAT。
     let shell_view = crate::kernel::detail::view_drive::active_shell_view(spec).is_some();
-    let plan_root = shell_view.then_some(root.as_path());
+    let plan_root = shell_view.then_some(product.as_path());
     let todo = grant_targets(spec, plan_root);
     // 本轮写下去的机器级授权条数（祖先链 + 可信基座；只用于在"已写权限"行后补一句去向说明）。
     let mut machine_written = 0usize;
@@ -272,7 +279,7 @@ pub fn prepare_fence(spec: &FencePlan, command: &str, home: &Path) -> FencePrep 
             }
             prompt_first_write(&PROMPT_ANCESTOR, STEP_ANCESTOR);
             let started = Instant::now();
-            match grant_machine_journaled(home, base, &base_text, &target, &root) {
+            match grant_machine_journaled(root, base, &base_text, &target, &product) {
                 Ok(true) => {
                     machine_written += 1;
                     push_step(&mut prep, STEP_ANCESTOR, started);
@@ -288,13 +295,13 @@ pub fn prepare_fence(spec: &FencePlan, command: &str, home: &Path) -> FencePrep 
         }
         // 工具链 / 运行包是**可信执行基座**：只读、无 scope 信息，与祖先链同属机器级授权
         // （授给本产品能力 SID、台账 scope=machine），跨会话复用、启动对账不回收。
-        let to_base = rights == RIGHTS_RO && is_trusted_base(path, &root);
+        let to_base = rights == RIGHTS_RO && is_trusted_base(path, &product);
         if to_base {
             if !has_ace_for(base, path, rights) {
                 prompt_first_write(&PROMPT_BASE, STEP_BASE);
             }
             let started = Instant::now();
-            match grant_machine_journaled(home, base, &base_text, &target, &root) {
+            match grant_machine_journaled(root, base, &base_text, &target, &product) {
                 Ok(true) => {
                     machine_written += 1;
                     push_step(&mut prep, STEP_BASE, started);
@@ -315,11 +322,11 @@ pub fn prepare_fence(spec: &FencePlan, command: &str, home: &Path) -> FencePrep 
         }
         let started = Instant::now();
         match grant_one_journaled(
-            home,
+            root,
             sid,
             &sid_text,
             &target,
-            &root,
+            &product,
             container_owner.clone(),
         ) {
             Ok(true) => {
@@ -427,7 +434,7 @@ pub fn verify(spec: &FencePlan, _command: &str) -> FenceVerdict {
 pub fn run_fenced(
     spec: &FencePlan,
     prepared: bool,
-    home: Option<&Path>,
+    root: Option<&Path>,
     command: &str,
     policy: &crate::kernel::contracts::fence::FenceRunPolicy,
 ) -> i32 {
@@ -453,7 +460,7 @@ pub fn run_fenced(
     }
     // 守门进程：挂现成视图盘（读记录 + 校验映射；不分配、不登记 pid），容器 cwd 才会写成盘符路径。
     // 已在本进程生效时是幂等的：只是重设同一个 active 视图。
-    if let Some(h) = home {
+    if let Some(h) = root {
         let _ = crate::kernel::detail::view_drive::attach_view_drive(h);
     }
     let name = container_name(spec);
@@ -466,7 +473,7 @@ pub fn run_fenced(
         return run_unfenced(spec, command);
     }
     // 建过就记进台账：守门进程是唯一真正建 profile 的地方，外层只知道"该建"、不知道"建成了"。
-    if let Some(h) = home {
+    if let Some(h) = root {
         record_profile(h, &name, &spec.lease);
     }
     let sid = match container_sid(&name) {
@@ -541,6 +548,6 @@ impl super::Confine for Backend {
         command: &str,
         policy: &crate::kernel::contracts::fence::FenceRunPolicy,
     ) -> i32 {
-        run_fenced(plan, prepared.prepared, prepared.home, command, policy)
+        run_fenced(plan, prepared.prepared, prepared.root, command, policy)
     }
 }

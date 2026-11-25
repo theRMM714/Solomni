@@ -40,8 +40,8 @@ impl SetupHost {
         self
     }
 
-    fn home(&self) -> PathBuf {
-        layout::home(&self.root)
+    fn state(&self) -> PathBuf {
+        layout::state(&self.root)
     }
 
     /// 目的：预授完成后把授权记进设置；没有 ACL 一步或没接端口时什么都不做。
@@ -94,7 +94,7 @@ impl SetupOps for SetupHost {
     }
 
     fn fence_ensure(&self, on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
-        fence::ensure(&self.root, &self.home(), on_line)
+        fence::ensure(&self.root, &self.state(), on_line)
     }
 }
 

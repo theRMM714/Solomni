@@ -11,12 +11,12 @@ use std::process::Command;
 /// 目的：守门进程的入参：runtime 的围栏策略 + **外层是否已把本机授权做完** + 产品私有区（台账落点）。
 ///   授权是改本机目录 ACL 的动作（只有 Windows 的容器围栏需要），所以它不进 runtime 的 `FencePlan`，
 ///   由适配层随这次执行一起交给守门进程。JSON 是**扁平**的：FencePlan 的字段同层再加 `prepared` 与 `product_home`。
-///   字段名刻意不叫 `home`：`FencePlan.home` 是 agent 的私有沙箱，这里是产品的 `.home/`，两者不是一回事。
+///   字段名刻意不叫 `home`：`FencePlan.home` 是 agent 的私有沙箱，这里是产品的台账目录 `data/state/`，两者不是一回事。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FenceJob {
     pub plan: FencePlan,
     pub prepared: bool,
-    /// 目的：产品私有区（`.home/`）：守门进程把**它建过的容器 profile** 记进这里的台账，供 `--fence-clean` 精确回收。
+    /// 目的：产品台账目录（`data/state/`）：守门进程把**它建过的容器 profile** 记进这里的台账，供 `--fence-clean` 精确回收。
     ///   守门进程是唯一真正建 profile 的地方，外层只知道"该建"、不知道"建成了"。
     ///   没有台账的调用方（探针）给 `None`：那类 profile 由 `--fence-clean` 的前缀清扫兜底。
     pub product_home: Option<PathBuf>,
@@ -97,7 +97,7 @@ pub fn run_fenced(job: &FenceJob, command: &str) -> i32 {
         &job.plan,
         Prepared {
             prepared: job.prepared,
-            home: job.product_home.as_deref(),
+            root: job.product_home.as_deref(),
         },
         command,
         &job.policy,

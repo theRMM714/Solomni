@@ -22,20 +22,20 @@ pub(crate) fn revoke_one_text(sid_text: &str, path: &Path, recursive: bool) -> R
 ///   （真机实测一次祖先链重算约 138 秒），机器级条目由 `--fence-clean` 的全量入口显式撤。
 /// 返回：给用户看的一句话（清理了几条、删了几个 profile、保留了多少机器级授权）。
 #[cfg(test)]
-pub fn clean(home: &Path) -> Result<String, String> {
-    clean_impl(home, false)
+pub fn clean(root: &Path) -> Result<String, String> {
+    clean_impl(root, false)
 }
 
 /// 目的：全量收尾——连 `scope=machine` 一起撤（`--fence-clean` 用；用户显式要求时才动机器级 ACL）。
-pub fn clean_all(home: &Path) -> Result<String, String> {
-    clean_impl(home, true)
+pub fn clean_all(root: &Path) -> Result<String, String> {
+    clean_impl(root, true)
 }
 
-fn clean_impl(home: &Path, include_machine: bool) -> Result<String, String> {
+fn clean_impl(root: &Path, include_machine: bool) -> Result<String, String> {
     // 锁只罩台账读取；慢的 ACL 还原 / 撤销与删 profile 全在锁外。
     let rec = {
-        let _lock = lock_ledger(home)?;
-        load_record(home)
+        let _lock = lock_ledger(root)?;
+        load_record(root)
     };
     if rec.is_empty() {
         return Ok("没有台账：本程序没在本机写过权限项".to_string());
@@ -127,8 +127,8 @@ fn clean_impl(home: &Path, include_machine: bool) -> Result<String, String> {
     }
     // 清干净了才改台账：锁内按本次成功清单销账，删不掉本身就是没收干净，如实报错。
     let kept = {
-        let _lock = lock_ledger(home)?;
-        let mut rec = load_record(home);
+        let _lock = lock_ledger(root)?;
+        let mut rec = load_record(root);
         rec.grants.retain(|g| {
             if g.scope == GrantScope::Machine && !include_machine {
                 return true; // 机器级默认保留
@@ -153,14 +153,14 @@ fn clean_impl(home: &Path, include_machine: bool) -> Result<String, String> {
         }
         rec.profiles.retain(|p| !deleted_names.contains(&p.name));
         if rec.is_empty() {
-            match std::fs::remove_file(record_path(home)) {
+            match std::fs::remove_file(record_path(root)) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => return Err(format!("权限项已清干净，但删除授权台账失败：{}", e)),
             }
             0
         } else {
-            save_record(home, &rec).map_err(|e| format!("授权台账更新失败：{}", e))?;
+            save_record(root, &rec).map_err(|e| format!("授权台账更新失败：{}", e))?;
             rec.grants
                 .iter()
                 .filter(|g| g.scope == GrantScope::Machine)
@@ -274,14 +274,14 @@ fn execute_release(plans: &[PlannedFinalize], errors: &mut Vec<String>) -> Vec<b
 /// 目的：锁内按本次成功清单销账（复检仍无归属才删，避免误删并发新授的条目）。
 /// 参数：had_record = 释放前台账是否存在；不存在就别凭空造一份。
 fn commit_release(
-    home: &Path,
+    root: &Path,
     plans: &[PlannedFinalize],
     ok: &[bool],
     profiles: &[(String, bool)],
     had_record: bool,
 ) -> Result<(), String> {
-    let _lock = lock_ledger(home)?;
-    let mut rec = load_record(home);
+    let _lock = lock_ledger(root)?;
+    let mut rec = load_record(root);
     for (p, done) in plans.iter().zip(ok) {
         if !done {
             continue;
@@ -299,37 +299,37 @@ fn commit_release(
         }
     }
     if rec.is_empty() {
-        rec.drop_if_empty(home);
+        rec.drop_if_empty(root);
     } else if had_record {
-        save_record(home, &rec).map_err(|e| format!("授权台账更新失败：{}", e))?;
+        save_record(root, &rec).map_err(|e| format!("授权台账更新失败：{}", e))?;
     }
     Ok(())
 }
 
 /// 目的：撤销一次会话的授权（会话删除时经 FenceHost 端口调用）。
-/// 参数：spec 是该会话各席的围栏范围；home 是产品私有区（台账落点，也是产品根的锚）。
+/// 参数：spec 是该会话各席的围栏范围；root 是产品私有区（台账落点，也是产品根的锚）。
 /// 约束：两阶段——锁内摘归属并落盘，锁外做 ACL，再锁内复检销账；慢的整树重算不占台账锁。
 /// 错误：撤权、还原或台账更新失败时如实返回；失败条目留在台账里，供下次重试。
-pub fn release_fence(spec: &FencePlan, home: &Path) -> Result<(), String> {
+pub fn release_fence(spec: &FencePlan, root: &Path) -> Result<(), String> {
     let sid = container_sid(&container_name(spec))?;
     let sid_text = sid_to_string(sid);
     free_sid(sid);
     // 只撤**这个会话**的归属：同名 agent 的另一个会话持有另一份 lease，不能被一起撤掉。
     let mut owner = current_owner();
     owner.lease = spec.lease.clone();
-    let had_record = record_path(home).exists();
+    let had_record = record_path(root).exists();
     let plans = {
-        let _lock = lock_ledger(home)?;
-        let mut rec = load_record(home);
+        let _lock = lock_ledger(root)?;
+        let mut rec = load_record(root);
         let plans = plan_release(&mut rec, &owner, Some(&sid_text));
         if had_record {
-            save_record(home, &rec).map_err(|e| format!("授权台账更新失败：{}", e))?;
+            save_record(root, &rec).map_err(|e| format!("授权台账更新失败：{}", e))?;
         }
         plans
     };
     let mut errors: Vec<String> = Vec::new();
     let ok = execute_release(&plans, &mut errors);
-    if let Err(e) = commit_release(home, &plans, &ok, &[], had_record) {
+    if let Err(e) = commit_release(root, &plans, &ok, &[], had_record) {
         errors.push(e);
     }
     if errors.is_empty() {
@@ -342,7 +342,7 @@ pub fn release_fence(spec: &FencePlan, home: &Path) -> Result<(), String> {
 /// 目的：按**会话租约**撤销本进程为该会话写下的全部授权与 profile（会话改配 / 删除时调用）。
 /// 约束：只撤"当前进程 + 该租约"的归属；同会话的其它进程、其它会话与工具链 baseline 都不受影响。
 ///   两阶段：锁内摘归属 / 收集变空的 profile，锁外做 ACL / 删 profile，再锁内复检销账。
-pub fn release_by_lease(home: &Path, lease: &str) -> Result<(), String> {
+pub fn release_by_lease(root: &Path, lease: &str) -> Result<(), String> {
     if lease.trim().is_empty() {
         return Err("按会话释放需要一个租约（空租约不留归属）".to_string());
     }
@@ -352,10 +352,10 @@ pub fn release_by_lease(home: &Path, lease: &str) -> Result<(), String> {
         start: me.start,
         lease: lease.to_string(),
     };
-    let had_record = record_path(home).exists();
+    let had_record = record_path(root).exists();
     let (plans, names) = {
-        let _lock = lock_ledger(home)?;
-        let mut rec = load_record(home);
+        let _lock = lock_ledger(root)?;
+        let mut rec = load_record(root);
         let plans = plan_release(&mut rec, &owner, None);
         // profile 与授权同生命周期：这个会话的归属走了、且没有别的归属，才删 profile。
         let mut names: Vec<String> = Vec::new();
@@ -371,7 +371,7 @@ pub fn release_by_lease(home: &Path, lease: &str) -> Result<(), String> {
         names.sort();
         names.dedup();
         if had_record {
-            save_record(home, &rec).map_err(|e| format!("授权台账更新失败：{}", e))?;
+            save_record(root, &rec).map_err(|e| format!("授权台账更新失败：{}", e))?;
         }
         (plans, names)
     };
@@ -388,7 +388,7 @@ pub fn release_by_lease(home: &Path, lease: &str) -> Result<(), String> {
             (name, done)
         })
         .collect();
-    if let Err(e) = commit_release(home, &plans, &ok, &profiles, had_record) {
+    if let Err(e) = commit_release(root, &plans, &ok, &profiles, had_record) {
         errors.push(e);
     }
     if errors.is_empty() {

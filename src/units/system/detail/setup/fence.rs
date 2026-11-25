@@ -12,21 +12,21 @@ pub(crate) fn grant(root: &Path, on_line: &mut dyn FnMut(&str)) -> Result<(), St
         on_line("本平台没有机器级 ACL 预授（已登记缺口）：围栏的权限模型不写 ACL");
         return Ok(());
     }
-    let home = layout::home(root);
+    let state = layout::state(root);
     on_line("围栏机器级预授：只需成功一次；之后新会话不再重写这批 ACL");
-    ensure(root, &home, on_line)?;
+    ensure(root, &state, on_line)?;
     on_line("围栏机器级预授完成");
     // 能力 SID 已就位才撤旧授权：不留读不到的窗口。
-    crate::kernel::detail::confine::retire_legacy_machine_grants(&home, &mut |line| on_line(line))
+    crate::kernel::detail::confine::retire_legacy_machine_grants(&state, &mut |line| on_line(line))
 }
 
 /// 目的：把机器级落点一次授好（进度逐条经 on_line）。
 pub(crate) fn ensure(
     root: &Path,
-    home: &Path,
+    state: &Path,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
-    crate::kernel::detail::confine::machine_ensure(root, home, on_line)
+    crate::kernel::detail::confine::machine_ensure(root, state, on_line)
 }
 
 /// 目的：还缺哪些机器级落点（只读；空 = 已就绪）。

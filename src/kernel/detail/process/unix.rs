@@ -13,8 +13,8 @@ use std::sync::atomic::AtomicBool;
 pub(super) struct State;
 
 impl State {
-    /// 目的：非 Windows 不保存私有区与写权限开关。
-    pub(super) fn new(_home: PathBuf, _write_allowed: Arc<AtomicBool>) -> State {
+    /// 目的：非 Windows 不保存产品安装根与写权限开关。
+    pub(super) fn new(_root: PathBuf, _write_allowed: Arc<AtomicBool>) -> State {
         State
     }
 }
@@ -35,7 +35,7 @@ pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
         stop: None,
         prepared: false,
         unfenced_note: None,
-        home: None,
+        root: None,
     }
 }
 

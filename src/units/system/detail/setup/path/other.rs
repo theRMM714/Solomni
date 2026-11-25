@@ -15,7 +15,7 @@ pub(crate) fn info(root: &Path) -> PathInfo {
         shim: String::new(),
         shim_present: false,
         shim_current: false,
-        backup_present: backup_path(&layout::home(root)).exists(),
+        backup_present: backup_path(&layout::state(root)).exists(),
     }
 }
 

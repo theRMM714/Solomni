@@ -31,10 +31,9 @@ fn view_drive_puts_the_container_cwd_on_the_mapped_letter() {
     let base = std::env::temp_dir().join(format!("solomni-view-probe-{}", std::process::id()));
     discard(&base);
     let root = base.join("product");
-    let home = root.join(".home");
     let private = root.join("session").join("s1");
     std::fs::create_dir_all(&private).expect("建私有区");
-    std::fs::create_dir_all(&home).expect("建 .home");
+    std::fs::create_dir_all(crate::kernel::domain::layout::state(&root)).expect("建台账目录");
 
     struct ReleaseOnDrop(PathBuf);
     impl Drop for ReleaseOnDrop {
@@ -42,7 +41,7 @@ fn view_drive_puts_the_container_cwd_on_the_mapped_letter() {
             crate::kernel::detail::view_drive::release_view_drive(&self.0);
         }
     }
-    let view = match crate::kernel::detail::view_drive::ensure_view_drive(&root, &home) {
+    let view = match crate::kernel::detail::view_drive::ensure_view_drive(&root) {
         Ok(view) => view,
         Err(e) => {
             eprintln!(
@@ -53,7 +52,7 @@ fn view_drive_puts_the_container_cwd_on_the_mapped_letter() {
             return;
         }
     };
-    let _release = ReleaseOnDrop(home.clone());
+    let _release = ReleaseOnDrop(root.clone());
 
     let spec = FencePlan {
         agent: "probe-view".to_string(),
@@ -80,16 +79,16 @@ fn view_drive_puts_the_container_cwd_on_the_mapped_letter() {
         panic!("建容器 profile：{}", e);
     }
     let command = "cd > cwd.txt && echo view-ok > out.txt";
-    let prep = prepare_fence(&spec, command, &home);
+    let prep = prepare_fence(&spec, command, &root);
     if let Some(blocked) = &prep.blocked {
         eprintln!(
             "[探针] 本机给授权落点写不了权限（{}）：视图盘往返探针跳过（不静默当作通过）",
             blocked.line()
         );
-        if let Err(e) = release_fence(&spec, &home) {
+        if let Err(e) = release_fence(&spec, &root) {
             eprintln!("[诊断] 撤权未完成（{}）：要收尾请跑 --fence-clean", e);
         }
-        clean(&home).ok();
+        clean(&root).ok();
         delete_profile(&container);
         discard(&base);
         return;
@@ -100,10 +99,10 @@ fn view_drive_puts_the_container_cwd_on_the_mapped_letter() {
     let out_text = std::fs::read_to_string(private.join("out.txt")).unwrap_or_default();
 
     free_sid(sid);
-    release_fence(&spec, &home).expect("撤权应当成功");
-    clean(&home).expect("台账回收应当成功");
+    release_fence(&spec, &root).expect("撤权应当成功");
+    clean(&root).expect("台账回收应当成功");
     // 先撤视图盘再删临时树：release 要读记录文件，树先删就再也撤不掉盘符映射（会留下可见的空盘）。
-    crate::kernel::detail::view_drive::release_view_drive(&home);
+    crate::kernel::detail::view_drive::release_view_drive(&root);
     assert!(delete_profile(&container), "探针的容器 profile 应当删得掉");
     discard(&base);
 

@@ -5,9 +5,13 @@
 //! 联动：windows.rs 的 prepare_fence 与守门进程都经 lock_ledger 拿事务；内存视图 Ledger/LedgerEntry 在 confine/ledger.rs。
 
 use super::super::Owner;
+use crate::kernel::domain::layout;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
+
+/// 目的：台账文件所在的目录名（`layout::state` 下的 `fence-grants.json`）。
+pub(crate) const RECORD_FILE: &str = "fence-grants.json";
 
 /// 目的：台账里一条快照（路径 + 记录时刻 + 原始安全描述符）。
 /// 约束：时间戳在**新增时**记一次，之后只读——它是“这条是什么时候挂上的”这一事实。
@@ -72,7 +76,7 @@ pub(crate) struct ProfileEntry {
 }
 
 /// 目的：授权台账——记下我们给谁、在哪些路径上写了权限、建过哪些容器 profile。
-/// 约束：落在产品私有区 .home/fence-grants.json（数据不出工作区）；收尾与按条处置都按它做。
+/// 约束：落在台账目录 `data/state/fence-grants.json`（数据不出工作区）；收尾与按条处置都按它做。
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 pub(crate) struct GrantRecord {
     #[serde(default)]
@@ -90,11 +94,11 @@ impl GrantRecord {
     }
 
     /// 目的：台账空到一行都不剩就删掉台账文件（不留“已办”的残条）。
-    pub(crate) fn drop_if_empty(&self, home: &Path) {
+    pub(crate) fn drop_if_empty(&self, root: &Path) {
         if !self.is_empty() {
             return;
         }
-        match std::fs::remove_file(record_path(home)) {
+        match std::fs::remove_file(record_path(root)) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => {}
@@ -110,13 +114,18 @@ pub(crate) fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-pub(crate) fn record_path(home: &Path) -> PathBuf {
-    home.join("fence-grants.json")
+/// 目的：台账目录（data/state）——kernel 机制一律持产品安装根，介质子路径只在 layout 拼。
+fn state_dir(root: &Path) -> PathBuf {
+    layout::state(root)
+}
+
+pub(crate) fn record_path(root: &Path) -> PathBuf {
+    state_dir(root).join(RECORD_FILE)
 }
 
 /// 台账写事务的跨进程锁文件名（与台账同目录，独立于台账本身）。
-fn lock_path(home: &Path) -> PathBuf {
-    home.join("fence-grants.lock")
+fn lock_path(root: &Path) -> PathBuf {
+    state_dir(root).join("fence-grants.lock")
 }
 
 /// 进程内串行：同一进程里可并发的工具调用会各写一次台账（见 collab 的并发批次），
@@ -131,14 +140,14 @@ pub(crate) struct LedgerGuard {
 
 /// 目的：拿住台账事务锁，覆盖一次完整的“读—改—写”（调用方拿到后自己 load/save）。
 /// 约束：有界等待（不无限阻塞）；拿不到就如实返回原因，调用方按“台账这一环走不动”处置。
-pub(crate) fn lock_ledger(home: &Path) -> Result<LedgerGuard, String> {
+pub(crate) fn lock_ledger(root: &Path) -> Result<LedgerGuard, String> {
     let proc = LEDGER_MUTEX
         .lock()
         .map_err(|_| "台账进程内锁已被毒化".to_string())?;
-    std::fs::create_dir_all(home).map_err(|e| format!("建私有区失败：{}", e))?;
+    std::fs::create_dir_all(state_dir(root)).map_err(|e| format!("建台账目录失败：{}", e))?;
     // 跨进程那半是内核的文件锁契约；等多久是台账自己的策略。
     let file = crate::kernel::detail::lock::lock_within(
-        &lock_path(home),
+        &lock_path(root),
         Duration::from_secs(60),
         "台账",
     )?;
@@ -151,38 +160,38 @@ pub(crate) fn lock_ledger(home: &Path) -> Result<LedgerGuard, String> {
 /// 目的：一次台账写事务：**只**把「读—改—写」罩在锁里，返回即释放——慢的 ACL 写不占锁。
 /// 约束：闭包内可以调 journal 的落盘函数（它们自己 save）；不要在这里做 acl_scan / grant_verified 这类慢操作。
 pub(crate) fn with_ledger<T>(
-    home: &Path,
+    root: &Path,
     f: impl FnOnce(&mut GrantRecord) -> Result<T, String>,
 ) -> Result<T, String> {
-    let _lock = lock_ledger(home)?;
-    let mut rec = load_record(home);
+    let _lock = lock_ledger(root)?;
+    let mut rec = load_record(root);
     f(&mut rec)
 }
 
-pub(crate) fn load_record(home: &Path) -> GrantRecord {
-    std::fs::read_to_string(record_path(home))
+pub(crate) fn load_record(root: &Path) -> GrantRecord {
+    std::fs::read_to_string(record_path(root))
         .ok()
         .and_then(|t| serde_json::from_str::<GrantRecord>(&t).ok())
         .unwrap_or_default()
 }
 
-pub(crate) fn save_record(home: &Path, rec: &GrantRecord) -> Result<(), String> {
-    std::fs::create_dir_all(home).map_err(|e| format!("建私有区失败：{}", e))?;
+pub(crate) fn save_record(root: &Path, rec: &GrantRecord) -> Result<(), String> {
+    std::fs::create_dir_all(state_dir(root)).map_err(|e| format!("建台账目录失败：{}", e))?;
     let text = serde_json::to_string_pretty(rec).map_err(|e| e.to_string())?;
-    std::fs::write(record_path(home), text).map_err(|e| e.to_string())
+    std::fs::write(record_path(root), text).map_err(|e| e.to_string())
 }
 
-/// 目的：回收前把整份台账拷一份到 .home/fence-backups/（审计 + 想重跑/核对的依据）；保留最近 N 份。
-pub(crate) fn backup_record(home: &Path) -> Result<Option<PathBuf>, String> {
-    let src = record_path(home);
+/// 目的：回收前把整份台账拷一份到 `data/state/fence-backups/`（审计 + 想重跑/核对的依据）；保留最近 N 份。
+pub(crate) fn backup_record(root: &Path) -> Result<Option<PathBuf>, String> {
+    let src = record_path(root);
     if !src.exists() {
         return Ok(None);
     }
-    let dir = home.join("fence-backups");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("建台账备份目录失败：{}", e))?;
-    let dst = dir.join(format!("fence-grants.{}.json", now_secs()));
+    let backups = state_dir(root).join("fence-backups");
+    std::fs::create_dir_all(&backups).map_err(|e| format!("建台账备份目录失败：{}", e))?;
+    let dst = backups.join(format!("fence-grants.{}.json", now_secs()));
     std::fs::copy(&src, &dst).map_err(|e| format!("备份台账失败：{}", e))?;
-    prune_backups(&dir, 10);
+    prune_backups(&backups, 10);
     Ok(Some(dst))
 }
 

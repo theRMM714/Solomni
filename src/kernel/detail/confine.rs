@@ -95,8 +95,8 @@ pub(crate) trait Confine: Sync {
 pub(crate) struct Prepared<'a> {
     /// 目的：外层是否成功写下了本机权限项（失败时按机制结论降级或拒绝）。
     pub prepared: bool,
-    /// 目的：产品私有区（台账落点）；探针等没有台账的调用方给 None。
-    pub home: Option<&'a Path>,
+    /// 目的：产品安装根（台账目录由 layout 从它派生）；探针等没有台账的调用方给 None。
+    pub root: Option<&'a Path>,
 }
 
 /// 目的：本平台后端（静态单例：后端无状态，机制状态都在系统里）。
@@ -118,27 +118,27 @@ pub fn verify(spec: &FencePlan, command: &str) -> FenceVerdict {
 
 /// 目的：围栏授权释放的适配器（实现 kernel 共享的 FenceHost 端口）：runtime 只说「这个会话的围栏撤掉」。
 pub struct FenceHostAdapter {
-    /// 产品私有区（.home/）：台账落点，也是产品根的锚（收尾还原要读它）。
-    home: PathBuf,
+    /// 产品安装根：台账目录（`data/state/`）与根内快照的分界都从它派生（收尾还原要读台账）。
+    root: PathBuf,
 }
 
 impl FenceHostAdapter {
-    /// 目的：组合根注入产品私有区；释放时据此按台账还原或精确撤权。
-    pub fn new(home: PathBuf) -> Self {
-        Self { home }
+    /// 目的：组合根注入产品安装根；释放时据此按台账还原或精确撤权。
+    pub fn new(root: PathBuf) -> Self {
+        Self { root }
     }
 }
 
 impl crate::kernel::ports::FenceHost for FenceHostAdapter {
     /// 目的：按会话租约撤销本进程为该会话写下的全部授权与 profile（会话改配 / 删除时调用）。
     fn release_by_lease(&self, lease: &str) -> Result<(), String> {
-        crate::kernel::detail::ledger::release_by_lease(&self.home, lease)
+        crate::kernel::detail::ledger::release_by_lease(&self.root, lease)
     }
 
     /// 目的：一次**一次性调用**的收尾——撤它自己的 ACE、删它的按次 profile、删 `private/Packages/<名字>` 空壳。
     /// 约束：三步各自记错、合并返回；profile 删不掉时临时目录仍要尽力清（它只是宿主侧的空壳）。
     fn release_call(&self, spec: &FencePlan) -> Result<(), String> {
-        crate::kernel::detail::ledger::release_call(spec, &self.home)
+        crate::kernel::detail::ledger::release_call(spec, &self.root)
     }
 }
 

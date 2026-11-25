@@ -10,16 +10,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 /// 目的：Windows 侧需要随会话宿主一起持有的状态。
 pub(super) struct State {
-    home: PathBuf,
+    root: PathBuf,
     write_allowed: Arc<AtomicBool>,
     disclosed: Arc<AtomicBool>,
 }
 
 impl State {
     /// 目的：保存组合根注入的产品私有区与写权限开关。
-    pub(super) fn new(home: PathBuf, write_allowed: Arc<AtomicBool>) -> State {
+    pub(super) fn new(root: PathBuf, write_allowed: Arc<AtomicBool>) -> State {
         State {
-            home,
+            root,
             write_allowed,
             disclosed: Arc::new(AtomicBool::new(false)),
         }
@@ -36,7 +36,7 @@ pub(super) fn prepare(
         let prep = crate::kernel::detail::confine::windows::prepare_fence(
             &spec.fence,
             &spec.command,
-            &state.home,
+            &state.root,
         );
         // 可选落点授不上只记事实（不牵动这次拉起）。
         for n in &prep.notes {
@@ -67,5 +67,5 @@ pub(super) fn prepare(
             &outcome.notes,
         ));
     }
-    Ok((prepared, Some(state.home.clone())))
+    Ok((prepared, Some(state.root.clone())))
 }

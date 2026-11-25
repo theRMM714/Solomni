@@ -133,7 +133,7 @@ impl Workdirs for FsWorkspace {
             .map(|l| l.key())
             .unwrap_or_else(|_| canonical.to_string_lossy().into_owned());
         let product = self.sessions.parent().unwrap_or(&self.sessions);
-        let dir = layout::home(product).join("locks");
+        let dir = layout::locks(product);
         std::fs::create_dir_all(&dir).map_err(|e| format!("建工作区锁目录失败：{}", e))?;
         let hash = crate::units::workspace::domain::hash::content_hash(key.as_bytes());
         let path = dir.join(format!("workspace-{}.lock", hash));

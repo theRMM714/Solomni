@@ -8,8 +8,9 @@
 #[test]
 pub(crate) fn doctor_reports_the_recorded_processes() {
     let root = crate::tests::scratch("doctor-procs");
-    std::fs::create_dir_all(root.join(".home")).expect("建 .home");
-    let book = crate::kernel::detail::procs::ProcessBook::open(&root.join(".home"));
+    let state = crate::kernel::domain::layout::state(&root);
+    std::fs::create_dir_all(&state).expect("建台账目录");
+    let book = crate::kernel::detail::procs::ProcessBook::open(&state);
     book.record(crate::kernel::detail::procs::Entry {
         pid: 999_999,
         since: 12,

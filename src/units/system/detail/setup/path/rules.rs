@@ -94,7 +94,7 @@ pub(crate) fn do_unset(port: &dyn UserPath, root: &Path) -> Result<String, Strin
 pub(crate) fn do_undo(port: &dyn UserPath, home: &Path) -> Result<String, String> {
     let Some(backup) = read_backup(home) else {
         return Err(
-            "没有 PATH 备份（.home/setup-path.json），无法还原；可先跑 --setup=unset 摘掉那一段"
+            "没有 PATH 备份（data/state/setup-path.json），无法还原；可先跑 --setup=unset 摘掉那一段"
                 .to_string(),
         );
     };
