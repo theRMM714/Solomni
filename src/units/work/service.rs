@@ -20,7 +20,6 @@ use crate::units::catalog::packages::api as pkgs;
 use crate::units::catalog::packages::api::Packages;
 use crate::units::catalog::registry::api::Registry;
 
-use crate::units::conversation::session::api::{Gates, History};
 use crate::units::llm::api::{Channel, Llm};
 use crate::units::prompt::api::Prompt;
 use crate::units::provision::api::Provision;
@@ -29,7 +28,9 @@ use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::session_model::api::{Delegation, HistoryView, RunState, SessionMeta};
 use crate::units::tools::api::{ToolExec, Tools};
 use crate::units::transcript::api::{OptionView, SessionEvent};
-use crate::units::turn::turn::api::{PROXY_PRIVATE_DIR, Session, Turn};
+use crate::units::turn::turn::api::PROXY_PRIVATE_DIR;
+use crate::units::turn_state::api::{Gates, History};
+use crate::units::turn_state::api::{Session, Turn};
 use crate::units::vm::api::Vm;
 use crate::units::work::api::{
     AgentSuggestion, ConfigAgent, ContinueView, EditGuest, FilesAgentRootView, FilesAgentView,
@@ -72,7 +73,7 @@ pub struct Work {
     systools: Arc<dyn Tools>,
     log: Arc<dyn Log + Send + Sync>,
     /// 目的：流程工厂（组合根注入）：建工作按会话类型表里的流程序列逐段造，本层不认识任何具体流程。
-    flows: Arc<dyn crate::units::conversation::session::api::Flows>,
+    flows: Arc<dyn crate::units::turn_state::api::Flows>,
 }
 
 impl Work {
@@ -93,7 +94,7 @@ impl Work {
         prompt: Arc<dyn Prompt>,
         systools: Arc<dyn Tools>,
         log: Arc<dyn Log + Send + Sync>,
-        flows: Arc<dyn crate::units::conversation::session::api::Flows>,
+        flows: Arc<dyn crate::units::turn_state::api::Flows>,
     ) -> Work {
         Work {
             root,

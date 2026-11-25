@@ -22,7 +22,7 @@ use crate::units::pure::registry_model::api::ToolMode;
 use crate::units::session_model::api::SessionMeta;
 use crate::units::transcript::api::SessionEvent;
 use crate::units::turn::env::api::SeatAccess;
-use crate::units::turn::turn::service::session::Turn;
+use crate::units::turn_state::api::Turn;
 use crate::units::vm::api::GuestOs;
 use crate::units::workspace::api::{Sandbox, Sandboxes, SharedScope};
 

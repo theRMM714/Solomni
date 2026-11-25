@@ -53,7 +53,7 @@
 - `src/units/turn/turn/service/facts.rs` → 沙箱 / 权限 / 工作区授权 / 工具环境（`env::api::member`）/ 预算的取数判据只有这一处：`src/units/runtime/service/env.rs` 的三个薄入口与建会话、回档、代理三条调用链都跟着它；改取数必须同改 `src/tests/workspace/resolve.rs`、`src/tests/runtime.rs` 的断言。
 - `src/units/turn/turn/service/rebuild.rs` → 重建与代理装配的行为契约（与实时逐条一致）：改一处必须同改 `src/tests/api/compaction.rs`、`src/tests/collab/flow.rs`、`src/tests/session/rewind.rs`、`src/tests/runtime/proxy.rs` 的断言。
 - `src/units/turn/turn/service/admit.rs` → 准入、按需重建、派发闸与子树续跑的唯一实现：`runtime` 的启用、派发与协作推进都经它，改语义必须同改 `src/tests/session/turn.rs` 的用例。
-- `src/units/turn/turn/service/state.rs` → 访问器是唯一写点；新增状态块要同时说明它属于谁、由谁写（R4）。
+- `src/units/turn_state/domain/live.rs` → 访问器是唯一写点；新增状态块要同时说明它属于谁、由谁写（R4）。
 - `src/units/turn/turn/service/turn.rs` / `flow.rs` → 回合推进与协作推进的行为契约（事件顺序、拒绝与提示文案）：改一处必须同改 `src/tests/runtime.rs`、`src/tests/collab/*` 的断言。
 - `src/units/turn/turn/service/generation*` → 五条生成链的线程名、事件外送与落盘时机是行为契约：改一处必须同改 `src/tests/api/events.rs`、`src/tests/runtime.rs`、`src/tests/api/compaction.rs` 的断言。
 - `src/units/turn/turn/api.rs` 的 `TurnHost` → 新加入口必须同改 `runtime` 的 `impl TurnHost for Handle`；它在 P5-9b 随命令队列手柄进 `src/entry/`。

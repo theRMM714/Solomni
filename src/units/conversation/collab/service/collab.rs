@@ -1,6 +1,6 @@
 //! 目的：协作会话状态机——建组、讨论、整理（出任务链）、审查关卡、链驱动、节点验收、总验收。
 //! 管：会话对象的字段（名单 / 讨论 / 链 / **本会话的裁决队句柄**）与各关卡的登记、处置、快照形态。
-//! 不管：队列本身的排队与校验（在 `crate::units::conversation::session::api::Gates`，与工具级确认共用）、
+//! 不管：队列本身的排队与校验（在 `crate::units::turn_state::api::Gates`，与工具级确认共用）、
 //!   讨论推进（`discussion.rs`）、泵的每一步（`pump.rs`）、回合收发与回答（`turn_io.rs`）、
 //!   代拟名单与按转录重建（`slate.rs`）；它不碰会话表，也不写别人的会话。
 //! 联动：契约见 docs/session/session-model.md 的「请用户裁决：一条通道，消息 + 选项」与
@@ -12,12 +12,12 @@ use crate::units::catalog::registry::api::Settings;
 use crate::units::conversation::collab::domain::gates::Pending;
 use crate::units::conversation::collab::service::discussion::Discussion;
 use crate::units::conversation::collab::service::synthesis::Execution;
-use crate::units::conversation::session::api::Gates;
 use crate::units::llm::api::{Channel, Chat, Llm, Msg};
 use crate::units::prompt::api::{Prompt, Segment};
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::tools::api::ToolExec;
 use crate::units::transcript::api::{LineView, SessionEvent};
+use crate::units::turn_state::api::Gates;
 use crate::units::vm::api::Vm;
 use crate::units::workspace::api::Sandboxes;
 use std::sync::Arc;

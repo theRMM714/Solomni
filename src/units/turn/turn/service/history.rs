@@ -7,7 +7,7 @@ use crate::units::conversation::session::api::{Persister, subtree_of};
 use crate::units::session_model::api::RunState;
 use crate::units::transcript::api::SessionEvent;
 
-use super::session::Turn;
+use crate::units::turn_state::api::Turn;
 
 impl Turn {
     /// 目的：把整棵子树（含自己）的运行态落成同一个值：**停止**先整棵冻上，**继续**再整棵解开。
@@ -53,10 +53,10 @@ impl Turn {
     pub(crate) fn notice_row(&mut self, sid: &str, text: &str) -> Vec<SessionEvent> {
         let mut out = Vec::new();
         match self.session_mut(sid) {
-            Some(crate::units::turn::turn::api::Session::Single(s)) => {
+            Some(crate::units::turn_state::api::Session::Single(s)) => {
                 out.extend(s.note_notice(text))
             }
-            Some(crate::units::turn::turn::api::Session::Flow(m)) => {
+            Some(crate::units::turn_state::api::Session::Flow(m)) => {
                 m.notice(text, &mut |e| out.push(e))
             }
             None => out.push(SessionEvent::Notice(text.to_string())),

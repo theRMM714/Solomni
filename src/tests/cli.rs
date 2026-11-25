@@ -161,7 +161,7 @@ fn waiting_list_is_built_line_by_line() {
 #[test]
 fn eof_answers_a_pending_card_by_stopping_instead_of_hanging() {
     use crate::units::conversation::collab::api::Pending;
-    use crate::units::conversation::session::api::SlotWake;
+    use crate::units::turn_state::api::SlotWake;
 
     let (handle, faces) = ops_with(vec![module_of("a")], Vec::new());
     let sid = "cli-eof-1";

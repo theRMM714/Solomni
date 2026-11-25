@@ -182,15 +182,14 @@ pub(crate) fn test_prompts() -> Prompts {
 }
 
 /// 目的：测试用工具总表与机制席位（走**与产品同一条**装配路径）。它与提示词册**分开**装配：两者互不依赖（见 units/prompt 的 Prompts）。测试用的**会话历史面**（与生产同一条路：端口装进 `SessionService`）。
-pub(crate) fn test_history()
--> Arc<dyn crate::units::conversation::session::api::History + Send + Sync> {
+pub(crate) fn test_history() -> Arc<dyn crate::units::turn_state::api::History + Send + Sync> {
     test_history_of(Arc::new(InMemoryHistory::new()))
 }
 
 /// 目的：同上，但用调用方给的替身（要在断言里看落盘内容的用例用它——同一份状态）。
 pub(crate) fn test_history_of(
     store: Arc<InMemoryHistory>,
-) -> Arc<dyn crate::units::conversation::session::api::History + Send + Sync> {
+) -> Arc<dyn crate::units::turn_state::api::History + Send + Sync> {
     Arc::new(crate::units::conversation::session::service::SessionService::new(store))
 }
 

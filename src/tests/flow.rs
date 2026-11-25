@@ -5,11 +5,11 @@
 
 use super::prelude::*;
 use crate::tests::doubles::StandIn;
-use crate::units::conversation::session::api::GateTicket;
 use crate::units::transcript::api::{
     DecisionCard, DecisionEnvelope, DecisionMessage, Gate, OptionView,
 };
-use crate::units::turn::turn::api::Session;
+use crate::units::turn_state::api::GateTicket;
+use crate::units::turn_state::api::Session;
 
 #[test]
 pub(crate) fn a_standin_flow_runs_on_the_same_driver() {

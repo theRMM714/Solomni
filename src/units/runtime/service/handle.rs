@@ -94,7 +94,7 @@ impl Handle {
     /// 参数：`door` = 该会话的裁决通道（与核心各关卡共用）；`bus` / `persister` = 卡的外送与落盘。
     pub(super) fn session_ask(
         &self,
-        door: &Arc<dyn crate::units::conversation::session::api::Gates>,
+        door: &Arc<dyn crate::units::turn_state::api::Gates>,
         sid: &str,
         bus: Arc<dyn Events>,
         persister: crate::units::conversation::session::api::Persister,
@@ -112,7 +112,7 @@ impl Handle {
             let handle = handle.lock().unwrap_or_else(|e| e.into_inner());
             crate::units::turn::turn::api::TurnHost::stop(&*handle, sid);
         });
-        crate::units::turn::turn::api::session_ask(Arc::clone(door), sid, emit, stop)
+        crate::units::turn_state::api::session_ask(Arc::clone(door), sid, emit, stop)
     }
 
     /// 目的：这个会话的**裁决队**（工具级确认进它）：只有接了交互前端才给——否则这一趟不接确认。
@@ -120,7 +120,7 @@ impl Handle {
     pub(super) fn decisions_of(
         &self,
         sid: &str,
-    ) -> Result<Option<Arc<dyn crate::units::conversation::session::api::Gates>>, String> {
+    ) -> Result<Option<Arc<dyn crate::units::turn_state::api::Gates>>, String> {
         if !self.interactive.load(std::sync::atomic::Ordering::Relaxed) {
             return Ok(None);
         }
@@ -160,7 +160,7 @@ impl Handle {
 impl crate::units::turn::turn::api::TurnHost for Handle {
     fn core<T>(
         &self,
-        f: impl FnOnce(&mut crate::units::turn::turn::api::Turn) -> Result<T, String> + Send + 'static,
+        f: impl FnOnce(&mut crate::units::turn_state::api::Turn) -> Result<T, String> + Send + 'static,
     ) -> Result<T, String>
     where
         T: Send + 'static,
@@ -171,7 +171,7 @@ impl crate::units::turn::turn::api::TurnHost for Handle {
     fn core_env<T>(
         &self,
         f: impl FnOnce(
-            &mut crate::units::turn::turn::api::Turn,
+            &mut crate::units::turn_state::api::Turn,
             &dyn crate::units::catalog::registry::api::Registry,
             &dyn crate::kernel::ports::HostProbe,
         ) -> Result<T, String>
@@ -200,13 +200,13 @@ impl crate::units::turn::turn::api::TurnHost for Handle {
     fn decisions_of(
         &self,
         sid: &str,
-    ) -> Result<Option<Arc<dyn crate::units::conversation::session::api::Gates>>, String> {
+    ) -> Result<Option<Arc<dyn crate::units::turn_state::api::Gates>>, String> {
         Handle::decisions_of(self, sid)
     }
 
     fn session_ask(
         &self,
-        door: &Arc<dyn crate::units::conversation::session::api::Gates>,
+        door: &Arc<dyn crate::units::turn_state::api::Gates>,
         sid: &str,
         bus: Arc<dyn Events>,
         persister: crate::units::conversation::session::api::Persister,

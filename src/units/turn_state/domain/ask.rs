@@ -2,13 +2,13 @@
 //! 管：进队与等回答、构不出可用选项时的收场（停会话 + 落警告）、停止 / 关闭时按"拒绝"解开。
 //! 不管：问什么、有几个选项（发起方给）、回答怎么落进业务（处置归发起方）、界面怎么画（呈现层）。
 //! 联动：走的是**同一条通道**（同一条队、同一张卡、同一条回答命令），契约见 docs/session/session-model.md 的
-//!   「请用户裁决」；队列本体在 `units/session/domain/decisions.rs`，本实现由宿主在生成线程上现造。
+//!   「请用户裁决」；队列本体在 `src/units/turn_state/domain/decisions.rs`，本实现由宿主在生成线程上现造。
 
 use crate::kernel::api::types::Ask;
 use crate::kernel::api::types::AskOutcome;
 use crate::kernel::ports::AskUser;
-use crate::units::conversation::session::api::{Gates, SlotWake};
 use crate::units::transcript::api::{SessionEvent, tool_ask};
+use crate::units::turn_state::domain::decisions::{Gates, SlotWake};
 use std::sync::Arc;
 
 /// 目的：工具执行层提问端口的实现：推一条卡给用户、**阻塞**等一个选项 id（不点不继续）。

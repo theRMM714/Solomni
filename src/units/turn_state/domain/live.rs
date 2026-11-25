@@ -2,14 +2,15 @@
 //! 管：`Session` 两种在世形态（单 agent / 一个流程槽）的在世表；运行态与创建占位的标记；每会话的裁决通道；
 //!   每会话的 shell 活进程槽（同一会话的多次 shell 调用共用一份活进程）。
 //! 不管：会话本体（`session` / `collab`）、生成驱动、落盘；谁在什么时候放取会话由 `runtime` 的用例决定。
-//! 联动：`runtime` 经 `api` 读写；裁决通道来自 `session::api`，shell 槽是 `session::api::ShellSlot`。
+//! 联动：`runtime` 经 `api` 读写；裁决通道来自本单元的 `api`，shell 槽是 `agentloop::api::ShellSlot`。
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use crate::kernel::api::types::SessionId;
 use crate::units::agentloop::api::{AgentSession, ShellSlot};
-use crate::units::conversation::session::api::{Decisions, Flow, Gates, decisions};
+use crate::units::turn_state::domain::decisions::{Decisions, Gates, decisions};
+use crate::units::turn_state::domain::flow::Flow;
 
 /// 目的：一份在世会话的两种形态：单 agent（含代理会话与子会话）与一个**流程**（协作只是已注册的一个流程）。
 /// 约束：流程槽是装箱的 trait 对象——会话形态不再是一张封闭清单，新流程不改这里。

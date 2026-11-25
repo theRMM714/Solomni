@@ -592,7 +592,7 @@ impl Work {
                     core_channel.ok_or_else(|| "有流程的会话缺少核心模型通道".to_string())?;
                 // 按这条会话声明里的流程序列装配：本层不认识任何具体流程（工厂是组合根注入的）。
                 let ids = meta.spec.flow_ids();
-                let setup = crate::units::conversation::session::api::FlowSetup {
+                let setup = crate::units::turn_state::api::FlowSetup {
                     settings: registry.snapshot(),
                     core_channel: Some(core_channel),
                     roster: metas.clone(),
@@ -601,17 +601,12 @@ impl Work {
                     desk: Arc::clone(&door),
                     restore: None,
                 };
-                let mut pipeline = crate::units::conversation::session::api::sequence_of(
-                    &ids,
-                    &setup,
-                    &*self.flows,
-                )?;
+                let mut pipeline =
+                    crate::units::turn_state::api::sequence_of(&ids, &setup, &*self.flows)?;
                 let mut out = Vec::new();
-                crate::units::conversation::session::api::Flow::begin_with(
-                    &mut pipeline,
-                    &task,
-                    &mut |e| out.push(e),
-                );
+                crate::units::turn_state::api::Flow::begin_with(&mut pipeline, &task, &mut |e| {
+                    out.push(e)
+                });
                 (Session::Flow(Box::new(pipeline)), out)
             }
         };

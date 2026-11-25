@@ -6,12 +6,12 @@
 use std::sync::Arc;
 
 use crate::units::catalog::registry::api::Settings;
-use crate::units::conversation::session::domain::decisions::Gates;
-use crate::units::conversation::session::domain::flow::Flow;
-use crate::units::conversation::session::domain::sequence::Sequence;
 use crate::units::llm::api::Channel;
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::session_model::api::{Profiles, SessionMeta};
+use crate::units::turn_state::domain::decisions::Gates;
+use crate::units::turn_state::domain::flow::Flow;
+use crate::units::turn_state::domain::sequence::Sequence;
 use crate::units::workspace::api::Sandboxes;
 
 /// 目的：造一段流程要的现场（每一段按 id 自己取用，本段不用的部分不消费）。

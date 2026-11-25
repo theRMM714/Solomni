@@ -6,10 +6,11 @@
 use std::sync::Arc;
 
 use crate::units::catalog::registry::api::Registry;
-use crate::units::conversation::session::api::{History, work_root};
+use crate::units::conversation::session::api::work_root;
 use crate::units::llm::api::LlmOpts;
+use crate::units::turn_state::api::History;
 
-use super::session::Turn;
+use crate::units::turn_state::api::Turn;
 
 /// 目的：本次模型调用的通道参数：**预算与"能不能流式"都取全局设置**（讨论、执行、验收、单 agent 共用一份）。
 ///  `want_stream` 是调用方这一次的意愿（呈现层按回包形状给）：**设置是上限，调用方可以在本次放弃流式**；
