@@ -4,6 +4,7 @@
 //! 联动：src/main.rs 组合根装配这些单元；runtime 与其它单元平级、只经各单元 api 编排（docs/architecture/boundaries.md）。
 
 pub mod agentloop;
+pub mod assets;
 pub mod catalog;
 pub mod collab;
 pub mod content;

@@ -5,7 +5,7 @@
 > "哪个席位用哪份提示词、拿哪些工具"见 [tools-and-roles.md](../tools/tools-and-roles.md) 的「提示词按席位分配」；
 > 模块自己的能力摘要（`brief`）与工具用法（`system`）见 [MODULE_SPEC.md](../../MODULE_SPEC.md)。
 
-册子按**共享 / 席位**两个目录切分；加载经 `PromptSource` 端口（`units/prompt/ports.rs`，实现在 `units/prompt/detail/yaml_prompts.rs`），
+册子按**共享 / 席位**两个目录切分；目录枚举与读盘归 `assets`（`prompts/` 的唯一主人），加载经 `PromptSource` 端口（`units/prompt/ports.rs`，实现在 `units/prompt/detail/yaml_prompts.rs`），
 `{{key}}` 渲染与"缺键即报错"在 `units/prompt/domain/prompt.rs`（纯逻辑，不读文件）。
 键的完整清单就是下面这张表——**本表由结构审查的 docsTruth 门禁（`tests/gates/structure/docsTruth.js`）与盘上的册子双向比对**（gate id 见 `node run-tests.js --list`）：加了键没改表、表里的键已不存在，都是硬失败。
 

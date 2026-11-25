@@ -41,6 +41,10 @@ pub const PROMPTS: &str = "prompts";
 /// 目的：系统工具目录名（安装根下，随包只读）。
 pub const SYSTOOLS: &str = "systools";
 
+/// 目的：界面语言目录名（安装根下，随包只读；运行期由编译期编入，不读盘）。
+#[allow(dead_code)]
+pub const LOCALES: &str = "locales";
+
 /// 目的：一台 guest 的规格文件名，落在它自己的镜像目录里。
 pub const GUEST_SPEC: &str = "guest.yaml";
 
@@ -135,6 +139,15 @@ pub fn systools(install: &Path) -> PathBuf {
     install.join(SYSTOOLS)
 }
 
+/// 目的：界面语言目录的绝对路径。
+/// 参数：`install` 安装根。
+/// 返回：`install/locales`。
+/// 约束：运行期没有读者（文案编译期编入）；只给 `assets` 的落点派生用。
+#[allow(dead_code)]
+pub fn locales(install: &Path) -> PathBuf {
+    install.join(LOCALES)
+}
+
 /// 目的：一台 guest 的规格文件路径。
 /// 参数：`dir` 该 guest 的镜像目录。
 /// 返回：`dir/guest.yaml`。
@@ -163,6 +176,9 @@ mod tests {
             "私有区不在源码树里"
         );
         assert_eq!(modules_src(install), install.join(MODULES));
+        assert_eq!(prompts(install), install.join(PROMPTS));
+        assert_eq!(systools(install), install.join(SYSTOOLS));
+        assert_eq!(locales(install), install.join(LOCALES));
         assert_eq!(guest_spec(&home(install)), root.join(HOME).join(GUEST_SPEC));
         assert_ne!(home(install), vm(install), "配置与镜像不共用一个目录");
         assert_ne!(home(install), session(install), "配置与会话不共用一个目录");

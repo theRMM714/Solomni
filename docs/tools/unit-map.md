@@ -26,4 +26,4 @@
 | `src/units/tools/domain/fence.rs` | 围栏描述符的派生策略与裁决卡材料（`fence_ask` / 选项 id；描述符与落点判据在 `src/kernel/contracts/fence.rs`） |
 | `src/units/tools/domain/shell.rs` | 执行类系统工具 shell 的纯规则：参数 / timeout 解析、命令长度、共享区执行位提示、回执解析（退出码 / 状态 / cwd·耗时） |
 | `src/units/tools/detail/sys_io.rs` | `SysIo` 端口的磁盘实现：纯 Rust 直接读写（严格 UTF-8、非法字节如实标注、写时建父目录）；按行窗口读流式扫完整份算行数与哈希；目录遍历走 `ignore::WalkBuilder`（不跟链接、按路径排序、规则剪枝），流式按行扫用 `BufReader` 且不受整份读上限约束；写盘在跨进程路径锁内做版本 CAS（锁目录由组合根注入，缺省退回进程内锁），临时文件 + 原子替换发布，`transact` 先校验/暂存再发布并在失败时回滚已发布文件 |
-| `src/units/tools/detail/yaml_systools.rs` | `SystoolsSource` 的磁盘实现：读 `systools/tools.yaml` 与 `names.yaml`（缺文件如实报装配错误） |
+| `src/units/tools/detail/yaml_systools.rs` | `SystoolsSource` 的装配输入：经 `Assets` 拿 `systools/tools.yaml` 与 `names.yaml` 并解码（落点与读盘在 `assets`，缺文件如实报装配错误） |
