@@ -341,7 +341,10 @@ pub(crate) fn system_with(
         Arc::new(crate::capabilities::system::detail::HostFacts);
     // 目的：便携维护端口——用户 PATH 与围栏机器级预授的写入实现都在 detail，service 只认端口。
     let setup: Arc<dyn crate::capabilities::system::api::SetupOps + Send + Sync> = Arc::new(
-        crate::capabilities::system::detail::setup::SetupHost::new(root),
+        crate::capabilities::system::detail::setup::SetupHost::new(root).with_policy(
+            crate::entry::portable::write_acl_policy(root),
+            crate::kernel::api::platform::HAS_EXTERNAL_ACL_STEP,
+        ),
     );
     Ok(SystemService::with_facts(
         SystemDeps {

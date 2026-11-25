@@ -476,6 +476,35 @@ fn existing_settings_file_must_be_self_consistent() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// 目的：`--setup fence` 的落盘面：不装登记处也能记授权——首启没有 settings.yaml 时按默认写，已有文件只改这一项。
+#[test]
+fn grant_write_acl_records_the_authorization_on_disk() {
+    let dir = crate::tests::scratch("grant-write-acl");
+    let store = crate::entry::assembly::settings_store(&dir);
+    crate::capabilities::catalog::registry::service::grant_write_acl(&store)
+        .expect("首启默认设置也要能记授权");
+    let loaded = store.load().expect("写回后要读得到");
+    assert!(loaded.app.sandbox.policy.windows.write_acl);
+
+    // 已有文件里是 best_effort + 未授权：只改授权一项，强制等级原样保留。
+    std::fs::write(
+        dir.join(".home").join("settings.yaml"),
+        "sandbox:\n  policy:\n    enforce:\n      filesystem: best_effort\n      network: best_effort\n      process_tree: best_effort\n      env_whitelist: best_effort\n    windows:\n      write_acl: false\n",
+    )
+    .expect("写 settings.yaml");
+    let before = store.load().expect("best_effort 不受平台限制");
+    assert!(!before.app.sandbox.policy.windows.write_acl);
+    crate::capabilities::catalog::registry::service::grant_write_acl(&store).expect("记授权");
+    let after = store.load().expect("写回后要读得到");
+    assert!(after.app.sandbox.policy.windows.write_acl);
+    assert_eq!(
+        after.app.sandbox.policy.enforce.filesystem,
+        crate::capabilities::catalog::registry::api::SandboxEnforceLevel::BestEffort,
+        "只改授权，不动强制等级"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn missing_settings_file_still_loads_defaults_for_first_run() {
     let dir = crate::tests::scratch("settings-first-run");

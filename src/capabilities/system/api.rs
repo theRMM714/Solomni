@@ -145,6 +145,12 @@ pub trait SetupOps: Send + Sync {
     fn fence_ensure(&self, on_line: &mut dyn FnMut(&str)) -> Result<(), String>;
 }
 
+/// 目的：围栏机器级预授成功后的那一笔——把"允许写 ACL"记进设置（设置归登记处，system 只认这个写入面）。
+/// 约束：返回给人读的一行（键与值）；失败给原因，预授本身已成功、不改退出码；标记由调用方按平台跳过。
+pub trait FencePolicy: Send + Sync {
+    fn record_authorization(&self) -> Result<String, String>;
+}
+
 /// 目的：一次系统维护调用的失败——文案 + 退出码（用法/门槛不对 = 2，执行失败 = 1）。
 /// 约束：呈现层只打印 `message` 并按 `code` 退出；不再自己猜该给几。
 #[derive(Debug, Clone)]

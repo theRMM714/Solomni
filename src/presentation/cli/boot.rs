@@ -374,7 +374,7 @@ fn work_gc(system: &dyn System, args: &Value, json: bool) -> i32 {
 }
 
 /// 目的：`setup`：便携维护（PATH shim 与围栏机器级预授）——省略模式就只报状态。
-/// 约束：状态是只读回执，人读与 `--json` 打同一份 JSON；写入类模式的进度行带 `[便携]` 前缀。
+/// 约束：状态是只读回执，人读与 `--json` 打同一份 JSON；写入类模式的进度行带 `[便携]` 前缀；`fence` / `all` 预授成功后把 `sandbox.policy.windows.write_acl` 记进设置。
 fn setup(system: &dyn System, args: &Value, json: bool) -> i32 {
     let raw = text(args, "mode").unwrap_or_default();
     let Some(mode) = SetupMode::parse(&raw) else {

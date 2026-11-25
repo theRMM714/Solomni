@@ -1,7 +1,7 @@
 //! 目的：便携维护（`--setup`）的实现——PATH shim 与用户 PATH、围栏机器级一次性预授、只读状态。
 //! 管：模式分派、状态视图（JSON）、围栏缺项对账；PATH 分段与 shim 内容在 path.rs / shim.rs，ACL 机制在 kernel 的 confine。
 //! 不管：命令语法、回执前缀与退出码（在 presentation/cli/boot.rs）；模式名与服务语义的对应（在 api 的 SetupMode）。
-//! 联动：SystemService 经 SetupOps 端口调用；entry 的启动对账用 fence_missing / fence_ensure。
+//! 联动：SystemService 经 SetupOps 端口调用；entry 的启动对账用 fence_missing / fence_ensure；预授成功后经 FencePolicy 端口把授权记进设置（组合根接 entry::portable::write_acl_policy）。
 
 pub(crate) mod fence;
 pub(crate) mod path;
@@ -12,22 +12,51 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::capabilities::system::api::{Fault, SetupMode, SetupOps};
+use crate::capabilities::system::api::{Fault, FencePolicy, SetupMode, SetupOps};
+use std::sync::Arc;
 
 /// 目的：便携维护的实现——只持有产品根，所有落点都从它推出（`bin` 与 `.home`）。
 pub(crate) struct SetupHost {
     root: PathBuf,
+    /// 预授成功后记授权的那一笔：`--setup` 这一路由组合根接上；启动对账与用例不接。
+    policy: Option<Arc<dyn FencePolicy>>,
+    /// 本平台有没有外部 ACL 那一步：生产取 kernel 的事实，用例两档都走（与 entry::portable 同一写法）。
+    acl_step: bool,
 }
 
 impl SetupHost {
     pub(crate) fn new(root: &Path) -> SetupHost {
         SetupHost {
             root: root.to_path_buf(),
+            policy: None,
+            acl_step: crate::kernel::api::platform::HAS_EXTERNAL_ACL_STEP,
         }
+    }
+
+    /// 目的：接上设置写入面：机器级预授成功的那一刻把授权记进设置，下次启动不再要授权。
+    pub(crate) fn with_policy(mut self, policy: Arc<dyn FencePolicy>, acl_step: bool) -> SetupHost {
+        self.policy = Some(policy);
+        self.acl_step = acl_step;
+        self
     }
 
     fn home(&self) -> PathBuf {
         layout::home(&self.root)
+    }
+
+    /// 目的：预授完成后把授权记进设置；没有 ACL 一步或没接端口时什么都不做。
+    /// 约束：失败只降级成一行进度（预授本身已成功），不改退出码。
+    fn record_authorization(&self, sink: &mut dyn FnMut(&str)) {
+        if !self.acl_step {
+            return;
+        }
+        let Some(policy) = &self.policy else {
+            return;
+        };
+        match policy.record_authorization() {
+            Ok(line) => sink(&line),
+            Err(e) => sink(&format!("未写 sandbox.policy.windows.write_acl：{e}")),
+        }
     }
 }
 
@@ -46,10 +75,14 @@ impl SetupOps for SetupHost {
                 SetupMode::Path => sink(&path::path_line(&self.root).map_err(Fault::failed)?),
                 SetupMode::Unset => sink(&path::unset_line(&self.root).map_err(Fault::failed)?),
                 SetupMode::Undo => sink(&path::undo_line(&self.root).map_err(Fault::failed)?),
-                SetupMode::Fence => fence::grant(&self.root, &mut sink).map_err(Fault::failed)?,
+                SetupMode::Fence => {
+                    fence::grant(&self.root, &mut sink).map_err(Fault::failed)?;
+                    self.record_authorization(&mut sink);
+                }
                 SetupMode::All => {
                     sink(&path::path_line(&self.root).map_err(Fault::failed)?);
                     fence::grant(&self.root, &mut sink).map_err(Fault::failed)?;
+                    self.record_authorization(&mut sink);
                 }
             }
         }
