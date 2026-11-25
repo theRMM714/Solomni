@@ -162,7 +162,7 @@ pub(crate) fn build_vm(root: &Path) -> Arc<dyn Vm + Send + Sync> {
     };
     Arc::new(crate::units::vm::service::VmService::new(
         Arc::new(crate::units::vm::detail::QemuEngine::with_overlay_dir(
-            layout::vm(root).join("overlays"),
+            crate::units::vmstore::api::paths(root).overlays(),
         )),
         shares,
     ))

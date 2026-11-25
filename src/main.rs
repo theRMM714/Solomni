@@ -546,7 +546,9 @@ fn main() {
     let vm: Arc<dyn units::vm::api::Vm + Send + Sync> =
         Arc::new(units::vm::service::VmService::new(
             Arc::new(
-                units::vm::detail::QemuEngine::with_overlay_dir(layout::vm(&root).join("overlays"))
+                units::vm::detail::QemuEngine::with_overlay_dir(
+                    units::vmstore::api::paths(&root).overlays(),
+                )
                     .with_book(std::sync::Arc::clone(&book))
                     .with_log(log.clone()),
             ),

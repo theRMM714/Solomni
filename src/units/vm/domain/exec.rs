@@ -574,10 +574,7 @@ fn qemu_requirement(registered: Option<&str>, probe: &dyn HostProbe) -> VmRequir
     }
 }
 
-/// 目的：虚拟根的父目录名——虚拟根都装在虚拟机资源区（`layout::vm`）的这一格下面。
-const GUEST_DIR: &str = "guest";
-
-/// 目的：虚拟根名 → 那一格目录的绝对路径（`layout::vm(root)/guest/<名>`）。
+/// 目的：虚拟根名 → 那一格目录的绝对路径（`data/.vm/guest/<名>`，布局归 `vmstore`）。
 /// 约束：名字必须是单纯的一段（不许路径分隔符与 `.` / `..`）——它来自清单，也是会话里存的值。
 pub fn resolve_guest(root: &Path, guest: &str) -> Result<std::path::PathBuf, String> {
     let name = guest.trim();
@@ -590,9 +587,7 @@ pub fn resolve_guest(root: &Path, guest: &str) -> Result<std::path::PathBuf, Str
             guest
         ));
     }
-    Ok(crate::kernel::domain::layout::vm(root)
-        .join(GUEST_DIR)
-        .join(name))
+    Ok(crate::units::vmstore::api::paths(root).guest(name))
 }
 
 /// 目的：虚拟根就绪检测——名字认得、那一格目录在场、布局可用（rootfs + 内核或磁盘镜像）。

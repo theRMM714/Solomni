@@ -3,7 +3,6 @@
 //! 不管：构建缓存卷怎么建（在 builds）、guest 怎么起（在 vm）。
 //! 联动：storage::service 用它算实际占用；工具与构建共用项目内的 qemu-img。
 
-use crate::kernel::api::layout;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -18,7 +17,10 @@ pub struct DiskInfo {
 /// 目的：项目内便携 QEMU 的 qemu-img；不在场给 None（调用方退回文件长度）。
 pub fn find(root: &Path) -> Option<PathBuf> {
     let name = format!("qemu-img{}", crate::kernel::api::platform::EXE_SUFFIX);
-    let p = layout::vm(root).join("qemu").join("bin").join(name);
+    let p = crate::units::vmstore::api::paths(root)
+        .engines()
+        .join("bin")
+        .join(name);
     if p.is_file() { Some(p) } else { None }
 }
 

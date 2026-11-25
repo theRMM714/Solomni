@@ -3,11 +3,11 @@
 //! 不管：编什么、什么时候编（`service.rs`）、guest 与盘怎么起（`vm`）。
 //! 联动：端口见 `ports.rs`；口径见 docs/builds/README.md 的「目标环境」与单元地图。
 
-use crate::kernel::api::layout;
 use crate::units::maintenance::builds::ports::{
     BuildCache, CacheGuard, CacheMount, ModuleWorkspace,
 };
 use crate::units::vm::api::GuestImage;
+use crate::units::vmstore::api;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -23,19 +23,14 @@ const LOCK_WAIT: Duration = Duration::from_secs(600);
 /// 目的：锁文件超过这么久没被释放，视为上一次构建没收尾留下的死锁（按修改时间判）。
 const LOCK_STALE: Duration = Duration::from_secs(3 * 3600);
 
-/// 目的：缓存卷目录（`<产品根>/.vm/build-cache`）。
-pub(crate) fn dir(root: &Path) -> PathBuf {
-    layout::vm(root).join("build-cache")
-}
-
 /// 目的：缓存卷落点——每个虚拟根一块（同一模块在不同虚拟根里的工具链不同，缓存不能混）。
 pub(crate) fn volume_path(root: &Path, guest: &str) -> PathBuf {
-    dir(root).join(format!("{}.qcow2", safe_name(guest)))
+    api::paths(root).build_volume(guest)
 }
 
 /// 目的：构建锁落点（每个虚拟根一把）。
 pub(crate) fn lock_path(root: &Path, guest: &str) -> PathBuf {
-    dir(root).join(format!("{}.lock", safe_name(guest)))
+    api::paths(root).build_lock(guest)
 }
 
 /// 目的：卷的环境标识——镜像与 guest 运行能力变了，卷里的缓存就不再可信（工具链换了）。
@@ -271,12 +266,12 @@ pub(crate) fn cleanup_script(id: &str) -> String {
 
 /// 目的：构建缓存卷旁的元数据落点（builds 写，storage 读；不参与判据）。
 pub(crate) fn meta_path(root: &Path, guest: &str) -> PathBuf {
-    dir(root).join(format!("{}.json", safe_name(guest)))
+    api::paths(root).build_meta(guest)
 }
 
 /// 目的：读已排队的按模块清理标记；执行成功后再删文件（挂载失败要能重试）。
 pub(crate) fn read_purge(root: &Path, guest: &str) -> Vec<String> {
-    let p = dir(root).join(format!("{}.purge", safe_name(guest)));
+    let p = api::paths(root).build_purge(guest);
     let text = std::fs::read_to_string(&p).unwrap_or_default();
     text.lines()
         .map(str::trim)
@@ -287,7 +282,7 @@ pub(crate) fn read_purge(root: &Path, guest: &str) -> Vec<String> {
 
 /// 目的：清理已执行的按模块标记。
 pub(crate) fn clear_purge(root: &Path, guest: &str) {
-    let _ = std::fs::remove_file(dir(root).join(format!("{}.purge", safe_name(guest))));
+    let _ = std::fs::remove_file(api::paths(root).build_purge(guest));
 }
 
 /// 目的：写卷的模块占用元数据（只给界面与回收参考；失败不阻断构建）。
@@ -507,7 +502,7 @@ mod tests {
     #[test]
     fn volume_and_lock_live_under_build_cache() {
         let root = Path::new("/proj");
-        let base = crate::kernel::domain::layout::vm(root).join("build-cache");
+        let base = crate::units::vmstore::api::paths(root).build_cache();
         assert_eq!(volume_path(root, "windows"), base.join("windows.qcow2"));
         assert_eq!(lock_path(root, "windows"), base.join("windows.lock"));
         assert_eq!(

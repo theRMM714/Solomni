@@ -3,7 +3,6 @@
 //! 不管：策略（settings.yaml）与业务决策。
 //! 联动：storage::service 每次 GC 后写；报告与 doctor 读。
 
-use crate::kernel::api::layout;
 use crate::units::maintenance::storage::api::LastGc;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -17,7 +16,7 @@ struct StateFile {
 
 /// 目的：状态文件路径。
 pub fn path(root: &Path) -> std::path::PathBuf {
-    layout::vm(root).join("storage.json")
+    crate::units::vmstore::api::paths(root).storage_state()
 }
 
 /// 目的：读上次回收；没有或坏文件给 None。
