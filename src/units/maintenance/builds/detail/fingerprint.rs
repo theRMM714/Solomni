@@ -3,18 +3,16 @@
 //! 不管：什么时候该重编（在 `service.rs`，按入口在场与目标比对）。
 //! 联动：端口见 `ports.rs`；落点与字段见 MODULE_SPEC 的「构建·缓存」。
 
-use crate::kernel::api::layout;
 use crate::units::catalog::modules::api::{BuildDecl, Module};
 use crate::units::maintenance::builds::ports::{BuildHome, BuildStates, BuiltRecord, SourceDigest};
+use crate::units::vmstore::api;
 use std::path::{Path, PathBuf};
 
 /// 目的：构建状态的落点（`.vm/build-state/<模块>.json`）——本机档与各虚拟根共用一份，靠 `target` 区分。
 /// 参数：`root` = 产品根；`id` = 模块 id。
 /// 返回：状态文件路径。
 pub(crate) fn state_path(root: &Path, id: &str) -> PathBuf {
-    layout::vm(root)
-        .join("build-state")
-        .join(format!("{}.json", id))
+    api::paths(root).build_state(id)
 }
 
 /// 目的：构建状态（指纹一致且入口在场就跳过重编）。
@@ -117,8 +115,8 @@ impl BuildStates for BuildStore {
     }
 
     fn prepare_home(&self, id: &str) -> Result<BuildHome, String> {
-        let state = layout::vm(&self.root).join("build-state").join(id);
-        let home = state.join("home");
+        let state = api::paths(&self.root).build_states().join(id);
+        let home = api::paths(&self.root).build_home(id);
         std::fs::create_dir_all(&home).map_err(|e| format!("建状态目录失败：{}", e))?;
         Ok(BuildHome { state, home })
     }

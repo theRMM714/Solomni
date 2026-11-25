@@ -9,7 +9,7 @@
 ## 入站契约与状态归属
 - 入站面：`api::Builds`（`ensure_many` 一批模块、`build` 单个模块）+ `api::Target`（`Host` / `Guest(虚拟根名)`）+ `api::Built`（模块 / 目标 / 是否跳过 / 输出）。
 - 调用方：`runtime` 在建 / 启用会话前调 `ensure_many` 补编；`system` 的 `build`（`--build`）是它的薄壳。
-- 状态归属：构建状态落 `data/.vm/build-state/<模块>.json`，由本单元读写（`target` + `fingerprint`）；构建缓存卷落 `data/.vm/build-cache/<虚拟根>.qcow2`，回收归 `storage`。
+- 状态归属：构建状态落 `data/.vm/build-state/<模块>.json`，由本单元读写（`target` + `fingerprint`）；构建缓存卷落 `data/.vm/build-cache/<虚拟根>.qcow2`，回收归 `storage`。两处落点的**拼法**由 `vmstore` 给（[vmstore/README.md](../vmstore/README.md)），本单元只按它取路径。
 - 构建是系统动作，不申请容器身份；围栏、guest 与进程由 `vm` / `kernel` 提供，本单元只给规格。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）

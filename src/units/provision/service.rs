@@ -4,7 +4,6 @@
 //!   台账格式（Ledger）、进程事实（Procs）、清单语义与规则（domain）。
 //! 联动：呈现层经 api::Provision；组合根构造六个适配器并注入；guest-runtime 的运行期编排在 guest.rs。
 
-use crate::kernel::api::layout;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -249,9 +248,7 @@ impl Provision for ProvisionService {
             return Err("还有 guest 在跑：先停止所有虚拟机会话，再还原虚拟根".to_string());
         }
         let dir = crate::units::vm::api::resolve_guest(&self.root, guest)?;
-        let lock = layout::vm(&self.root)
-            .join("build-cache")
-            .join(format!("{}.lock", guest));
+        let lock = crate::units::vmstore::api::paths(&self.root).build_lock(guest);
         if self.host.exists(&lock) {
             return Err("这个虚拟根有构建在跑：等构建结束再还原".to_string());
         }
@@ -482,7 +479,7 @@ pub(crate) fn run(
     }
     // 显式点名 vs 全量补齐：运行期编排的失败在两种情形下处置不同（见下面 guest-runtime 分支）。
     let explicit = !ids.is_empty();
-    let cache = layout::vm(pipeline.root).join("cache");
+    let cache = crate::units::vmstore::api::paths(pipeline.root).downloads();
     pipeline.host.mkdir_all(&cache)?;
     let mut ledger = pipeline.ledger.snapshot();
     for dep in picked {

@@ -48,6 +48,8 @@
 | 动作 | 语义 |
 | --- | --- |
 | 清理整卷 | 删 `data/.vm/build-cache/<虚拟根>.qcow2`、元数据与锁（有构建锁则拒绝） |
+
+- 落点拼法不归本单元：`.vm` 下每个子目录与文件名（含 `<虚拟根>` 这一段的收法）由 `vmstore` 给（[vmstore/README.md](../vmstore/README.md)）；本单元只决策「扫什么、删什么、什么时候不许删」。
 | 按模块清理 | 写 `data/.vm/build-cache/<虚拟根>.purge`；下次该虚拟根构建挂载时删除该模块工作区并 trim |
 | 压缩 | 未被构建占用时 `qemu-img convert` 回写，失败保留原卷 |
 | 清空下载缓存 | 删 `data/.vm/cache` 内容；补齐作业运行中拒绝；重装需重新下载 |

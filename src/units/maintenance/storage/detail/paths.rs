@@ -1,49 +1,49 @@
 //! 目的：回收各处的落点与构建卷占用判定——survey 与 reclaim 共用同一套路径。
-//! 管：构建缓存、下载缓存、可写层、日志的路径，以及"构建锁还在不在"。
-//! 不管：怎么扫（survey）、怎么删（reclaim）、回收锁（lock）。
-//! 联动：detail::survey 与 detail::reclaim 都经它取路径，扫与删不会各写一份。
+//! 管：把盘点用的名字映射到 `vmstore` 的布局上，并给出"构建锁还在不在"的判定。
+//! 不管：怎么扫（survey）、怎么删（reclaim）、回收锁（lock）；落点本身归 `vmstore`。
+//! 联动：detail::survey 与 detail::reclaim 都经它取路径，扫与删不会各写一份；布局见 `units::vmstore`。
 
-use crate::kernel::api::layout;
+use crate::units::vmstore::api;
 use std::path::{Path, PathBuf};
 
 /// 目的：构建缓存卷的目录。
 pub fn build_dir(root: &Path) -> PathBuf {
-    layout::vm(root).join("build-cache")
+    api::paths(root).build_cache()
 }
 
 /// 目的：一个虚拟根的构建缓存卷。
 pub fn build_volume(root: &Path, guest: &str) -> PathBuf {
-    build_dir(root).join(format!("{}.qcow2", guest))
+    api::paths(root).build_volume(guest)
 }
 
 /// 目的：构建缓存卷旁的元数据（builds 写，盘点读）。
 pub fn build_meta(root: &Path, guest: &str) -> PathBuf {
-    build_dir(root).join(format!("{}.json", guest))
+    api::paths(root).build_meta(guest)
 }
 
 /// 目的：一个虚拟根的构建锁（builds 持，盘点与回收看）。
 pub fn build_lock(root: &Path, guest: &str) -> PathBuf {
-    build_dir(root).join(format!("{}.lock", guest))
+    api::paths(root).build_lock(guest)
 }
 
 /// 目的：按模块清理的排队标记（下次构建前消费）。
 pub fn build_purge(root: &Path, guest: &str) -> PathBuf {
-    build_dir(root).join(format!("{}.purge", guest))
+    api::paths(root).build_purge(guest)
 }
 
 /// 目的：依赖补齐的下载缓存目录。
 pub fn download_dir(root: &Path) -> PathBuf {
-    layout::vm(root).join("cache")
+    api::paths(root).downloads()
 }
 
 /// 目的：会话可写层目录。
 pub fn overlay_dir(root: &Path) -> PathBuf {
-    layout::vm(root).join("overlays")
+    api::paths(root).overlays()
 }
 
 /// 目的：运行日志目录。
 pub fn log_dir(root: &Path) -> PathBuf {
-    layout::logs(root)
+    crate::kernel::api::layout::logs(root)
 }
 
 /// 目的：这个虚拟根是不是有构建在跑（构建锁仍有效）。

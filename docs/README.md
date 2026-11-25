@@ -40,6 +40,7 @@
 | `prompt`（提示词册） | [README.md](prompt/README.md)、[unit-map.md](prompt/unit-map.md)、[prompts.md](prompt/prompts.md) |
 | `residents`（常驻服务） | [README.md](residents/README.md)、[unit-map.md](residents/unit-map.md) |
 | `taskchain`（任务链） | [README.md](taskchain/README.md)、[unit-map.md](taskchain/unit-map.md) |
+| `vmstore`（虚拟机盘资源，`data/.vm`） | [README.md](vmstore/README.md)、[unit-map.md](vmstore/unit-map.md) |
 | `sessions`（会话盘资源，`data/session`） | [README.md](sessions/README.md)、[unit-map.md](sessions/unit-map.md) |
 | `home`（登记处资源，`data/.home`） | [README.md](home/README.md)、[unit-map.md](home/unit-map.md) |
 | `kernel`（地基库，环 0） | [README.md](kernel/README.md)、[unit-map.md](kernel/unit-map.md) |

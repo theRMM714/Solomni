@@ -18,6 +18,7 @@ agentloop: 2
 catalog: 2
 home: 2
 sessions: 2
+vmstore: 2
 llm: 2
 prompt: 2
 provision: 2
