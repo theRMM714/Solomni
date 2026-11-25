@@ -3,9 +3,9 @@
 //! 不管：内存形态与校验（在 domain）；状态与用例（在 service.rs）；通道与模型发现（在 llm）。
 //! 联动：实现 registry/ports.rs 的 SettingsStore，由组合根装配给 service。
 
-use crate::units::catalog::registry::api::Agents;
 use crate::units::catalog::registry::api::{AppSettings, ModelEntry, Provider, Settings};
 use crate::units::catalog::registry::ports::SettingsStore;
+use crate::units::pure::registry_model::api::Agents;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

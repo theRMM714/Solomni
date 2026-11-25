@@ -7,7 +7,7 @@ use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work, slow_ops};
 use super::support::spawn;
 use crate::presentation::faces::Faces;
-use crate::units::catalog::registry::api::AgentMeta;
+use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::runtime::api::{Acted, ActionCall, Caller};
 use crate::units::work::api::{ConfigAgent, SessionEdit, WorkSpec};
 
@@ -272,7 +272,7 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
         .agents()
         .expect("读登记处")
         .iter()
-        .map(crate::units::catalog::registry::api::agent_meta)
+        .map(crate::units::pure::registry_model::api::agent_meta)
         .collect();
     let (opened, _) = faces
         .work

@@ -3,8 +3,8 @@
 //! 不管：IO、端口与状态；候选名单怎么来（那是本能力 `service.rs` 与登记处的事）。
 //! 联动：由本能力的 `service.rs` 消费。
 
-use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::conversation::slate::api::{Mode, Pick};
+use crate::units::pure::registry_model::api::AgentMeta;
 
 /// 目的：按模式收束名单——协作原样（N 个独立 agent）；单 agent 最多一条。
 /// 参数：`picks` 是候选名单，`mode` 是本次的形态。

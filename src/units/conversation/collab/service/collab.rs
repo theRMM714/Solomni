@@ -8,7 +8,6 @@
 
 use super::lines::push_delta;
 use crate::units::catalog::modules::api::Modules;
-use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::catalog::registry::api::Settings;
 use crate::units::conversation::collab::domain::gates::Pending;
 use crate::units::conversation::collab::service::discussion::Discussion;
@@ -16,6 +15,7 @@ use crate::units::conversation::collab::service::synthesis::Execution;
 use crate::units::conversation::session::api::Gates;
 use crate::units::llm::api::{Channel, Chat, Llm, Msg};
 use crate::units::prompt::api::{Prompt, Segment};
+use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::tools::api::ToolExec;
 use crate::units::transcript::api::{LineView, SessionEvent};
 use crate::units::vm::api::Vm;

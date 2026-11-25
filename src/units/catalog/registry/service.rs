@@ -5,13 +5,14 @@
 
 use crate::kernel::ports::Log;
 use crate::units::catalog::modules::api::Roster;
-use crate::units::catalog::registry::api::{AgentView, ModelView, ProviderView, Registry};
-use crate::units::catalog::registry::domain::agents;
+use crate::units::catalog::registry::api::{ModelView, ProviderView, Registry};
 use crate::units::catalog::registry::domain::providers::{
     self, AppSettings, ModelDraft, ModelEntry, Provider, Settings,
 };
 use crate::units::catalog::registry::ports::SettingsStore;
 use crate::units::llm::api::{Channel, Llm, ProbeOutcome, ReplayReport, ToolMode};
+use crate::units::pure::registry_model::api as agents;
+use crate::units::pure::registry_model::api::AgentView;
 use std::sync::Arc;
 
 /// 目的：只在目标为空时用发现值填上（已登记的一律保留）。
@@ -184,7 +185,7 @@ pub fn save_model(r: &mut dyn Registry, draft: ModelDraft) -> Result<(), String>
 /// 约束：清单归 `modules`、保留名归 `tools`，本函数只取调用方给的事实，不自己去找。
 pub fn save_agent(
     r: &mut dyn Registry,
-    draft: &crate::units::catalog::registry::api::AgentDraft,
+    draft: &crate::units::pure::registry_model::api::AgentDraft,
     roster: &Roster,
     reserved: &[String],
 ) -> Result<(), String> {

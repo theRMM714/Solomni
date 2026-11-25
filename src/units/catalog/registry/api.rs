@@ -3,14 +3,14 @@
 //! 不管：四份 yaml 的内存形态与写路径（在 domain 与 service.rs）；持久化机制（在 ports / detail）。
 //! 联动：runtime 只持 Box<dyn Registry>；实现见 service.rs；消费方是 runtime 与呈现层。
 
-pub use crate::units::catalog::registry::domain::agents::{
-    AgentDraft, AgentMeta, AgentView, Agents, RosterPick, agent_meta, check_reserved, listing,
-    model_listing, resolve_picks, unique_instance_name, validate_name,
+pub use crate::units::catalog::registry::domain::picks::{
+    model_listing, resolve_picks, unique_instance_name,
 };
 pub use crate::units::catalog::registry::domain::providers::{
     AppSettings, ModelDraft, ModelEntry, ModelView, Provider, ProviderView, SandboxEnforceLevel,
     SandboxUnavailable, Settings, StorageSettings, ThinkingSpec,
 };
+pub use crate::units::pure::registry_model::api::AgentView;
 
 // 视图 DTO 的字段类型：生产在 domain 内构造，api 面只给呈现侧与装配替身命名（二进制 crate 没有外部消费者，rustc 报 unused）。
 #[allow(unused_imports)]

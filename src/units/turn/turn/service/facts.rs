@@ -9,7 +9,6 @@ use std::collections::BTreeMap;
 use crate::kernel::ports::HostProbe;
 use crate::units::catalog::modules::api::{Module, Roster};
 use crate::units::catalog::packages::api::PackagePlan;
-use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::catalog::registry::api::Registry;
 use crate::units::conversation::session::api::{
     AgentSession, MemberSpec, SessionMeta, SingleSpec, work_root_of,
@@ -19,6 +18,7 @@ use crate::units::llm::api::Channel;
 use crate::units::llm::api::ToolMode;
 use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::permission::api::PermissionSet;
+use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::transcript::api::SessionEvent;
 use crate::units::turn::env::api::SeatAccess;
 use crate::units::turn::turn::service::session::Turn;

@@ -5,4 +5,5 @@
 
 pub mod exec_model;
 pub mod permission;
+pub mod registry_model;
 pub mod taskchain;

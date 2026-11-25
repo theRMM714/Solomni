@@ -17,10 +17,11 @@ use crate::tests::doubles::{
 use crate::tests::ops_with;
 use crate::units::catalog::modules::api::{ModulesOps, Roster};
 use crate::units::catalog::packages::api::Problem;
-use crate::units::catalog::registry::api::{AgentView, AppSettings, ModelDraft, RegistryOps};
-use crate::units::catalog::registry::domain::agents::Agent;
+use crate::units::catalog::registry::api::{AppSettings, ModelDraft, RegistryOps};
 use crate::units::conversation::collab::api::{CheckView, CollabEvent};
 use crate::units::llm::api::{ProbeOutcome, ReplayReport};
+use crate::units::pure::registry_model::api::Agent;
+use crate::units::pure::registry_model::api::AgentView;
 use crate::units::pure::taskchain::api::{NodeStatus, TaskChain, TaskNode};
 use crate::units::transcript::api::{ContextUsage, LineView, ToolCallView};
 use crate::units::transcript::api::{DecisionAnswer, DecisionEnvelope, DecisionMessage};

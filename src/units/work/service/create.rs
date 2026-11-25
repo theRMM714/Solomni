@@ -245,8 +245,8 @@ impl Work {
         let reserved = self.systools.reserved_agents();
         // 校验 agent：名字合法、模块与模型真实存在；模块可跨 agent 共用（各自独立沙箱与工具面）
         for a in &spec.agents {
-            crate::units::catalog::registry::api::validate_name(&a.name)?;
-            crate::units::catalog::registry::api::check_reserved(&a.name, &reserved)?;
+            crate::units::pure::registry_model::api::validate_name(&a.name)?;
+            crate::units::pure::registry_model::api::check_reserved(&a.name, &reserved)?;
             for id in &a.modules {
                 if !roster.modules.iter().any(|m| &m.manifest.id == id) {
                     return Err(format!("无此模块：{}", id));

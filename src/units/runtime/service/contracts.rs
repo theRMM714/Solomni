@@ -410,7 +410,7 @@ impl RegistryOps for Handle {
         self.call(move |core| {
             let roster = core.modules_handle().roster();
             let reserved = core.systools_handle().reserved_agents();
-            let draft = crate::units::catalog::registry::api::AgentDraft {
+            let draft = crate::units::pure::registry_model::api::AgentDraft {
                 name,
                 modules,
                 model,

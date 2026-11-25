@@ -18,7 +18,6 @@ use crate::kernel::ports::{HostProbe, Log};
 use crate::units::catalog::modules::api::{Module, Modules};
 use crate::units::catalog::packages::api as pkgs;
 use crate::units::catalog::packages::api::Packages;
-use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::catalog::registry::api::Registry;
 use crate::units::conversation::session::api::{
     Delegation, Gates, History, HistoryView, RunState, SessionMeta,
@@ -27,6 +26,7 @@ use crate::units::llm::api::{Channel, Llm};
 use crate::units::prompt::api::Prompt;
 use crate::units::provision::api::Provision;
 use crate::units::pure::exec_model::api::ExecSpec;
+use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::tools::api::{ToolExec, Tools};
 use crate::units::transcript::api::{OptionView, SessionEvent};
 use crate::units::turn::turn::api::{PROXY_PRIVATE_DIR, Session, Turn};

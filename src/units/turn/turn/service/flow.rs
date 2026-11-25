@@ -5,13 +5,13 @@
 //!   本方法族的取放与收尾判据都在 `Turn` 的会话表上。
 
 use crate::kernel::ports::HostProbe;
-use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::catalog::registry::api::Registry;
 use crate::units::conversation::session::api::{
     Answered, Flow, GateTicket, Handback, RunState, SessionMeta, SessionSpec, TurnIo, UsageTotals,
     flat_modules, work_root,
 };
 use crate::units::prompt::api::Segment;
+use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::transcript::api::{DecisionQueue, Gate, SessionEvent};
 use crate::units::turn::turn::api::{Prepared, RestoreRequest, Session};
 

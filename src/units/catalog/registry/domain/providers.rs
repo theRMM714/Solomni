@@ -577,7 +577,7 @@ pub struct Settings {
     /// 目的：基本设置。
     pub app: AppSettings,
     /// 目的：用户配置的具名 agent。
-    pub agents: crate::units::catalog::registry::domain::agents::Agents,
+    pub agents: crate::units::pure::registry_model::api::Agents,
 }
 
 impl Settings {

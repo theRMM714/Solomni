@@ -168,7 +168,7 @@ pub(crate) fn single_work(name: &str, modules: &[&str]) -> crate::units::work::a
         freshness: None,
         name: name.to_string(),
         kind: crate::units::conversation::session::api::SINGLE.to_string(),
-        agents: vec![crate::units::catalog::registry::api::AgentMeta {
+        agents: vec![crate::units::pure::registry_model::api::AgentMeta {
             name: modules[0].to_string(),
             transient: true,
             modules: modules.iter().map(|s| s.to_string()).collect(),

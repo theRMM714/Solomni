@@ -4,12 +4,12 @@
 //! 联动：被 CollabSession 消费；裁决通道见 docs/session/session-model.md 的「请用户裁决：一条通道，消息 + 选项」。
 
 use super::collab::*;
-use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::conversation::collab::domain::gates::{
     OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY,
     OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM, Pending,
 };
 use crate::units::conversation::collab::service::discussion::TurnOut;
+use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::transcript::api::{LineView, SessionEvent};
 use std::sync::Arc;
 

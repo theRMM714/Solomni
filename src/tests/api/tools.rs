@@ -146,7 +146,7 @@ fn pick_agents_names_the_unknown_and_lists_the_rest() {
     assert_eq!(
         views
             .iter()
-            .map(crate::units::catalog::registry::api::agent_meta)
+            .map(crate::units::pure::registry_model::api::agent_meta)
             .count(),
         1,
         "视图 → 实例不丢项"

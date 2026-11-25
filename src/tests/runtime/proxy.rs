@@ -654,7 +654,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
     // 与形态不符的载荷：整条拒绝，不留半成品。
     let mut bad = spec.clone();
     bad.name = "w-user-proxy-2".to_string();
-    bad.agents = vec![crate::units::catalog::registry::api::AgentMeta {
+    bad.agents = vec![crate::units::pure::registry_model::api::AgentMeta {
         name: "a".to_string(),
         transient: true,
         modules: vec!["m1".to_string()],

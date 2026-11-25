@@ -3,9 +3,9 @@
 //! 不管：谁在跑（`turn`）、目录怎么落盘（`detail/fs_history.rs`）、外部工作区的档位策略（`workspace`）。
 //! 联动：只经 `History` 端口读 meta 与列表；`runtime` 的建工作、改配、回档与历史列表都调这里。
 
-use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::conversation::session::api::{History, HistoryView, SessionMeta};
 use crate::units::pure::exec_model::api::Tier;
+use crate::units::pure::registry_model::api::AgentMeta;
 
 /// 目的：整张名单的扁平模块清单（保序去重）：同一模块被多个 agent 共用时只出现一次。
 pub fn flat_modules(agents: &[AgentMeta]) -> Vec<String> {

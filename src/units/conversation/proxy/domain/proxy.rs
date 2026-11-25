@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::units::catalog::registry::api::AgentMeta;
+use crate::units::pure::registry_model::api::AgentMeta;
 
 pub const CATALOG: &str = "catalog_agents";
 pub const CREATE: &str = "create_session";
@@ -257,7 +257,7 @@ pub fn relay_note(kind: MessageKind) -> String {
 /// 目的：只读清单事实——只含公开信息（无密钥、无真实私有路径、无私有工作区内容）。
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Catalog {
-    pub agents: Vec<crate::units::catalog::registry::api::AgentView>,
+    pub agents: Vec<crate::units::pure::registry_model::api::AgentView>,
     pub modules: Vec<ModuleFact>,
     pub models: Vec<ModelFact>,
 }
@@ -547,7 +547,7 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
                 true,
             )
         };
-        crate::units::catalog::registry::api::validate_name(&name)
+        crate::units::pure::registry_model::api::validate_name(&name)
             .map_err(|e| format!("agents[{}] 的名字不合法：{}", i, e))?;
         resolved.push(AgentMeta::normalized(
             name, modules, model, chara, transient,

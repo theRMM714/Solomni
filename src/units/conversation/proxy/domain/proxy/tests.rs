@@ -8,7 +8,7 @@ use crate::units::conversation::session::api::SINGLE;
 
 fn facts() -> Catalog {
     Catalog {
-        agents: vec![crate::units::catalog::registry::api::AgentView {
+        agents: vec![crate::units::pure::registry_model::api::AgentView {
             name: "a".to_string(),
             modules: vec!["m1".to_string()],
             model: Some("gpt".to_string()),
