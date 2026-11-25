@@ -328,9 +328,18 @@ fn main() {
         entry::startup::FenceReport::new(fence_cap.clone(), authorized, Arc::clone(&sandbox_mode));
     entry::startup::print_fence_report(&fence_report, sandbox_cfg.policy.host_read_roots.len());
 
+    // 这一次调用要不要常驻运行时：判据只认命令声明里的 `runtime`（`systools/commands.yaml`）。
+    // 分派与启动门共用这一份判定：一次性命令不占视图盘、不起存储自动任务、不拉常驻服务，也不被围栏授权拦住
+    // （它们不跑任何被围栏的进程）；会话、Web 与模块工具调用照旧。
+    let runtime_needed = {
+        let words: Vec<&str> = flags.positionals.iter().map(String::as_str).collect();
+        presentation::cli::shell::needs_runtime(&words, flags.help, flags.version)
+    };
     let missing = entry::startup::missing_parts(&requirements, &fence_cap, authorized);
-    for part in &missing {
-        eprintln!("[沙箱] {}：{}", part.name, part.cause.label());
+    if runtime_needed {
+        for part in &missing {
+            eprintln!("[沙箱] {}：{}", part.name, part.cause.label());
+        }
     }
 
     // 测试/CI 的进程级注入：只认 '1' 降级、'0' 严格；其它值不作为覆盖。
@@ -348,7 +357,7 @@ fn main() {
     {
         let mut stdin = std::io::stdin().lock();
         let mut stderr = std::io::stderr();
-        if !missing.is_empty() {
+        if runtime_needed && !missing.is_empty() {
             // 首次启动：没有 settings.yaml 时先给一次授权机会（只 Windows、只 TTY、无环境变量覆盖）。
             match entry::startup::maybe_onboard_windows(
                 &missing,
@@ -377,7 +386,7 @@ fn main() {
             }
         }
 
-        if !missing.is_empty() && !sandbox_mode.degraded() {
+        if runtime_needed && !missing.is_empty() && !sandbox_mode.degraded() {
             match entry::startup::run_gate(
                 &missing,
                 sandbox_mode.ask_allowed,
@@ -400,10 +409,10 @@ fn main() {
         }
     }
     // 启动只读对账：机器级预授缺项时只提示（不静默慢写、不阻断）；首次授权那一趟已当场补过。
-    if authorized {
+    if authorized && runtime_needed {
         entry::portable::fence_hint(&root);
     }
-    if sandbox_mode.degraded() {
+    if runtime_needed && sandbox_mode.degraded() {
         eprintln!("[沙箱] 本进程已降级：缺失的强制项按如实降级执行；重启后重新评估");
     }
     // **会话类型表**（systools/profiles.yaml）：一个会话类型就是一串流程与它的静止机制。
@@ -772,8 +781,9 @@ fn main() {
     // 所以死登记常见「映射还在、记录还在」；放在分配之前、不受开关影响，`SOLOMNI_VIEW_DRIVE=0` 时也要清。
     view_drive_sweep(&home);
     // 视图盘唯一的分配点：维护旗、探针与启动期早退都已返回；`std::process::exit` 不走 Drop，早分配必然泄漏盘符。
+    // 一次性命令（`runtime: none`）不分配：它们跑完就退，占一个盘符没有用处。
     // 细节与逃生口见 `view_drive_begin` 的目的/约束。
-    let view_drive = view_drive_begin(&root, &home);
+    let view_drive = runtime_needed && view_drive_begin(&root, &home);
     // 核心搬到它自己的执行线程：此后呈现层只持有**入站能力面**——拿不到核心本体，也拿不到任何核心锁。
     let handle = match capabilities::runtime::api::Handle::spawn(core) {
         Ok(h) => h,
@@ -789,13 +799,19 @@ fn main() {
     // 依赖补齐面：组合根注入（能力面默认未接入，这里换成真实现）。
     faces.provision = Arc::clone(&provision);
     faces.storage = Arc::clone(&storage);
-    storage_service.start_auto();
+    // 存储自动任务只服务会话与 Web：一次性命令跑完就退，没有要回收的东西。
+    if runtime_needed {
+        storage_service.start_auto();
+    }
     // 基础工具链事实：Web 端横幅与 CLI 启动报告读同一份。
     faces.toolchains = capabilities::system::api::toolchain_json(&base);
 
     // 启动拉起：把所有**已启用**的常驻服务拉起来（进程级租约，不属于任何会话）。
-    for line in residents_boot.start_enabled() {
-        log.info("main::residents", &line);
+    // 一次性命令不拉：它们不提供常驻服务，也不该在退出时留下任何进程。
+    if runtime_needed {
+        for line in residents_boot.start_enabled() {
+            log.info("main::residents", &line);
+        }
     }
 
     // 工具级确认要有地方被作答：网页有裁决卡，CLI 在生成中就地按选项答——两边都接上了。

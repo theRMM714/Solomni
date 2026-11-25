@@ -45,6 +45,27 @@ fn render() -> Module {
     m
 }
 
+/// 运行需求：判据只认命令声明——手册与版本永远不要，none 命令跑完即回，services 命令要，模块工具调用要。
+#[test]
+fn runtime_need_follows_declaration() {
+    assert!(!shell::needs_runtime(&["modules"], false, false));
+    assert!(!shell::needs_runtime(&["work", "log"], false, false));
+    assert!(shell::needs_runtime(&["single"], false, false));
+    assert!(shell::needs_runtime(&["web", "--json"], false, false));
+    // 手册与版本：后面跟什么都不用装运行时（只打印）。
+    assert!(!shell::needs_runtime(&[], true, false));
+    assert!(!shell::needs_runtime(&["--help"], false, false));
+    assert!(!shell::needs_runtime(&["--version"], false, false));
+    assert!(!shell::needs_runtime(&["render", "--help"], false, false));
+    // 非命令词：无尾词只可能是模块手册或拼错的命令（都只打印）；有尾词按模块工具调用处理。
+    assert!(!shell::needs_runtime(&["render"], false, false));
+    assert!(shell::needs_runtime(&["render", "report"], false, false));
+    // 没有任何词表 = 交互入口，要运行时。
+    assert!(shell::needs_runtime(&[], false, false));
+    // 单个短横的多字符词：这一趟只报用法错，但按最保守的运行时处理。
+    assert!(shell::needs_runtime(&["-json"], false, false));
+}
+
 /// 清单：模块、版本、启用态、一句话说明都在，拒收原因单独列（校验不是挑选）。
 #[test]
 fn listing_shows_version_state_and_rejections() {
