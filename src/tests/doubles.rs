@@ -7,7 +7,7 @@
 
 use super::builders::SilentRunner;
 use crate::units::pure::registry_model::api::AgentMeta;
-use crate::units::runtime::api::SessionEvent;
+use crate::units::transcript::api::SessionEvent;
 use crate::units::work::api::WorkSpec;
 
 use crate::kernel::ports::ProcessRunner;

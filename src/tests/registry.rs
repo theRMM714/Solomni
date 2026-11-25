@@ -281,8 +281,8 @@ pub(crate) fn agent_crud_and_work_with_agents() {
 // ---------- 模块清单（内存来源） ----------
 #[test]
 pub(crate) fn a_probe_writes_back_only_conclusive_results() {
+    use crate::units::llm::api::ProbeOutcome;
     use crate::units::pure::registry_model::api::ToolMode;
-    use crate::units::runtime::api::ProbeOutcome;
     let fresh = |outcome: ProbeOutcome| {
         let mut core = core_with_gateway(
             vec![],

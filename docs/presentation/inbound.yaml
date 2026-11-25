@@ -7,8 +7,8 @@
 
 # 根级：面袋与两个渠道入口
 src/presentation/faces.rs: catalog/modules catalog/registry catalog/secrets maintenance/storage provision residents runtime turn/turn turn_state work
-src/presentation/cli.rs: registry_model runtime system tools
-src/presentation/web.rs: agentloop maintenance/storage runtime workspace
+src/presentation/cli.rs: exec_model registry_model runtime system tools transcript turn/turn
+src/presentation/web.rs: agentloop maintenance/storage runtime transcript turn/turn workspace
 
 # 终端渠道：解析、启动相、命令手册、会话流、裁决、渲染
 src/presentation/cli/argv.rs: tools
@@ -17,5 +17,5 @@ src/presentation/cli/catalog.rs: catalog/modules tools
 src/presentation/cli/commands.rs: runtime workspace
 src/presentation/cli/flows.rs: registry_model system
 src/presentation/cli/gate.rs: provision registry_model
-src/presentation/cli/shell.rs: catalog/modules runtime system tools
+src/presentation/cli/shell.rs: catalog/modules runtime system tools turn/turn
 src/presentation/cli/view.rs: catalog/packages conversation/collab transcript work

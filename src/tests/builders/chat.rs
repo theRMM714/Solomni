@@ -159,7 +159,7 @@ impl ChatGateway for AbortGateway {
 
 /// 目的：固定探测结论的网关：专测"结论怎么落到登记处"这一层策略（事实本身由适配器测）。
 pub(crate) struct ProbeGateway {
-    pub(crate) outcome: Arc<Mutex<crate::units::runtime::api::ProbeOutcome>>,
+    pub(crate) outcome: Arc<Mutex<crate::units::llm::api::ProbeOutcome>>,
 }
 
 impl ChatGateway for ProbeGateway {

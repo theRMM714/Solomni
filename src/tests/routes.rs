@@ -5,11 +5,10 @@
 
 use crate::presentation::faces::Faces;
 
-use crate::units::runtime::api::DecisionQueue;
-use crate::units::runtime::api::{
-    Acted, ActionCall, ActionOps, ActionView, Advance, Caller, Output, RuntimeOps,
-};
+use crate::units::runtime::api::{Acted, ActionCall, ActionOps, ActionView, Caller, RuntimeOps};
 use crate::units::session_model::api::{HistoryView, MEETING, SINGLE, SessionMeta, SessionSpec};
+use crate::units::transcript::api::DecisionQueue;
+use crate::units::turn::turn::api::{Advance, Output};
 use crate::units::turn::turn::api::{Events, TurnOps};
 use crate::units::turn_state::api::HistoryOps;
 use crate::units::work::api::{
@@ -303,7 +302,7 @@ impl WorkOps for FakeFaces {
             WorkOpened {
                 sid: "w1".to_string(),
                 agents: vec!["甲".to_string()],
-                facts: vec![crate::units::runtime::api::SessionEvent::Notice(
+                facts: vec![crate::units::transcript::api::SessionEvent::Notice(
                     "开好了".to_string(),
                 )],
             },
@@ -572,9 +571,9 @@ impl TurnOps for FakeFaces {
         self.guard()?;
         Ok(Advance { head: 10 })
     }
-    fn compact(&self, _sid: &str) -> Result<crate::units::runtime::api::Advance, String> {
+    fn compact(&self, _sid: &str) -> Result<crate::units::turn::turn::api::Advance, String> {
         self.guard()?;
-        Ok(crate::units::runtime::api::Advance { head: 0 })
+        Ok(crate::units::turn::turn::api::Advance { head: 0 })
     }
     fn is_running(&self, _sid: &str) -> bool {
         self.running.load(Ordering::Relaxed)

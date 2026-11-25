@@ -8,9 +8,11 @@ use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work};
 use super::support::spawn;
 use crate::presentation::faces::Faces;
-use crate::units::runtime::api::{Acted, ActionCall, Caller, SessionEvent};
-use crate::units::runtime::api::{Handle, Output};
+use crate::units::runtime::api::Handle;
+use crate::units::runtime::api::{Acted, ActionCall, Caller};
 use crate::units::session_model::api::MEETING;
+use crate::units::transcript::api::SessionEvent;
+use crate::units::turn::turn::api::Output;
 use std::sync::Arc;
 
 #[test]

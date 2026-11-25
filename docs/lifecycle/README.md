@@ -24,7 +24,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`registry`、`residents`、`session`、`tools`、`turn`、`vm`、`work`、`workspace`；`kernel` 的 `Log` / `HostProbe`。
-- 谁在用我：`runtime`（`RewindTarget` / `RewindOutcome` 经 `runtime::api` 重导出（`RuntimeOps::rewind` 取前者），回档与删除的时机由它给）。
+- 谁在用我：`runtime`（`RewindTarget` / `RewindOutcome` 直接从 `lifecycle::api` 取：`RuntimeOps::rewind` 收前者、`RebuildDeps` 也由它构造；回档与删除的时机由它给）。
 - **不引用 `runtime`**：依赖只向下，`lifecycle` 在 `runtime` 之下（`layers.yaml`）。
 
 ## 一、回档三模式的顺序

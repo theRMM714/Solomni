@@ -1,5 +1,6 @@
-//! 目的：运行时（第 10 层）的入站契约：呈现层与核心之间的唯一通道（见 docs/presentation/contracts.md）。
-//! 管：`RuntimeOps`（启用 / 改需求 / 回档 / 停止）、动作词汇与 `ActionOps`、`LogOps`，以及呈现层共用读模型的再导出点。
+//! 目的：运行时（环 3 用例）的入站契约：呈现层与核心之间的唯一通道（见 docs/presentation/contracts.md）。
+//! 管：`RuntimeOps`（启用 / 改需求 / 回档 / 停止）、动作词汇与 `ActionOps`、`LogOps`，以及呈现层要用的内核词汇（`i18n` / `Note` / `Severity`）。
+//!   别处单元的形状一律不在这里转出：呈现层直接 import 定义它的那个 `api`。
 //! 不管：建工作与视图（`work::api::WorkOps`）、回合推进（`turn::api::TurnOps`）、HTTP / JSON / 路由（呈现层的传输事）。
 //! 联动：命令经 `Handle` 在核心自己的线程上执行；`entry/faces.rs` 把每个窄契约交给呈现层。
 
@@ -11,26 +12,9 @@ pub use crate::kernel::api::i18n;
 /// 目的：回执说明的稳定码、类型化参数与轻重：呈现层按它上色与渲染，不解析回执正文。
 pub use crate::kernel::api::note::Note;
 pub use crate::kernel::api::note::Severity;
-/// 目的：回档目标与结果（层 9 的词汇）：这里只取用，不定义。
-pub(crate) use crate::units::lifecycle::api::{RebuildDeps, RewindOutcome, RewindTarget};
-/// 目的：工具通道探测的三态结论。
-pub use crate::units::llm::api::ProbeOutcome;
-/// 目的：运行档（本机档 / 虚拟机档）的词汇。
-pub use crate::units::pure::exec_model::api::Tier;
-/// 目的：落盘历史的只读视图（会话列表是「在世会话 × 历史」的并集）。
-#[allow(unused_imports)]
-pub use crate::units::session_model::api::HistoryView;
-/// 目的：会话事件（开场事实 / 回合事件 / 通知）的线格式。
-pub use crate::units::transcript::api::SessionEvent;
-/// 目的：裁决卡、裁决队与等待者：界面与 CLI 按它们渲染「等你定的事」。
-#[allow(unused_imports)]
-pub use crate::units::transcript::api::{DecisionCard, DecisionQueue, DecisionWaiter};
-/// 目的：回合推进自用的协作态：门面重导出，契约测试的既有路径不必改。
-pub(crate) use crate::units::turn::turn::api::CollabWork;
-/// 目的：命令回包（事件台头部序号）、事件台与生成输出方式。
-pub use crate::units::turn::turn::api::{Advance, Events, Output};
-/// 目的：会话视图：启用后要交给界面的那一份（工作与会话配置的词汇归 `work::api`）。
-pub use crate::units::work::api::SessionView;
+use crate::units::lifecycle::api::RewindTarget;
+use crate::units::turn::turn::api::{Advance, Output};
+use crate::units::work::api::SessionView;
 
 /// 目的：运行时自己的用例：启用、改需求、回档、停止——它们要同时碰会话中心、历史生命周期与宿主的作业表，
 ///   只有 runtime 拿得到，所以归这里；身体只有编排，不含任何下层用例的实现。
