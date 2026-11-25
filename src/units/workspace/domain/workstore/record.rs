@@ -1,7 +1,7 @@
 //! 目的：版本库的记录形态——提交、引用、改动、待恢复事务、内容对象与回收报告。
 //! 管：`Commit` / `Ref` / `Change` / `Index` / `Tree` / `Pending` / `ObjectInfo` / `WorkGcReport` / `CommitSummary` 这些落盘与回执共用的数据结构。
 //! 不管：三方比较与判定（`merge.rs` / `resolve.rs`）、路径校验（`path.rs`）、状态展示（`status.rs`）。
-//! 联动：落盘由 `workspace::detail::fs_workstore` 消费，能力面经 `workspace::api` 重导出（docs/workspace/README.md）。
+//! 联动：落盘由 `workspace::detail::fs_workstore` 消费，入站面经 `workspace::api` 重导出（docs/workspace/README.md）。
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

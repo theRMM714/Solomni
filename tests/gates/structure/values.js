@@ -1,9 +1,9 @@
 /**
- * 结构审查·值边界门禁：跨能力只传值与端口，不传活对象（R15 / R16）。
+ * 结构审查·值边界门禁：跨单元只传值与端口，不传活对象（R15 / R16）。
  * 判据：① api*.rs 的公共函数与 trait 方法，参数里不得有 &mut——按**完整签名**判（可跨行）；
  *       豁免三条：&mut self、端口借用 &mut dyn Trait、泛型与回调边界里的 &mut（impl FnOnce(&mut T) 之类）——硬判；
- *       ② api*.rs 的值（pub struct）与它经 pub use 转出的同能力结构带内部可变（Mutex / RwLock / RefCell / Cell / UnsafeCell / Atomic），或字段是具名状态的可变借用 / 闭包（借端口 `&mut dyn Trait` 不算：那是把端口借进来）；
- *       ③ 跨能力的同形结构（字段名与类型全同）——②③ 只进 notes，等顶层编排定稿后转硬。
+ *       ② api*.rs 的值（pub struct）与它经 pub use 转出的同单元结构带内部可变（Mutex / RwLock / RefCell / Cell / UnsafeCell / Atomic），或字段是具名状态的可变借用 / 闭包（借端口 `&mut dyn Trait` 不算：那是把端口借进来）；
+ *       ③ 跨单元的同形结构（字段名与类型全同）——②③ 只进 notes，等顶层编排定稿后转硬。
  *       ④ 契约唯一家与镜像禁令（H4）：同一个名字不得在两个契约面上各定义一次；
  *          呈现层/入口不得定义与契约同名的 pub 类型（那是复制 DTO，不是防腐）。
  */
@@ -44,7 +44,7 @@ function fieldsOf(lines, start) {
   return out;
 }
 
-/** 收集能力源码里的全部 pub struct（按名字建索引，用来做传递可达）。 */
+/** 收集单元源码里的全部 pub struct（按名字建索引，用来做传递可达）。 */
 function structIndex(files) {
   const index = new Map();
   for (const file of files) {
@@ -59,7 +59,7 @@ function structIndex(files) {
   return index;
 }
 
-/** api 面 `pub use` 转出的类型名：它们是跨能力可见的契约面，和 api 里直接声明的一样受判。 */
+/** api 面 `pub use` 转出的类型名：它们是跨单元可见的契约面，和 api 里直接声明的一样受判。 */
 function reexported(lines) {
   const out = [];
   // `pub use` 可能跨多行（花括号折行），先拼成一条语句再取名字。
@@ -198,7 +198,7 @@ function contractProblems(root) {
   return problems;
 }
 
-/** 值边界（api 面）与同形重复（全能力面）：返回 {problems, notes}。 */
+/** 值边界（api 面）与同形重复（全入站面）：返回 {problems, notes}。 */
 function values(root) {
   const dir = path.join(root, "src", "units");
   const files = rsFilesOf(dir).filter((f) => !f.includes(path.sep + "tests" + path.sep));
@@ -209,7 +209,7 @@ function values(root) {
   const mutable = [];
   const borrows = [];
   const reported = new Set();
-  // 一个跨能力可见的结构：字段带锁 / 带可变借用 / 顺着字段可达锁，都算活对象。
+  // 一个跨单元可见的结构：字段带锁 / 带可变借用 / 顺着字段可达锁，都算活对象。
   const judge = (cap, name, fields, at) => {
     const key = cap + "::" + name;
     if (reported.has(key)) return;
@@ -234,7 +234,7 @@ function values(root) {
       }
     }
   };
-  // 定义位置：只用于回执里指路（同一个名字在能力内唯一才判）。
+  // 定义位置：只用于回执里指路（同一个名字在单元内唯一才判）。
   const defAt = (defs, name) => {
     const file = defs[0].file;
     const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
@@ -259,7 +259,7 @@ function values(root) {
       judge(cap, name, defs[0].fields, defAt(defs, name) + "（经 " + rel(root, file) + " 转出）");
     }
   }
-  if (mutable.length) notes.push("值边界：api 的值带内部可变或可达内部可变，跨能力传递时它就是活对象（R16 迁移清单）：" + mutable.join("、"));
+  if (mutable.length) notes.push("值边界：api 的值带内部可变或可达内部可变，跨单元传递时它就是活对象（R16 迁移清单）：" + mutable.join("、"));
   if (borrows.length) notes.push("值边界：api 的值里塞了可变借用或闭包，等于把对象当参数传（R16 迁移清单）：" + borrows.join("、"));
   const everyStruct = [];
   const same = new Map();
@@ -279,7 +279,7 @@ function values(root) {
   for (const group of same.values()) {
     if (new Set(group.map((s) => s.cap)).size < 2) continue;
     const names = [...new Set(group.map((s) => (s.cap ? s.cap + "::" : "") + s.name))];
-    notes.push("值边界：跨能力同形结构（R15 迁移清单）：" + names.join(" = "));
+    notes.push("值边界：跨单元同形结构（R15 迁移清单）：" + names.join(" = "));
   }
   problems.push(...contractProblems(root));
   return { problems, notes };

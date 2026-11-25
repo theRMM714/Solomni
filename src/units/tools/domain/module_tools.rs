@@ -1,14 +1,14 @@
-//! 目的：模块清单 → 工具面——把 `module.yaml` 声明的工具与参数契约转成工具能力认识的形态。
+//! 目的：模块清单 → 工具面——把 `module.yaml` 声明的工具与参数契约转成工具单元认识的形态。
 //! 管：参数契约的声明形态（`ToolDecl::schema`）、模型侧的工具参数段与工具清单段。
 //! 不管：`module.yaml` 的读取与参数**声明形态**（`Param` / `ParamType` 归 `workspace`）——这里只消费，免得 `workspace → tools` 成环。
-//! 联动：由本能力的 `service/` 在装配工具面时调用；声明形态来自 `workspace::api`。
+//! 联动：由本单元的 `service/` 在装配工具面时调用；声明形态来自 `workspace::api`。
 
 use crate::units::catalog::modules::api::{Module, ToolDecl};
 use crate::units::prompt::api::{Prompt, Segment};
 use crate::units::tools::domain::schema::ToolSchema;
 
 impl ToolDecl {
-    /// 目的：把这个工具声明的参数契约转成工具能力认识的形态（校验与渲染共用）。
+    /// 目的：把这个工具声明的参数契约转成工具单元认识的形态（校验与渲染共用）。
     /// 返回：声明了参数时给出 schema；没声明 = `None` = 不校验。
     pub fn schema(&self) -> Option<ToolSchema> {
         self.params

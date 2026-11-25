@@ -71,7 +71,7 @@ function collect(root, opts) {
   const empty = () => ({ problems: [], scope, unit, units: [], files: [] });
   const fail = (problems) => Object.assign(empty(), { problems });
   if (scope !== "weekly" && scope !== "unit") {
-    return fail(["scope 只认 weekly / unit，收到：" + scope + (scope === "capability" ? "（旧能力抽查改成 --scope unit --unit <单元名>）" : "")]);
+    return fail(["scope 只认 weekly / unit，收到：" + scope + (scope === "capability" ? "（旧单元抽查改成 --scope unit --unit <单元名>）" : "")]);
   }
   if (scope === "unit" && !unit) {
     return fail(["scope=unit 需要 --unit <单元名>：可选值见 tests/specs/*.yaml 的 unit 行"]);

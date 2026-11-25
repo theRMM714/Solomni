@@ -4,7 +4,7 @@
 //! 管：工具名常量与 `is_work_tool`、取参（`str_list` / `str_arg`）、各工具回执的拼装。
 //! 不管：真正的拉取 / 提交 / 状态 / 三方视图 / 解决 / 备份恢复（走 `workspace::api::Workspace`）；
 //!   冲突、状态与备份判定（在 `workspace`）。
-//! 联动：由本能力的 `service/` 调用；工具名与 `systools/tools.yaml` 同一份名单。
+//! 联动：由本单元的 `service/` 调用；工具名与 `systools/tools.yaml` 同一份名单。
 
 use crate::units::workspace::api::{
     ChangeKind, CommitReport, DiffReport, DiffSign, LostReport, PullReport, PushReport,

@@ -1,7 +1,7 @@
-//! 目的：会话能力的用例与端口持有者——历史落盘端口只在这里（R12）。
+//! 目的：会话单元的用例与端口持有者——历史落盘端口只在这里（R12）。
 //! 管：造会话 / 追流水 / 读元信息 / 删会话的用例，会话装配（`assemble`）、核实环境（`verify`）、增量落盘（`persist_events` / `record_events` / `Persister`）。
 //! 不管：文件机制（在 `detail/fs_history.rs`）、会话运行时与回档算术（在 `agentloop`）、队列代理（在 runtime）。
-//! 联动：别的能力走 `api::History`；呈现层走 `api::HistoryOps`（由队列代理实现）；装配在组合根，这里只收注入的端口。
+//! 联动：别的单元走 `api::History`；呈现层走 `api::HistoryOps`（由队列代理实现）；装配在组合根，这里只收注入的端口。
 
 use crate::units::conversation::session::ports::HistoryStore;
 use crate::units::session_model::api::persist_policy_for;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 pub(crate) mod tree;
 
-/// 目的：会话能力：持历史落盘端口，按用例答话。
+/// 目的：会话单元：持历史落盘端口，按用例答话。
 pub struct SessionService {
     store: Arc<dyn HistoryStore + Send + Sync>,
 }

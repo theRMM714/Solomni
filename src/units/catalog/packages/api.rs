@@ -1,4 +1,4 @@
-//! 目的：packages 能力的入站面——其它能力与呈现层只准用这里。
+//! 目的：packages 子业务的入站面——其它单元与呈现层只准用这里。
 //! 管：Packages 用例 trait、包库快照、目标选择、PackagePlan 与包选择诊断。
 //! 不管：纯逻辑实现（domain/）与端口（ports.rs）。
 //! 联动：被 vm / runtime / entry::probes / residents 消费；契约见 RUNTIME_SPEC.md。

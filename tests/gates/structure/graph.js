@@ -52,13 +52,13 @@ const HINTS = {
   entry:
     "<h2>怎么看 · 入口分段</h2><p class=hint>启动流程四段：值层 → 判定层 → 装配层 → 编排层。边是模块之间的引用，同段互依赖与向上依赖都是红色。段号以 docs/entry/layers.yaml 为准；main 只串流程。</p>",
   pres:
-    "<h2>怎么看 · 屏面入站面</h2><p class=hint>左边一屏（presentation 里的文件），右边它取的能力单元。清单在 docs/presentation/inbound.yaml，源码与清单双向比对；红边是清单外的取用或同层互依赖。点一屏看它的单元与四槽。</p>",
+    "<h2>怎么看 · 屏面入站面</h2><p class=hint>左边一屏（presentation 里的文件），右边它取的单元。清单在 docs/presentation/inbound.yaml，源码与清单双向比对；红边是清单外的取用或同层互依赖。点一屏看它的单元与四槽。</p>",
 };
 
 /** 仓库相对路径（正斜杠）。 */
 const relOf = (root, f) => f.slice(root.length + 1).replace(/\\/g, "/");
 
-/** 路径所属能力；不在能力目录下返回空串。 */
+/** 路径所属单元；不在单元目录下返回空串。 */
 function capOf(rel) {
   const m = /^src\/units\/(?:pure\/)?([a-z_][a-z0-9_]*)\//.exec(rel);
   return m ? m[1] : "";
@@ -306,7 +306,7 @@ function entryView(root, rows, problems) {
   return { nodes: nodes, edges: edges, fe: fe, segments: Math.max(0, ...tiers.values()) + 1 };
 }
 
-/** 屏面入站面：每屏取哪些能力单元，清单取 presentation-inbound.js 的解析器（唯一权威）。 */
+/** 屏面入站面：每屏取哪些单元，清单取 presentation-inbound.js 的解析器（唯一权威）。 */
 function presView(root, rows, problems) {
   const file = path.join(root, "docs", "presentation", "inbound.yaml");
   const parsed = fs.existsSync(file) ? presentation.parseInboundText(fs.readFileSync(file, "utf8")) : { faces: new Map(), problems: [] };
@@ -449,7 +449,7 @@ function layout(nodes, nodeW, nodeH) {
   return { pos: pos, bands: bands, width: width, height: y };
 }
 
-/** 分层视图（能力 / 机制 / 入口共用）：带内铺层，边按门禁口径着色（越界红、常规灰）。 */
+/** 分层视图（单元 / 机制 / 入口共用）：带内铺层，边按门禁口径着色（越界红、常规灰）。 */
 function bandSvg(data, opts) {
   const nodeW = opts.nodeW;
   const nodeH = opts.nodeH;
@@ -509,7 +509,7 @@ function bandSvg(data, opts) {
   return out.join("");
 }
 
-/** 屏面视图：左边一屏，右边它取的能力单元。 */
+/** 屏面视图：左边一屏，右边它取的单元。 */
 function presSvg(pres, wide) {
   const SW = 300;
   const SH = 40;
@@ -527,7 +527,7 @@ function presSvg(pres, wide) {
   const out = [];
   out.push('<svg class="' + (W > 1240 ? "wide" : "") + '" viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" role="img" aria-label="屏面入站面">');
   out.push('<defs><marker id="par" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#94a3b8"/></marker></defs>');
-  out.push('<text x="' + LEFT + '" y="16" class="band">屏（src/presentation）</text><text x="' + RIGHT + '" y="16" class="band">入站能力单元（inbound.yaml）</text>');
+  out.push('<text x="' + LEFT + '" y="16" class="band">屏（src/presentation）</text><text x="' + RIGHT + '" y="16" class="band">入站面单元（inbound.yaml）</text>');
   const SP = new Map();
   const UP = new Map();
   pres.screens.forEach((s, i) => SP.set(s.file, { x: LEFT, y: top + i * (SH + SGAP) }));
@@ -578,7 +578,7 @@ function overviewSvg(meta, entry) {
   const segNames = { 0: "值层", 1: "判定层", 2: "装配层", 3: "编排层" };
   const entryLines = [...groups.keys()].sort((a, b) => b - a).map((k) => segNames[k] + "：" + groups.get(k).sort().join(" · "));
   const bands = [
-    { view: "pres", y: 20, h: 100, title: "presentation · " + meta.screens + " 屏 / " + meta.screenFiles + " 个文件", lines: ["每屏只取清单里的能力单元：" + meta.unitCount + " 个单元、" + meta.cross.screenEdges + " 处屏→单元引用（docs/presentation/inbound.yaml）"], tag: "点这里看屏面入站面" },
+    { view: "pres", y: 20, h: 100, title: "presentation · " + meta.screens + " 屏 / " + meta.screenFiles + " 个文件", lines: ["每屏只取清单里的单元：" + meta.unitCount + " 个单元、" + meta.cross.screenEdges + " 处屏→单元引用（docs/presentation/inbound.yaml）"], tag: "点这里看屏面入站面" },
     { view: "caps", y: 164, h: 110, title: "units · " + meta.caps + " 单元 / " + meta.files + " 个文件", lines: ["单元之间 " + meta.edges + " 条依赖边，环间只向内（layers.yaml）", "对外只经 kernel 的 " + meta.cross.faces + " 个 api 面（" + meta.cross.capKernel + " 处取用）"], tag: "点这里看单元环" },
     { view: "mech", y: 318, h: 110, title: "kernel · " + meta.mech + " 机制 / " + meta.mechLayers + " 层", lines: ["机制之间 " + meta.mechEdges + " 条边，严格下行、无环（docs/kernel/mechanisms.yaml）", "对外面按概念切成 " + meta.cross.faces + " 个，内核内部不绕道面"], tag: "点这里看机制分层" },
   ];
@@ -593,7 +593,7 @@ function overviewSvg(meta, entry) {
     out.push('<text x="14" y="' + (52 + i * 34) + '" style="font-size:11px;fill:#cbd5e1">' + esc(line) + "</text>");
   });
   out.push('<text x="14" y="' + (52 + entryLines.length * 34) + '" style="font-size:11px;fill:#94a3b8">编排层 main 只串流程</text>');
-  out.push('<text x="14" y="' + (78 + entryLines.length * 34) + '" style="font-size:11px;fill:#cbd5e1">装配 ' + meta.cross.entryPres + " 屏 / " + meta.cross.entryCap + ' 个能力单元</text>');
+  out.push('<text x="14" y="' + (78 + entryLines.length * 34) + '" style="font-size:11px;fill:#cbd5e1">装配 ' + meta.cross.entryPres + " 屏 / " + meta.cross.entryCap + ' 个单元</text>');
   out.push('<text x="14" y="' + (78 + entryLines.length * 34 + 20) + '" style="font-size:11px;fill:#cbd5e1">' + meta.cross.entryKernel + ' 个模块取 kernel 对外面</text>');
   out.push('<text x="14" y="' + (totalH - 16) + '" style="font-size:11px;fill:#64748b">点这里看入口分段</text>');
   out.push("</g>");
@@ -718,7 +718,7 @@ function page(data) {
     " stage.innerHTML=fileGraph(n.files,fe,prefix);",
     " var tags=view==='entry'?'<span class=tag>第 '+n.layer+' 段</span>':view==='pres'?'<span class=tag>取 '+n.units.length+' 个单元</span>':'<span class=tag>环 '+n.layer+'</span>';",
     " panel.innerHTML='<h2>'+esc(view==='pres'?n.name:n.name)+'</h2>'+tags+'<span class=tag>'+n.files.length+' 个文件</span>'",
-    "  +(view==='pres'?'<div class=path style=\"margin-top:8px\">'+esc(n.file)+'</div><h3>入站能力单元</h3><p class=hint>'+esc(n.units.join(' · '))+'</p>':'')",
+    "  +(view==='pres'?'<div class=path style=\"margin-top:8px\">'+esc(n.file)+'</div><h3>入站面单元</h3><p class=hint>'+esc(n.units.join(' · '))+'</p>':'')",
     "  +'<h3>命中问题</h3>'+issues(n.issues)+'<h3>提示</h3><p class=hint>点文件看四槽；悬停文件高亮它的依赖。</p>';",
     " bindFile();}",
     "function drawFile(){var path=cur.p;stage.scrollTop=0;stage.scrollLeft=0;var at=FA[path];if(!at)return;var n=nodeOf(at.view,at.node);if(!n)return;",
@@ -750,7 +750,7 @@ function page(data) {
     '<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">',
     "<title>Solomni 结构图</title><style>" + style + "</style></head><body>",
     "<header><h1>Solomni 结构图</h1>",
-    '<span class="n">能力 <b>' + m.caps + "</b> · 机制 <b>" + m.mech + "</b> · 入口 <b>" + m.entry + "</b> · 屏 <b>" + m.screens + "</b> · 依赖边 <b>" + m.edges + " / " + m.mechEdges + " / " + m.entryEdges + "</b> · 命中 <b>" + m.issues + "</b></span>",
+    '<span class="n">单元 <b>' + m.caps + "</b> · 机制 <b>" + m.mech + "</b> · 入口 <b>" + m.entry + "</b> · 屏 <b>" + m.screens + "</b> · 依赖边 <b>" + m.edges + " / " + m.mechEdges + " / " + m.entryEdges + "</b> · 命中 <b>" + m.issues + "</b></span>",
     '<button id="back" type="button" disabled>← 返回</button><div id="crumbs"></div>',
     '<nav id="tabs">' + tabs + '</nav><button id="fit" type="button">适应宽度</button></header>',
     "<main><section><div id=stage>" + stageHtml + "</div>",
@@ -779,7 +779,7 @@ function summary(meta, before) {
   const base = "结构图：Structure.html " + (before ? "已刷新" : "已生成") + "（" + meta.caps + " 单元 /" + meta.mech + " 机制 / " + meta.entry + " 入口模块 / " + meta.screens + " 屏；依赖边 " + meta.edges + " / " + meta.mechEdges + " / " + meta.entryEdges + "；命中 " + meta.issues + "）";
   if (!before) return base;
   const parts = [];
-  for (const [key, label] of [["caps", "能力"], ["mech", "机制"], ["entry", "入口模块"], ["screens", "屏"], ["edges", "能力边"], ["mechEdges", "机制边"], ["entryEdges", "入口边"], ["issues", "命中"]]) {
+  for (const [key, label] of [["caps", "单元"], ["mech", "机制"], ["entry", "入口模块"], ["screens", "屏"], ["edges", "单元边"], ["mechEdges", "机制边"], ["entryEdges", "入口边"], ["issues", "命中"]]) {
     const d = meta[key] - (before[key] || 0);
     if (d) parts.push(label + (d > 0 ? "+" : "") + d);
   }

@@ -168,7 +168,7 @@ pub struct CommitRequest {
     pub paths: Vec<String>,
     pub deletes: Vec<String>,
     pub message: String,
-    /// 目的：提交时间（由调用方给：本能力不持时钟）。
+    /// 目的：提交时间（由调用方给：本单元不持时钟）。
     pub time: i64,
     /// 目的：提交锚的行号（调用方给：这一席下一条转录行的 id）。
     pub line: u64,
@@ -185,7 +185,7 @@ pub struct CommitReport {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PushRequest {
     pub message: String,
-    /// 目的：提交时间（由调用方给：本能力不持时钟）。
+    /// 目的：提交时间（由调用方给：本单元不持时钟）。
     pub time: i64,
     /// 目的：提交锚的行号（这一席下一条转录行的 id）。
     pub line: u64,

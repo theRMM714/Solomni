@@ -1,4 +1,4 @@
-//! 目的：packages 能力的用例与端口持有者。
+//! 目的：packages 子业务的用例与端口持有者。
 //! 管：持 PackageSource（R12），按调用交出包库与依赖文件夹路径。
 //! 不管：纯逻辑（domain/）；适配器（detail/）由组合根构造。
 //! 联动：端口在 ports.rs；被 api::Packages 的调用方消费。

@@ -1,5 +1,5 @@
 //! 目的：终端渲染：花名册、菜单、事件流与模型/供应商标签。
-//! 管：把能力面的事实与事件词汇翻成终端行文。
+//! 管：把入站面的事实与事件词汇翻成终端行文。
 //! 不管：命令解析、交互裁决、会话流。
 //! 联动：`cli.rs`、`cli/gate.rs`、`docs/presentation/contracts.md`
 
@@ -214,7 +214,7 @@ fn head(glyph: &str, ink: theme::Ink, name: &str, verb: &str) -> String {
 
 fn render_rich(events: &[SessionEvent]) {
     for e in events {
-        // 协作机制自己的事件（整理 / 待审 / 节点 / 回报 / 验收 / 交付）：词汇归协作能力，
+        // 协作机制自己的事件（整理 / 待审 / 节点 / 回报 / 验收 / 交付）：词汇归协作单元，
         // 这里按它的 typed 视图画；认不出来的一律落回下面的通用臂。
         if let Some(ce) = CollabEvent::of(e) {
             render_collab_rich(&ce);

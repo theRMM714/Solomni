@@ -1,4 +1,4 @@
-//! 目的：模块能力的出站端口。
+//! 目的：模块子业务的出站端口。
 //! 管：`ModuleSource`（清单来源）与 `ModuleStateStore`（启停覆盖落盘）。
 //! 不管：目录遍历与解析机制（在 `detail/`）；有效值判定（在 `service.rs`）。
 //! 联动：都只由 `service.rs` 持有（R12）；实现见 `detail/`。

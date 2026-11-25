@@ -1,7 +1,7 @@
 //! 目的：模块清单来源——扫描 `modules/` 目录（实现 `ModuleSource` 端口）。
 //! 管：目录遍历、yaml 解析、`userdata/` 的确保存在、拒收原因如实呈现。
 //! 不管：清单契约与校验（在 `domain/module.rs`）；重扫策略（在 `service.rs`）。
-//! 联动：由本能力 `service.rs` 持有；见 docs/modules/README.md。
+//! 联动：由本单元 `service.rs` 持有；见 docs/modules/README.md。
 
 use crate::units::catalog::modules::api::{Module, ModuleManifest, Roster};
 use crate::units::catalog::modules::ports::ModuleSource;
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 pub struct FsModules {
     /// **工具名保留表**（内置工具名）：由组合根在装配期问一次 `tools` 交进来——
-    /// 清单校验归本能力，名字空间归工具能力，两边不互相依赖。
+    /// 清单校验归本单元，名字空间归工具单元，两边不互相依赖。
     tool_reserved: Vec<String>,
     /// **模块 id 保留表**：产品命令名/别名与 `names.yaml` 的 `modules` 块。
     /// 模块 id 会成为动作 id 前缀 `module.<模块>.<工具>`，所以不能与命令词同形。

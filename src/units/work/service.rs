@@ -2,7 +2,7 @@
 //! 管：`Work` 的字段与构造、建工作的两段结果、改配的准备结果、模块声明的能力表、运行包重建判据。
 //! 不管：报告与档位（`report.rs`）、配置读写（`config.rs`）、调用参数（`model.rs`）、宿主工具路径（`host.rs`）、视图（`views.rs`）、建工作与 guest 启动（`create.rs`）、启用与拟名单（`activation.rs` / `suggest.rs`）、guest 任务本身（`guest_job.rs`）。
 //! 联动：runtime 与呈现层经这里的方法名调用；各子模块 impl 同一个 `Work`。
-//!   `Turn` / `Registry` / `HostProbe` 都是方法形参、不是字段：本能力不持第二份 `Turn`。
+//!   `Turn` / `Registry` / `HostProbe` 都是方法形参、不是字段：本单元不持第二份 `Turn`。
 
 mod activation;
 mod config;
@@ -46,8 +46,8 @@ use std::sync::Arc;
 
 /// 目的：**工作与会话配置的用例面**：建工作 / 改配 / 视图 / 报告 / guest 起停都经它。
 ///  与 `Core` 分开：这里只管"一场工作怎么被建立、改配、看、报"，
-///  不看命令队列、不看协作链推进、不看回档——那些留在 runtime（层 10）。
-///  组合根在 `Core::new` 里造一份，与 runtime 共享同一批能力面。
+///  不看命令队列、不看协作链推进、不看回档——那些留在 runtime（环 3）。
+///  组合根在 `Core::new` 里造一份，与 runtime 共享同一批入站面。
 pub struct Work {
     /// 产品根：虚拟根这类"装在项目内"的东西按它解析成绝对路径（`vm::resolve_guest`）。
     root: PathBuf,
@@ -61,15 +61,15 @@ pub struct Work {
     packages: Arc<dyn Packages + Send + Sync>,
     /// 依赖补齐面（**不持它的端口**，R12）：虚拟根清单与装没装齐从它读。
     provision: Arc<dyn Provision + Send + Sync>,
-    /// 目的：模块能力（**不持它的端口**，R12）——模块清单事实的唯一上游。
+    /// 目的：模块子业务（**不持它的端口**，R12）——模块清单事实的唯一上游。
     modules: Arc<dyn Modules + Send + Sync>,
     /// llm 用例面：按解析出来的通道造收发句柄。
     llm: Arc<dyn Llm + Send + Sync>,
     /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具、释放围栏授权都走它。
     tools: Arc<dyn ToolExec + Send + Sync>,
-    /// 提示词册能力：只按名字取段。
+    /// 提示词单元：只按名字取段。
     prompt: Arc<dyn Prompt>,
-    /// 工具总表与机制席位的能力面（授权两张表）：表本体在工具能力里，与册子互不依赖。
+    /// 工具总表与机制席位的入站面（授权两张表）：表本体在工具单元里，与册子互不依赖。
     systools: Arc<dyn Tools>,
     log: Arc<dyn Log + Send + Sync>,
     /// 目的：流程工厂（组合根注入）：建工作按会话类型表里的流程序列逐段造，本层不认识任何具体流程。
@@ -77,7 +77,7 @@ pub struct Work {
 }
 
 impl Work {
-    /// 组合根专用：与 `Core` 共享同一批能力面（不新建任何实现）。
+    /// 组合根专用：与 `Core` 共享同一批入站面（不新建任何实现）。
     // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。
     // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
     #[allow(clippy::too_many_arguments)]

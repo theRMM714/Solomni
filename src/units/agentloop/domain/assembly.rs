@@ -1,4 +1,4 @@
-//! 目的：一席工具面与单 agent 会话对象的装配——把能力面的事实拼成能跑的会话。
+//! 目的：一席工具面与单 agent 会话对象的装配——把入站面的事实拼成能跑的会话。
 //! 管：`MemberEnvParts` / `MemberSpec` / `SingleSpec` 三个参数对象（`SessionPorts` 在本单元的 `domain::ports`），
 //!   `member_tools` / `single_session` 两个装配入口，以及重建与代理两场的整场装配（`rebuild_single` / `proxy_session`）。
 //! 不管：落盘（会话单元的 `service.rs`）、生成驱动（`engine`）、纯派生规则（在 `session::assemble`）。

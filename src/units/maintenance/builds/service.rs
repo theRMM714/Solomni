@@ -1,7 +1,7 @@
-//! 目的：构建能力的用例实现——按模块声明在目标环境把产物编出来，并复验入口。
+//! 目的：构建子业务的用例实现——按模块声明在目标环境把产物编出来，并复验入口。
 //! 管：本机档（宿主 + 产品围栏）与虚拟机档（guest + 编译包）两条构建路径、构建期能力选包、缓存命中、编完复验。
 //! 不管：源指纹、构建状态与缓存卷的机制（`ports.rs` 定接口，`detail/` 实现）、包库与引擎的机制（`packages` / `vm` / `provision`）、CLI 文案（`entry::probes`）。
-//! 联动：`ProcessRunner` / `HostProbe` / `Log` 是 kernel 的共享机制；`SourceDigest` / `BuildStates` / `BuildCache` 是本能力的端口，实现只在组合根注入。
+//! 联动：`ProcessRunner` / `HostProbe` / `Log` 是 kernel 的共享机制；`SourceDigest` / `BuildStates` / `BuildCache` 是本单元的端口，实现只在组合根注入。
 
 use crate::kernel::api::fence::FencePlan;
 use crate::kernel::ports::{FenceGate, FenceHost, HostProbe, Log, ProcessRunner};
@@ -43,8 +43,8 @@ pub struct BuildsService {
 }
 
 impl BuildsService {
-    /// 目的：组合根专用——注入包库、虚拟机、补齐、三个本能力端口、执行器与工具链安装根。
-    /// 参数：`root` = 产品根；`packages` / `vm` / `provision` = 各能力的用例面；`digest` / `states` / `cache` = 源指纹、构建状态、缓存卷的适配器；`runner` = 外部进程执行；`gate` = 围栏裁决；`probe` = 宿主事实；`log` = 运行日志；`toolchain_roots` = 基础工具链安装根。
+    /// 目的：组合根专用——注入包库、虚拟机、补齐、三个本单元端口、执行器与工具链安装根。
+    /// 参数：`root` = 产品根；`packages` / `vm` / `provision` = 各单元的用例面；`digest` / `states` / `cache` = 源指纹、构建状态、缓存卷的适配器；`runner` = 外部进程执行；`gate` = 围栏裁决；`probe` = 宿主事实；`log` = 运行日志；`toolchain_roots` = 基础工具链安装根。
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         root: PathBuf,

@@ -106,7 +106,7 @@ pub struct Discussion {
     pub(crate) closed: bool,
     /// 目的：yes,allow：授权小组自裁——ask 不中止轮转，留档待办。
     pub(crate) allow_autonomy: bool,
-    /// 目的：提示词册能力面：**不是册子本体**（持有者只有提示词能力一处），这里只按名字取段。
+    /// 目的：提示词册入站面：**不是册子本体**（持有者只有提示词单元一处），这里只按名字取段。
     pub(crate) prompts: Arc<dyn Prompt>,
     /// 目的：讨论席的**机制说明 + 讨论约定**（开场与轮转都带它）：只说约定不说机制，AI 会空转。
     ///   能用哪些工具**不在这里**——随回合注入（见会话工具面的 tools_block）。

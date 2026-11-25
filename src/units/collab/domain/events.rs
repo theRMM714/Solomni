@@ -1,6 +1,6 @@
 //! 目的：协作自己的会话事件（**只属于协作**）：线上 kind/payload 与类型化视图的互转。
 //! 管：`CollabEvent` 八种事件、`CheckView`、以及它们与 `SessionEvent::Push` 的双向映射。
-//! 不管：事件的产生时机（在本能力的 `service/`）、会话通道本身（在会话能力）。
+//! 不管：事件的产生时机（在本单元的 `service/`）、会话通道本身（在会话单元）。
 //! 联动：`service/` 造事件时用 `push`；呈现层与测试用 `of` 认回来（按 kind 解释，不认 Rust 枚举位置）。
 
 use crate::units::pure::taskchain::api::TaskChain;
@@ -88,7 +88,7 @@ impl CollabEvent {
         })
     }
 
-    /// 目的：从会话事件认回来：不是机制推送（或不是本能力的 kind）就是 None。
+    /// 目的：从会话事件认回来：不是机制推送（或不是本单元的 kind）就是 None。
     pub fn of(event: &SessionEvent) -> Option<CollabEvent> {
         match event {
             SessionEvent::Push { kind, payload } => CollabEvent::parse(kind, payload),

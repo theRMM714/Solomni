@@ -1,4 +1,4 @@
-//! 目的：storage 能力的出站端口。
+//! 目的：storage 子业务的出站端口。
 //! 管：SpaceSurvey（磁盘事实）、SpaceReclaim（锁、删除、排队、压缩、回收摘要）、GuestLiveness（guest 存活）。
 //! 不管：什么该删、按什么顺序删（在 `domain`）；目录怎么扫、文件怎么删（在 `detail/`）。
 //! 联动：由 `service.rs` 持有（R12）；实现是 `detail/survey.rs`、`detail/reclaim.rs`、`detail/guests.rs`。

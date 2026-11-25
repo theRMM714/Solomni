@@ -32,8 +32,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-// ---------- 假能力面 ----------
-/// 假能力面：不碰核心、不起线程。`fail` 一注入，所有能力一律失败（用来验错误路径）。
+// ---------- 假入站面 ----------
+/// 假入站面：不碰核心、不起线程。`fail` 一注入，所有能力一律失败（用来验错误路径）。
 #[derive(Default)]
 struct FakeFaces {
     fail: Option<String>,
@@ -560,7 +560,7 @@ impl TurnOps for FakeFaces {
             card: serde_json::from_value(json!({
                 "id": format!("d1-{}", sid),
                 "envelope": { "role": "core", "name": "核心" },
-                "message": { "title": "要不要继续？", "body": "假能力面", "detail": "" },
+                "message": { "title": "要不要继续？", "body": "假入站面", "detail": "" },
                 "options": [{ "id": "go", "label": "继续" }],
             }))
             .expect("假卡形状"),
@@ -1194,7 +1194,7 @@ fn dev_assets_follow_build_profile() {
 // ---------- 逐条路由：错误 / 空 / 边界 ----------
 #[test]
 fn every_api_route_reports_capability_failure_as_4xx() {
-    let ops = fake_ops(Some("假能力面：一律失败"));
+    let ops = fake_ops(Some("假入站面：一律失败"));
     for route in ROUTES {
         if route.capability == "静态资源"
             || route.id == "events"
@@ -1219,7 +1219,7 @@ fn every_api_route_reports_capability_failure_as_4xx() {
             route.pattern,
             text
         );
-        assert!(text.contains("假能力面"), "错误要如实传播：{}", text);
+        assert!(text.contains("假入站面"), "错误要如实传播：{}", text);
     }
 }
 

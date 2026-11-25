@@ -1,6 +1,6 @@
 //! 目的：出站 HTTPS 的共享机制——按平台装配 TLS 的 ureq 代理。
 //! 管：**唯一**一处 TLS 后端装配（Windows 显式 native-tls / 其余 rustls）与通用代理构建。
-//! 不管：具体协议、状态码与错误语义（在各自能力里）。
+//! 不管：具体协议、状态码与错误语义（在各自单元里）。
 //! 联动：llm 的 http_agent 与依赖补齐都经它取代理 / TLS 配置。
 
 use std::time::Duration;

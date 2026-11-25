@@ -1,5 +1,5 @@
 //! 目的：service 层：核心本体与手柄、长步骤编排、动作分发、代理入站桥；子模块共用的 import 也在这里。
-//! 管：子模块声明与共用面（下层能力的 api 类型、压缩工厂、动作词汇），每个子模块只写自己那段编排。
+//! 管：子模块声明与共用面（下层单元的 api 类型、压缩工厂、动作词汇），每个子模块只写自己那段编排。
 //! 不管：任何用例的身体（在下层能力）；装配清单（组合根 main.rs）；呈现层的形状（api 与 presentation）。
 //! 联动：api 经 Handle 把命令交给这里；子模块一律 `use super::*` 取共用面。
 
@@ -51,7 +51,7 @@ pub(crate) use self::bridge::ProxyBridge;
 use self::compact::{CompactChoice, CompactRuntime};
 /// 目的：核心本体（`core::Core`）：状态只在核心线程上被碰，测试装配点用它。
 pub(crate) use self::core::Core;
-/// 目的：会话本体（`turn` 的 `Turn`）：代理控制要问运行态。
+/// 目的：回合状态本体（`turn_state` 的 `Turn`）：代理控制要问运行态。
 pub(crate) use self::core::Turn;
 /// 目的：核心手柄（`handle::Handle`）：`api` 与装配点只经它发命令。
 pub(crate) use self::handle::Handle;

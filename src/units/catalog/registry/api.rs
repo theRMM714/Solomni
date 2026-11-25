@@ -1,5 +1,5 @@
-//! 目的：registry 能力的入站面——其它能力、runtime 与呈现层只准用这里。
-//! 管：DTO 重导出（供应商 / 模型 / agent / 设置）与 Registry / RegistryOps 能力面（视图 / 只读事实 / 写三类方法）。
+//! 目的：registry 子业务的入站面——其它单元、runtime 与呈现层只准用这里。
+//! 管：DTO 重导出（供应商 / 模型 / agent / 设置）与 Registry / RegistryOps 入站面（视图 / 只读事实 / 写三类方法）。
 //! 不管：四份 yaml 的内存形态与写路径（在 domain 与 service.rs）；持久化机制（在 ports / detail）。
 //! 联动：runtime 只持 Box<dyn Registry>；实现见 service.rs；消费方是 runtime 与呈现层。
 
@@ -20,7 +20,7 @@ use crate::units::catalog::modules::api::Roster;
 use crate::units::llm::api::{Channel, ProbeOutcome, ReplayReport};
 
 /// 目的：登记处的**队列面**：呈现层经 `Handle`（核心自己的线程 + 命令队列）调它。
-///    与 `Registry`（能力面）的分工是**有意的不对称**，不是重复：
+///    与 `Registry`（入站面）的分工是**有意的不对称**，不是重复：
 ///    - `Registry` 的写方法取 `&mut self`——只有那样"单写者"才是**编译期事实**（R4/R5）；
 ///    - 本 trait 全取 `&self`——呈现层持有的是可克隆的句柄（多连接共用），队列独占在**线程那一侧**，
 ///      不是靠类型系统在调用点表达。
@@ -50,21 +50,21 @@ pub trait RegistryOps: Send + Sync {
     fn set_settings(&self, app: AppSettings) -> Result<(), String>;
     fn discover_models(&self, provider_id: &str) -> Result<Vec<String>, String>;
     /// 实测一条通道支不支持原生工具调用（要真实网络；三种结论都如实回报，
-    /// 只把**确定**的结论写回登记处 —— 这条规则在能力里，不在呈现层）。
+    /// 只把**确定**的结论写回登记处 —— 这条规则在单元里，不在呈现层）。
     fn probe_model_tools(&self, id: &str) -> Result<ProbeOutcome, String>;
     /// 实测这种"回放形状"供应商收不收、模型有没有真的读懂（要真实网络；**不改登记处**）。
     fn probe_replay_shape(&self, id: &str) -> Result<ReplayReport, String>;
 }
 
-/// 目的：登记处能力面：供应商 / 模型 / agent / 基本设置，以及通道上的模型发现与探测。
+/// 目的：登记处入站面：供应商 / 模型 / agent / 基本设置，以及通道上的模型发现与探测。
 ///    两类方法对应两类调用方：
 ///    - **呈现层要的**（`provider_views` / `model_views` / `agent_views` / `app_settings` …）——
 ///      它经 `RegistryOps`（本文件）走命令队列进来（见 `runtime/api.rs`）；
-///    - **其它能力与 runtime 要的只读事实**（`resolve` / `tool_mode` / `context_of` / `snapshot` …）——
+///    - **其它单元与 runtime 要的只读事实**（`resolve` / `tool_mode` / `context_of` / `snapshot` …）——
 ///      谁是登记处的主人就由谁答，调用方不自己维护一份镜像。
 ///      实现者是 `service.rs` 的 `RegistryService`（**状态在它里面**，runtime 只持 `Box<dyn Registry>`）。
 pub trait Registry: Send + Sync {
-    // ---- 视图：给呈现层与别的能力看的登记处（**永不携带密钥**） ----
+    // ---- 视图：给呈现层与别的单元看的登记处（**永不携带密钥**） ----
     /// 供应商视图（不含密钥）。
     fn provider_views(&self) -> Vec<ProviderView>;
     /// 模型视图（含「是否核心默认」与形态）。
@@ -80,7 +80,7 @@ pub trait Registry: Send + Sync {
     /// 核心 AI 默认模型 id。
     fn core_model(&self) -> Option<String>;
 
-    // ---- 只读事实：别的能力问「通道怎么发 / 有没有它 / 窗口多大」 ----
+    // ---- 只读事实：别的单元问「通道怎么发 / 有没有它 / 窗口多大」 ----
     /// 模型 id → 成品通道；模型或供应商缺失 = 报错（不猜测回退）。
     fn resolve(&self, model: &str) -> Result<Channel, String>;
     /// 核心 AI 默认通道；未设定或解析失败 = 如实报错（不回落、不猜）。

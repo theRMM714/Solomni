@@ -42,14 +42,14 @@ fn every_command_projects_into_one_book() {
     assert_eq!(ops.find("/help").map(|o| o.id.as_str()), Some("help"));
     assert_eq!(ops.find("?").map(|o| o.id.as_str()), Some("help"));
 
-    // 执行者：启动相一律走系统能力；界面动作走 ui；其余走能力面。
+    // 执行者：启动相一律走系统单元；界面动作走 ui；其余走入站面。
     for o in ops.ops().iter().filter(|o| o.phase == Phase::Boot) {
         assert_eq!(o.executor, Executor::System, "{} 是启动相命令", o.id);
     }
     assert_eq!(op("help").executor, Executor::Ui);
     assert_eq!(op("version").executor, Executor::Ui);
     assert_eq!(op("work").executor, Executor::Core);
-    // 模块词不是命令：模块工具经模块能力面调用，不进命令目录（模块 id 另由保留名拦）。
+    // 模块词不是命令：模块工具经模块入站面调用，不进命令目录（模块 id 另由保留名拦）。
     assert!(ops.find("render").is_none(), "模块不该出现在命令目录里");
 }
 

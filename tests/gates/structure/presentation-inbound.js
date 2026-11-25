@@ -1,5 +1,5 @@
 /**
- * 结构审查·呈现层入站面门禁：每屏只许取清单里登记过的能力单元，且同层不许互相依赖。
+ * 结构审查·呈现层入站面门禁：每屏只许取清单里登记过的单元，且同层不许互相依赖。
  * 规则：① 清单（docs/presentation/inbound.yaml）是每屏入站面的唯一权威，源码与清单**双向比对**：
  *        源码取了清单外的单元＝入站面外溢（要放行就改清单），清单登记了但源码没取＝清单过期；
  *       ② 呈现层内部只许向上取根（presentation.rs / faces.rs / signal.rs / cli.rs / web.rs），
@@ -22,7 +22,7 @@ const ROOTS = new Set([
   "src/presentation/cli.rs",
   "src/presentation/web.rs",
 ]);
-// 分区段：能力路径截到它为止才是「单元」——::api 之前那段才是子单元名。
+// 分区段：单元路径截到它为止才是「单元」——::api 之前那段才是子单元名。
 const PARTITIONS = ["api", "service", "domain", "detail", "ports"];
 
 /** 目的：把 use 路径折成入站面单元名（\`work\` / \`catalog/registry\`）；环 1 的 pure:: 前缀不算单元名。 */
@@ -95,7 +95,7 @@ function presentationInbound(root) {
     const allowed = parsed.faces.get(f) || [];
     for (const u of units) {
       if (!allowed.includes(u)) {
-        problems.push("呈现入站面：" + f + " 取了清单外的能力单元 " + u + "（要放行先改 " + MANIFEST + "）");
+        problems.push("呈现入站面：" + f + " 取了清单外的单元 " + u + "（要放行先改 " + MANIFEST + "）");
       }
     }
     for (const u of allowed) {
@@ -105,15 +105,15 @@ function presentationInbound(root) {
     }
   }
   for (const f of [...parsed.faces.keys()].sort()) {
-    if (!used.has(f)) problems.push("呈现入站面：清单登记的 " + f + " 在盘上不存在或不再取任何能力（删掉这一行）");
+    if (!used.has(f)) problems.push("呈现入站面：清单登记的 " + f + " 在盘上不存在或不再取任何单元（删掉这一行）");
   }
 
-  // 回执：清单里有几屏、最宽的一屏取几个能力——宽就是「这屏知道得太多」，只报不拦。
+  // 回执：清单里有几屏、最宽的一屏取几个单元——宽就是「这屏知道得太多」，只报不拦。
   const widest = [...used].sort((a, b) => b[1].length - a[1].length).slice(0, 3);
   notes.push(
     "呈现入站面：清单 " +
       parsed.faces.size +
-      " 屏 / 实际取能力的 " +
+      " 屏 / 实际取单元的 " +
       used.size +
       " 屏；最宽：" +
       widest.map(([f, u]) => f.replace("src/presentation/", "") + " " + u.length).join("、")

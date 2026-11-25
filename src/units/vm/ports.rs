@@ -1,4 +1,4 @@
-//! 目的：vm 能力的出站端口。
+//! 目的：vm 单元的出站端口。
 //! 管：VmEngine / GuestVm / GuestChannel（起 / 跑 / 销毁 guest）与 ShareBackend（宿主↔guest 共享）。
 //! 不管：运行包库与选包（packages）、镜像判定与挂载清单（domain/guest.rs）、引擎参数（detail/）。
 //! 联动：由 service.rs 持有（R12）；实现是 detail/qemu.rs 与 detail/share_*.rs。

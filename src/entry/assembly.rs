@@ -1,5 +1,5 @@
-//! 目的：组合根的共用装配——把产品根变成能力面，供启动程序、探针与用例复用。
-//! 管：各能力的端口选型、适配器构造与依赖顺序；同一份能力面只在这里装一次。
+//! 目的：组合根的共用装配——把产品根变成入站面，供启动程序、探针与用例复用。
+//! 管：各单元的端口选型、适配器构造与依赖顺序；同一份入站面只在这里装一次。
 //! 不管：业务用例、参数解析、回执打印（在 main / presentation/cli/boot.rs）；任何业务语义。
 //! 联动：消费者是 `src/main.rs`、`src/presentation/cli/boot.rs` 与测试；契约见 ARCHITECTURE.md 的「根」。
 
@@ -29,7 +29,7 @@ fn fetch() -> Arc<dyn Fetcher> {
     Arc::new(HttpFetch::new(15, 7200))
 }
 
-/// 目的：补齐能力的端口组合——根只给产品根与取数端口，其余适配器在这里落成。
+/// 目的：补齐单元的端口组合——根只给产品根与取数端口，其余适配器在这里落成。
 fn provision_deps(root: &Path, fetch: Arc<dyn Fetcher>) -> ProvisionDeps {
     ProvisionDeps {
         host: Arc::new(RealHost),
@@ -42,18 +42,18 @@ fn provision_deps(root: &Path, fetch: Arc<dyn Fetcher>) -> ProvisionDeps {
     }
 }
 
-/// 目的：不带 vm 的补齐能力面（只查状态、只装不需要 guest 的条目）。
+/// 目的：不带 vm 的补齐入站面（只查状态、只装不需要 guest 的条目）。
 /// 约束：guest-runtime 会被如实拒绝；需要时用 `provision_with_vm`。
 pub(crate) fn provision(root: &Path) -> ProvisionService {
     ProvisionService::new(root, provision_deps(root, fetch()))
 }
 
-/// 目的：带 vm 的补齐能力面；guest-runtime 编排需要它。
+/// 目的：带 vm 的补齐入站面；guest-runtime 编排需要它。
 pub(crate) fn provision_with_vm(root: &Path, vm: Arc<dyn Vm + Send + Sync>) -> ProvisionService {
     ProvisionService::with_vm(root, provision_deps(root, fetch()), vm)
 }
 
-/// 目的：带供给 vm 的补齐能力面——vm 只持内部 `none` 共享档，进程台账按产品根现场打开。
+/// 目的：带供给 vm 的补齐入站面——vm 只持内部 `none` 共享档，进程台账按产品根现场打开。
 pub(crate) fn provision_with_guest_vm(root: &Path) -> ProvisionService {
     provision_with_vm(
         root,
@@ -63,7 +63,7 @@ pub(crate) fn provision_with_guest_vm(root: &Path) -> ProvisionService {
     )
 }
 
-/// 目的：供给编排专用的 vm 能力面：只持内部 `none` 共享档（只经 QGA，不挂载、不建可写层）。
+/// 目的：供给编排专用的 vm 入站面：只持内部 `none` 共享档（只经 QGA，不挂载、不建可写层）。
 /// 约束：与会话 vm 分开装配——`none` 不进用户候选链，避免 `clients` 为空的 guest 被静默当成无共享。
 pub(crate) fn provision_vm(
     book: Arc<crate::kernel::detail::procs::ProcessBook>,
@@ -106,7 +106,7 @@ pub(crate) fn settings_store(
     )
 }
 
-/// 目的：用给定补齐面装一份存储能力（不另装核心）。
+/// 目的：用给定补齐面装一份存储子业务（不另装核心）。
 /// 参数：`log` = 日志端口；`active_log` = 当前进程正在写的日志路径（没有就 None），盘点时标为受保护。
 pub(crate) fn storage(
     root: &Path,
@@ -134,7 +134,7 @@ pub(crate) fn storage(
     )
 }
 
-/// 目的：虚拟机档构建用的 vm 能力面：**只持挂载式**共享档（virtiofs / 9p / smb）。
+/// 目的：虚拟机档构建用的 vm 入站面：**只持挂载式**共享档（virtiofs / 9p / smb）。
 /// 约束：模块目录是读写挂进去的，产物才能落回宿主那份——构建只持挂载式用户档；
 ///   `copy` 是开发/应急通道，不装配；`none` 只给供给编排。
 pub(crate) fn build_vm(root: &Path) -> Arc<dyn Vm + Send + Sync> {
@@ -165,7 +165,7 @@ pub(crate) fn build_runner(
     ))
 }
 
-/// 目的：命令行构建用的能力面——包库、虚拟机、补齐、执行器与基础工具链安装根按产品根现场装配。
+/// 目的：命令行构建用的入站面——包库、虚拟机、补齐、执行器与基础工具链安装根按产品根现场装配。
 pub(crate) fn build_service(root: &Path) -> Result<BuildsService, String> {
     let packages: Arc<dyn crate::units::catalog::packages::api::Packages + Send + Sync> = Arc::new(
         crate::units::catalog::packages::service::PackagesService::with_base(
@@ -210,7 +210,7 @@ pub(crate) fn build_service(root: &Path) -> Result<BuildsService, String> {
         crate::entry::toolchains::active_roots(root),
     ))
 }
-/// 目的：隐秘字段能力面的装配：清单事实 + 值存储端口；加载失败如实拒绝（不静默空表）。
+/// 目的：隐秘字段入站面的装配：清单事实 + 值存储端口；加载失败如实拒绝（不静默空表）。
 /// 约束：值只经存储端口落盘；本函数不读环境变量、不碰命令行、不拼错误文案。
 pub(crate) fn secrets_with(
     modules: Arc<dyn crate::units::catalog::modules::api::Modules + Send + Sync>,
@@ -221,7 +221,7 @@ pub(crate) fn secrets_with(
     ))
 }
 
-/// 目的：隐秘字段能力面（值落 `.home/secrets.yaml`）——主程序用它，路径选型只在这里定一次。
+/// 目的：隐秘字段入站面（值落 `.home/secrets.yaml`）——主程序用它，路径选型只在这里定一次。
 pub(crate) fn secrets(
     root: &Path,
     modules: Arc<dyn crate::units::catalog::modules::api::Modules + Send + Sync>,
@@ -234,7 +234,7 @@ pub(crate) fn secrets(
     )
 }
 
-/// 目的：常驻服务能力面的装配：适配器注册表 + 模块清单 + 隐秘字段面；生命周期与协议全在能力内。
+/// 目的：常驻服务入站面的装配：适配器注册表 + 模块清单 + 隐秘字段面；生命周期与协议全在该单元内。
 /// 约束：协议适配器只由组合根构造（核心不认识任何协议）；网络开关与运行包事实由调用方用它的 `with_*` 补。
 pub(crate) fn residents(
     adapters: Vec<Arc<dyn crate::units::residents::ports::ServiceAdapter + Send + Sync>>,
@@ -244,7 +244,7 @@ pub(crate) fn residents(
     crate::units::residents::service::ResidentsService::new(adapters, modules, secrets)
 }
 
-/// 目的：系统维护能力面的端口：组合根里已经装好的同一份实例，启动相命令直接复用。
+/// 目的：系统维护入站面的端口：组合根里已经装好的同一份实例，启动相命令直接复用。
 /// 约束：一处进程只要一套存储 / 补齐 / 构建——另装一套会让后台作业与日志互相看不见。
 pub(crate) struct SystemPorts {
     pub storage: Arc<dyn crate::units::maintenance::storage::api::Storage + Send + Sync>,
@@ -254,8 +254,8 @@ pub(crate) struct SystemPorts {
     pub modules: Arc<dyn crate::units::catalog::modules::api::Modules + Send + Sync>,
 }
 
-/// 目的：启动相命令用的系统维护能力面——存储 / 补齐 / 构建 / 工作区 / 模块与工具链事实按产品根现场装。
-/// 约束：只在这里装一次；能力自己不构造别的能力的适配器（依赖由本函数注入）。
+/// 目的：启动相命令用的系统维护入站面——存储 / 补齐 / 构建 / 工作区 / 模块与工具链事实按产品根现场装。
+/// 约束：只在这里装一次；单元自己不构造别的单元的适配器（依赖由本函数注入）。
 pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, String> {
     let provision: Arc<dyn Provision + Send + Sync> = Arc::new(provision_with_guest_vm(root));
     let storage: Arc<dyn crate::units::maintenance::storage::api::Storage + Send + Sync> =
@@ -282,8 +282,8 @@ pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, Str
             Arc::new(crate::units::catalog::modules::detail::FsModules::new(
                 root.join("modules"),
                 crate::units::tools::api::names(),
-                // 启动相没有工具能力可问：命令词直接取编译进来的命令表投影；
-                // 名字表的 modules 块由核心装配在装载工具能力后再并入（启动相不派发模块动作）。
+                // 启动相没有工具单元可问：命令词直接取编译进来的命令表投影；
+                // 名字表的 modules 块由核心装配在装载工具单元后再并入（启动相不派发模块动作）。
                 crate::units::tools::api::CommandBook::builtin()
                     .map(|b| crate::units::tools::api::OpBook::from_commands(b).ids())
                     .unwrap_or_default(),
@@ -294,7 +294,7 @@ pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, Str
                 ),
             ),
         )
-        .map_err(|e| format!("模块能力装配失败：{}", e))?,
+        .map_err(|e| format!("模块清单装配失败：{}", e))?,
     );
     system_with(
         root,
@@ -328,7 +328,7 @@ pub(crate) fn write_acl_policy(root: &Path) -> Arc<dyn FencePolicy> {
     })
 }
 
-/// 目的：用调用方已经装好的端口拼出系统维护能力面（主程序复用同一份存储 / 补齐 / 构建 / 工作区 / 模块）。
+/// 目的：用调用方已经装好的端口拼出系统维护入站面（主程序复用同一份存储 / 补齐 / 构建 / 工作区 / 模块）。
 pub(crate) fn system_with(
     root: &Path,
     base: &BaseFacts,

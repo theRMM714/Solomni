@@ -1,6 +1,6 @@
-//! 目的：启动相命令的用例——操作数解析、回执分支与退出码，以及真实系统维护能力的装配面。
+//! 目的：启动相命令的用例——操作数解析、回执分支与退出码，以及真实系统维护单元的装配面。
 //! 管：boot::run 的每一条命令与每种失败（人读 / --json）、System 的合成替身、真实装配的一次冒烟。
-//! 不管：命令表本身（commands.rs）、各能力的内部规则（各能力自己的用例）、入口分派（entry 的用例）。
+//! 不管：命令表本身（commands.rs）、各单元的内部规则（各单元自己的用例）、入口分派（entry 的用例）。
 //! 联动：src/presentation/cli/boot.rs 与 src/units/system/{api,service}.rs；命令表见 systools/commands.yaml。
 
 use serde_json::{Value, json};
@@ -261,7 +261,7 @@ fn gc_reports_or_starts_a_job() {
     assert_eq!(boot::run(op("gc"), &faces(&["--yes"]), &failed, true), 1);
 }
 
-/// 目的：便携维护的三条分支——省略模式只报状态、写模式交给能力、未知模式退 2、能力失败按自己的码退。
+/// 目的：便携维护的三条分支——省略模式只报状态、写模式交给单元、未知模式退 2、单元失败按自己的码退。
 #[test]
 fn setup_reports_status_and_refuses_unknown_modes() {
     let fake = Fake::default();
@@ -346,7 +346,7 @@ fn work_gc_covers_preview_and_apply() {
         0
     );
     assert_eq!(boot::run(op("work-gc"), &faces(&["dev"]), &fake, true), 0);
-    // 缺工作名 / 能力面拒绝。
+    // 缺工作名 / 入站面拒绝。
     assert_eq!(boot::run(op("work-gc"), &[], &fake, false), 2);
     let refused = Fake {
         fault: Some("work_gc"),
@@ -392,7 +392,7 @@ fn build_prints_output_and_rejects_bad_operands() {
         ),
         2
     );
-    // 能力面报错。
+    // 入站面报错。
     assert_eq!(
         boot::run(op("build"), &faces(&["toolbox"]), &skipped, true),
         0
@@ -467,7 +467,7 @@ fn unknown_operands_and_commands_are_refused() {
     assert!(crate::presentation::cli::catalog::boot("nope").is_none());
 }
 
-/// 目的：真实装配一次系统维护面（临时根）——启动相命令对着真能力也得给出退出码。
+/// 目的：真实装配一次系统维护面（临时根）——启动相命令对着真单元也得给出退出码。
 #[test]
 fn real_assembly_serves_every_boot_command() {
     let root =
@@ -482,7 +482,7 @@ fn real_assembly_serves_every_boot_command() {
     .expect("写设置");
 
     let service =
-        crate::entry::assembly::system(&root, &BaseFacts::default()).expect("装配系统能力");
+        crate::entry::assembly::system(&root, &BaseFacts::default()).expect("装配系统单元");
     // 直接走用例面：自检、盘点、状态、回收（预览 + 各分类）、工作区回收、构建。
     let _ = service.doctor();
     let _ = service.fence();
@@ -526,7 +526,7 @@ fn real_assembly_serves_every_boot_command() {
         note: "用例".to_string(),
     });
 
-    // 呈现层的每条命令也对着真能力跑一遍（不看文案，只看退出码）。
+    // 呈现层的每条命令也对着真单元跑一遍（不看文案，只看退出码）。
     for json in [false, true] {
         assert_eq!(boot::run(op("doctor"), &[], &service, json), 0);
         assert_eq!(boot::run(op("storage"), &[], &service, json), 0);

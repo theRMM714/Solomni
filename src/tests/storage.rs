@@ -1,5 +1,5 @@
 //! 目的：存储空间的契约——策略排序、盘点、回收幂等、锁与显式清理。
-//! 管：storage 能力的 T1/T2 用例与三个端口的契约；不碰真实 .vm / session / .home。
+//! 管：storage 子业务的 T1/T2 用例与三个端口的契约；不碰真实 .vm / session / .home。
 //! 不管：构建怎么跑（builds.rs）、guest 生命周期（vm.rs）。
 //! 联动：契约见 docs/storage/README.md；入口 node run-tests.js。
 
@@ -7,7 +7,7 @@ use crate::units::maintenance::storage::api::{
     CleanKind, CleanOutcome, CleanRequest, StoragePolicy,
 };
 
-/// 目的：用组合根装一个存储能力（隔离根 + 假补齐面 + 可指定的运行日志）。用例只经能力面断言可观察结果。
+/// 目的：用组合根装一个存储能力（隔离根 + 假补齐面 + 可指定的运行日志）。用例只经入站面断言可观察结果。
 fn service_with_active(
     root: &std::path::Path,
     active_log: Option<std::path::PathBuf>,

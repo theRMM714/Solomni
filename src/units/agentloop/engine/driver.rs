@@ -1,6 +1,6 @@
 //! 目的：成员回合驱动——在一条 AgentSession 上跑一个回合（单 agent 的话 / 子会话的任务 / 讨论席的发言 / 压缩）。
 //! 管：say / dispatch_task / discussion_turn / continue_reply / compact_session 五个方法，以及它们用的私有装配（压缩、发送视图、轮循环接线）。
-//! 不管：会话类型与状态（归会话能力的 domain）；轮循环本体（在 round.rs）；工具循环（在 tools.rs）；裁决队与提问端口的形状（在 io.rs 与各自端口后）。
+//! 不管：会话类型与状态（归会话单元的 domain）；轮循环本体（在 round.rs）；工具循环（在 tools.rs）；裁决队与提问端口的形状（在 io.rs 与各自端口后）。
 //! 联动：turn 能力的生成流程取 AgentSession 后调这五个方法；契约见 docs/session/session-model.md。
 
 use super::io::{CompactedTurn, MemberTurn, TurnIo};

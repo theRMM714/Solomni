@@ -1,4 +1,4 @@
-//! 目的：registry 能力的出站端口——四份 yaml 的持久化。
+//! 目的：registry 子业务的出站端口——四份 yaml 的持久化。
 //! 管：SettingsStore trait 的定义（读 / 写 Settings）。
 //! 不管：yaml 解析与文件机制（在 detail/yaml_settings.rs）；状态与用例（在 service.rs）。
 //! 联动：只由 service.rs 使用；实现见 detail/yaml_settings.rs。

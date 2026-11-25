@@ -523,7 +523,7 @@ impl Core {
         &mut self,
         spec: &d::NewSession,
     ) -> Result<(PreparedSession, Option<GuestBoot>), String> {
-        // 会话类型是数据：这里只交**原始事实**，要不要需求、要不要名单由工作能力按类型表判。
+        // 会话类型是数据：这里只交**原始事实**，要不要需求、要不要名单由工作单元按类型表判。
         let kind = spec.kind.clone();
         let parent = spec.parent.clone();
         let agents: Vec<AgentMeta> = spec

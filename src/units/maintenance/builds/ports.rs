@@ -1,4 +1,4 @@
-//! 目的：builds 能力的出站端口。
+//! 目的：builds 子业务的出站端口。
 //! 管：SourceDigest（源指纹）、BuildStates（构建状态与按次家目录）、BuildCache（缓存卷、构建锁、guest 侧工作区）。
 //! 不管：什么时候重编、走本机档还是虚拟机档（在 `service.rs`）；状态文件与脚本的文本（在 `detail/`）。
 //! 联动：由 `service.rs` 持有（R12）；实现是 `detail/fingerprint.rs` 的 `BuildStore` 与 `detail/cache.rs` 的 `CacheOnDisk`。

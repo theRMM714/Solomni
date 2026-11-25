@@ -19,7 +19,7 @@ pub(crate) fn doctor_reports_the_recorded_processes() {
         created: None,
         guard_note: Some("把子进程绑进作业对象失败".to_string()),
     });
-    let system = crate::entry::assembly::system(&root, &Default::default()).expect("装系统能力");
+    let system = crate::entry::assembly::system(&root, &Default::default()).expect("装系统单元");
     let doc = crate::units::system::api::System::doctor(&system);
     let procs = doc
         .get("processes")
@@ -94,7 +94,7 @@ fn startup_fence_report_and_doctor_share_the_same_capability() {
         std::sync::Arc::new(crate::kernel::api::fence::SandboxMode::permissive()),
     );
     let root = crate::tests::scratch("fence-report");
-    let system = crate::entry::assembly::system(&root, &Default::default()).expect("装系统能力");
+    let system = crate::entry::assembly::system(&root, &Default::default()).expect("装系统单元");
     let doc = system.doctor_with(crate::units::system::api::FenceFacts {
         fs: cap.fs,
         net: cap.net,

@@ -1,7 +1,7 @@
-//! 目的：会话本体——回合状态（`TurnState`）加上装配一席所需的能力面，一处持有。
+//! 目的：回合状态本体——在世表与运行态（`TurnState`）加上装配一席所需的入站面，一处持有。
 //! 管：`Turn` 的字段与构造、会话在世的访问器转发、运行中文案、装配端口的取用（`session_ports`）、压缩通道工厂。
 //! 不管：生成驱动、落盘与命令队列（在 `runtime`）；工具面与会话对象的拼装（在 `agentloop::api`）；纯派生规则（在 `agentloop::domain::assemble`）。
-//! 联动：`runtime` 持一份 `Turn` 并经它放取会话；取事实的一侧从 `session_ports` 取能力面，再交 `session` 装配。
+//! 联动：`runtime` 持一份 `Turn` 并经它放取会话；取事实的一侧从 `session_ports` 取入站面，再交 `agentloop` 装配。
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,8 +23,8 @@ use crate::units::agentloop::api::SessionPorts;
 use crate::units::vm::api::Vm;
 use crate::units::workspace::api::Workspace;
 
-/// 目的：会话本体：在世表与运行态（`TurnState`）连同装配一席要用的能力面，一处持有。
-/// 约束：只在核心线程上读写；能力面由 `session_ports` 交出——回合驱动与重建在本单元外（`turn`），
+/// 目的：回合状态本体：在世表与运行态（`TurnState`）连同装配一席要用的入站面，一处持有。
+/// 约束：只在核心线程上读写；入站面由 `session_ports` 交出——回合驱动与重建在本单元外（`turn`），
 ///   故状态表与端口按 crate 可见，新的直取点必须同次说明理由。
 pub struct Turn {
     /// 目的：在世会话表、运行态与创建占位、裁决队、每会话的 shell 活进程槽。
@@ -65,8 +65,8 @@ pub struct Turn {
 
 /// 目的：`Turn` 的构造与取用。
 impl Turn {
-    /// 目的：造一份会话本体：回合状态随之就绪，能力面与基础工具链根由组合根注入。
-    // 会话本体把"装配一席要的能力面"一次说全；收口成参数对象只是把参数挪个地方。
+    /// 目的：造一份回合状态本体：回合状态随之就绪，入站面与基础工具链根由组合根注入。
+    // 回合状态本体把"装配一席要的入站面"一次说全；收口成参数对象只是把参数挪个地方。
     // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -113,7 +113,7 @@ impl Turn {
         self.base_roots = roots;
     }
 
-    /// 目的：装配一席要用的能力面（端口对象）——按 `Turn` 现持的那几份克隆出来，交 `session` 的装配入口。
+    /// 目的：装配一席要用的入站面（端口对象）——按 `Turn` 现持的那几份克隆出来，交 `session` 的装配入口。
     pub fn session_ports(&self) -> SessionPorts {
         SessionPorts {
             llm: Arc::clone(&self.llm),

@@ -1,7 +1,7 @@
-//! 目的：工具能力的**状态、用例与端口持有者**——执行工具、释放围栏授权。
-//! 管：状态是 `domain` 的 `SystemTools`（工具总表与名字表）；出站端口是 `SysIo`（本能力私有）
+//! 目的：工具单元的**状态、用例与端口持有者**——执行工具、释放围栏授权。
+//! 管：状态是 `domain` 的 `SystemTools`（工具总表与名字表）；出站端口是 `SysIo`（本单元私有）
 //!   与 kernel 共享的 `ProcessRunner` / `FenceHost` / `FenceGate`——**只有这里持有它们**（R12）。
-//! 不管：纯规则（在 `domain/`）；`systools/` 的 yaml 加载在 `detail/yaml_systools.rs`；哪些席位拿哪些工具在会话能力的机制声明里。本文件不碰文件系统。
+//! 不管：纯规则（在 `domain/`）；`systools/` 的 yaml 加载在 `detail/yaml_systools.rs`；哪些席位拿哪些工具在会话单元的机制声明里。本文件不碰文件系统。
 //! 联动：对外两个面 `Tools` 与 `ToolExec`（见 `api.rs`）；装配在 `main.rs`。
 
 pub mod fence;
@@ -17,7 +17,7 @@ use crate::units::tools::ports::{SysIo, SystoolsSource};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, RwLock};
 
-/// 目的：工具能力——持三张表与四个端口，按用例答话。
+/// 目的：工具单元——持三张表与四个端口，按用例答话。
 pub struct ToolsService {
     /// **状态**：工具总表。
     catalog: SystemTools,

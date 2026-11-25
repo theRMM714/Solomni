@@ -1,6 +1,6 @@
 /**
  * 结构审查·依赖方向门禁：三条规则 + 归层不许有静默空洞。
- * 规则：① 业务/机制层不得反向依赖 adapters / presentation；② presentation 只经入站能力面（core::api）驱动；
+ * 规则：① 业务/机制层不得反向依赖 adapters / presentation；② presentation 只经入站面（core::api）驱动；
  *       ③ 业务层内部不得成环（按强连通分量判定）。
  * 零豁免：七类违规集合与业务层依赖环必须为空——不读基线文件，没有先记账再治理的静默通道。
  */
@@ -35,7 +35,7 @@ function stripTestModules(text) {
 function direction(root) {
   const problems = [];
 
-  // 归一：能力路径截到「分区段」为止——::api / ::service / ::domain / ::detail / ::ports 是唯一合法入口与内部的判据段，
+  // 归一：单元路径截到「分区段」为止——::api / ::service / ::domain / ::detail / ::ports 是唯一合法入口与内部的判据段，
   // 分区段之前可以有任意层子业务（如 units/conversation/session/domain）。截断到分区段才能既认出 ::api，又认出 ::ports。
   const PARTITIONS = ["api", "service", "domain", "detail", "ports"];
   const normTarget = (full) => {
@@ -46,7 +46,7 @@ function direction(root) {
     return "crate::" + parts.slice(0, Math.min(depth, parts.length)).join("::");
   };
   const LAYER_OF = (r) => {
-    // 前端（交付机制）：各渠道一个顶层目录；不是业务能力。
+    // 前端（交付机制）：各渠道一个顶层目录；不是业务单元。
     if (r === "src/presentation.rs" || r.startsWith("src/presentation/")) return "presentation";
     // 程序入口层：组合根 + 机器可读探针 + 围栏守门进程 + 入口层共用机制。它依赖所有人，任何人都不许依赖它。
     if (r === "src/main.rs" || r === "src/entry.rs" || r === "src/guard.rs" || r.startsWith("src/entry/") || r.startsWith("src/guard/")) return "entry";
@@ -56,7 +56,7 @@ function direction(root) {
     if (r === "src/main.rs") return "main";
     return null;
   };
-  // 层 → 它不得引用的层。端口由能力定义、它的 detail（与 kernel 的机制实现）实现，永不反向。
+  // 层 → 它不得引用的层。端口由单元定义、它的 detail（与 kernel 的机制实现）实现，永不反向。
   const FORBIDDEN = {
     kernel: ["units", "presentation", "entry"],
     units: ["presentation", "entry"],
@@ -112,18 +112,18 @@ function direction(root) {
         if (own && (other === "cli" || other === "web") && own !== other) channelCross.add(f + " -> " + t);
       }
       if ((FORBIDDEN[layer] || []).includes(targetLayer)) reverse.add(f + " -> " + t);
-      // 呈现层只认入站能力面：某个能力的 ::api（顶层编排 runtime 也不例外）。
+      // 呈现层只认入站面：某个单元的 ::api（顶层编排 runtime 也不例外）。
       const presOk = t.startsWith("crate::units::") && t.endsWith("::api");
       if (layer === "presentation" && !presOk && targetLayer !== "presentation") presentation.add(f + " -> " + t);
-      // 业务之间只经对方的 api 交流（R1）；跨能力引用 ::ports / ::domain / ::detail 一律不许。
+      // 业务之间只经对方的 api 交流（R1）；跨单元引用 ::ports / ::domain / ::detail 一律不许。
       if (layer === "units" && targetLayer === "units") {
         const selfCap = unitOfPath(f);
         const otherCap = unitOfModule(t);
         if (otherCap && otherCap !== selfCap && !t.endsWith("::api")) apiOnly.add(f + " -> " + t);
       }
-      // domain 是纯逻辑：不得引用任何能力端口（自己的也不行，引了就不是纯的了）。
+      // domain 是纯逻辑：不得引用任何单元端口（自己的也不行，引了就不是纯的了）。
       if (f.includes("/domain/") && t.startsWith("crate::units::") && t.endsWith("::ports")) domainPorts.add(f + " -> " + t);
-      // 端口只由定义它的能力持有（R12）：任何非入口层引用别的能力的 ports 都是违规。
+      // 端口只由定义它的单元持有（R12）：任何非入口层引用别的单元的 ports 都是违规。
       if (
         layer !== "entry" &&
         t.startsWith("crate::units::") &&
@@ -132,20 +132,20 @@ function direction(root) {
       ) {
         apiOnly.add(f + " -> " + t);
       }
-      // api.rs 是入站用例面：不得把能力端口再导出去。
+      // api.rs 是入站用例面：不得把单元端口再导出去。
       if (f.endsWith("/api.rs") && t.startsWith("crate::units::") && t.endsWith("::ports")) apiPorts.add(f + " -> " + t);
-      // ::detail 是实现：跨能力引用一律不许，只有入口层的组合根能构造它。
+      // ::detail 是实现：跨单元引用一律不许，只有入口层的组合根能构造它。
       if (layer !== "entry" && t.startsWith("crate::units::") && t.endsWith("::detail") && unitOfModule(t) !== unitOfPath(f)) {
         apiOnly.add(f + " -> " + t);
       }
-      // 环的节点：能力用 units/<名字>（协调业务与别的能力同处一张图）。
+      // 环的节点：单元用 units/<名字>（协调业务与别的单元同处一张图）。
       const selfNode = "units/" + unitOfPath(f);
       const otherNode = targetLayer === "units" ? "units/" + unitOfModule(t) : null;
       if (otherNode && otherNode !== selfNode) {
         (coreGraph[selfNode] = coreGraph[selfNode] || new Set()).add(otherNode);
       }
     }
-    // 不许给别的能力的类型写 impl（R1）：这是另一种"互相引入"，use 边看不见它。
+    // 不许给别的单元的类型写 impl（R1）：这是另一种"互相引入"，use 边看不见它。
     if (layer !== "entry") {
       const selfCap = layer === "units" ? unitOfPath(f) : null;
       const foreignPaths = (s) =>
@@ -196,11 +196,11 @@ function direction(root) {
     for (const item of items) problems.push("依赖方向：" + hint + "：" + item);
   };
   expectEmpty([...reverse].sort(), "业务层不得反向依赖呈现层或入口层");
-  expectEmpty([...presentation].sort(), "presentation 只能经各能力的 ::api 驱动");
-  expectEmpty([...apiOnly].sort(), "业务之间只能经对方的 ::api（R1）；::domain / ::detail 是实现，跨能力一律不许碰");
-  expectEmpty([...foreignImpl].sort(), "不得给别的能力的类型写 impl（R1：另一种互相引入）");
+  expectEmpty([...presentation].sort(), "presentation 只能经各单元的 ::api 驱动");
+  expectEmpty([...apiOnly].sort(), "业务之间只能经对方的 ::api（R1）；::domain / ::detail 是实现，跨单元一律不许碰");
+  expectEmpty([...foreignImpl].sort(), "不得给别的单元的类型写 impl（R1：另一种互相引入）");
   expectEmpty([...domainPorts].sort(), "domain 是纯逻辑：不得引用任何 ports");
-  expectEmpty([...apiPorts].sort(), "api 是入站用例面：不得把本能力的 ports 再导出去（R12）");
+  expectEmpty([...apiPorts].sort(), "api 是入站用例面：不得把本单元的 ports 再导出去（R12）");
   expectEmpty([...channelCross].sort(), "呈现层的两个渠道（cli / web）互不依赖：不得引用对方");
 
   for (const scc of sortSccs(coreSccs)) {

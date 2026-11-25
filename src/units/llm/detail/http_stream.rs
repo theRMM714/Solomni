@@ -1,6 +1,6 @@
 //! 目的：可取消的 OpenAI 兼容流式 HTTP 适配器。
 //! 管：一次模型调用的出站流、SSE 解析、分层超时与取消关闭。
-//! 不管：端点候选与重试归类（endpoint）、通道构造（http_chat）、会话状态与行落盘（会话能力）。
+//! 不管：端点候选与重试归类（endpoint）、通道构造（http_chat）、会话状态与行落盘（会话单元）。
 //! 联动：http_chat 调它；预算来自 llm::api::CompleteOpts；TLS / 代理由 reqwest 的平台配置。
 
 use super::endpoint::{Attempt, retryable_status};

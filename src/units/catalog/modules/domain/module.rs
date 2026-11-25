@@ -129,7 +129,7 @@ pub struct ModuleManifest {
 /// 目的：一个常驻服务：模块作者声明「用哪个适配器拉起它、怎么启动、默认开不开」。
 ///   协议语义全在适配器里（units/residents）；这里只有文本声明，没有执行。
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)] // 字段由 residents / 呈现层 / 适配器读取；本能力只做声明形态与语法校验
+#[allow(dead_code)] // 字段由 residents / 呈现层 / 适配器读取；本单元只做声明形态与语法校验
 pub struct ServiceDecl {
     /// 目的：组合根注册的适配器名（核心只做注册表匹配，未知 = 拒收并列出可用名）。
     pub adapter: String,
@@ -149,7 +149,7 @@ pub struct ServiceDecl {
 /// 目的：一个隐秘字段：模块声明「我需要哪个隐秘字段、注入成哪个环境变量」——**只声明标识，不声明值**。
 ///   值由用户经设置配置、只存 `.home/`，由 `units/secrets` 按模块作用域注入。
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)] // 字段由 secrets / 呈现层读取；本能力只做声明形态与语法校验
+#[allow(dead_code)] // 字段由 secrets / 呈现层读取；本单元只做声明形态与语法校验
 pub struct SecretDecl {
     /// 目的：注入该模块工具/服务进程的环境变量名（必填、非空）。
     pub env: String,
@@ -252,7 +252,7 @@ pub fn check_runtimes(m: &ModuleManifest) -> Result<(), String> {
 }
 
 /// 目的：外部工具表的校验（纯逻辑；扫描模块时由适配层调用）：**保留名由调用方给**
-///   （工具名空间归工具能力，清单主人不反向依赖它——见 docs/architecture/boundaries.md 的「三分法」）。
+///   （工具名空间归工具单元，清单主人不反向依赖它——见 docs/architecture/boundaries.md 的「三分法」）。
 pub fn check_tools(m: &ModuleManifest, reserved: &[String]) -> Result<(), String> {
     for (name, decl) in &m.tools {
         if reserved.iter().any(|r| r == name) {
@@ -269,7 +269,7 @@ pub fn check_tools(m: &ModuleManifest, reserved: &[String]) -> Result<(), String
 }
 
 /// 目的：常驻服务表的校验（纯逻辑；扫描模块时由适配层调用）：**只校验语法**。
-///   适配器名是否存在由 `residents` 在使用时按注册表判——模块能力不认识适配器。
+///   适配器名是否存在由 `residents` 在使用时按注册表判——模块子业务不认识适配器。
 pub fn check_services(m: &ModuleManifest) -> Result<(), String> {
     for (name, decl) in &m.services {
         if name.trim().is_empty() {

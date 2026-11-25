@@ -1,11 +1,11 @@
-//! 目的：运行时的核心本体（Core）——持有注入的端口、能力面与会话中心，只在核心自己的线程上被碰。
-//! 管：容器各成员（端口 / 能力面 / 会话中心 / base roots）与访问器，以及对下层用例的薄转发（一行一次）。
-//! 不管：命令队列与线程切换（在 handle）、动作分发（在 action）、回合与会话内部（在下层能力）。
+//! 目的：运行时的核心本体（Core）——持有注入的端口、入站面与会话中心，只在核心自己的线程上被碰。
+//! 管：容器各成员（端口 / 入站面 / 会话中心 / base roots）与访问器，以及对下层用例的薄转发（一行一次）。
+//! 不管：命令队列与线程切换（在 handle）、动作分发（在 action）、回合与会话内部（在下层单元）。
 //! 联动：组合根造它（main.rs）；service/handle 在 spawn 里把它移进执行线程；测试访问器供契约测试读会话内容。
 
 use super::*;
 
-/// 目的：**应用服务**：持有注入的端口、能力面与会话中心；入口与呈现层拿不到它（只拿 `presentation::faces::Faces`）。
+/// 目的：**应用服务**：持有注入的端口、入站面与会话中心；入口与呈现层拿不到它（只拿 `presentation::faces::Faces`）。
 ///  组合根在 `Handle::spawn` 里把它**移进核心自己的执行线程**——此后状态只被那一个线程碰，
 ///  所以这里不加任何锁（并发不变式见 docs/architecture/layers.md）。
 pub struct Core {
@@ -15,9 +15,9 @@ pub struct Core {
     pub(super) history: Arc<dyn History + Send + Sync>,
     /// 目的：虚拟机档用例面（**不持它的端口**，R12）——guest 生命周期与档位就绪检测走它。
     pub(super) vm: Arc<dyn Vm + Send + Sync>,
-    /// 目的：模块能力（**不持它的端口**，R12）——模块清单事实的唯一上游。
+    /// 目的：模块子业务（**不持它的端口**，R12）——模块清单事实的唯一上游。
     pub(super) modules: Arc<dyn Modules + Send + Sync>,
-    /// 目的：构建能力面（**不持它的端口**，R12）——创建会话前补编声明了 `build:` 的模块。
+    /// 目的：构建入站面（**不持它的端口**，R12）——创建会话前补编声明了 `build:` 的模块。
     pub(super) builds: Arc<dyn Builds + Send + Sync>,
     /// 目的：压缩通道工厂——全局设置只在这里对账，会话在压缩触发时现取（不刷新会话）。
     pub(super) compact: Arc<CompactRuntime>,
@@ -33,23 +33,24 @@ pub struct Core {
     /// 目的：项目内基础工具链的只读安装根（python / node / cc）——shell 每次调用都放行它们。
     ///  来源是组合根读到的 active.json；不按 agent 的模块重复注入。
     pub(super) base_roots: Vec<std::path::PathBuf>,
-    /// 目的：工具总表与机制席位的能力面（授权两张表；名字表由组合根另取）——**表本体在工具能力里**，与册子互不依赖。
+    /// 目的：工具总表与机制席位的入站面（授权两张表；名字表由组合根另取）——**表本体在 `tools` 单元里**，与册子互不依赖。
     pub(super) systools: Arc<dyn Tools>,
-    /// 目的：回合状态与会话本体——在世会话表、运行态与创建占位、裁决队、每会话的 shell 活进程槽，以及一席的装配（在 `turn`）。
+    /// 目的：回合状态本体（`turn_state`）——在世会话表、运行态与创建占位、裁决队、每会话的 shell 活进程槽。
+    ///   一席的装配不在这里（在 `agentloop` 的 `domain/assembly.rs`）。
     pub(crate) turn: crate::units::turn_state::api::Turn,
-    /// 目的：工作与会话配置的用例面（层 9）——建工作 / 改配 / 视图 / 报告 / guest 起停都经它。
-    ///   本能力只做命令队列、协作链推进与代理工具族；work 用例的方法原样转发。
+    /// 目的：工作与会话配置的用例面（环 3）——建工作 / 改配 / 视图 / 报告 / guest 起停都经它。
+    ///   本单元只做命令队列、协作链推进与代理工具族；work 用例的方法原样转发。
     pub(crate) work: Work,
-    /// 目的：会话历史生命周期（层 9）——历史列出 / 只读打开 / 删除收尾 / 回档三模式都经它。
-    ///   会话本体按形参交过去（`&mut turn`），它不持第二份。
+    /// 目的：会话历史生命周期（环 3）——历史列出 / 只读打开 / 删除收尾 / 回档三模式都经它。
+    ///   回合状态本体按形参交过去（`&mut turn`），它不持第二份。
     pub(crate) lifecycle: crate::units::lifecycle::api::Lifecycle,
 }
 
-/// 目的：在世会话形态（`turn` 的状态类型）：测试访问器用它读会话内容。
+/// 目的：在世会话形态（`turn_state` 的状态类型）：测试访问器用它读会话内容。
 #[cfg(test)]
 pub(crate) use crate::units::turn_state::api::Session;
 
-/// 目的：会话本体（`turn` 的 `Turn`）：准入、派发闸、重建与代理由这里转调。
+/// 目的：回合状态本体（`turn_state` 的 `Turn`）：准入、派发闸、重建与代理由这里转调。
 pub(crate) use crate::units::turn_state::api::Turn;
 
 impl Core {
@@ -75,7 +76,7 @@ impl Core {
         profiles: crate::units::session_model::api::Profiles,
     ) -> Core {
         let compact = Arc::new(CompactRuntime::new(Arc::clone(&llm)));
-        // 流程工厂在这里注入：turn / work 只认 `session::api::Flows`，具体流程的类型只出现在协作能力里。
+        // 流程工厂在这里注入：turn / work 只认 `turn_state::api::Flows`，具体流程的类型只出现在 `collab` 单元里。
         let flows: Arc<dyn crate::units::turn_state::api::Flows> =
             Arc::new(crate::units::collab::api::CollabFlows::new(
                 Arc::clone(&llm),
@@ -87,7 +88,7 @@ impl Core {
                 Arc::clone(&log),
                 profiles,
             ));
-        // 会话本体收在 turn：它只认能力面与压缩工厂，不认 runtime 的端口（层 8 不得依赖层 9）。
+        // 回合状态收在 turn_state：它只认入站面与压缩工厂，不认 runtime 的端口（环 2 不得依赖环 3）。
         let turn = crate::units::turn_state::api::Turn::new(
             Arc::clone(&workspace),
             Arc::clone(&vm),
@@ -106,7 +107,7 @@ impl Core {
             Arc::clone(&packages),
             Arc::clone(&flows),
         );
-        // work 用例面与 runtime 共享同一批能力面（Arc 克隆，不新建实现）。
+        // work 用例面与 runtime 共享同一批入站面（Arc 克隆，不新建实现）。
         let work = Work::new(
             root.clone(),
             Arc::clone(&history),
@@ -194,12 +195,12 @@ impl Core {
         Arc::clone(&self.history)
     }
 
-    /// 目的：模块能力面（手柄与核心共享同一份；启停写面经它）。
+    /// 目的：模块入站面（手柄与核心共享同一份；启停写面经它）。
     pub(crate) fn modules_handle(&self) -> Arc<dyn Modules + Send + Sync> {
         Arc::clone(&self.modules)
     }
 
-    /// 目的：构建能力面（手柄与核心共享同一份；创建会话前在调用方线程补编，核心线程不陪着等编译）。
+    /// 目的：构建入站面（手柄与核心共享同一份；创建会话前在调用方线程补编，核心线程不陪着等编译）。
     pub(crate) fn builds_handle(&self) -> Arc<dyn Builds + Send + Sync> {
         Arc::clone(&self.builds)
     }
@@ -228,12 +229,12 @@ impl Core {
         Arc::clone(&self.tools)
     }
 
-    /// 目的：登记处能力面（只读）：组合根与测试读登记处的事实走这里。
+    /// 目的：登记处入站面（只读）：组合根与测试读登记处的事实走这里。
     pub fn registry(&self) -> &dyn Registry {
         self.registry.as_ref()
     }
 
-    /// 目的：登记处能力面（可写）：登记处的用例只经它调用。
+    /// 目的：登记处入站面（可写）：登记处的用例只经它调用。
     pub fn registry_mut(&mut self) -> &mut dyn Registry {
         self.registry.as_mut()
     }

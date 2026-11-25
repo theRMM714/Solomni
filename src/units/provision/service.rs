@@ -31,7 +31,7 @@ pub(crate) struct Pipeline<'a> {
     pub(crate) vm: Option<&'a (dyn Vm + Send + Sync)>,
 }
 
-/// 目的：组合根交给补齐能力的全部出站端口——端口由能力声明，适配器由根在装配时选。
+/// 目的：组合根交给补齐单元的全部出站端口——端口由本单元声明，适配器由根在装配时选。
 pub struct ProvisionDeps {
     pub host: Arc<dyn HostFs>,
     pub ledger: Arc<dyn Ledger>,
@@ -76,7 +76,7 @@ impl ProvisionService {
         }
     }
 
-    /// 目的：带 vm 能力面的实现（组合根 / --provision 入口用）；guest-runtime 编排需要它。
+    /// 目的：带 vm 入站面的实现（组合根 / --provision 入口用）；guest-runtime 编排需要它。
     pub fn with_vm(
         root: &Path,
         deps: ProvisionDeps,

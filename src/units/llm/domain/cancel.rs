@@ -1,7 +1,7 @@
 //! 目的：把调用方持有的停止位包成只读端口——置位的仍是持有原子的那一方。
 //! 管：`CancelFlag` 与唯一入口 `cancel_flag`。
 //! 不管：停止位的创建与置位（在 `session` 与 `turn`）；适配器的轮询（在 `detail/`）。
-//! 联动：本能力的 `api.rs` 转出 `cancel_flag`，适配器只读 `Cancelled`。
+//! 联动：本单元的 `api.rs` 转出 `cancel_flag`，适配器只读 `Cancelled`。
 
 /// 目的：一次调用的停止位包装；只读，置位由原子持有者做。
 struct CancelFlag(std::sync::Arc<std::sync::atomic::AtomicBool>);

@@ -36,7 +36,7 @@ pub trait RuntimeOps: Send + Sync {
     fn stop(&self, sid: &str) -> Vec<String>;
 }
 
-/// 目的：日志能力：呈现层与 CLI 的埋点入口（**只转发，不做任何判定**）。
+/// 目的：日志面：呈现层与 CLI 的埋点入口（**只转发，不做任何判定**）。
 ///   呈现层因此拿不到端口对象、也不依赖 kernel（见 docs/architecture/layers.md）。
 pub trait LogOps: Send + Sync {
     fn info(&self, at: &str, msg: &str);
@@ -133,7 +133,7 @@ pub struct ActionView {
     pub reason: String,
 }
 
-/// 目的：动作能力的入站面——目录 + 分发。
+/// 目的：动作面的入站面——目录 + 分发。
 pub trait ActionOps: Send + Sync {
     /// 目的：目录：给这个调用者能看到的动作（含此刻可用性）。`sid` = 当前会话上下文。
     fn catalog(&self, caller: &Caller, sid: Option<&str>) -> Result<Vec<ActionView>, String>;

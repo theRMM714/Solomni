@@ -1,4 +1,4 @@
-//! 目的：模块能力的用例与端口持有者。
+//! 目的：模块子业务的用例与端口持有者。
 //! 管：按用例答话（清单、启停有效值、启停写面）；持有清单来源与状态落盘两个端口。
 //! 不管：目录遍历机制（在 `detail/fs_modules.rs`）；契约与校验（在 `domain/module.rs`）。
 //! 联动：装配（new 出适配器）在组合根；端口只在这里（R12）。
@@ -8,7 +8,7 @@ use crate::units::catalog::modules::domain::state::EnabledState;
 use crate::units::catalog::modules::ports::{ModuleSource, ModuleStateStore};
 use std::sync::{Arc, Mutex};
 
-/// 目的：模块能力——持清单来源与状态落盘两个端口，按用例答话。
+/// 目的：模块子业务——持清单来源与状态落盘两个端口，按用例答话。
 pub struct ModulesService {
     source: Arc<dyn ModuleSource + Send + Sync>,
     store: Arc<dyn ModuleStateStore + Send + Sync>,

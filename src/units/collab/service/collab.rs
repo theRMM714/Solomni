@@ -136,15 +136,15 @@ pub struct CollabSession {
     pub(crate) core_chat: crate::units::llm::api::BoxedChat,
     /// 目的：核心通道的工具调用形态（原生才声明工具；信封通道看提示词里的说明）。
     pub(crate) core_mode: crate::units::pure::registry_model::api::ToolMode,
-    /// 目的：提示词册能力面：**不是册子本体**（持有者只有提示词能力一处），这里只按名字取段。
+    /// 目的：提示词册入站面：**不是册子本体**（持有者只有提示词单元一处），这里只按名字取段。
     pub(crate) prompts: Arc<dyn Prompt>,
-    /// 目的：工具总表的能力面（**表本体在工具能力里**，与册子互不依赖）。
+    /// 目的：工具总表的入站面（**表本体在工具单元里**，与册子互不依赖）。
     pub(crate) systools: Arc<dyn crate::units::tools::api::Tools>,
     /// 目的：llm 用例面（**不持它的端口**，R12）：按通道造句柄、修信封都走它。
     pub(crate) llm: Arc<dyn Llm + Send + Sync>,
     /// 目的：虚拟机档用例面（**不持它的端口**，R12）：运行包库走它。
     pub(crate) vm: Arc<dyn Vm + Send + Sync>,
-    /// 目的：模块能力（**不持它的端口**，R12）——清单事实的唯一上游。
+    /// 目的：模块子业务（**不持它的端口**，R12）——清单事实的唯一上游。
     pub(crate) modules: Arc<dyn Modules + Send + Sync>,
     /// 目的：工具执行面（**不持它的端口**，R12）：跑外部/内置工具都走它。
     pub(crate) tools: Arc<dyn ToolExec + Send + Sync>,

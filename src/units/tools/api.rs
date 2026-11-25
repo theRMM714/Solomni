@@ -1,5 +1,5 @@
-//! 目的：工具能力的入站能力面——其它能力与呈现层只准用这里（不许碰 `domain` / `ports`）。
-//! 管：`Tools`（拿总表与保留名）与 `ToolExec`（执行外部工具 / shell / 内置工具、释放围栏授权）两个 trait，并重导出领域共享类型；席位面由会话能力按总表合成。
+//! 目的：工具单元的入站面——其它单元与呈现层只准用这里（不许碰 `domain` / `ports`）。
+//! 管：`Tools`（拿总表与保留名）与 `ToolExec`（执行外部工具 / shell / 内置工具、释放围栏授权）两个 trait，并重导出领域共享类型；席位面由会话单元按总表合成。
 //! 不管：实现与机制（在 `service/` / `detail/`）；端口定义（在 `ports.rs`）。
 //! 联动：实现见 `service.rs`；`runtime` 等消费方只持 `Arc<dyn Tools>` / `Arc<dyn ToolExec>`。
 
@@ -438,9 +438,9 @@ impl WriteGate for SessionWriteGate<'_> {
     }
 }
 
-/// 目的：系统工具总表与名字表的**能力面**：别的能力只拿声明书，**看不见表里的保留名与自检实现**。
+/// 目的：系统工具总表与名字表的**入站面**：别的单元只拿声明书，**看不见表里的保留名与自检实现**。
 /// 约束：表本体（`SystemTools`）是纯数据、没有端口；组合根装载一次，`runtime` 只持 `Arc<dyn Tools>`
-///   并与协作会话共享（见 `service.rs`）。**本能力不认识席位**：面由会话能力的机制声明按总表合成。
+///   并与协作会话共享（见 `service.rs`）。**本单元不认识席位**：面由会话单元的机制声明按总表合成。
 pub trait Tools: Send + Sync {
     /// 内置工具总表（工具**是什么**的声明书）：调用方要持有它时拿走一份。
     fn book(&self) -> ToolBook;
@@ -457,7 +457,7 @@ pub trait Tools: Send + Sync {
 }
 
 /// 目的：一次内置工具调用的结果：结论与更新后的观察账本。
-/// 约束：账本属于会话，**按值进出**——调用方交一份，拿回更新后的那份；不把可变借用递给别的能力（R16）。
+/// 约束：账本属于会话，**按值进出**——调用方交一份，拿回更新后的那份；不把可变借用递给别的单元（R16）。
 #[derive(Debug, Clone)]
 pub struct Recorded {
     /// 目的：这次调用的结论（回给模型的那一段文本）。
@@ -466,9 +466,9 @@ pub struct Recorded {
     pub observations: Observations,
 }
 
-/// 目的：工具能力的**执行面**（`service.rs` 实现）：别的能力要执行工具、要释放围栏授权，走这里。
+/// 目的：工具单元的**执行面**（`service.rs` 实现）：别的单元要执行工具、要释放围栏授权，走这里。
 /// 约束：出站端口 `SysIo` 由它持有（R12）；`ProcessRunner` / `FenceHost` 是 kernel 共享的机制端口。
-///   为什么 `SysIo` 的读写不在这里：它只被本能力自己的 domain（内置工具实现）用，
+///   为什么 `SysIo` 的读写不在这里：它只被本单元自己的 domain（内置工具实现）用，
 ///   别人要的是"跑一个工具"，不是"按路径读写文件"。
 pub trait ToolExec: Send + Sync {
     /// 执行一次**外部工具**（模块声明的那种）：围栏安装、守门进程、超时杀树、截断都在端口后面。
@@ -492,14 +492,14 @@ pub trait ToolExec: Send + Sync {
     ) -> ToolOutcome;
 
     /// 执行一次**一次性 shell**：平台 shell、按次超时、取消与 head+tail 截断都在 kernel 的 `ProcessRunner` 后面；
-    /// 跑完（若这次用的是按次临时 profile）由本能力释放围栏授权。
+    /// 跑完（若这次用的是按次临时 profile）由本单元释放围栏授权。
     fn run_shell(
         &self,
         run: &crate::kernel::ports::ShellRun<'_>,
         budget: ResultBudget,
     ) -> ToolOutcome;
 
-    /// 执行一次**内置工具**：放行、寻址、参数校验在本能力的 domain，机制在 `SysIo` 后面。
+    /// 执行一次**内置工具**：放行、寻址、参数校验在本单元的 domain，机制在 `SysIo` 后面。
     /// 参数：`observations` = 会话的观察账本（按值传入）；`gate` = 写入门禁（`None` = 直调兜底，只给旧测试用）；
     ///   `budget` = 本批回执预算，read 在**执行前**按它选行，整批不会超剩余上下文。
     /// 返回：结论与更新后的账本（见 `Recorded`）。
