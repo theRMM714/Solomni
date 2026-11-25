@@ -83,27 +83,33 @@ pub(crate) fn provision_vm_with(
     ))
 }
 
+/// 目的：登记处读写面（`data/.home` 这块盘归 `home` 单元）——组合根只装一次，登记处 / 隐秘字段 / 模块覆盖共用。
+pub(crate) fn home_docs(root: &Path) -> Arc<dyn crate::units::home::api::Home + Send + Sync> {
+    Arc::new(crate::units::home::service::HomeService::new(Box::new(
+        crate::units::home::detail::FsHome::new(layout::home(root)),
+    )))
+}
+
 /// 目的：按 settings.yaml 取存储策略；读不到用默认。
 fn storage_policy(root: &Path) -> StoragePolicy {
-    std::fs::read_to_string(layout::home(root).join("settings.yaml"))
-        .ok()
-        .and_then(|t| {
-            yaml_serde::from_str::<crate::units::catalog::registry::api::AppSettings>(&t).ok()
-        })
+    read_settings(root)
         .map(|a| StoragePolicy::from(&a.storage))
         .unwrap_or_default()
+}
+
+/// 目的：读一份基本设置（读不到 / 非法 = None）——读经 `home` 单元，组合根不自己碰文件。
+fn read_settings(root: &Path) -> Option<crate::units::catalog::registry::api::AppSettings> {
+    let text = home_docs(root)
+        .read(crate::units::home::api::Doc::Settings)
+        .ok()??;
+    yaml_serde::from_str(&text).ok()
 }
 
 /// 目的：四份登记处 yaml 的读取面——组合根按产品根装，启动与排障都走这一份。
 pub(crate) fn settings_store(
     root: &Path,
 ) -> crate::units::catalog::registry::detail::yaml_settings::YamlSettingsStore {
-    crate::units::catalog::registry::detail::yaml_settings::YamlSettingsStore::new(
-        layout::home(root).join("providers.yaml"),
-        layout::home(root).join("models.yaml"),
-        layout::home(root).join("settings.yaml"),
-        layout::home(root).join("agents.yaml"),
-    )
+    crate::units::catalog::registry::detail::yaml_settings::YamlSettingsStore::new(home_docs(root))
 }
 
 /// 目的：用给定补齐面装一份存储子业务（不另装核心）。
@@ -228,9 +234,9 @@ pub(crate) fn secrets(
 ) -> Result<Arc<dyn crate::units::catalog::secrets::api::SecretOps + Send + Sync>, String> {
     secrets_with(
         modules,
-        Arc::new(crate::units::catalog::secrets::detail::YamlSecrets::new(
-            layout::home(root).join("secrets.yaml"),
-        )),
+        Arc::new(crate::units::catalog::secrets::detail::YamlSecrets::new(home_docs(
+            root,
+        ))),
     )
 }
 
@@ -289,9 +295,7 @@ pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, Str
                     .unwrap_or_default(),
             )),
             Arc::new(
-                crate::units::catalog::modules::detail::YamlModuleState::new(
-                    layout::home(root).join("modules.yaml"),
-                ),
+                crate::units::catalog::modules::detail::YamlModuleState::new(home_docs(root)),
             ),
         )
         .map_err(|e| format!("模块清单装配失败：{}", e))?,
@@ -362,11 +366,7 @@ pub(crate) fn system_with(
 
 /// 目的：构建期的全局网络开关（与主程序同一份 settings.yaml；读不到 / 非法按拒绝）。
 fn network_allowed(root: &Path) -> bool {
-    std::fs::read_to_string(layout::home(root).join("settings.yaml"))
-        .ok()
-        .and_then(|t| {
-            yaml_serde::from_str::<crate::units::catalog::registry::api::AppSettings>(&t).ok()
-        })
+    read_settings(root)
         .map(|a| crate::units::turn::env::api::network_allowed(&a))
         .unwrap_or(false)
 }
