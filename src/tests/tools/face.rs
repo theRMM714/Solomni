@@ -597,7 +597,7 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
             task: None,
             delegate: false,
             permission: None,
-            tier: crate::kernel::api::types::Tier::Host,
+            tier: crate::units::exec_model::api::Tier::Host,
             guest: None,
             workspace: None,
         })

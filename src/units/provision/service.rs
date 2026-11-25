@@ -18,7 +18,7 @@ use crate::units::provision::ports::{
     Fetcher, GuestImage, HostFs, Installers, Ledger, Procs,
 };
 use crate::units::vm::api::Vm;
-use crate::kernel::api::types::JobState;
+use crate::units::exec_model::api::JobState;
 use crate::kernel::ports::HostProbe;
 
 /// 目的：一次补齐要用的端口组合——由 `ProvisionService` 借出，后台线程自己持有一份。

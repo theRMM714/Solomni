@@ -1,57 +1,10 @@
 //! 目的：跨层共享的形状。
-//! 管：只没有领域逻辑的事实——`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask`（请用户裁决的问题）/ 默认预算。
-//! 不管：带领域逻辑的类型（归各自能力）；各业务自造一份 DTO 副本（R6 禁止）。
+//! 管：只没有领域逻辑的事实——`SessionId` / `ToolOutcome` / `Ask`（请用户裁决的问题）/ 默认预算。
+//! 不管：带领域逻辑的类型（归各自能力）；执行与作业模型（归环 1 的 exec_model）；各业务自造一份 DTO 副本（R6 禁止）。
 //! 联动：由 `src/kernel/api.rs` 重导出；判据见 ARCHITECTURE.md 的「硬要求清单」R6。
 
 use crate::kernel::contracts::note::{Note, Severity};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-
-/// 目的：执行档位——本机 = 直接在宿主上跑；虚拟机 = 整台 guest（不信任 AI 时的可选档）。
-/// 约束：共享形状只属于 kernel（R6）——它被登记处与执行计划共享，且不认识任何业务概念。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Tier {
-    #[default]
-    Host,
-    Vm,
-}
-
-impl Tier {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Tier::Host => "host",
-            Tier::Vm => "vm",
-        }
-    }
-
-    /// 目的：把对外写法解析成档位；缺省（空串）= 本机档，未知值如实报错。
-    /// 约束：呈现层与协调业务共用这一处解析，不再各写一份（对外词汇只有 host / vm）。
-    pub fn parse(s: &str) -> Result<Tier, String> {
-        match s.trim() {
-            "" | "host" => Ok(Tier::Host),
-            "vm" => Ok(Tier::Vm),
-            other => Err(format!("未知执行档位：{}（只接受 host / vm）", other)),
-        }
-    }
-}
-
-/// 目的：会话的执行选型——档位 + 虚拟根名 + 能力定版。
-/// 约束：进 meta.yaml 的 exec 段（缺字段按默认 = 本机档读回）；本机/虚拟机两侧与呈现层共享，按 R6 归 kernel。
-///   网络与围栏要求是**全局策略**，不在这里。
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ExecSpec {
-    #[serde(default)]
-    pub tier: Tier,
-    /// 目的：虚拟机档用的**虚拟根名**（清单 `guest` 字段，如 debian / windows）；本机档为空。
-    /// 约束：存的是名字不是路径——路径由 `vm::resolve_guest` 按当前安装解析，换安装/挪产品根都不用改会话。
-    #[serde(default)]
-    pub guest: Option<String>,
-    /// 目的：能力名 → 精确版本（用户定版；多版本时不猜）。
-    #[serde(default)]
-    pub pins: BTreeMap<String, String>,
-}
 
 /// 目的：单次模型调用的默认总预算（秒）。
 /// 约束：登记处（设置项）与 `llm` 的出站调用参数共享它；设置项见 `AppSettings::llm_timeout_secs`。
@@ -149,21 +102,6 @@ pub struct Ask {
     ///   想加"接受 / 拒绝 / 全部接受"这类选项，改的是发起方自己的选项集，不是这里。
     #[serde(default)]
     pub on_unanswered: Option<String>,
-}
-
-/// 目的：长任务的进度快照——补齐环境与还原本地空间共用同一条进度通道（`seq` + `lines`）。
-/// 约束：共享形状只属于 kernel（R6）——两个产生方各自持有作业，形状不各造一份（R15）。
-#[derive(Debug, Clone, Serialize, Default, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct JobState {
-    /// 目的：是否还在跑。
-    pub running: bool,
-    /// 目的：进度行的**单调序号**（前端按它增量取；`lines` 只留最近若干行，序号不会回退）。
-    pub seq: u64,
-    /// 目的：最近的进度行（更早的被挤掉）。
-    pub lines: Vec<String>,
-    /// 目的：失败原因（在跑或成功时为空）。
-    pub error: Option<String>,
 }
 
 impl Ask {

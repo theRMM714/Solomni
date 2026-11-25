@@ -12,7 +12,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/units/provision.rs` | 能力入口：模块与公开面（`ProvisionService`），以及组合根用的装配工厂 `assemble` / `assemble_with_vm` |
-| `src/units/provision/api.rs` | 入站契约：`Provision` trait（含 `tool_path` 宿主工具取法）+ `DepStatus`（含 `stale`：探针在场但装的不是当前清单那版）/ `HostTool` DTO（`JobState` 在 kernel） + `NoProvision` |
+| `src/units/provision/api.rs` | 入站契约：`Provision` trait（含 `tool_path` 宿主工具取法）+ `DepStatus`（含 `stale`：探针在场但装的不是当前清单那版）/ `HostTool` DTO（`JobState` 在 `exec_model`） + `NoProvision` |
 | `src/units/provision/domain.rs` | 清单语义：`dependencies.yaml` / `links.yaml` 解析、按本机筛选、安装身份、pin 与 guest 画像 `GuestProfile` |
 | `src/units/provision/ports.rs` | 出站端口：`Fetcher`（取数）/ `HostFs`（宿主落点）/ `Ledger`（台账与在场判定）/ `Installers`（按 kind 落盘）/ `GuestImage`（rootfs 镜像构造）/ `Procs`（进程台账） |
 | `src/units/provision/service.rs` | 编排：状态与台账快照、依赖选择（`split_ensure_spec` / `pending_of_kinds`）、每条的装 / 验 / 记、作业与取消、宿主工具路径（`tool_path`：登记值优先，否则按台账前缀找在场项并拼产品根）；只经端口触达 IO |

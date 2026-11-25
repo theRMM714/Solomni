@@ -6,7 +6,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/units/maintenance/storage.rs` | 能力入口：装配声明与文件头 |
-| `src/units/maintenance/storage/api.rs` | 入站契约：Storage trait、SpaceReport / GcReport / CleanRequest、分类 id（`JobState` 从 kernel 复用）、NoStorage |
+| `src/units/maintenance/storage/api.rs` | 入站契约：Storage trait、SpaceReport / GcReport / CleanRequest、分类 id（`JobState` 从 `exec_model` 复用）、NoStorage |
 | `src/units/maintenance/storage/ports.rs` | 出站端口：盘点（SpaceSurvey → SpaceFacts）、回收（SpaceReclaim + ReclaimLease）、guest 存活（GuestLiveness） |
 | `src/units/maintenance/storage/service.rs` | 用例实现：预算与策略、自动投递回收、显式清理分派、还原作业、作业进度 |
 | `src/units/maintenance/storage/domain.rs` | 纯策略：按龄 / 上限 / 保护项排序；名字合法性 |

@@ -14,7 +14,7 @@ use crate::units::system::api::{
 };
 use crate::units::tools::api::{CommandBook, Op, OpBook};
 use crate::units::workspace::api::WorkGcReport;
-use crate::kernel::api::types::JobState;
+use crate::units::exec_model::api::JobState;
 use crate::presentation::cli::boot;
 
 /// 目的：命令表里那一条——用例只按名字取，旗语与校验都由声明决定（表非法就直接失败）。

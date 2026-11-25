@@ -189,7 +189,7 @@ impl ResidentOps for ResidentsService {
                 host_fallback: &base.fallback,
             };
             let plan = pkgs::plan_host(
-                &crate::kernel::api::types::ExecSpec::default(),
+                &crate::units::exec_model::api::ExecSpec::default(),
                 std::slice::from_ref(m),
                 &packages.library(),
                 pkgs::PinPolicy::First,

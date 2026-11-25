@@ -163,7 +163,7 @@ impl Turn {
                 );
                 // 席位取落盘声明里的那一席（成员 / 节点会话是 executor）——与实时同一个口径。
                 let seat = meta.spec.seat.clone();
-                let host_plan = if meta.exec.tier == crate::kernel::api::types::Tier::Host {
+                let host_plan = if meta.exec.tier == crate::units::exec_model::api::Tier::Host {
                     crate::units::vm::api::host_plan_for(
                         &self.packages.library(),
                         &self.packages.base(),
@@ -552,7 +552,7 @@ impl Turn {
             unavailable: BTreeMap::new(),
             mode: tool_mode,
             seat: "core_proxy",
-            tier: crate::kernel::api::types::Tier::Host,
+            tier: crate::units::exec_model::api::Tier::Host,
             guest_lease: String::new(),
             shell: self.shell_slot(&sb.session),
             env: self.member_env(
@@ -560,7 +560,7 @@ impl Turn {
                 &[],
                 &sb,
                 crate::units::turn::env::api::network_allowed(registry.app()),
-                crate::kernel::api::types::Tier::Host,
+                crate::units::exec_model::api::Tier::Host,
                 &crate::units::catalog::packages::api::PackagePlan::default(),
             ),
         };

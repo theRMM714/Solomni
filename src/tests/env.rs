@@ -16,8 +16,8 @@ use crate::units::turn::env::api::{
     sandboxes, shared_scope,
 };
 use crate::units::workspace::api::{Sandbox, ScopeMode, SharedEdit, SharedScope, WorkRoots};
-use crate::kernel::api::types::ExecSpec;
-use crate::kernel::api::types::Tier;
+use crate::units::exec_model::api::ExecSpec;
+use crate::units::exec_model::api::Tier;
 use crate::tests::doubles::module_of;
 use std::collections::BTreeMap;
 use std::ffi::OsString;

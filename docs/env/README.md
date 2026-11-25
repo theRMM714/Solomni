@@ -21,7 +21,7 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`session`（`SessionMeta`）、`workspace`（`Sandbox` / `Sandboxes` / `WorkRoots`）、`modules`（`Roster`）、`packages`（`PackagePlan`）、`permission`（`PermissionSet`）、`registry`（`AppSettings` / `AgentMeta`）、`kernel`（`FencePlan` / `Tier`、`ports::PathCodec`）
+- 经 `::api` 用到：`session`（`SessionMeta`）、`workspace`（`Sandbox` / `Sandboxes` / `WorkRoots`）、`modules`（`Roster`）、`packages`（`PackagePlan`）、`permission`（`PermissionSet`）、`registry`（`AppSettings` / `AgentMeta`）、`kernel`（`FencePlan`、`ports::PathCodec`）、`exec_model`（`Tier`）
 - 谁在用我：`runtime`（`src/units/runtime/service/env.rs` 的三条薄入口：guest 诊断准备与两席沙箱 / 权限）、`turn`（`src/units/turn/turn/service/facts.rs` 取事实后转调派生函数）、`collab`（`src/units/conversation/collab/service/collab.rs` 的会话设置取网络开关与宿主只读根）、`cli` / `web`（入口装配取网络开关与宿主只读根条数）、`src/tests/env.rs`
 
 ## 一、事实进、结果出

@@ -12,8 +12,8 @@ use std::sync::Arc;
 use crate::units::catalog::modules::api::Module;
 use crate::units::catalog::packages::api as pkgs;
 use crate::units::catalog::packages::api::{BaseFacts, Library, PackagePlan, PinPolicy};
-use crate::kernel::api::types::ExecSpec;
-use crate::kernel::api::types::Tier;
+use crate::units::exec_model::api::ExecSpec;
+use crate::units::exec_model::api::Tier;
 use crate::kernel::ports::{HostProbe, PathCodec};
 
 /// 目的：这次会话的 guest 镜像（本机档或选定虚拟根判不出来 = None）——平台名与 guest OS 都从它派生。

@@ -11,7 +11,7 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api::Storage`（`report` / `gc` / `ensure_headroom` / `clean` / `job` / `set_policy` / `policy`）+ DTO（`SpaceReport` / `GcReport` / `SpaceItem` / `CleanRequest` / `CleanOutcome` / `StoragePolicy`（`JobState` 是 kernel 的共享形状））；空实现 `NoStorage`。
+- 入站面：`api::Storage`（`report` / `gc` / `ensure_headroom` / `clean` / `job` / `set_policy` / `policy`）+ DTO（`SpaceReport` / `GcReport` / `SpaceItem` / `CleanRequest` / `CleanOutcome` / `StoragePolicy`（`JobState` 是 `exec_model` 的共享形状））；空实现 `NoStorage`。
 - 协作面：组合根注入 `Provision` 与 `Log`；`builds` 在起 guest 前调 `ensure_headroom`。
 - 状态归属：策略与作业状态由 `StorageService` 持有（`policy` / `job` 两个 `Mutex`）；策略由呈现层保存设置后推入，不落盘。
 

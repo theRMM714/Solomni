@@ -122,7 +122,7 @@ pub fn host_platform() -> Option<&'static str> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlatformDir<'a> {
     /// 目的：None = 两档通用；Some = 只服务那一档。
-    pub tier: Option<crate::kernel::api::types::Tier>,
+    pub tier: Option<crate::units::exec_model::api::Tier>,
     /// 目的：平台名（os-arch）。
     pub platform: &'a str,
 }
@@ -131,9 +131,9 @@ pub struct PlatformDir<'a> {
 /// 约束：不认的子目录当普通内容，不是平台目录。
 pub fn platform_dir(name: &str) -> Option<PlatformDir<'_>> {
     let (tier, rest) = if let Some(rest) = name.strip_prefix("host-") {
-        (Some(crate::kernel::api::types::Tier::Host), rest)
+        (Some(crate::units::exec_model::api::Tier::Host), rest)
     } else if let Some(rest) = name.strip_prefix("guest-") {
-        (Some(crate::kernel::api::types::Tier::Vm), rest)
+        (Some(crate::units::exec_model::api::Tier::Vm), rest)
     } else {
         (None, name)
     };

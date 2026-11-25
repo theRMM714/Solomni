@@ -17,7 +17,7 @@ use crate::units::conversation::session::api::SessionMeta;
 use crate::units::permission::api::PermissionSet;
 use crate::units::workspace::api::{Sandbox, Sandboxes, SharedScope, WORKIGNORE, WorkRoots};
 use crate::kernel::api::fence::FencePlan;
-use crate::kernel::api::types::Tier;
+use crate::units::exec_model::api::Tier;
 use crate::kernel::ports::PathCodec;
 
 /// 目的：派生一席工具环境所需的全部已取事实。

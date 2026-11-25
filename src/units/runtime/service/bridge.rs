@@ -255,7 +255,7 @@ impl Core {
                     kind: crate::units::conversation::session::api::PROXY,
                     seat: crate::units::conversation::session::api::PROXY_SEAT,
                     granted_at,
-                    tier: crate::kernel::api::types::Tier::Host,
+                    tier: crate::units::exec_model::api::Tier::Host,
                     guest: None,
                     profile: crate::units::permission::api::ProfileId::Online,
                     workspace: None,
