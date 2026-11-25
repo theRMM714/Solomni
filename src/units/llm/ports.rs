@@ -1,4 +1,4 @@
-//! 目的：llm 能力的出站端口——本能力要请人做的事。
+//! 目的：llm 单元的出站端口——本单元要请人做的事。
 //! 管：ChatGateway / ModelCatalog / EnvelopeRepair 三个 trait 的定义。
 //! 不管：协议词汇与入站用例（在 api / service）；适配器实现（在 detail）。
 //! 联动：只由 service.rs 持有（R12）；实现见 detail/http_chat.rs、detail/model_catalog.rs、detail/repair.rs。

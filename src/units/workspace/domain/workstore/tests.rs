@@ -1,6 +1,6 @@
 //! 目的：workstore 的纯判定用例——路径校验、三方比较、解决判定与状态映射。
 //! 管：`clean_rel` / `expand_paths` / `plan_commit` / `plan_merge` / `pull_verdict` / `local_take_verdict` / `status_of` / `work_state_of` / `backup_rel` / `split_backup` 的边界。
-//! 不管：落盘与 IO（由 `workspace::detail` 与能力面用例覆盖）。
+//! 不管：落盘与 IO（由 `workspace::detail` 与入站面用例覆盖）。
 //! 联动：只经 `super::*` 用纯函数；起作用的源码见同目录 `record.rs` / `path.rs` / `merge.rs` / `resolve.rs` / `status.rs`。
 
 use std::collections::BTreeMap;

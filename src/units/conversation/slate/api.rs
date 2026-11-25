@@ -1,4 +1,4 @@
-//! 目的：slate 的入站能力面——DTO 与用例签名。
+//! 目的：slate 的入站面——DTO 与用例签名。
 //! 管：propose 的再导出；Mode / Pick / Proposal / Parties / Request 的类型契约。
 //! 不管：IO 与模型调用（在 service.rs）；模式收束的纯规则（在 domain/proposal.rs）；端口与状态。
 //! 联动：service::propose 经本面被两个调用方（推荐 / 代拟）使用；依赖 llm / prompt / registry / session / tools 的 api。
@@ -42,7 +42,7 @@ pub struct Proposal {
     pub rejected: Vec<String>,
 }
 
-/// 目的：拟名单要用的**参与方事实**（调用方从各能力取来，本业务不持句柄）。
+/// 目的：拟名单要用的**参与方事实**（调用方从各单元取来，本业务不持句柄）。
 pub struct Parties<'a> {
     /// 目的：提示词册（段与文案都在它的书里）。
     pub prompt: &'a dyn Prompt,

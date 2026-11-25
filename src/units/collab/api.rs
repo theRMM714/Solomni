@@ -1,7 +1,7 @@
-//! 目的：协作能力的入站面——对外导出的会话对象与回合处置。
+//! 目的：协作单元的入站面——对外导出的会话对象与回合处置。
 //! 管：流程词汇（事件 / 关卡 / 选项 id）、流程工厂与 collab_state::tool_runs 的再导出。
-//! 不管：实现（在 service/ 与 domain/）；回合引擎（在 `src/units/agentloop/engine/`）；其它能力的内部；呈现层的渲染与布局。
-//! 联动：其它能力与呈现层只经本面使用协作；实现见 src/units/collab/service/，状态派生见 src/units/collab/domain/collab_state.rs。
+//! 不管：实现（在 service/ 与 domain/）；回合引擎（在 `src/units/agentloop/engine/`）；其它单元的内部；呈现层的渲染与布局。
+//! 联动：其它单元与呈现层只经本面使用协作；实现见 src/units/collab/service/，状态派生见 src/units/collab/domain/collab_state.rs。
 
 pub use crate::units::collab::domain::collab_state::tool_runs;
 /// 目的：检查项的形状（Review 载荷的解释）；呈现按载荷 JSON 渲染，生产侧不直接引用。

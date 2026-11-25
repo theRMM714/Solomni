@@ -1,5 +1,5 @@
 //! 目的：回执的**结构化说明**——稳定码 + 轻重分级 + 类型化参数；码是契约，文案在边缘按语言渲染。
-//! 管：轻重三档（`Severity`）、说明形状（`Note`）、跨能力共用的码表（`codes`）与按说明汇总分级。
+//! 管：轻重三档（`Severity`）、说明形状（`Note`）、跨单元共用的码表（`codes`）与按说明汇总分级。
 //! 不管：具体文案（在 `locales/<lang>.ftl`，由 `kernel::detail::i18n` 渲染）；谁展示（模型通道 / 界面 / 日志各自决定）。
 //! 联动：`ToolOutcome` 与 `RunOutcome` 都带它；工具执行层、会话引擎与 Web/CLI 按 `code` 取目录文案。
 
@@ -85,7 +85,7 @@ pub fn severity_of(notes: &[Note]) -> Severity {
         .unwrap_or(Severity::Info)
 }
 
-/// 目的：跨能力共用的回执码表——稳定 ASCII 点分标识，任何一档都不许在这里写自然语言。
+/// 目的：跨单元共用的回执码表——稳定 ASCII 点分标识，任何一档都不许在这里写自然语言。
 /// 约束：`locales/<lang>.ftl` 每个码一条；Web 按 `ALL` 导出目录（缺一条由测试点名）。
 pub mod codes {
     /// 目的：shell 正常退出（`code` = 退出码；0 是 info，非零是 warning）。

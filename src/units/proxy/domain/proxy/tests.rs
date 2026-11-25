@@ -1,6 +1,6 @@
 //! 目的：核心代理六个工具的纯逻辑 的测试：入参解析、授权判据与载荷规整。
 //! 管：只覆盖本模块的公开契约与拒绝文案；夹具在本文件内。
-//! 不管：执行面与幂等账（在 `src/tests/runtime/proxy.rs`）、其它能力。
+//! 不管：执行面与幂等账（在 `src/tests/runtime/proxy.rs`）、其它单元。
 //! 联动：与 `src/units/proxy/domain/proxy.rs` 同模块，`#[cfg(test)] mod tests;` 指到这里。
 
 use super::*;

@@ -1,12 +1,12 @@
 //! 目的：lifecycle 单元的测试——测试侧的回档入口，与回档标记续号这类纯判据。
-//! 管：`rewind` 助手（会话本体与重建要的两个能力面在这里一次交齐）与标记号续号。
+//! 管：`rewind` 助手（会话本体与重建要的两个入站面在这里一次交齐）与标记号续号。
 //! 不管：回档三模式的端到端行为（在 session/rewind.rs、runtime.rs 等处按真实会话验证）。
 //! 联动：src/tests 各处用 `crate::tests::lifecycle::rewind` 回档；单元说明见 docs/lifecycle/README.md。
 
 use super::prelude::*;
 use crate::units::lifecycle::api::{Lifecycle, RebuildDeps, RewindTarget};
 
-/// 目的：测试用回档入口——把会话本体与重建要的两个能力面一并交给生命周期，返回主会话活动视图。
+/// 目的：测试用回档入口——把会话本体与重建要的两个入站面一并交给生命周期，返回主会话活动视图。
 pub(crate) fn rewind(
     core: &mut Core,
     sid: &str,

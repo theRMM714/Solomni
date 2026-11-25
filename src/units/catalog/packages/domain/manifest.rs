@@ -1,7 +1,7 @@
 //! 目的：运行包契约（package.yaml）与包库事实——一个包 = 一个文件夹 + 一份清单。
 //! 管：清单校验、去重、系统路径冲突预检与按能力查版本（纯逻辑，可单测）。
 //! 不管：目录遍历与 yaml 解析（PackageSource 端口的适配层）、包内容怎么组织（只认清单事实）。
-//! 联动：契约见 RUNTIME_SPEC.md；被 domain/plan.rs 与本能力 service 消费。
+//! 联动：契约见 RUNTIME_SPEC.md；被 domain/plan.rs 与本单元 service 消费。
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -31,7 +31,7 @@ pub struct PackageManifest {
     /// 目的：kind = system 时它写进去的系统路径（同上书写形式）。
     #[serde(default)]
     pub provides_paths: Vec<String>,
-    /// 目的：该包自己需要的能力名（传递依赖由本能力求闭包）。
+    /// 目的：该包自己需要的能力名（传递依赖由本单元求闭包）。
     #[serde(default)]
     pub requires: Vec<String>,
     /// 目的：再分发要随包带上。

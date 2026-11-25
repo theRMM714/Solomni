@@ -1,6 +1,6 @@
 //! 目的：自检事实本体——平台、围栏、外部解释器、工具链、进程台账、虚拟机档前置与存储盘面拼成一份 JSON。
 //! 管：只读事实的汇总与字段形状（`--doctor` 与用例读同一份）。
-//! 不管：围栏机制（kernel）、进程身份（kernel::detail::procs）、各能力内部规则。
+//! 不管：围栏机制（kernel）、进程身份（kernel::detail::procs）、各单元内部规则。
 //! 联动：由 SystemService::doctor 调用；字段口径见 docs/system/README.md。
 
 use crate::kernel::api::layout;

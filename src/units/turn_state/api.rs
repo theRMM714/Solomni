@@ -25,7 +25,7 @@ pub use crate::units::turn_state::domain::live::Session;
 /// 目的：复合流程：装配期把若干段流程串成一条。
 #[allow(unused_imports)]
 pub use crate::units::turn_state::domain::sequence::Sequence;
-/// 目的：会话本体（在世表 + 运行态 + 装配一席要用的能力面）的出口。
+/// 目的：回合状态本体（在世表 + 运行态 + 装配一席要用的入站面）的出口。
 pub use crate::units::turn_state::domain::turn::Turn;
 
 /// 目的：造这个会话的**工具层提问端口**（登记一张卡、外送并落盘、停会话都走同一会话那条道）。
@@ -51,10 +51,10 @@ pub trait HistoryOps: Send + Sync {
     fn delete(&self, name: &str) -> Result<bool, String>;
 }
 
-/// 目的：会话的**直连面**（`conversation::session` 的 `service.rs` 实现）：别的能力要造会话、追流水、
+/// 目的：会话的**直连面**（`conversation::session` 的 `service.rs` 实现）：别的单元要造会话、追流水、
 ///   读元信息、删会话，走这里；出站端口 `HistoryStore`（目录布局与 append-only 文件格式）**只由它持有**（R12）。
 ///   它与 `HistoryOps` 的分工是**接收者不同**，不是重复：`HistoryOps` 由队列代理（`Handle`）实现、
-///   面向呈现层；`History` 由能力自己实现、面向别的能力。这里的四个写操作（create / save_meta /
+///   面向呈现层；`History` 由本单元自己实现、面向别的单元。这里的四个写操作（create / save_meta /
 ///   append / delete）**不开放给呈现层**——呈现层要写就经协调业务的用例。
 pub trait History: Send + Sync {
     /// 建一个会话目录（meta + 空流水）。

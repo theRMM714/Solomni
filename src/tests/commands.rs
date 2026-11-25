@@ -129,7 +129,7 @@ fn only_runtime_commands_ask_for_services() {
     }
 }
 
-/// 相位与执行者自洽：启动相只可能是系统能力，转录相不许挂系统能力。
+/// 相位与执行者自洽：启动相只可能是系统单元，转录相不许挂系统单元。
 #[test]
 fn phase_and_executor_agree() {
     let mut broken = Vec::new();
@@ -140,7 +140,7 @@ fn phase_and_executor_agree() {
     }
     for op in phase(Phase::Core) {
         if op.executor.name() == "system" {
-            broken.push(format!("{} 是转录相却挂着系统能力", op.id));
+            broken.push(format!("{} 是转录相却挂着系统单元", op.id));
         }
     }
     assert!(broken.is_empty(), "{broken:?}");

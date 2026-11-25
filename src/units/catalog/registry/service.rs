@@ -1,5 +1,5 @@
 //! 目的：登记处的状态与用例——四份 yaml 的内存形态只由这里写。
-//! 管：实现 api::Registry 与 RegistryOps（视图 / 只读事实 / 写三类方法）；注入端口与 llm 能力面；应用模型发现结果。
+//! 管：实现 api::Registry 与 RegistryOps（视图 / 只读事实 / 写三类方法）；注入端口与 llm 入站面；应用模型发现结果。
 //! 不管：yaml 解析与落盘（在 detail/yaml_settings.rs）；DTO 与校验规则（在 domain）；适配器装配（在组合根）。
 //! 联动：组合根 new 时注入 SettingsStore 与 llm::api::Llm；对外只经 registry::api::Registry。
 
@@ -73,7 +73,7 @@ pub fn grant_write_acl(store: &dyn SettingsStore) -> Result<(), String> {
 
 /// 目的：登记处能力：持四份 yaml 的内存形态，按用例读写、改完即落盘。
 pub struct RegistryService {
-    /// **状态**：登记处的内存形态。私有——别的能力只经 `Registry` 读。
+    /// **状态**：登记处的内存形态。私有——别的单元只经 `Registry` 读。
     settings: Settings,
     store: Arc<dyn SettingsStore + Send + Sync>,
     /// 通道探测（原生工具调用 / 回放形状）与模型发现：**调 llm 的用例面**，不持它的端口（R12）。
@@ -149,7 +149,7 @@ impl RegistryService {
 }
 
 /// 目的：保存模型草稿：原生工具模式先实测通道（支持原生工具调用 + 至少一种回放形状被接受）。
-/// 参数：`r` 登记处能力面；`draft` 待保存的模型草稿。
+/// 参数：`r` 登记处入站面；`draft` 待保存的模型草稿。
 /// 返回：写入并落盘成功返回 `()`；信封形态是用户显式选择，不实测、直接保存。
 /// 错误：通道不支持原生工具调用 / 无法判定 / 不接受任何回放形状——错误文案点明「模型未保存」。
 /// 约束：所有写入口共用这一处判据（不只是 Web 表单）。
@@ -180,7 +180,7 @@ pub fn save_model(r: &mut dyn Registry, draft: ModelDraft) -> Result<(), String>
 }
 
 /// 目的：保存 agent：目录保留名与模块存在性都在这一处校验，再交给登记处写。
-/// 参数：`r` 登记处能力面；`draft` 用户给的定义；`roster` 清单事实（模块校验用）；`reserved` 目录保留名。
+/// 参数：`r` 登记处入站面；`draft` 用户给的定义；`roster` 清单事实（模块校验用）；`reserved` 目录保留名。
 /// 返回：写入并落盘成功返回 `()`。
 /// 错误：名字是保留名、模块不在清单里、模型不存在——都不写入。
 /// 约束：清单归 `modules`、保留名归 `tools`，本函数只取调用方给的事实，不自己去找。

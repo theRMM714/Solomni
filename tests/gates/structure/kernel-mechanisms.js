@@ -7,7 +7,7 @@
  *       ③ 声明层号必须等于按现有依赖重算的层号——表是事实的缓存，不是可以写宽的意图；
  *       ④ 机制之间不许成环——重算前先找环并报出环路径（成环时不再谈层号）；
  *       ⑤ 内核内部只走机制路径——src/kernel 下（除 api/ 面自身）不许出现 `crate::kernel::api`，
- *          对外面只留给能力与装配层；内核绕道面会让面与实现互相牵制。
+ *          对外面只留给单元与装配层；内核绕道面会让面与实现互相牵制。
  * ③ 的含义：动了一条边就重算全表（node tests/gates/structure/kernel-mechanisms.js --write 重算写回），
  * 让「这个机制为什么抬高」留在 diff 里；不想抬层就只能消掉那条边。
  * 只回执不判红：扇出（数字说明一个机制在替多少个机制装配）。
@@ -114,7 +114,7 @@ function edgesOf(root, mechs) {
 }
 
 /** 内核内部绕道对外面的地方：src/kernel 下（除 api/ 面自身）出现 kernel::api。
- *  对外面是给能力与装配层用的；内核内部直取所属机制，面才不会被实现反向绑住。 */
+ *  对外面是给单元与装配层用的；内核内部直取所属机制，面才不会被实现反向绑住。 */
 function apiFaceRefs(root, mechs) {
   const hits = [];
   const files = [...new Set([...mechs.values()].flat())];

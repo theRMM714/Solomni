@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Executor {
-    /// 走能力面：校验 → 授权 → 执行 → 审计（`ActionOps::act`）。
+    /// 走入站面：校验 → 授权 → 执行 → 审计（`ActionOps::act`）。
     #[default]
     Core,
     /// 走系统能力：装配核心之前就要能跑（doctor / gc / provision …）。

@@ -1,5 +1,5 @@
 //! 目的：HTTP 入站契约的**唯一定义**：路由目录 + 匹配器。
-//! 管：路由表（方法、路径模式、入站能力、请求/响应形状、状态码、说明）与匹配、路径参数解析、百分号解码、目录 JSON 输出。
+//! 管：路由表（方法、路径模式、入站面、请求/响应形状、状态码、说明）与匹配、路径参数解析、百分号解码、目录 JSON 输出。
 //! 不管：请求分发与响应构造（`src/presentation/web.rs`）；文档表本身的维护（`docs/presentation/contracts.md` 的 ROUTES 段由契约测试与这里比对）。
 //! 联动：`src/presentation/web.rs` 按本目录分发，所以「代码里有路由但目录里没有」在结构上不可能发生；反向缺口由 `src/tests/routes.rs` 逐条点名。
 
@@ -11,7 +11,7 @@ pub struct Route {
     pub method: &'static str,
     /// 目的：路径模式；`{name}` 段是参数（匹配时按段取值）。
     pub pattern: &'static str,
-    /// 目的：它落到哪个入站能力（文档与覆盖检查用）。
+    /// 目的：它落到哪个入站面（文档与覆盖检查用）。
     pub capability: &'static str,
     pub request: &'static str,
     pub response: &'static str,

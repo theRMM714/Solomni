@@ -1,6 +1,6 @@
 //! 目的：进程入口的两段分派（取根前 / 取根后）——只处理内部协议旗语，不碰真实的用户根。
 //! 管：`before_root` / `after_root` 的分支走向与退出码。
-//! 不管：产品命令（启动相在 `src/presentation/cli/boot.rs`，转录相在 `src/presentation/cli.rs`）；探针自身的事实输出（在各能力）。
+//! 不管：产品命令（启动相在 `src/presentation/cli/boot.rs`，转录相在 `src/presentation/cli.rs`）；探针自身的事实输出（在各单元）。
 //! 联动：`src/main.rs` 的调用点；参数表与分支顺序在 `src/entry/args.rs`。
 
 use crate::entry::args::{after_root, before_root};

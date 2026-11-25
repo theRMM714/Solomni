@@ -1,4 +1,4 @@
-//! 目的：提示词册的能力面实现与装配入口。
+//! 目的：提示词册的入站面实现与装配入口。
 //! 管：实现 api::Prompt；load 装载一次后只答不问；持有者全进程只有一处。
 //! 不管：文件系统与 yaml 解析（在 detail/yaml_prompts.rs）；渲染细节（在 domain/prompt.rs）。
 //! 联动：状态就是 domain 的 Prompts；组合根调用 load 得到 Arc<dyn Prompt> 交给 runtime。

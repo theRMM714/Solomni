@@ -1,6 +1,6 @@
 //! 目的：跨层共享的形状。
 //! 管：只没有领域逻辑的事实——`SessionId` / `ToolOutcome` / `Ask`（请用户裁决的问题）/ 默认预算。
-//! 不管：带领域逻辑的类型（归各自能力）；执行与作业模型（归环 1 的 exec_model）；各业务自造一份 DTO 副本（R6 禁止）。
+//! 不管：带领域逻辑的类型（归各自单元）；执行与作业模型（归环 1 的 exec_model）；各业务自造一份 DTO 副本（R6 禁止）。
 //! 联动：由 `src/kernel/api.rs` 重导出；判据见 ARCHITECTURE.md 的「硬要求清单」R6。
 
 use crate::kernel::contracts::note::{Note, Severity};

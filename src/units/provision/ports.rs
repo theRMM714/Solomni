@@ -50,7 +50,7 @@ pub trait Ledger: Send + Sync {
     fn sync_active(&self, all: &[crate::units::provision::domain::Dep]) -> Result<(), String>;
 }
 
-/// 目的：本能力要观察的长驻子进程——编排只问"现在有哪些、有几个 guest 在跑"。
+/// 目的：本单元要观察的长驻子进程——编排只问"现在有哪些、有几个 guest 在跑"。
 pub trait Procs: Send + Sync {
     /// 目的：台账里的全部条目，逐条带上"此刻还活着吗"。
     fn entries(&self) -> Vec<crate::units::provision::api::ProcInfo>;

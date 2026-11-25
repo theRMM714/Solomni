@@ -1,5 +1,5 @@
-//! 目的：依赖补齐能力的入站契约——状态、虚拟根清单、作业快照与两条动作；DTO 是呈现层序列化的形状。
-//! 管：Provision trait 与 DepStatus / GuestBase DTO、宿主工具取法的 HostTool 词表、未接入的 NoProvision；作业快照 `JobState` 是共享形状，家在 `src/kernel/contracts/types.rs`。
+//! 目的：依赖补齐单元的入站契约——状态、虚拟根清单、作业快照与两条动作；DTO 是呈现层序列化的形状。
+//! 管：Provision trait 与 DepStatus / GuestBase DTO、宿主工具取法的 HostTool 词表、未接入的 NoProvision；作业快照 `JobState` 是共享形状，家在 `src/units/pure/exec_model/`。
 //! 不管：清单怎么解析、怎么下载（在 service）。
 //! 联动：`presentation::faces::Faces.provision` 持它；Web 的 setup 路由与 CLI 探针都经它；runtime 的"选虚拟机"经 `guest_bases` 取候选。
 

@@ -1,6 +1,6 @@
 /* 前端判据：弹窗真的建得起来 + 行解析/按序应用这两条纯逻辑。
  * 用法：node src/presentation/web/modals.smoke.cjs   （输出 FRONTEND-MODALS-OK / FAIL）
- * 为什么需要：连续几个 bug 都在前端渲染层，而 Rust 侧与 HTTP 能力面碰不到 DOM——只能靠肉眼发现。
+ * 为什么需要：连续几个 bug 都在前端渲染层，而 Rust 侧与 HTTP 入站面碰不到 DOM——只能靠肉眼发现。
  * 这里的桩 DOM **会拒绝非节点**（真实 DOM 的 appendChild 就会抛）：
  * numberInput 返回的是 {input, wrap}，误把它当元素传给 field() 会让整个表单建不起来——
  * 真机上就是"点编辑下面无法展开修改"。桩 DOM 若不校验，这类误用就永远照不出来。

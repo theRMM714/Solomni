@@ -20,7 +20,7 @@ const PROTOCOL_VERSION: &str = "2024-11-05";
 /// 目的：MCP stdio 适配器——按声明拉起服务、握手、发现工具、转发调用。
 pub struct McpAdapter {
     host: Arc<dyn SessionHost + Send + Sync>,
-    /// 运行日志：协议版本这类"服务回选的事实"记在这里——能力面保持协议中立，不带协议字段。
+    /// 运行日志：协议版本这类"服务回选的事实"记在这里——入站面保持协议中立，不带协议字段。
     log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
 }
 

@@ -1,7 +1,7 @@
 //! 目的：回合状态——会话在核心线程里的在世表、运行态与创建占位、裁决队、每会话的 shell 活进程槽。
 //! 管：`Session` 两种在世形态（单 agent / 一个流程槽）的在世表；运行态与创建占位的标记；每会话的裁决通道；
 //!   每会话的 shell 活进程槽（同一会话的多次 shell 调用共用一份活进程）。
-//! 不管：会话本体（`session` / `collab`）、生成驱动、落盘；谁在什么时候放取会话由 `runtime` 的用例决定。
+//! 不管：会话对象与装配（`agentloop`）、生成驱动、落盘；谁在什么时候放取会话由 `runtime` 的用例决定。
 //! 联动：`runtime` 经 `api` 读写；裁决通道来自本单元的 `api`，shell 槽是 `agentloop::api::ShellSlot`。
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -17,7 +17,7 @@ use crate::units::turn_state::domain::flow::Flow;
 ///   两变体大小仍差得远（见 docs/testing/quality-isolation.md 的 allow 清单）。
 #[allow(clippy::large_enum_variant)]
 pub enum Session {
-    /// 目的：单 agent 会话本体。
+    /// 目的：单 agent 会话的在世记录。
     Single(AgentSession),
     /// 目的：流程槽（协作、以后的评审流程都装在这里）。
     Flow(Box<dyn Flow>),

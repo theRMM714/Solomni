@@ -74,7 +74,7 @@ impl CollabSession {
     /// 目的：核实用的小工具环境（只读）：按席位现装一份，交给核心操作的 `verify` 形参。
     ///   为什么要它：核心操作（出方案 / 节点验收…）也常需要"先看看现场再下结论"，
     ///   而核心不是 member、手里没有工具环境——没有它，模型一想核实就被判"没调用 X"而整步中断。
-    /// 约束：本能力不自己拼工具面——装配在 `agentloop` 的 `verify_tools`（见 docs/session/session-model.md）。
+    /// 约束：本单元不自己拼工具面——装配在 `agentloop` 的 `verify_tools`（见 docs/session/session-model.md）。
     pub(crate) fn verify_env(
         &self,
         seat: &str,

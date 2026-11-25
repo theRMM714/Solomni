@@ -1,7 +1,7 @@
-//! 目的：llm 能力的入站面——其它能力与呈现层只准用这里（不许碰 domain / ports）。
+//! 目的：llm 单元的入站面——其它单元与呈现层只准用这里（不许碰 domain / ports）。
 //! 管：重导出信封与回执类型，定义协议词汇（Chat / BoxedChat / Msg / Completion / Chunk / ToolCall / ToolDecl / Channel / LlmOpts / CompleteOpts / ProbeOutcome）与 Llm 用例面。
 //! 不管：信封解析与回执装配（在 domain）；出站端口的定义（在 ports）；适配器装配（在组合根）。
-//! 联动：runtime、其它能力与呈现层都经这里会话；实现见 service.rs；出站端口只由 service 持有（R12）。
+//! 联动：runtime、其它单元与呈现层都经这里会话；实现见 service.rs；出站端口只由 service 持有（R12）。
 
 pub use crate::units::llm::domain::cancel::{cancel_flag, cancel_flag_ref};
 pub use crate::units::llm::domain::envelope::{Malformed, Reply, Tail, ToolInvoke, Verb, parse};
@@ -379,8 +379,8 @@ pub struct RepairOutcome {
     pub what: Vec<String>,
 }
 
-/// 目的：本能力对外的**用例面**（`service.rs` 实现）：别的能力要通道、要探测、要发现时走这里，
-///    **不持本能力的出站端口**（R12）。
+/// 目的：本单元对外的**用例面**（`service.rs` 实现）：别的单元要通道、要探测、要发现时走这里，
+///    **不持本单元的出站端口**（R12）。
 pub trait Llm: Send + Sync {
     /// 按已解析的通道造一条成员会话句柄（`module_id` 只用于日志名号）。
     fn member_channel(&self, channel: &Channel, module_id: &str) -> BoxedChat;

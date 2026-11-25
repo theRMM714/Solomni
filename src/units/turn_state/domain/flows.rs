@@ -32,7 +32,7 @@ pub struct FlowSetup<'a> {
     pub restore: Option<(&'a SessionMeta, &'a [serde_json::Value])>,
 }
 
-/// 目的：流程工厂：会话类型表 + id → 造一段（实现在流程自己的能力里，由组合根注入）。
+/// 目的：流程工厂：会话类型表 + id → 造一段（实现在流程自己的单元里，由组合根注入）。
 pub trait Flows: Send + Sync {
     /// 目的：会话类型表——装配按它取某个类型的流程序列。
     fn book(&self) -> &Profiles;

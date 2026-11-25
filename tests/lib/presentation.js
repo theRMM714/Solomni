@@ -5,12 +5,12 @@
  * 联动：门禁与 \`tests/lib/parsers.js\` 的自测都调它；改格式只改这一处。
  */
 
-// 单元写法：能力（\`work\`）或能力/子单元（\`catalog/registry\`）；\`kernel\` 是机制层的入站面。
+// 单元写法：单元（\`work\`）或单元/子单元（\`catalog/registry\`）；\`kernel\` 是机制层的入站面。
 const UNIT_RE = /^(kernel|[a-z_][a-z0-9_]*(\/[a-z_][a-z0-9_]*)?)$/;
 const PATH_RE = /^src\/presentation(\/[a-z_][a-z0-9_\/]*)\.rs$/;
 
 /**
- * 目的：把清单正文读成「文件 → 允许取的能力单元」。
+ * 目的：把清单正文读成「文件 → 允许取的单元」。
  * @param {string} text 文件正文
  * @returns {{faces: Map<string, string[]>, problems: string[]}}
  */

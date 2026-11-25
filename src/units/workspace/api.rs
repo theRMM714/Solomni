@@ -1,4 +1,4 @@
-//! 目的：工作区能力的入站能力面——其它能力与呈现层只准用这里（不许碰 `domain` / `ports`）。
+//! 目的：工作区单元的入站面——其它单元与呈现层只准用这里（不许碰 `domain` / `ports`）。
 //! 管：`Workspace` 用例 trait 与它的视图类型（沙箱寻址、文件视图、提交 / 拉取 / 还原 / 状态 / 回收），并重导出领域共享类型。
 //! 不管：用例实现（在 `service/`）；寻址与版本化的纯规则（在 `domain/`）；落盘机制（在 `detail/`）。
 //! 联动：实现见 `service.rs`；`tools` 借 `Place` / `Sandbox` 定位读写落点。
@@ -200,7 +200,7 @@ pub struct CommitFileView {
     pub too_large: bool,
 }
 
-/// 目的：工作区的**用例面**（`service.rs` 实现）：别的能力要工作区目录与版本化，走这里。
+/// 目的：工作区的**用例面**（`service.rs` 实现）：别的单元要工作区目录与版本化，走这里。
 /// 约束：出站端口（`Workdirs` / `WorkStore`）**只由它持有**（R12）。
 pub trait Workspace: Send + Sync {
     /// 目的：把根会话的工作区绑定落成布局投影（`Some` = 外部工作区根；`None` = 产品内布局）。
@@ -218,7 +218,7 @@ pub trait Workspace: Send + Sync {
     fn files(&self, session: &str, agents: &[String]) -> Result<WorkFiles, String>;
     /// 统计工作区用量（共享区 + 各 agent 沙箱的文件数与总字节）：删除前如实交代用。
     fn usage(&self, session: &str, agents: &[String]) -> Result<WorkUsage, String>;
-    /// 沙箱寻址根（work 与各 agent 私有区）：布局机制在适配层，拼接与越界校验在本能力。
+    /// 沙箱寻址根（work 与各 agent 私有区）：布局机制在适配层，拼接与越界校验在本单元。
     fn roots(&self, session: &str, agents: &[String]) -> Result<WorkRoots, String>;
 
     /// **拉取**：把主副本（head）的路径写进该 agent 的沙箱同相对路径，并更新它的拉取基线。

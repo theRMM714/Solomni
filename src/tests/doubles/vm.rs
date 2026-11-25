@@ -416,7 +416,7 @@ impl crate::units::vm::api::Vm for RecordingVm {
     }
 }
 
-/// 目的：测试用的 **vm 能力面**——把 guest 替身装进 `VmService`（与生产同一条路，R12）。
+/// 目的：测试用的 **vm 入站面**——把 guest 替身装进 `VmService`（与生产同一条路，R12）。
 /// 约束：共享档替身同时持 `9p` 与 `smb`（都是用户链里的挂载式档，不需要外部工具），Linux/macOS 的真实候选能挑到 9p，Windows 能挑到 smb；copy 是 emergency 档，空候选不会被自动选中。
 pub(crate) fn test_vm() -> Arc<dyn crate::units::vm::api::Vm + Send + Sync> {
     Arc::new(crate::units::vm::service::VmService::new(
@@ -428,7 +428,7 @@ pub(crate) fn test_vm() -> Arc<dyn crate::units::vm::api::Vm + Send + Sync> {
     ))
 }
 
-/// 目的：带可控"起 guest 耗时 / 失败"的 vm 能力面——验核心不被慢步骤占住、失败不留痕。
+/// 目的：带可控"起 guest 耗时 / 失败"的 vm 入站面——验核心不被慢步骤占住、失败不留痕。
 pub(crate) fn test_vm_with_engine(
     engine: FakeEngine,
 ) -> Arc<dyn crate::units::vm::api::Vm + Send + Sync> {
@@ -441,7 +441,7 @@ pub(crate) fn test_vm_with_engine(
     ))
 }
 
-/// 目的：测试用的 **packages 能力面**——把内存包库装进 `PackagesService`（与生产同一条路，R12）。
+/// 目的：测试用的 **packages 入站面**——把内存包库装进 `PackagesService`（与生产同一条路，R12）。
 pub(crate) fn test_packages(
     packages: Arc<dyn PackageSource + Send + Sync>,
 ) -> Arc<dyn crate::units::catalog::packages::api::Packages + Send + Sync> {
@@ -453,7 +453,7 @@ pub(crate) fn test_packages(
     )
 }
 
-/// 目的：测试用的 packages 能力面，带"宿主回退可用"的事实（由测试 probe 声明它有什么）。
+/// 目的：测试用的 packages 入站面，带"宿主回退可用"的事实（由测试 probe 声明它有什么）。
 pub(crate) fn test_packages_with_base(
     packages: Arc<dyn PackageSource + Send + Sync>,
     base: crate::units::catalog::packages::api::BaseFacts,

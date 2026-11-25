@@ -1,4 +1,4 @@
-//! 目的：常驻服务的入站能力面——统一管理 API（协议中立：核心不认识 MCP / ACP）。
+//! 目的：常驻服务的入站面——统一管理 API（协议中立：核心不认识 MCP / ACP）。
 //! 管：ResidentOps 与它的 DTO（服务视图、操作、状态、回执）；未注入时的空实现 NoResidents。
 //! 不管：适配器端口（在 `ports.rs`，不进 api）；具体协议；模块声明的解析（在 workspace）。
 //! 联动：实现见 `service.rs`；由 `main.rs` 装配进 `presentation::faces::Faces`，呈现层只经 `ResidentOps` 调用。

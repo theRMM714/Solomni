@@ -1,6 +1,6 @@
 //! 目的：Solomni 组合根与进程入口。
-//! 管：启动序列——参数 / 根目录 / 工具链 / 日志 / 授权对账；唯一允许 new 具体适配器并装配各能力（含 runtime）的地方。
-//! 不管：参数表与分派（entry::args）、各适配器与能力的内部实现、装配后的业务行为（在能力与呈现层）。
+//! 管：启动序列——参数 / 根目录 / 工具链 / 日志 / 授权对账；唯一允许 new 具体适配器并装配各单元（含 runtime）的地方。
+//! 不管：参数表与分派（entry::args）、各适配器与单元的内部实现、装配后的业务行为（在单元与呈现层）。
 //! 联动：装配结果交给呈现层（presentation::cli / presentation::web），runtime 不知道后两者存在；测试构建外露启动门助手（entry::startup）。
 
 mod entry;
@@ -129,7 +129,7 @@ fn main() {
         eprintln!("[工具链] {}", w);
     }
 
-    // 启动相命令（--doctor / --gc / --provision …）：命令表说有哪些、system 能力执行，拿到码就退。
+    // 启动相命令（--doctor / --gc / --provision …）：命令表说有哪些、system 单元执行，拿到码就退。
     if let Some(command) = flags.command.as_deref() {
         let Some(op) = command_ops()
             .find(command)
@@ -247,7 +247,7 @@ fn main() {
     );
     // 端点记忆：谁先通了就固定谁，后续会话不再反复探测候选。
     let memo = units::llm::detail::endpoint::memo_new();
-    // **llm 能力**：三个出站端口（通道工厂 / 模型目录 / 信封修复）只由它的 service 持有（R12）；
+    // **llm 单元**：三个出站端口（通道工厂 / 模型目录 / 信封修复）只由它的 service 持有（R12）；
     // 别人（登记处、协调业务、协作会话）只拿它的 `api::Llm` 面。
     let gateway: Arc<dyn units::llm::ports::ChatGateway + Send + Sync> = Arc::new(
         units::llm::detail::HttpGateway::with_log(Arc::clone(&log), Arc::clone(&memo)),
@@ -261,7 +261,7 @@ fn main() {
             catalog,
             Arc::new(units::llm::detail::UnambiguousRepair),
         ));
-    // **登记处能力**：四份 yaml 的状态与用例都在它里面（runtime 只按 `Registry` 用它，看不见字段）。
+    // **登记处子业务**：四份 yaml 的状态与用例都在它里面（runtime 只按 `Registry` 用它，看不见字段）。
     let mut registry = match units::catalog::registry::service::RegistryService::new(
         Arc::new(store),
         Arc::clone(&llm),
@@ -425,8 +425,8 @@ fn main() {
         }
     };
     let prompt_source = units::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
-    // **提示词册能力**：册子只在这里装载一次、也只被它持有；runtime 与工具执行
-    // （回执里的那些收尾标记）要的"段"都经它的能力面拿——不再各存一份拷贝。
+    // **提示词单元**：册子只在这里装载一次、也只被它持有；runtime 与工具执行
+    // （回执里的那些收尾标记）要的"段"都经它的入站面拿——不再各存一份拷贝。
     let prompt = match units::prompt::service::load(&prompt_source) {
         Ok(p) => p,
         Err(e) => {
@@ -435,7 +435,7 @@ fn main() {
         }
     };
     // 工具总表与机制席位必须自洽（悬空引用 / 缺能力都是装配错误）：装配期就挡下，不拖到运行期。
-    // 三张表归**工具能力**（加载器在它自己的 detail 里；装载后由它的 service 持有）。
+    // 三张表归**工具单元**（加载器在它自己的 detail 里；装载后由它的 service 持有）。
     let systools_source =
         units::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"));
 
@@ -448,7 +448,7 @@ fn main() {
     .with_mode(std::sync::Arc::clone(&sandbox_mode));
     // 内置文件工具：纯 Rust 直接读写，不经过外部进程（编码问题不进本程序）。
     let io = units::tools::detail::FsSysIo::with_lock_dir(home.join("locks"));
-    // **工具能力**：三张表由加载器读进来，三个出站端口（外部执行 / 内置读写 / 围栏释放）
+    // **工具单元**：三张表由加载器读进来，三个出站端口（外部执行 / 内置读写 / 围栏释放）
     // 只由它的 service 持有（R12）。装配期就挡下"悬空引用 / 缺能力"。
     let fence_host: Arc<dyn kernel::ports::FenceHost + Send + Sync> =
         Arc::new(kernel::detail::confine::FenceHostAdapter::new(home.clone()));
@@ -487,7 +487,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    // 保留名表（内置工具名）由**组合根**问一次工具能力后交进去：清单校验归 modules，名字空间归 tools，
+    // 保留名表（内置工具名）由**组合根**问一次工具单元后交进去：清单校验归 modules，名字空间归 tools，
     // 两边不互相依赖。模块 id 还与产品命令词互斥（它是动作 id 前缀），命令词在这里并进同一份保留名。
     let mut module_reserved = units::tools::api::Tools::reserved_modules(&*systools);
     module_reserved.extend(command_ops().ids());
@@ -496,7 +496,7 @@ fn main() {
         units::tools::api::names(),
         module_reserved,
     );
-    // **模块能力**：清单来源与启停覆盖落盘只由它的 service 持有（R12）；它是模块事实的唯一上游。
+    // **模块子业务**：清单来源与启停覆盖落盘只由它的 service 持有（R12）；它是模块事实的唯一上游。
     let module_state =
         units::catalog::modules::detail::YamlModuleState::new(home.join("modules.yaml"));
     let modules: Arc<dyn units::catalog::modules::api::Modules + Send + Sync> =
@@ -511,7 +511,7 @@ fn main() {
             }
         };
 
-    // **虚拟机档能力**：运行包库来源、VM 引擎与共享后端这些出站端口只由它的 service 持有（R12）；用户共享后端按平台用户链装配，起 guest 时选。
+    // **虚拟机档单元**：运行包库来源、VM 引擎与共享后端这些出站端口只由它的 service 持有（R12）；用户共享后端按平台用户链装配，起 guest 时选。
     // copy 不在用户链；只有进程级开发/应急开关才补进持有列表（仍要显式候选）。
     let order = units::vm::domain::exec::default_combos(std::env::consts::OS);
     let mut shares: Vec<Arc<dyn units::vm::ports::ShareBackend + Send + Sync>> = Vec::new();
@@ -550,12 +550,12 @@ fn main() {
             shares,
         ));
 
-    // **工作区能力**：目录布局与版本库两个出站端口只由它的 service 持有（R12）。
+    // **工作区单元**：目录布局与版本库两个出站端口只由它的 service 持有（R12）。
     let workspace: Arc<dyn units::workspace::api::Workspace + Send + Sync> = Arc::new(
         units::workspace::service::WorkspaceService::new(Arc::new(workspace), Arc::new(workstore)),
     );
 
-    // **隐秘字段能力**：值只落 .home/secrets.yaml；加载失败 = 装配失败（不静默空表）。
+    // **隐秘字段子业务**：值只落 .home/secrets.yaml；加载失败 = 装配失败（不静默空表）。
     let secrets = match entry::assembly::secrets(&root, Arc::clone(&modules)) {
         Ok(s) => s,
         Err(e) => {
@@ -564,7 +564,7 @@ fn main() {
         }
     };
 
-    // **常驻服务能力**：真实协议适配器（MCP stdio 走守门进程的长驻会话）+ 模块能力面 + 隐秘字段面。
+    // **常驻服务单元**：真实协议适配器（MCP stdio 走守门进程的长驻会话）+ 模块入站面 + 隐秘字段面。
     let residents: Arc<dyn units::residents::api::ResidentOps + Send + Sync> = Arc::new(
         entry::assembly::residents(
             vec![Arc::new(units::residents::detail::McpAdapter::new(
@@ -607,7 +607,7 @@ fn main() {
     ));
     let storage: Arc<dyn units::maintenance::storage::api::Storage + Send + Sync> =
         storage_service.clone();
-    // **构建能力**：创建会话前补编模块产物（本机档宿主、虚拟机档 guest）；执行器与 `--build` 同一条路——
+    // **构建子业务**：创建会话前补编模块产物（本机档宿主、虚拟机档 guest）；执行器与 `--build` 同一条路——
     // **不申请容器身份**（构建是系统动作）：AppContainer 的临时目录写不了文件；可达范围仍由围栏规格给出。
     let build_runner = kernel::detail::process::ProcTools::new(
         std::env::current_exe().unwrap_or_default(),
@@ -767,7 +767,7 @@ fn main() {
     // 视图盘唯一的分配点：维护旗、探针与启动期早退都已返回；`std::process::exit` 不走 Drop，早分配必然泄漏盘符。
     // 一次性命令（`runtime: none`）不分配（跑完就退）；细节与逃生口见 `view_drive_begin`。
     let view_drive = runtime_needed && view_drive_begin(&root, &home);
-    // 核心搬到它自己的执行线程：此后呈现层只持有**入站能力面**——拿不到核心本体，也拿不到任何核心锁。
+    // 核心搬到它自己的执行线程：此后呈现层只持有**入站面**——拿不到核心本体，也拿不到任何核心锁。
     let handle = match units::runtime::api::Handle::spawn(core) {
         Ok(h) => h,
         Err(e) => {
@@ -779,7 +779,7 @@ fn main() {
         }
     };
     let mut faces = Faces::from_handle(&handle);
-    // 依赖补齐面：组合根注入（能力面默认未接入，这里换成真实现）。
+    // 依赖补齐面：组合根注入（入站面默认未接入，这里换成真实现）。
     faces.provision = Arc::clone(&provision);
     faces.storage = Arc::clone(&storage);
     // 存储自动任务只服务会话与 Web：一次性命令跑完就退，没有要回收的东西。
@@ -833,7 +833,7 @@ fn main() {
             &fence_report,
         );
     } else {
-        // CLI 里输入 web 可直接转入 Web，无需重启进程（能力面可克隆，两份呈现共用同一个核心）。
+        // CLI 里输入 web 可直接转入 Web，无需重启进程（入站面可克隆，两份呈现共用同一个核心）。
         // 在 Web 里按 Ctrl+C = **回到 CLI**（web::serve 收到中断就正常返回）；在 CLI 提示符下再按 = 退出。
         loop {
             match presentation::cli::run(

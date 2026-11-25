@@ -1,7 +1,7 @@
 //! 目的：常驻服务的注册表与生命周期——统一管理 API 的实现。
 //! 管：适配器注册表、运行中的实例、用户开关、租约回收；只认适配器端口与 `Workspace::roster` 的清单事实。
 //! 不管：任何协议（全在适配器）；进程与围栏（在 kernel，随真实适配器接入）；
-//!   启停开关（归 modules：用户覆盖 ?? 作者默认）；本能力只按有效值跑。
+//!   启停开关（归 modules：用户覆盖 ?? 作者默认）；本单元只按有效值跑。
 //! 联动：api 见 `api.rs`，端口见 `ports.rs`；由 `main.rs` 装配。
 
 use crate::units::catalog::modules::api::{Module, Modules, Roster, ServiceDecl};
@@ -25,7 +25,7 @@ struct Running {
     lease: String,
 }
 
-/// 目的：常驻服务能力——持适配器注册表与运行态，按统一 API 答话。
+/// 目的：常驻服务单元——持适配器注册表与运行态，按统一 API 答话。
 pub struct ResidentsService {
     adapters: BTreeMap<String, Arc<dyn ServiceAdapter + Send + Sync>>,
     modules: Arc<dyn Modules + Send + Sync>,
@@ -46,7 +46,7 @@ pub struct ResidentsService {
 }
 
 impl ResidentsService {
-    /// 目的：组合根专用——注入适配器注册表与模块能力面（取清单与启停有效值）。
+    /// 目的：组合根专用——注入适配器注册表与模块入站面（取清单与启停有效值）。
     pub fn new(
         adapters: Vec<Arc<dyn ServiceAdapter + Send + Sync>>,
         modules: Arc<dyn Modules + Send + Sync>,

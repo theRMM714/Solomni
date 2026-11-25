@@ -1,6 +1,6 @@
-//! 目的：系统维护与自检能力的入站面——启动相命令要的事实、请求与结果形状。
+//! 目的：系统维护与自检单元的入站面——启动相命令要的事实、请求与结果形状。
 //! 管：FenceFacts、各类请求、System 用例 trait 与工具链事实的渲染。
-//! 不管：怎么回收 / 怎么补齐（在 service 与各能力）；命令语法与回执文案（在呈现层）。
+//! 不管：怎么回收 / 怎么补齐（在 service 与各单元）；命令语法与回执文案（在呈现层）。
 //! 联动：presentation/cli/boot.rs 与 Web 的维护入口经它执行；事实来自 storage / provision / builds / workspace / vm。
 //!   作业进度快照 `JobState` 是 kernel 的共享形状，这里只转出给呈现层。
 
@@ -25,7 +25,7 @@ pub struct FenceFacts {
     pub note: String,
 }
 
-/// 目的：自检里要直读宿主的那几项事实——能力按端口声明，宿主探针在 detail 侧实现，由能力入口装进来。
+/// 目的：自检里要直读宿主的那几项事实——能力按端口声明，宿主探针在 detail 侧实现，由单元入口装进来。
 pub trait Facts: Send + Sync {
     /// 目的：本机围栏能力（生产路径只取一次）。
     fn fence(&self) -> FenceFacts;
@@ -167,7 +167,7 @@ impl Fault {
             code: 2,
         }
     }
-    /// 目的：执行失败（能力面报错）。
+    /// 目的：执行失败（入站面报错）。
     pub fn failed(message: impl Into<String>) -> Fault {
         Fault {
             message: message.into(),

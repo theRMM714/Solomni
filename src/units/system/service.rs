@@ -1,6 +1,6 @@
-//! 目的：系统维护与自检能力的用例实现——把各能力的用例面组合成启动相命令要的一次调用。
+//! 目的：系统维护与自检单元的用例实现——把各单元的用例面组合成启动相命令要的一次调用。
 //! 管：SystemService 的依赖字段、System 的逐条实现、写操作的确认门槛与失败码（Fault）。
-//! 不管：回执排版（在 presentation/cli/boot.rs）、端口适配器构造（在组合根）、各能力内部规则。
+//! 不管：回执排版（在 presentation/cli/boot.rs）、端口适配器构造（在组合根）、各单元内部规则。
 //! 联动：entry::assembly::system 注入依赖；presentation/cli/boot.rs 与 Web 的维护入口消费。
 
 use std::path::PathBuf;
@@ -22,7 +22,7 @@ use crate::units::system::api::{
 };
 use crate::units::workspace::api::{WorkGcReport, Workspace, safe_file_name};
 
-/// 目的：系统维护能力的依赖面——全部由组合根注入（能力自己不构造别的能力的适配器）。
+/// 目的：系统维护单元的依赖面——全部由组合根注入（能力自己不构造别的单元的适配器）。
 pub struct SystemDeps {
     /// 目的：产品根（自检要读 `.home` 与 `.tools` 的现场事实）。
     pub root: PathBuf,
@@ -47,7 +47,7 @@ pub struct SystemService {
 }
 
 impl SystemService {
-    /// 目的：按组合根注入的依赖、宿主事实端口与便携维护端口装一次（实现由能力入口装配）。
+    /// 目的：按组合根注入的依赖、宿主事实端口与便携维护端口装一次（实现由单元入口装配）。
     pub fn with_facts(
         deps: SystemDeps,
         facts: Arc<dyn Facts>,

@@ -193,7 +193,7 @@ pub(crate) fn test_history_of(
     Arc::new(crate::units::conversation::session::service::SessionService::new(store))
 }
 
-/// 目的：测试用的 **tools 能力**：三张表 + 三个替身端口（与生产同一条路，R12）。两个面都从这里出：`Arc<dyn Tools>`（表）与 `Arc<dyn ToolExec>`（执行）。
+/// 目的：测试用的 **tools 单元**：三张表 + 三个替身端口（与生产同一条路，R12）。两个面都从这里出：`Arc<dyn Tools>`（表）与 `Arc<dyn ToolExec>`（执行）。
 pub(crate) fn test_tools_svc() -> Arc<crate::units::tools::service::ToolsService> {
     test_tools_svc_with(
         Arc::new(SilentRunner),

@@ -1,7 +1,7 @@
 //! 目的：入口的内部协议分派——守门子进程、机器可读探针与围栏台账；产品命令不在这里。
 //! 管：取产品根前后的两段字面量分派；只认**内部协议**旗语（不进命令表，也不进 --help）。
-//! 不管：产品命令的执行（在 presentation/cli/boot.rs 与 system 能力）、根规范化、装配（在 main 与 entry 的其它文件）。
-//! 联动：`src/main.rs` 先分派启动相命令、再按两段调用本文件；探针实现在 `src/entry/probes/`，守门在 `src/guard/`。
+//! 不管：产品命令的执行（在 presentation/cli/boot.rs 与 system 单元）、根规范化、装配（在 main 与 entry 的其它文件）。
+//! 联动：`src/main.rs` 先分派启动相命令、再按两段调用本文件；探针实现在 `src/entry/probes/`，守门在 `src/guard.rs`。
 
 use std::path::Path;
 
@@ -39,7 +39,7 @@ pub(crate) fn before_root(args: &[String]) -> Option<i32> {
     if let Some(i) = args.iter().position(|a| a == "--https-check") {
         return Some(super::probes::https_check(args, i));
     }
-    // 隐藏模式：把归档解到目录（跨平台纯 Rust）——provision 能力用它解归档，不依赖用户装了什么解压工具。
+    // 隐藏模式：把归档解到目录（跨平台纯 Rust）——provision 单元用它解归档，不依赖用户装了什么解压工具。
     if let Some(i) = args.iter().position(|a| a == "--unpack") {
         return Some(super::probes::unpack_cli(args, i));
     }

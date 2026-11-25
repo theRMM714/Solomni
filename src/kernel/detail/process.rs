@@ -1,4 +1,4 @@
-//! 目的：工具执行适配器——把本能力放行的工具命令拉进围栏里跑（实现 kernel 共享的 ProcessRunner 端口）。
+//! 目的：工具执行适配器——把本单元放行的工具命令拉进围栏里跑（实现 kernel 共享的 ProcessRunner 端口）。
 //! 管：外层拉起守门进程（本程序的 --fence-run 模式）；由它把围栏与环境白名单装进真正的工具进程；stdin 送参、stdout/stderr 截获、超时连根杀树、输出截断。
 //! 不管：命令行与可达范围的策略（由调用方派生后传入）；命令来自 module.yaml，JSON 参数走 stdin（不进命令行）。
 //! 联动：围栏机制在 confine；ProcessRunner 端口形状见 src/kernel/ports.rs。

@@ -1,5 +1,5 @@
 //! 目的：Web 转录中心：tiny_http 服务器 + 长轮询增量事件推送。
-//! 管：HTTP 协议适配（请求分发、静态资源、长轮询与**入站能力面**之间的转译）、服务器生命周期；只绑 127.0.0.1，密钥永不进任何响应（能力面只给 id）。
+//! 管：HTTP 协议适配（请求分发、静态资源、长轮询与**入站面**之间的转译）、服务器生命周期；只绑 127.0.0.1，密钥永不进任何响应（入站面只给 id）。
 //! 不管：渲染（在浏览器 `src/presentation/web/assets/app/main.js` 起的分层模块）；路由目录与匹配（`src/presentation/web/routes.rs`）。
 //! 联动：核心状态在核心自己的线程上——这里拿不到它、也拿不到任何核心锁，「停止」直接说给核心听；请求经 `Faces`（`src/units/*/api.rs`）进入。
 
@@ -53,7 +53,7 @@ pub struct FenceInfo {
 pub const RESTART_EXIT_CODE: i32 = 75;
 
 /// 目的：启动转录中心服务器：**可中断**——收到 Ctrl+C / SIGINT 就正常关闭回到 CLI（进程仍在）。
-/// 参数：`faces` 是入站能力面，`port` 默认 3081，`fence` 是本机围栏能力。
+/// 参数：`faces` 是入站面，`port` 默认 3081，`fence` 是本机围栏能力。
 /// 约束：只绑本机回环；中断处理器是进程级的（`presentation::signal`），装一次之后一直有效，
 ///   这里只负责把「按过 Ctrl+C」翻译成「离开服务器」。
 pub fn serve(faces: Faces, port: u16, fence: FenceInfo) -> Result<(), String> {
@@ -76,7 +76,7 @@ pub(crate) fn serve_until(
     fence: &FenceInfo,
     stop: &dyn Fn() -> bool,
 ) -> Result<(), String> {
-    // 日志经**入站能力面**（faces.log）取——呈现层不持有端口对象。
+    // 日志经**入站面**（faces.log）取——呈现层不持有端口对象。
     let log = Arc::clone(&faces.log);
     log.info("web::serve", &format!("转录中心启动，端口 {}", port));
     let addr = format!("127.0.0.1:{}", port);
@@ -634,7 +634,7 @@ pub(crate) fn route(
 }
 
 /// 目的：请求里的会话类型 → 类型 id：唯一解析处；空值如实报错（路由据此回 400）。
-/// 约束：不复制会话类型表——在册与否由工作能力按 systools/profiles.yaml 判。
+/// 约束：不复制会话类型表——在册与否由工作单元按 systools/profiles.yaml 判。
 pub fn parse_kind(s: &str) -> Result<String, String> {
     let kind = s.trim();
     if kind.is_empty() {

@@ -1,11 +1,11 @@
-//! 目的：装配组合根——把替身装进各能力面与核心，和生产的接线同一条路。
-//! 管：能力面工厂、核心装配的各种变体、agent 登记辅助。
+//! 目的：装配组合根——把替身装进各入站面与核心，和生产的接线同一条路。
+//! 管：入站面工厂、核心装配的各种变体、agent 登记辅助。
 //! 不管：替身实现（各 `*.rs`）。
 //! 联动：`src/units/runtime/service/` 与 `docs/testing/doubles.md`。
 
 use super::*;
 
-/// 目的：登记处能力的测试装配：内存登记处 + 指定模型目录 + 指定通道 + 空日志。生产里这些端口由组合根注入，测试这里用替身顶。
+/// 目的：登记处子业务的测试装配：内存登记处 + 指定模型目录 + 指定通道 + 空日志。生产里这些端口由组合根注入，测试这里用替身顶。
 pub(crate) fn registry_service(
     store: InMemorySettings,
     llm: Arc<dyn crate::units::llm::api::Llm + Send + Sync>,
@@ -20,7 +20,7 @@ pub(crate) fn registry_service(
     )
 }
 
-/// 目的：测试用的 **llm 能力面**：把通道工厂 + 模型目录装进 `LlmService`（修信封用 `NoRepair`）。与生产同一条路——组合根装 service，别人只拿 `api::Llm` 面（R12）。
+/// 目的：测试用的 **llm 入站面**：把通道工厂 + 模型目录装进 `LlmService`（修信封用 `NoRepair`）。与生产同一条路——组合根装 service，别人只拿 `api::Llm` 面（R12）。
 pub(crate) fn test_llm(
     gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync>,
     catalog: Arc<FakeCatalog>,
@@ -48,7 +48,7 @@ pub(crate) fn test_llm_demo() -> Arc<dyn crate::units::llm::api::Llm + Send + Sy
     test_llm_with_repair(Arc::new(NoRepair))
 }
 
-/// 目的：测试用的 **workspace 能力面**：把两个出站端口装进 `WorkspaceService`（与生产同一条路，R12）。版本库默认用内存替身；要观察主副本/提交记录的用例用 `test_workspace_store`。
+/// 目的：测试用的 **workspace 入站面**：把两个出站端口装进 `WorkspaceService`（与生产同一条路，R12）。版本库默认用内存替身；要观察主副本/提交记录的用例用 `test_workspace_store`。
 pub(crate) fn test_workspace(
     dirs: Arc<dyn Workdirs + Send + Sync>,
 ) -> Arc<dyn crate::units::workspace::api::Workspace + Send + Sync> {
@@ -97,21 +97,21 @@ impl crate::units::catalog::modules::ports::ModuleStateStore for InMemoryModuleS
     }
 }
 
-/// 目的：测试用的**模块能力面**——把清单来源与覆盖存储装进 `ModulesService`（与生产同一条路，R12）。
+/// 目的：测试用的**模块入站面**——把清单来源与覆盖存储装进 `ModulesService`（与生产同一条路，R12）。
 pub(crate) fn test_modules(
     source: Arc<dyn ModuleSource + Send + Sync>,
 ) -> Arc<dyn crate::units::catalog::modules::api::Modules + Send + Sync> {
     test_modules_store(source, Arc::new(InMemoryModuleState::new()))
 }
 
-/// 目的：测试用的模块能力面（指定覆盖存储；断言落盘/有效值的用例用它）。
+/// 目的：测试用的模块入站面（指定覆盖存储；断言落盘/有效值的用例用它）。
 pub(crate) fn test_modules_store(
     source: Arc<dyn ModuleSource + Send + Sync>,
     store: Arc<dyn crate::units::catalog::modules::ports::ModuleStateStore + Send + Sync>,
 ) -> Arc<dyn crate::units::catalog::modules::api::Modules + Send + Sync> {
     Arc::new(
         crate::units::catalog::modules::service::ModulesService::new(source, store)
-            .expect("装模块能力"),
+            .expect("装模块"),
     )
 }
 
@@ -338,7 +338,7 @@ pub(crate) fn core_with_io(
 }
 
 /// 目的：注入**构建面**的装配——创建会话前补编的用例要断言"编完才建 / 编不成不建"。
-/// 参数：`modules` = 清单事实；`builds` = 构建能力面（用例给真实现或替身）。
+/// 参数：`modules` = 清单事实；`builds` = 构建入站面（用例给真实现或替身）。
 pub(crate) fn core_with_builds(
     modules: Vec<Module>,
     builds: Arc<dyn crate::units::maintenance::builds::api::Builds + Send + Sync>,

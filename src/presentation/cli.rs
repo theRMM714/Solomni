@@ -1,7 +1,7 @@
-//! 目的：终端转录中心：解析命令 → 用入站能力面 → 渲染事件流。
+//! 目的：终端转录中心：解析命令 → 用入站面 → 渲染事件流。
 //! 管：命令分发、启动页事实、退出或转入 Web 的去向。
-//! 不管：业务决策与状态（都在各能力内部）；终端 I/O 与配色（`cli/term.rs`、`cli/theme.rs`）。
-//! 联动：能力面来自 `src/units/*/api.rs`；事件词汇与 `src/presentation/web/` 并列共用；模块声明见 `src/presentation.rs`。
+//! 不管：业务决策与状态（都在各单元内部）；终端 I/O 与配色（`cli/term.rs`、`cli/theme.rs`）。
+//! 联动：入站面来自 `src/units/*/api.rs`；事件词汇与 `src/presentation/web/` 并列共用；模块声明见 `src/presentation.rs`。
 
 use crate::presentation::faces::Faces;
 use crate::units::pure::exec_model::api::Tier;
@@ -77,7 +77,7 @@ pub enum CliExit {
 /// 目的：转录中心主循环：交互模式用固定输入框，非交互模式保持逐行输入（输出不变）。
 /// 参数：`web_default_port` 是会话内 `web` 命令不带端口时的默认值；`plain` 为真则强制纯文本；`anim` 为假则生成态不轮流刷帧；
 ///   `startup` 是启动目录当外部工作区的结论（组合根算一次，这里只用不判）；`system` 是启动相命令的执行面
-///   （与命令行共用同一份系统维护能力，见 `run_boot`）。
+///   （与命令行共用同一份系统维护单元，见 `run_boot`）。
 pub fn run(
     faces: Faces,
     web_default_port: u16,

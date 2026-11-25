@@ -1,6 +1,6 @@
 //! 目的：呈现层的入站面集合：把同一个核心手柄按**屏幕各取一面**拆成窄契约，每个渠道只认自己那一面。
 //! 管：`Faces` 的字段与 `Faces::from_handle`；字段类型全部是各单元自己的入站契约或值。
-//! 不管：任何判定与编排（在 `runtime` 与各能力）；字段之外的装配顺序（在 `src/main.rs`）。
+//! 不管：任何判定与编排（在 `runtime` 与各单元）；字段之外的装配顺序（在 `src/main.rs`）。
 //! 联动：`src/main.rs` 造出手柄后调 `Faces::from_handle`，再补上 `provision` / `storage` / `toolchains`；`src/presentation/{cli,web}` 各屏只取需要的字段。
 
 use crate::units::catalog::modules::api::ModulesOps;
@@ -28,9 +28,9 @@ pub struct Faces {
     pub modules: Arc<dyn ModulesOps + Send + Sync>,
     /// 目的：事件台的**只读**面：呈现层订阅事实，但写面（`Events`）不出本层。
     pub events: Arc<dyn EventFeed>,
-    /// 目的：动作能力：目录 + 分发（CLI 与 Web 共用同一份声明与同一处授权）。
+    /// 目的：动作面：目录 + 分发（CLI 与 Web 共用同一份声明与同一处授权）。
     pub actions: Arc<dyn ActionOps + Send + Sync>,
-    /// 目的：日志能力：呈现层只经它埋点（**不持有端口对象**）。
+    /// 目的：日志面：呈现层只经它埋点（**不持有端口对象**）。
     pub log: Arc<dyn LogOps + Send + Sync>,
     /// 目的：常驻服务的统一管理面（组合根注入的同一份，经核心手柄转发）。
     pub residents: Arc<dyn crate::units::residents::api::ResidentOps + Send + Sync>,

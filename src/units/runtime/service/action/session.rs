@@ -102,7 +102,7 @@ impl Handle {
                 format!("interrupted:{}", stopped.len())
             }
             d::ControlAction::Stop => {
-                // 走会话能力的停止：冻结整棵子树 + 级联中断在跑的生成（回执给实际停下的会话数）。
+                // 走会话单元的停止：冻结整棵子树 + 级联中断在跑的生成（回执给实际停下的会话数）。
                 let stopped = RuntimeOps::stop(self, sid);
                 format!("stopped:{}", stopped.len())
             }

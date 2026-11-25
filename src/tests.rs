@@ -91,8 +91,8 @@ pub(crate) fn fence_acl_guard() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// 目的：起一个内存装配的核心手柄并把能力面拆成 `Faces`（契约测试共用）。
-///   返回手柄是为了能观察事件台与测试注入；只用能力面的用例可以忽略它。
+/// 目的：起一个内存装配的核心手柄并把入站面拆成 `Faces`（契约测试共用）。
+///   返回手柄是为了能观察事件台与测试注入；只用入站面的用例可以忽略它。
 pub(crate) fn ops_with(
     modules: Vec<crate::units::catalog::modules::api::Module>,
     core_script: Vec<&str>,
@@ -113,7 +113,7 @@ pub(crate) fn ops_with(
     (handle, faces)
 }
 
-/// 目的：注入**指定 vm 能力面与会话历史**的内存装配（guest 诊断动作要断言"回包就是 guest 报的事实"）。
+/// 目的：注入**指定 vm 入站面与会话历史**的内存装配（guest 诊断动作要断言"回包就是 guest 报的事实"）。
 /// 约束：与 `core_with_gateway` 同形，只把 vm 与历史换成本次用例给的替身。
 pub(crate) fn ops_with_vm(
     modules: Vec<crate::units::catalog::modules::api::Module>,

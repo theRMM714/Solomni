@@ -9,7 +9,7 @@ use crate::units::session_model::api::{MEETING, PROXY, SINGLE};
 // ---------- Core 门面：会话中心（内存组合根） ----------
 #[test]
 pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
-    // 呈现层只把会话类型原样往下传：在册与否由工作能力按会话类型表判（见 detail/profiles.rs）。
+    // 呈现层只把会话类型原样往下传：在册与否由工作单元按会话类型表判（见 detail/profiles.rs）。
     use crate::presentation::web::parse_kind;
     assert_eq!(parse_kind("single").unwrap(), SINGLE);
     assert_eq!(parse_kind(" collab ").unwrap(), MEETING);

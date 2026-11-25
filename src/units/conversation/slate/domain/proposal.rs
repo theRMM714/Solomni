@@ -1,7 +1,7 @@
 //! 目的：名单的收束规则（纯函数）——模式决定最终交出去的是几条。
 //! 管：按模式收束（协作 = 原样；单 agent = 最多一条，多条并成一个当场组装的 agent）。
-//! 不管：IO、端口与状态；候选名单怎么来（那是本能力 `service.rs` 与登记处的事）。
-//! 联动：由本能力的 `service.rs` 消费。
+//! 不管：IO、端口与状态；候选名单怎么来（那是本单元 `service.rs` 与登记处的事）。
+//! 联动：由本单元的 `service.rs` 消费。
 
 use crate::units::conversation::slate::api::{Mode, Pick};
 use crate::units::pure::registry_model::api::AgentMeta;

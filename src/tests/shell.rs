@@ -1,6 +1,6 @@
 //! 目的：钉命令行的统一入口——模块清单、三级手册与模块工具的参数落点都从声明派生。
 //! 管：清单正文、模块手册（文本与 JSON）、工具手册的派生用法、模块工具词法（具名旗 / 整段 JSON）。
-//! 不管：词法规则本身（src/tests/op.rs）、业务动作的执行（各能力测试）。
+//! 不管：词法规则本身（src/tests/op.rs）、业务动作的执行（各单元测试）。
 //! 联动：src/presentation/cli/shell.rs、systools/commands.yaml、modules/*/module.yaml。
 
 use super::doubles::module_of;

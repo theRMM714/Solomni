@@ -11,7 +11,7 @@ use std::fs::File;
 use std::path::Path;
 
 /// 目的：工作区**目录布局**端口——一次工作的 work 目录与各 agent 沙箱（机制在适配层）。
-/// 约束：本能力只说"哪次工作、哪些 agent"，不碰路径拼接细节；**只有 `service.rs` 持有它**（R12）。
+/// 约束：本单元只说"哪次工作、哪些 agent"，不碰路径拼接细节；**只有 `service.rs` 持有它**（R12）。
 pub trait Workdirs {
     /// 目的：把工作区绑定落成布局投影（`Some` = 外部工作区根；`None` = 产品内布局）。
     /// 约束：只写会话目录里的布局文件，不创建 / 不校验外部根，也不碰用户文件。
@@ -30,7 +30,7 @@ pub trait Workdirs {
     fn write_work(&self, session: &str, name: &str, bytes: &[u8]) -> Result<(), String>;
     /// work/ 下是否已有同名文件（上传同名冲突判定）。
     fn work_has(&self, session: &str, name: &str) -> bool;
-    /// 沙箱寻址根（work 与各 agent 私有区）：布局机制在适配层，拼接与越界校验在本能力。
+    /// 沙箱寻址根（work 与各 agent 私有区）：布局机制在适配层，拼接与越界校验在本单元。
     fn roots(&self, session: &str, agents: &[String]) -> Result<WorkRoots, String>;
     /// 列出本工作可引用的文件（work/ 与各 agent 沙箱；相对路径、/ 分隔、排序稳定）。
     fn list(&self, session: &str, agents: &[String]) -> Result<WorkFiles, String>;

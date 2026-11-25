@@ -967,7 +967,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
     agents: [{ name: '资料手', transient: true, modules: ['harvest', 'render', 'indexer'], model: 'm1' }],
   });
   assert(cR.status === 200, '建「真工具」工作（harvest + render + indexer）', cR.text.slice(0, 200));
-  // 投喂两份材料（走产品的上传能力面，落进本次工作的共享区）。
+  // 投喂两份材料（走产品的上传入站面，落进本次工作的共享区）。
   assert((await act(nameR, 'upload', {
     name: '甲.md', data_base64: Buffer.from('# 甲\n\n本地优先的检索：索引建好之后可以离线查。\n', 'utf8').toString('base64'),
   })).status === 200, '投喂甲.md');
@@ -984,7 +984,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
   const corpusPath = path.join(workDir, 'corpus.jsonl');
   const reportPath = path.join(workDir, 'report.html');
   const indexPath = path.join(workDir, 'index.bin');
-  // 直接经产品能力面驱动一次发言：假供应商会按提示词分支发出 harvest.scan、render.report 与 indexer.build/query。
+  // 直接经产品入站面驱动一次发言：假供应商会按提示词分支发出 harvest.scan、render.report 与 indexer.build/query。
   const sayR = await act(nameR, 'send_message', { text: '真工具链路：先抽语料，再渲染报告，最后建索引并检索' });
   assert(sayR.status === 200, '「真工具」发言', sayR.text.slice(0, 200));
   const rowsR = (await all(nameR)).filter((x) => x.tool).map((x) => x.tool);

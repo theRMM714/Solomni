@@ -1,4 +1,4 @@
-//! 目的：工作区能力的 service 门面——`WorkspaceService` 的字段与构造、端口持有、以及各用例族共用的底座原语。
+//! 目的：工作区单元的 service 门面——`WorkspaceService` 的字段与构造、端口持有、以及各用例族共用的底座原语。
 //! 管：`Workdirs` / `WorkStore` 两个端口只在这里（R12）；gate、tree_of、pin_head、restore_impl、materialize、settle、提交号预留与待恢复事务，以及 `work_*` 工具执行者的装配。
 //! 不管：具体用例（commit / sync / history / resolve / lifecycle 各子模块）、`Workspace` 的 trait 转发（facade）、落盘实现（detail）。
 //! 联动：`api::Workspace` 的唯一实现在 facade.rs，逐条转发到同级子模块；组合根注入两个端口适配器。
@@ -69,7 +69,7 @@ const MAX_LOG_LIMIT: usize = 200;
 /// 一条提交详情里最多列出的改动条数（超出如实标注截断）。
 const MAX_COMMIT_CHANGES: usize = 500;
 
-/// 目的：工作区能力——持四个端口，按用例答话。
+/// 目的：工作区单元——持四个端口，按用例答话。
 pub struct WorkspaceService {
     dirs: Arc<dyn Workdirs + Send + Sync>,
     store: Arc<dyn WorkStore + Send + Sync>,

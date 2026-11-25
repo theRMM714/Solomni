@@ -7,7 +7,7 @@ use super::super::prelude::*;
 
 pub(crate) type WorkFace = Arc<dyn crate::units::workspace::api::Workspace + Send + Sync>;
 
-/// 目的：装配一个只用内存端口的工作区能力面：目录布局 + 版本库都是内存替身。
+/// 目的：装配一个只用内存端口的工作区入站面：目录布局 + 版本库都是内存替身。
 pub(crate) fn work_ws() -> (WorkFace, Arc<InMemoryWorkspace>, Arc<InMemoryWorkStore>) {
     let dirs = Arc::new(InMemoryWorkspace::new());
     let store = Arc::new(InMemoryWorkStore::new());

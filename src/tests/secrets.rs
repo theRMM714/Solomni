@@ -19,7 +19,7 @@ fn demo_modules() -> Vec<Module> {
     vec![m]
 }
 
-/// 目的：装好的能力面 + 可观察的存储替身。
+/// 目的：装好的入站面 + 可观察的存储替身。
 fn demo() -> (
     Arc<dyn crate::units::catalog::secrets::api::SecretOps + Send + Sync>,
     Arc<InMemorySecretStore>,
@@ -28,7 +28,7 @@ fn demo() -> (
     let modules = test_modules(Arc::new(VecSource(demo_modules())));
     let port: Arc<dyn crate::units::catalog::secrets::ports::SecretStore + Send + Sync> =
         store.clone();
-    let ops = crate::entry::assembly::secrets_with(modules, port).expect("装隐秘字段能力面");
+    let ops = crate::entry::assembly::secrets_with(modules, port).expect("装隐秘字段入站面");
     (ops, store)
 }
 

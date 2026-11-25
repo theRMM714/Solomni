@@ -1,4 +1,4 @@
-//! 目的：vm 能力的用例与端口持有者。
+//! 目的：vm 单元的用例与端口持有者。
 //! 管：持 VmEngine / ShareBackend（R12），按租约管理 guest 生命周期
 //!   （guest 与共享凭据同生共死；每次执行前后走共享的同步钩子）。
 //! 不管：纯逻辑（domain/）、运行包库与选包（packages）；适配器（detail/）由组合根构造。
@@ -33,7 +33,7 @@ struct Lease {
     execs: BTreeMap<(String, String), (FileStamp, String)>,
 }
 
-/// 目的：虚拟机档能力——持 VM 引擎与**已实现的全部共享后端**，按会话租约管理 guest。
+/// 目的：虚拟机档单元——持 VM 引擎与**已实现的全部共享后端**，按会话租约管理 guest。
 pub struct VmService {
     engine: Arc<dyn VmEngine + Send + Sync>,
     /// 已实现的共享后端（按优先序持有）：起 guest 时按 GuestSpec.shares 挑第一个落得上的。

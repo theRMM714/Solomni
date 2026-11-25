@@ -1,4 +1,4 @@
-//! 目的：工具能力的出站端口——文件读写与三张表的加载（机制在适配层）。
+//! 目的：工具单元的出站端口——文件读写与三张表的加载（机制在适配层）。
 //! 管：`SystoolsSource` / `SysIo` 与它们的数据形态（`FileRead` / `DirEntry`）。
 //! 不管：外部进程执行与围栏授权释放——那是 kernel 共享的 `ProcessRunner` / `FenceHost`。
 //! 联动：由 `service.rs` 持有（R12）；kernel 端口见 `src/kernel/ports.rs`。
@@ -224,7 +224,7 @@ pub struct ScanSummary {
 /// 目的：扫描单行时最多读多少字节；超出的部分丢掉并计入 `long_lines`。
 pub const MAX_SCAN_LINE_BYTES: usize = 64 * 1024;
 
-/// 目的：内置文件工具的读写端口：机制在适配层，放行/寻址/越界在本能力。
+/// 目的：内置文件工具的读写端口：机制在适配层，放行/寻址/越界在本单元。
 ///   读严格按 UTF-8 解码，非法字节如实标注；写一律 UTF-8；列目录只报名字/类型/大小。
 pub trait SysIo: Send + Sync {
     fn read(&self, path: &std::path::Path) -> Result<FileRead, String>;

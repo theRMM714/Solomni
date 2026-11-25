@@ -724,7 +724,7 @@ pub(crate) fn dispatch_external(
         );
         return (module.clone(), deny(&ctx.face, why));
     }
-    // 常驻服务的操作：不走外部命令，转给常驻服务能力（服务进程已在它自己的围栏里跑着）。
+    // 常驻服务的操作：不走外部命令，转给常驻服务单元（服务进程已在它自己的围栏里跑着）。
     if let Some(op) = mt.services.get(&inv.name) {
         let args: serde_json::Value = match serde_json::from_str(&inv.args_json) {
             Ok(a) => a,

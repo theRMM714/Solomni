@@ -16,7 +16,7 @@ use crate::units::vm::api::Vm;
 
 use super::collab::{CollabSession, Phase};
 
-/// 目的：协作流程工厂：持有装配两段要的能力面，按 id 造讨论段或执行段。
+/// 目的：协作流程工厂：持有装配两段要的入站面，按 id 造讨论段或执行段。
 pub struct CollabFlows {
     llm: Arc<dyn Llm + Send + Sync>,
     vm: Arc<dyn Vm + Send + Sync>,
@@ -29,7 +29,7 @@ pub struct CollabFlows {
 }
 
 impl CollabFlows {
-    /// 目的：组合根注入：能力面全是共享句柄（Arc 克隆，不新建实现），会话类型表是装好的那一份。
+    /// 目的：组合根注入：入站面全是共享句柄（Arc 克隆，不新建实现），会话类型表是装好的那一份。
     // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。
     #[allow(clippy::too_many_arguments)]
     pub fn new(

@@ -1,4 +1,4 @@
-//! 目的：共享区版本化工作区的**成员侧执行者**——把十个 work_* 调用接到 workspace 能力面上。
+//! 目的：共享区版本化工作区的**成员侧执行者**——把十个 work_* 调用接到 workspace 入站面上。
 //! 管：成员工具调用的参数解析、路径权限收口与回执转交。
 //! 不管：版本库写入、冲突与备份判定（在 workspace）；工具声明（`systools/tools.yaml`）。
 //! 联动：`turn` 装配工具面时按 allowed 现取本文件的 `work_handlers`；版本库写入由 workspace 的

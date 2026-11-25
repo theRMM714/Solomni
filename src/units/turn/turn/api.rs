@@ -1,6 +1,6 @@
-//! 目的：turn 能力的入站契约：事件台、生成入口，以及宿主必须提供的入口（`TurnHost`）。
+//! 目的：turn 单元的入站契约：事件台、生成入口，以及宿主必须提供的入口（`TurnHost`）。
 //! 管：重导出事件台与生成入口（`service::generation`），并定义宿主端口 `TurnHost`。
-//! 不管：回合状态与会话本体（在 `turn_state`）、推进规则（`service/{turn,flow,rebuild}`）、谁在什么时候放取会话（宿主）。
+//! 不管：回合状态本体（在 `turn_state`）、推进规则（`service/{turn,flow,rebuild}`）、谁在什么时候放取会话（宿主）。
 //! 联动：宿主（命令队列手柄）实现 `TurnHost`；呈现层与测试只经本模块取用。
 
 use std::sync::Arc;
@@ -140,7 +140,7 @@ pub(crate) enum Prepared {
     NotSingle,
 }
 
-/// 目的：回档重建的**描述**（改需求那条路径要宿主执行重建，本层不持生命周期能力）。
+/// 目的：回档重建的**描述**（改需求那条路径要宿主执行重建，本层不持生命周期）。
 ///   `events` 已经是改写后的盘上事件切片；`next` 是沿用"全量最大 id + 1"的续号。
 pub(crate) struct RestoreRequest {
     pub(crate) sid: String,

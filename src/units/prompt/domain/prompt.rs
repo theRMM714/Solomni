@@ -42,17 +42,17 @@ pub fn render(template: &str, vars: Vars) -> Result<String, String> {
 }
 
 /// 目的：装配输入的**内存形态**：**只有提示词文本**（`prompts/`）。
-///    工具总表与机制席位是**另一个能力的东西**（`systools/` 与 `session/domain/mechanism.rs`）：
-///    挂进这里就等于让提示词能力反过来依赖工具能力，两边成环。
-///    **持有者只有本能力**（`service.rs` 一处，R4）。运行时回执与清单行归各产生它们的代码，
+///    工具总表与机制席位是**另一个单元的东西**（`systools/` 与 `session/domain/mechanism.rs`）：
+///    挂进这里就等于让提示词单元反过来依赖工具单元，两边成环。
+///    **持有者只有本单元**（`service.rs` 一处，R4）。运行时回执与清单行归各产生它们的代码，
 ///    不再从这里共享；这里只有提示词段。
 #[derive(Debug, Clone)]
 pub struct Prompts {
-    /// 目的：按名字取的那些段。**布局只有本能力知道**。
+    /// 目的：按名字取的那些段。**布局只有本单元知道**。
     pub(crate) core: CoreTexts,
 }
 
-/// 目的：**一段核心提示词的名字**：别的能力按名字取段，不点册子内部结构。
+/// 目的：**一段核心提示词的名字**：别的单元按名字取段，不点册子内部结构。
 ///    加/改一段提示词的步骤因此固定成两步：`prompts/` 里加键 → 这里加一个变体（缺了编译不过）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Segment {
@@ -98,8 +98,8 @@ pub enum Segment {
 
 /// 目的：把册子的多个文件合并成内存形态：各文件的**顶层键**合并后就是 `core:` 的内容。
 /// 参数：`docs` = 每个文件一份 YAML 文本。
-///    **别的能力不按字段路径读册子**：它们按名字取一段（`Prompt::text` / `Prompt::render`）。
-///    所以"文件怎么分"与"某一段落在结构体的哪一格"都只有本能力知道——改版式不再牵动别的能力。
+///    **别的单元不按字段路径读册子**：它们按名字取一段（`Prompt::text` / `Prompt::render`）。
+///    所以"文件怎么分"与"某一段落在结构体的哪一格"都只有本单元知道——改版式不再牵动别的单元。
 ///    三条如实报错（不静默）：**键在两个文件里重复**（拆分时最可能犯的错）、**缺键**、**类型不对**。
 pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
     let mut merged = yaml_serde::Mapping::new();

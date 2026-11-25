@@ -1,6 +1,6 @@
 //! 目的：入站契约的实现：把每个窄契约的每个方法落到一次 call 或一次转发上。
 //! 管：WorkOps / TurnOps / RuntimeOps / RegistryOps / HistoryOps / ModulesOps / LogOps 七个实现。
-//! 不管：方法体里的业务判定（在下层能力）；长步骤编排（activation / rewind / action）。
+//! 不管：方法体里的业务判定（在下层单元）；长步骤编排（activation / rewind / action）。
 //! 联动：呈现层经 entry/faces.rs 拿到这里实现的窄契约；每个方法都进核心线程执行。
 
 use super::*;
@@ -284,7 +284,7 @@ impl RuntimeOps for Handle {
         let sid = sid.to_string();
         let text = text.to_string();
         // 改需求改写盘上转录并推重置快照上事件台，刷新/多端才看到同一条需求；
-        // 重建归这一层（生命周期能力是宿主的）：turn 只交回「哪条会话 + 事件切片 + 下一个行号」。
+        // 重建归这一层（生命周期由宿主管）：turn 只交回「哪条会话 + 事件切片 + 下一个行号」。
         let outcome = self.call({
             let sid = sid.clone();
             move |core| {

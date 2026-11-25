@@ -13,7 +13,7 @@ use crate::units::turn::turn::api::{EventFeed, EventLine, Events};
 const BUS_MAX: usize = 10_000;
 const BUS_KEEP: usize = 5_000;
 
-/// 目的：事件发布台：核心是唯一生产者（`push` 只由本能力调用）；
+/// 目的：事件发布台：核心是唯一生产者（`push` 只由本单元调用）；
 ///   任何数量的消费者按 `since` 增量取——多端并用、断线重连都不用额外机制。
 pub(crate) struct EventBus {
     inner: Mutex<BusInner>,

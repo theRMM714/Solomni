@@ -856,7 +856,7 @@ fn guest_runtime_failure_is_soft_for_the_whole_set_but_hard_when_named() {
         note: String::new(),
     };
     let file_dep = mk("x.file", "file", ".vm/x", ".vm/x/a.bin", "release:a.bin");
-    // 虚拟根还没装 + 没注入 vm 能力面：这一条必然失败，正好用来验软失败。
+    // 虚拟根还没装 + 没注入 vm 入站面：这一条必然失败，正好用来验软失败。
     let rt_dep = mk(
         "vm.guest-runtime.linux",
         "guest-runtime",

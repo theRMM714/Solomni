@@ -11,7 +11,7 @@ const path = require("path");
 const { rel } = require("../../lib/fsutil.js");
 const { mask } = require("../../lib/rust-mask.js");
 
-// 替身与装配层：按能力装配被测对象本就是它们的职责；用例文件不在豁免内。
+// 替身与装配层：按单元装配被测对象本就是它们的职责；用例文件不在豁免内。
 const SCAFFOLD = [
   "src/tests/doubles.rs",
   "src/tests/doubles/",
@@ -43,7 +43,7 @@ function testsApiOnly(root) {
         const m = IMPL_USE.exec(lines[i]);
         if (!m) continue;
         problems.push(
-          `${r}:${i + 1} 用例不得直接引用能力的实现分区（::${m[1]}::）——改走 ::api / ::ports 或组合根 crate::entry::assembly，装配细节放替身层：${lines[i].trim()}`
+          `${r}:${i + 1} 用例不得直接引用单元的实现分区（::${m[1]}::）——改走 ::api / ::ports 或组合根 crate::entry::assembly，装配细节放替身层：${lines[i].trim()}`
         );
       }
     }

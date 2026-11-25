@@ -1,6 +1,6 @@
 //! 目的：启动期把项目内基础工具链（.tools/toolchains）前置到 PATH，并设置工具需要的环境变量。
 //! 管：读 active.json、校验目标平台与相对路径、拼出"项目 bin 在前、宿主 PATH 在后"的环境、产生回退报告。
-//! 不管：下载 / 解包 / 版本选择（provision 能力的 `kind: toolchain`）；guest 内工具链；模块工具协议与围栏。
+//! 不管：下载 / 解包 / 版本选择（provision 单元的 `kind: toolchain`）；guest 内工具链；模块工具协议与围栏。
 //! 联动：由 main 在根解析后调用；环境随后由 fence_env / interpreter_dirs / HostProbe 共用。
 
 use crate::units::catalog::packages::api::{BaseFacts, HostFallback};

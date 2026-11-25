@@ -1,7 +1,7 @@
 //! 目的：端点候选、重试判定与尝试归类的纯逻辑（无 IO）。
 //! 管：chat / models 候选序列、补全与回落规则、进程内端点记忆、可重试状态判定。
 //! 不管：实际发请求（在 http_chat / model_catalog / http_probe）；协议形状与信封。
-//! 联动：被 http_chat、model_catalog、http_probe 复用；无本能力之外的依赖。
+//! 联动：被 http_chat、model_catalog、http_probe 复用；无本单元之外的依赖。
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
