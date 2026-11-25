@@ -690,19 +690,19 @@ fn main() {
             std::process::exit(2);
         };
         match core.registry_mut().probe_model_tools(id) {
-            Ok(units::runtime::api::ProbeOutcome::Supported { detail }) => {
+            Ok(units::llm::api::ProbeOutcome::Supported { detail }) => {
                 println!("[探测] 模型 {}：支持原生工具调用（{}）", id, detail);
                 println!("[探测] 已把 models.yaml 的 tools 写成 native");
                 std::process::exit(0);
             }
-            Ok(units::runtime::api::ProbeOutcome::Unsupported { detail }) => {
+            Ok(units::llm::api::ProbeOutcome::Unsupported { detail }) => {
                 println!("[探测] 模型 {}：**不支持**原生工具调用（{}）", id, detail);
                 println!(
                     "[探测] 已把 models.yaml 的 tools 写成 envelope（手写信封照旧可用，能力没有任何损失）"
                 );
                 std::process::exit(0);
             }
-            Ok(units::runtime::api::ProbeOutcome::Unknown { detail }) => {
+            Ok(units::llm::api::ProbeOutcome::Unknown { detail }) => {
                 println!("[探测] 模型 {}：无法判定（{}）", id, detail);
                 println!("[探测] 登记处**没有改动**：请自行决定填 native 还是 envelope");
                 std::process::exit(0);

@@ -4,8 +4,9 @@
 //! 联动：核心状态在核心自己的线程上——这里拿不到它、也拿不到任何核心锁，「停止」直接说给核心听；请求经 `Faces`（`src/units/*/api.rs`）进入。
 
 use crate::presentation::faces::Faces;
-use crate::units::runtime::api::Output;
-use crate::units::runtime::api::{Acted, ActionCall, Caller, SessionEvent};
+use crate::units::runtime::api::{Acted, ActionCall, Caller};
+use crate::units::transcript::api::SessionEvent;
+use crate::units::turn::turn::api::Output;
 use crate::units::workspace::api::MAX_ASSET_BYTES;
 pub(crate) mod assets;
 mod host_fs;

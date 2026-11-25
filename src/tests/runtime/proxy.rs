@@ -440,7 +440,7 @@ pub(crate) fn declaration_shape_is_enforced_before_semantics() {
 ///   工具行落进它自己的转录。这条钉住“代理会话就是普通成员会话 + 派发去特例”的整条链。
 #[test]
 pub(crate) fn the_proxy_session_runs_a_turn_through_the_generic_loop() {
-    use crate::units::runtime::api::Output;
+    use crate::units::turn::turn::api::Output;
 
     let (handle, faces) = super::super::ops_with(
         vec![],
@@ -720,7 +720,7 @@ pub(crate) fn proxy_session_exposes_context_usage() {
     let sid = faces.work.create_work(spec).expect("建代理会话").0.sid;
     faces
         .turn
-        .say(&sid, "开始", crate::units::runtime::api::Output::Final)
+        .say(&sid, "开始", crate::units::turn::turn::api::Output::Final)
         .expect("代理一轮");
     let views = faces
         .work

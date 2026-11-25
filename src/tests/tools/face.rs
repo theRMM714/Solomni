@@ -564,7 +564,7 @@ pub(crate) fn module_lease_serializes_exclusive_calls_but_allows_parallel_reader
 
 #[test]
 pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
-    use crate::units::runtime::api::ProbeOutcome;
+    use crate::units::llm::api::ProbeOutcome;
     // 一开始登记处说"不支持原生"：会话按手写信封装配（系统提示也就教信封）
     let outcome = Arc::new(Mutex::new(ProbeOutcome::Unsupported {
         detail: "先不支持".to_string(),

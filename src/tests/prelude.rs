@@ -44,7 +44,7 @@ pub use crate::units::vm::api::{self as exec};
 pub use crate::units::catalog::modules::ports::ModuleSource;
 pub use crate::units::workspace::ports::Workdirs;
 
-pub use crate::units::runtime::api::SessionEvent;
+pub use crate::units::transcript::api::SessionEvent;
 pub use crate::units::work::api::{ConfigAgent, SessionEdit, WorkSpec};
 
 pub use crate::units::conversation::collab::api::{CollabEvent, Pending};

@@ -8,9 +8,9 @@ use super::super::{ops_with, single_work, slow_ops};
 use super::support::spawn;
 use crate::presentation::faces::Faces;
 use crate::units::pure::registry_model::api::AgentMeta;
-use crate::units::runtime::api::Output;
 use crate::units::runtime::api::{Acted, ActionCall, Caller};
 use crate::units::session_model::api::{CUSTOM, SINGLE};
+use crate::units::turn::turn::api::Output;
 use crate::units::work::api::{ConfigAgent, SessionEdit, WorkSpec};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -46,7 +46,11 @@ fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
         .sid;
     faces
         .turn
-        .say(&sid, "先说一句", crate::units::runtime::api::Output::Final)
+        .say(
+            &sid,
+            "先说一句",
+            crate::units::turn::turn::api::Output::Final,
+        )
         .expect("第一轮");
     faces
         .runtime
@@ -57,7 +61,7 @@ fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
         .say(
             &sid,
             "留档之后再说",
-            crate::units::runtime::api::Output::Final,
+            crate::units::turn::turn::api::Output::Final,
         )
         .expect("第二轮");
 
@@ -73,7 +77,11 @@ fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
         .expect("确认后删除");
     faces
         .turn
-        .say(&sid, "删完继续", crate::units::runtime::api::Output::Final)
+        .say(
+            &sid,
+            "删完继续",
+            crate::units::turn::turn::api::Output::Final,
+        )
         .expect("删除后还能继续");
 }
 
@@ -100,7 +108,7 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
         .sid;
     faces
         .turn
-        .say(&sid, "做一下", crate::units::runtime::api::Output::Final)
+        .say(&sid, "做一下", crate::units::turn::turn::api::Output::Final)
         .expect("一轮");
 
     let views = faces
@@ -134,7 +142,11 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
     // 跨回合累加：第二轮的用量叠在 meta 的同一本账上，不覆盖也不清零。
     faces
         .turn
-        .say(&sid, "再做一件", crate::units::runtime::api::Output::Final)
+        .say(
+            &sid,
+            "再做一件",
+            crate::units::turn::turn::api::Output::Final,
+        )
         .expect("第二轮");
     let views = faces
         .work

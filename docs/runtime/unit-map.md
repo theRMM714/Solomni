@@ -15,7 +15,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/units/runtime.rs` | 能力入口与公开面 |
-| `src/units/runtime/api.rs` | 入站契约：`RuntimeOps`（启用 / 改需求 / 回档 / 停止）、`ActionOps`（动作目录与分发）、`LogOps` 与动作词汇（`Caller` / `ActionCall` / `ActionView` / `Acted`）；呈现层共用读模型（`SessionEvent` / `DecisionCard` / `Tier` / `Advance` / `EventBus` / `Output`）经这里重导出 |
+| `src/units/runtime/api.rs` | 入站契约：`RuntimeOps`（启用 / 改需求 / 回档 / 停止）、`ActionOps`（动作目录与分发）、`LogOps` 与动作词汇（`Caller` / `ActionCall` / `ActionView` / `Acted`）；另有内核词汇 `i18n` / `Note` / `Severity` 的转出（呈现层因此不必依赖 kernel）；别处单元的形状不再经这里转出 |
 | `src/units/runtime/service.rs` | 子模块声明与共用 import（各能力 `api` 的类型、压缩工厂、动作词汇）；不含任何用例身体 |
 | `src/units/runtime/service/core.rs` | 核心本体 `Core`：注入面字段、17 参构造 `Core::new`、访问器（`registry` / `registry_mut` / `log_handle` / `tools_handle` / …）、`registry_write`、`sync_compact_choice`，以及一批同名薄转发（含 `ambient_workspace`） |
 | `src/units/runtime/service/handle.rs` | 核心手柄 `Handle`：`spawn` 把 `Core` 搬进 `kernel` 的 `Actor`（线程名 `solomni-core`）、`call` / `publish` / `record_notice` / `events` / `allow_tool_cards`，以及 `TurnHost` 的宿主侧实现 |
