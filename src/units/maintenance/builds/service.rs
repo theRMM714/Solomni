@@ -3,6 +3,8 @@
 //! 不管：源指纹、构建状态与缓存卷的机制（`ports.rs` 定接口，`detail/` 实现）、包库与引擎的机制（`packages` / `vm` / `provision`）、CLI 文案（`entry::probes`）。
 //! 联动：`ProcessRunner` / `HostProbe` / `Log` 是 kernel 的共享机制；`SourceDigest` / `BuildStates` / `BuildCache` 是本能力的端口，实现只在组合根注入。
 
+use crate::kernel::api::fence::FencePlan;
+use crate::kernel::ports::{FenceGate, FenceHost, HostProbe, Log, ProcessRunner};
 use crate::units::catalog::modules::api::{BuildDecl, Module};
 use crate::units::catalog::packages::api::{
     Facts, HostExec, Library, Packages, PinPolicy, PlannedPackage, Provider, build_packages,
@@ -14,12 +16,8 @@ use crate::units::maintenance::builds::ports::{
 };
 use crate::units::maintenance::storage::api::Storage;
 use crate::units::provision::api::Provision;
-use crate::units::vm::api::{
-    self as vm, ExecPlan, GuestOs, GuestRun, GuestSpec, MissingEntry, Vm,
-};
-use crate::kernel::api::fence::FencePlan;
 use crate::units::pure::exec_model::api::Tier;
-use crate::kernel::ports::{FenceGate, FenceHost, HostProbe, Log, ProcessRunner};
+use crate::units::vm::api::{self as vm, ExecPlan, GuestOs, GuestRun, GuestSpec, MissingEntry, Vm};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;

@@ -189,8 +189,7 @@ pub(crate) fn work(name: &str, kind: &str, modules: &[&str]) -> WorkSpec {
 }
 
 /// 目的：假依赖补齐面——清单为空、动作不能真跑（runtime 只读它的虚拟根清单；测试不碰网络与下载）。
-pub(crate) fn test_provision()
--> Arc<dyn crate::units::provision::api::Provision + Send + Sync> {
+pub(crate) fn test_provision() -> Arc<dyn crate::units::provision::api::Provision + Send + Sync> {
     test_provision_with(Vec::new())
 }
 
@@ -214,9 +213,7 @@ pub(crate) fn test_provision_with_root(
         fn status(&self) -> Result<Vec<crate::units::provision::api::DepStatus>, String> {
             Ok(self.0.clone())
         }
-        fn guest_bases(
-            &self,
-        ) -> Result<Vec<crate::units::provision::api::GuestBase>, String> {
+        fn guest_bases(&self) -> Result<Vec<crate::units::provision::api::GuestBase>, String> {
             Ok(Vec::new())
         }
         fn processes(&self) -> Result<Vec<crate::units::provision::api::ProcInfo>, String> {
@@ -266,10 +263,7 @@ pub(crate) fn test_provision_with_root(
 }
 
 /// 目的：一条"已装在项目内"的依赖（`probe` 是相对产品根的写法，与清单同构）。
-pub(crate) fn installed_dep(
-    id: &str,
-    probe: &str,
-) -> crate::units::provision::api::DepStatus {
+pub(crate) fn installed_dep(id: &str, probe: &str) -> crate::units::provision::api::DepStatus {
     crate::units::provision::api::DepStatus {
         id: id.to_string(),
         guest: None,

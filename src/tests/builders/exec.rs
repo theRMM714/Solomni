@@ -8,8 +8,7 @@ use super::*;
 /// 目的：测试用的"逐成员跑一遍"：内部走**共享的 converse_with**（工具循环本身仍在生产里， 只是执行阶段的入口从平铺的 Execution::run 换成了链驱动）。
 pub(crate) struct ExecLike {
     pub reports: BTreeMap<String, String>,
-    pub traces:
-        BTreeMap<String, Vec<crate::units::conversation::session::api::ToolCallView>>,
+    pub traces: BTreeMap<String, Vec<crate::units::transcript::api::ToolCallView>>,
     /// 目的：每个成员的各回复原文（每条回复一份）。
     pub raws: BTreeMap<String, Vec<String>>,
 }
@@ -69,7 +68,7 @@ pub(crate) fn run_execution<S: Seat>(
         );
         let mut views = Vec::new();
         let mut noop = |_c: crate::units::llm::api::Chunk| true;
-        let mut sink = |_e: crate::units::conversation::session::api::SessionEvent| {};
+        let mut sink = |_e: crate::units::transcript::api::SessionEvent| {};
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let rounds = crate::units::conversation::session::service::engine::round::converse_with(
             member.chat.as_mut().expect("测试通道").as_mut(),
@@ -81,9 +80,9 @@ pub(crate) fn run_execution<S: Seat>(
             &id,
             &cancel,
             &mut noop,
-            &mut |v: &crate::units::conversation::session::api::ToolCallView| views.push(v.clone()),
+            &mut |v: &crate::units::transcript::api::ToolCallView| views.push(v.clone()),
             &mut |_r: &crate::units::conversation::session::service::engine::round::Round,
-                  _s: &mut dyn FnMut(crate::units::conversation::session::api::SessionEvent)| {},
+                  _s: &mut dyn FnMut(crate::units::transcript::api::SessionEvent)| {},
             &mut sink,
             // 不接工具层提问：默认路径就是"没有可回答的前端 = fail-closed 拒绝"。
             None,

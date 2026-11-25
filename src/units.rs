@@ -15,6 +15,7 @@ pub mod residents;
 pub mod runtime;
 pub mod system;
 pub mod tools;
+pub mod transcript;
 pub mod turn;
 pub mod vm;
 pub mod work;

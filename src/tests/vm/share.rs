@@ -6,9 +6,9 @@
 /// 目的：自定义 guest 没声明任何可用客户端时，起 guest 前就拒绝，不等到挂载失败。
 #[test]
 pub(crate) fn a_guest_without_supported_clients_is_rejected_before_boot() {
-    use crate::units::vm::api::tier_readiness;
     use crate::units::pure::exec_model::api::ExecSpec as VmSpec;
     use crate::units::pure::exec_model::api::Tier;
+    use crate::units::vm::api::tier_readiness;
     let root = crate::tests::scratch("vm-guest-share-readiness");
     let probe = crate::kernel::detail::HostProbeAdapter;
     let arch = if cfg!(target_arch = "aarch64") {

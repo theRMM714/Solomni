@@ -9,13 +9,11 @@ pub mod grep;
 pub mod systool;
 
 use self::fence::ToolFenceGate;
-use crate::units::tools::api::{
-    Observations, Recorded, ToolBook, ToolExec, ToolOutcome, Tools,
-};
+use crate::kernel::ports::{FenceGate, FenceHost, ProcessRunner};
+use crate::units::tools::api::{Observations, Recorded, ToolBook, ToolExec, ToolOutcome, Tools};
 use crate::units::tools::domain::budget::{self, Continuation};
 use crate::units::tools::domain::table::SystemTools;
 use crate::units::tools::ports::{SysIo, SystoolsSource};
-use crate::kernel::ports::{FenceGate, FenceHost, ProcessRunner};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, RwLock};
 

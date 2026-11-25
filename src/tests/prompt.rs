@@ -307,10 +307,8 @@ pub(crate) fn session_at_roots_go_by_the_session_guest() {
         let r = p.ref_roots();
         let codec = r.path_codec.as_ref().expect("带 guest 的会话要有翻译器");
         // 三种 guest 各自给的写法必须与各自方言的桥一致（提示词里的写法与转录里的写法同源）。
-        let want = crate::units::vm::api::PathBridge::for_session(
-            std::env::consts::OS,
-            Some(g.dialect()),
-        );
+        let want =
+            crate::units::vm::api::PathBridge::for_session(std::env::consts::OS, Some(g.dialect()));
         assert_eq!(codec.to_view(&sb.private), want.to_guest(&sb.private));
     }
 }

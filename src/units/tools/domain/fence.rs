@@ -3,9 +3,9 @@
 //! 不管：描述符自身的形状（在 kernel::contracts::fence）、裁决与回执文案（在 service/fence.rs）、平台机制（在 kernel::detail::confine）。
 //! 联动：经 tools::api 给成员循环与协调业务用；kernel 不反向依赖本模块。
 
-use crate::units::workspace::api::Sandbox;
 use crate::kernel::api::fence::{Access, FenceBlocked, FencePlan, Grant, NetPolicy, Reach};
 use crate::kernel::api::types::Ask;
+use crate::units::workspace::api::Sandbox;
 use std::path::{Path, PathBuf};
 
 impl FencePlan {

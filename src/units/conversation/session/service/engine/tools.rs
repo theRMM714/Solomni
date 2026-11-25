@@ -5,11 +5,12 @@
 
 use super::decls::ToolDecls;
 pub(crate) use super::fence::CallDone;
-use crate::units::conversation::session::api::{SessionEvent, ToolFace};
+use crate::kernel::api::types::ToolOutcome;
+use crate::units::conversation::session::api::ToolFace;
 use crate::units::conversation::session::domain::tools::MemberTools;
 use crate::units::llm::api::ToolInvoke;
 use crate::units::tools::api::{Observations, SessionWriteGate, ShellFacts, ToolSchema};
-use crate::kernel::api::types::ToolOutcome;
+use crate::units::transcript::api::SessionEvent;
 
 /// 目的：分支执行体的结果形态，在 CallDone 前多带一份观察账本副本（并发批次按原序合并）。
 pub(crate) type BranchDone = (
@@ -415,8 +416,7 @@ pub(crate) fn run_batch(
     // 每一次调用都留一条**同形状的审计记录**（与呈现层的动作记录同一处格式化）：可查、可对账。
     for ((module, tool, _args), slot) in plan.iter().zip(done.iter()) {
         if let Some((_label, outcome, _facts, _shell)) = slot {
-            let name =
-                crate::units::conversation::session::api::qualify(module.as_deref(), tool);
+            let name = crate::units::transcript::api::qualify(module.as_deref(), tool);
             ctx.log.info(
                 "action",
                 &crate::units::tools::api::action_audit(
@@ -610,7 +610,9 @@ pub(crate) fn run_shell(
     }
     // 容器身份按"会话 + agent + 受保护根集合"派生（见 container_name）：同一会话的 shell 共用 SID 与 ACL。
     // 生命周期归会话，调用结束不释放。
-    if ctx.face.tier == crate::units::pure::exec_model::api::Tier::Vm && ctx.face.guest_lease.is_empty() {
+    if ctx.face.tier == crate::units::pure::exec_model::api::Tier::Vm
+        && ctx.face.guest_lease.is_empty()
+    {
         return (
             ToolOutcome::new(
                 false,
@@ -746,9 +748,7 @@ pub(crate) fn dispatch_external(
                 match serde_json::from_str::<serde_json::Value>(&inv.args_json) {
                     Ok(args) => {
                         if let Err(fault) = book.check(&args) {
-                            let why = crate::units::tools::api::arg_fault_text(
-                                &full, book, &fault,
-                            );
+                            let why = crate::units::tools::api::arg_fault_text(&full, book, &fault);
                             return (module.clone(), refuse(why));
                         }
                     }
@@ -783,23 +783,22 @@ pub(crate) fn dispatch_external(
                 // 共享盘不承载执行位：模块声明的相对入口先落进 guest 本地副本，再把首 token 换成它
                 // （cwd 仍是共享的模块根，数据与 userdata 不动）。
                 let declared = command.trim_start();
-                let dispatched =
-                    match crate::units::catalog::modules::api::local_entry(declared) {
-                        Some(entry) => {
-                            match ctx.vm.stage_exec(
-                                &ctx.face.guest_lease,
-                                &module,
-                                &mt.root.join(entry),
-                                entry,
-                            ) {
-                                Ok(staged) => {
-                                    format!("{}{}", staged, &declared[entry.len()..])
-                                }
-                                Err(why) => return (module, refuse(why)),
+                let dispatched = match crate::units::catalog::modules::api::local_entry(declared) {
+                    Some(entry) => {
+                        match ctx.vm.stage_exec(
+                            &ctx.face.guest_lease,
+                            &module,
+                            &mt.root.join(entry),
+                            entry,
+                        ) {
+                            Ok(staged) => {
+                                format!("{}{}", staged, &declared[entry.len()..])
                             }
+                            Err(why) => return (module, refuse(why)),
                         }
-                        None => declared.to_string(),
-                    };
+                    }
+                    None => declared.to_string(),
+                };
                 ctx.vm.guest_run_fenced(
                     &ctx.face.guest_lease,
                     &crate::units::vm::api::GuestRun {

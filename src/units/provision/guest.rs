@@ -4,11 +4,11 @@
 //! 联动：由 service.rs 的 guest-runtime 分支调用；vm 能力经 ::api 注入（组合根或 --provision 入口装配）；契约见 RUNTIME_SPEC.md。
 
 use super::domain::{Dep, deps, links, source_url, under};
+use crate::kernel::api::layout;
+use crate::kernel::ports::HostProbe;
 use crate::units::vm::api::{
     GuestArch, GuestClients, GuestImage, GuestRun, GuestSpec, SeedDocs, Vm, classify_base,
 };
-use crate::kernel::api::layout;
-use crate::kernel::ports::HostProbe;
 use std::path::Path;
 use std::time::Duration;
 

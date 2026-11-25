@@ -47,10 +47,7 @@ pub trait Ledger: Send + Sync {
     /// 目的：从台账里划掉一条（旧版本重装前）。
     fn forget(&self, id: &str) -> Result<(), String>;
     /// 目的：把已在场的基础工具链登记进 `.tools/toolchains/active.json`（启动期只读这一份）。
-    fn sync_active(
-        &self,
-        all: &[crate::units::provision::domain::Dep],
-    ) -> Result<(), String>;
+    fn sync_active(&self, all: &[crate::units::provision::domain::Dep]) -> Result<(), String>;
 }
 
 /// 目的：本能力要观察的长驻子进程——编排只问"现在有哪些、有几个 guest 在跑"。

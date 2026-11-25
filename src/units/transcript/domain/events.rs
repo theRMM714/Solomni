@@ -1,7 +1,7 @@
 //! 目的：呈现侧契约——事件与介入请求的词汇与形状，前端按此渲染；呈现即上下文，转录行与核心记录完全一致。
 //! 管：`SessionEvent` / `LineView` / `ToolCallView` / `DecisionCard` 等类型，以及 `idle` / `working` / `qualify` 等构造。
-//! 不管：会话状态与派生（在 `session.rs`）、裁决排队与等待（在 `decisions.rs`）、前端渲染（在呈现层）。
-//! 联动：由 `session.rs` 与 runtime 产生，经 `api.rs` 导出；契约见 `docs/session/session-model.md`。
+//! 不管：会话状态与派生（在会话单元的 `domain/session.rs`）、裁决排队与等待（在会话单元的 `domain/decisions.rs`）、前端渲染（在呈现层）。
+//! 联动：由会话单元与 runtime 产生，经 `src/units/transcript/api.rs` 导出；契约见 `docs/session/session-model.md`。
 
 /// 目的：裁决卡的信封——谁在问。role = core（核心）/ member（某一席）/ tools（工具层）；name = 具体是谁。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -88,10 +88,7 @@ pub struct ContextUsage {
 
 impl ContextUsage {
     /// 目的：供应商 usage → 带窗口的上下文用量。
-    pub fn from_tokens(
-        tokens: crate::units::llm::api::TokenUsage,
-        window: u64,
-    ) -> ContextUsage {
+    pub fn from_tokens(tokens: crate::units::llm::api::TokenUsage, window: u64) -> ContextUsage {
         ContextUsage {
             prompt_tokens: tokens.prompt_tokens,
             completion_tokens: tokens.completion_tokens,

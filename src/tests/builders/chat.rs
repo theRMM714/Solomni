@@ -103,10 +103,7 @@ pub(crate) struct TruncGateway {
 }
 
 impl ChatGateway for TruncGateway {
-    fn probe_tools(
-        &self,
-        _c: &Channel,
-    ) -> Result<crate::units::llm::api::ProbeOutcome, String> {
+    fn probe_tools(&self, _c: &Channel) -> Result<crate::units::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(&self, _c: &Channel, _id: &str) -> BoxedChat {
@@ -145,10 +142,7 @@ pub(crate) struct AbortGateway {
 }
 
 impl ChatGateway for AbortGateway {
-    fn probe_tools(
-        &self,
-        _c: &Channel,
-    ) -> Result<crate::units::llm::api::ProbeOutcome, String> {
+    fn probe_tools(&self, _c: &Channel) -> Result<crate::units::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(&self, _c: &Channel, _id: &str) -> BoxedChat {
@@ -169,10 +163,7 @@ pub(crate) struct ProbeGateway {
 }
 
 impl ChatGateway for ProbeGateway {
-    fn probe_tools(
-        &self,
-        _c: &Channel,
-    ) -> Result<crate::units::llm::api::ProbeOutcome, String> {
+    fn probe_tools(&self, _c: &Channel) -> Result<crate::units::llm::api::ProbeOutcome, String> {
         Ok(self.outcome.lock().expect("锁").clone())
     }
     fn member_channel(&self, _c: &Channel, _id: &str) -> BoxedChat {
@@ -318,20 +309,14 @@ pub(crate) struct NativeGateway {
 }
 
 impl ChatGateway for NativeGateway {
-    fn probe_tools(
-        &self,
-        _c: &Channel,
-    ) -> Result<crate::units::llm::api::ProbeOutcome, String> {
+    fn probe_tools(&self, _c: &Channel) -> Result<crate::units::llm::api::ProbeOutcome, String> {
         Ok(crate::units::llm::api::ProbeOutcome::Supported {
             detail: "替身".to_string(),
         })
     }
 
     /// 目的：保存闸门要同时看回放形状：这个替身固定报「协议形状被接受」。
-    fn probe_replay(
-        &self,
-        _c: &Channel,
-    ) -> Result<crate::units::llm::api::ReplayReport, String> {
+    fn probe_replay(&self, _c: &Channel) -> Result<crate::units::llm::api::ReplayReport, String> {
         Ok(crate::units::llm::api::ReplayReport {
             shapes: vec![crate::units::llm::api::ReplayShape {
                 name: "content-empty".to_string(),

@@ -5,9 +5,9 @@
 //! 不管：进程与围栏机制（走注入的 `SessionHost`）；生命周期与租约（在 service）；参数校验（服务是权威）。
 //! 联动：实现 ports::ServiceAdapter；经 `detail.rs` 暴露给组合根。
 
+use crate::kernel::ports::{Session, SessionHost, SessionSpec};
 use crate::units::residents::api::Operation;
 use crate::units::residents::ports::{LaunchSpec, ServiceAdapter, ServiceInstance};
-use crate::kernel::ports::{Session, SessionHost, SessionSpec};
 use serde_json::{Value, json};
 use std::sync::Arc;
 

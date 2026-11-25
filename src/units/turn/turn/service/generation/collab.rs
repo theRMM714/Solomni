@@ -3,7 +3,8 @@
 //! 不管：单个成员回合的实现、会话装配。
 //! 联动：`generation/member.rs`、`turn::api::TurnHost`、docs/session/session-model.md
 
-use crate::units::conversation::session::api::{Flow, Handback, SessionEvent};
+use crate::units::conversation::session::api::{Flow, Handback};
+use crate::units::transcript::api::SessionEvent;
 use crate::units::turn::turn::api::{Advance, AskReq, CollabWork, TurnHost};
 
 /// 目的：协作的长步骤（开始讨论 / 回答 / 继续）：与单 agent 同一条 own-and-return—— 队列只占"取/交"两步，泵在工作线程上跑；事件**边产边送**事件台，界面因此能看着讨论推进。  **核心驱动**（见 docs/session/session-model.md 二之二）：泵只决定"该问谁"， 成员回合由主线程取该 agent 的会话去跑（它才拿得到那些会话）。所以泵线程与主线程**握手**： 泵让出 → 发 AskReq → 主线程跑完回 MemberTurn → 泵继续。
@@ -50,143 +51,141 @@ pub(crate) fn collab_generation<H: TurnHost>(
         // 泵线程自己拿一份停止开关（流程那份由 set_cancel 交出去，登记的那份留给收尾）。
         let cancel = std::sync::Arc::clone(&cancel);
         std::thread::Builder::new()
-                .name("solomni-collab".to_string())
-                .spawn(move || {
-                    let mut c = session;
-                    let mut seq = 0u64;
-                    // 安全网计数（见循环尾）：提醒/重问必须有终点，不能让泵空转。
-                    let mut guard = 0usize;
-                    {
-                        // 边产边送 + 边落盘：长流程里用户能看着讨论一轮轮推进，
-                        // 中途刷新页面也能看到已产生的部分（不再等整段结束才一次性出现）。
-                        let mut sink = |ev: SessionEvent| {
-                            seq = bus.push(&sid, std::slice::from_ref(&ev));
-                            // 落盘失败要**如实告知**（落一条警告进事件台），不静默丢历史。
-                            if let Some(warn) = persister.persist(std::slice::from_ref(&ev)) {
-                                bus.push(&sid, std::slice::from_ref(&SessionEvent::Notice(warn)));
-                            }
-                        };
-                        match &work {
-                            // 处置一张已经出队的回答：落定（校验 / 出队 / 记账）已在核心线程上做完。
-                            CollabWork::Dispose(ticket) => {
-                                // 关卡归发起它的流程：驱动只把票交回流程面，不解释这是哪一关。
-                                let m: &mut dyn Flow = &mut *c;
-                                if let Err(e) = m.settle(ticket, &mut sink) {
-                                    sink(SessionEvent::Notice(format!("[裁决] {}", e)));
-                                }
-                            }
-                            CollabWork::Resume => {
-                                let m: &mut dyn Flow = &mut *c;
-                                m.resume(&mut sink);
+            .name("solomni-collab".to_string())
+            .spawn(move || {
+                let mut c = session;
+                let mut seq = 0u64;
+                // 安全网计数（见循环尾）：提醒/重问必须有终点，不能让泵空转。
+                let mut guard = 0usize;
+                {
+                    // 边产边送 + 边落盘：长流程里用户能看着讨论一轮轮推进，
+                    // 中途刷新页面也能看到已产生的部分（不再等整段结束才一次性出现）。
+                    let mut sink = |ev: SessionEvent| {
+                        seq = bus.push(&sid, std::slice::from_ref(&ev));
+                        // 落盘失败要**如实告知**（落一条警告进事件台），不静默丢历史。
+                        if let Some(warn) = persister.persist(std::slice::from_ref(&ev)) {
+                            bus.push(&sid, std::slice::from_ref(&SessionEvent::Notice(warn)));
+                        }
+                    };
+                    match &work {
+                        // 处置一张已经出队的回答：落定（校验 / 出队 / 记账）已在核心线程上做完。
+                        CollabWork::Dispose(ticket) => {
+                            // 关卡归发起它的流程：驱动只把票交回流程面，不解释这是哪一关。
+                            let m: &mut dyn Flow = &mut *c;
+                            if let Err(e) = m.settle(ticket, &mut sink) {
+                                sink(SessionEvent::Notice(format!("[裁决] {}", e)));
                             }
                         }
-                        // 核心驱动：流程让出"该问谁"就回头找主线程（它才拿得到各 agent 的会话）。
-                        // 这里只认流程面：推一步 / 取走让出的事 / 交回处置——不认识协作的任何字段。
-                        let flow: &mut dyn Flow = &mut *c;
-                        // 这一步是这一趟的第一次推进（已走过「继续」的，就从断点接着推）。
-                        let mut opening = !matches!(&work, CollabWork::Resume);
-                        loop {
-                            // 先看有没有已经让出的那一步；没有就推一步（推完再看一次）。
-                            let ask = match flow.take_ask() {
-                                Some(a) => Some(a),
-                                None => {
-                                    if opening {
-                                        flow.start(&mut sink);
-                                    } else {
-                                        flow.step(&mut sink);
-                                    }
-                                    flow.take_ask()
+                        CollabWork::Resume => {
+                            let m: &mut dyn Flow = &mut *c;
+                            m.resume(&mut sink);
+                        }
+                    }
+                    // 核心驱动：流程让出"该问谁"就回头找主线程（它才拿得到各 agent 的会话）。
+                    // 这里只认流程面：推一步 / 取走让出的事 / 交回处置——不认识协作的任何字段。
+                    let flow: &mut dyn Flow = &mut *c;
+                    // 这一步是这一趟的第一次推进（已走过「继续」的，就从断点接着推）。
+                    let mut opening = !matches!(&work, CollabWork::Resume);
+                    loop {
+                        // 先看有没有已经让出的那一步；没有就推一步（推完再看一次）。
+                        let ask = match flow.take_ask() {
+                            Some(a) => Some(a),
+                            None => {
+                                if opening {
+                                    flow.start(&mut sink);
+                                } else {
+                                    flow.step(&mut sink);
                                 }
-                            };
-                            opening = false;
-                            let Some(ask) = ask else {
-                                break;
-                            };
-                            // 提醒时要往它自己的会话里写（那边用的是同一个名字）。
-                            let agent_name = ask.member.clone();
-                            // 主会话据此显示"某某正在工作"（按钮切换与占位动画都读它）。
-                            bus.push(
-                                &sid,
-                                &[crate::units::conversation::session::api::SessionEvent::Working {
-                                    agent: Some(agent_name.clone()),
-                                }],
-                            );
-                            // **它自己的标签页同样要进"在跑"**：不然打开它只会看到上一次的运行态
-                            // （或者按钮一直停在「停止」）。收尾那条在成员回合的收尾处推。
-                            bus.push(
-                                &format!("{}--{}", sid, agent_name),
-                                &[crate::units::conversation::session::api::SessionEvent::Working {
-                                    agent: Some(agent_name.clone()),
-                                }],
-                            );
-                            let req = AskReq {
-                                agent: ask.member.clone(),
-                                seat: ask.seat.clone(),
-                                identity: ask.identity.clone(),
-                                turn: ask.turn.clone(),
-                                cancel: std::sync::Arc::clone(&cancel),
-                                opts: ask.opts.clone(),
-                                round: ask.round,
-                                turn_id: ask.turn_id,
-                            };
-                            if ask_tx.send(req).is_err() {
-                                break;
+                                flow.take_ask()
                             }
-                            // 等主线程跑完这一回合（它取会话、跑模型、落盘，再把结果送回来）。
-                            let Ok(res) = turn_rx.recv() else { break };
-                            match res {
-                                Ok(turn) => {
-                                    // **交回流程的策略**（见 session-model.md 二）：
-                                    // 吸收继续 / 注入提醒后重问 / 记未回应后放过，驱动只照流程的判定做。
-                                    let after = flow.handback(&ask, &turn);
-                                    match after {
-                                        Handback::Fed => flow.feed(&ask, turn, &mut sink),
-                                        Handback::Remind(text) => {
-                                            // 提醒进**它自己的会话**（系统消息）；不 feed——泵重问同一个人。
-                                            let child = format!("{}--{}", sid, agent_name);
-                                            let target = child.clone();
-                                            if let Ok(evs) = handle
-                                                .core(move |turn| turn.note_system(&child, &text))
-                                            {
-                                                // 提醒属于**它自己的会话**：按子会话的 sid 外送，
-                                                // 不能混进主会话的事件流（否则主会话会冒出系统行）。
-                                                for e in evs {
-                                                    bus.push(&target, std::slice::from_ref(&e));
-                                                }
+                        };
+                        opening = false;
+                        let Some(ask) = ask else {
+                            break;
+                        };
+                        // 提醒时要往它自己的会话里写（那边用的是同一个名字）。
+                        let agent_name = ask.member.clone();
+                        // 主会话据此显示"某某正在工作"（按钮切换与占位动画都读它）。
+                        bus.push(
+                            &sid,
+                            &[crate::units::transcript::api::SessionEvent::Working {
+                                agent: Some(agent_name.clone()),
+                            }],
+                        );
+                        // **它自己的标签页同样要进"在跑"**：不然打开它只会看到上一次的运行态
+                        // （或者按钮一直停在「停止」）。收尾那条在成员回合的收尾处推。
+                        bus.push(
+                            &format!("{}--{}", sid, agent_name),
+                            &[crate::units::transcript::api::SessionEvent::Working {
+                                agent: Some(agent_name.clone()),
+                            }],
+                        );
+                        let req = AskReq {
+                            agent: ask.member.clone(),
+                            seat: ask.seat.clone(),
+                            identity: ask.identity.clone(),
+                            turn: ask.turn.clone(),
+                            cancel: std::sync::Arc::clone(&cancel),
+                            opts: ask.opts.clone(),
+                            round: ask.round,
+                            turn_id: ask.turn_id,
+                        };
+                        if ask_tx.send(req).is_err() {
+                            break;
+                        }
+                        // 等主线程跑完这一回合（它取会话、跑模型、落盘，再把结果送回来）。
+                        let Ok(res) = turn_rx.recv() else { break };
+                        match res {
+                            Ok(turn) => {
+                                // **交回流程的策略**（见 session-model.md 二）：
+                                // 吸收继续 / 注入提醒后重问 / 记未回应后放过，驱动只照流程的判定做。
+                                let after = flow.handback(&ask, &turn);
+                                match after {
+                                    Handback::Fed => flow.feed(&ask, turn, &mut sink),
+                                    Handback::Remind(text) => {
+                                        // 提醒进**它自己的会话**（系统消息）；不 feed——泵重问同一个人。
+                                        let child = format!("{}--{}", sid, agent_name);
+                                        let target = child.clone();
+                                        if let Ok(evs) =
+                                            handle.core(move |turn| turn.note_system(&child, &text))
+                                        {
+                                            // 提醒属于**它自己的会话**：按子会话的 sid 外送，
+                                            // 不能混进主会话的事件流（否则主会话会冒出系统行）。
+                                            for e in evs {
+                                                bus.push(&target, std::slice::from_ref(&e));
                                             }
                                         }
-                                        Handback::PassOver => flow.pass_over(&ask, &mut sink),
                                     }
-                                    // 安全网：提醒/重问必须有终点（计数有上限，这里再兜一层）。
-                                    guard += 1;
-                                    if guard > 500 {
-                                        sink(SessionEvent::Notice(
+                                    Handback::PassOver => flow.pass_over(&ask, &mut sink),
+                                }
+                                // 安全网：提醒/重问必须有终点（计数有上限，这里再兜一层）。
+                                guard += 1;
+                                if guard > 500 {
+                                    sink(SessionEvent::Notice(
                                         "[警告] 讨论推进次数异常（已到安全上限），已停下等用户处理"
                                             .to_string(),
                                     ));
-                                        break;
-                                    }
-                                }
-                                Err(err) => {
-                                    // 如实交回（由流程统一外送中断通知），不再往下推。
-                                    flow.failed(&err);
-                                    flow.step(&mut sink);
                                     break;
                                 }
                             }
+                            Err(err) => {
+                                // 如实交回（由流程统一外送中断通知），不再往下推。
+                                flow.failed(&err);
+                                flow.step(&mut sink);
+                                break;
+                            }
                         }
-                        // 泵停了（问完了 / 出错 / 被中断）：主会话回到"空闲"。
-                        // 下一次问谁时会再推一条带名字的，所以这里只需要收尾这一条。
-                        bus.push(
-                            &sid,
-                            &[crate::units::conversation::session::api::SessionEvent::Working {
-                                agent: None,
-                            }],
-                        );
                     }
-                    (c, seq)
-                })
-                .map_err(|e| format!("起协作线程失败：{}", e))?
+                    // 泵停了（问完了 / 出错 / 被中断）：主会话回到"空闲"。
+                    // 下一次问谁时会再推一条带名字的，所以这里只需要收尾这一条。
+                    bus.push(
+                        &sid,
+                        &[crate::units::transcript::api::SessionEvent::Working { agent: None }],
+                    );
+                }
+                (c, seq)
+            })
+            .map_err(|e| format!("起协作线程失败：{}", e))?
     };
     // 主线程驱动每个请求：取该 agent 的会话、跑这一回合、把结果发回泵。
     // 模型调用在成员线程上（own-and-return），核心队列只占"取/交"两步——界面因此不被阻塞。

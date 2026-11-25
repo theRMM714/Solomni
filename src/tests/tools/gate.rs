@@ -5,9 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::tools::api::{
-    Coverage, GateFault, LineRange, Need, Observations, WriteGate,
-};
+use crate::units::tools::api::{Coverage, GateFault, LineRange, Need, Observations, WriteGate};
 use crate::units::workspace::api::{GateFile, content_hash};
 use std::sync::Mutex;
 

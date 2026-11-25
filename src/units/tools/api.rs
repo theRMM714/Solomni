@@ -3,18 +3,14 @@
 //! 不管：实现与机制（在 `service/` / `detail/`）；端口定义（在 `ports.rs`）。
 //! 联动：实现见 `service.rs`；`runtime` 等消费方只持 `Arc<dyn Tools>` / `Arc<dyn ToolExec>`。
 
-pub use crate::units::tools::domain::budget::{
-    ResultBudget, cap_result_with, continuation_for,
-};
+pub use crate::units::tools::domain::budget::{ResultBudget, cap_result_with, continuation_for};
 pub use crate::units::tools::domain::commands::{CommandBook, Phase, Runtime};
 pub use crate::units::tools::domain::op::{
     Executor, Op, OpBook, complete as complete_op, parse as parse_op, usage as op_usage,
     usage_named,
 };
 pub use crate::units::tools::domain::patch::{EditFault, Fault};
-pub use crate::units::tools::domain::schema::{
-    ArgFault, ToolBook, ToolSchema, json_schema_lines,
-};
+pub use crate::units::tools::domain::schema::{ArgFault, ToolBook, ToolSchema, json_schema_lines};
 pub use crate::units::tools::domain::shell::{
     ShellFacts, did_run, facts as shell_facts, parse as parse_shell, place_notes, shared_exec_note,
     truncated,

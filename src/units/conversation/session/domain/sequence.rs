@@ -8,8 +8,9 @@ use std::sync::atomic::AtomicBool;
 
 use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::conversation::session::api::{
-    Flow, Gate, GateTicket, Handback, MemberAsk, MemberTurn, SessionEvent, Settle, WorkPlan,
+    Flow, GateTicket, Handback, MemberAsk, MemberTurn, Settle, WorkPlan,
 };
+use crate::units::transcript::api::{Gate, SessionEvent};
 use crate::units::workspace::api::Sandboxes;
 
 /// 目的：一串按顺序跑的流程段：前一段收尾后产物交给下一段，行号接着上一段。

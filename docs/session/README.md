@@ -23,7 +23,7 @@
 
 ## 改动本单元时必须同步
 
-- 行与事件词汇（`src/units/conversation/session/domain/events.rs`、`LineView` 字段）一改 → `collab` 的状态派生、`runtime` 的视图、`cli` / `web` 渲染、`src/tests/session/` 全跟。
+- 行与事件词汇（`src/units/transcript/domain/events.rs`、`LineView` 字段）一改 → `collab` 的状态派生、`runtime` 的视图、`cli` / `web` 渲染、`src/tests/session/` 全跟。
 - 机制自己的事件与关卡（`Push` 的 `kind` / `payload`、`Gate`）改 → 对应机制的词汇文件（协作在 `src/units/conversation/collab/domain/events.rs` 与 `src/units/conversation/collab/domain/gates.rs`）与它的渲染；会话侧不跟着改。
 - 流程面（`src/units/conversation/session/domain/flow.rs` 的 `Flow` / `MemberAsk` / `Handback` / `WorkPlan`）一改 → 每个流程的实现（协作在 `src/units/conversation/collab/service/flow.rs`）与驱动（`src/units/turn/turn/service/flow.rs`、`src/units/turn/turn/service/generation/collab.rs`）一起改。
 - 复合流程（`src/units/conversation/session/domain/sequence.rs` 的 `Sequence`）一改 → 装配点（`src/units/work/service/create.rs`、`src/units/turn/turn/service/rebuild.rs`）与流程自己的 `intake` / `output` / `part` 一起看：前一段交出的产物就是后一段的需求。

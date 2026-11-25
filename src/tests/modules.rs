@@ -191,17 +191,12 @@ pub(crate) fn overrides_survive_a_reload() {
     let first = test_modules_store(
         Arc::clone(&source) as Arc<dyn ModuleSource + Send + Sync>,
         Arc::clone(&store)
-            as Arc<
-                dyn crate::units::catalog::modules::ports::ModuleStateStore + Send + Sync,
-            >,
+            as Arc<dyn crate::units::catalog::modules::ports::ModuleStateStore + Send + Sync>,
     );
     first.set_module_enabled("a", false).expect("停用");
     let second = test_modules_store(
         source,
-        store
-            as Arc<
-                dyn crate::units::catalog::modules::ports::ModuleStateStore + Send + Sync,
-            >,
+        store as Arc<dyn crate::units::catalog::modules::ports::ModuleStateStore + Send + Sync>,
     );
     assert!(!second.module_enabled("a"), "覆盖要落盘并在下次装配时载入");
 }

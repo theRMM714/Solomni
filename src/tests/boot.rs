@@ -5,17 +5,17 @@
 
 use serde_json::{Value, json};
 
+use crate::presentation::cli::boot;
 use crate::units::catalog::packages::api::BaseFacts;
 use crate::units::maintenance::builds::api::Built;
 use crate::units::maintenance::storage::api::{CleanOutcome, GcAction, GcReport};
+use crate::units::pure::exec_model::api::JobState;
 use crate::units::system::api::{
     BuildRequest, EnsureRequest, Fault, FenceFacts, GcRequest, ResetRequest, System, WorkGcRequest,
     toolchain_json, toolchain_lines,
 };
 use crate::units::tools::api::{CommandBook, Op, OpBook};
 use crate::units::workspace::api::WorkGcReport;
-use crate::units::pure::exec_model::api::JobState;
-use crate::presentation::cli::boot;
 
 /// 目的：命令表里那一条——用例只按名字取，旗语与校验都由声明决定（表非法就直接失败）。
 pub(crate) fn op(name: &str) -> &'static Op {

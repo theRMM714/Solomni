@@ -77,8 +77,7 @@ impl Lifecycle {
         }
         let (mut active, children) = match *target {
             RewindTarget::Archive(line) => {
-                let before =
-                    crate::units::conversation::session::api::align_keep(&raw, line);
+                let before = crate::units::conversation::session::api::align_keep(&raw, line);
                 if before == u64::MAX {
                     return Err(format!(
                         "回档目标行 {} 不在当前转录里；可能已被回档或删除，请刷新后重试",
@@ -89,9 +88,8 @@ impl Lifecycle {
                 let mark = Self::next_mark_id(&raw);
                 let keep_turn =
                     crate::units::conversation::session::api::turn_of_line(&raw, before);
-                let label = crate::units::conversation::session::api::archive_label(
-                    &raw, before, from,
-                );
+                let label =
+                    crate::units::conversation::session::api::archive_label(&raw, before, from);
                 // 先算各子会话的折叠点（不落盘），再算共享区点：两者都成功才动文件。
                 let (kids, folds) = self.archive_children_plan(turn, sid, keep_turn)?;
                 let keep = Self::keep_by_agent(&meta, before, &kids);
@@ -116,20 +114,17 @@ impl Lifecycle {
                     rewound.push((kid, active));
                 }
                 let (_, raw_after) = self.history.load(sid)?;
-                let next =
-                    crate::units::conversation::session::api::next_line_id(&raw_after);
+                let next = crate::units::conversation::session::api::next_line_id(&raw_after);
                 let active = self.restore_session(turn, deps, sid, &meta, &raw_after, next)?;
                 (active, rewound)
             }
             RewindTarget::Delete(line) => {
-                let before =
-                    crate::units::conversation::session::api::align_keep(&raw, line);
+                let before = crate::units::conversation::session::api::align_keep(&raw, line);
                 // before = u64::MAX = 「保留全部」：删不到任何东西，转录与文件都不动。
                 if before == u64::MAX {
                     let (_kids, rewound) = self.cut_children(turn, deps, sid, u64::MAX)?;
-                    let kept = crate::units::conversation::session::api::cut_before_line(
-                        &raw, before,
-                    );
+                    let kept =
+                        crate::units::conversation::session::api::cut_before_line(&raw, before);
                     let next = crate::units::conversation::session::api::next_line_id(&kept);
                     let active = self.restore_session(turn, deps, sid, &meta, &kept, next)?;
                     return Ok(RewindOutcome {
@@ -137,8 +132,7 @@ impl Lifecycle {
                         children: rewound,
                     });
                 }
-                let kept =
-                    crate::units::conversation::session::api::cut_before_line(&raw, before);
+                let kept = crate::units::conversation::session::api::cut_before_line(&raw, before);
                 // 删除会截掉转录里的留档标记；版本库里的 refs/archive/* 必须跟着作废，
                 // 否则留下"文件里有档案、转录里找不到"的孤儿。先算清楚并在确认前报数量。
                 let kept_marks: Vec<u64> =
@@ -186,14 +180,13 @@ impl Lifecycle {
                     if let Some(Session::Single(s)) = turn.session_mut(sid) {
                         s.apply_rewind(before);
                         // 截掉的尾部里的 usage 事件也随 kept 过滤；状态栏不能继续显示旧数字。
-                        s.set_last_usage(
-                            crate::units::conversation::session::api::last_usage(&kept),
-                        );
+                        s.set_last_usage(crate::units::conversation::session::api::last_usage(
+                            &kept,
+                        ));
                     }
                     // 就地回退没重建对象：shell 快照也按截断后的转录重算（被截掉的 shell 不能继续显示）。
-                    turn.shell_slot(sid).set(
-                        crate::units::conversation::session::api::last_shell(&kept),
-                    );
+                    turn.shell_slot(sid)
+                        .set(crate::units::conversation::session::api::last_shell(&kept));
                     crate::units::conversation::session::api::truncate_events(&kept)
                 } else {
                     let next = crate::units::conversation::session::api::next_line_id(&kept);
@@ -320,9 +313,8 @@ impl Lifecycle {
                 continue;
             }
             let active = crate::units::conversation::session::api::truncate_events(&raw);
-            let before = crate::units::conversation::session::api::last_line_within(
-                &active, keep_turn,
-            );
+            let before =
+                crate::units::conversation::session::api::last_line_within(&active, keep_turn);
             let from = crate::units::conversation::session::api::next_line_id(&raw);
             if !agent.is_empty() {
                 keeps.insert(agent, before);
@@ -398,11 +390,9 @@ impl Lifecycle {
                 continue;
             }
             let active = crate::units::conversation::session::api::truncate_events(&raw);
-            let before = crate::units::conversation::session::api::last_line_within(
-                &active, keep_turn,
-            );
-            let kept =
-                crate::units::conversation::session::api::cut_before_line(&raw, before);
+            let before =
+                crate::units::conversation::session::api::last_line_within(&active, keep_turn);
+            let kept = crate::units::conversation::session::api::cut_before_line(&raw, before);
             self.history
                 .replace(&kid, &kept)
                 .map_err(|e| format!("子会话 {} 删除落盘失败：{}", kid, e))?;

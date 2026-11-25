@@ -3,9 +3,9 @@
 //! 不管：安装器（provision 能力的 `kind: toolchain`）、真实进程围栏与 guest 工具链。
 //! 联动：被测实现见 src/entry/toolchains.rs；启动期调用见 src/main.rs。
 
+use crate::entry::toolchains::{active_roots, compose, target};
 use crate::units::catalog::packages::api::{BaseFacts, HostFallback};
 use crate::units::system::api::toolchain_lines;
-use crate::entry::toolchains::{active_roots, compose, target};
 
 type ToolSpec<'a> = (&'a str, &'a str, &'a [&'a str], &'a [(&'a str, &'a str)]);
 

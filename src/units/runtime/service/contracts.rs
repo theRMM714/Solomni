@@ -151,12 +151,7 @@ impl WorkOps for Handle {
 
 impl TurnOps for Handle {
     fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String> {
-        crate::units::turn::turn::api::single_generation(
-            self,
-            sid,
-            Some(text.to_string()),
-            out,
-        )
+        crate::units::turn::turn::api::single_generation(self, sid, Some(text.to_string()), out)
     }
 
     fn continue_flow(&self, sid: &str, out: Output) -> Result<Advance, String> {
@@ -173,11 +168,7 @@ impl TurnOps for Handle {
             })
             .unwrap_or_default();
         if spec.is_some_and(|s| s.driven()) {
-            return crate::units::turn::turn::api::collab_generation(
-                self,
-                sid,
-                CollabWork::Resume,
-            );
+            return crate::units::turn::turn::api::collab_generation(self, sid, CollabWork::Resume);
         }
         crate::units::turn::turn::api::single_generation(self, sid, None, out)
     }
@@ -377,9 +368,7 @@ impl RegistryOps for Handle {
     ) -> Result<(), String> {
         // 保存前实测（原生工具与回放形状）与落盘判据都在 registry：本层只把它交到核心线程上跑。
         self.call(move |core| {
-            core.registry_write(|r| {
-                crate::units::catalog::registry::api::save_model(r, draft)
-            })
+            core.registry_write(|r| crate::units::catalog::registry::api::save_model(r, draft))
         })
     }
 
@@ -429,9 +418,7 @@ impl RegistryOps for Handle {
                 chara,
             };
             core.registry_write(|r| {
-                crate::units::catalog::registry::api::save_agent(
-                    r, &draft, &roster, &reserved,
-                )
+                crate::units::catalog::registry::api::save_agent(r, &draft, &roster, &reserved)
             })
         })
     }
@@ -454,18 +441,12 @@ impl RegistryOps for Handle {
         self.call(move |core| core.registry().discover_models(&provider_id))
     }
 
-    fn probe_model_tools(
-        &self,
-        id: &str,
-    ) -> Result<crate::units::llm::api::ProbeOutcome, String> {
+    fn probe_model_tools(&self, id: &str) -> Result<crate::units::llm::api::ProbeOutcome, String> {
         let id = id.to_string();
         self.call(move |core| core.registry_mut().probe_model_tools(&id))
     }
 
-    fn probe_replay_shape(
-        &self,
-        id: &str,
-    ) -> Result<crate::units::llm::api::ReplayReport, String> {
+    fn probe_replay_shape(&self, id: &str) -> Result<crate::units::llm::api::ReplayReport, String> {
         let id = id.to_string();
         self.call(move |core| core.registry().probe_replay_shape(&id))
     }

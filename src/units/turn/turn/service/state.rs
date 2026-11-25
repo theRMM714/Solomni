@@ -7,10 +7,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
+use crate::kernel::api::types::SessionId;
 use crate::units::conversation::session::api::{
     AgentSession, Decisions, Flow, Gates, ShellSlot, decisions,
 };
-use crate::kernel::api::types::SessionId;
 
 /// 目的：一份在世会话的两种形态：单 agent（含代理会话与子会话）与一个**流程**（协作只是已注册的一个流程）。
 /// 约束：流程槽是装箱的 trait 对象——会话形态不再是一张封闭清单，新流程不改这里。

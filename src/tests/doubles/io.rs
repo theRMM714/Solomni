@@ -267,9 +267,7 @@ impl SysIo for InMemorySysIo {
             return Err(m.clone());
         }
         let compiled = match (opts.ignore, rules) {
-            (true, Some(text)) => Some(crate::units::workspace::api::Rules::compile(
-                root, text,
-            )?),
+            (true, Some(text)) => Some(crate::units::workspace::api::Rules::compile(root, text)?),
             _ => None,
         };
         let base = root
@@ -344,10 +342,8 @@ impl SysIo for InMemorySysIo {
         path: &std::path::Path,
         expect: &crate::units::tools::ports::Expect,
         mutation: crate::units::tools::ports::Mutation,
-    ) -> Result<
-        crate::units::tools::ports::WriteReceipt,
-        crate::units::tools::ports::WriteFault,
-    > {
+    ) -> Result<crate::units::tools::ports::WriteReceipt, crate::units::tools::ports::WriteFault>
+    {
         use crate::units::tools::ports::{WriteFault, WriteReceipt};
         if let Some(m) = self.failure_for(path) {
             return Err(WriteFault::io(path, &m));
@@ -371,10 +367,8 @@ impl SysIo for InMemorySysIo {
     fn transact(
         &self,
         ops: Vec<crate::units::tools::ports::WriteOp>,
-    ) -> Result<
-        Vec<crate::units::tools::ports::WriteReceipt>,
-        crate::units::tools::ports::WriteFault,
-    > {
+    ) -> Result<Vec<crate::units::tools::ports::WriteReceipt>, crate::units::tools::ports::WriteFault>
+    {
         use crate::units::tools::ports::{WriteFault, WriteReceipt};
         let mut files = self.files.lock().expect("锁");
         let mut next = files.clone();
@@ -442,11 +436,7 @@ fn memory_mutation(
     current: Option<&str>,
     mutation: crate::units::tools::ports::Mutation,
 ) -> Result<
-    (
-        String,
-        Vec<crate::units::tools::api::LineRange>,
-        usize,
-    ),
+    (String, Vec<crate::units::tools::api::LineRange>, usize),
     crate::units::tools::ports::WriteFault,
 > {
     use crate::units::tools::api::LineRange;

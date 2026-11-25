@@ -4,9 +4,7 @@
 //! 联动：runtime、其它能力与呈现层都经这里会话；实现见 service.rs；出站端口只由 service 持有（R12）。
 
 pub use crate::units::llm::domain::cancel::{cancel_flag, cancel_flag_ref};
-pub use crate::units::llm::domain::envelope::{
-    Malformed, Reply, Tail, ToolInvoke, Verb, parse,
-};
+pub use crate::units::llm::domain::envelope::{Malformed, Reply, Tail, ToolInvoke, Verb, parse};
 pub use crate::units::llm::domain::malformed::malformed_report;
 
 use crate::kernel::api::types::DEFAULT_LLM_TIMEOUT_SECS;

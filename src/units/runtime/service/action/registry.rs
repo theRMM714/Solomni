@@ -43,12 +43,10 @@ impl Handle {
                     None => RegistryOps::models(self)?
                         .into_iter()
                         .find(|m| m.id == s("id"))
-                        .map(
-                            |m| crate::units::catalog::registry::api::ThinkingSpec {
-                                default: m.thinking.default,
-                                levels: m.thinking.levels,
-                            },
-                        )
+                        .map(|m| crate::units::catalog::registry::api::ThinkingSpec {
+                            default: m.thinking.default,
+                            levels: m.thinking.levels,
+                        })
                         .unwrap_or_default(),
                 };
                 // 工具调用形态：表单带 tools 就用它；没带 = 编辑保留原值，新建缺省（native）。

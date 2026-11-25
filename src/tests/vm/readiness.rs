@@ -8,8 +8,8 @@ use super::super::prelude::*;
 /// 目的：机器能力与会话选型分开——vm_capability 不问 base；tier_readiness（保存/开始）才要求 base。
 #[test]
 pub(crate) fn vm_capability_is_machine_only_while_session_readiness_needs_base() {
-    use crate::units::vm::api::{VmInputs, vm_capability};
     use crate::tests::doubles::FixedProbe;
+    use crate::units::vm::api::{VmInputs, vm_capability};
     let qemu = std::path::PathBuf::from("/opt/qemu-system-x86_64");
     let mut probe = FixedProbe {
         hypervisor: true,

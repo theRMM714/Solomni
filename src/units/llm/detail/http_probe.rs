@@ -3,12 +3,10 @@
 //! 不管：通道会话本身（在 http_chat）；探测结果与设置的持久化（在 registry）。
 //! 联动：经 api::Channel 与 detail/endpoint.rs 的候选发请求；结论由 registry/service.rs 的发现用例记账。
 
-use crate::units::llm::api::Channel;
-use crate::units::llm::api::{
-    Completion, ProbeOutcome, ReplayReport, ReplayShape, ToolDecl,
-};
-use crate::units::llm::detail::endpoint::{Attempt, chat_candidates, resolve_candidates};
 use crate::kernel::ports::Log;
+use crate::units::llm::api::Channel;
+use crate::units::llm::api::{Completion, ProbeOutcome, ReplayReport, ReplayShape, ToolDecl};
+use crate::units::llm::detail::endpoint::{Attempt, chat_candidates, resolve_candidates};
 
 /// 探针工具：无参数、只有说明——目的是让模型有东西可调。
 fn ping_decl() -> ToolDecl {

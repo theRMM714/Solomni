@@ -9,12 +9,12 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::kernel::ports::{HostProbe, PathCodec};
 use crate::units::catalog::modules::api::Module;
 use crate::units::catalog::packages::api as pkgs;
 use crate::units::catalog::packages::api::{BaseFacts, Library, PackagePlan, PinPolicy};
 use crate::units::pure::exec_model::api::ExecSpec;
 use crate::units::pure::exec_model::api::Tier;
-use crate::kernel::ports::{HostProbe, PathCodec};
 
 /// 目的：这次会话的 guest 镜像（本机档或选定虚拟根判不出来 = None）——平台名与 guest OS 都从它派生。
 /// 约束：虚拟根名先经 `resolve_guest` 解析成那一格目录，再按布局判定；两者任一失败都给 None。
@@ -57,12 +57,10 @@ pub fn path_codec_of(
     let Some(guest) = guest_os_of(root, probe, spec) else {
         return crate::kernel::api::view_drive::view_codec();
     };
-    Some(Arc::new(
-        crate::units::vm::api::PathBridge::for_session(
-            std::env::consts::OS,
-            Some(guest.dialect()),
-        ),
-    ))
+    Some(Arc::new(crate::units::vm::api::PathBridge::for_session(
+        std::env::consts::OS,
+        Some(guest.dialect()),
+    )))
 }
 
 /// 目的：这份规格的 guest 镜像自带哪些运行能力（本机档或判不出来 = 空）。

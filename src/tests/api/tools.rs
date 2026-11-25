@@ -7,8 +7,8 @@ use super::super::doubles::InMemoryHistory;
 use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work};
 use super::support::spawn;
-use crate::units::runtime::api::{Acted, ActionCall, Caller, SessionEvent};
 use crate::presentation::faces::Faces;
+use crate::units::runtime::api::{Acted, ActionCall, Caller, SessionEvent};
 
 use crate::units::conversation::session::api::MEETING;
 use crate::units::runtime::api::{Handle, Output};
@@ -70,10 +70,7 @@ fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
     let ok_ops = Faces::from_handle(&ok_handle);
     ok_ops
         .registry
-        .upsert_model(draft(
-            "native-ok",
-            crate::units::llm::api::ToolMode::Native,
-        ))
+        .upsert_model(draft("native-ok", crate::units::llm::api::ToolMode::Native))
         .expect("实测明确通过应允许保存");
     assert_eq!(
         ok_ops

@@ -58,8 +58,7 @@ pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
         assert!(!schema.desc.trim().is_empty(), "{} 缺说明", name);
         assert!(schema.params.is_some(), "{} 缺参数契约", name);
     }
-    let seat =
-        crate::units::conversation::session::api::seat("core_proxy").expect("代理席在册");
+    let seat = crate::units::conversation::session::api::seat("core_proxy").expect("代理席在册");
     let face: Vec<String> = crate::units::conversation::session::api::seat_face(seat)
         .into_iter()
         .map(|s| s.to_string())
@@ -702,9 +701,8 @@ pub(crate) fn proxy_session_exposes_context_usage() {
         vec!["{\"type\":\"say\",\"text\":\"代理在\"}".to_string()],
     )
     .with_usage(TokenUsage::new(700, 50, Some(750)));
-    let handle =
-        crate::units::runtime::api::Handle::spawn(core_with_gateway(vec![], gateway))
-            .expect("起核心线程");
+    let handle = crate::units::runtime::api::Handle::spawn(core_with_gateway(vec![], gateway))
+        .expect("起核心线程");
     let faces = Faces::from_handle(&handle);
     let spec = crate::units::work::api::WorkSpec {
         flows: None,
@@ -722,11 +720,7 @@ pub(crate) fn proxy_session_exposes_context_usage() {
     let sid = faces.work.create_work(spec).expect("建代理会话").0.sid;
     faces
         .turn
-        .say(
-            &sid,
-            "开始",
-            crate::units::runtime::api::Output::Final,
-        )
+        .say(&sid, "开始", crate::units::runtime::api::Output::Final)
         .expect("代理一轮");
     let views = faces
         .work

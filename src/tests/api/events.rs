@@ -6,9 +6,9 @@
 use super::super::doubles::module_of;
 use super::super::{single_work, slow_ops};
 use super::support::spawn;
+use crate::presentation::faces::Faces;
 use crate::units::runtime::api::Output;
 use crate::units::runtime::api::SessionEvent;
-use crate::presentation::faces::Faces;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -124,10 +124,7 @@ fn rewind_pushes_a_reset_fact_and_history_merge_ignores_superseded_batches() {
     // ① 删除到第 0 行：盘上转录清空；事件台必须给一条 rewound（活动视图为空）。
     let replayed = faces
         .runtime
-        .rewind(
-            &sid,
-            crate::units::lifecycle::api::RewindTarget::Delete(0),
-        )
+        .rewind(&sid, crate::units::lifecycle::api::RewindTarget::Delete(0))
         .expect("回档到第 0 行");
     assert!(replayed.is_empty(), "删除到 0 的活动视图应为空");
 

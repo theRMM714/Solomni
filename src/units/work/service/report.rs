@@ -35,8 +35,7 @@ impl Work {
     ) -> RuntimeReport {
         let roster = self.modules.roster();
         let lib = self.packages.library();
-        let guest_runtimes =
-            crate::units::vm::api::guest_runtimes_of(&self.root, probe, spec);
+        let guest_runtimes = crate::units::vm::api::guest_runtimes_of(&self.root, probe, spec);
         let vm = spec.tier == crate::units::pure::exec_model::api::Tier::Vm;
         let (diagnoses, mut missing, available) = if vm {
             let diagnoses = pkgs::diagnoses(&roster.modules, &lib, spec, &guest_runtimes)
@@ -140,8 +139,8 @@ impl Work {
             .filter(|m| ids.iter().any(|id| *id == m.manifest.id))
             .cloned()
             .collect();
-        let guest = crate::units::vm::api::guest_os_of(&self.root, probe, &meta.exec)
-            .map(|g| g.as_str());
+        let guest =
+            crate::units::vm::api::guest_os_of(&self.root, probe, &meta.exec).map(|g| g.as_str());
         let target_os = guest.unwrap_or(std::env::consts::OS);
         let missing: Vec<crate::units::vm::api::MissingEntry> =
             crate::units::vm::api::missing_entries_for(&session_modules, target_os, &|p| {

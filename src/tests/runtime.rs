@@ -7,9 +7,9 @@ mod proxy;
 use super::builders::*;
 use super::prelude::*;
 // 只有非 macOS 的用例用得到这个面（macOS 上其余用例整体 cfg 掉）。
-use crate::units::conversation::session::api::{MEETING, PROXY, SINGLE};
 #[cfg(not(target_os = "macos"))]
 use crate::presentation::faces::Faces;
+use crate::units::conversation::session::api::{MEETING, PROXY, SINGLE};
 
 /// 造一台"根在给定目录、补齐面报给定清单"的核心（只为验外部工具路径的取法）。
 fn runtime_rooted(
@@ -103,8 +103,8 @@ fn vm_capable_probe(
 #[cfg(not(target_os = "macos"))]
 #[test]
 pub(crate) fn creating_a_vm_session_does_not_block_the_core() {
-    use crate::units::runtime::api::Handle;
     use crate::tests::doubles::FakeEngine;
+    use crate::units::runtime::api::Handle;
     const BOOT: std::time::Duration = std::time::Duration::from_millis(400);
     let guest = crate::tests::test_guest("core-free");
     let probe = vm_capable_probe(&guest);
@@ -150,8 +150,8 @@ pub(crate) fn creating_a_vm_session_does_not_block_the_core() {
 #[cfg(not(target_os = "macos"))]
 #[test]
 pub(crate) fn a_failed_guest_boot_leaves_no_session_behind() {
-    use crate::units::runtime::api::Handle;
     use crate::tests::doubles::FakeEngine;
+    use crate::units::runtime::api::Handle;
     let guest = crate::tests::test_guest("boot-fail");
     let probe = vm_capable_probe(&guest);
     let engine = FakeEngine {
@@ -295,8 +295,8 @@ pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
 #[cfg(windows)]
 #[test]
 pub(crate) fn workspace_policy_splits_network_roots_by_tier() {
-    use crate::units::workspace::api::policy;
     use crate::units::pure::exec_model::api::Tier;
+    use crate::units::workspace::api::policy;
     use std::path::Path;
     use std::time::{Duration, Instant};
 
@@ -320,8 +320,8 @@ pub(crate) fn workspace_policy_splits_network_roots_by_tier() {
 /// 目的：加载复检在这台机器上也能跑：越界拒绝、产品外的目录放行、暂时不可达不挡（不因平台差异漏判）。
 #[test]
 pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
-    use crate::units::workspace::api::{product_root, recheck};
     use crate::units::pure::exec_model::api::Tier;
+    use crate::units::workspace::api::{product_root, recheck};
 
     let root = crate::tests::scratch("recheck-cross");
     let product = root.join("product");
@@ -343,8 +343,8 @@ pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
 /// 约束：`ambient` 与建会话的 `resolve` 共用一条阶梯，但**不探可写**：启动目录可不可写不阻塞建会话。
 #[test]
 pub(crate) fn ambient_workspace_takes_the_startup_directory_through_the_same_ladder() {
-    use crate::units::workspace::api::{ambient, product_root};
     use crate::units::pure::exec_model::api::Tier;
+    use crate::units::workspace::api::{ambient, product_root};
 
     let root = crate::tests::scratch("ambient-workspace");
     let product = root.join("product");
@@ -378,8 +378,8 @@ pub(crate) fn ambient_workspace_takes_the_startup_directory_through_the_same_lad
 #[cfg(windows)]
 #[test]
 pub(crate) fn loaded_binding_is_rechecked_against_the_tier() {
-    use crate::units::workspace::api::{product_root, recheck};
     use crate::units::pure::exec_model::api::Tier;
+    use crate::units::workspace::api::{product_root, recheck};
     use std::path::Path;
 
     let probe = crate::kernel::detail::HostProbeAdapter;
@@ -620,9 +620,8 @@ pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
         for ev in evs {
             if let Some(ls) = ev.get("lines").and_then(|l| l.as_array()) {
                 for l in ls {
-                    if let Ok(v) = serde_json::from_value::<
-                        crate::units::conversation::session::api::LineView,
-                    >(l.clone())
+                    if let Ok(v) =
+                        serde_json::from_value::<crate::units::transcript::api::LineView>(l.clone())
                     {
                         out.push((v.id, v.render(), v.turn));
                     }

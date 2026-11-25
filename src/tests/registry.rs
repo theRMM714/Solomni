@@ -357,9 +357,7 @@ pub(crate) fn a_probe_writes_back_only_conclusive_results() {
 #[test]
 pub(crate) fn reserved_directory_names_are_rejected_case_insensitively() {
     let reserved = vec!["work".to_string(), "children".to_string()];
-    assert!(
-        crate::units::catalog::registry::api::check_reserved("children", &reserved).is_err()
-    );
+    assert!(crate::units::catalog::registry::api::check_reserved("children", &reserved).is_err());
     assert!(
         crate::units::catalog::registry::api::check_reserved("CHILDREN", &reserved).is_err(),
         "Windows 文件系统不区分大小写"

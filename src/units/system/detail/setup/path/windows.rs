@@ -72,8 +72,7 @@ pub(crate) fn do_path(port: &dyn UserPath, home: &Path, root: &Path) -> Result<S
 /// 目的：状态段（只读）。
 pub(crate) fn info(root: &Path) -> PathInfo {
     let bin = bin_text(root);
-    let (shim_present, shim_current) =
-        crate::units::system::detail::setup::shim::inspect(root);
+    let (shim_present, shim_current) = crate::units::system::detail::setup::shim::inspect(root);
     let port = crate::kernel::detail::WindowsUserPath::new();
     let (supported, has_bin) = match port.read() {
         Ok(value) => (true, contains(&value.text, &bin)),

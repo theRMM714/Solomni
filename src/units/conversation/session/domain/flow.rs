@@ -7,8 +7,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use crate::units::catalog::registry::api::AgentMeta;
-use crate::units::conversation::session::api::{Gate, GateTicket, MemberTurn, SessionEvent};
+use crate::units::conversation::session::api::{GateTicket, MemberTurn};
 use crate::units::llm::api::{CompleteOpts, Msg};
+use crate::units::transcript::api::{Gate, SessionEvent};
 use crate::units::workspace::api::Sandboxes;
 
 /// 目的：流程让出的那一步——请驱动取某个成员会话跑一回合。

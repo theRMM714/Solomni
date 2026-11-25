@@ -5,8 +5,8 @@
 //! 联动：`runtime` 建会话走 `resolve`、加载复检走 `recheck`（都经 `workspace::api`）；两者共用一个 `policy`，手改 meta
 //!   也过不去；规范化、元数据与可写探测都走 `HostProbe`。
 
-use crate::units::pure::exec_model::api::Tier;
 use crate::kernel::ports::HostProbe;
+use crate::units::pure::exec_model::api::Tier;
 use std::path::{Path, PathBuf};
 
 /// 目的：把产品根规范化成判定用的写法（规范化失败时退回原样）。

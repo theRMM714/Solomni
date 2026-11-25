@@ -10,6 +10,7 @@ mod rewind;
 #[cfg(test)]
 pub(crate) use history::{ReleaseByLease, SessionDelete};
 
+use crate::kernel::ports::Log;
 use crate::units::conversation::session::api::{
     History, HistoryView, SessionMeta, guest_scope, subtree_of, tree_order,
 };
@@ -18,7 +19,6 @@ use crate::units::tools::api::ToolExec;
 use crate::units::turn::turn::api::{Session, Turn};
 use crate::units::vm::api::Vm;
 use crate::units::workspace::api::Workspace;
-use crate::kernel::ports::Log;
 use std::sync::Arc;
 
 /// 目的：**会话历史生命周期的用例面**：回档三模式、历史列表与只读打开、删除的报账与收尾。

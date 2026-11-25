@@ -3,13 +3,13 @@
 //! 不管：编码猜测（不是本程序的事）；参数校验、回执文案与放行（在 `domain`）。
 //! 联动：实现 `ports::SysIo`，由 `main.rs` 构造注入 `service/`。
 
+use crate::kernel::api::lock::lock_within;
 use crate::units::tools::api::LineRange;
 use crate::units::tools::ports::{
     DirEntry, Expect, FilePage, FileRead, MAX_SCAN_LINE_BYTES, Mutation, ScanSummary, SysIo,
     WalkEntry, WalkOpts, WriteFault, WriteOp, WriteReceipt,
 };
 use crate::units::workspace::api::{Rules, Sha256, content_hash};
-use crate::kernel::api::lock::lock_within;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::io::{Read, Write};
@@ -171,9 +171,7 @@ fn apply_mutation(
             };
             let hay =
                 String::from_utf8(bytes.to_vec()).map_err(|_| WriteFault::invalid_utf8(path))?;
-            match crate::units::tools::domain::systool::apply_literal_edit(
-                &hay, &old, &new, all,
-            ) {
+            match crate::units::tools::domain::systool::apply_literal_edit(&hay, &old, &new, all) {
                 Ok((out, changed, n)) => Ok((
                     out,
                     changed
@@ -185,9 +183,9 @@ fn apply_mutation(
                 Err(crate::units::tools::domain::systool::LiteralFault::NotFound) => {
                     Err(WriteFault::anchor_not_found(path))
                 }
-                Err(crate::units::tools::domain::systool::LiteralFault::Ambiguous {
-                    lines,
-                }) => Err(WriteFault::anchor_ambiguous(path, lines.len())),
+                Err(crate::units::tools::domain::systool::LiteralFault::Ambiguous { lines }) => {
+                    Err(WriteFault::anchor_ambiguous(path, lines.len()))
+                }
             }
         }
     }

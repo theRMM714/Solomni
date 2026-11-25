@@ -334,8 +334,7 @@ pub(crate) fn judge_reads_separates_shifted_from_changed() {
         vec![ReadVerdict::SameVersion]
     );
     // 发布之后共享区才真的没有这个文件——读过它内容的上下文立刻过期。
-    crate::units::workspace::ports::WorkStore::remove_under(&*_store, &sb, "gone.md")
-        .unwrap();
+    crate::units::workspace::ports::WorkStore::remove_under(&*_store, &sb, "gone.md").unwrap();
     ws.work_commit("w", "a", "s", &commit_req(&[], &["gone.md"], "删", 6))
         .unwrap();
     // 工作线提交只是本地提交：共享区要到推送后才真的没有这个文件。

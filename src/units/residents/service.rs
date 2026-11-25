@@ -7,9 +7,7 @@
 use crate::units::catalog::modules::api::{Module, Modules, Roster, ServiceDecl};
 use crate::units::catalog::packages::api as pkgs;
 use crate::units::catalog::secrets::api::SecretOps;
-use crate::units::residents::api::{
-    Operation, Receipt, ResidentOps, ServiceState, ServiceView,
-};
+use crate::units::residents::api::{Operation, Receipt, ResidentOps, ServiceState, ServiceView};
 use crate::units::residents::ports::{LaunchSpec, ServiceAdapter, ServiceInstance};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};

@@ -6,10 +6,10 @@
 use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work, slow_ops};
 use super::support::spawn;
+use crate::presentation::faces::Faces;
 use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::runtime::api::{Acted, ActionCall, Caller};
 use crate::units::work::api::{ConfigAgent, SessionEdit, WorkSpec};
-use crate::presentation::faces::Faces;
 
 use crate::units::conversation::session::api::{CUSTOM, SINGLE};
 use crate::units::runtime::api::Output;
@@ -47,11 +47,7 @@ fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
         .sid;
     faces
         .turn
-        .say(
-            &sid,
-            "先说一句",
-            crate::units::runtime::api::Output::Final,
-        )
+        .say(&sid, "先说一句", crate::units::runtime::api::Output::Final)
         .expect("第一轮");
     faces
         .runtime
@@ -78,11 +74,7 @@ fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
         .expect("确认后删除");
     faces
         .turn
-        .say(
-            &sid,
-            "删完继续",
-            crate::units::runtime::api::Output::Final,
-        )
+        .say(&sid, "删完继续", crate::units::runtime::api::Output::Final)
         .expect("删除后还能继续");
 }
 
@@ -109,11 +101,7 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
         .sid;
     faces
         .turn
-        .say(
-            &sid,
-            "做一下",
-            crate::units::runtime::api::Output::Final,
-        )
+        .say(&sid, "做一下", crate::units::runtime::api::Output::Final)
         .expect("一轮");
 
     let views = faces
@@ -141,18 +129,13 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
         }),
         "流水里要有 usage 事件"
     );
-    let last =
-        crate::units::conversation::session::api::last_usage(&events).expect("读回用量");
+    let last = crate::units::conversation::session::api::last_usage(&events).expect("读回用量");
     assert_eq!(last.total_tokens, 1020);
 
     // 跨回合累加：第二轮的用量叠在 meta 的同一本账上，不覆盖也不清零。
     faces
         .turn
-        .say(
-            &sid,
-            "再做一件",
-            crate::units::runtime::api::Output::Final,
-        )
+        .say(&sid, "再做一件", crate::units::runtime::api::Output::Final)
         .expect("第二轮");
     let views = faces
         .work

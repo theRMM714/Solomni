@@ -5,14 +5,13 @@
 
 use super::decls::ToolDecls;
 use super::tools::*;
-use crate::units::conversation::session::api::{
-    LineView, SessionEvent, ToolCallView, reply_msgs,
-};
+use crate::kernel::api::types::ToolOutcome;
+use crate::units::conversation::session::api::reply_msgs;
 use crate::units::conversation::session::domain::tools::MemberTools;
 use crate::units::llm::api::{self as envelope, Verb};
 use crate::units::llm::api::{Chat, Chunk, CompleteOpts, Msg};
 use crate::units::tools::api::{ResultBudget, cap_result_with, continuation_for};
-use crate::kernel::api::types::ToolOutcome;
+use crate::units::transcript::api::{LineView, SessionEvent, ToolCallView};
 
 /// 目的：一次工具调用的产出：调用视图 + 它压进历史的消息。
 pub struct ToolRun {
@@ -529,8 +528,7 @@ pub fn converse_with(
                         // 模型可见的最末一处：与执行侧共用同一批预算（执行侧已收过的原样放回）。
                         cap_result_with(&mut outcome, continuation_for(&label, &plan[i].1), budget);
                         if let Some(facts) = shell.as_mut() {
-                            facts.truncated =
-                                crate::units::tools::api::truncated(&outcome.notes);
+                            facts.truncated = crate::units::tools::api::truncated(&outcome.notes);
                         }
                         ToolCallView {
                             speaker: speaker.to_string(),
@@ -699,9 +697,7 @@ pub fn converse_with(
                 let invokes = reply.tools.clone();
                 // 自由格式工具（patch）只能单发：它的输入是**信封之后的那段正文**（不必转义），
                 // 显示正文只认信封**之前**那段——补丁内容不该被当成 AI 发言渲染出来。
-                if invokes.len() == 1
-                    && crate::units::tools::api::is_freeform(&invokes[0].name)
-                {
+                if invokes.len() == 1 && crate::units::tools::api::is_freeform(&invokes[0].name) {
                     reply.text = invokes[0].lead.clone();
                 }
                 let plan: Vec<(Option<String>, String, String)> = invokes
@@ -759,8 +755,7 @@ pub fn converse_with(
                         // 与原生通道同一处预算：信封通道的回执也收进同一批剩余空间（read / 模块工具的续读提示各按能力给）。
                         cap_result_with(&mut outcome, continuation_for(&label, tool), budget);
                         if let Some(facts) = shell.as_mut() {
-                            facts.truncated =
-                                crate::units::tools::api::truncated(&outcome.notes);
+                            facts.truncated = crate::units::tools::api::truncated(&outcome.notes);
                         }
                         ToolCallView {
                             speaker: speaker.to_string(),

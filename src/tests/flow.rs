@@ -4,11 +4,12 @@
 //! 联动：doubles/standin.rs 实现流程面；本文件不改 turn / work / runtime / lifecycle / presentation / session。
 
 use super::prelude::*;
-use crate::units::conversation::session::api::{
-    DecisionCard, DecisionEnvelope, DecisionMessage, Gate, GateTicket, OptionView,
+use crate::tests::doubles::StandIn;
+use crate::units::conversation::session::api::GateTicket;
+use crate::units::transcript::api::{
+    DecisionCard, DecisionEnvelope, DecisionMessage, Gate, OptionView,
 };
 use crate::units::turn::turn::api::Session;
-use crate::tests::doubles::StandIn;
 
 #[test]
 pub(crate) fn a_standin_flow_runs_on_the_same_driver() {

@@ -9,6 +9,9 @@ use super::doubles::{
     InMemoryWorkStore, InMemoryWorkspace, NoFenceHost, RecordingFence, ScriptGateway, SharedScript,
     TestPrompts, VecSource, abs, module_of,
 };
+use crate::kernel::api::fence::FencePlan;
+use crate::kernel::ports::{FenceHost, ProcessRunner};
+use crate::kernel::ports::{Log, NoopLog};
 use crate::units::catalog::modules::ports::ModuleSource;
 use crate::units::catalog::packages::ports::PackageSource;
 use crate::units::catalog::registry::api::AgentMeta;
@@ -19,12 +22,9 @@ use crate::units::conversation::session::ports::HistoryStore;
 use crate::units::llm::api::{Channel, Chat, CompleteOpts, Msg};
 use crate::units::llm::ports::{ChatGateway, ModelCatalog};
 use crate::units::prompt::ports::PromptSource;
+use crate::units::pure::exec_model::api::ExecSpec;
 use crate::units::tools::ports::SysIo;
 use crate::units::workspace::ports::Workdirs;
-use crate::kernel::api::fence::FencePlan;
-use crate::units::pure::exec_model::api::ExecSpec;
-use crate::kernel::ports::{FenceHost, ProcessRunner};
-use crate::kernel::ports::{Log, NoopLog};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

@@ -3,11 +3,14 @@
 //! 不管：取事实（`runtime` 的 history / workspace / registry）、机制侧怎么用围栏。
 //! 联动：`src/units/env/domain/env.rs`；`runtime/service/env.rs` 取事实后转调。
 
+use crate::tests::doubles::module_of;
 use crate::units::catalog::modules::api::Roster;
 use crate::units::catalog::packages::api::PackagePlan;
 use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::catalog::registry::api::AppSettings;
 use crate::units::conversation::session::api::{MEETING, RunState, SINGLE, SessionMeta};
+use crate::units::pure::exec_model::api::ExecSpec;
+use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::permission::api::{
     PermissionDefaults, PermissionLayer, ProfileId, SessionSandbox,
 };
@@ -16,9 +19,6 @@ use crate::units::turn::env::api::{
     sandboxes, shared_scope,
 };
 use crate::units::workspace::api::{Sandbox, ScopeMode, SharedEdit, SharedScope, WorkRoots};
-use crate::units::pure::exec_model::api::ExecSpec;
-use crate::units::pure::exec_model::api::Tier;
-use crate::tests::doubles::module_of;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;

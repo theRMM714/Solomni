@@ -181,10 +181,7 @@ impl Lifecycle {
         let Ok((meta, _)) = self.history.load(name) else {
             turn.take(name);
             return Ok(SessionDelete {
-                stop: crate::units::vm::api::GuestStop::new(
-                    Arc::clone(&self.vm),
-                    Vec::new(),
-                ),
+                stop: crate::units::vm::api::GuestStop::new(Arc::clone(&self.vm), Vec::new()),
                 history: Arc::clone(&self.history),
                 dirs: vec![name.to_string()],
                 target: name.to_string(),

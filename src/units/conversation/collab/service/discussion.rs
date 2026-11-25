@@ -2,10 +2,7 @@
 //! 管：Discussion 的推进步骤与回合处置（Adv / TurnOut / AfterTurn）；成员工具面与并发调度策略；讨论转录行外送。
 //! 不管：模型调用与工具执行机制（在 llm / tools 的端口后）；整理与验收（synthesis.rs）；会话状态机与关卡（collab.rs）；泵的装配（pump.rs）。
 //! 联动：工具循环联动 envelope::Verb::Tool 与 kernel::ports::ProcessRunner；文案经 units/prompt 渲染自提示词册；约定见 docs/session/session-model.md。
-#[cfg(test)]
-use crate::units::conversation::session::api::ToolCallView;
 use crate::units::conversation::session::api::{LineSink, MemberTurn, verb_tag};
-use crate::units::conversation::session::api::{LineView, SessionEvent};
 #[cfg(test)]
 use crate::units::conversation::session::api::{Round, build_round_lines, converse_with};
 #[cfg(test)]
@@ -15,6 +12,9 @@ use crate::units::llm::api::Verb;
 #[cfg(test)]
 use crate::units::llm::api::{Chat, Chunk};
 use crate::units::prompt::api::{Prompt, Segment};
+#[cfg(test)]
+use crate::units::transcript::api::ToolCallView;
+use crate::units::transcript::api::{LineView, SessionEvent};
 use std::sync::Arc;
 
 pub const MAX_ROUNDS: usize = 6;

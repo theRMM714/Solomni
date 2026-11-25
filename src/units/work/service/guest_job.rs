@@ -4,13 +4,13 @@
 //! 联动：由 `Core::guest_boot` / `delete_bookkeeping` 产出，`api` 层的句柄在调用方线程上 `run()`；
 //!   契约见 docs/runtime/README.md 的「长步骤」与 docs/vm/README.md 的「并发」。
 
+use crate::kernel::api::fence::FencePlan;
+use crate::kernel::ports::{HostProbe, Log};
 use crate::units::vm::api::{
     ExecPlan, GuestDiagnosis, GuestRun, GuestSpec, Vm, admit_guest, classify_base, mounts_from,
     package_setup_scripts, resolve_guest,
 };
 use crate::units::workspace::api::Sandboxes;
-use crate::kernel::api::fence::FencePlan;
-use crate::kernel::ports::{HostProbe, Log};
 use std::path::PathBuf;
 use std::sync::Arc;
 

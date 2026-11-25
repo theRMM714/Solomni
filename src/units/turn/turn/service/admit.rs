@@ -3,13 +3,13 @@
 //! 不管：重建本体（见 `service/rebuild.rs`）、生成驱动与工作编排（见 `runtime`）。
 //! 联动：`runtime` 的启用、派发与协作推进都经这里；`ensure_session` 重建时按 `runtime` 传来的登记处与主机探针取事实。
 
+use crate::kernel::ports::HostProbe;
 use crate::units::catalog::registry::api::Registry;
 use crate::units::conversation::session::api::{
     RunState, SessionMeta, subtree_of, truncate_events,
 };
 use crate::units::turn::turn::api::Session;
 use crate::units::turn::turn::service::session::Turn;
-use crate::kernel::ports::HostProbe;
 
 impl Turn {
     /// 目的：把一条已建好的会话说进在世表并落盘（建会话的尾巴只走这一条，免得两处各写一遍顺序）。

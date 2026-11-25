@@ -2,11 +2,13 @@
 //! 管：按会话先来后到排队、只有队首可见可答、回答的校验（卡号是队首 + 选项属于那张卡）、
 //!   整队作废（停止 = 拒绝）把等待方解开、卡号的发放与续号；对外只出两个窄端口 `Decisions` 与 `Gates`。
 //! 不管：问什么（发起方给消息与选项）、回答怎么处置（发起方）、界面怎么画（呈现层）。
-//! 联动：卡片形状与选项 id 在 `crate::units::conversation::session::domain::events`；契约见
+//! 联动：卡片形状与选项 id 在 `crate::units::transcript::api`；契约见
 //!   docs/session/session-model.md 的「请用户裁决：一条通道，消息 + 选项」；
 //!   由核心持有（`src/units/runtime/service.rs` 的 desk），生成线程与回答口都经 `session::api` 的端口。
 
-use super::events::{DecisionAnswer, DecisionQueue, DecisionWaiter, Gate, SessionEvent, idle};
+use crate::units::transcript::api::{
+    DecisionAnswer, DecisionQueue, DecisionWaiter, Gate, SessionEvent, idle,
+};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Condvar, Mutex};
 

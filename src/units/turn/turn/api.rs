@@ -33,20 +33,17 @@ pub fn session_ask(
     emit: Box<dyn Fn(SessionEvent) + Send + Sync>,
     stop: Box<dyn Fn(&str) + Send + Sync>,
 ) -> Arc<dyn AskUser> {
-    Arc::new(
-        crate::units::turn::turn::service::ask_user::SessionAsk::new(door, sid, emit, stop),
-    )
+    Arc::new(crate::units::turn::turn::service::ask_user::SessionAsk::new(door, sid, emit, stop))
 }
 /// 目的：在世会话形态（宿主与测试只经它取用）。
 ///   回合状态本身（`TurnState`）是本能力的内部结构：它只被 `Turn` 持有，不出单元。
 pub use crate::units::turn::turn::service::state::Session;
 
-use crate::units::catalog::registry::api::Registry;
-use crate::units::conversation::session::api::{
-    AgentSession, DecisionQueue, Gates, Persister, SessionEvent, SessionMeta,
-};
 use crate::kernel::api::types::SessionId;
 use crate::kernel::ports::{AskUser, HostProbe};
+use crate::units::catalog::registry::api::Registry;
+use crate::units::conversation::session::api::{AgentSession, Gates, Persister, SessionMeta};
+use crate::units::transcript::api::{DecisionQueue, SessionEvent};
 
 /// 目的：一次生成的输出方式：流式逐片，还是只要最终结果。
 ///   「怎么呈现」是呈现层的决定，所以由调用方显式给出，核心不替它猜。

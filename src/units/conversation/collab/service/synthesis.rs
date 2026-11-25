@@ -3,9 +3,9 @@
 //! 不管：讨论状态机（discussion.rs）；任务链的驱动（collab.rs 与 kernel 的链驱动）。
 //! 联动：载荷来自 tools 的工具调用；任务链形状在 src/kernel/chain.rs。
 
-use crate::units::conversation::session::api::SessionEvent;
 use crate::units::llm::api::{Chat, Msg};
 use crate::units::prompt::api::{Prompt, Segment};
+use crate::units::transcript::api::SessionEvent;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -23,9 +23,7 @@ pub fn draft_plan(
     mode: crate::units::llm::api::ToolMode,
     opts: crate::units::llm::api::CompleteOpts<'static>,
     cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-    verify: Option<
-        &mut (dyn crate::units::conversation::session::api::CoreVerify + 'static),
-    >,
+    verify: Option<&mut (dyn crate::units::conversation::session::api::CoreVerify + 'static)>,
     sink: &mut dyn FnMut(SessionEvent),
 ) -> Result<
     (
@@ -176,9 +174,7 @@ impl Execution {
         systools: &dyn crate::units::tools::api::Tools,
         llm: crate::units::llm::api::LlmOpts,
         mode: crate::units::llm::api::ToolMode,
-        verify: Option<
-            &mut (dyn crate::units::conversation::session::api::CoreVerify + 'static),
-        >,
+        verify: Option<&mut (dyn crate::units::conversation::session::api::CoreVerify + 'static)>,
         // 核心这一轮的行推给谁（总验收也要能看到它在核对什么）。
         sink: &mut dyn FnMut(SessionEvent),
     ) {
@@ -207,8 +203,8 @@ impl Execution {
             self.stopped = true;
             return;
         }
-        let opts = crate::units::llm::api::CompleteOpts::plain(llm.stream)
-            .with_timeout(llm.timeout_secs);
+        let opts =
+            crate::units::llm::api::CompleteOpts::plain(llm.stream).with_timeout(llm.timeout_secs);
         // 核心操作走工具调用：总验收清单由 checklist 工具承载。
         let made = crate::units::conversation::session::api::core_operation(
             systools,

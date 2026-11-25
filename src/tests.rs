@@ -106,10 +106,9 @@ pub(crate) fn ops_with(
         vec!["{\"type\":\"say\",\"text\":\"好\"}".to_string()],
     );
     let gateway = doubles::gw(member, core_script.into_iter().map(String::from).collect());
-    let handle = crate::units::runtime::api::Handle::spawn(doubles::core_with_gateway(
-        modules, gateway,
-    ))
-    .expect("起核心线程");
+    let handle =
+        crate::units::runtime::api::Handle::spawn(doubles::core_with_gateway(modules, gateway))
+            .expect("起核心线程");
     let faces = crate::presentation::faces::Faces::from_handle(&handle);
     (handle, faces)
 }
@@ -163,10 +162,7 @@ pub(crate) fn ops_with_vm(
 }
 
 /// 目的：一次单 agent 工作的规格（契约测试共用）。
-pub(crate) fn single_work(
-    name: &str,
-    modules: &[&str],
-) -> crate::units::work::api::WorkSpec {
+pub(crate) fn single_work(name: &str, modules: &[&str]) -> crate::units::work::api::WorkSpec {
     crate::units::work::api::WorkSpec {
         flows: None,
         freshness: None,
@@ -362,10 +358,9 @@ pub(crate) fn gated_ops(
     };
     let started = std::sync::Arc::clone(&gateway.started);
     let release = std::sync::Arc::clone(&gateway.release);
-    let handle = crate::units::runtime::api::Handle::spawn(doubles::core_with_gateway(
-        modules, gateway,
-    ))
-    .expect("起核心线程");
+    let handle =
+        crate::units::runtime::api::Handle::spawn(doubles::core_with_gateway(modules, gateway))
+            .expect("起核心线程");
     let faces = crate::presentation::faces::Faces::from_handle(&handle);
     (handle, faces, started, release)
 }
@@ -413,10 +408,9 @@ pub(crate) fn slow_ops(
         ticks: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
     };
     let ticks = std::sync::Arc::clone(&gateway.ticks);
-    let handle = crate::units::runtime::api::Handle::spawn(doubles::core_with_gateway(
-        modules, gateway,
-    ))
-    .expect("起核心线程");
+    let handle =
+        crate::units::runtime::api::Handle::spawn(doubles::core_with_gateway(modules, gateway))
+            .expect("起核心线程");
     let faces = crate::presentation::faces::Faces::from_handle(&handle);
     (handle, faces, ticks)
 }

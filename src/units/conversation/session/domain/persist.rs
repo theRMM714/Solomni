@@ -3,7 +3,7 @@
 //! 不管：流水怎么写到盘上（`HistoryStore` 端口与 `Persister`）、什么时候写（调用方）。
 //! 联动：`session::service` 的 `persist_events` 按这里的策略过滤；`#` 开头的系统会话只推不留。
 
-use crate::units::conversation::session::domain::events::SessionEvent;
+use crate::units::transcript::api::SessionEvent;
 
 /// 目的：**这个会话要不要留档**：由**会话种类**定，不由调用点定。
 ///  - `Keep`：定稿事件落盘（单 agent 会话与协作会话都要回放——前者是模型上下文的一部分，

@@ -4,9 +4,9 @@
 //! 联动：隔离根 `tests::scratch`；会话元数据夹具 `meta` 在文件内。
 
 use super::*;
+use crate::tests::doubles::test_workspace_store;
 use crate::units::conversation::session::api::{MEETING, SINGLE, SessionSpec};
 use crate::units::workspace::api::{ChangeKind, CommitAnchor, WORKIGNORE, WORKIGNORE_SEED};
-use crate::tests::doubles::test_workspace_store;
 
 fn meta(name: &str) -> SessionMeta {
     SessionMeta {

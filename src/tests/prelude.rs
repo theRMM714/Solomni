@@ -31,13 +31,13 @@ pub use crate::units::conversation::session::domain::tools::ModuleTools;
 
 pub use crate::units::conversation::session::ports::HistoryStore;
 
-pub use crate::units::tools::api::ToolExec;
 pub use crate::kernel::ports::ProcessRunner;
+pub use crate::units::tools::api::ToolExec;
 
 pub use crate::units::catalog::modules::api::Module;
 
-pub use crate::units::vm::api::{self as exec};
 pub use crate::units::pure::exec_model::api::ExecSpec;
+pub use crate::units::vm::api::{self as exec};
 
 pub use crate::units::catalog::modules::ports::ModuleSource;
 pub use crate::units::workspace::ports::Workdirs;
@@ -48,9 +48,7 @@ pub use crate::units::work::api::{ConfigAgent, SessionEdit, WorkSpec};
 pub use crate::units::conversation::collab::api::{CollabEvent, Pending};
 
 /// 目的：裁决卡的选项 id（契约）：测试按它作答，不按文案。
-pub use crate::units::conversation::collab::api::{
-    OPT_BEGIN, OPT_PLAN_SAY, OPT_SLATE_CONFIRM,
-};
+pub use crate::units::conversation::collab::api::{OPT_BEGIN, OPT_PLAN_SAY, OPT_SLATE_CONFIRM};
 
 pub(crate) use crate::units::runtime::service::Core;
 

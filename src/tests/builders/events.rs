@@ -53,8 +53,7 @@ pub(crate) fn replay_lines(events: &[serde_json::Value]) -> Vec<String> {
                 .unwrap_or_default()
         })
         .map(|l| {
-            serde_json::from_value::<crate::units::conversation::session::api::LineView>(l)
-                .map(|v| v.render())
+            serde_json::from_value::<crate::units::transcript::api::LineView>(l).map(|v| v.render())
         })
         .filter_map(Result::ok)
         .collect()
@@ -104,7 +103,7 @@ pub(crate) fn transcript_rows(events: &[SessionEvent]) -> Vec<(u64, String, bool
 /// 目的：事件流里的工具调用视图（tool 行携带的那个）。
 pub(crate) fn tool_views(
     events: &[SessionEvent],
-) -> Vec<crate::units::conversation::session::api::ToolCallView> {
+) -> Vec<crate::units::transcript::api::ToolCallView> {
     events
         .iter()
         .flat_map(|e| match e {

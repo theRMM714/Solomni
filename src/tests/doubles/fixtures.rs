@@ -80,10 +80,7 @@ pub(crate) fn decl_with(
 }
 
 /// 目的：测试沙箱：work 共享区 + agent 私有区 + 指定模块目录（都是绝对路径）。
-pub(crate) fn test_sandbox(
-    agent: &str,
-    modules: &[&str],
-) -> crate::units::workspace::api::Sandbox {
+pub(crate) fn test_sandbox(agent: &str, modules: &[&str]) -> crate::units::workspace::api::Sandbox {
     let mut map = BTreeMap::new();
     for id in modules {
         map.insert(id.to_string(), abs(&["mods", id]));
@@ -99,11 +96,7 @@ pub(crate) fn test_sandbox(
         permissions: Default::default(),
         scope: Default::default(),
         path_codec: None,
-        filter_rules: abs(&[
-            "demo",
-            ".work",
-            crate::units::workspace::api::WORKIGNORE,
-        ]),
+        filter_rules: abs(&["demo", ".work", crate::units::workspace::api::WORKIGNORE]),
     }
 }
 
@@ -116,9 +109,7 @@ pub(crate) fn test_sandbox_readonly(
 }
 
 /// 目的：测试用会话参数：agent 名 + 该 agent 的沙箱（无模块）。身份块由它现渲染。
-pub(crate) fn test_params(
-    agent: &str,
-) -> crate::units::conversation::session::api::SessionParams {
+pub(crate) fn test_params(agent: &str) -> crate::units::conversation::session::api::SessionParams {
     crate::units::conversation::session::api::SessionParams::from_workspace(
         agent,
         &test_sandbox(agent, &[]),

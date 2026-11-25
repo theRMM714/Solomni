@@ -3,8 +3,8 @@
 //! 不管：guest 怎么起（vm）、怎么停（runtime）、盘点怎么分类（survey）。
 //! 联动：service 在回收与还原前经 GuestLiveness 端口问它；survey 判可写层保护时用同一个函数。
 
-use crate::units::maintenance::storage::ports::GuestLiveness;
 use crate::kernel::api::layout;
+use crate::units::maintenance::storage::ports::GuestLiveness;
 use std::path::{Path, PathBuf};
 
 /// 目的：按进程台账判 guest 存活。

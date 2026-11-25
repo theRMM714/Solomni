@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use crate::kernel::ports::HostProbe;
 use crate::units::catalog::modules::api::Module;
 use crate::units::catalog::registry::api::Registry;
 use crate::units::conversation::session::api::{
@@ -15,7 +16,6 @@ use crate::units::llm::api::{Channel, Msg};
 use crate::units::turn::turn::api::Session;
 use crate::units::turn::turn::service::session::Turn;
 use crate::units::workspace::api::{Sandbox, WORKIGNORE};
-use crate::kernel::ports::HostProbe;
 
 /// 目的：代理会话的私有沙箱目录名（只有这一处）。
 pub const PROXY_PRIVATE_DIR: &str = ".proxy";
@@ -163,7 +163,8 @@ impl Turn {
                 );
                 // 席位取落盘声明里的那一席（成员 / 节点会话是 executor）——与实时同一个口径。
                 let seat = meta.spec.seat.clone();
-                let host_plan = if meta.exec.tier == crate::units::pure::exec_model::api::Tier::Host {
+                let host_plan = if meta.exec.tier == crate::units::pure::exec_model::api::Tier::Host
+                {
                     crate::units::vm::api::host_plan_for(
                         &self.packages.library(),
                         &self.packages.base(),
@@ -219,12 +220,10 @@ impl Turn {
                     observations,
                     usage: crate::units::conversation::session::api::last_usage(events),
                 };
-                Session::Single(
-                    crate::units::conversation::session::api::rebuild_single(
-                        &self.session_ports(),
-                        spec,
-                    ),
-                )
+                Session::Single(crate::units::conversation::session::api::rebuild_single(
+                    &self.session_ports(),
+                    spec,
+                ))
             }
         } else {
             // 代理会话：没有 agent（核心自己说话）；外壳由 build_proxy 装配，回放与单 agent 共用同一件。
@@ -239,9 +238,7 @@ impl Turn {
                 s.compacted_upto = compacted_upto;
                 s.compacted_line = compacted_line;
                 s.next_line = s.marks.len() as u64;
-                s.set_reply_seq(crate::units::conversation::session::api::max_reply(
-                    events,
-                ));
+                s.set_reply_seq(crate::units::conversation::session::api::max_reply(events));
                 s.set_context_freshness(freshness.0);
                 s.set_freshness_keep_percent(freshness.1);
                 let (observations, reads) = replay_ledgers(events, compacted_upto);
@@ -249,16 +246,13 @@ impl Turn {
                 for (reply, body, fact) in reads {
                     s.note_read_at(body, reply, fact);
                 }
-                s.set_last_usage(crate::units::conversation::session::api::last_usage(
-                    events,
-                ));
+                s.set_last_usage(crate::units::conversation::session::api::last_usage(events));
                 Session::Single(s)
             }
         };
         // 状态栏的 shell 快照同样按转录派生：重启 / 启用 / 回档重建后不再"失忆"。
-        self.shell_slot(&meta.name).set(
-            crate::units::conversation::session::api::last_shell(events),
-        );
+        self.shell_slot(&meta.name)
+            .set(crate::units::conversation::session::api::last_shell(events));
         Ok(built)
     }
 }
@@ -288,9 +282,9 @@ fn replay_ledgers(
             let Some(t) = l.get("tool") else {
                 continue;
             };
-            let Ok(c) = serde_json::from_value::<
-                crate::units::conversation::session::api::ToolCallView,
-            >(t.clone()) else {
+            let Ok(c) =
+                serde_json::from_value::<crate::units::transcript::api::ToolCallView>(t.clone())
+            else {
                 continue;
             };
             let body = crate::units::conversation::session::api::tool_result_body(&c);
@@ -335,15 +329,13 @@ pub fn replay_dialogue(
     }
     // **压缩过**的会话按最后一条压缩行重建发送视图（见 session-model.md 六）：`up_to` 之前的行由摘要代替，
     // 转录本身完整保留；回档到压缩行之前时它已随转录被截掉，所以「没有它」就是「回到压缩前」。
-    let compacted = crate::units::conversation::session::api::last_compaction(events);
+    let compacted = crate::units::transcript::api::last_compaction(events);
     let compacted_upto = compacted.as_ref().map(|(up_to, _, _)| *up_to).unwrap_or(0);
     let compacted_line = compacted.as_ref().map(|(_, _, id)| *id).unwrap_or(0);
     // 对话里**只有**真正发生过的事；身份与环境由 params 现渲染。
     let mut history: Vec<Msg> = compacted
         .as_ref()
-        .map(|(_, summary, _)| {
-            crate::units::conversation::session::api::summary_message(summary)
-        })
+        .map(|(_, summary, _)| crate::units::conversation::session::api::summary_message(summary))
         .into_iter()
         .collect();
     let mut marks: Vec<usize> = Vec::new();
@@ -445,13 +437,12 @@ pub fn replay_dialogue(
             } else {
                 std::mem::take(&mut pending_raw)
             };
-            let views: Vec<crate::units::conversation::session::api::ToolCallView> = group
+            let views: Vec<crate::units::transcript::api::ToolCallView> = group
                 .iter()
                 .filter_map(|t| t.get("tool").cloned())
                 .filter_map(|t| serde_json::from_value(t).ok())
                 .collect();
-            for m in crate::units::conversation::session::api::reply_msgs(mode, &raw, &views)
-            {
+            for m in crate::units::conversation::session::api::reply_msgs(mode, &raw, &views) {
                 history.push(m);
             }
             for row in &group {
@@ -574,12 +565,10 @@ impl Turn {
             freshness: meta.context_freshness,
             freshness_keep_percent: meta.freshness_keep_percent,
         };
-        Ok(
-            crate::units::conversation::session::api::proxy_session(
-                &self.session_ports(),
-                spec,
-            ),
-        )
+        Ok(crate::units::conversation::session::api::proxy_session(
+            &self.session_ports(),
+            spec,
+        ))
     }
 }
 

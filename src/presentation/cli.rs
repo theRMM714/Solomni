@@ -3,6 +3,7 @@
 //! 不管：业务决策与状态（都在各能力内部）；终端 I/O 与配色（`cli/term.rs`、`cli/theme.rs`）。
 //! 联动：能力面来自 `src/units/*/api.rs`；事件词汇与 `src/presentation/web/` 并列共用；模块声明见 `src/presentation.rs`。
 
+use crate::presentation::faces::Faces;
 use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::catalog::registry::api::{ModelView, ProviderView};
 use crate::units::runtime::api::Output;
@@ -10,7 +11,6 @@ use crate::units::runtime::api::{Acted, ActionCall, Caller};
 use crate::units::runtime::api::{DecisionCard, DecisionWaiter, SessionEvent, Tier};
 use crate::units::system::api::System;
 use crate::units::tools::api::Op;
-use crate::presentation::faces::Faces;
 
 /// 目的：输入框下方命令列表的一行：补全用的写法（含前导 `/`）与一句说明。
 /// 约束：行类型放在这一层——`catalog` 只投影命令表，`term` 只管画，两边都不认识对方。

@@ -576,9 +576,9 @@ impl crate::kernel::ports::AskUser for RecordingAsk {
 fn unwritable_interpreter_dir_never_silently_runs_unfenced() {
     #[cfg(windows)]
     let _fence = crate::tests::fence_acl_guard();
+    use crate::kernel::detail::acl::FencePart;
     use crate::units::tools::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
     use crate::units::tools::service::fence::ToolFenceGate;
-    use crate::kernel::detail::acl::FencePart;
     if !fence_live() {
         eprintln!("[探针] 未开启真机围栏测试：本探针要写本机权限项，已跳过；要真跑加 --fence-live");
         return;

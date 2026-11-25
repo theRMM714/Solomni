@@ -36,12 +36,11 @@ pub(crate) fn build(
     } else {
         "vm.virtiofsd."
     });
-    let vm =
-        crate::units::vm::api::vm_requirements(&crate::units::vm::api::VmInputs {
-            qemu: qemu.as_deref(),
-            share_tool: share_tool.as_deref(),
-            probe: &crate::kernel::detail::HostProbeAdapter,
-        });
+    let vm = crate::units::vm::api::vm_requirements(&crate::units::vm::api::VmInputs {
+        qemu: qemu.as_deref(),
+        share_tool: share_tool.as_deref(),
+        probe: &crate::kernel::detail::HostProbeAdapter,
+    });
     // 长驻子进程：账本里还活着的那几条（自检只报事实，不动手收）。
     let book = crate::kernel::detail::procs::ProcessBook::open(&layout::home(root));
     let procs: Vec<Value> = book

@@ -24,8 +24,7 @@ pub struct Handle {
     /// 目的：常驻服务面（与核心共享同一份）：ResidentOps 由它转发。
     pub(crate) residents: Arc<dyn crate::units::residents::api::ResidentOps + Send + Sync>,
     /// 目的：隐秘字段面（与核心共享同一份）：SecretOps 由它转发。
-    pub(crate) secrets:
-        Arc<dyn crate::units::catalog::secrets::api::SecretOps + Send + Sync>,
+    pub(crate) secrets: Arc<dyn crate::units::catalog::secrets::api::SecretOps + Send + Sync>,
     /// 目的：模块公地能力面（与核心共享同一份）：模块事实与启停写面由它转发。
     pub(super) modules: Arc<dyn crate::units::catalog::modules::api::Modules + Send + Sync>,
     /// 目的：构建能力面（与核心共享同一份）：创建会话前在**调用方线程**补编模块产物。
@@ -121,8 +120,7 @@ impl Handle {
     pub(super) fn decisions_of(
         &self,
         sid: &str,
-    ) -> Result<Option<Arc<dyn crate::units::conversation::session::api::Gates>>, String>
-    {
+    ) -> Result<Option<Arc<dyn crate::units::conversation::session::api::Gates>>, String> {
         if !self.interactive.load(std::sync::atomic::Ordering::Relaxed) {
             return Ok(None);
         }
@@ -162,9 +160,7 @@ impl Handle {
 impl crate::units::turn::turn::api::TurnHost for Handle {
     fn core<T>(
         &self,
-        f: impl FnOnce(&mut crate::units::turn::turn::api::Turn) -> Result<T, String>
-        + Send
-        + 'static,
+        f: impl FnOnce(&mut crate::units::turn::turn::api::Turn) -> Result<T, String> + Send + 'static,
     ) -> Result<T, String>
     where
         T: Send + 'static,
@@ -204,8 +200,7 @@ impl crate::units::turn::turn::api::TurnHost for Handle {
     fn decisions_of(
         &self,
         sid: &str,
-    ) -> Result<Option<Arc<dyn crate::units::conversation::session::api::Gates>>, String>
-    {
+    ) -> Result<Option<Arc<dyn crate::units::conversation::session::api::Gates>>, String> {
         Handle::decisions_of(self, sid)
     }
 

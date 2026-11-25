@@ -4,9 +4,7 @@
 //! 联动：只被单元测试与测试替身引用；实现 api::Chat 与 ports::ChatGateway；detail.rs 以 cfg(test) 声明。
 
 use crate::units::llm::api::Channel;
-use crate::units::llm::api::{
-    BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg, TokenUsage,
-};
+use crate::units::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg, TokenUsage};
 use crate::units::llm::ports::ChatGateway;
 
 /// 目的：脚本假模型：按调用次序回放脚本（最后一个条目重复兜底）；记录调用供测试断言。

@@ -29,8 +29,7 @@ pub struct Core {
     /// 目的：常驻服务的统一管理面（**不持它的端口**）——动作面与会话回收经它。
     pub(super) residents: Arc<dyn crate::units::residents::api::ResidentOps + Send + Sync>,
     /// 目的：隐秘字段的统一管理面——工具 / 服务起进程时按它解析注入项并脱敏。
-    pub(super) secrets:
-        Arc<dyn crate::units::catalog::secrets::api::SecretOps + Send + Sync>,
+    pub(super) secrets: Arc<dyn crate::units::catalog::secrets::api::SecretOps + Send + Sync>,
     /// 目的：项目内基础工具链的只读安装根（python / node / cc）——shell 每次调用都放行它们。
     ///  来源是组合根读到的 active.json；不按 agent 的模块重复注入。
     pub(super) base_roots: Vec<std::path::PathBuf>,
@@ -77,8 +76,8 @@ impl Core {
     ) -> Core {
         let compact = Arc::new(CompactRuntime::new(Arc::clone(&llm)));
         // 流程工厂在这里注入：turn / work 只认 `session::api::Flows`，具体流程的类型只出现在协作能力里。
-        let flows: Arc<dyn crate::units::conversation::session::api::Flows> = Arc::new(
-            crate::units::conversation::collab::api::CollabFlows::new(
+        let flows: Arc<dyn crate::units::conversation::session::api::Flows> =
+            Arc::new(crate::units::conversation::collab::api::CollabFlows::new(
                 Arc::clone(&llm),
                 Arc::clone(&vm),
                 Arc::clone(&modules),
@@ -87,8 +86,7 @@ impl Core {
                 Arc::clone(&tools),
                 Arc::clone(&log),
                 profiles,
-            ),
-        );
+            ));
         // 会话本体收在 turn：它只认能力面与压缩工厂，不认 runtime 的端口（层 8 不得依赖层 9）。
         let turn = crate::units::turn::turn::api::Turn::new(
             Arc::clone(&workspace),
@@ -295,7 +293,14 @@ impl Core {
     pub(crate) fn activation_build_request(
         &self,
         sid: &str,
-    ) -> Result<(Vec<String>, crate::units::pure::exec_model::api::Tier, Option<String>), String> {
+    ) -> Result<
+        (
+            Vec<String>,
+            crate::units::pure::exec_model::api::Tier,
+            Option<String>,
+        ),
+        String,
+    > {
         self.work.activation_build_request(sid)
     }
 

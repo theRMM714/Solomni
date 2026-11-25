@@ -4,12 +4,12 @@
 //! 联动：启动报告与 `src/main.rs` 的 `FenceReport`；语义见 `docs/kernel/README.md`。
 
 use super::prelude::*;
+use crate::kernel::api::fence::SandboxRequirements;
+use crate::kernel::detail::confine::Capability;
 use crate::units::catalog::registry::api::SandboxEnforceLevel::BestEffort;
 #[cfg(windows)]
 use crate::units::catalog::registry::api::SandboxEnforceLevel::Require;
 use crate::units::catalog::registry::ports::SettingsStore;
-use crate::kernel::api::fence::SandboxRequirements;
-use crate::kernel::detail::confine::Capability;
 use crate::{GateOutcome, MissingCause, MissingPart};
 use std::collections::BTreeMap;
 use std::io::Cursor;

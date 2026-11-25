@@ -439,7 +439,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         crate::units::llm::api::CompleteOpts::plain(false),
         None,
         Some(&mut verify as &mut dyn crate::units::conversation::session::api::CoreVerify),
-        &mut |_e: crate::units::conversation::session::api::SessionEvent| {},
+        &mut |_e: crate::units::transcript::api::SessionEvent| {},
     )
     .expect("核实之后要能交出方案");
     assert_eq!(out["plan"], "方案");
@@ -474,7 +474,7 @@ pub(crate) fn body_json_is_not_a_core_operation() {
         crate::units::llm::api::CompleteOpts::plain(false),
         None,
         None,
-        &mut |_e: crate::units::conversation::session::api::SessionEvent| {},
+        &mut |_e: crate::units::transcript::api::SessionEvent| {},
     );
     let err = out.expect_err("正文 JSON 不是工具调用，该如实报错");
     assert!(err.contains("没有调用 plan"), "{}", err);
@@ -520,7 +520,7 @@ pub(crate) fn core_operation_takes_a_native_structured_call() {
         crate::units::llm::api::CompleteOpts::plain(false),
         None,
         None,
-        &mut |e: crate::units::conversation::session::api::SessionEvent| {
+        &mut |e: crate::units::transcript::api::SessionEvent| {
             seen.lock().expect("锁").push(e);
         },
     )
@@ -530,7 +530,7 @@ pub(crate) fn core_operation_takes_a_native_structured_call() {
     assert!(
         rows.iter().any(|e| matches!(
             e,
-            crate::units::conversation::session::api::SessionEvent::Transcript(_)
+            crate::units::transcript::api::SessionEvent::Transcript(_)
         )),
         "这一轮的事实要推出去"
     );

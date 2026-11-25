@@ -10,7 +10,7 @@ use crate::units::conversation::collab::domain::gates::{
     OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM, Pending,
 };
 use crate::units::conversation::collab::service::discussion::TurnOut;
-use crate::units::conversation::session::api::{LineView, SessionEvent};
+use crate::units::transcript::api::{LineView, SessionEvent};
 use std::sync::Arc;
 
 use super::lines::*;
@@ -137,7 +137,7 @@ impl CollabSession {
         let option = ticket.option.as_str();
         let note = ticket.note.trim().to_string();
         let empty_before = self.roster.is_empty();
-        // 这一关是哪一种由发起方解释：队列只搬 kind + payload（见 session/domain/events.rs 的 Gate）。
+        // 这一关是哪一种由发起方解释：队列只搬 kind + payload（见 src/units/transcript/domain/events.rs 的 Gate）。
         let (p, advice) = Pending::from_gate(&ticket.gate)
             .ok_or_else(|| format!("这张卡不是本机制发的：{}", ticket.gate.kind))?;
         let nodes = match &p {
@@ -197,9 +197,7 @@ impl CollabSession {
         let kind = p.kind();
         let brief = self.decision_brief(p);
         let text = note.to_string();
-        sink(crate::units::conversation::session::api::working(
-            "核心",
-        ));
+        sink(crate::units::transcript::api::working("核心"));
         let judged = {
             let mut verify_box = self.verify_env("planner");
             let verify = verify_box.as_deref_mut();
@@ -218,7 +216,7 @@ impl CollabSession {
                 sink,
             )
         };
-        sink(crate::units::conversation::session::api::idle());
+        sink(crate::units::transcript::api::idle());
         self.note_user(note, sink);
         match judged {
             Ok((true, why)) => {
@@ -256,7 +254,7 @@ impl CollabSession {
             }
             Err(err) => {
                 self.notice(
-                    &crate::units::conversation::session::api::interrupted_note(&format!(
+                    &crate::units::transcript::api::interrupted_note(&format!(
                         "判定你的意思时没能问模型（{}）；为稳妥先不动，请再说一句。",
                         err
                     )),

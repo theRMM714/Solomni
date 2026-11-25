@@ -3,10 +3,10 @@
 //! 不管：QEMU 进程本身与命令通道（detail/qemu.rs）、镜像判定与挂载清单（domain/guest.rs）。
 //! 联动：实现 ports::ShareBackend；由组合根构造、service.rs 持有；helper 是独立仓的预编译产物（见 dependencies.yaml 的 vm.smbd.windows）。
 
+use crate::kernel::detail::procs::{self, Entry, ProcessBook};
 use crate::units::vm::domain::exec::SMBD_BIN;
 use crate::units::vm::domain::guest::{GuestImage, GuestMount, sh_quote};
 use crate::units::vm::ports::{ShareBackend, ShareGuard, SharePlan};
-use crate::kernel::detail::procs::{self, Entry, ProcessBook};
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};

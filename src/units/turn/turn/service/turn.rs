@@ -7,12 +7,13 @@
 
 use std::sync::Arc;
 
+use crate::kernel::ports::HostProbe;
 use crate::units::catalog::registry::api::Registry;
 use crate::units::conversation::session::api::{
-    AgentSession, Flow, Gates, RunState, SessionEvent, seat as seat_of, subtree_of,
+    AgentSession, Flow, Gates, RunState, seat as seat_of, subtree_of,
 };
+use crate::units::transcript::api::SessionEvent;
 use crate::units::turn::turn::api::{Prepared, Session};
-use crate::kernel::ports::HostProbe;
 
 use super::flow::NodeSpawn;
 use super::session::Turn;

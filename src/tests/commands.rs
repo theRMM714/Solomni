@@ -3,8 +3,8 @@
 //! 不管：手册排版（`src/tests/cli.rs`）与命令行为（各业务测试）。
 //! 联动：`systools/commands.yaml`、`src/units/tools/domain/op.rs`、`src/presentation/cli/boot.rs`、`src/presentation/cli.rs`。
 
-use crate::units::tools::api::{CommandBook, Op, OpBook, Phase, Runtime};
 use crate::presentation::cli::catalog;
+use crate::units::tools::api::{CommandBook, Op, OpBook, Phase, Runtime};
 use std::sync::OnceLock;
 
 /// 启动相的分派实现（只按名字取字段；旗语与位置参数由声明解析）。
