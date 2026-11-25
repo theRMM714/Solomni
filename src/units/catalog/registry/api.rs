@@ -7,20 +7,17 @@ pub use crate::units::catalog::registry::domain::picks::{
     model_listing, resolve_picks, unique_instance_name,
 };
 pub use crate::units::catalog::registry::domain::providers::{
-    AppSettings, ModelDraft, ModelEntry, ModelView, Provider, ProviderView, SandboxEnforceLevel,
-    SandboxUnavailable, Settings, StorageSettings, ThinkingSpec,
+    AppSettings, SandboxEnforceLevel, SandboxUnavailable, Settings,
 };
-pub use crate::units::pure::registry_model::api::AgentView;
-
-// 视图 DTO 的字段类型：生产在 domain 内构造，api 面只给呈现侧与装配替身命名（二进制 crate 没有外部消费者，rustc 报 unused）。
-#[allow(unused_imports)]
-pub use crate::units::catalog::registry::domain::providers::ModelThinkingView;
+pub use crate::units::pure::registry_model::api::{
+    AgentView, ModelDraft, ModelView, ProviderView, ToolMode,
+};
 
 #[allow(unused_imports)]
 pub use crate::units::catalog::registry::service::{save_agent, save_model};
 
 use crate::units::catalog::modules::api::Roster;
-use crate::units::llm::api::{Channel, ProbeOutcome, ReplayReport, ToolMode};
+use crate::units::llm::api::{Channel, ProbeOutcome, ReplayReport};
 
 /// 目的：登记处的**队列面**：呈现层经 `Handle`（核心自己的线程 + 命令队列）调它。
 ///    与 `Registry`（能力面）的分工是**有意的不对称**，不是重复：

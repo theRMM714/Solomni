@@ -1,5 +1,5 @@
 //! 目的：llm 能力的入站面——其它能力与呈现层只准用这里（不许碰 domain / ports）。
-//! 管：重导出信封与回执类型，定义协议词汇（Chat / BoxedChat / Msg / Completion / Chunk / ToolCall / ToolDecl / Channel / ToolMode / LlmOpts / CompleteOpts / ProbeOutcome）与 Llm 用例面。
+//! 管：重导出信封与回执类型，定义协议词汇（Chat / BoxedChat / Msg / Completion / Chunk / ToolCall / ToolDecl / Channel / LlmOpts / CompleteOpts / ProbeOutcome）与 Llm 用例面。
 //! 不管：信封解析与回执装配（在 domain）；出站端口的定义（在 ports）；适配器装配（在组合根）。
 //! 联动：runtime、其它能力与呈现层都经这里会话；实现见 service.rs；出站端口只由 service 持有（R12）。
 
@@ -8,7 +8,6 @@ pub use crate::units::llm::domain::envelope::{Malformed, Reply, Tail, ToolInvoke
 pub use crate::units::llm::domain::malformed::malformed_report;
 
 use crate::kernel::api::types::DEFAULT_LLM_TIMEOUT_SECS;
-use serde::{Deserialize, Serialize};
 
 /// 目的：一种"回放形状"的探测结论：**收了没有**（HTTP 层）+ **看懂了没有**（回答里带回了工具结果里的编号）
 ///    + 供应商原话或回答片段。事实，不是猜测。
@@ -24,18 +23,6 @@ pub struct ReplayShape {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ReplayReport {
     pub shapes: Vec<ReplayShape>,
-}
-
-/// 目的：该通道的工具调用形态（登记处里的事实；**缺省 native** = 现代供应商普遍支持）。
-/// 约束：手写信封只给模型表单里**显式选择**的通道（保存前不实测）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum ToolMode {
-    /// 手写信封：模型在正文里写 {"type":"tool",…}，核心解析。
-    Envelope,
-    /// 原生工具调用：参数走供应商的结构化槽位（保存前实测通过才允许落盘）。
-    #[default]
-    Native,
 }
 
 /// 目的：成品通道：登记处**解析后的结果**（端点 + 密钥 + 实际模型串），交给通道层建会话；

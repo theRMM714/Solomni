@@ -24,7 +24,7 @@ pub(crate) fn settings_resolves_model_to_channel() {
             api_model: "real-model".into(),
             provider: "p".into(),
             note: String::new(),
-            tools: crate::units::llm::api::ToolMode::Native,
+            tools: crate::units::pure::registry_model::api::ToolMode::Native,
             context: 32_000,
             thinking: Default::default(),
         },
@@ -55,7 +55,7 @@ pub(crate) fn settings_resolves_model_to_channel() {
             .iter()
             .find(|v| v.id == "d")
             .map(|v| v.tools),
-        Some(crate::units::llm::api::ToolMode::Native),
+        Some(crate::units::pure::registry_model::api::ToolMode::Native),
         "不填 tools 的模型缺省走原生"
     );
     assert_eq!(
@@ -63,7 +63,7 @@ pub(crate) fn settings_resolves_model_to_channel() {
             .iter()
             .find(|v| v.id == "m")
             .map(|v| v.tools),
-        Some(crate::units::llm::api::ToolMode::Native),
+        Some(crate::units::pure::registry_model::api::ToolMode::Native),
         "模型视图要带上形态（前端显示与探测结果都靠它）"
     );
     assert!(s.resolve("ghost").is_err(), "未知模型必须报错");
@@ -281,7 +281,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
 // ---------- 模块清单（内存来源） ----------
 #[test]
 pub(crate) fn a_probe_writes_back_only_conclusive_results() {
-    use crate::units::llm::api::ToolMode;
+    use crate::units::pure::registry_model::api::ToolMode;
     use crate::units::runtime::api::ProbeOutcome;
     let fresh = |outcome: ProbeOutcome| {
         let mut core = core_with_gateway(
@@ -370,7 +370,7 @@ pub(crate) fn reserved_directory_names_are_rejected_case_insensitively() {
 /// 目的：登记时就拒掉目录外的档、悬空的默认档与被保留键的片段；删掉仍被模型使用的等级也要拒绝。
 #[test]
 pub(crate) fn thinking_registration_rejects_unknown_levels_defaults_and_reserved_keys() {
-    use crate::units::catalog::registry::api::ThinkingSpec;
+    use crate::units::pure::registry_model::api::ThinkingSpec;
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
     core.registry_mut()
         .provider_upsert("p1", "http://x", "k")

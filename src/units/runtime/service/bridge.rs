@@ -5,10 +5,10 @@
 
 use super::*;
 
-fn tool_mode_str(m: crate::units::llm::api::ToolMode) -> String {
+fn tool_mode_str(m: crate::units::pure::registry_model::api::ToolMode) -> String {
     match m {
-        crate::units::llm::api::ToolMode::Native => "native".to_string(),
-        crate::units::llm::api::ToolMode::Envelope => "envelope".to_string(),
+        crate::units::pure::registry_model::api::ToolMode::Native => "native".to_string(),
+        crate::units::pure::registry_model::api::ToolMode::Envelope => "envelope".to_string(),
     }
 }
 

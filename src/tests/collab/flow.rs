@@ -381,7 +381,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     let sb = test_sandbox("核心", &[]);
     let mut verify = MemberTools {
         face: crate::units::conversation::session::api::ToolFace {
-            mode: crate::units::llm::api::ToolMode::Envelope,
+            mode: crate::units::pure::registry_model::api::ToolMode::Envelope,
             seat: "orchestrator".to_string(),
             modules: BTreeMap::new(),
             tier: crate::units::pure::exec_model::api::Tier::Host,
@@ -433,7 +433,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         &*test_tools_svc(),
         "planner",
         "plan",
-        crate::units::llm::api::ToolMode::Envelope,
+        crate::units::pure::registry_model::api::ToolMode::Envelope,
         &mut chat,
         &[crate::units::llm::api::Msg::user("出方案")],
         crate::units::llm::api::CompleteOpts::plain(false),
@@ -468,7 +468,7 @@ pub(crate) fn body_json_is_not_a_core_operation() {
         &*test_tools_svc(),
         "planner",
         "plan",
-        crate::units::llm::api::ToolMode::Envelope,
+        crate::units::pure::registry_model::api::ToolMode::Envelope,
         chat.as_mut(),
         &[crate::units::llm::api::Msg::user("出方案")],
         crate::units::llm::api::CompleteOpts::plain(false),
@@ -514,7 +514,7 @@ pub(crate) fn core_operation_takes_a_native_structured_call() {
         &*test_tools_svc(),
         "planner",
         "plan",
-        crate::units::llm::api::ToolMode::Native,
+        crate::units::pure::registry_model::api::ToolMode::Native,
         &mut chat,
         &[crate::units::llm::api::Msg::user("出方案")],
         crate::units::llm::api::CompleteOpts::plain(false),

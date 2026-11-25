@@ -14,7 +14,7 @@ pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Dis
             Member::new(
                 &id,
                 crate::tests::doubles::test_params(&id),
-                crate::units::llm::api::ToolMode::Envelope,
+                crate::units::pure::registry_model::api::ToolMode::Envelope,
                 scripted(s),
             )
         })
@@ -243,7 +243,7 @@ pub(crate) fn native_member(
     let m = Member::new(
         id,
         crate::tests::doubles::test_params(id),
-        crate::units::llm::api::ToolMode::Native,
+        crate::units::pure::registry_model::api::ToolMode::Native,
         chat,
     );
     let mut modules = BTreeMap::new();
@@ -262,7 +262,7 @@ pub(crate) fn native_member(
         member: m,
         tools: Some(MemberTools {
             face: crate::units::conversation::session::api::ToolFace {
-                mode: crate::units::llm::api::ToolMode::Native,
+                mode: crate::units::pure::registry_model::api::ToolMode::Native,
                 seat: "solo".to_string(),
                 modules,
                 tier: crate::units::pure::exec_model::api::Tier::Host,

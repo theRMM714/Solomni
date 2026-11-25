@@ -4,8 +4,9 @@
 //! 联动：能力面来自 `src/units/*/api.rs`；事件词汇与 `src/presentation/web/` 并列共用；模块声明见 `src/presentation.rs`。
 
 use crate::presentation::faces::Faces;
-use crate::units::catalog::registry::api::{ModelView, ProviderView};
 use crate::units::pure::registry_model::api::AgentMeta;
+use crate::units::pure::registry_model::api::ModelView;
+use crate::units::pure::registry_model::api::ProviderView;
 use crate::units::runtime::api::Output;
 use crate::units::runtime::api::{Acted, ActionCall, Caller};
 use crate::units::runtime::api::{DecisionCard, DecisionWaiter, SessionEvent, Tier};

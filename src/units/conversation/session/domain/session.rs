@@ -403,12 +403,12 @@ impl AgentSession {
     }
 
     /// 目的：这条会话**正在用**的工具调用形态（身份块里的调用约定按它现渲染）。
-    pub fn tool_mode(&self) -> crate::units::llm::api::ToolMode {
+    pub fn tool_mode(&self) -> crate::units::pure::registry_model::api::ToolMode {
         self.tools.as_ref().map(|t| t.face.mode).unwrap_or_default()
     }
 
     /// 目的：改形态：**只改这一格**（登记处派生出来的参数），不重建会话。
-    pub fn set_tool_mode(&mut self, mode: crate::units::llm::api::ToolMode) {
+    pub fn set_tool_mode(&mut self, mode: crate::units::pure::registry_model::api::ToolMode) {
         if let Some(t) = self.tools.as_mut() {
             t.face.mode = mode;
         }

@@ -262,7 +262,7 @@ pub(crate) fn member_with_service_tools(
     );
     crate::units::conversation::session::domain::tools::MemberTools {
         face: crate::units::conversation::session::api::ToolFace {
-            mode: crate::units::llm::api::ToolMode::Envelope,
+            mode: crate::units::pure::registry_model::api::ToolMode::Envelope,
             modules,
             tier: crate::units::pure::exec_model::api::Tier::Host,
             guest_lease: String::new(),

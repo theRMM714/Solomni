@@ -60,10 +60,10 @@ impl Turn {
             s.set_tool_mode(want);
         }
         Ok(Some(match want {
-            crate::units::llm::api::ToolMode::Native => {
+            crate::units::pure::registry_model::api::ToolMode::Native => {
                 "工具调用形态已按登记处改为**原生工具调用**（本条起生效）".to_string()
             }
-            crate::units::llm::api::ToolMode::Envelope => {
+            crate::units::pure::registry_model::api::ToolMode::Envelope => {
                 "工具调用形态已按登记处改为**手写信封**（本条起生效）".to_string()
             }
         }))

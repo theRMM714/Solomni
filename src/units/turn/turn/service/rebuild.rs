@@ -308,7 +308,7 @@ fn replay_ledgers(
 /// 约束：重建必须与实时逐条一致（见 `reply_msgs` 与 session-model.md）。
 pub fn replay_dialogue(
     events: &[serde_json::Value],
-    mode: crate::units::llm::api::ToolMode,
+    mode: crate::units::pure::registry_model::api::ToolMode,
 ) -> (
     Vec<crate::units::llm::api::Msg>,
     Vec<usize>,

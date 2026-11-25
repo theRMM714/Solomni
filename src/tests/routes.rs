@@ -21,10 +21,12 @@ use crate::units::work::api::{
 use crate::presentation::web::routes::{self, ROUTES};
 use crate::presentation::web::{self, FenceInfo};
 use crate::units::catalog::modules::api::{ModulesOps, Roster};
+use crate::units::catalog::registry::api::AppSettings;
 use crate::units::catalog::registry::api::RegistryOps;
-use crate::units::catalog::registry::api::{AppSettings, ModelView, ProviderView};
 use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::registry_model::api::AgentView;
+use crate::units::pure::registry_model::api::ModelView;
+use crate::units::pure::registry_model::api::ProviderView;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -674,9 +676,9 @@ impl RegistryOps for FakeFaces {
             api_model: "m".to_string(),
             provider: "p1".to_string(),
             note: String::new(),
-            tools: crate::units::llm::api::ToolMode::Envelope,
+            tools: crate::units::pure::registry_model::api::ToolMode::Envelope,
             context: 32_000,
-            thinking: crate::units::catalog::registry::api::ModelThinkingView {
+            thinking: crate::units::pure::registry_model::api::ModelThinkingView {
                 default: None,
                 levels: Default::default(),
             },
@@ -689,7 +691,7 @@ impl RegistryOps for FakeFaces {
     }
     fn upsert_model(
         &self,
-        _draft: crate::units::catalog::registry::api::ModelDraft,
+        _draft: crate::units::pure::registry_model::api::ModelDraft,
     ) -> Result<(), String> {
         self.guard()
     }

@@ -213,7 +213,7 @@ pub struct ServiceOp {
 pub struct ToolFace {
     /// 目的：这条通道的工具调用形态：envelope = 手写信封（任何供应商都能用）；native = 供应商结构化槽位。
     ///   **两套互斥**：native 就不解析信封、正文里的信封也不执行（但如实记失败行）。
-    pub mode: crate::units::llm::api::ToolMode,
+    pub mode: crate::units::pure::registry_model::api::ToolMode,
     /// 目的：模块 id → 该模块的（目录, 工具表）；内置 read/write 不走这里。
     pub modules: BTreeMap<String, ModuleTools>,
     /// 目的：本会话的执行档位——工具执行者据此决定在本机跑还是送进 guest。
@@ -364,7 +364,7 @@ impl MemberTools {
     pub(crate) fn tools_block(&self, ids: &[String], with_modules: bool) -> String {
         // 原生通道的工具面由**声明槽**下发（名字 / 说明 / JSON Schema），这里不再重复文字清单：
         // 只保留声明表达不了的内容（patch 的自由格式写法）。信封通道仍由这段文字承载全部工具说明。
-        let native = self.face.mode == crate::units::llm::api::ToolMode::Native;
+        let native = self.face.mode == crate::units::pure::registry_model::api::ToolMode::Native;
         let mut parts: Vec<String> = Vec::new();
         if !native {
             for id in ids {

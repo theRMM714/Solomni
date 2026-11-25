@@ -13,7 +13,7 @@ pub fn agent_system(
     chara: &str,
     modules: &[ModulePrompt],
     env: &str,
-    mode: crate::units::llm::api::ToolMode,
+    mode: crate::units::pure::registry_model::api::ToolMode,
     seat: &str,
 ) -> String {
     render_system(
@@ -35,7 +35,7 @@ pub fn seat_system(
     segment: crate::units::prompt::api::Segment,
     agent: &str,
     env: &str,
-    mode: crate::units::llm::api::ToolMode,
+    mode: crate::units::pure::registry_model::api::ToolMode,
     seat: &str,
 ) -> String {
     render_system(prompt, segment, agent, "", &[], env, mode, seat)
@@ -51,7 +51,7 @@ fn render_system(
     chara: &str,
     modules: &[ModulePrompt],
     env: &str,
-    mode: crate::units::llm::api::ToolMode,
+    mode: crate::units::pure::registry_model::api::ToolMode,
     seat: &str,
 ) -> String {
     use crate::units::prompt::api::Segment;
@@ -88,10 +88,10 @@ fn render_system(
             (
                 "tool_calling",
                 match mode {
-                    crate::units::llm::api::ToolMode::Native => {
+                    crate::units::pure::registry_model::api::ToolMode::Native => {
                         prompt.text(Segment::ToolCallingNative).to_string()
                     }
-                    crate::units::llm::api::ToolMode::Envelope => {
+                    crate::units::pure::registry_model::api::ToolMode::Envelope => {
                         prompt.text(Segment::ToolCallingEnvelope).to_string()
                     }
                 },
@@ -212,7 +212,7 @@ impl SessionParams {
     pub fn identity(
         &self,
         prompt: &dyn crate::units::prompt::api::Prompt,
-        mode: crate::units::llm::api::ToolMode,
+        mode: crate::units::pure::registry_model::api::ToolMode,
     ) -> String {
         let env = env_block(prompt, self);
         match self.seat_system {

@@ -7,9 +7,7 @@ use crate::kernel::api::jobs::JobRegistry;
 use crate::units::catalog::modules::api::{Module, Modules, Roster};
 use crate::units::catalog::packages::api::Packages;
 use crate::units::catalog::registry::api::Registry;
-use crate::units::catalog::registry::api::{
-    AppSettings, ModelView, ProviderView, RegistryOps, StorageSettings,
-};
+use crate::units::catalog::registry::api::{AppSettings, RegistryOps};
 use crate::units::conversation::proxy::api as d;
 use crate::units::conversation::session::api::subtree_of;
 use crate::units::conversation::session::api::{
@@ -18,12 +16,16 @@ use crate::units::conversation::session::api::{
 use crate::units::llm::api::Channel;
 #[cfg(test)]
 use crate::units::llm::api::Msg;
-use crate::units::llm::api::{Llm, ProbeOutcome, ToolMode};
+use crate::units::llm::api::{Llm, ProbeOutcome};
 use crate::units::maintenance::builds::api::Builds;
 use crate::units::prompt::api::Prompt;
 use crate::units::provision::api::Provision;
 use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::registry_model::api::AgentView;
+use crate::units::pure::registry_model::api::ModelView;
+use crate::units::pure::registry_model::api::ProviderView;
+use crate::units::pure::registry_model::api::StorageSettings;
+use crate::units::pure::registry_model::api::ToolMode;
 use crate::units::runtime::api::{
     Acted, ActionCall, ActionOps, ActionParamView, ActionView, Advance, Caller, CollabWork, Events,
     LogOps, Output, RebuildDeps, RewindOutcome, RewindTarget, RuntimeOps,

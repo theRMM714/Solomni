@@ -16,10 +16,11 @@ use crate::units::conversation::session::api::{
 };
 use crate::units::conversation::session::domain::assemble::{FaceInput, assemble as assemble_face};
 use crate::units::conversation::session::domain::tools::MemberTools;
-use crate::units::llm::api::{Channel, Llm, Msg, ToolMode};
+use crate::units::llm::api::{Channel, Llm, Msg};
 use crate::units::prompt::api::{Prompt, Segment};
 use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::registry_model::api::AgentMeta;
+use crate::units::pure::registry_model::api::ToolMode;
 use crate::units::residents::api::ResidentOps;
 use crate::units::tools::api::{ObservationFact, Observations, ToolExec, Tools};
 use crate::units::transcript::api::{ContextUsage, SessionEvent};
