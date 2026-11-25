@@ -18,6 +18,9 @@ impl crate::kernel::ports::HostProbe for FixedProbe {
     fn has_exe(&self, name: &str) -> bool {
         self.exes.iter().any(|n| n == name)
     }
+    fn path(&self) -> std::ffi::OsString {
+        std::ffi::OsString::from("")
+    }
     fn hypervisor_available(&self) -> bool {
         self.hypervisor
     }
@@ -72,6 +75,9 @@ impl crate::kernel::ports::HostProbe for TestHostProbe {
     fn has_exe(&self, name: &str) -> bool {
         matches!(name, "qemu-system-x86_64" | "smbd" | "virtiofsd")
             || crate::kernel::detail::HostProbeAdapter.has_exe(name)
+    }
+    fn path(&self) -> std::ffi::OsString {
+        crate::kernel::detail::HostProbeAdapter.path()
     }
     fn hypervisor_available(&self) -> bool {
         self.hypervisor

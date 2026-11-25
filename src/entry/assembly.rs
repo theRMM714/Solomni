@@ -91,7 +91,9 @@ pub(crate) fn home_docs(root: &Path) -> Arc<dyn crate::units::home::api::Home + 
 }
 
 /// 目的：会话盘面（`data/session` 这块盘归 `sessions` 单元）——组合根只在这里装一次，转录与共享区适配器都从它取根。
-pub(crate) fn sessions(root: &Path) -> Arc<dyn crate::units::sessions::api::Sessions + Send + Sync> {
+pub(crate) fn sessions(
+    root: &Path,
+) -> Arc<dyn crate::units::sessions::api::Sessions + Send + Sync> {
     Arc::new(crate::units::sessions::service::SessionsService::new(
         layout::session(root),
         Box::new(crate::units::sessions::detail::FsSessionDirs::new()),
@@ -250,9 +252,9 @@ pub(crate) fn secrets(
 ) -> Result<Arc<dyn crate::units::catalog::secrets::api::SecretOps + Send + Sync>, String> {
     secrets_with(
         modules,
-        Arc::new(crate::units::catalog::secrets::detail::YamlSecrets::new(home_docs(
-            root,
-        ))),
+        Arc::new(crate::units::catalog::secrets::detail::YamlSecrets::new(
+            home_docs(root),
+        )),
     )
 }
 
@@ -292,9 +294,11 @@ pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, Str
         Arc::new(build_service(root)?);
     let workspace: Arc<dyn crate::units::workspace::api::Workspace + Send + Sync> =
         Arc::new(crate::units::workspace::service::WorkspaceService::new(
-            Arc::new(crate::units::workspace::detail::fs_workspace::FsWorkspace::new(
-                sessions(root).root(),
-            )),
+            Arc::new(
+                crate::units::workspace::detail::fs_workspace::FsWorkspace::new(
+                    sessions(root).root(),
+                ),
+            ),
             Arc::new(crate::units::workspace::detail::fs_workstore::FsWorkStore::new()),
         ));
     let modules: Arc<dyn crate::units::catalog::modules::api::Modules + Send + Sync> = Arc::new(
@@ -309,9 +313,7 @@ pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, Str
                     .unwrap_or_default(),
                 content(root),
             )),
-            Arc::new(
-                crate::units::catalog::modules::detail::YamlModuleState::new(home_docs(root)),
-            ),
+            Arc::new(crate::units::catalog::modules::detail::YamlModuleState::new(home_docs(root))),
         )
         .map_err(|e| format!("模块清单装配失败：{}", e))?,
     );

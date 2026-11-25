@@ -194,7 +194,7 @@ impl BuildsService {
         net: bool,
     ) -> Result<Built, String> {
         let base = self.packages.base();
-        let current_path = std::env::var_os("PATH").unwrap_or_default();
+        let current_path = self.probe.path();
         let facts = Facts {
             probe: &HostExec(&*self.probe),
             current_path: &current_path,

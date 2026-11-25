@@ -18,11 +18,10 @@ fn yaml_settings_store_propagates_non_not_found_read_errors() {
         let root = scratch(&format!("yaml-settings-readerr-{}", name));
         let home = root.join(".home");
         std::fs::create_dir_all(home.join(name)).expect("拿目录占住这个路径");
-        let store = YamlSettingsStore::new(Arc::new(
-            crate::units::home::service::HomeService::new(Box::new(
-                crate::units::home::detail::FsHome::new(home.clone()),
-            )),
-        ));
+        let store =
+            YamlSettingsStore::new(Arc::new(crate::units::home::service::HomeService::new(
+                Box::new(crate::units::home::detail::FsHome::new(home.clone())),
+            )));
         assert!(
             store.load().is_err(),
             "{} 是非 NotFound 读错误，必须报错而不是退回默认",

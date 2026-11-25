@@ -67,7 +67,10 @@ mod tests {
         assert!(svc.area("harvest").userdata().is_dir());
         assert_eq!(
             svc.area("harvest").userdata(),
-            root.join("data").join("modules").join("harvest").join("userdata")
+            root.join("data")
+                .join("modules")
+                .join("harvest")
+                .join("userdata")
         );
         let _ = std::fs::remove_dir_all(&root);
     }

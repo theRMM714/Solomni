@@ -222,7 +222,7 @@ fn logs(root: &Path, active_log: Option<&str>) -> SpaceCategory {
 }
 
 fn guest_bases(root: &Path) -> SpaceCategory {
-    let items = scan::children(&layout::vm(root).join("guest"))
+    let items = scan::children(&crate::units::vmstore::api::paths(root).guests())
         .into_iter()
         .filter(|p| p.is_dir())
         .map(|p| {

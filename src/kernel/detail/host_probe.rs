@@ -75,6 +75,11 @@ impl HostProbe for HostProbeAdapter {
         path.is_file()
     }
 
+    /// 当前进程的 PATH：环境变量只在机制层读，服务层问端口。
+    fn path(&self) -> std::ffi::OsString {
+        std::env::var_os("PATH").unwrap_or_default()
+    }
+
     fn is_dir(&self, path: &Path) -> bool {
         path.is_dir()
     }

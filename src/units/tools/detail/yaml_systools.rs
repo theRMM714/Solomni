@@ -41,32 +41,32 @@ impl SystoolsSource for YamlSystools {
     fn load(&self) -> Result<SystemTools, String> {
         let text = self
             .assets
-            .read(Doc::SystoolsTools)
-            .map_err(|e| format!("工具总表读不了（{}）：{}", Doc::SystoolsTools.label(), e))?;
+            .read(Doc::Tools)
+            .map_err(|e| format!("工具总表读不了（{}）：{}", Doc::Tools.label(), e))?;
         let tools: ToolFile = yaml_serde::from_str(&text)
-            .map_err(|e| format!("工具总表非法（{}）：{}", Doc::SystoolsTools.label(), e))?;
+            .map_err(|e| format!("工具总表非法（{}）：{}", Doc::Tools.label(), e))?;
         if tools.tools.is_empty() {
             return Err(format!(
                 "工具总表里一个工具都没有（{}）",
-                Doc::SystoolsTools.label()
+                Doc::Tools.label()
             ));
         }
         let text = self
             .assets
-            .read(Doc::SystoolsNames)
-            .map_err(|e| format!("名字表读不了（{}）：{}", Doc::SystoolsNames.label(), e))?;
+            .read(Doc::Names)
+            .map_err(|e| format!("名字表读不了（{}）：{}", Doc::Names.label(), e))?;
         let names: NamesFile = yaml_serde::from_str(&text)
-            .map_err(|e| format!("名字表非法（{}）：{}", Doc::SystoolsNames.label(), e))?;
+            .map_err(|e| format!("名字表非法（{}）：{}", Doc::Names.label(), e))?;
         if names.agents.is_empty() {
             return Err(format!(
                 "名字表里 agent 保留名一块是空的（{} 的 agents）",
-                Doc::SystoolsNames.label()
+                Doc::Names.label()
             ));
         }
         if names.modules.is_empty() {
             return Err(format!(
                 "名字表里模块保留名一块是空的（{} 的 modules）",
-                Doc::SystoolsNames.label()
+                Doc::Names.label()
             ));
         }
         Ok(SystemTools {

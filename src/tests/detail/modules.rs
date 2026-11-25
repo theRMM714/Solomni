@@ -6,7 +6,9 @@
 use super::*;
 
 /// 目的：给扫描用的内容盘适配——私有区落在隔离根下的 `data/modules`，不碰源码树。
-fn content_at(root: &std::path::Path) -> std::sync::Arc<dyn crate::units::content::api::Content + Send + Sync> {
+fn content_at(
+    root: &std::path::Path,
+) -> std::sync::Arc<dyn crate::units::content::api::Content + Send + Sync> {
     std::sync::Arc::new(crate::units::content::service::ContentService::new(
         root,
         Box::new(crate::units::content::detail::FsContentFs),
@@ -149,7 +151,11 @@ fn fs_modules_reads_the_private_area_fact() {
     };
     put("with");
     put("without");
-    let kept = root.join("data").join("modules").join("with").join("userdata");
+    let kept = root
+        .join("data")
+        .join("modules")
+        .join("with")
+        .join("userdata");
     std::fs::create_dir_all(&kept).expect("建已有的私有区");
     std::fs::write(kept.join("keep.txt"), "x").expect("放已有的状态");
 
@@ -175,7 +181,10 @@ fn fs_modules_reads_the_private_area_fact() {
     );
     assert_eq!(
         fact("without"),
-        root.join("data").join("modules").join("without").join("userdata"),
+        root.join("data")
+            .join("modules")
+            .join("without")
+            .join("userdata"),
         "原本没有的会被建出来，且落在 data/ 下"
     );
     assert!(

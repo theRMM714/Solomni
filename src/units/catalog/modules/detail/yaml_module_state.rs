@@ -23,9 +23,8 @@ impl YamlModuleState {
 impl ModuleStateStore for YamlModuleState {
     fn load(&self) -> Result<EnabledState, String> {
         match self.home.read(Doc::Modules)? {
-            Some(t) => {
-                yaml_serde::from_str::<EnabledState>(&t).map_err(|e| format!("modules.yaml 非法：{}", e))
-            }
+            Some(t) => yaml_serde::from_str::<EnabledState>(&t)
+                .map_err(|e| format!("modules.yaml 非法：{}", e)),
             None => Ok(EnabledState::default()),
         }
     }

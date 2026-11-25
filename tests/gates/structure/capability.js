@@ -14,9 +14,22 @@ const { rel } = require("../../lib/fsutil.js");
 const { stripTestModules } = require("./dependency.js");
 const { mask } = require("../../lib/rust-mask.js");
 
-const IO_CALLS = ["std::fs", "std::process::Command", "ureq", "reqwest", "std::net"];
+const IO_CALLS = [
+  "std::fs",
+  "std::process::Command",
+  "ureq",
+  "reqwest",
+  "std::net",
+];
+/** 环境变量也是盘外事实：产物里谁读 HOME / PATH，谁就在替用户拍板（编译期常量 std::env::consts 不算）。 */
+const ENV_READ = /std::env::(var|var_os|temp_dir|current_dir|current_exe|set_var|remove_var|args)\b/;
 /** 端口方法之外的 canonicalize 调用也是直接 IO：`probe.canonicalize` 走端口，`path.canonicalize` 直接碰盘。 */
 const CANONICALIZE = /canonicalize\s*\(/;
+/** 路径探查同样是 IO：`path.is_dir()` / `volume.exists()` 直接问盘，`probe.is_dir()` 走端口。
+ *  端口的形参名在这里是约定（`probe` / `host` / `io` / `dirs` / `sessions` / `fs` / `files`），
+ *  连同 `self.<字段>.` 一并豁免；其余接收者一律算直接碰盘。 */
+const PATH_PROBE = /\.(is_dir|is_file|exists|read_dir|symlink_metadata)\s*\(/;
+const PORT_PROBE = /\b(?:probe|host|io|dirs|sessions|fs|files)\s*\.\s*(?:is_dir|is_file|exists|read_dir|symlink_metadata)\s*\(/g;
 
 /** 单元内的实现分区：api / service / domain / detail；其余（单元根 X.rs、guest.rs 这类）不归这些判据管。
  *  单元与子业务之间可以多一层目录（如 units/conversation/session/domain），判据取路径里第一个分区段。 */
@@ -129,6 +142,11 @@ function scan(root) {
       }
       const withoutPort = prod.replace(/\b(?:self\s*\.\s*)?probe\s*\.\s*canonicalize\s*\(/g, "");
       if (CANONICALIZE.test(withoutPort)) serviceIo.add(f + " -> Path::canonicalize");
+      const env = withoutPort.match(ENV_READ);
+      if (env) serviceIo.add(f + " -> std::env::" + env[1]);
+      if (PATH_PROBE.test(withoutPort.replace(PORT_PROBE, ""))) {
+        serviceIo.add(f + " -> Path::is_dir/is_file/exists");
+      }
       const node = modulePathOf(f);
       serviceGraph[node] = siblingEdges(node, prod, nodes);
     }

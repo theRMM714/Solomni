@@ -34,7 +34,8 @@ impl Paths {
 
     /// 目的：一个虚拟根的构建缓存卷（`<build-cache>/<虚拟根>.qcow2`）。
     pub fn build_volume(&self, guest: &str) -> PathBuf {
-        self.build_cache().join(format!("{}.qcow2", safe_segment(guest)))
+        self.build_cache()
+            .join(format!("{}.qcow2", safe_segment(guest)))
     }
 
     /// 目的：构建缓存卷旁的元数据（`<build-cache>/<虚拟根>.json`；构建写，盘点读）。
@@ -78,9 +79,7 @@ impl Paths {
 
     /// 目的：一个模块那次构建的私有家目录（`<build-state>/<模块>/home`）。
     pub fn build_home(&self, module: &str) -> PathBuf {
-        self.build_states()
-            .join(safe_segment(module))
-            .join("home")
+        self.build_states().join(safe_segment(module)).join("home")
     }
 
     /// 目的：虚拟根目录（`<guests>/`）。
@@ -138,14 +137,32 @@ mod tests {
         let p = Paths::at(Path::new("/w"));
         let vm = layout::vm(Path::new("/w"));
         assert_eq!(p.build_cache(), vm.join("build-cache"));
-        assert_eq!(p.build_volume("debian-13"), vm.join("build-cache").join("debian-13.qcow2"));
-        assert_eq!(p.build_meta("debian-13"), vm.join("build-cache").join("debian-13.json"));
-        assert_eq!(p.build_lock("debian-13"), vm.join("build-cache").join("debian-13.lock"));
-        assert_eq!(p.build_purge("debian-13"), vm.join("build-cache").join("debian-13.purge"));
+        assert_eq!(
+            p.build_volume("debian-13"),
+            vm.join("build-cache").join("debian-13.qcow2")
+        );
+        assert_eq!(
+            p.build_meta("debian-13"),
+            vm.join("build-cache").join("debian-13.json")
+        );
+        assert_eq!(
+            p.build_lock("debian-13"),
+            vm.join("build-cache").join("debian-13.lock")
+        );
+        assert_eq!(
+            p.build_purge("debian-13"),
+            vm.join("build-cache").join("debian-13.purge")
+        );
         assert_eq!(p.downloads(), vm.join("cache"));
         assert_eq!(p.overlays(), vm.join("overlays"));
-        assert_eq!(p.build_state("demo"), vm.join("build-state").join("demo.json"));
-        assert_eq!(p.build_home("demo"), vm.join("build-state").join("demo").join("home"));
+        assert_eq!(
+            p.build_state("demo"),
+            vm.join("build-state").join("demo.json")
+        );
+        assert_eq!(
+            p.build_home("demo"),
+            vm.join("build-state").join("demo").join("home")
+        );
         assert_eq!(p.guest("debian-13"), vm.join("guest").join("debian-13"));
         assert_eq!(p.engines(), vm.join("qemu"));
         assert_eq!(p.ledger(), vm.join("state").join("deps.json"));
@@ -158,7 +175,10 @@ mod tests {
     fn unsafe_segments_collapse_into_one_stem() {
         let p = Paths::at(Path::new("/w"));
         assert_eq!(p.build_volume("a/b"), p.build_volume("a_b"));
-        assert!(p.guest("../x").starts_with(layout::vm(Path::new("/w")).join("guest")));
+        assert!(
+            p.guest("../x")
+                .starts_with(layout::vm(Path::new("/w")).join("guest"))
+        );
         assert!(!p.build_volume("a/b").to_string_lossy().contains("a/b"));
     }
 }
