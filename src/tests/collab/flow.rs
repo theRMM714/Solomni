@@ -384,7 +384,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
             mode: crate::units::llm::api::ToolMode::Envelope,
             seat: "orchestrator".to_string(),
             modules: BTreeMap::new(),
-            tier: crate::kernel::api::types::Tier::Host,
+            tier: crate::units::exec_model::api::Tier::Host,
             guest_lease: String::new(),
             sandbox: sb.clone(),
             tools_this_turn: test_prompts()

@@ -22,7 +22,7 @@ use crate::units::prompt::ports::PromptSource;
 use crate::units::tools::ports::SysIo;
 use crate::units::workspace::ports::Workdirs;
 use crate::kernel::api::fence::FencePlan;
-use crate::kernel::api::types::ExecSpec;
+use crate::units::exec_model::api::ExecSpec;
 use crate::kernel::ports::{FenceHost, ProcessRunner};
 use crate::kernel::ports::{Log, NoopLog};
 use std::collections::BTreeMap;

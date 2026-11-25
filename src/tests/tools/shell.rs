@@ -38,7 +38,7 @@ pub(crate) fn runtime_base_roots_are_only_put_on_host_member_tools() {
         false,
         crate::units::llm::api::ToolMode::Envelope,
         "solo",
-        crate::kernel::api::types::Tier::Host,
+        crate::units::exec_model::api::Tier::Host,
         String::new(),
         &plan,
     );
@@ -54,7 +54,7 @@ pub(crate) fn runtime_base_roots_are_only_put_on_host_member_tools() {
         false,
         crate::units::llm::api::ToolMode::Envelope,
         "solo",
-        crate::kernel::api::types::Tier::Vm,
+        crate::units::exec_model::api::Tier::Vm,
         "guest".to_string(),
         &plan,
     );

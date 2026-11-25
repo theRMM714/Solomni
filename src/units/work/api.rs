@@ -10,7 +10,7 @@ use crate::units::conversation::session::api::{HistoryView, OptionView, SessionE
 use crate::units::vm::api::{ExecPlan, GuestStop, Vm};
 use crate::units::workspace::api::Sandboxes;
 use crate::kernel::api::types::SessionId;
-use crate::kernel::api::types::Tier;
+use crate::units::exec_model::api::Tier;
 use crate::kernel::ports::{HostProbe, Log};
 use std::collections::BTreeMap;
 use std::path::PathBuf;

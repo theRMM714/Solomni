@@ -21,7 +21,7 @@ use crate::units::turn::env::api::SeatAccess;
 use crate::units::turn::turn::service::session::Turn;
 use crate::units::vm::api::GuestOs;
 use crate::units::workspace::api::{Sandbox, Sandboxes, SharedScope};
-use crate::kernel::api::types::Tier;
+use crate::units::exec_model::api::Tier;
 use crate::kernel::ports::HostProbe;
 
 /// 目的：一席事实的取用：沙箱、权限、工具面入参与上下文预算。

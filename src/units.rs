@@ -5,6 +5,7 @@
 
 pub mod catalog;
 pub mod conversation;
+pub mod exec_model;
 pub mod lifecycle;
 pub mod llm;
 pub mod maintenance;

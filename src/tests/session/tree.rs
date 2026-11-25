@@ -530,8 +530,8 @@ pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
 #[test]
 pub(crate) fn guest_lease_follows_the_tier_and_the_proxy_root() {
     use crate::units::conversation::session::api::guest_lease;
-    use crate::kernel::api::types::ExecSpec;
-    use crate::kernel::api::types::Tier;
+    use crate::units::exec_model::api::ExecSpec;
+    use crate::units::exec_model::api::Tier;
     let meta = |name: &str, parent: Option<&str>, tier: Tier, kind: &str| SessionMeta {
         usage_totals: Default::default(),
         context_freshness: false,

@@ -182,7 +182,7 @@ pub(crate) fn single_work(
         task: None,
         delegate: false,
         permission: None,
-        tier: crate::kernel::api::types::Tier::Host,
+        tier: crate::units::exec_model::api::Tier::Host,
         guest: None,
         workspace: None,
     }

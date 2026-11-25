@@ -14,7 +14,7 @@ use crate::units::tools::api::{Observations, ToolBook, ToolExec};
 use crate::units::vm::api::Vm;
 use crate::units::workspace::api::Sandbox;
 use crate::kernel::api::fence::FencePlan;
-use crate::kernel::api::types::Tier;
+use crate::units::exec_model::api::Tier;
 use crate::kernel::ports::Log;
 
 /// 目的：装配核心核实环境所需的全部事实与端口：沙箱、席位、通道形态、网络、工具总表、说明块素材与四个端口。

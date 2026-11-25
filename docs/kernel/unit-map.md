@@ -16,7 +16,7 @@
 | `src/kernel/api.rs` | 地基库对外面的入口：只声明 `api/` 下的面模块。面按**对外概念**切（`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `path` / `platform`），每个面只做重导出、不定义条目；能力与装配层经 `api::<面>` 取用，内核内部直取所属机制（见 [README](README.md) 的「六、对外面」） |
 | `src/kernel/ports.rs` | 全项目共享的机制端口：`Log` / `PathCodec` / `AskUser` / `ToolHandler` / `HostProbe` / `ProcessRunner` / `SessionHost` / `FenceHost` / `FenceGate` / `UserPath` 的 trait 定义与它们的纯数据形态（含 `ShellRun` 的 `gate`、用户 PATH 的 `PathValue`） |
 | `src/kernel/contracts.rs` | 跨层共享形状的入口：`fence` / `note` / `run` / `types` 四个子模块声明 |
-| `src/kernel/contracts/types.rs` | 跨层共享的形状（纯数据）：`SessionId` / `Tier` / `ExecSpec` / `ToolOutcome` / `Ask` / `AskOutcome` / `JobState` 与默认预算、能力名文法 |
+| `src/kernel/contracts/types.rs` | 跨层共享的端口载荷（纯数据）：`SessionId` / `ToolOutcome` / `Ask` / `AskOutcome` 与默认预算、能力名文法（执行档位与作业进度归 `exec_model`，不在 kernel） |
 | `src/kernel/contracts/note.rs` | 回执说明的契约：`Note`（稳定 ASCII 码 + 类型化参数）、`Severity`（`info` / `warning` / `error` 与 `Ord` 优先级）与码表 `codes`（含导出给界面遍历的 `ALL`） |
 | `src/kernel/contracts/run.rs` | 宿主执行端口的中性回执 `RunOutcome`（跑没跑、轻重、输出、说明；不含业务语义与文案） |
 | `src/kernel/contracts/fence.rs` | 围栏**意图**：`FencePlan`（`home` / `cwd` / `grants` / `net`）、`Grant`（`path` + `Access` + `Reach`）、`NetPolicy`、`FenceRunPolicy` 与 `FenceBlocked`：纯数据，不含任何平台词汇 |

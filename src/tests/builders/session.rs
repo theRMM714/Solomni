@@ -67,7 +67,7 @@ pub(crate) fn member_with_tools(
                 mode: crate::units::llm::api::ToolMode::Envelope,
                 seat: "solo".to_string(),
                 modules,
-                tier: crate::kernel::api::types::Tier::Host,
+                tier: crate::units::exec_model::api::Tier::Host,
                 guest_lease: String::new(),
                 sandbox: test_sandbox("m0", &[]),
                 tools_this_turn: test_prompts()
