@@ -7,6 +7,7 @@
 ## 管什么 / 不管什么
 
 - 管：会话历史的落盘与读写（实现 `turn_state` 的两个端口面 `History` / `HistoryOps`）、会话树派生（子树 / 工作根 / 配置归属 / guest 租约）、席位面与工具总表的自洽断言。
+- 不管：`data/session` 这块盘本身归 [`sessions` 单元](../sessions/README.md)（会话根 + 存在性）；本单元只在它给的根下写 `meta.yaml` / `transcript.jsonl` / `children/`。
 - 不管：不实现单会话运行时（会话对象、回合引擎、工具面、一席装配与核实环境、核心操作回路在 `agentloop`）、不持裁决队与流程面（在 `turn_state`）、不编排跨会话（`runtime`）、不决定讨论流程（`collab`）、不实现工具机制（`tools`）、不声明会话身份（元信息 / 类型表 / 机制席位在 `session_model`，本单元只按声明装配）。
 
 ## 入站契约与状态归属

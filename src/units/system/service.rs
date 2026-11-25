@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::kernel::api::layout;
 use crate::units::catalog::modules::api::Modules;
 use crate::units::catalog::packages::api::BaseFacts;
 use crate::units::maintenance::builds::api::{Builds, Built, Target};
@@ -16,6 +15,7 @@ use crate::units::maintenance::storage::api::{
     CleanKind, CleanOutcome, CleanRequest, GcReport, Storage,
 };
 use crate::units::provision::api::Provision;
+use crate::units::sessions::api::Sessions;
 use crate::units::pure::exec_model::api::JobState;
 use crate::units::system::api::{
     BuildRequest, EnsureRequest, Facts, Fault, FenceFacts, GcRequest, ResetRequest, SetupMode,
@@ -25,8 +25,10 @@ use crate::units::workspace::api::{WorkGcReport, Workspace, safe_file_name};
 
 /// 目的：系统维护单元的依赖面——全部由组合根注入（能力自己不构造别的单元的适配器）。
 pub struct SystemDeps {
-    /// 目的：产品根（自检要读 `.home` 与 `.tools` 的现场事实）。
+    /// 目的：产品根（自检要读 `data/.home` 与 `.tools` 的现场事实）。
     pub root: PathBuf,
+    /// 目的：会话盘面（"有没有这个工作"要问会话盘的主人，不在业务层碰文件系统）。
+    pub sessions: Arc<dyn Sessions>,
     pub storage: Arc<dyn Storage>,
     pub provision: Arc<dyn Provision>,
     pub builds: Arc<dyn Builds>,
@@ -166,7 +168,7 @@ impl System for SystemService {
 
     fn work_gc(&self, req: WorkGcRequest) -> Result<WorkGcReport, Fault> {
         let work = safe_file_name(&req.work).map_err(Fault::usage)?;
-        if !layout::session(&self.deps.root).join(&work).is_dir() {
+        if !self.deps.sessions.exists(&work) {
             return Err(Fault::usage(format!("没有这个工作：{}", work)));
         }
         self.deps

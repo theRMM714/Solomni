@@ -8,6 +8,7 @@ pub mod catalog;
 pub mod collab;
 pub mod conversation;
 pub mod home;
+pub mod sessions;
 pub mod lifecycle;
 pub mod llm;
 pub mod maintenance;

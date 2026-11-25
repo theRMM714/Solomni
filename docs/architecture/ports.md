@@ -24,6 +24,8 @@
 | `Home` | `data/.home` 的入站面：按 `Doc` 读原样文本（不存在 = `None`）、整份原子写、私密文档收紧权限；文档形态与解码不在这里 |
 | `HomeFiles` | 登记处的文件机制：按文件名读、原子写（临时文件 + rename）、可选私密权限；只由 `home` 的 service 持有 |
 | `SettingsStore` | 登记处持久化（providers / models / settings / agents 四个 yaml；文件机制走 `Home`） |
+| `Sessions` | 会话盘（`data/session`）的入站面：会话根（只交给组合根构造两个文件适配器）与会话目录存在性；内部布局不在这里 |
+| `SessionDirs` | 会话盘的目录事实：某个会话目录存不存在；只由 `sessions` 的 service 持有 |
 | `ModuleSource` | 模块清单来源（扫描安装根的 `modules/`，模块私有区在 `data/modules/`） |
 | `ModuleStateStore` | 模块与服务的启停覆盖落盘（`data/.home/modules.yaml`） |
 | `PackageSource` | 运行包库来源（扫描依赖文件夹 `data/runtimes/`） |
