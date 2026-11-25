@@ -6,7 +6,7 @@
 use super::super::builders::shown_contains;
 use super::super::doubles::{collab_work, module_of};
 use super::super::gated_ops;
-use crate::units::conversation::collab::api::OPT_BEGIN;
+use crate::units::collab::api::OPT_BEGIN;
 use crate::units::transcript::api::SessionEvent;
 use crate::units::turn::turn::api::Output;
 use std::sync::Arc;

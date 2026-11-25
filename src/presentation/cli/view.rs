@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::presentation::faces::Faces;
-use crate::units::conversation::collab::api::CollabEvent;
+use crate::units::collab::api::CollabEvent;
 
 /// 目的：启动页副行：终端转录中心、版本与根路径。
 pub(super) fn startup_tagline() -> String {

@@ -226,7 +226,7 @@ pub(crate) fn stopped_session_offers_enable_instead_of_continue() {
 /// 约束：归档不是终态——「恢复归档」翻回 active，但**不唤醒**（不产生模型调用）。
 #[test]
 pub(crate) fn archive_hides_dispatch_and_restore_brings_it_back() {
-    use crate::units::conversation::proxy::api::ControlAction;
+    use crate::units::proxy::api::ControlAction;
     let hist = Arc::new(InMemoryHistory::new());
     seed_session(
         &hist,

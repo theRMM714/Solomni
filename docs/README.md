@@ -13,9 +13,9 @@
 | `work`（工作用例） | [README.md](work/README.md)、[unit-map.md](work/unit-map.md) |
 | `lifecycle`（会话历史生命周期） | [README.md](lifecycle/README.md)、[unit-map.md](lifecycle/unit-map.md) |
 | `conversation`：`session`（会话） | [README.md](session/README.md)、[unit-map.md](session/unit-map.md)、[session-model.md](session/session-model.md) |
-| `conversation`：`collab`（协作会话） | [README.md](collab/README.md)、[unit-map.md](collab/unit-map.md)、[task-chain.md](collab/task-chain.md) |
-| `conversation`：`proxy`（核心代理工具） | [README.md](proxy/README.md)、[unit-map.md](proxy/unit-map.md) |
 | `conversation`：`slate`（名单） | [README.md](slate/README.md)、[unit-map.md](slate/unit-map.md) |
+| `collab`（协作会话） | [README.md](collab/README.md)、[unit-map.md](collab/unit-map.md)、[task-chain.md](collab/task-chain.md) |
+| `proxy`（核心代理工具） | [README.md](proxy/README.md)、[unit-map.md](proxy/unit-map.md) |
 | `turn`：`turn`（回合状态） | [README.md](turn/README.md)、[unit-map.md](turn/unit-map.md) |
 | `turn`：`env`（环境事实） | [README.md](env/README.md)、[unit-map.md](env/unit-map.md) |
 | `maintenance`：`builds`（模块构建） | [README.md](builds/README.md)、[unit-map.md](builds/unit-map.md) |

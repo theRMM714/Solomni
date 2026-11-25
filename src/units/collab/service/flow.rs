@@ -6,10 +6,10 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use crate::units::conversation::collab::domain::events::CollabEvent;
-use crate::units::conversation::collab::domain::gates::{OPT_BEGIN_ALLOW, Pending};
-use crate::units::conversation::collab::service::collab::{CollabSession, Phase};
-use crate::units::conversation::collab::service::discussion::AfterTurn;
+use crate::units::collab::domain::events::CollabEvent;
+use crate::units::collab::domain::gates::{OPT_BEGIN_ALLOW, Pending};
+use crate::units::collab::service::collab::{CollabSession, Phase};
+use crate::units::collab::service::discussion::AfterTurn;
 
 use crate::units::agentloop::api::MemberTurn;
 use crate::units::pure::registry_model::api::AgentMeta;

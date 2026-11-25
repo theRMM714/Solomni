@@ -58,7 +58,7 @@ impl Lifecycle {
         let next_line = crate::units::agentloop::api::next_line_id(&raw);
         // 说明：`align_keep` 对「找不到目标行」返回 u64::MAX = 保留全部；删除模式允许这种写法，
         // 留档模式不能把 MAX 写进标记（下面单独拒绝）。另记这次回档移出的工具执行次数，用于告知"副作用不在回档范围内"。
-        let before_tools = crate::units::conversation::collab::api::tool_runs(
+        let before_tools = crate::units::collab::api::tool_runs(
             &crate::units::agentloop::api::truncate_events(&raw),
         );
         let work = work_root(self.history.as_ref(), sid)?;
@@ -207,7 +207,7 @@ impl Lifecycle {
                 (active, rewound)
             }
         };
-        let after_tools = crate::units::conversation::collab::api::tool_runs(&active);
+        let after_tools = crate::units::collab::api::tool_runs(&active);
         let dropped = before_tools.saturating_sub(after_tools);
         if dropped > 0 {
             active.push(serde_json::json!({

@@ -290,7 +290,7 @@ impl ProxyBridge {
     }
 }
 
-impl crate::units::conversation::proxy::api::ProxyHost for ProxyBridge {
+impl crate::units::proxy::api::ProxyHost for ProxyBridge {
     fn catalog(&self, scope: d::CatalogScope) -> Result<d::Catalog, String> {
         self.call(move |core| core.proxy_catalog(scope))
     }
@@ -405,7 +405,7 @@ impl Handle {
         mut session: crate::units::agentloop::api::AgentSession,
         sid: &str,
     ) -> Result<crate::units::agentloop::api::AgentSession, String> {
-        use crate::units::conversation::proxy::api as dp;
+        use crate::units::proxy::api as dp;
         let wanted = session.tools.as_ref().is_some_and(|tools| {
             tools.handlers.is_empty() && tools.face.allowed.iter().any(|t| dp::is_proxy_tool(t))
         });
@@ -436,11 +436,11 @@ impl Handle {
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
         let host: std::sync::Arc<
-            dyn crate::units::conversation::proxy::api::ProxyHost + Send + Sync,
+            dyn crate::units::proxy::api::ProxyHost + Send + Sync,
         > = std::sync::Arc::new(crate::units::runtime::service::ProxyBridge::new(
             self.clone(),
         ));
-        let handler = crate::units::conversation::proxy::api::ProxyHandler::new(
+        let handler = crate::units::proxy::api::ProxyHandler::new(
             host,
             self.book.clone(),
             dp::ProxyCall {

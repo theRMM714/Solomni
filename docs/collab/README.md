@@ -1,7 +1,7 @@
 # collab（协作会话）
 
 > 定位：从讨论走到交付的协作会话状态机。
-> 效力：规范｜核对：2026-11-23｜依据：`src/units/conversation/collab/api.rs`
+> 效力：规范｜核对：2026-11-23｜依据：`src/units/collab/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -12,11 +12,11 @@
 ## 入站契约与状态归属
 
 - 入站面：`api::CollabSession`——讨论与执行引擎、回合与验收词汇、协作状态派生的对外名字；协作自己的事件（`CollabEvent`）与裁决关（`Pending`、`OPT_*`）也从 `api` 出。
-- 词汇归属：协作事件与关卡在 `src/units/conversation/collab/domain/`（`events.rs` / `gates.rs`），会话只提供「机制事件」通道与不解释 `kind` 的裁决队——改协作流程不改会话文件。
-- 流程面：协作在 `src/units/conversation/collab/service/flow.rs` 实现 `session::api::Flow`（推一步 / 让出一回合 / 交回处置 / 处置自己发的关卡）与可派的活 `session::api::WorkPlan`（该派哪些节点、节点提示词与返工提示、开跑收工记账、开工事件）；`turn` 的驱动只认流程面，认不出这是协作。关卡的解释在 `src/units/conversation/collab/domain/gates.rs`（`Pending::from_gate` 认出是哪一关，`CollabSession::dispose` 落定）。
-- 两条流程：讨论（`discuss`：核心代理主持、讨论席开会，收敛后由核心写一份总结）与执行（`execute`：核心拟计划与任务链、执行席逐节点干、核心逐阶段验收后交付）。两者共用同一个 `CollabSession` 类型与同一份落盘事实，用 `Phase`（`src/units/conversation/collab/service/collab.rs`）分开；装配期由 `Sequence` 串起来——前一段交出的总结就是后一段的需求。
-- 流程工厂：`src/units/conversation/collab/service/flows.rs` 的 `CollabFlows` 实现 `turn_state::api::Flows`（按 id 造讨论段或执行段，新建走 `start`、重建走 `restore`）；组合根把它注入 `turn` / `work`，装配点只按会话类型表的 `flows` 要段，因此 `work` / `turn` 不认识协作。
-- 状态归属：会话对象及其状态只有它写；「转录即状态」的派生在 `src/units/conversation/collab/domain/collab_state.rs`（纯函数、可回放）。
+- 词汇归属：协作事件与关卡在 `src/units/collab/domain/`（`events.rs` / `gates.rs`），会话只提供「机制事件」通道与不解释 `kind` 的裁决队——改协作流程不改会话文件。
+- 流程面：协作在 `src/units/collab/service/flow.rs` 实现 `session::api::Flow`（推一步 / 让出一回合 / 交回处置 / 处置自己发的关卡）与可派的活 `session::api::WorkPlan`（该派哪些节点、节点提示词与返工提示、开跑收工记账、开工事件）；`turn` 的驱动只认流程面，认不出这是协作。关卡的解释在 `src/units/collab/domain/gates.rs`（`Pending::from_gate` 认出是哪一关，`CollabSession::dispose` 落定）。
+- 两条流程：讨论（`discuss`：核心代理主持、讨论席开会，收敛后由核心写一份总结）与执行（`execute`：核心拟计划与任务链、执行席逐节点干、核心逐阶段验收后交付）。两者共用同一个 `CollabSession` 类型与同一份落盘事实，用 `Phase`（`src/units/collab/service/collab.rs`）分开；装配期由 `Sequence` 串起来——前一段交出的总结就是后一段的需求。
+- 流程工厂：`src/units/collab/service/flows.rs` 的 `CollabFlows` 实现 `turn_state::api::Flows`（按 id 造讨论段或执行段，新建走 `start`、重建走 `restore`）；组合根把它注入 `turn` / `work`，装配点只按会话类型表的 `flows` 要段，因此 `work` / `turn` 不认识协作。
+- 状态归属：会话对象及其状态只有它写；「转录即状态」的派生在 `src/units/collab/domain/collab_state.rs`（纯函数、可回放）。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
@@ -25,8 +25,8 @@
 
 ## 改动本单元时必须同步
 
-- 核实环境的规格（`VerifySpec` 的字段与构造）只有 `src/units/agentloop/domain/verify.rs` 一处：改字段必须同改 `src/units/conversation/collab/service/turn_io.rs` 的 `verify_env` 与 `src/tests/collab/` 的核实用例。
-- 状态派生（`src/units/conversation/collab/domain/`）与驱动（`src/units/agentloop/engine/driver.rs`）必须同改；同步 `src/tests/collab/` 五份用例、`docs/collab/task-chain.md`、`docs/session/session-model.md`、`docs/tools/tools-and-roles.md`。
+- 核实环境的规格（`VerifySpec` 的字段与构造）只有 `src/units/agentloop/domain/verify.rs` 一处：改字段必须同改 `src/units/collab/service/turn_io.rs` 的 `verify_env` 与 `src/tests/collab/` 的核实用例。
+- 状态派生（`src/units/collab/domain/`）与驱动（`src/units/agentloop/engine/driver.rs`）必须同改；同步 `src/tests/collab/` 五份用例、`docs/collab/task-chain.md`、`docs/session/session-model.md`、`docs/tools/tools-and-roles.md`。
 
 ## 本目录
 

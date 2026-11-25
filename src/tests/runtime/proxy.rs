@@ -6,8 +6,8 @@
 use super::super::prelude::*;
 use crate::presentation::faces::Faces;
 
-use crate::units::conversation::proxy::api as d;
-use crate::units::conversation::proxy::api::ProxyTools;
+use crate::units::proxy::api as d;
+use crate::units::proxy::api::ProxyTools;
 use crate::units::session_model::api::{PROXY, SINGLE};
 
 fn rig() -> (Arc<FakeProxyHost>, ProxyTools) {

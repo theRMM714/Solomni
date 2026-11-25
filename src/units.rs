@@ -5,12 +5,14 @@
 
 pub mod agentloop;
 pub mod catalog;
+pub mod collab;
 pub mod conversation;
 pub mod lifecycle;
 pub mod llm;
 pub mod maintenance;
 pub mod prompt;
 pub mod provision;
+pub mod proxy;
 pub mod pure;
 pub mod residents;
 pub mod runtime;

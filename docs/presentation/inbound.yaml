@@ -18,4 +18,4 @@ src/presentation/cli/commands.rs: runtime workspace
 src/presentation/cli/flows.rs: registry_model system
 src/presentation/cli/gate.rs: provision registry_model
 src/presentation/cli/shell.rs: catalog/modules runtime system tools turn/turn
-src/presentation/cli/view.rs: catalog/packages conversation/collab transcript work
+src/presentation/cli/view.rs: catalog/packages collab transcript work

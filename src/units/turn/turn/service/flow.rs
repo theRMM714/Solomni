@@ -804,7 +804,7 @@ impl Turn {
     pub fn collab_pending(
         &self,
         sid: &str,
-    ) -> Result<Option<crate::units::conversation::collab::api::Pending>, String> {
+    ) -> Result<Option<crate::units::collab::api::Pending>, String> {
         if !self.holds(sid) {
             return Err("无此会话".to_string());
         }
@@ -812,7 +812,7 @@ impl Turn {
         Ok(self.desk().peek_gate(sid).and_then(|d| {
             d.head()
                 .and_then(|(_, gate)| {
-                    crate::units::conversation::collab::api::Pending::from_gate(&gate)
+                    crate::units::collab::api::Pending::from_gate(&gate)
                 })
                 .map(|(p, _)| p)
         }))

@@ -18,7 +18,7 @@ use crate::tests::ops_with;
 use crate::units::catalog::modules::api::{ModulesOps, Roster};
 use crate::units::catalog::packages::api::Problem;
 use crate::units::catalog::registry::api::{AppSettings, RegistryOps};
-use crate::units::conversation::collab::api::{CheckView, CollabEvent};
+use crate::units::collab::api::{CheckView, CollabEvent};
 use crate::units::llm::api::{ProbeOutcome, ReplayReport};
 use crate::units::pure::registry_model::api::Agent;
 use crate::units::pure::registry_model::api::AgentView;

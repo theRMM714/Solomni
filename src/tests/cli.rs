@@ -160,7 +160,7 @@ fn waiting_list_is_built_line_by_line() {
 /// 约束：停止不套用发起方声明的默认项；等待方被解开、会话随后不再被派发。
 #[test]
 fn eof_answers_a_pending_card_by_stopping_instead_of_hanging() {
-    use crate::units::conversation::collab::api::Pending;
+    use crate::units::collab::api::Pending;
     use crate::units::turn_state::api::SlotWake;
 
     let (handle, faces) = ops_with(vec![module_of("a")], Vec::new());

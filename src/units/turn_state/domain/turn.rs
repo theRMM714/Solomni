@@ -1,6 +1,6 @@
 //! 目的：会话本体——回合状态（`TurnState`）加上装配一席所需的能力面，一处持有。
 //! 管：`Turn` 的字段与构造、会话在世的访问器转发、运行中文案、装配端口的取用（`session_ports`）、压缩通道工厂。
-//! 不管：生成驱动、落盘与命令队列（在 `runtime`）；工具面与会话对象的拼装（在 `session::service::assemble`）；纯派生规则（在 `session::domain::assemble`）。
+//! 不管：生成驱动、落盘与命令队列（在 `runtime`）；工具面与会话对象的拼装（在 `agentloop::api`）；纯派生规则（在 `agentloop::domain::assemble`）。
 //! 联动：`runtime` 持一份 `Turn` 并经它放取会话；取事实的一侧从 `session_ports` 取能力面，再交 `session` 装配。
 
 use std::path::PathBuf;

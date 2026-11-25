@@ -28,9 +28,11 @@ vm: 2
 workspace: 2
 
 # 环 3 用例
+collab: 3
 conversation: 3
 lifecycle: 3
 maintenance: 3
+proxy: 3
 runtime: 3
 system: 3
 turn: 3
