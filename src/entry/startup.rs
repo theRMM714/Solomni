@@ -235,13 +235,38 @@ pub(crate) fn run_gate<R: BufRead, W: Write>(
         return GateOutcome::Exit(1);
     }
     if !tty {
+        // 没有可回答的前端时只剩"改设置再跑一遍"：把缺几项、每种缺法能怎么修一次说清，
+        // 每条出路都写成能整行复制的形状（读者不必猜键名与层级）。
+        let unauthorized = missing
+            .iter()
+            .any(|p| p.cause == MissingCause::Unauthorized);
+        let unsupported = missing.iter().any(|p| p.cause == MissingCause::Unsupported);
         let _ = writeln!(
             writer,
-            "[沙箱] 没有可回答的前端：不进入会话（fail-closed）。"
+            "[沙箱] 没有可回答的前端：不进入会话（fail-closed）；缺 {} 项强制围栏。",
+            missing.len()
         );
+        if unauthorized {
+            let _ = writeln!(
+                writer,
+                "[沙箱] 出路 A（只给这一次）：SOLOMNI_FENCE_WRITE=1 <原命令>"
+            );
+            let _ = writeln!(
+                writer,
+                "[沙箱] 出路 B（永久授权）：在 .home/settings.yaml 的 sandbox.policy.windows 下写 write_acl: true"
+            );
+        }
+        if unsupported {
+            // 授权只装得上机制、装不上能力：这几项只有降强制等级能过门，别让读者白试 A / B。
+            let _ = writeln!(
+                writer,
+                "[沙箱] {} 是本机能力缺失：A / B 修不了，仍需出路 C。",
+                missing_names(missing, MissingCause::Unsupported)
+            );
+        }
         let _ = writeln!(
             writer,
-            "[沙箱] 要启用：在 .home/settings.yaml 写 sandbox.policy.windows.write_acl: true，或设置 SOLOMNI_FENCE_WRITE=1。"
+            "[沙箱] 出路 C（持久接受无强制）：在 .home/settings.yaml 的 sandbox.policy.enforce 下把 filesystem / network / process_tree / env_whitelist 写成 best_effort"
         );
         return GateOutcome::Exit(1);
     }
