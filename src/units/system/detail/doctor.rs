@@ -42,7 +42,7 @@ pub(crate) fn build(
         probe: &crate::kernel::detail::HostProbeAdapter,
     });
     // 长驻子进程：账本里还活着的那几条（自检只报事实，不动手收）。
-    let book = crate::kernel::detail::procs::ProcessBook::open(&layout::home(root));
+    let book = crate::kernel::detail::procs::ProcessBook::open(&layout::state(root));
     let procs: Vec<Value> = book
         .list()
         .into_iter()

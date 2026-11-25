@@ -150,7 +150,7 @@ fn download(root: &Path) -> SpaceCategory {
 }
 
 fn overlays(root: &Path, qemu: Option<&Path>, now: u64) -> SpaceCategory {
-    let live = guests::live_in(&layout::home(root));
+    let live = guests::live_in(&layout::state(root));
     let items = scan::files_with_ext(&paths::overlay_dir(root), "qcow2")
         .into_iter()
         .map(|p| {

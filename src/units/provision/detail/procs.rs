@@ -9,20 +9,20 @@ use std::path::{Path, PathBuf};
 use crate::units::provision::api::ProcInfo;
 use crate::units::provision::ports::Procs;
 
-/// 目的：进程簿的适配器——产品根下的 `.home` 是进程簿的归属。
+/// 目的：进程簿的适配器——台账目录（`data/state`）是进程簿的归属。
 pub struct BookProcs {
-    home: PathBuf,
+    state: PathBuf,
 }
 
 impl BookProcs {
     pub fn new(root: &Path) -> BookProcs {
         BookProcs {
-            home: layout::home(root),
+            state: layout::state(root),
         }
     }
 
     fn book(&self) -> std::sync::Arc<crate::kernel::detail::procs::ProcessBook> {
-        crate::kernel::detail::procs::ProcessBook::open(&self.home)
+        crate::kernel::detail::procs::ProcessBook::open(&self.state)
     }
 }
 

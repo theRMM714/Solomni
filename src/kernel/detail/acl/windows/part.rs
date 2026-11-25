@@ -70,7 +70,7 @@ impl FencePart {
             FencePart::ContainerIdentity => {
                 "确认本机能建 AppContainer profile（受限会话里建不起来）"
             }
-            FencePart::Ledger => "确认产品私有区 .home/ 可写（授权台账要落在那里）",
+            FencePart::Ledger => "确认台账目录 data/state/ 可写（授权台账要落在那里）",
             FencePart::IntegrityLabel => {
                 "提权清掉这个目录的强制完整性标签（icacls 只能设级别、删不掉标签），或把落点换到未打标签的目录"
             }

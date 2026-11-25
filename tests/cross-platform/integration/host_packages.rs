@@ -21,10 +21,12 @@ fn write_pkg_script(bin: &std::path::Path, name: &str, body: &str) {
 #[test]
 fn host_build_uses_a_runtime_package_from_runtimes() {
     let root = scratch("host-pkg-build");
-    let pkg_bin = root.join("runtimes").join("pkgtool").join("bin");
+    // 运行包是产品数据：安装根下的 data/runtimes（介质名只在 layout 里拼，测试按同一盘面摆）。
+    let runtimes = root.join("data").join("runtimes");
+    let pkg_bin = runtimes.join("pkgtool").join("bin");
     std::fs::create_dir_all(&pkg_bin).expect("建包 bin");
     std::fs::write(
-        root.join("runtimes").join("pkgtool").join("package.yaml"),
+        runtimes.join("pkgtool").join("package.yaml"),
         "id: pkgtool\nversion: 1\nprefix: opt/rt/pkgtool\n",
     )
     .expect("写包清单");
@@ -73,7 +75,11 @@ fn host_build_uses_a_runtime_package_from_runtimes() {
         "产物要落进模块目录：{}",
         artifact.display()
     );
-    let state = root.join(".vm").join("build-state").join("hello.json");
+    let state = root
+        .join("data")
+        .join(".vm")
+        .join("build-state")
+        .join("hello.json");
     assert!(state.is_file(), "状态要落盘：{}", state.display());
 
     // 缺包：如实拒绝，点出缺哪个能力与去哪放。

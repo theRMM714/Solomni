@@ -76,18 +76,18 @@ fn early_exit(flags: &presentation::cli::argv::Flags) -> Option<i32> {
 }
 
 /// 目的：分配本实例的视图盘。返回「真的分配了」——真才在退出时释放。
-fn view_drive_begin(root: &Path, home: &Path) -> bool {
-    kernel::api::view_drive::view_drive_begin(root, home)
+fn view_drive_begin(root: &Path) -> bool {
+    kernel::api::view_drive::view_drive_begin(root)
 }
 
 /// 目的：只清扫视图盘的崩溃残留（不分配盘符）：每次启动都跑一遍，别让死登记与残留映射越积越多。
-fn view_drive_sweep(home: &Path) {
-    let _ = kernel::api::view_drive::view_drive_sweep(home);
+fn view_drive_sweep(root: &Path) {
+    let _ = kernel::api::view_drive::view_drive_sweep(root);
 }
 
 /// 目的：退出时注销本进程的视图盘登记（最后一个使用者才真撤映射）。
-fn view_drive_release(home: &Path) {
-    kernel::api::view_drive::view_drive_release(home);
+fn view_drive_release(root: &Path) {
+    kernel::api::view_drive::view_drive_release(root);
 }
 
 fn main() {
@@ -142,7 +142,7 @@ fn main() {
             std::process::exit(2);
         };
         // 维护命令不跑会话，也就不需要视图盘：只清扫上一次崩溃/强杀留下的盘符映射，不分配新的。
-        view_drive_sweep(&home);
+        view_drive_sweep(&root);
         let system = match entry::assembly::system(&root, &base) {
             Ok(s) => s,
             Err(e) => {
@@ -200,7 +200,7 @@ fn main() {
     // 启动对账（装配期，会话尚未开工）：按台账回收上一次运行被杀/崩溃留下的陈旧授权。
     // 只回收归属明确已死的条目；无法判定的报告后跳过；失败如实报、台账保留供重试（--fence-reconcile / --fence-clean）。
     {
-        let rep = kernel::detail::ledger::reconcile(&home);
+        let rep = kernel::detail::ledger::reconcile(&root);
         if rep.has_activity() {
             eprintln!("[围栏] 启动对账：{}", rep.summary());
         }
@@ -209,7 +209,7 @@ fn main() {
         }
     }
     // 长驻子进程的账：按它回收上一次留下的孤儿（Unix 确认命令行标记才动手；Windows 有作业对象兜底）。
-    let book = kernel::detail::procs::ProcessBook::open(&home);
+    let book = kernel::detail::procs::ProcessBook::open(&layout::state(&root));
     {
         let rep = book.reconcile();
         if rep.touched() {
@@ -368,7 +368,7 @@ fn main() {
             ) {
                 Ok(true) => {
                     eprintln!(
-                        "[沙箱] 已写入 .home/settings.yaml；启动器会把本进程整体重启（直接运行二进制时请重新启动）。"
+                        "[沙箱] 已写入 data/.home/settings.yaml；启动器会把本进程整体重启（直接运行二进制时请重新启动）。"
                     );
                     // 首次授权那一趟顺手把机器级预授做掉：之后的会话不必再重写这批 ACL。
                     entry::portable::ensure_after_authorize(&root);
@@ -396,7 +396,7 @@ fn main() {
                 entry::startup::GateOutcome::Proceed => sandbox_mode.set_degraded(true),
                 entry::startup::GateOutcome::Restart => {
                     eprintln!(
-                        "[沙箱] 已写入 .home/settings.yaml；启动器会把本进程整体重启（直接运行二进制时请重新启动）。"
+                        "[沙箱] 已写入 data/.home/settings.yaml；启动器会把本进程整体重启（直接运行二进制时请重新启动）。"
                     );
                     std::process::exit(presentation::web::RESTART_EXIT_CODE);
                 }
@@ -443,16 +443,16 @@ fn main() {
     // 工具执行：外层拉起的守门进程就是本程序自己（围栏在它里面装）。
     let tools = kernel::detail::process::ProcTools::new(
         std::env::current_exe().unwrap_or_default(),
-        home.clone(),
+        root.clone(),
         std::sync::Arc::clone(&write_allowed),
     )
     .with_mode(std::sync::Arc::clone(&sandbox_mode));
     // 内置文件工具：纯 Rust 直接读写，不经过外部进程（编码问题不进本程序）。
-    let io = units::tools::detail::FsSysIo::with_lock_dir(home.join("locks"));
+    let io = units::tools::detail::FsSysIo::with_lock_dir(layout::locks(&root));
     // **工具单元**：三张表由加载器读进来，三个出站端口（外部执行 / 内置读写 / 围栏释放）
     // 只由它的 service 持有（R12）。装配期就挡下"悬空引用 / 缺能力"。
     let fence_host: Arc<dyn kernel::ports::FenceHost + Send + Sync> =
-        Arc::new(kernel::detail::confine::FenceHostAdapter::new(home.clone()));
+        Arc::new(kernel::detail::confine::FenceHostAdapter::new(root.clone()));
     let tools_svc = match units::tools::service::ToolsService::new(
         &systools_source,
         Arc::new(tools),
@@ -556,7 +556,7 @@ fn main() {
         units::workspace::service::WorkspaceService::new(Arc::new(workspace), Arc::new(workstore)),
     );
 
-    // **隐秘字段子业务**：值只落 .home/secrets.yaml；加载失败 = 装配失败（不静默空表）。
+    // **隐秘字段子业务**：值只落 data/.home/secrets.yaml；加载失败 = 装配失败（不静默空表）。
     let secrets = match entry::assembly::secrets(&root, Arc::clone(&modules)) {
         Ok(s) => s,
         Err(e) => {
@@ -572,7 +572,7 @@ fn main() {
                 Arc::new(
                     kernel::detail::ProcessSessions::new(
                         std::env::current_exe().unwrap_or_default(),
-                        home.clone(),
+                        root.clone(),
                         std::sync::Arc::clone(&write_allowed),
                         std::sync::Arc::clone(&book),
                     )
@@ -612,7 +612,7 @@ fn main() {
     // **不申请容器身份**（构建是系统动作）：AppContainer 的临时目录写不了文件；可达范围仍由围栏规格给出。
     let build_runner = kernel::detail::process::ProcTools::new(
         std::env::current_exe().unwrap_or_default(),
-        home.clone(),
+        root.clone(),
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     );
     // 项目内基础工具链的只读安装根：构建与 shell 共用同一份（不按 agent 重复注入）。
@@ -764,17 +764,17 @@ fn main() {
 
     // 视图盘记录：先清上一次崩溃 / 强杀留下的死登记——盘符映射是登录会话级的，进程死了也还在，
     // 所以死登记常见「映射还在、记录还在」；放在分配之前、不受开关影响，`SOLOMNI_VIEW_DRIVE=0` 时也要清。
-    view_drive_sweep(&home);
+    view_drive_sweep(&root);
     // 视图盘唯一的分配点：维护旗、探针与启动期早退都已返回；`std::process::exit` 不走 Drop，早分配必然泄漏盘符。
     // 一次性命令（`runtime: none`）不分配（跑完就退）；细节与逃生口见 `view_drive_begin`。
-    let view_drive = runtime_needed && view_drive_begin(&root, &home);
+    let view_drive = runtime_needed && view_drive_begin(&root);
     // 核心搬到它自己的执行线程：此后呈现层只持有**入站面**——拿不到核心本体，也拿不到任何核心锁。
     let handle = match units::runtime::api::Handle::spawn(core) {
         Ok(h) => h,
         Err(e) => {
             eprintln!("[装配失败] {}", e);
             if view_drive {
-                view_drive_release(&home);
+                view_drive_release(&root);
             }
             std::process::exit(1);
         }
@@ -823,7 +823,7 @@ fn main() {
             presentation::cli::shell::Outcome::Exit => 0,
         };
         if view_drive {
-            view_drive_release(&home);
+            view_drive_release(&root);
         }
         std::process::exit(code);
     }
@@ -855,7 +855,7 @@ fn main() {
     // 正常退出：注销本 pid 的视图盘登记，没有存活 pid 才真撤映射。Ctrl+C / 关窗 / 注销 / 关机
     // 由分配时装上的控制台钩子先撤（见 `view_drive_begin`）；崩溃 / 强杀来不及跑的残留由下次启动清扫。
     if view_drive {
-        view_drive_release(&home);
+        view_drive_release(&root);
     }
 }
 
@@ -888,10 +888,10 @@ mod prelude_tests {
     #[cfg(not(windows))]
     #[test]
     fn view_drive_hooks_are_noops_off_windows() {
-        let home = std::env::temp_dir().join("solomni-view-drive-noop");
-        assert!(!view_drive_begin(&home, &home), "非 Windows 不分配盘符");
-        view_drive_sweep(&home);
-        view_drive_release(&home);
+        let root = std::env::temp_dir().join("solomni-view-drive-noop");
+        assert!(!view_drive_begin(&root), "非 Windows 不分配盘符");
+        view_drive_sweep(&root);
+        view_drive_release(&root);
         assert!(
             kernel::api::view_drive::view_codec().is_none(),
             "没有视图盘就没有编码器"

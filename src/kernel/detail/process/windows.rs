@@ -23,17 +23,17 @@ fn fence_not_entered() -> RunOutcome {
 
 /// 目的：Windows 侧需要随工具执行器一起持有的状态。
 pub(super) struct State {
-    home: PathBuf,
+    root: PathBuf,
     write_allowed: Arc<AtomicBool>,
     disclosed: Arc<AtomicBool>,
     shell_ps: Option<&'static str>,
 }
 
 impl State {
-    /// 目的：保存组合根注入的产品私有区与写权限开关。
-    pub(super) fn new(home: PathBuf, write_allowed: Arc<AtomicBool>) -> State {
+    /// 目的：保存组合根注入的产品安装根与写权限开关。
+    pub(super) fn new(root: PathBuf, write_allowed: Arc<AtomicBool>) -> State {
         State {
-            home,
+            root,
             write_allowed,
             disclosed: Arc::new(AtomicBool::new(false)),
             shell_ps: None,
@@ -50,7 +50,7 @@ pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
     if tools.platform.write_allowed.load(Ordering::Relaxed) {
         // 围栏准备单独计时：首调用逐条写 ACL 常常占掉整次耗时的绝大部分，回执要能分辨它。
         let fence_started = Instant::now();
-        let prep = confine::windows::prepare_fence(fence, ctx.command, &tools.platform.home);
+        let prep = confine::windows::prepare_fence(fence, ctx.command, &tools.platform.root);
         let steps = prep.steps.clone();
         super::FENCE_PREP.with(|slot| {
             slot.set(Some(FenceTiming {
@@ -71,7 +71,7 @@ pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
                     stop: Some(fence_not_entered()),
                     prepared: false,
                     unfenced_note: None,
-                    home: None,
+                    root: None,
                 };
             };
             let case = FenceCase {
@@ -88,14 +88,14 @@ pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
                         stop: Some(RunOutcome::failed(output)),
                         prepared: false,
                         unfenced_note: None,
-                        home: None,
+                        root: None,
                     };
                 }
             }
         }
     } else if !tools.platform.disclosed.swap(true, Ordering::Relaxed) {
         eprintln!(
-            "[围栏] 容器围栏未启用（用户没授权在本机写权限）：外部工具按无围栏执行（能力等级见启动报告）。要启用：在设置里打开，或在 .home/settings.yaml 写 sandbox.policy.windows.write_acl: true"
+            "[围栏] 容器围栏未启用（用户没授权在本机写权限）：外部工具按无围栏执行（能力等级见启动报告）。要启用：在设置里打开，或在 data/.home/settings.yaml 写 sandbox.policy.windows.write_acl: true"
         );
     }
     if !prepared
@@ -106,14 +106,14 @@ pub(super) fn prepare(ctx: PrepareCtx<'_>) -> Prepared {
             stop: Some(outcome),
             prepared: false,
             unfenced_note: None,
-            home: None,
+            root: None,
         };
     }
     Prepared {
         stop: None,
         prepared,
         unfenced_note: note,
-        home: Some(tools.platform.home.clone()),
+        root: Some(tools.platform.root.clone()),
     }
 }
 

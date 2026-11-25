@@ -502,10 +502,9 @@ pub(crate) fn failed_guest_boot_cleans_external_workspace_store() {
 ///   显式登记永远优先，登记了就不看项目内那份（登记是用户的意思）。
 #[test]
 pub(crate) fn vm_tool_paths_follow_provisioned_packages_without_restart() {
-    let probe = ".vm/qemu/bin/qemu-system-x86_64";
+    let probe = "data/.vm/qemu/bin/qemu-system-x86_64";
     let root = crate::tests::scratch("vm-tool-fallback");
-    let exe = root
-        .join(".vm")
+    let exe = crate::kernel::domain::layout::vm(&root)
         .join("qemu")
         .join("bin")
         .join("qemu-system-x86_64");

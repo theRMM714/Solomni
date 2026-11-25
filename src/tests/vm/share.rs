@@ -17,7 +17,9 @@ pub(crate) fn a_guest_without_supported_clients_is_rejected_before_boot() {
         "amd64"
     };
     let write_guest = |name: &str, clients: &str| {
-        let dir = root.join(".vm").join("guest").join(name);
+        let dir = crate::kernel::domain::layout::vm(&root)
+            .join("guest")
+            .join(name);
         std::fs::create_dir_all(&dir).expect("建 guest 目录");
         std::fs::write(dir.join("rootfs.ext4"), b"img").expect("写磁盘镜像");
         std::fs::write(

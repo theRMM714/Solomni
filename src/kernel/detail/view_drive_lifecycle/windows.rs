@@ -18,30 +18,30 @@ fn enabled(raw: Option<&str>) -> bool {
 /// 目的：控制台终止时留给清理的锁等待上限：控制台事件线程上不能久等。
 const EXIT_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// 目的：本实例的私有区（退出清理要知道撤哪份登记）；只在钩子装上之后才有值。
-static HOME: OnceLock<PathBuf> = OnceLock::new();
+/// 目的：本实例的产品安装根（退出清理要知道撤哪份登记）；只在钩子装上之后才有值。
+static ROOT: OnceLock<PathBuf> = OnceLock::new();
 
 /// 目的：控制台事件处理——先把本实例的视图盘映射与登记撤掉，再把事件交回默认处理（继续退出）。
 /// 约束：跑在系统另起的线程上，只做撤登记这一件事。返回 FALSE 不吞事件，Ctrl+C / 关窗 / 注销 / 关机
 ///   都由默认处理终止进程；原始模式下 Ctrl+C 是按键（`src/presentation/cli/term.rs`），走 CLI 正常退出、
 ///   已在组合根释放，不经过这里。
-/// 安全前提：处理函数只读进程内静态与 `.home` 记录，不碰其它共享状态；注册只发生一次。
+/// 安全前提：处理函数只读进程内静态与台账目录里的记录，不碰其它共享状态；注册只发生一次。
 unsafe extern "system" fn on_console_event(_event: u32) -> i32 {
-    if let Some(home) = HOME.get() {
-        cleanup(home);
+    if let Some(root) = ROOT.get() {
+        cleanup(root);
     }
     0
 }
 
 /// 目的：退出清理本体——撤本进程的视图盘登记与映射。
-fn cleanup(home: &Path) {
-    view_drive::release_view_drive_within(home, EXIT_WAIT);
+fn cleanup(root: &Path) {
+    view_drive::release_view_drive_within(root, EXIT_WAIT);
 }
 
 /// 目的：装上退出清理钩子：此后的控制台终止都会先撤掉视图盘，不留可见盘符。
 /// 约束：每进程只装一次；没有控制台时安装失败只记一行，残留仍由下次启动的清扫兜底。
-fn install_exit_hook(home: &Path) {
-    if HOME.set(home.to_path_buf()).is_err() {
+fn install_exit_hook(root: &Path) {
+    if ROOT.set(root.to_path_buf()).is_err() {
         return;
     }
     let ok = unsafe { SetConsoleCtrlHandler(Some(on_console_event), 1) };
@@ -51,13 +51,13 @@ fn install_exit_hook(home: &Path) {
 }
 
 /// 目的：分配本实例的视图盘；返回是否真的分配了。
-pub(super) fn begin(root: &Path, home: &Path) -> bool {
+pub(super) fn begin(root: &Path) -> bool {
     if !enabled(std::env::var("SOLOMNI_VIEW_DRIVE").ok().as_deref()) {
         return false;
     }
-    match view_drive::ensure_view_drive(root, home) {
+    match view_drive::ensure_view_drive(root) {
         Ok(_) => {
-            install_exit_hook(home);
+            install_exit_hook(root);
             true
         }
         Err(e) => {
@@ -68,13 +68,13 @@ pub(super) fn begin(root: &Path, home: &Path) -> bool {
 }
 
 /// 目的：只清扫视图盘的崩溃残留（不分配盘符）；返回撤掉的盘符个数。
-pub(super) fn sweep(home: &Path) -> usize {
-    view_drive::sweep_view_drive(home)
+pub(super) fn sweep(root: &Path) -> usize {
+    view_drive::sweep_view_drive(root)
 }
 
 /// 目的：退出时注销本进程的视图盘登记。
-pub(super) fn release(home: &Path) {
-    view_drive::release_view_drive(home);
+pub(super) fn release(root: &Path) {
+    view_drive::release_view_drive(root);
 }
 
 /// 目的：沙箱用的路径编解码器。
@@ -100,7 +100,6 @@ mod tests {
     fn exit_cleanup_drops_the_record() {
         let home = std::env::temp_dir().join(format!("solomni-view-exit-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(&home).expect("建临时私有区");
         let root = home.join("product-root");
         std::fs::create_dir_all(&root).expect("建假产品根");
         let pid = std::process::id();
@@ -112,12 +111,12 @@ mod tests {
                 "created": crate::kernel::detail::procs::created(pid).unwrap_or(0),
             }],
         }]);
-        std::fs::write(home.join("view-drive.json"), record.to_string()).expect("写记录");
+        let record_dir = crate::kernel::domain::layout::state(&home);
+        std::fs::create_dir_all(&record_dir).expect("建记录目录");
+        let record_file = record_dir.join("view-drive.json");
+        std::fs::write(&record_file, record.to_string()).expect("写记录");
         cleanup(&home);
-        assert!(
-            !home.join("view-drive.json").exists(),
-            "退出清理后不该留下盘符登记"
-        );
+        assert!(!record_file.exists(), "退出清理后不该留下盘符登记");
         let _ = std::fs::remove_dir_all(&home);
     }
 }

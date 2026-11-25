@@ -25,11 +25,11 @@ fn acl_facts(path: &Path) -> (Vec<String>, Vec<String>) {
 /// 目的：列出台账现值——快照（路径 + 时间）、根外授权（SID / 路径 / 权限位）、容器 profile，
 ///   以及“当前实际 ACE 与台账对不对得上”的差异。
 /// 约束：ACE 的读法只有一处（acl_scan / ace_parts / orphan_package_aces），此处不另写一套。
-pub fn catalog(home: &Path) -> Ledger {
+pub fn catalog(root: &Path) -> Ledger {
     // 列清单也要读一致性快照：写侧都在锁里，读侧不持锁可能读到写了一半的文件。
     // 没有台账就不建私有区、不加锁（只读场景不产生副作用）。
-    let _lock = if record_path(home).exists() {
-        match lock_ledger(home) {
+    let _lock = if record_path(root).exists() {
+        match lock_ledger(root) {
             Ok(l) => Some(l),
             Err(e) => {
                 return Ledger {
@@ -41,7 +41,7 @@ pub fn catalog(home: &Path) -> Ledger {
     } else {
         None
     };
-    let rec = load_record(home);
+    let rec = load_record(root);
     if rec.is_empty() {
         return Ledger {
             note: "没有台账：本程序没在本机写过权限项".to_string(),
@@ -138,9 +138,9 @@ pub fn catalog(home: &Path) -> Ledger {
 /// 目的：按路径**只还原一条**快照（其余条目与整份 DACL 不受影响）。
 /// 返回：还原成功的一句话（含“台账里已没有这条”这类如实说明）。
 /// 错误：台账里没有该路径、路径不在了、写回被拒，都如实返回；失败时台账**不改**（供重试）。
-pub fn restore_one(home: &Path, path: &Path) -> Result<String, String> {
-    let _lock = lock_ledger(home)?;
-    let mut rec = load_record(home);
+pub fn restore_one(root: &Path, path: &Path) -> Result<String, String> {
+    let _lock = lock_ledger(root)?;
+    let mut rec = load_record(root);
     let key = path.to_string_lossy().into_owned();
     let Some(idx) = rec.snapshots.iter().position(|s| s.path == key) else {
         return Err(format!("台账里没有这个路径的快照：{}", key));
@@ -153,18 +153,18 @@ pub fn restore_one(home: &Path, path: &Path) -> Result<String, String> {
     rec.snapshots.remove(idx);
     // 整体还原会连该路径上所有我们写下的 ACE 一起撤掉：那些授权条目也一并销账。
     rec.grants.retain(|g| g.path != key);
-    if let Err(e) = save_record(home, &rec) {
+    if let Err(e) = save_record(root, &rec) {
         return Err(format!("已还原该条，但台账更新失败：{}", e));
     }
-    rec.drop_if_empty(home);
+    rec.drop_if_empty(root);
     Ok(format!("已按台账还原这一条快照的原始权限：{}", key))
 }
 
 /// 目的：按 **SID + 路径**只撤一条授权（其余条目不受影响）；**不在台账里也照撤**。
 /// 返回：撤权结果的一句话（是否在台账里如实标注）；盘上本来就没有该 SID 的 ACE 时也如实说。
 /// 错误：路径不在了、SID 不合法、写撤权后的 DACL 被拒，都如实返回；失败时台账不改动。
-pub fn revoke_grant(home: &Path, sid_text: &str, path: &Path) -> Result<String, String> {
-    let _lock = lock_ledger(home)?;
+pub fn revoke_grant(root: &Path, sid_text: &str, path: &Path) -> Result<String, String> {
+    let _lock = lock_ledger(root)?;
     let key = path.to_string_lossy().into_owned();
     if std::fs::symlink_metadata(path).is_err() {
         return Err(format!("这个路径现在不在了：{}", key));
@@ -179,7 +179,7 @@ pub fn revoke_grant(home: &Path, sid_text: &str, path: &Path) -> Result<String, 
     free_sid(sid);
     outcome.map_err(|e| format!("撤销未完成（{}，{}）：{}", sid_text, key, e))?;
     // 台账里有这一条就按条删掉；没有就如实说它不在台账里（照样撤）。
-    let mut rec = load_record(home);
+    let mut rec = load_record(root);
     let had = rec
         .grants
         .iter()
@@ -190,10 +190,10 @@ pub fn revoke_grant(home: &Path, sid_text: &str, path: &Path) -> Result<String, 
         if !rec.grants.iter().any(|g| g.path == key) {
             rec.snapshots.retain(|s| s.path != key);
         }
-        if let Err(e) = save_record(home, &rec) {
+        if let Err(e) = save_record(root, &rec) {
             return Err(format!("已撤掉该条 ACE，但台账更新失败：{}", e));
         }
-        rec.drop_if_empty(home);
+        rec.drop_if_empty(root);
     }
     Ok(match (present, had) {
         (true, true) => format!("已按台账撤销这一条授权：{} → {}", sid_text, key),
@@ -215,20 +215,20 @@ pub fn revoke_grant(home: &Path, sid_text: &str, path: &Path) -> Result<String, 
 /// 目的：按名**只删一个**容器 profile（连该容器的存储一起删）。
 /// 返回：删除结果的一句话（是否在台账里如实标注）；盘上本来就没有这个 profile 时也如实说。
 /// 错误：删除被拒时如实返回；失败时台账不改动。
-pub fn remove_profile_one(home: &Path, name: &str) -> Result<String, String> {
-    let _lock = lock_ledger(home)?;
+pub fn remove_profile_one(root: &Path, name: &str) -> Result<String, String> {
+    let _lock = lock_ledger(root)?;
     let existed = profile_exists(name);
     if existed && !delete_profile(name) {
         return Err(format!("删不掉这个容器 profile：{}", name));
     }
-    let mut rec = load_record(home);
+    let mut rec = load_record(root);
     let had = rec.profiles.iter().any(|p| p.name == name);
     if had {
         rec.profiles.retain(|p| p.name != name);
-        if let Err(e) = save_record(home, &rec) {
+        if let Err(e) = save_record(root, &rec) {
             return Err(format!("已删掉该 profile，但台账更新失败：{}", e));
         }
-        rec.drop_if_empty(home);
+        rec.drop_if_empty(root);
     }
     Ok(match (existed, had) {
         (true, true) => format!("已按台账删掉这个容器 profile：{}", name),

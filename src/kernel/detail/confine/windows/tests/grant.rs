@@ -324,8 +324,8 @@ fn grants_are_written_when_the_environment_allows_it() {
             Vec::new(),
         ),
     };
-    // 台账落在探针自己的 base 里（不碰真实 .home/）；产品根 = base，所以落点在根内走快照。
-    let home = base.join(".home");
+    // 台账由 base 派生（不碰真实数据根）；产品根 = base，所以落点在根内走快照。
+    let home = base.clone();
     let outcome = prepare_fence(&spec, "cmd", &home);
     expect_granted(&outcome, "授权应当成功");
     let rec = load_record(&home);
@@ -403,7 +403,7 @@ fn prepare_reports_a_blocking_integrity_label() {
             Vec::new(),
         ),
     };
-    let home = base.join(".home");
+    let home = base.clone();
     let outcome = prepare_fence(&spec, "cmd", &home);
     let blocked = outcome
         .blocked
@@ -450,7 +450,7 @@ fn fence_steps_only_cover_real_acl_writes() {
             Vec::new(),
         ),
     };
-    let home = base.join(".home");
+    let home = base.clone();
     let first = prepare_fence(&spec, "cmd", &home);
     expect_granted(&first, "授权应当成功");
     assert!(
@@ -515,7 +515,7 @@ fn trusted_base_grants_are_machine_scope() {
             vec![tool.clone()],
         ),
     };
-    let home = base.join(".home");
+    let home = base.clone();
     let first = prepare_fence(&spec, "cmd", &home);
     expect_granted(&first, "授权应当成功");
     {
@@ -569,7 +569,7 @@ fn revoke_removes_the_container_ace_from_the_given_roots() {
             Vec::new(),
         ),
     };
-    let home = base.join(".home");
+    let home = base.clone();
     expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     assert!(
@@ -616,7 +616,7 @@ fn read_only_grants_write_ro_aces_and_revoke_removes_them() {
             Vec::new(),
         ),
     };
-    let home = base.join(".home");
+    let home = base.clone();
     expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     assert!(has_ace_for(sid, &ro, RIGHTS_RO), "只读根上要有只读 ACE");
@@ -666,7 +666,7 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
             Vec::new(),
         ),
     };
-    let home = base.join(".home");
+    let home = base.clone();
     // 父目录已从祖先（产品根）继承到同主体的只读属性授权时，prepare_fence 按「已有 ACE 就跳过」
     // 不写自己那条：这一段验证的就变成「不重复写」——显式 ACE 与台账条目都不该出现。
     let inherited = inherits_machine_stat(&base);
@@ -959,9 +959,9 @@ fn failed_write_keeps_preexisting_ace_and_never_says_rollback() {
     let _fence = crate::tests::fence_acl_guard();
     let base = crate::tests::scratch("grant-failure-rollback");
     let dir = base.join("mod");
-    let home = base.join(".home");
+    let home = base.clone();
     std::fs::create_dir_all(&dir).expect("建目录");
-    std::fs::create_dir_all(&home).expect("建台账目录");
+    std::fs::create_dir_all(crate::kernel::domain::layout::state(&home)).expect("建台账目录");
     let sid = product_sid().expect("派生本产品能力 SID");
     // 预存一条**不够用**的 ACE（真机上就是链接上那条只有 SYNCHRONIZE 的项）。
     const SYNCHRONIZE: u32 = 0x0010_0000;
@@ -1067,7 +1067,7 @@ fn legacy_aapp_machine_grants_retire_only_after_capability_is_in_place() {
         discard(&base);
         return;
     }
-    let home = root.join(".home");
+    let home = root.clone();
     let aapp = system_baseline_sid().expect("取全应用包 SID");
     let aapp_text = sid_to_string(aapp);
     let cap = product_sid().expect("派生本产品能力 SID");
@@ -1177,7 +1177,7 @@ fn clean_keeps_machine_scope_unless_full_cleanup_is_requested() {
             Vec::new(),
         ),
     };
-    let home = base.join(".home");
+    let home = base.clone();
     // 覆盖来自祖先继承时 prepare_fence 不重复写，也就没有自己的机器级条目可保留（保留数因此是 0）。
     let inherited = inherits_machine_stat(&base);
     expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");

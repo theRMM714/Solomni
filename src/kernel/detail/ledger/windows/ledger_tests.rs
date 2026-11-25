@@ -24,7 +24,7 @@ fn journal_records_snapshot_and_grant_before_touching_acl() {
         discard(&base);
         return;
     }
-    let home = base.join(".home");
+    let home = base.clone();
     let bytes = sd_bytes(&target).expect("读原始安全描述符");
     let mut rec = load_record(&home);
     assert!(
@@ -137,7 +137,7 @@ fn missing_grant_target_is_skipped_and_not_journaled() {
             Vec::new(),
         ),
     };
-    let home = base.join(".home");
+    let home = base.clone();
     let outcome = prepare_fence(&spec, "cmd", &home);
     expect_granted(&outcome, "不存在的落点应跳过、不判整次失败");
     let rec = load_record(&home);
@@ -247,7 +247,7 @@ fn ledger_catalog_and_per_item_disposal_keep_the_rest_untouched() {
         discard(&outside);
         return;
     }
-    let home = base.join(".home");
+    let home = base.clone();
     let spec = FencePlan {
         agent: "probe-grant".to_string(),
         lease: String::new(),
@@ -420,7 +420,7 @@ fn reconcile_reclaims_dead_owners_and_keeps_live_ones() {
         discard(&base);
         return;
     }
-    let home = base.join(".home");
+    let home = base.clone();
     let spec_live = FencePlan {
         agent: "probe-reconcile-live".to_string(),
         lease: String::new(),
@@ -503,8 +503,8 @@ fn reconcile_reports_ledger_less_profiles_without_deleting_them() {
     }
     let base =
         std::env::temp_dir().join(format!("solomni-reconcile-orphan-{}", std::process::id()));
-    let home = base.join(".home");
-    std::fs::create_dir_all(&home).expect("建台账目录");
+    let home = base.clone();
+    std::fs::create_dir_all(crate::kernel::domain::layout::state(&home)).expect("建台账目录");
     let spec = FencePlan {
         agent: "probe-reconcile-orphan".to_string(),
         lease: "call-orphan".to_string(),
@@ -549,7 +549,7 @@ fn reconcile_skips_entries_without_ownership() {
         discard(&base);
         return;
     }
-    let home = base.join(".home");
+    let home = base.clone();
     let spec = FencePlan {
         agent: "probe-reconcile-skip".to_string(),
         lease: String::new(),
@@ -646,7 +646,7 @@ fn machine_grant_has_no_owners_and_survives_reconcile() {
         discard(&base);
         return;
     }
-    let home = base.join(".home");
+    let home = base.clone();
     let base_sid = match product_sid() {
         Ok(s) => s,
         Err(e) => {
@@ -724,8 +724,8 @@ fn machine_grant_has_no_owners_and_survives_reconcile() {
 fn ledger_without_scope_field_loads_as_per_call() {
     let _fence = crate::tests::fence_acl_guard();
     let base = std::env::temp_dir().join(format!("solomni-scope-default-{}", std::process::id()));
-    let home = base.join(".home");
-    std::fs::create_dir_all(&home).expect("建台账目录");
+    let home = base.clone();
+    std::fs::create_dir_all(crate::kernel::domain::layout::state(&home)).expect("建台账目录");
     // 旧格式：GrantEntry 没有 scope 这一位。
     let legacy = r#"{
   "profiles": [],

@@ -507,17 +507,12 @@ mod tests {
     #[test]
     fn volume_and_lock_live_under_build_cache() {
         let root = Path::new("/proj");
-        assert_eq!(
-            volume_path(root, "windows"),
-            PathBuf::from("/proj/.vm/build-cache/windows.qcow2")
-        );
-        assert_eq!(
-            lock_path(root, "windows"),
-            PathBuf::from("/proj/.vm/build-cache/windows.lock")
-        );
+        let base = crate::kernel::domain::layout::vm(root).join("build-cache");
+        assert_eq!(volume_path(root, "windows"), base.join("windows.qcow2"));
+        assert_eq!(lock_path(root, "windows"), base.join("windows.lock"));
         assert_eq!(
             volume_path(root, "a/b"),
-            PathBuf::from("/proj/.vm/build-cache/a_b.qcow2"),
+            base.join("a_b.qcow2"),
             "名字里的分隔符不能带进路径"
         );
     }

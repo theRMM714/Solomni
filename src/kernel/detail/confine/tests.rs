@@ -30,31 +30,31 @@ fn effective_paths_follows_platform_acl_step() {
 #[test]
 fn admin_actions_degrade_without_acl_support() {
     let root = crate::tests::scratch("confine-admin-nonwindows");
-    let home = root.join(".home");
-    let _ = std::fs::create_dir_all(&home);
+    let state = crate::kernel::domain::layout::state(&root);
+    let _ = std::fs::create_dir_all(&state);
 
     assert!(
-        crate::kernel::detail::ledger::reconcile(&home)
+        crate::kernel::detail::ledger::reconcile(&root)
             .note
             .contains("不留权限项")
     );
     assert!(
-        crate::kernel::detail::ledger::ledger(&home)
+        crate::kernel::detail::ledger::ledger(&root)
             .entries
             .is_empty()
     );
-    assert!(crate::kernel::detail::ledger::restore_one(&home, &root).is_err());
-    assert!(crate::kernel::detail::ledger::revoke_grant(&home, "S-1-0-0", &root).is_err());
-    assert!(crate::kernel::detail::ledger::remove_profile_one(&home, "x").is_err());
+    assert!(crate::kernel::detail::ledger::restore_one(&root, &root).is_err());
+    assert!(crate::kernel::detail::ledger::revoke_grant(&root, "S-1-0-0", &root).is_err());
+    assert!(crate::kernel::detail::ledger::remove_profile_one(&root, "x").is_err());
     assert_eq!(
         crate::kernel::detail::ledger::sweep_orphan_aces(&root).unwrap(),
         0
     );
     assert!(super::machine_missing(&root).is_err());
-    assert!(super::machine_ensure(&root, &home, &mut |_| {}).is_err());
-    super::retire_legacy_machine_grants(&home, &mut |_| {}).unwrap();
+    assert!(super::machine_ensure(&root, &state, &mut |_| {}).is_err());
+    super::retire_legacy_machine_grants(&state, &mut |_| {}).unwrap();
     assert_eq!(
-        crate::kernel::detail::ledger::clean_all(&home).unwrap(),
+        crate::kernel::detail::ledger::clean_all(&root).unwrap(),
         "本平台的围栏不留权限项，无需清理"
     );
     assert_eq!(crate::kernel::detail::ledger::sweep_profiles().unwrap(), 0);

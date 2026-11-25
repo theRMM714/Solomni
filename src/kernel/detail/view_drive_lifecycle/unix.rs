@@ -9,17 +9,17 @@ use std::sync::Arc;
 use crate::kernel::ports::PathCodec;
 
 /// 目的：非 Windows 没有视图盘：不分配。
-pub(super) fn begin(_root: &Path, _home: &Path) -> bool {
+pub(super) fn begin(_root: &Path) -> bool {
     false
 }
 
 /// 目的：非 Windows 没有视图盘可清扫（撤掉的盘符恒 0）。
-pub(super) fn sweep(_home: &Path) -> usize {
+pub(super) fn sweep(_root: &Path) -> usize {
     0
 }
 
 /// 目的：非 Windows 没有视图盘可释放。
-pub(super) fn release(_home: &Path) {}
+pub(super) fn release(_root: &Path) {}
 
 /// 目的：非 Windows 路径怎么写就怎么用，恒 `None`。
 pub(super) fn codec() -> Option<Arc<dyn PathCodec>> {

@@ -259,10 +259,12 @@ pub(crate) fn core_with_workdirs(
     )
 }
 
-/// 目的：在**指定产品根**下造一格虚拟根（`<root>/.vm/guest/<名>`），返回名字。
-/// 约束：`crate::tests::test_guest` 只能造在当前目录（那正是 `Core` 的默认产品根）；这里给注入产品根的用例用。内容与它同形（占位磁盘镜像 + 内核 + 三平台共享客户端声明）；收尾由调用方连根删，不影响真实 `.vm/`。
+/// 目的：在**指定产品根**下造一格虚拟根（`layout::vm(root)/guest/<名>`），返回名字。
+/// 约束：`crate::tests::test_guest` 只能造在当前目录（那正是 `Core` 的默认产品根）；这里给注入产品根的用例用。内容与它同形（占位磁盘镜像 + 内核 + 三平台共享客户端声明）；收尾由调用方连根删，不影响真实数据根。
 pub(crate) fn test_guest_at(root: &std::path::Path, name: &str) -> String {
-    let dir = root.join(".vm").join("guest").join(name);
+    let dir = crate::kernel::domain::layout::vm(root)
+        .join("guest")
+        .join(name);
     std::fs::create_dir_all(&dir).expect("建虚拟根目录");
     std::fs::write(dir.join("rootfs.ext4"), b"img").expect("写占位磁盘镜像");
     std::fs::write(dir.join("vmlinuz"), b"stub").expect("写占位内核");

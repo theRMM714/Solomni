@@ -21,7 +21,7 @@ mod rules;
 #[cfg(any(windows, test))]
 pub(crate) use rules::*;
 
-/// 目的：备份文件名（放产品私有区 .home；记为「我们第一次改之前」的原串与原类型）。
+/// 目的：备份文件名（放台账目录 data/state；记为「我们第一次改之前」的原串与原类型）。
 pub(crate) const BACKUP_FILE: &str = "setup-path.json";
 
 /// 目的：PATH 与 shim 的可观察状态（--setup=status 的 path 段）。

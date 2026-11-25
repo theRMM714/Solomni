@@ -1,5 +1,5 @@
 //! 目的：长驻子进程的账与回收——谁在跑、属于谁、什么时候起的；核心没了也不留孤儿。
-//! 管：登记表（`.home/processes.json`）、父死子亡的接线与结论（Linux 内核信号 / macOS 守门进程 / Windows 作业对象）、
+//! 管：登记表（`data/state/processes.json`）、父死子亡的接线与结论（Linux 内核信号 / macOS 守门进程 / Windows 作业对象）、
 //!   进程身份（Unix 命令行标记 / Windows 创建时间）、存活探测与终止、启动时对账。
 //! 不管：进程怎么起（各适配器自己 new Command）、业务语义（purpose / owner 只是标签，不参与决策）。
 //! 联动：vm 的引擎、共享适配器与常驻服务的守门进程在起进程处登记；组合根启动时对一次账，`--doctor` 与 `/api/processes` 把它读出来；
@@ -65,7 +65,7 @@ impl Report {
     }
 }
 
-/// 目的：长驻子进程的账——落 `.home/processes.json`，进程内一份内存表（跨线程共享）。
+/// 目的：长驻子进程的账——落 `data/state/processes.json`，进程内一份内存表（跨线程共享）。
 pub struct ProcessBook {
     path: PathBuf,
     entries: Mutex<Vec<Entry>>,
@@ -73,8 +73,9 @@ pub struct ProcessBook {
 
 impl ProcessBook {
     /// 目的：打开账本（读不懂就当空账：账坏了不该挡住启动，但会如实少一份记录）。
-    pub fn open(home: &Path) -> Arc<ProcessBook> {
-        let path = home.join("processes.json");
+    /// 参数：`dir` 台账目录（`layout::state`）；账本就是它下面的 `processes.json`。
+    pub fn open(dir: &Path) -> Arc<ProcessBook> {
+        let path = dir.join("processes.json");
         let entries = std::fs::read_to_string(&path)
             .ok()
             .and_then(|t| serde_json::from_str::<Vec<Entry>>(&t).ok())

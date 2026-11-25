@@ -24,26 +24,27 @@ pub struct ProcessSessions {
     exe: PathBuf,
     /// 目的：长驻子进程的账——守门进程起时登记、收时注销，核心被强杀留下的孤儿由启动对账按它回收。
     book: std::sync::Arc<procs::ProcessBook>,
-    /// 目的：平台侧状态——Windows 持有产品私有区与写权限开关；其余平台为空。
+    /// 目的：平台侧状态——Windows 持有产品安装根与写权限开关；其余平台为空。
     platform: platform::State,
     /// 目的：全局沙箱要求与本进程是否已同意降级。
     mode: std::sync::Arc<crate::kernel::domain::fence::SandboxMode>,
 }
 
 impl ProcessSessions {
-    /// 目的：组合根注入：当前可执行文件（守门进程就是它自己）、产品私有区、写权限开关与进程账。
-    /// 约束：与一次执行（`ProcTools::new`）同一份装配事实；非 Windows 平台忽略私有区 / 写权限（显式忽略以免被误读成漏用）；
+    /// 目的：组合根注入：当前可执行文件（守门进程就是它自己）、产品安装根、写权限开关与进程账。
+    /// 约束：与一次执行（`ProcTools::new`）同一份装配事实；安装根不是台账目录（台账由内核机制自己派生）；
+    ///   非 Windows 平台忽略安装根 / 写权限（显式忽略以免被误读成漏用）；
     ///   账必须与组合根用**同一个**实例（账本是整份文件写回，两份会互相覆盖）。
     pub fn new(
         exe: PathBuf,
-        home: PathBuf,
+        root: PathBuf,
         write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
         book: std::sync::Arc<procs::ProcessBook>,
     ) -> ProcessSessions {
         ProcessSessions {
             exe,
             book,
-            platform: platform::State::new(home, write_allowed),
+            platform: platform::State::new(root, write_allowed),
             mode: std::sync::Arc::new(crate::kernel::domain::fence::SandboxMode::permissive()),
         }
     }
@@ -139,7 +140,7 @@ impl SessionHost for ProcessSessions {
     fn open(&self, spec: &SessionSpec) -> Result<Box<dyn Session>, String> {
         // 平台后端决定要不要先准备围栏：Windows 的容器围栏要先把可达范围授权给容器 SID；
         // 其余平台没有这一步，直接返回「未准备、无家目录」。
-        let (prepared, home) = platform::prepare(&self.platform, spec)?;
+        let (prepared, root) = platform::prepare(&self.platform, spec)?;
         // 全局沙箱要求：机制不可用且本进程未同意降级时，常驻服务不拉起。
         self.mode
             .check(&spec.fence, prepared)
@@ -147,7 +148,7 @@ impl SessionHost for ProcessSessions {
         let job = crate::kernel::detail::confine::FenceJob {
             plan: spec.fence.clone(),
             prepared,
-            product_home: home,
+            product_home: root,
             policy: crate::kernel::contracts::fence::FenceRunPolicy {
                 require_fs: self.mode.requirements.filesystem,
                 require_net: self.mode.requirements.network,

@@ -5,11 +5,17 @@
 
 use std::path::{Path, PathBuf};
 
-/// 目的：数据根目录名——产品可变状态全部落在它下面。
+/// 目的：数据根目录名——产品自己的可变状态全部落在它下面，与开发环境、随包只读内容分开。
 pub const DATA: &str = "data";
 
 /// 目的：用户可编辑的设置与登记处目录名（数据根下）。
 pub const HOME: &str = ".home";
+
+/// 目的：台账目录名（数据根下）——进程簿、围栏授权账、锁与安装痕迹都落这里。
+pub const STATE: &str = "state";
+
+/// 目的：介质内部的锁目录名（台账下）。
+pub const LOCKS: &str = "locks";
 
 /// 目的：运行日志目录名（数据根下）。
 pub const LOGS: &str = "logs";
@@ -20,7 +26,7 @@ pub const SESSION: &str = "session";
 /// 目的：虚拟机与构建缓存目录名（数据根下）。
 pub const VM: &str = ".vm";
 
-/// 目的：模块源码目录名（安装根下）。
+/// 目的：模块私有区目录名（数据根下；源码另在安装根的 `modules/`）。
 pub const MODULES: &str = "modules";
 
 /// 目的：运行包目录名（数据根下）——用户投放口。
@@ -40,9 +46,9 @@ pub const GUEST_SPEC: &str = "guest.yaml";
 
 /// 目的：数据根的绝对路径——产品可变状态的唯一落点。
 /// 参数：`install` 安装根。
-/// 返回：改造期与安装根同址；搬进 `data/` 时改成 `install.join(DATA)`（只改这一行）。
+/// 返回：`install/data`。
 pub fn data(install: &Path) -> PathBuf {
-    install.to_path_buf()
+    install.join(DATA)
 }
 
 /// 目的：设置与登记处目录的绝对路径。
@@ -50,6 +56,20 @@ pub fn data(install: &Path) -> PathBuf {
 /// 返回：`data/.home`。
 pub fn home(install: &Path) -> PathBuf {
     data(install).join(HOME)
+}
+
+/// 目的：台账目录的绝对路径。
+/// 参数：`install` 安装根。
+/// 返回：`data/state`。
+pub fn state(install: &Path) -> PathBuf {
+    data(install).join(STATE)
+}
+
+/// 目的：锁目录的绝对路径。
+/// 参数：`install` 安装根。
+/// 返回：`data/state/locks`。
+pub fn locks(install: &Path) -> PathBuf {
+    state(install).join(LOCKS)
 }
 
 /// 目的：运行日志目录的绝对路径。
@@ -129,16 +149,23 @@ mod tests {
     #[test]
     fn media_derive_under_their_roots() {
         let install = Path::new("product");
-        assert_eq!(home(install), install.join(HOME));
-        assert_eq!(session(install), install.join(SESSION));
-        assert_eq!(vm(install), install.join(VM));
-        assert_eq!(runtimes(install), install.join(RUNTIMES));
-        assert_eq!(modules_src(install), install.join(MODULES));
+        let root = install.join(DATA);
+        assert_eq!(data(install), root, "可变状态全在一个数据根下");
+        assert_eq!(state(install), root.join(STATE));
+        assert_eq!(locks(install), root.join(STATE).join(LOCKS));
+        assert_eq!(home(install), root.join(HOME));
+        assert_eq!(session(install), root.join(SESSION));
+        assert_eq!(vm(install), root.join(VM));
+        assert_eq!(runtimes(install), root.join(RUNTIMES));
         assert_eq!(
-            guest_spec(&home(install)),
-            install.join(HOME).join(GUEST_SPEC)
+            modules_data(install),
+            root.join(MODULES),
+            "私有区不在源码树里"
         );
+        assert_eq!(modules_src(install), install.join(MODULES));
+        assert_eq!(guest_spec(&home(install)), root.join(HOME).join(GUEST_SPEC));
         assert_ne!(home(install), vm(install), "配置与镜像不共用一个目录");
         assert_ne!(home(install), session(install), "配置与会话不共用一个目录");
+        assert_ne!(home(install), state(install), "配置与台账不共用一个目录");
     }
 }

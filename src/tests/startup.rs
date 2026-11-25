@@ -458,9 +458,9 @@ fn set_app_settings_accepts_best_effort_without_write_acl() {
 fn existing_settings_file_must_be_self_consistent() {
     let dir = crate::tests::scratch("settings-authorization");
     let store = crate::entry::assembly::settings_store(&dir);
-    std::fs::create_dir_all(dir.join(".home")).expect("建 .home");
+    std::fs::create_dir_all(crate::kernel::domain::layout::home(&dir)).expect("建 .home");
     std::fs::write(
-        dir.join(".home").join("settings.yaml"),
+        crate::kernel::domain::layout::home(&dir).join("settings.yaml"),
         "sandbox:\n  policy:\n    enforce:\n      filesystem: require\n      network: require\n    windows:\n      write_acl: false\n",
     )
     .expect("写 settings.yaml");
@@ -490,7 +490,7 @@ fn grant_write_acl_records_the_authorization_on_disk() {
 
     // 已有文件里是 best_effort + 未授权：只改授权一项，强制等级原样保留。
     std::fs::write(
-        dir.join(".home").join("settings.yaml"),
+        crate::kernel::domain::layout::home(&dir).join("settings.yaml"),
         "sandbox:\n  policy:\n    enforce:\n      filesystem: best_effort\n      network: best_effort\n      process_tree: best_effort\n      env_whitelist: best_effort\n    windows:\n      write_acl: false\n",
     )
     .expect("写 settings.yaml");

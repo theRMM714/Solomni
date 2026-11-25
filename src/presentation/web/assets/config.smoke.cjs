@@ -102,8 +102,8 @@ const CFG = {
     ],
   },
   guests: [
-    { guest: "debian-13", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: true, missing: [], install: ".vm/guest/debian-13", runtimes: ["python"] },
-    { guest: "debian-12", label: "debian-12-genericcloud-amd64", os: "linux", arch: "amd64", ready: false, missing: ["vm.guest-runtime.windows"], install: ".vm/guest/debian-12" },
+    { guest: "debian-13", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: true, missing: [], install: "data/.vm/guest/debian-13", runtimes: ["python"] },
+    { guest: "debian-12", label: "debian-12-genericcloud-amd64", os: "linux", arch: "amd64", ready: false, missing: ["vm.guest-runtime.windows"], install: "data/.vm/guest/debian-12" },
   ],
   pins: { python: "3.12", ruby: "3.2" },
   thinking: { level: null, default_level: "high", label: "high", options: [{ id: "high", label: "high" }], note: "" },
@@ -184,8 +184,8 @@ const sandbox = {
       const running = setupStarted && (!wait || setupPolls < 2);
       const pending = running ? ["vm.virtiofsd.windows"] : (setupStarted ? [] : ["vm.virtiofsd.windows"]);
       return jsonRes({
-        deps: [{ id: "vm.virtiofsd.windows", guest: null, present: !pending.length, install: ".vm/virtiofsd",
-          probe: ".vm/virtiofsd/virtiofsd.exe", source: "release:virtiofsd", url: "https://example.invalid/v.zip",
+        deps: [{ id: "vm.virtiofsd.windows", guest: null, present: !pending.length, install: "data/.vm/virtiofsd",
+          probe: "data/.vm/virtiofsd/virtiofsd.exe", source: "release:virtiofsd", url: "https://example.invalid/v.zip",
           size_mb: 3, note: "virtiofsd 便携包" }],
         job: { running, current: "", seq: setupPolls, lines: ["vm.virtiofsd.windows：下载 https://example.invalid/v.zip"], error: null },
         missing: pending.length,
@@ -209,7 +209,7 @@ const sandbox = {
         vm_requirements: tiersVmAvailable ? [] : RAW.vm_requirements,
         guests: tiersVmAvailable
           ? [{ guest: "debian-13", label: "debian-13", os: "linux", arch: "amd64", ready: tiersGuestReady,
-              missing: tiersGuestReady ? [] : ["vm.guest-runtime.linux"], install: ".vm/guest/debian-13", runtimes: ["python"] }]
+              missing: tiersGuestReady ? [] : ["vm.guest-runtime.linux"], install: "data/.vm/guest/debian-13", runtimes: ["python"] }]
           : [],
         available: {},
       } });

@@ -316,8 +316,8 @@ fn pin_comes_from_the_manifest_entry_or_the_ledger_pair() {
         id: "x".to_string(),
         os: "windows".to_string(),
         arch: "x86_64".to_string(),
-        install: ".vm/x".to_string(),
-        probe: ".vm/x/x.exe".to_string(),
+        install: "data/.vm/x".to_string(),
+        probe: "data/.vm/x/x.exe".to_string(),
         source: "smbd.windows".to_string(),
         kind: "file".to_string(),
         guest: None,
@@ -392,8 +392,8 @@ fn unknown_family_is_refused_with_a_prebuilt_image_way_out() {
         id: "vm.guest.linux".to_string(),
         os: "linux".to_string(),
         arch: "x86_64".to_string(),
-        install: ".vm/guest/debian".to_string(),
-        probe: ".vm/guest/debian/rootfs.ext4".to_string(),
+        install: "data/.vm/guest/debian".to_string(),
+        probe: "data/.vm/guest/debian/rootfs.ext4".to_string(),
         source: "guest.debian.image".to_string(),
         kind: "guest-rootfs".to_string(),
         guest: Some("debian".to_string()),
@@ -559,7 +559,7 @@ fn kernel_pick_avoids_rt_and_cloud_flavors() {
 fn archive_probe_gets_an_executable_bit() {
     use std::os::unix::fs::PermissionsExt;
     let root = crate::tests::scratch("provision-archive-exec");
-    let cache = root.join(".vm").join("cache");
+    let cache = crate::kernel::domain::layout::vm(&root).join("cache");
     fs::create_dir_all(&cache).expect("建缓存");
     let src = root.join("src");
     fs::create_dir_all(&src).expect("建源目录");
@@ -577,8 +577,8 @@ fn archive_probe_gets_an_executable_bit() {
         os: "any".to_string(),
         arch: "any".to_string(),
         kind: "archive".to_string(),
-        install: ".vm/tool".to_string(),
-        probe: ".vm/tool/tool".to_string(),
+        install: "data/.vm/tool".to_string(),
+        probe: "data/.vm/tool/tool".to_string(),
         guest: None,
         family: None,
         toolchain: None,
@@ -602,10 +602,14 @@ fn archive_probe_gets_an_executable_bit() {
         None,
     )
     .expect("补齐");
-    let mode = fs::metadata(root.join(".vm").join("tool").join("tool"))
-        .expect("读入口程序")
-        .permissions()
-        .mode();
+    let mode = fs::metadata(
+        crate::kernel::domain::layout::vm(&root)
+            .join("tool")
+            .join("tool"),
+    )
+    .expect("读入口程序")
+    .permissions()
+    .mode();
     assert!(
         mode & 0o111 != 0,
         "入口程序要能跑（拿到 {:o}）",
@@ -616,7 +620,7 @@ fn archive_probe_gets_an_executable_bit() {
 #[test]
 fn install_file_uses_probe_name() {
     let root = crate::tests::scratch("provision-file");
-    let cache = root.join(".vm").join("cache");
+    let cache = crate::kernel::domain::layout::vm(&root).join("cache");
     fs::create_dir_all(&cache).expect("建缓存");
     fs::write(cache.join("a.bin"), b"qcow2").expect("写缓存");
     let dep = Dep {
@@ -624,8 +628,8 @@ fn install_file_uses_probe_name() {
         os: "any".to_string(),
         arch: "any".to_string(),
         kind: "file".to_string(),
-        install: ".vm/guest/debian".to_string(),
-        probe: ".vm/guest/debian/rootfs.qcow2".to_string(),
+        install: "data/.vm/guest/debian".to_string(),
+        probe: "data/.vm/guest/debian/rootfs.qcow2".to_string(),
         guest: Some("debian".to_string()),
         family: None,
         toolchain: None,
@@ -651,7 +655,7 @@ fn install_file_uses_probe_name() {
     )
     .expect("单文件安装");
     assert!(
-        root.join(".vm")
+        crate::kernel::domain::layout::vm(&root)
             .join("guest")
             .join("debian")
             .join("rootfs.qcow2")
@@ -664,7 +668,7 @@ fn install_file_uses_probe_name() {
 #[test]
 fn guest_disk_install_writes_guest_yaml() {
     let root = crate::tests::scratch("provision-disk");
-    let cache = root.join(".vm").join("cache");
+    let cache = crate::kernel::domain::layout::vm(&root).join("cache");
     fs::create_dir_all(&cache).expect("建缓存");
     fs::write(cache.join("d.qcow2"), b"qcow2").expect("写缓存");
     let dep = Dep {
@@ -672,8 +676,8 @@ fn guest_disk_install_writes_guest_yaml() {
         os: "windows".to_string(),
         arch: "x86_64".to_string(),
         kind: "guest-disk".to_string(),
-        install: ".vm/guest/debian".to_string(),
-        probe: ".vm/guest/debian/rootfs.qcow2".to_string(),
+        install: "data/.vm/guest/debian".to_string(),
+        probe: "data/.vm/guest/debian/rootfs.qcow2".to_string(),
         guest: Some("debian".to_string()),
         family: None,
         toolchain: None,
@@ -698,7 +702,9 @@ fn guest_disk_install_writes_guest_yaml() {
         None,
     )
     .expect("guest-disk 安装");
-    let base = root.join(".vm").join("guest").join("debian");
+    let base = crate::kernel::domain::layout::vm(&root)
+        .join("guest")
+        .join("debian");
     assert!(base.join("rootfs.qcow2").is_file());
     let y = fs::read_to_string(base.join("guest.yaml")).expect("guest.yaml");
     assert!(y.contains("agent: qga"), "{}", y);
@@ -778,7 +784,9 @@ fn host_filter_selects_only_this_platform() {
 #[test]
 fn guest_bases_merge_manifest_entries_by_guest() {
     let root = crate::tests::scratch("provision-guests");
-    let base = root.join(".vm").join("guest").join("debian");
+    let base = crate::kernel::domain::layout::vm(&root)
+        .join("guest")
+        .join("debian");
     fs::create_dir_all(&base).expect("建虚拟根");
     fs::write(base.join("vmlinuz"), b"x").expect("写内核");
     fs::write(
@@ -791,7 +799,7 @@ fn guest_bases_merge_manifest_entries_by_guest() {
         os: "any".to_string(),
         arch: "any".to_string(),
         kind: "file".to_string(),
-        install: ".vm/guest/debian".to_string(),
+        install: "data/.vm/guest/debian".to_string(),
         probe: probe.to_string(),
         guest: Some(guest.to_string()),
         family: None,
@@ -803,14 +811,14 @@ fn guest_bases_merge_manifest_entries_by_guest() {
         note: String::new(),
     };
     // 镜像那条已按当前清单装好（台账登记过），运行期那条还没装。
-    let image = dep("g.img", ".vm/guest/debian/vmlinuz", "debian");
+    let image = dep("g.img", "data/.vm/guest/debian/vmlinuz", "debian");
     record_installed(&root, &image).expect("台账");
     let svc = service(&root);
     // 两条条目同属一个虚拟根：都在场 = 就绪；缺一条 = 如实列出缺哪条。
     let both = svc
         .guest_bases_of(&[
-            dep("g.img", ".vm/guest/debian/vmlinuz", "debian"),
-            dep("g.rt", ".vm/guest/debian/.runtimes-ready", "debian"),
+            dep("g.img", "data/.vm/guest/debian/vmlinuz", "debian"),
+            dep("g.rt", "data/.vm/guest/debian/.runtimes-ready", "debian"),
         ])
         .expect("清单");
     assert_eq!(both.len(), 1, "同一个虚拟根归并成一条：{:?}", both);
@@ -824,9 +832,9 @@ fn guest_bases_merge_manifest_entries_by_guest() {
     );
     assert!(!both[0].ready, "少一条就不算装齐");
     assert_eq!(both[0].missing, vec!["g.rt".to_string()]);
-    assert_eq!(both[0].install, ".vm/guest/debian");
+    assert_eq!(both[0].install, "data/.vm/guest/debian");
     let one = svc
-        .guest_bases_of(&[dep("g.img", ".vm/guest/debian/vmlinuz", "debian")])
+        .guest_bases_of(&[dep("g.img", "data/.vm/guest/debian/vmlinuz", "debian")])
         .expect("清单");
     assert!(one[0].ready && one[0].missing.is_empty(), "{:?}", one[0]);
     let _ = fs::remove_dir_all(&root);
@@ -836,7 +844,7 @@ fn guest_bases_merge_manifest_entries_by_guest() {
 #[test]
 fn guest_runtime_failure_is_soft_for_the_whole_set_but_hard_when_named() {
     let root = crate::tests::scratch("provision-soft-runtime");
-    let cache = root.join(".vm").join("cache");
+    let cache = crate::kernel::domain::layout::vm(&root).join("cache");
     fs::create_dir_all(&cache).expect("建缓存");
     fs::write(cache.join("a.bin"), b"x").expect("写缓存");
     let mk = |id: &str, kind: &str, install: &str, probe: &str, source: &str| Dep {
@@ -855,13 +863,19 @@ fn guest_runtime_failure_is_soft_for_the_whole_set_but_hard_when_named() {
         sha256: String::new(),
         note: String::new(),
     };
-    let file_dep = mk("x.file", "file", ".vm/x", ".vm/x/a.bin", "release:a.bin");
+    let file_dep = mk(
+        "x.file",
+        "file",
+        "data/.vm/x",
+        "data/.vm/x/a.bin",
+        "release:a.bin",
+    );
     // 虚拟根还没装 + 没注入 vm 入站面：这一条必然失败，正好用来验软失败。
     let rt_dep = mk(
         "vm.guest-runtime.linux",
         "guest-runtime",
-        ".vm/guest/debian",
-        ".vm/guest/debian/.runtimes-ready",
+        "data/.vm/guest/debian",
+        "data/.vm/guest/debian/.runtimes-ready",
         "release:a.bin",
     );
     let all = [file_dep, rt_dep];
@@ -887,7 +901,10 @@ fn guest_runtime_failure_is_soft_for_the_whole_set_but_hard_when_named() {
         lines
     );
     assert!(
-        root.join(".vm").join("x").join("a.bin").is_file(),
+        crate::kernel::domain::layout::vm(&root)
+            .join("x")
+            .join("a.bin")
+            .is_file(),
         "其余依赖照样装好"
     );
     // 显式点名这一条 = 你要的就是它：失败即失败。
@@ -938,7 +955,7 @@ fn status_reads_real_filesystem() {
 #[test]
 fn install_core_uses_cache_and_checks_probe() {
     let root = crate::tests::scratch("provision-install");
-    let cache = root.join(".vm").join("cache");
+    let cache = crate::kernel::domain::layout::vm(&root).join("cache");
     fs::create_dir_all(&cache).expect("建缓存");
     let tar_path = cache.join("a.tar");
     {
@@ -957,8 +974,8 @@ fn install_core_uses_cache_and_checks_probe() {
         os: "any".to_string(),
         arch: "any".to_string(),
         kind: "archive".to_string(),
-        install: ".vm/x".to_string(),
-        probe: ".vm/x/f.txt".to_string(),
+        install: "data/.vm/x".to_string(),
+        probe: "data/.vm/x/f.txt".to_string(),
         guest: None,
         family: None,
         toolchain: None,
@@ -985,7 +1002,10 @@ fn install_core_uses_cache_and_checks_probe() {
     )
     .expect("从缓存装");
     assert!(
-        root.join(".vm").join("x").join("f.txt").is_file(),
+        crate::kernel::domain::layout::vm(&root)
+            .join("x")
+            .join("f.txt")
+            .is_file(),
         "装完 probe 要在：{:?}",
         lines
     );
