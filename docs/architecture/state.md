@@ -15,7 +15,8 @@
 ## 二、落盘契约
 - **转录即状态**：会话内容 = 按 `rewind` 标记回放出的活动窗口；内存与落盘不一致时**以流水为准**。
 - **能重建的不落盘**：视图、索引、账本缓存与执行计划是派生物，重启后由真相重建；写盘只写派生不出来的事实。
-- **落盘路径相对根派生**：一律用 `PathBuf` 组件拼接、不写机器绝对路径（R9）；布局名字集中在 `src/kernel/domain/layout.rs`（`.home` / `.vm` / `runtimes` / `guest.yaml`），不散写字符串。
+- **落盘路径相对根派生**：一律用 `PathBuf` 组件拼接、不写机器绝对路径（R9）；布局名字集中在 `src/kernel/domain/layout.rs`，不散写字符串。
+- **两个根**：安装根 = 随包分发的只读内容（`modules/` 源码、`bin/`、`prompts/`、`systools/`、`locales/`、`guest.yaml`）；数据根 `data/` = 产品全部可变状态（`data/.home` 登记处、`data/state` 台账、`data/logs`、`data/session`、`data/.vm`、`data/modules`、`data/runtimes`）。`data/` 整块由 `.gitignore` 忽略，只留 `data/.gitkeep` 保住投放口；判定在 `tests/gates/structure/resource-names.js`。
 - 含机器路径的内容不进仓库（R9）；对外书写用 `/`，见 [rust-dev.md](rust-dev.md) 的跨平台机制。
 - **改布局同次改三处**：`docs/<单元>/unit-map.md`、本文对应节与 [../../AGENTS.md](../../AGENTS.md) 的「文档路由」（R8）。
 - **权限与围栏**：策略在 `src/units/tools/domain/fence.rs`，机制与落点在 `src/kernel/detail/confine/`；规则见 [../permission/README.md](../permission/README.md)，平台差异见 [../kernel/README.md](../kernel/README.md) 的「围栏落点：必要与可选」。

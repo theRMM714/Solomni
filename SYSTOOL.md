@@ -44,6 +44,6 @@
 - `systools/tools.yaml` → 加 / 改一个系统工具：唯一真相在这里，同次补实现、引用它的席位声明（`mechanism.rs` 的 `SEATS` / 工具 `callers`）与测试
 - `src/units/session_model/domain/mechanism.rs` → 改席位 / 机制：同次同步 `prompts/roles/<席位>`（提示词与工具面同处声明，分开必然漂）与 `systools/tools.yaml` 的 `callers`
 - `systools/names.yaml` → 加 / 改保留目录名：同次同步落盘布局文档 [docs/session/session-model.md](docs/session/session-model.md)
-- `systools/profiles.yaml` → 改会话类型 / 流程顺序：同次确认流程已在 `session/domain/mechanism.rs` 的 `MECHANISMS` 注册（席位与人数在那边），并同步机制册 `prompts/shared/mechanisms.yaml` 的席位条目（装配期校验，见 [docs/session/session-model.md](docs/session/session-model.md)）
+- `systools/profiles.yaml` → 改会话类型 / 流程顺序：同次确认流程已在 `src/units/session_model/domain/mechanism.rs` 的 `MECHANISMS` 注册（席位与人数在那边），并同步机制册 `prompts/shared/mechanisms.yaml` 的席位条目（装配期校验，见 [docs/session/session-model.md](docs/session/session-model.md)）
 - `docs/tools/tools-and-roles.md` → 改路径模型 / 围栏口径：同次同步 [ARCHITECTURE.md](ARCHITECTURE.md)
 - `src/tests/detail/prompt.rs` → 悬空引用由装配期 `mechanism::problems()` 挡下，改表后保持它锁死

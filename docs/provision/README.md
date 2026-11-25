@@ -6,7 +6,7 @@
 
 ## 管什么 / 不管什么
 
-- 管：内嵌 `dependencies.yaml`（依赖清单）与 `links.yaml`（下载源台账）、本机状态（缺什么、装到哪、从哪来）、下载缓存（`.vm/cache`）、解包落盘（`kernel::detail::unpack`）、一次后台补齐作业（进度 / 取消），**本机有哪些长驻子进程在跑**（读 `kernel::detail::procs` 的账：用途、归属、起止），以及**宿主工具路径的取法**（`tool_path`：qemu / virtiofsd / smbd 的登记值优先、装好的兜底）。
+- 管：内嵌 `dependencies.yaml`（依赖清单）与 `links.yaml`（下载源台账）、本机状态（缺什么、装到哪、从哪来）、下载缓存（`data/.vm/cache`）、解包落盘（`kernel::detail::unpack`）、一次后台补齐作业（进度 / 取消），**本机有哪些长驻子进程在跑**（读 `kernel::detail::procs` 的账：用途、归属、起止），以及**宿主工具路径的取法**（`tool_path`：qemu / virtiofsd / smbd 的登记值优先、装好的兜底）。
 - 不管：虚拟机档的能力语义与档位判定（在 `vm`）。
 - 不管：构建期工具链的引导（本机档由 `env.js` 在宿主 `cc` 不可用时按同一清单装项目内 Zig；虚拟机档由 guest 的运行能力提供——都不是本单元）。
 - 不管：界面怎么展示（在 `presentation`）。
@@ -17,7 +17,7 @@
 - DTO：`DepStatus` / `GuestBase` / `HostTool`（`JobState` 是 `exec_model` 的共享形状）（要取哪件宿主工具：`Qemu` / `Virtiofsd` / `Smbd`，是工具 id 与台账前缀的唯一映射）；`NoProvision` 是未接入的默认实现（如实失败，不假装可用）。
 - **宿主工具路径**：`tool_path(tool, registered)` 是 `qemu_path` / `virtiofsd_path` / `smbd_path` 的唯一实现——`registered` 是设置里登记的值（trim 后非空即回它），否则按台账前缀 `vm.qemu.` / `vm.virtiofsd.` / `vm.smbd.` 找在场的那一条、回拼接产品根后的绝对路径；调用方（`runtime` 的 `src/units/work/service/host.rs`）只负责取登记值并 trim。
 - **虚拟根清单**：`guest_bases` 把清单里带 `guest:` 的条目按虚拟根名归并（`ready` = 这一根的各条都按当前清单装好），一个虚拟根可由多条条目共同装；runtime 的创建向导与会话配置按它渲染下拉。
-- **虚拟根名**是 guest 的身份，按「发行版-大版本」取（`debian-13`），不按宿主平台取：两个宿主装的是同一个 Debian 13，目录同叫 `.vm/guest/debian-13`，布局差异由 `guest.yaml` 与镜像类型表达。
+- **虚拟根名**是 guest 的身份，按「发行版-大版本」取（`debian-13`），不按宿主平台取：两个宿主装的是同一个 Debian 13，目录同叫 `data/.vm/guest/debian-13`，布局差异由 `guest.yaml` 与镜像类型表达。
 - 状态归属：清单与台账的唯一真相在仓库根 `dependencies.yaml` / `links.yaml`，产品里**编译期内嵌**；作业状态是**进程内**的（不落盘，进程重启即清空）。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
@@ -72,19 +72,19 @@
   - Linux 虚拟根：agent 由 `guest-rootfs` 装进镜像，`.qga-ready` 让编排跳过首启；维护启动先按 QEMU 用户网络配网。
   - 维护启动两端同一条路：整份刷新 apt lists、装 python3 与 C-C++（gcc / g++ / make / libc6-dev），并从固定版本官方二进制装 Node（Windows 另加 cifs-utils，客户端声明写成 cifs；Linux 保持镜像声明的 9p/virtiofs）。
   - 自证命令是 `python -V`、`node --version` 与一次最小 C++ 编译：三者都通了才声明；通过后写 `.runtimes-ready`，失败不写（下次重试）。
-  - 当前基础镜像按 2.3 GB 构造（留 1.5 GB 余量）；不是这个基线的虚拟根**不在支持范围**，不自动修补——删除 `.vm/guest/<名>` 后重新 `--provision --ensure --yes`。
+  - 当前基础镜像按 2.3 GB 构造（留 1.5 GB 余量）；不是这个基线的虚拟根**不在支持范围**，不自动修补——删除 `data/.vm/guest/<名>` 后重新 `--provision --ensure --yes`。
   - 全量补齐时这一条失败只如实跳过并继续；显式点名才硬失败——它依赖本机能起 guest。
 
 ## 四、安装身份与台账
 
 - **装好 ≠ 探针在场**：每条依赖有一个安装身份，算自清单字段、pin 的 sha256 与工具链载荷（再加一个模式版本号，安装布局或判定口径变了就加一）。身份不同的旧产物是「旧安装」，不是「装好了」。
-- 台账在 `.vm/state/deps.json`：`{依赖 id: 身份}`，每装好一条就以临时文件 + rename 写一次（后面某条失败时，前面装好的不会白装）。
+- 台账在 `data/.vm/state/deps.json`：`{依赖 id: 身份}`，每装好一条就以临时文件 + rename 写一次（后面某条失败时，前面装好的不会白装）。
 - 身份变了（pin 升级、清单改布局、模式版本加一）就先清掉这条依赖自己产出的那份东西再重装：`guest-disk` / `guest-rootfs` / `archive` / `appimage` / `toolchain` 清整个 `install` 目录，`file` / `guest-runtime` 只清 `probe`；缓存按 pin 现验：旧 pin 下缓存的那份会在下次下载时被替换一次（校验仍不符才如实报错）。
 - 状态（`status` / `--provision` / 界面的「缺什么」）与 `--ensure=<kind>` 的缺项判定都走这套：`present` = 探针在场且身份一致；探针在场但身份不符时 `stale` 为真，界面与 CLI 能分清「没装」与「装的是旧版本」。
 
 ## 五、缓存与完整性
 
-- 缓存目录 `.vm/cache`。缓存里那份（复用的、刚下好的）进解包前按台账核对 sha256：
+- 缓存目录 `data/.vm/cache`。缓存里那份（复用的、刚下好的）进解包前按台账核对 sha256：
   - 自托管 release 资产读清单条目（`source: release:<tag>/<资产>` 与 `sha256:`）；
   - 链接类源读 `links.yaml` 的 `<键>.sha256`（pin 与它守护的 URL 在同一份台账里）；
   - 校验值由 `node pins.js update` 从上游校验源生成，`node pins.js check` 只读比对；不手抄。

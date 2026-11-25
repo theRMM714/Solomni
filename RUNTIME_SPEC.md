@@ -4,14 +4,14 @@
 
 ## 结构
 ```text
-runtimes/<包文件夹>/
+data/runtimes/<包文件夹>/
   package.yaml
   ...包内容（二进制、库、脚本，按 kind 组织）
   host-<os>-<arch>/    # 可选：只给本机档的载荷
   guest-<os>-<arch>/   # 可选：只给虚拟机档的载荷
   <os>-<arch>/         # 可选：两档共用的载荷（os ∈ linux/macos/windows，arch ∈ x86_64/aarch64）
 ```
-- 一个包 = 一个文件夹 + 一份 `package.yaml`；放入 `runtimes/` 即出现，移出即消失，没有注册仪式（该目录在 `.gitignore` 里：包内容多为二进制，只提交源码与文档）。
+- 一个包 = 一个文件夹 + 一份 `package.yaml`；放入 `data/runtimes/` 即出现，移出即消失，没有注册仪式（`data/` 整块由 `.gitignore` 忽略，库里只留一个 `.gitkeep` 保住投放口：包内容多为二进制，只提交源码与文档）。
 - 目标由发起方给（本机会话 / 直接动作 / 常驻服务 / `--build` = 宿主；虚拟机档 = 选定的 guest）；包不声明自己服务哪一档。
 - 本机档取 `host-<os>-<arch>/`（优先）或 `<os>-<arch>/`，把载荷根当作包根，`<根>/bin` 进本次执行的 PATH。
 - 虚拟机档取 `guest-<os>-<arch>/`（优先）或 `<os>-<arch>/`，把载荷根挂到 `/<prefix>`。
@@ -37,7 +37,7 @@ runtimes/<包文件夹>/
 - 能力名就是包 id：一个包提供它自己的 id 这一个能力名（别名尚未支持）；写法：小写字母或数字开头，其余小写字母、数字、`-` `_` `.`，长度 1..=64。
 - `files` 里的 sha256 用于可复现，不用于信任：用户自造的包没有可信基准，本程序不据此判断包是否安全。
 - `files` 随包库扫描一起解析并保留，供呈现与后续装配使用，但不参与装配判断，也不做校验（指纹对不上不会报错，也不会因此换版本）；包内容的组织方式由包作者决定，核心只认清单事实。
-- 产品不预置任何包：库里有什么能力，完全取决于用户往 `runtimes/` 放了什么；`python` / `node` / `bash` / `cc`（C/C++ 工具链）只是常见写法的示例，没有特殊含义。
+- 产品不预置任何包：库里有什么能力，完全取决于用户往 `data/runtimes/` 放了什么；`python` / `node` / `bash` / `cc`（C/C++ 工具链）只是常见写法的示例，没有特殊含义。
 - 基础工具链不是运行包：产品把 Python / Node / C-C++ 的固定版本作为运行前提装进 `.tools/toolchains`（由 `--provision` 的 `kind: toolchain` 补，组别名只补缺项；登记进 `.tools/toolchains/active.json`），服务本机档；虚拟机档的同一组能力由 guest 镜像的 `guest.yaml` 声明，`vm` 的运行期编排负责安装并逐个自证（见 `docs/vm/README.md`）。
 
 ## 二、kind 与装配

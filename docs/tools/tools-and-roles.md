@@ -11,7 +11,7 @@
 ## 一、两张表与字段
 
 - 工具**是什么**在 `systools/tools.yaml`；这个**身份有什么**在 `src/units/session_model/domain/mechanism.rs` 的机制与席位声明（席位记着发哪些工具、能不能写、能不能发布、带哪段提示词）。
-- 授权只有这两处；`systools/names.yaml` 是布局的第三份（`session/<工作>/` 的保留目录名），不是工具或席位授权。
+- 授权只有这两处；`systools/names.yaml` 是布局的第三份（`data/session/<工作>/` 的保留目录名），不是工具或席位授权。
 - 代码里**不得**出现"哪个席位能调哪个工具"的名单：只有三个动作——**机制只声明需求**（`Seat` 记着发哪些工具、能不能写、能不能发布、带哪段提示词）、**会话的装配机现拼这一席的面**（`src/units/agentloop/domain/assemble.rs` 的 `assemble`，唯一实现）、**按面校验调用**（`src/units/agentloop/engine/tools.rs` 的 `face_has`）。
 
 ```yaml
@@ -137,7 +137,7 @@ Mechanism { id: "discuss", flow: true, seats: &["core_proxy", "discussant"] }
   - 核心**不预校验**服务参数——服务是权威，错了由它如实回绝。
   - 调用经 `ResidentOps::call` 转给常驻服务；**未启动的服务不出现**（操作是跑起来才发现的）。
   - 就绪服务的操作同样进**动作目录**（`GET /api/actions` 对 user 可见），Web / CLI 的动作面板因此不必另建一份清单。
-- **隐秘字段的设置只给 user**：`set_secret` / `clear_secret`（`module` + `name`，值 `value`）——值只落 `.home/` 的 `secrets.yaml`，不进转录 / 日志 / 命令行，永不回显；审计只记动作 id 与成败，不记值。
+- **隐秘字段的设置只给 user**：`set_secret` / `clear_secret`（`module` + `name`，值 `value`）——值只落 `data/.home/` 的 `secrets.yaml`，不进转录 / 日志 / 命令行，永不回显；审计只记动作 id 与成败，不记值。
 - **模块工具也是动作**（动态动作，来自清单）：id = `module.<模块id>.<工具名>`。人可直接跑（无会话，围栏按模块目录 + 可选工作目录派生）；会话里由成员循环执行（同一份 `module.yaml` 声明、同一个 `ToolExec::run_module`）。两条路径的审计记录同一处格式化（`action_audit`），只是各自进自己的账本：呈现层进运行日志，模型侧进**转录工具行**（可回放）。**缺运行包 = 不执行**：两条路径读同一把尺子（`runtime_report.missing`），目录里如实标不可用，不静默降级。
 
 ## 五、执行类系统工具：shell
@@ -191,8 +191,8 @@ Mechanism { id: "discuss", flow: true, seats: &["core_proxy", "discussant"] }
 
 | 占位符 | 运行时替换为 | 可达范围 |
 | --- | --- | --- |
-| `{{work_root}}` | 本次工作共享区根：默认 `session/<工作名>/work/`，根会话绑定外部工作区时是该目录的绝对路径（**主副本**）；虚拟机档由路径桥渲染成 guest 内写法（内部布局落在会话树挂载点下，外部绑定时落在外部工作区挂载点下） | 本工作内 agent 的内置文件工具（**只读**：写会被拒绝，写入走 `work_commit` + `work_push`）；容器里的进程（shell / 模块工具）读不到它，要就地处理先 `work_pull` |
-| `{{sandbox_root}}` | 该 agent 私有沙箱 `session/<工作名>/<agent实例名>/` 的绝对路径 | 只有它自己（**永远全权**） |
+| `{{work_root}}` | 本次工作共享区根：默认 `data/session/<工作名>/work/`，根会话绑定外部工作区时是该目录的绝对路径（**主副本**）；虚拟机档由路径桥渲染成 guest 内写法（内部布局落在会话树挂载点下，外部绑定时落在外部工作区挂载点下） | 本工作内 agent 的内置文件工具（**只读**：写会被拒绝，写入走 `work_commit` + `work_push`）；容器里的进程（shell / 模块工具）读不到它，要就地处理先 `work_pull` |
+| `{{sandbox_root}}` | 该 agent 私有沙箱 `data/session/<工作名>/<agent实例名>/` 的绝对路径 | 只有它自己（**永远全权**） |
 | `{{module_roots}}` | 该 agent 使用的模块目录的绝对路径（只读表头 + 一行一个；无模块时给「成员模块目录：无」） | 只有使用该模块的 agent（**对 agent 的内置文件工具永久只读，含 `userdata/`**：agent 只有使用权；模块工具 / 服务进程可写自己的 `userdata/`） |
 
 - **越界即拒绝**：

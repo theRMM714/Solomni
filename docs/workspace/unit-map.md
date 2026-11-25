@@ -40,6 +40,6 @@
 | `src/units/workspace/domain/workstore/diff.rs` | 文本差异纯逻辑：Myers 行级差分、带上下文的 hunk 归并、单文件上限与 `DiffRequest` / `DiffReport` 形态 |
 | `src/units/workspace/domain/workstore/reset.rs` | 回退请求与报告形态：`ResetRequest` / `ResetReport` |
 | `src/units/workspace/domain/workstore/tests.rs` | workstore 纯逻辑单测：路径清理、提交规则、拉取不覆盖本地、解决判定、丢失与备份 |
-| `src/units/workspace/detail/fs_workspace.rs` | `Workdirs` 的落盘实现：`session/<工作名>/` 下的 `work/` 与各 agent 沙箱；准备会话时在版本库目录播种 `.workignore`（已存在不覆盖）；外部工作区绑定投影 `.work-root` 与共享区根解析；跨会话写锁按落点身份做键；用量统计带 2 秒内存缓存且不跟随目录链接 |
+| `src/units/workspace/detail/fs_workspace.rs` | `Workdirs` 的落盘实现：`data/session/<工作名>/` 下的 `work/` 与各 agent 沙箱；准备会话时在版本库目录播种 `.workignore`（已存在不覆盖）；外部工作区绑定投影 `.work-root` 与共享区根解析；跨会话写锁按落点身份做键；用量统计带 2 秒内存缓存且不跟随目录链接 |
 | `src/units/workspace/detail/walk.rs` | 工作区目录遍历的唯一实现：递归列文件、逐层按名字排序、给了 `.workignore` 规则就整棵剪掉被忽略的子树、按条数上限截断；`fs_workspace` 的清单与 `fs_workstore` 的 `list` / `list_visible` 共用 |
 | `src/units/workspace/detail/fs_workstore.rs` | `WorkStore` 的落盘实现：流式扫描 / 写入 / 复制（含跨根备份复制）、按规则剪枝的目录列举、版本库小文本读 `read_text` / 原子写 `write_text`、跨进程锁、版本库对象与对象枚举 / 删除、提交记录、基线、待恢复事务与提交号计数器；目录刷新经 `fs_meta::sync_dir` |

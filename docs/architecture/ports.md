@@ -23,8 +23,8 @@
 | `ModelCatalog` | 按端点与密钥列出一条通道当前可用的模型名 |
 | `SettingsStore` | 登记处持久化（providers / models / settings / agents 四个 yaml） |
 | `ModuleSource` | 模块清单来源（扫描 `modules/`） |
-| `ModuleStateStore` | 模块与服务的启停覆盖落盘（`.home/modules.yaml`） |
-| `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`） |
+| `ModuleStateStore` | 模块与服务的启停覆盖落盘（`data/.home/modules.yaml`） |
+| `PackageSource` | 运行包库来源（扫描依赖文件夹 `data/runtimes/`） |
 | `SourceDigest` | 模块源指纹：构建命令、构建期能力、网络开关与全部源文件内容 → 一段稳定指纹（缓存命中的判据） |
 | `BuildStates` | 构建状态：某模块上次构建的目标与指纹；每次构建的私有家目录落点 |
 | `BuildCache` | 构建缓存卷：卷落点、同一虚拟根的构建锁、待清理账、模块用量元数据、挂载/对账/源同步/差异回写的脚本文本 |
@@ -34,7 +34,7 @@
 | `GuestLiveness` | 有没有 guest 在跑（删除可写层与还原虚拟根的前置判据） |
 | `Fetcher` | 取数：按 URL 取文本、算文件 sha256、按候选源下载（测速选源 + 断点续传 + 逐行回执） |
 | `HostFs` | 依赖落盘的宿主侧原语：存在性、建目录、原子写、删除、执行位 |
-| `Ledger` | 依赖台账（`.vm/state/deps.json`）：快照、在场判定、guest 画像、装好登记与清旧、工具链生效登记 |
+| `Ledger` | 依赖台账（`data/.vm/state/deps.json`）：快照、在场判定、guest 画像、装好登记与清旧、工具链生效登记 |
 | `Installers` | 按 `kind` 落盘：归档解包、单文件、AppImage、工具链包装、guest 磁盘与 `guest.yaml` 画像 |
 | `GuestImage` | `guest-rootfs` 的 ext4 镜像构造（选 deb、内核 / QGA / initrd、属性回填） |
 | `Procs` | 进程台账条目与 `guest` 是否在跑（安装期 `reset_guest` 的前置判据） |
@@ -52,7 +52,7 @@
 | `EnvelopeRepair` | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就不修） |
 | `ServiceAdapter` | 一个常驻服务的协议适配器：拉起、发现操作、调用、关闭（按行协议走 kernel 的 `SessionHost`） |
 | `ServiceInstance` | 一个已拉起的常驻服务实例：调用操作、关闭、判活、取回被刷新的操作清单 |
-| `SecretStore` | 模块隐秘字段的落盘（`.home/` 的 `secrets.yaml`；值不进提示词、转录与日志） |
+| `SecretStore` | 模块隐秘字段的落盘（`data/.home/` 的 `secrets.yaml`；值不进提示词、转录与日志） |
 | `FenceHost` | 围栏授权的释放：`release_by_lease` 按会话租约撤 ACE/删 profile（会话改配、删除），`release_call` 服务一次性调用（撤 ACE、删 profile 与临时目录）；**kernel 共享机制端口** |
 | `Log` / `HostProbe` / `PathCodec` | 运行日志（三级）/ 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力）/ 模型侧路径 ↔ 宿主路径的翻译 |
 | `ToolHandler` | **一类工具的执行者**（按名字认领）：内置、模块与核心自有工具因此走**同一条派发路径** |

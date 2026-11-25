@@ -20,7 +20,7 @@
 | `src/units/provision/detail.rs` | 适配器入口：登记六个实现模块 |
 | `src/units/provision/detail/fetch.rs` | `HttpFetch`：ureq 取文本、sha256、选源测速与断点续传 |
 | `src/units/provision/detail/host.rs` | `RealHost`：存在性、建目录、原子写、删除、执行位；以及 `symlink` / `run_tool` / `write_exe` 等宿主原语（平台文件原语经 `kernel::api` 的 `fs_meta`） |
-| `src/units/provision/detail/ledger.rs` | `FileLedger`：`.vm/state/deps.json` 读写、探针在场判定、装好登记与清旧、`active.json` 的工具链登记 |
+| `src/units/provision/detail/ledger.rs` | `FileLedger`：`data/.vm/state/deps.json` 读写、探针在场判定、装好登记与清旧、`active.json` 的工具链登记 |
 | `src/units/provision/detail/install.rs` | `HostInstallers`：归档解包、单文件复制、AppImage 自解包、Zig 包装脚本、guest 磁盘与 `guest.yaml` 画像 |
 | `src/units/provision/detail/guest_image.rs` | `Ext4Images` 适配器：`install_guest_rootfs` 的多步构造（镜像 tar → rootfs 目录 → 内核 → initrd → agent → ext4）、基线打包、`guest.yaml` 画像补全 |
 | `src/units/provision/detail/guest_image/deb.rs` | deb 与内核 / agent 的选型、解包与落位：分区定位、版本比较、`ar` 解包、ABI 判定、`vmlinuz` / `initrd.img` 软链 |

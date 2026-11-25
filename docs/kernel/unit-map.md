@@ -33,7 +33,7 @@
 | `src/kernel/detail/clock.rs` | 本地时间机制（门面）：`Local`（本机时区的年月日时分秒毫秒）与此刻的 `local_now`、到分钟流水戳 `local_stamp`（`YYYYMMDD-HHMM`）；按平台选中 `src/kernel/detail/clock/{windows,unix}.rs` |
 | `src/kernel/detail/clock/windows.rs` | `clock` 的 Windows 后端：`GetLocalTime` 取本机时区的民用时间 |
 | `src/kernel/detail/clock/unix.rs` | `clock` 的非 Windows 后端：`localtime_r` 转本地民用时间，时区坏掉时退到 `gmtime_r` 的 UTC 值 |
-| `src/kernel/detail/file_log.rs` | `Log` 端口的文件实现：每次运行在 `logs/` 下按本地时间戳建文件并逐行追加（写经 `Mutex` 串行），时间字段取自 `clock` |
+| `src/kernel/detail/file_log.rs` | `Log` 端口的文件实现：每次运行在 `data/logs/` 下按本地时间戳建文件并逐行追加（写经 `Mutex` 串行），时间字段取自 `clock` |
 | `src/kernel/detail/host_probe.rs` | `HostProbe` 端口的机制实现（门面）：查环境变量与 `PATH` 里的可执行文件、路径存在性；可执行位与虚拟化事实在 `src/kernel/detail/host_probe/{windows,linux,macos,other}.rs` |
 | `src/kernel/detail/host_probe/windows.rs` | `HostProbe` 的 Windows 虚拟化事实：系统目录有 `WinHvPlatform.dll` |
 | `src/kernel/detail/host_probe/linux.rs` | `HostProbe` 的 Linux 虚拟化事实：`/dev/kvm` 存在 |
@@ -63,7 +63,7 @@
 | `src/kernel/detail/process/tests.rs` | 进程适配器的真实契约用例：真起进程、真收输出、真判退出码与平台分支（`#[cfg(test)] mod tests;` 指向） |
 | `src/kernel/detail/i18n.rs` | 回执说明的渲染与词表：语言协商（设置 → `SOLOMNI_LANG` → 源语言）、`locales/zh-CN.ftl` 的 Fluent 渲染、把整份词表导出给界面（键仍是稳定码） |
 | `src/kernel/detail/procs/tests.rs` | 进程账与回收的契约用例：登记/注销、存活探测、父死子亡的分平台接线（`#[cfg(test)] mod tests;` 指向） |
-| `src/kernel/detail/procs.rs` | 长驻子进程的账（`.home/processes.json`）与回收（门面）：登记、对账与回收流程；平台实现在 `src/kernel/detail/procs/windows.rs` / `src/kernel/detail/procs/unix.rs` |
+| `src/kernel/detail/procs.rs` | 长驻子进程的账（`data/state/processes.json`）与回收（门面）：登记、对账与回收流程；平台实现在 `src/kernel/detail/procs/windows.rs` / `src/kernel/detail/procs/unix.rs` |
 | `src/kernel/detail/procs/windows.rs` | `procs` 的 Windows 后端：作业对象、创建时间身份、存活探测与 `taskkill` |
 | `src/kernel/detail/procs/unix.rs` | `procs` 的非 Windows 后端：进程组、PDEATHSIG、macOS 守门进程、命令行身份与信号终止 |
 | `src/kernel/detail/session.rs` | 长驻外部进程机制（门面）：守门进程长跑、按行收发、关闭杀树、进程账登记与注销；平台围栏准备在 `src/kernel/detail/session/{windows,unix}.rs`，实现 `SessionHost` |

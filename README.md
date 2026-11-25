@@ -10,7 +10,7 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
 - **工具与工作流按契约接入。** 一个文件夹 + 一份 `module.yaml`（能力摘要 + 工具用法 + 工具声明）就是模块，启动命令由模块自己声明。
   适配只落在模块自己那边，不引 SDK、不动本仓代码结构。**契约之外双方互不依赖**：拿掉本产品，模块照原样跑；移走模块，产品照常运行。
   同一个能力，人走界面用、agent 走契约用，共用同一份声明（契约见 [MODULE_SPEC.md](MODULE_SPEC.md)）。
-- **多个 agent 一起干一件活。** 每个 agent 有自己的沙箱（`session/<工作名>/<agent 实例名>/`），它同时是共享区的**工作副本**；
+- **多个 agent 一起干一件活。** 每个 agent 有自己的沙箱（`data/session/<工作名>/<agent 实例名>/`），它同时是共享区的**工作副本**；
   共享区 `work/` 是**主副本、对 agent 只读**。要用的内容先 `work_pull` 拉进沙箱，改完 `work_commit` 记进自己的工作线、`work_push` 发布到共享区。
   提交按**文件级三方比较**判定：冲突整个拒绝并逐条点名，不会静默覆盖；冲突后用 `work_versions` 看三方、`work_resolve` 显式选边——文本可人工合并后用 `take=local`，图片 / 视频 / 二进制只能选边，不做自动合并。
   文本、图片、视频与其它二进制都按字节处理；任一提交点都能还原。
@@ -33,7 +33,7 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
 
 - **三种形态**：单 agent / 小组协作 / 代理（决定权整块交给核心）。形态、流程与用户旅程见 [PRODUCT.md](PRODUCT.md)。
 - **模块即插即用**：`modules/` 里放一个带合法 `module.yaml` 的文件夹就出现，移走就消失——不注册、不编译、不重启（契约见 [MODULE_SPEC.md](MODULE_SPEC.md)）。
-- **会话与历史**：一个工作一个目录 `session/<工作名>/`；回档 / 留档 / 删除 / 恢复、转录回放、上下文压缩、共享区版本化（`work_pull` / `work_commit` / `work_push` / `work_status` / `work_versions` / `work_resolve` / `work_lost`），以及用户侧的提交历史 / 非破坏性回滚。
+- **会话与历史**：一个工作一个目录 `data/session/<工作名>/`；回档 / 留档 / 删除 / 恢复、转录回放、上下文压缩、共享区版本化（`work_pull` / `work_commit` / `work_push` / `work_status` / `work_versions` / `work_resolve` / `work_lost`），以及用户侧的提交历史 / 非破坏性回滚。
 - **三重隔离**：内置文件工具越界拒绝（shell 的边界是围栏）→ 工具进程 / shell 走守门进程（环境白名单 / 进程树 / 超时或取消杀整棵树）→ 平台围栏（Windows AppContainer、Linux Landlock、macOS seatbelt）；装不上就如实报告能力等级。
 - **两档执行**：本机档（默认）与虚拟机档（模块工具在 guest 里跑）。虚拟机档按宿主 × 引擎 × guest × 通道 × 共享五轴可插。
 - 组合、前提与缺口细节见 [docs/vm/README.md](docs/vm/README.md)：Windows 缺 `smbd` 时虚拟机档不可用（先补齐，不降级），copy 只是开发/应急通道、不参与用户档；虚拟机档在 Linux / Windows 上不可用时，网页与命令行按同一份清单补齐依赖（见下）；运行包契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
@@ -41,7 +41,7 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
 <!-- BEGIN:platform-status -->
 > 已真机验收：Linux、Windows；未验：macOS（缺口见 `tests/macos/gaps.yaml`）。
 <!-- END:platform-status -->
-- **登记处**：供应商 / 模型 / agent / 设置四份 YAML，全在 `.home/`，由界面管理；通道密钥只在本机登记处与核心的出站调用里（边界见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)）。
+- **登记处**：供应商 / 模型 / agent / 设置四份 YAML，全在 `data/.home/`，由界面管理；通道密钥只在本机登记处与核心的出站调用里（边界见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)）。
 - **两种交互面**：终端转录中心（默认）与本地网页（`--web`，只绑 `127.0.0.1`，默认 3081）；网页会话页的状态栏显示上下文用量与共享区提交。
 - **一条裁决通道**：核心关卡、工具级确认与工具执行层的问题都用同一张「消息 + 选项」卡；必须阻塞，选项 id 是契约，卡片与回答随会话落盘。行为见 [PRODUCT.md](PRODUCT.md) 与 [docs/session/session-model.md](docs/session/session-model.md)。
 
@@ -62,12 +62,12 @@ node start.js --provision --ensure --yes # 可选（Linux / Windows）：把 QEM
 
 > 下文虚拟机 / 存储示例里的 `solomni` 指构建出的 `target/<profile>/solomni`；源码树里等价入口是 `node start.js ...`。
 
-- **首次启动**：没有 `.home/settings.yaml` 时，Windows 会先问一次是否授权容器围栏（写目录 ACL）；
+- **首次启动**：没有 `data/.home/settings.yaml` 时，Windows 会先问一次是否授权容器围栏（写目录 ACL）；
   选是就写盘并整体重启；选否不写设置、进入启动门（本次无围栏 / 重设 / 退出）。`--web` 也要先过这关，
   不会“带参数就直接开网页”。运行前提（Python / Node / C-C++）不在启动器里装：由产品
   `node start.js --provision --ensure=toolchain --yes` 按清单补（组别名只补缺项），`start.js` 只指路。
 - 工具链与缓存收敛在**项目内**：检测到**真能构建**的 Rust 才**只读借用**（借用前编译一个空程序探测：Windows 上 msvc host 缺 `link.exe`、例如没装 VS C++ 时不算可用），缓存与产物仍落 `platform/<os>/`；没有或有问题的才先征求同意装进项目内（Windows 装 GNU，自带链接器，不需要 Visual Studio），不动系统；Linux / macOS 的 C 工具链同口径：宿主 `cc` 能构建就直接用，缺了才征得同意把 Zig cc 装进 `.tools/toolchains`（macOS 缺 CLT 时直接给前置，不假装 Zig 能替代 SDK）。**无交互终端时不做安装**，打印手动步骤后退出。`node env.js` 给出 host、构建结论、C 工具链来源与借不借用。
-- 模块工具/构建的**基础工具链**（Python / Node / C-C++）是运行前提，装进 `.tools/toolchains/`，启动时前置 PATH。安装者有两条路，共用同一份清单：开发环境由 `env.js` 统一引导（`node env.js setup --yes`，与 Rust 同等待遇），运行期用户由产品 `--provision`（`kind: toolchain`，组别名只补缺项，按探针 + 台账身份判已装）；装完把在场项写进 `.tools/toolchains/active.json`（`profile` / `target` / 每项的 `id` / `version` / `bin` / `env`），启动期只读这一份。宿主回退只在 Windows 围栏能授权时可用（按**真身安装根**判：已有足够权限项、目录属主是当前用户、或当前用户对该目录有 WRITE_DAC；命令名经链接进来时链接本身不授）；否则如实报原因并要求先装项目内。C# 等额外能力可由用户把适用于本机目标的包放进 `runtimes/`（包 `bin/` 进本次执行的 PATH；缺包如实报告）。
+- 模块工具/构建的**基础工具链**（Python / Node / C-C++）是运行前提，装进 `.tools/toolchains/`，启动时前置 PATH。安装者有两条路，共用同一份清单：开发环境由 `env.js` 统一引导（`node env.js setup --yes`，与 Rust 同等待遇），运行期用户由产品 `--provision`（`kind: toolchain`，组别名只补缺项，按探针 + 台账身份判已装）；装完把在场项写进 `.tools/toolchains/active.json`（`profile` / `target` / 每项的 `id` / `version` / `bin` / `env`），启动期只读这一份。宿主回退只在 Windows 围栏能授权时可用（按**真身安装根**判：已有足够权限项、目录属主是当前用户、或当前用户对该目录有 WRITE_DAC；命令名经链接进来时链接本身不授）；否则如实报原因并要求先装项目内。C# 等额外能力可由用户把适用于本机目标的包放进 `data/runtimes/`（包 `bin/` 进本次执行的 PATH；缺包如实报告）。
   C/C++ 在 Windows 用 MinGW-w64、Linux / macOS 用 Zig；构建期复用同一条 Zig 安装（`env.js` 在宿主 `cc` 不可用时先装好），macOS 链接原生框架仍需要系统的 Xcode Command Line Tools / SDK。
   借用系统工具链时不读系统 `~/.cargo/config.toml`（镜像 / 凭据），依赖会重新下到项目内——这是「不写项目外」的取舍；门禁还会快照项目外缓存根，写出去即失败。
 
@@ -91,14 +91,14 @@ node dev.js test|fmt|clippy   # 本机开发回路：改一层验一层；cargo 
 - **外部连接台账**：`links.yaml` 是项目自用、可能变的外部 URL 的唯一真相（当前：工具链引导源、winlibs 上游发布包的钉死 URL、自托管依赖的 Release 下载根、guest 镜像源与 SMB helper 资产）；
   改一处全仓生效。**下载源的校验值与那条链接成对**写在同一份台账里（`<链接键>.sha256`），自托管 release 资产的校验值写在 `dependencies.yaml` 的条目里。
   校验值由 `node pins.js update` 按上游校验源生成（不手抄）；`node pins.js check` 只读比对，CI 的 `pins-check` 每周检查一次，不写文件、不开 PR。
-  用户覆盖走 `.home/settings.yaml` 与环境变量，不改仓库里的台账。
+  用户覆盖走 `data/.home/settings.yaml` 与环境变量，不改仓库里的台账。
 - **没有可用模型就不建会话**：先登记供应商与模型并设定核心默认；缺了如实拒绝并指明缺什么，不回落假模型。
 - 常用参数：`--root <目录>`（换产品根）、`--web`（直接进 Web 界面）、`--port <端口>`、`--plain`（无色纯文本）、`--no-anim`（生成态不刷帧）、`--release`；`--help` 看旗语与命令手册（`--help --all` 展开隐藏项）。
 - 终端提示符下的命令：输入 `help`（或 `/help`）得到全量清单与旗语规范（`src/presentation/cli/catalog.rs` 的命令表；非交互模式启动时也会打印）；回档走 `rewind`，供应商 / 模型 / 核心默认模型分别走 `provider` / `model` / `core`。
 
 ### 配供应商与模型
 
-在界面里加供应商（端点 + 密钥）与模型，并给核心选一个默认模型；密钥只写进 `.home/providers.yaml`，不回显。
+在界面里加供应商（端点 + 密钥）与模型，并给核心选一个默认模型；密钥只写进 `data/.home/providers.yaml`，不回显。
 
 ## 模块契约
 

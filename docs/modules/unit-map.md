@@ -13,6 +13,6 @@
 | `src/units/catalog/modules/service.rs` | 用例与端口持有者：`ModuleSource` 只在这里（R12） |
 | `src/units/catalog/modules/ports.rs` | 出站端口：`ModuleSource`（扫描 `modules/`） |
 | `src/units/catalog/modules/domain/module.rs` | `module.yaml` 契约、参数类型、校验与清单（`Roster` / `listing`） |
-| `src/units/catalog/modules/domain/state.rs` | 启停覆盖值与文件形态（`.home/modules.yaml` 的 serde 形态） |
+| `src/units/catalog/modules/domain/state.rs` | 启停覆盖值与文件形态（`data/.home/modules.yaml` 的 serde 形态） |
 | `src/units/catalog/modules/detail/fs_modules.rs` | 适配器：扫描目录、解析清单、确保 `userdata/` 存在 |
-| `src/units/catalog/modules/detail/yaml_module_state.rs` | 适配器：读写 `.home/modules.yaml` |
+| `src/units/catalog/modules/detail/yaml_module_state.rs` | 适配器：读写 `data/.home/modules.yaml` |
