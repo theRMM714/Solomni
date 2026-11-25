@@ -13,16 +13,22 @@
 const fs = require("fs");
 const path = require("path");
 const { stripTestModules } = require("./dependency.js");
+const { PURE, unitDir } = require("./unitpath.js");
 
 const TABLE = "layers.yaml";
 const RINGS = new Map([[0, "地基"], [1, "纯"], [2, "状态与机制"], [3, "用例"]]);
 
-const dirsOf = (root) => fs
-  .readdirSync(path.join(root, "src", "units"), { withFileTypes: true })
-  .filter((e) => e.isDirectory())
-  .map((e) => e.name)
-  .filter((name) => name !== "pure")
-  .sort();
+/** 盘上的单元名：src/units/ 下的目录加上 src/units/pure/ 下的目录（环 1 的路径编码）。 */
+const dirsOf = (root) => {
+  const base = path.join(root, "src", "units");
+  const out = [];
+  for (const e of fs.readdirSync(base, { withFileTypes: true })) {
+    if (!e.isDirectory()) continue;
+    if (e.name !== PURE) { out.push(e.name); continue; }
+    for (const p of fs.readdirSync(path.join(base, PURE), { withFileTypes: true })) if (p.isDirectory()) out.push(p.name);
+  }
+  return out.sort();
+};
 
 const rsFilesOf = (dir) => {
   const out = [];
@@ -82,7 +88,7 @@ function shapeProblems(root, tiers, dirs) {
 function edgesOf(root, dirs) {
   const edges = new Map();
   for (const cap of dirs) {
-    for (const f of rsFilesOf(path.join(root, "src", "units", cap))) {
+    for (const f of rsFilesOf(unitDir(root, cap))) {
       const text = stripTestModules(fs.readFileSync(f, "utf8"));
       for (const raw of text.split(/\r?\n/)) {
         if (!raw.trim() || raw.trim().startsWith("//")) continue;
@@ -145,7 +151,7 @@ function edgeProblem(tiers, rank, from, to) {
 /** H2：纯层不得有 IO、端口、可变全局与 kernel 机制依赖；kernel 的纯契约值放行。 */
 function pureProblems(root, unit) {
   const problems = [];
-  const dir = path.join(root, "src", "units", unit);
+  const dir = unitDir(root, unit);
   if (fs.existsSync(path.join(dir, "ports"))) problems.push("纯层：环 1 的 " + unit + " 不得有 ports/ 目录（端口是 IO 的门，纯层不设门）");
   const bad = [
     [/^\s*use\s+(std::(?:fs|net|process|env|thread)|tokio|reqwest|sqlx)\b/, "IO 依赖"],
@@ -200,7 +206,7 @@ function layers(root) {
   return { problems, notes };
 }
 
-module.exports = { layers, parseLayers, edgesOf, dirsOf, rsFilesOf, ranksOf, edgeProblem, RINGS };
+module.exports = { layers, parseLayers, edgesOf, dirsOf, rsFilesOf, ranksOf, edgeProblem, unitDir, RINGS };
 
 /** 命令行：打印环表、同环 rank 与判据结果；环由人决定，没有 --write。 */
 if (require.main === module) {

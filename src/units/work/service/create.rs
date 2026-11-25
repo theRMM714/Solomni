@@ -25,7 +25,7 @@ impl Work {
         &self,
         probe: &dyn HostProbe,
         raw: &std::path::Path,
-        tier: crate::units::exec_model::api::Tier,
+        tier: crate::units::pure::exec_model::api::Tier,
     ) -> Result<std::path::PathBuf, String> {
         let product = crate::units::workspace::api::product_root(&self.root, probe);
         crate::units::workspace::api::ambient(raw, tier, &product, probe)
@@ -117,7 +117,7 @@ impl Work {
         &self,
         probe: &dyn HostProbe,
         raw: Option<&std::path::Path>,
-        tier: crate::units::exec_model::api::Tier,
+        tier: crate::units::pure::exec_model::api::Tier,
         parent: Option<&str>,
     ) -> Result<Option<crate::units::conversation::session::api::WorkspaceBinding>, String>
     {
@@ -202,7 +202,7 @@ impl Work {
                     guest: spec.guest.as_deref(),
                     profile: spec
                         .permission
-                        .unwrap_or(crate::units::permission::api::ProfileId::Online),
+                        .unwrap_or(crate::units::pure::permission::api::ProfileId::Online),
                     workspace,
                     freshness: spec.freshness,
                 },
@@ -321,10 +321,10 @@ impl Work {
             // 顶层来自**用户在创建向导里的选择**（默认 = 设置里的档位）。承载不了由下面如实拒绝。
             exec: match parent {
                 Some(p) => self.history.meta(p)?.exec,
-                None => crate::units::exec_model::api::ExecSpec {
+                None => crate::units::pure::exec_model::api::ExecSpec {
                     tier: spec.tier,
                     guest: spec.guest.clone(),
-                    ..crate::units::exec_model::api::ExecSpec::default()
+                    ..crate::units::pure::exec_model::api::ExecSpec::default()
                 },
             },
             // 绑定只写在工作根上；子会话沿 parent 链继承，不复制一份。
@@ -336,9 +336,9 @@ impl Work {
             sandbox: match parent {
                 // 子会话只带自己的 narrowing；根 ceiling 沿祖先链现算，不再复制父权限。
                 Some(_) => Default::default(),
-                None => crate::units::permission::api::SessionSandbox {
+                None => crate::units::pure::permission::api::SessionSandbox {
                     ceiling: spec.permission.map(|profile| {
-                        crate::units::permission::api::PermissionLayer {
+                        crate::units::pure::permission::api::PermissionLayer {
                             profile: Some(profile),
                         }
                     }),
@@ -385,7 +385,7 @@ impl Work {
             .filter(|m| module_ids.iter().any(|id| id == &m.manifest.id))
             .cloned()
             .collect();
-        if meta.exec.tier == crate::units::exec_model::api::Tier::Vm {
+        if meta.exec.tier == crate::units::pure::exec_model::api::Tier::Vm {
             let guest_runtimes =
                 crate::units::vm::api::guest_runtimes_of(&self.root, host, &meta.exec);
             for (id, caps) in pkgs::absent(&session_modules, &self.packages.library()) {
@@ -437,7 +437,7 @@ impl Work {
             None
         };
         // 代拟名单还没确认：沙箱/模块都不知道，先不起 guest；第一次真正生成前 ensure_guest 再起。
-        let boot = if meta.exec.tier == crate::units::exec_model::api::Tier::Vm
+        let boot = if meta.exec.tier == crate::units::pure::exec_model::api::Tier::Vm
             && !(meta.delegate && meta.agents.is_empty())
         {
             // 共享 guest：按整棵树装配（proxy 子工作都进代理根那一台），租约取作用域根。
@@ -555,7 +555,7 @@ impl Work {
                 );
                 let guest =
                     crate::units::vm::api::guest_os_of(&self.root, probe, &meta.exec);
-                let host_plan = if meta.exec.tier == crate::units::exec_model::api::Tier::Host {
+                let host_plan = if meta.exec.tier == crate::units::pure::exec_model::api::Tier::Host {
                     crate::units::vm::api::host_plan_for(
                         &self.packages.library(),
                         &self.packages.base(),
@@ -790,8 +790,8 @@ impl Work {
             ts: crate::kernel::api::procs::unix_seconds(),
             agents: Vec::new(),
             exec,
-            sandbox: crate::units::permission::api::SessionSandbox {
-                ceiling: Some(crate::units::permission::api::PermissionLayer {
+            sandbox: crate::units::pure::permission::api::SessionSandbox {
+                ceiling: Some(crate::units::pure::permission::api::PermissionLayer {
                     profile: Some(profile),
                 }),
                 narrowing: None,

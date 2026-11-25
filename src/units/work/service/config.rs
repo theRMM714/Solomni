@@ -186,11 +186,11 @@ impl Work {
         }
         // 档位：与「开始」同一把尺子——虚拟机档的选型不成立（多版本未定版 / 定版不存在 / 路径冲突）如实拒绝。
         let tier = match edit.tier.as_str() {
-            "host" => crate::units::exec_model::api::Tier::Host,
-            "vm" => crate::units::exec_model::api::Tier::Vm,
+            "host" => crate::units::pure::exec_model::api::Tier::Host,
+            "vm" => crate::units::pure::exec_model::api::Tier::Vm,
             other => return Err(format!("未知执行档位：{}（只认 host / vm）", other)),
         };
-        let spec = crate::units::exec_model::api::ExecSpec {
+        let spec = crate::units::pure::exec_model::api::ExecSpec {
             tier,
             guest: edit.guest.clone(),
             pins: edit.pins.clone(),
@@ -203,8 +203,8 @@ impl Work {
         }
         // 承载校验：前置条件不具备时**不允许改入虚拟机档**（用户环境问题，不是选型问题）；界面上的"能不能选"由
         // SessionConfig 的 tier_ready 说同一件事。已在虚拟机档上的会话只校验它自己那几项（基础根等），不拦模块/模型/定版/网络。
-        let staying_vm = meta.exec.tier == crate::units::exec_model::api::Tier::Vm
-            && tier == crate::units::exec_model::api::Tier::Vm;
+        let staying_vm = meta.exec.tier == crate::units::pure::exec_model::api::Tier::Vm
+            && tier == crate::units::pure::exec_model::api::Tier::Vm;
         if staying_vm {
             // 留在 vm 档：只校验用户这次填的基础根（填错路径就是填错路径），
             // 不拿"本机能不能提供 vm 档"去拦一条已经存在的会话。
@@ -326,8 +326,8 @@ impl Work {
                 new_children.push(cm);
             }
         }
-        let was_vm = meta.exec.tier == crate::units::exec_model::api::Tier::Vm;
-        let is_vm = new_meta.exec.tier == crate::units::exec_model::api::Tier::Vm;
+        let was_vm = meta.exec.tier == crate::units::pure::exec_model::api::Tier::Vm;
+        let is_vm = new_meta.exec.tier == crate::units::pure::exec_model::api::Tier::Vm;
         // 共享 guest 的装配按整棵树算：把这次的新值覆盖到作用域根的子树上，再出计划与沙箱。
         let (lease, tree, tree_plan) = if is_vm {
             let (lease, scope_meta) = guest_scope(self.history.as_ref(), &new_meta)?
@@ -392,7 +392,7 @@ impl Work {
         turn: &mut Turn,
         registry: &dyn Registry,
         sid: &str,
-        profile: crate::units::permission::api::ProfileId,
+        profile: crate::units::pure::permission::api::ProfileId,
     ) -> Result<(), String> {
         let (meta, _) = self.history_open(sid)?;
         let guard = work_root(self.history.as_ref(), sid).unwrap_or_else(|_| sid.to_string());

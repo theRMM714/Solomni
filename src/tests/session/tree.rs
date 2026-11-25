@@ -370,7 +370,7 @@ pub(crate) fn cut_lines_stay_out_of_the_model_dialogue() {
 /// 目的：根编辑不覆盖子收窄；子只能再收窄，不能换更高档。
 #[test]
 pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
-    use crate::units::permission::api::{PermissionLayer, ProfileId};
+    use crate::units::pure::permission::api::{PermissionLayer, ProfileId};
     use crate::units::workspace::api::{ScopeMode, SharedEdit};
     let hist = Arc::new(InMemoryHistory::new());
     let mut core = core_with_all(
@@ -458,7 +458,7 @@ pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
 /// 目的：创建时选的档位直接落进根 ceiling。
 #[test]
 pub(crate) fn creation_writes_the_chosen_profile_into_the_root_ceiling() {
-    use crate::units::permission::api::ProfileId;
+    use crate::units::pure::permission::api::ProfileId;
     let hist = Arc::new(InMemoryHistory::new());
     let mut core = core_with_all(
         vec![module_of("a")],
@@ -485,7 +485,7 @@ pub(crate) fn creation_writes_the_chosen_profile_into_the_root_ceiling() {
 /// 目的：快速切档是根级动作——更新根 ceiling，子会话只能再收窄。
 #[test]
 pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
-    use crate::units::permission::api::ProfileId;
+    use crate::units::pure::permission::api::ProfileId;
     let hist = Arc::new(InMemoryHistory::new());
     let mut core = core_with_all(
         vec![module_of("a")],
@@ -530,8 +530,8 @@ pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
 #[test]
 pub(crate) fn guest_lease_follows_the_tier_and_the_proxy_root() {
     use crate::units::conversation::session::api::guest_lease;
-    use crate::units::exec_model::api::ExecSpec;
-    use crate::units::exec_model::api::Tier;
+    use crate::units::pure::exec_model::api::ExecSpec;
+    use crate::units::pure::exec_model::api::Tier;
     let meta = |name: &str, parent: Option<&str>, tier: Tier, kind: &str| SessionMeta {
         usage_totals: Default::default(),
         context_freshness: false,

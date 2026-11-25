@@ -8,7 +8,7 @@ use crate::units::catalog::packages::api::PackagePlan;
 use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::catalog::registry::api::AppSettings;
 use crate::units::conversation::session::api::{MEETING, RunState, SINGLE, SessionMeta};
-use crate::units::permission::api::{
+use crate::units::pure::permission::api::{
     PermissionDefaults, PermissionLayer, ProfileId, SessionSandbox,
 };
 use crate::units::turn::env::api::{
@@ -16,8 +16,8 @@ use crate::units::turn::env::api::{
     sandboxes, shared_scope,
 };
 use crate::units::workspace::api::{Sandbox, ScopeMode, SharedEdit, SharedScope, WorkRoots};
-use crate::units::exec_model::api::ExecSpec;
-use crate::units::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::ExecSpec;
+use crate::units::pure::exec_model::api::Tier;
 use crate::tests::doubles::module_of;
 use std::collections::BTreeMap;
 use std::ffi::OsString;

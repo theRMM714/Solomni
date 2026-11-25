@@ -14,14 +14,14 @@ impl Work {
         &self,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
-        tier: crate::units::exec_model::api::Tier,
+        tier: crate::units::pure::exec_model::api::Tier,
     ) -> RuntimeReport {
         self.runtime_report_for(
             registry,
             probe,
-            &crate::units::exec_model::api::ExecSpec {
+            &crate::units::pure::exec_model::api::ExecSpec {
                 tier,
-                ..crate::units::exec_model::api::ExecSpec::default()
+                ..crate::units::pure::exec_model::api::ExecSpec::default()
             },
         )
     }
@@ -31,13 +31,13 @@ impl Work {
         &self,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
-        spec: &crate::units::exec_model::api::ExecSpec,
+        spec: &crate::units::pure::exec_model::api::ExecSpec,
     ) -> RuntimeReport {
         let roster = self.modules.roster();
         let lib = self.packages.library();
         let guest_runtimes =
             crate::units::vm::api::guest_runtimes_of(&self.root, probe, spec);
-        let vm = spec.tier == crate::units::exec_model::api::Tier::Vm;
+        let vm = spec.tier == crate::units::pure::exec_model::api::Tier::Vm;
         let (diagnoses, mut missing, available) = if vm {
             let diagnoses = pkgs::diagnoses(&roster.modules, &lib, spec, &guest_runtimes)
                 .into_iter()
@@ -172,7 +172,7 @@ impl Work {
             &self.packages.library(),
             &self.packages.base(),
             probe,
-            &crate::units::exec_model::api::ExecSpec::default(),
+            &crate::units::pure::exec_model::api::ExecSpec::default(),
             modules,
             pkgs::PinPolicy::First,
         )
@@ -212,7 +212,7 @@ impl Work {
             },
             narrowed: meta.parent.is_some() && meta.sandbox.narrowing.is_some(),
             parent_profile,
-            profiles: crate::units::permission::api::ProfileId::all()
+            profiles: crate::units::pure::permission::api::ProfileId::all()
                 .into_iter()
                 .map(|p| p.spec())
                 .collect(),

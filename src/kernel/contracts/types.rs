@@ -4,7 +4,6 @@
 //! 联动：由 `src/kernel/api.rs` 重导出；判据见 ARCHITECTURE.md 的「硬要求清单」R6。
 
 use crate::kernel::contracts::note::{Note, Severity};
-use serde::{Deserialize, Serialize};
 
 /// 目的：单次模型调用的默认总预算（秒）。
 /// 约束：登记处（设置项）与 `llm` 的出站调用参数共享它；设置项见 `AppSettings::llm_timeout_secs`。

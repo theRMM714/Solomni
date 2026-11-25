@@ -594,7 +594,7 @@ pub(crate) fn run_shell(
     fence.extend_read_tree(ctx.face.runtime_roots.iter().cloned());
     // 要连宿主回环时才换网络档：容器侧起中继、按端口放行（宿主侧还会拒产品自己的端口）。
     if !call.local_ports.is_empty() {
-        if ctx.face.tier == crate::units::exec_model::api::Tier::Vm {
+        if ctx.face.tier == crate::units::pure::exec_model::api::Tier::Vm {
             return (
                 ToolOutcome::new(
                     false,
@@ -610,7 +610,7 @@ pub(crate) fn run_shell(
     }
     // 容器身份按"会话 + agent + 受保护根集合"派生（见 container_name）：同一会话的 shell 共用 SID 与 ACL。
     // 生命周期归会话，调用结束不释放。
-    if ctx.face.tier == crate::units::exec_model::api::Tier::Vm && ctx.face.guest_lease.is_empty() {
+    if ctx.face.tier == crate::units::pure::exec_model::api::Tier::Vm && ctx.face.guest_lease.is_empty() {
         return (
             ToolOutcome::new(
                 false,
@@ -631,7 +631,7 @@ pub(crate) fn run_shell(
     }
     // 本机档的围栏准备耗时由 ProcessRunner 同线程交棒（见 kernel 的 take_fence_prep）；虚拟机档没有本机 ACL 准备，这里恒为 None。
     let mut fence_prep: Option<crate::kernel::api::process::FenceTiming> = None;
-    let mut outcome = if ctx.face.tier == crate::units::exec_model::api::Tier::Vm {
+    let mut outcome = if ctx.face.tier == crate::units::pure::exec_model::api::Tier::Vm {
         let run = crate::units::vm::api::GuestRun {
             command: call.script.clone(),
             args_json: String::new(),
@@ -772,7 +772,7 @@ pub(crate) fn dispatch_external(
                 &ctx.face.fence,
             )
             .at(&mt.root);
-            let outcome = if ctx.face.tier == crate::units::exec_model::api::Tier::Vm {
+            let outcome = if ctx.face.tier == crate::units::pure::exec_model::api::Tier::Vm {
                 // 虚拟机档：命令送进这个会话的 guest；per-call 断网由 guest helper 落实。
                 if ctx.face.guest_lease.is_empty() {
                     return (

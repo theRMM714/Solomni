@@ -182,7 +182,7 @@ pub(crate) fn work(name: &str, kind: &str, modules: &[&str]) -> WorkSpec {
         task: None,
         delegate: false,
         permission: None,
-        tier: crate::units::exec_model::api::Tier::Host,
+        tier: crate::units::pure::exec_model::api::Tier::Host,
         guest: None,
         workspace: None,
     }
@@ -222,7 +222,7 @@ pub(crate) fn test_provision_with_root(
         fn processes(&self) -> Result<Vec<crate::units::provision::api::ProcInfo>, String> {
             Ok(Vec::new())
         }
-        fn job(&self) -> crate::units::exec_model::api::JobState {
+        fn job(&self) -> crate::units::pure::exec_model::api::JobState {
             Default::default()
         }
         fn start(&self, _ids: Vec<String>) -> Result<(), String> {

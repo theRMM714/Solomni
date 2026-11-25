@@ -36,7 +36,7 @@ use crate::units::work::api::{
 };
 use crate::units::work::domain::{merge_into_one, session_started, validate_work_name};
 use crate::units::workspace::api::Workspace;
-use crate::units::exec_model::api::ExecSpec;
+use crate::units::pure::exec_model::api::ExecSpec;
 use crate::kernel::ports::{HostProbe, Log};
 use std::collections::BTreeMap;
 use std::path::PathBuf;

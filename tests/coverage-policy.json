@@ -91,7 +91,7 @@
       "title": "安全策略与围栏路径判定",
       "min": 100,
       "globs": [
-        "src/units/permission/**",
+        "src/units/pure/permission/**",
         "src/kernel/detail/launch.rs",
         "src/kernel/detail/ledger.rs",
         "src/kernel/detail/confine/prep.rs",

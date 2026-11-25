@@ -274,7 +274,7 @@ pub(crate) fn native_member(
                 mode: crate::units::llm::api::ToolMode::Native,
                 seat: "solo".to_string(),
                 modules,
-                tier: crate::units::exec_model::api::Tier::Host,
+                tier: crate::units::pure::exec_model::api::Tier::Host,
                 guest_lease: String::new(),
                 sandbox: sb.clone(),
                 tools_this_turn: test_prompts()

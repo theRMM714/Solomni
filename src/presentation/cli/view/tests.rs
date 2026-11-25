@@ -23,7 +23,7 @@ use crate::units::conversation::session::domain::events::{
     DecisionAnswer, DecisionEnvelope, DecisionMessage,
 };
 use crate::units::llm::api::{ProbeOutcome, ReplayReport};
-use crate::units::taskchain::api::{NodeStatus, TaskChain, TaskNode};
+use crate::units::pure::taskchain::api::{NodeStatus, TaskChain, TaskNode};
 use crate::tests::doubles::{
     InMemorySettings, core_with_settings_modules, module_of, module_with_runtimes,
 };

@@ -1,7 +1,7 @@
 # exec_model（执行与作业模型）
 
 > 定位：纯领域——执行档位、执行选型与长任务进度这三类共享词汇的唯一家。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/exec_model/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/pure/exec_model/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -25,7 +25,7 @@
 ## 一、为什么是独立单元
 
 - 三个形状原先挂在 `src/kernel/contracts/types.rs`：它们不含端口载荷，kernel 内部也没有使用点（`kernel::ports` 用的是 `Ask` / `AskOutcome` / `ToolOutcome`）。留在 kernel 等于让「产品词汇」占着地基库，且共享形状没有唯一的业务归属。
-- 拆出来以后：kernel 只托管端口载荷（R6 的新口径），这三个形状归环 1，任何单元都只经 `units::exec_model::api` 取，不许再复制副本（R15）。
+- 拆出来以后：kernel 只托管端口载荷（R6 的新口径），这三个形状归环 1，任何单元都只经 `units::pure::exec_model::api` 取，不许再复制副本（R15）。
 
 ## 改动本单元时必须同步
 

@@ -10,7 +10,7 @@ use crate::units::conversation::session::api::{HistoryView, OptionView, SessionE
 use crate::units::vm::api::{ExecPlan, GuestStop, Vm};
 use crate::units::workspace::api::Sandboxes;
 use crate::kernel::api::types::SessionId;
-use crate::units::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::Tier;
 use crate::kernel::ports::{HostProbe, Log};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -32,7 +32,7 @@ pub struct WorkSpec {
     /// 目的：执行档位（用户在创建向导里选的；默认 = 设置里的档位）。承载不了就由 create_work 如实拒绝。
     pub tier: Tier,
     /// 目的：创建时选的权限档位；None = 用设置里的默认档（代理创建时由呈现层显式选）。
-    pub permission: Option<crate::units::permission::api::ProfileId>,
+    pub permission: Option<crate::units::pure::permission::api::ProfileId>,
     /// 目的：虚拟机档用的虚拟根名（可省 = 空；会话建好后也可在会话配置里改）。
     pub guest: Option<String>,
     /// 目的：外部工作区根（已规范化的绝对路径）；None = 产品内 `session/<名>/work`。
@@ -145,7 +145,7 @@ pub struct ConfigAgent {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PermissionView {
     /// 目的：生效档位 id。
-    pub profile: crate::units::permission::api::ProfileId,
+    pub profile: crate::units::pure::permission::api::ProfileId,
     /// 目的：用户标签。
     pub label: String,
     /// 目的：一句话说明。
@@ -155,9 +155,9 @@ pub struct PermissionView {
     /// 目的：这条会话是不是子会话收窄层。
     pub narrowed: bool,
     /// 目的：父档位（子会话）。
-    pub parent_profile: Option<crate::units::permission::api::ProfileId>,
+    pub parent_profile: Option<crate::units::pure::permission::api::ProfileId>,
     /// 目的：可选档位（前端照抄，不自己编）。
-    pub profiles: Vec<crate::units::permission::api::ProfileSpec>,
+    pub profiles: Vec<crate::units::pure::permission::api::ProfileSpec>,
 }
 
 /// 目的：权限视图里的共享区归属。
@@ -227,7 +227,7 @@ pub struct SessionEdit {
     pub pins: BTreeMap<String, String>,
     /// 目的：会话级网络档位层（根 ceiling / 子 narrowing）。`None` = 保留现值。
     #[serde(default)]
-    pub permission: Option<crate::units::permission::api::PermissionLayer>,
+    pub permission: Option<crate::units::pure::permission::api::PermissionLayer>,
     /// 目的：会话级共享区归属（根覆盖 / 子收窄）。`None` = 保留现值。
     #[serde(default)]
     pub shared: Option<crate::units::workspace::api::SharedEdit>,
@@ -436,7 +436,7 @@ pub(crate) struct ProxySeed<'a> {
     /// 目的：虚拟机档要用的 guest 规格（空串按没给）。
     pub(crate) guest: Option<&'a str>,
     /// 目的：权威档的权限档位。
-    pub(crate) profile: crate::units::permission::api::ProfileId,
+    pub(crate) profile: crate::units::pure::permission::api::ProfileId,
     /// 目的：外部工作区绑定（已解析，不是原始路径）。
     pub(crate) workspace: Option<crate::units::conversation::session::api::WorkspaceBinding>,
     /// 目的：创建时定的过期内容替换（None = 关）：`(开, 保底百分比)`，写进新会话的工作根 meta。

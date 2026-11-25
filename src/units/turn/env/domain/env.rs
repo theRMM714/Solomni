@@ -14,10 +14,10 @@ use crate::units::catalog::packages::api::PackagePlan;
 use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::catalog::registry::api::AppSettings;
 use crate::units::conversation::session::api::SessionMeta;
-use crate::units::permission::api::PermissionSet;
+use crate::units::pure::permission::api::PermissionSet;
 use crate::units::workspace::api::{Sandbox, Sandboxes, SharedScope, WORKIGNORE, WorkRoots};
 use crate::kernel::api::fence::FencePlan;
-use crate::units::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::Tier;
 use crate::kernel::ports::PathCodec;
 
 /// 目的：派生一席工具环境所需的全部已取事实。

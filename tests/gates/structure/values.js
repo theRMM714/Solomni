@@ -10,6 +10,7 @@
 "use strict";
 const fs = require("fs");
 const path = require("path");
+const { unitOfPath } = require("./unitpath.js");
 
 const MUTABLE = /(Mutex<|RwLock<|RefCell<|Cell<|UnsafeCell<|Atomic(Usize|U64|U32|I64|Bool|U8))/;
 const BORROW_OBJ = /(&'?\w*\s*mut\s|dyn Fn\b|Box<dyn Fn)/;
@@ -26,11 +27,7 @@ const rsFilesOf = (dir) => {
   return out;
 };
 
-const capOf = (file) => {
-  const parts = file.split(path.sep);
-  const at = parts.indexOf("units");
-  return at >= 0 ? parts[at + 1] : "";
-};
+const capOf = (file) => unitOfPath(file);
 const rel = (root, file) => path.relative(root, file).split(path.sep).join("/");
 const shallow = (s) => s.replace(/\s+/g, " ").trim();
 

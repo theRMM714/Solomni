@@ -4,6 +4,6 @@
 //! 联动：vm、provision、runtime、maintenance、system、presentation 都经这里取类型。
 
 #[allow(unused_imports)] // 入站面：其它单元与测试都经这里取类型
-pub use crate::units::exec_model::domain::exec_selection::{ExecSpec, Tier};
+pub use crate::units::pure::exec_model::domain::exec_selection::{ExecSpec, Tier};
 #[allow(unused_imports)] // 入站面：进度通道的消费方都经这里取类型
-pub use crate::units::exec_model::domain::job::JobState;
+pub use crate::units::pure::exec_model::domain::job::JobState;

@@ -6,8 +6,8 @@
 use crate::units::catalog::modules::api::Module;
 use crate::units::catalog::packages::api::PlannedPackage;
 use crate::units::vm::domain::guest::{GuestAgent, GuestImage, GuestOs};
-use crate::units::exec_model::api::ExecSpec;
-use crate::units::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::ExecSpec;
+use crate::units::pure::exec_model::api::Tier;
 use crate::kernel::ports::HostProbe;
 use serde::Serialize;
 use std::path::Path;

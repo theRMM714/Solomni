@@ -15,7 +15,7 @@ use crate::units::conversation::session::api::{
     Flow, Gate, GateTicket, Handback, MemberAsk, MemberTurn, SessionEvent, Settle, WorkPlan,
     mechanism_of, seat,
 };
-use crate::units::taskchain::api::NodeStatus;
+use crate::units::pure::taskchain::api::NodeStatus;
 use crate::units::workspace::api::Sandboxes;
 
 impl Flow for CollabSession {

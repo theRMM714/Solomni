@@ -234,7 +234,7 @@ impl CollabSession {
                 c.nodes
                     .iter()
                     .filter(|n| {
-                        n.status == crate::units::taskchain::api::NodeStatus::Done
+                        n.status == crate::units::pure::taskchain::api::NodeStatus::Done
                             && !n.reported
                     })
                     .map(|n| {
@@ -285,7 +285,7 @@ impl CollabSession {
                 return;
             }
             // 这一阶段的节点逐个判（核心 AI 给结论，也由它决定重派哪些）。
-            let stage_nodes: Vec<crate::units::taskchain::api::TaskNode> = self
+            let stage_nodes: Vec<crate::units::pure::taskchain::api::TaskNode> = self
                 .chain
                 .as_ref()
                 .map(|c| c.stage_nodes(stage).into_iter().cloned().collect())
@@ -295,7 +295,7 @@ impl CollabSession {
             // 节点上，否则"退回待办并重派"的名单就是错的。
             let mut retry: Option<String> = None;
             let (verdicts, advice) = loop {
-                let reviewed = crate::units::taskchain::api::TaskChain {
+                let reviewed = crate::units::pure::taskchain::api::TaskChain {
                     nodes: stage_nodes.clone(),
                 };
                 sink(crate::units::conversation::session::api::working(

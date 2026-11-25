@@ -33,14 +33,14 @@ pub struct SessionMeta {
     pub agents: Vec<AgentMeta>,
     /// 目的：执行档位与运行包选型（exec 段；缺字段按默认 = 本机档读回）。
     #[serde(default)]
-    pub exec: crate::units::exec_model::api::ExecSpec,
+    pub exec: crate::units::pure::exec_model::api::ExecSpec,
     /// 目的：共享区主副本绑定的外部工作区根；`None` = 产品内的 `session/<名>/work`。
     /// 约束：只写在工作根上（子会话沿 `parent` 继承同一个根），创建后不可改。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<WorkspaceBinding>,
     /// 目的：这条会话的权限层：根是 ceiling，子是 narrowing。全局给默认值，这里只覆盖显式字段。
     #[serde(default)]
-    pub sandbox: crate::units::permission::api::SessionSandbox,
+    pub sandbox: crate::units::pure::permission::api::SessionSandbox,
     /// 目的：这条会话对共享区归属的覆盖：根是覆盖（可放宽到全局默认之外），子是收窄。
     ///   空 = 完全沿用上一层的范围。
     #[serde(default)]
@@ -159,7 +159,7 @@ impl RunState {
 
 /// 目的：任务级委托：代理模式下，真实用户把决定权**整块**交给核心（全权）。
 ///   它只是一个存在标志与授予时间；范围 / 期限 / 决定粒度与额外路径权限归独立的
-///   **权限管理**能力（`units/permission/`，与某个会话本身无关）。
+///   **权限管理**能力（`units/pure/permission/`，与某个会话本身无关）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Delegation {
     /// 目的：授予时间（Unix 秒）：授予由真实用户在建工作时完成。
@@ -205,7 +205,7 @@ pub struct HistoryView {
     /// 目的：这条会话记的执行档位与选型（meta.yaml 的 exec 段；缺字段按默认 = 本机档读回）。
     ///   列表视图据此提示"环境已变"——**不拦打开**，记录是用户的。
     #[serde(default)]
-    pub exec: crate::units::exec_model::api::ExecSpec,
+    pub exec: crate::units::pure::exec_model::api::ExecSpec,
     /// 目的：谁编排的（子会话 = 父会话名）：侧栏据此把子会话缩进挂在父会话下。
     #[serde(default)]
     pub parent: Option<String>,

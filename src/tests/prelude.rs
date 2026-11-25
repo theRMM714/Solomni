@@ -37,7 +37,7 @@ pub use crate::kernel::ports::ProcessRunner;
 pub use crate::units::catalog::modules::api::Module;
 
 pub use crate::units::vm::api::{self as exec};
-pub use crate::units::exec_model::api::ExecSpec;
+pub use crate::units::pure::exec_model::api::ExecSpec;
 
 pub use crate::units::catalog::modules::ports::ModuleSource;
 pub use crate::units::workspace::ports::Workdirs;
@@ -54,7 +54,7 @@ pub use crate::units::conversation::collab::api::{
 
 pub(crate) use crate::units::runtime::service::Core;
 
-pub use crate::units::exec_model::api::Tier;
+pub use crate::units::pure::exec_model::api::Tier;
 
 pub use std::collections::{BTreeMap, BTreeSet};
 

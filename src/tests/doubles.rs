@@ -30,7 +30,7 @@ use crate::units::tools::ports::SystoolsSource;
 use crate::units::tools::ports::{FileRead, SysIo};
 use crate::units::workspace::domain::asset::{AssetScanner, FileVersion};
 use crate::units::workspace::ports::{WorkStore, Workdirs};
-use crate::units::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::Tier;
 use crate::kernel::ports::ProcessRunner;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;

@@ -295,7 +295,7 @@ impl Core {
     pub(crate) fn activation_build_request(
         &self,
         sid: &str,
-    ) -> Result<(Vec<String>, crate::units::exec_model::api::Tier, Option<String>), String> {
+    ) -> Result<(Vec<String>, crate::units::pure::exec_model::api::Tier, Option<String>), String> {
         self.work.activation_build_request(sid)
     }
 
@@ -355,7 +355,7 @@ impl Core {
     pub(crate) fn set_permission_profile(
         &mut self,
         sid: &str,
-        profile: crate::units::permission::api::ProfileId,
+        profile: crate::units::pure::permission::api::ProfileId,
     ) -> Result<(), String> {
         self.work
             .set_permission_profile(&mut self.turn, self.registry.as_ref(), sid, profile)
@@ -444,7 +444,7 @@ impl Core {
     }
 
     /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。
-    pub fn runtime_report(&self, tier: crate::units::exec_model::api::Tier) -> RuntimeReport {
+    pub fn runtime_report(&self, tier: crate::units::pure::exec_model::api::Tier) -> RuntimeReport {
         self.work
             .runtime_report(self.registry.as_ref(), self.probe.as_ref(), tier)
     }
@@ -491,7 +491,7 @@ impl Core {
     pub fn ambient_workspace(
         &self,
         raw: &std::path::Path,
-        tier: crate::units::exec_model::api::Tier,
+        tier: crate::units::pure::exec_model::api::Tier,
     ) -> Result<std::path::PathBuf, String> {
         self.work.ambient_workspace(self.probe.as_ref(), raw, tier)
     }

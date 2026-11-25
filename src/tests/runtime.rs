@@ -296,7 +296,7 @@ pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
 #[test]
 pub(crate) fn workspace_policy_splits_network_roots_by_tier() {
     use crate::units::workspace::api::policy;
-    use crate::units::exec_model::api::Tier;
+    use crate::units::pure::exec_model::api::Tier;
     use std::path::Path;
     use std::time::{Duration, Instant};
 
@@ -321,7 +321,7 @@ pub(crate) fn workspace_policy_splits_network_roots_by_tier() {
 #[test]
 pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
     use crate::units::workspace::api::{product_root, recheck};
-    use crate::units::exec_model::api::Tier;
+    use crate::units::pure::exec_model::api::Tier;
 
     let root = crate::tests::scratch("recheck-cross");
     let product = root.join("product");
@@ -344,7 +344,7 @@ pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
 #[test]
 pub(crate) fn ambient_workspace_takes_the_startup_directory_through_the_same_ladder() {
     use crate::units::workspace::api::{ambient, product_root};
-    use crate::units::exec_model::api::Tier;
+    use crate::units::pure::exec_model::api::Tier;
 
     let root = crate::tests::scratch("ambient-workspace");
     let product = root.join("product");
@@ -379,7 +379,7 @@ pub(crate) fn ambient_workspace_takes_the_startup_directory_through_the_same_lad
 #[test]
 pub(crate) fn loaded_binding_is_rechecked_against_the_tier() {
     use crate::units::workspace::api::{product_root, recheck};
-    use crate::units::exec_model::api::Tier;
+    use crate::units::pure::exec_model::api::Tier;
     use std::path::Path;
 
     let probe = crate::kernel::detail::HostProbeAdapter;

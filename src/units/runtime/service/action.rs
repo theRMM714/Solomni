@@ -221,7 +221,7 @@ impl Handle {
             "set_permission_profile" => {
                 let sid = s("session_id");
                 let profile =
-                    crate::units::permission::api::ProfileId::parse(&s("profile"))?;
+                    crate::units::pure::permission::api::ProfileId::parse(&s("profile"))?;
                 self.call(move |core| core.set_permission_profile(&sid, profile))?;
                 Ok(Acted::Done(serde_json::json!({ "ok": true })))
             }

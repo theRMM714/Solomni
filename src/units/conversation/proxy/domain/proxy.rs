@@ -352,7 +352,7 @@ pub struct NewSession {
     /// 目的：父会话——由**机制**从调用上下文填，不从模型参数取（模型不能自选父）。
     pub parent: Option<String>,
     /// 目的：创建时的权限档位；None = 用设置默认（子会话忽略并继承父 ceiling）。
-    pub permission: Option<crate::units::permission::api::ProfileId>,
+    pub permission: Option<crate::units::pure::permission::api::ProfileId>,
     /// 目的：外部工作区根（仅人经呈现层：产品目录之外的绝对路径）；None = 产品内布局。
     /// 约束：子会话不接受（沿父会话继承），核心代理的建会话工具也不暴露这个字段。
     pub workspace: Option<String>,
@@ -556,7 +556,7 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
     let permission = args
         .permission
         .as_deref()
-        .map(crate::units::permission::api::ProfileId::parse)
+        .map(crate::units::pure::permission::api::ProfileId::parse)
         .transpose()?;
     Ok(NewSession {
         kind,

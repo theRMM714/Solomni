@@ -6,14 +6,14 @@
 use super::*;
 use crate::units::conversation::session::api::SessionSpec;
 
-pub(crate) fn chain_node(id: &str, deps: &[&str]) -> crate::units::taskchain::api::TaskNode {
-    crate::units::taskchain::api::TaskNode {
+pub(crate) fn chain_node(id: &str, deps: &[&str]) -> crate::units::pure::taskchain::api::TaskNode {
+    crate::units::pure::taskchain::api::TaskNode {
         id: id.to_string(),
         title: format!("节点{}", id),
         objective: format!("把 {} 做完", id),
         assignee: "甲".to_string(),
         deps: deps.iter().map(|d| d.to_string()).collect(),
-        status: crate::units::taskchain::api::NodeStatus::Pending,
+        status: crate::units::pure::taskchain::api::NodeStatus::Pending,
         sub_session: None,
         report: None,
         acceptance: None,
@@ -67,7 +67,7 @@ pub(crate) fn member_with_tools(
                 mode: crate::units::llm::api::ToolMode::Envelope,
                 seat: "solo".to_string(),
                 modules,
-                tier: crate::units::exec_model::api::Tier::Host,
+                tier: crate::units::pure::exec_model::api::Tier::Host,
                 guest_lease: String::new(),
                 sandbox: test_sandbox("m0", &[]),
                 tools_this_turn: test_prompts()

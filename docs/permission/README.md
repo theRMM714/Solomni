@@ -1,7 +1,7 @@
 # permission（权限）
 
 > 定位：独立于会话的一类能力——只回答「这个会话能不能出站」。
-> 效力：规范｜核对：2026-11-22｜依据：`src/units/permission/api.rs`
+> 效力：规范｜核对：2026-11-22｜依据：`src/units/pure/permission/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -67,7 +67,7 @@
 ## 六、根 ceiling + 子会话逐层收窄
 
 - 根写 `sandbox.ceiling`，子写 `sandbox.narrowing`；effective = 全局默认 → 根 ceiling → 沿祖先链每层 narrowing。
-- 子只能换更低档：`apply_narrowing` 用 `rank()` 比较，比父宽即报错（`src/units/permission/domain/permission/base.rs`）。
+- 子只能换更低档：`apply_narrowing` 用 `rank()` 比较，比父宽即报错（`src/units/pure/permission/domain/permission/base.rs`）。
 - 共享区的收窄与档位无关，在 workspace 的 `SharedEdit` 里独立校验（`src/units/workspace/domain/scope.rs`）：子只能更窄，父编辑只改 ceiling、不覆盖子收窄。
 - 档位切换是根级动作：整棵 work tree 有会话在生成时拒绝（先停再切）；切换从下一次求合并起生效。
 
