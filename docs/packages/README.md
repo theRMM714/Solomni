@@ -6,14 +6,14 @@
 
 ## 管什么 / 不管什么
 
-- 管：`package.yaml` 契约与校验；`runtimes/` 包库的扫描事实；按**发起方目标**（本机 / guest 平台）选载荷；选型诊断（缺包 / 多版本 / 定版 / 冲突 / 目标不匹配 / 无 bin）；`PackagePlan` 的装载顺序、本机 PATH 与只读根；按模块汇总的不可用能力。
+- 管：`package.yaml` 契约与校验；`data/runtimes/` 包库的扫描事实；按**发起方目标**（本机 / guest 平台）选载荷；选型诊断（缺包 / 多版本 / 定版 / 冲突 / 目标不匹配 / 无 bin）；`PackagePlan` 的装载顺序、本机 PATH 与只读根；按模块汇总的不可用能力。
 - 不管：guest 生命周期、挂载 / 软链 / system 叠写（`vm` 消费 `PackagePlan` 后自己做）；实际工具进程（`tools`）；会话装配与工具面（`runtime`）；构建编排与补编（`builds`）。
 
 ## 入站契约与状态归属
 
 - 入站面：`api::Packages`（`library` / `runtimes_dir` / `base`）+ 纯逻辑入口（`plan_host` / `plan_guest` / `diagnoses` 等）。
 - 出站端口：`PackageSource` **只由 `src/units/catalog/packages/service.rs` 持有**（R12）。
-- 状态归属：本单元不落盘；包库事实来自 `runtimes/`，选包计划交给调用方。
+- 状态归属：本单元不落盘；包库事实来自 `data/runtimes/`，选包计划交给调用方。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 - 所属单元：`catalog`（环 2）；本页的子业务同单元的 `modules` / `registry` / `secrets` 子业务直接调用，不经 `api`。

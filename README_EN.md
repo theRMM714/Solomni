@@ -11,7 +11,7 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
   Adaptation stays on the module's side — no SDK, no restructuring of this repository. **Outside the contract the two sides depend on nothing from each other**:
   take the product away and the module still runs; take the module away and the product keeps running.
   People use it through the UI and agents through the contract, from one declaration (contract in [MODULE_SPEC.md](MODULE_SPEC.md)).
-- **Several agents working on one job.** Every agent has its own sandbox (`session/<name>/<agent-instance>/`), which is also its **working copy** of the shared area;
+- **Several agents working on one job.** Every agent has its own sandbox (`data/session/<name>/<agent-instance>/`), which is also its **working copy** of the shared area;
   the shared area `work/` is the **main copy and read-only for agents**. Pull what you need with `work_pull`, edit in the sandbox, then record with `work_commit` and publish with `work_push`.
   Commits use a file-level three-way comparison: a conflict rejects the whole commit and names each path instead of silently overwriting; merge text by hand, inspect all three sides with `work_versions`, and resolve explicitly with `work_resolve` — images / video / binary can only choose a side; no automatic merge.
   Text, images, video and other binaries are handled as bytes; any commit point can be restored.
@@ -36,7 +36,7 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
 - **Three forms**: single agent / group collaboration / proxy (the whole decision goes to the core). See [PRODUCT.md](PRODUCT.md).
 - **Modules are drop-in**: a folder with a valid `module.yaml` under `modules/` appears; remove it and it is gone — no registration, no build, no restart
   (contract in [MODULE_SPEC.md](MODULE_SPEC.md)).
-- **Sessions and history**: one directory per piece of work (`session/<name>/`); rewind / archive / delete / restore, transcript replay, context compaction,
+- **Sessions and history**: one directory per piece of work (`data/session/<name>/`); rewind / archive / delete / restore, transcript replay, context compaction,
   versioned shared area (`work_pull` / `work_commit` / `work_push` / `work_status` / `work_versions` / `work_resolve` / `work_lost`), plus a user-facing commit history with non-destructive rollback.
 - **Shell**: a one-shot `shell` for build / test / scripts (executor, solo and the core proxy for verification). Its grants are fixed: the private sandbox is read-write, base / project toolchains, module dirs and authorized host roots are read-only, and the network follows the session profile (offline never dials out). Call parameters carry no scope knob. The shared area stays outside the container (run `work_pull` first) and module secrets are never injected.
 - **Three isolation layers**: path checks inside the built-in file tools (shell's boundary is the fence) → every tool process and shell runs behind the gate process (environment allowlist / process tree / timeout or cancel kills the whole tree)
@@ -47,7 +47,7 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
 <!-- BEGIN:platform-status-en -->
 > Verified on real hardware: Linux, Windows; not verified: macOS (gaps in `tests/macos/gaps.yaml`).
 <!-- END:platform-status-en -->
-- **Registry**: four YAML files for providers / models / agents / settings, all under `.home/`, managed from the UI; channel keys live only in the local registry and in the core's outbound calls
+- **Registry**: four YAML files for providers / models / agents / settings, all under `data/.home/`, managed from the UI; channel keys live only in the local registry and in the core's outbound calls
   (boundaries in [REGISTRY_SPEC.md](REGISTRY_SPEC.md)).
 - **Two interfaces**: the terminal transcript center (default) and the local web UI (`--web`, binds `127.0.0.1` only, port 3081 by default). The web session page has a status bar for context usage and shared-area commits.
 - **One decision channel**: core gates, tool-level confirmation and questions raised by the tool layer use the same card (message + options); it blocks, the option id is the contract,
@@ -74,7 +74,7 @@ node start.js --provision --ensure --yes # optional (Linux / Windows): install Q
 > In the vm / storage examples below, `solomni` means the built binary at `target/<profile>/solomni`; the
 > equivalent source-tree entry is `node start.js ...`.
 
-- **First start**: without `.home/settings.yaml`, Windows first asks whether to authorize the container fence
+- **First start**: without `data/.home/settings.yaml`, Windows first asks whether to authorize the container fence
   (directory ACLs); choosing no writes nothing and enters the startup gate (unfenced this run / reconfigure / exit).
   `--web` does not bypass that gate. Runtime prerequisites (Python / Node / C-C++) are not installed by the
   launcher: the product fills them in via `node start.js --provision --ensure=toolchain --yes` (the group alias fills
@@ -100,7 +100,7 @@ node start.js --provision --ensure --yes # optional (Linux / Windows): install Q
   reads read-only. The
   host fallback is only usable when the Windows fence can grant it (an adequate existing entry, or the directory is
   owned by the current user); otherwise the reason is reported and the project-local install is required. C# and
-  other non-base capabilities can be added as host-targeted packages under `runtimes/` (their `bin/` joins that
+  other non-base capabilities can be added as host-targeted packages under `data/runtimes/` (their `bin/` joins that
   run's PATH; missing packages are reported honestly).
   C/C++ uses MinGW-w64 on Windows and Zig on Linux / macOS; the same Zig install also serves source builds (env.js
   installs it first when the host `cc` is unusable). Linking native macOS frameworks still needs the system Xcode
@@ -142,7 +142,7 @@ node dev.js test|fmt|clippy   # one-layer dev commands; cargo only runs through 
   repository follows. **A download's checksum lives next to the link it guards** in the same ledger (`<link-key>.sha256`);
   self-hosted release assets carry theirs in the `dependencies.yaml` entry. Checksums are generated from upstream sources by
   `node pins.js update` (never copied by hand); `node pins.js check` verifies them read-only and the weekly `pins-check`
-  CI job reports drift without writing files or opening PRs. User overrides go through `.home/settings.yaml` and environment
+  CI job reports drift without writing files or opening PRs. User overrides go through `data/.home/settings.yaml` and environment
   variables, not the ledger.
 - **No usable model means no session**: register a provider and a model and set the core default first; a missing channel is refused with a precise reason, never replaced by a fake model.
 - Common flags: `--root <dir>` (product root), `--web` (go straight to the web UI), `--port <port>`, `--plain` (no color, plain text), `--no-anim` (static frames instead of a spinner), `--release`; `--help` shows the flags and the command manual (`--help --all` expands hidden entries).
@@ -151,7 +151,7 @@ node dev.js test|fmt|clippy   # one-layer dev commands; cargo only runs through 
 ### Add a provider and a model
 
 In the UI, add a provider (endpoint + key) and models, and pick the core default model. Keys are written only
-to `.home/providers.yaml` and are never echoed back.
+to `data/.home/providers.yaml` and are never echoed back.
 
 ## Module contract
 

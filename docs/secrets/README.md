@@ -1,6 +1,6 @@
 # secrets（隐秘字段）
 
-> 定位：模块声明的隐秘信息（如 MCP server 的令牌）的值存储与按模块解析——值只落 `.home/`，只给起进程的一侧注入。
+> 定位：模块声明的隐秘信息（如 MCP server 的令牌）的值存储与按模块解析——值只落 `data/.home/`，只给起进程的一侧注入。
 > 效力：规范｜核对：2026-11-25｜依据：`src/units/catalog/secrets/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
@@ -15,7 +15,7 @@
 
 - 入站面：`api`（`SecretOps` + `SecretView` + 空实现 `NoSecrets`）。
 - 出站端口：`SecretStore` **只由 `service.rs` 持有**（R12）。
-- 状态归属：值缓存（键 = 模块 / 字段）+ 存储端口；文件实现在 `src/units/catalog/secrets/detail/yaml_secrets.rs`（`.home/` 的 `secrets.yaml`，unix 下 0600）。
+- 状态归属：值缓存（键 = 模块 / 字段）+ 存储端口；文件实现在 `src/units/catalog/secrets/detail/yaml_secrets.rs`（`data/.home/` 的 `secrets.yaml`，unix 下 0600）。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 - 所属单元：`catalog`（环 2）；本页的子业务同单元的 `modules` / `packages` / `registry` 子业务直接调用，不经 `api`。

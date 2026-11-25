@@ -11,7 +11,7 @@
 - 入站面：`api::Registry`（读 `&self`、写 `&mut self`；`probe_replay_shape` 只读）。
 - 状态住在协调业务的执行线程上，靠单线程命令队列互斥，不额外上锁。
 - 出站端口 `SettingsStore` 只由 `service.rs` 持有。
-- 落盘形态归本单元：`.home/` 下四份 yaml，读写与解析在 `src/units/catalog/registry/detail/yaml_settings.rs`。
+- 落盘形态归本单元：`data/.home/` 下四份 yaml，读写与解析在 `src/units/catalog/registry/detail/yaml_settings.rs`。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 - 所属单元：`catalog`（环 2）；本页的子业务同单元的 `modules` / `packages` / `secrets` 子业务直接调用，不经 `api`。
@@ -49,7 +49,7 @@
 - 密钥回显边界：界面只呈现「供应商 id + 端点」与「模型 id + 展示名」，永不携带密钥；更新供应商时 `api_key` 留空 = 保留原值。
 
 ## 五、四份 yaml 的读写
-- `.home/` 下四份文件分开读写：`load` 逐份读，缺哪份就用哪份的默认；`save` 会同时写四份。
+- `data/.home/` 下四份文件分开读写：`load` 逐份读，缺哪份就用哪份的默认；`save` 会同时写四份。
 - 设置状态与通道解析在 `src/units/catalog/registry/domain/providers.rs`（`AppSettings` / `SandboxSettings` / `Settings` 与 `resolve`）；agent 与模型的值形态在环 1 的 `src/units/pure/registry_model/domain/agents.rs` 与 `src/units/pure/registry_model/domain/models.rs`，名单落地在 `src/units/catalog/registry/domain/picks.rs`；解析与写盘在 `src/units/catalog/registry/detail/yaml_settings.rs`。
 - yaml 非法（解析失败）= 装配失败并指出是哪一份。
 - 字段、默认值与拒收规则见 `REGISTRY_SPEC.md`。

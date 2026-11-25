@@ -1,16 +1,16 @@
 # 登记处契约（REGISTRY_SPEC）
-> 定位：`.home/` 下四份 yaml 的格式与字段、缺字段与非法输入怎么办、密钥边界在哪；不回答实现与探测行为。
+> 定位：`data/.home/` 下四份 yaml 的格式与字段、缺字段与非法输入怎么办、密钥边界在哪；不回答实现与探测行为。
 > 效力：契约｜核对：2026-11-25｜依据：`src/units/catalog/registry/domain/providers.rs`
 
 ## 结构
 ```text
-.home/
+data/.home/
   providers.yaml   # 供应商通道：端点 + 密钥
   models.yaml      # 模型清单 + 核心默认模型
   agents.yaml      # 用户配置的具名 agent
   settings.yaml    # 基本设置（开关与默认档位）
 ```
-- 登记处是产品级资源，不是模块资源；四份 yaml 都由用户经界面（终端或本地网页的设置）管理，落在 `.home/`——用户私有区、git 忽略。
+- 登记处是产品级资源，不是模块资源；四份 yaml 都由用户经界面（终端或本地网页的设置）管理，落在 `data/.home/`——用户私有区、git 忽略。
 - 四份文件分开读写：`load` 逐份读，缺哪份就用哪份的默认；`save` 会同时写四份。
 - yaml 非法（解析失败）= 装配失败并指出是哪一份；核心只校验，不纠正，不静默兜底。
 - 模块与工具只持 id 引用，永不接触通道与密钥（见 `MODULE_SPEC.md`「隐秘字段」）。
@@ -114,7 +114,7 @@
 | `discuss_remind_cap` | 整数 | 否 | `3` | 讨论里一轮内对同一个成员最多提醒几次 |
 - `thinking.levels` 是全局思考等级标签目录：默认四档，用户可追加任意标签（例如 `xhigh`、`高`、`极高 档`）；标签可以任意字符，但不能为空、不能有首尾空白或控制字符，不能重复。
 - 删掉仍被模型 `thinking.levels` 引用的档位 = 拒绝并列出模型；模型默认档不在新目录里 = 同样拒绝。
-- 会话里切档是会话级事实（写在 `session/` 下那张 `meta.yaml` 的 `thinking`，工作根持有、子会话共享）；状态栏与配置页只列这组模型都登记了的档，没选过档时直接显示共同默认档（见 `docs/session/session-model.md`）。
+- 会话里切档是会话级事实（写在 `data/session/` 下那张 `meta.yaml` 的 `thinking`，工作根持有、子会话共享）；状态栏与配置页只列这组模型都登记了的档，没选过档时直接显示共同默认档（见 `docs/session/session-model.md`）。
 - `storage` 只约束可回收缓存（构建缓存卷 / 下载缓存 / 过期可写层 / 日志），不约束会话、虚拟根、模块产物；到上限先回收一次，不拒绝构建；只有宿主剩余低于 `min_free_gib` 且回收后仍低才拒绝；字段范围保存时校验。
 - `periodic_gc=false` 只关闭全局周期回收，构建前 headroom 始终保留；`gc_interval_minutes` 控制全局周期回收，默认且最小 15 分钟，改设置最多 30 秒生效、不重启。
 - `compact_at_percent` / `compact_keep_percent` 都按模型窗口算：前者是自动压缩阈值（0 = 关），后者是压缩时至少保留的最近内容（0 = 只留摘要）；压缩只改"发给模型什么"，转录完整保留；压缩记录本身是一条带 `kind = compacted` 的转录行，删除 / 留档 / 恢复走普通行操作；本轮新注入的用户消息 / 派发任务不会被压进摘要（见 `docs/session/session-model.md`）。
@@ -124,7 +124,7 @@
 - 权限语义只有一份权威：`docs/permission/README.md`。
 - 网络是全局开关（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；provisioning 首启与核心模型出站不受它影响。
 - 启动门：默认 CLI 与 `--web` 都先过环境检查；`sandbox.policy` 的要求没满足时，只能本次无围栏（不落盘）/ 重新设置 / 退出（`settings.yaml` 的 `on_unavailable`），不会起 CLI 或 Web；没有可回答的前端、或 `refuse` 且不重设 = 退出。
-- 首次启动（`.home/` 下还没有 `settings.yaml`）在 Windows 上先问一次是否授权 `windows.write_acl`：选是就写盘并以退出码 75 整体重启；选否不写任何设置，直接进入启动门；这样默认不写本机权限项，又不会让首次启动停在"不可用"状态。
+- 首次启动（`data/.home/` 下还没有 `settings.yaml`）在 Windows 上先问一次是否授权 `windows.write_acl`：选是就写盘并以退出码 75 整体重启；选否不写任何设置，直接进入启动门；这样默认不写本机权限项，又不会让首次启动停在"不可用"状态。
 - 重设只修能修的那一项：Windows 未授权 → 写 `write_acl: true`；本机能力缺失 → 明确询问是否把 `enforce` 四项降为 `best_effort`（持久接受无强制），默认否。
 - Windows 配置一致性：`require` 文件系统 / 网络围栏 + `windows.write_acl: false` 是非法组合——保存时直接拒绝；已存在的 `settings.yaml` 加载时报 `settings.yaml 配置非法`；首启没有文件不拦（交给引导）；要无围栏请把对应 `enforce` 降为 `best_effort`。
 - `on_unavailable=ask` 时，启动门发现 `require` 的机制不可用会询问是否本进程降级；回答不落盘，重启再问；没人答 / 没有前端 / `refuse` = fail-closed；`SOLOMNI_SANDBOX_DEGRADED=1/0` 只供测试与 CI 在进程级注入（`1` 仅在 `ask` 下生效）。
@@ -184,7 +184,7 @@ agents:
 - `agents.yaml`：agent 名不满足「六、名字与 id」的校验 = 拒收；同一工作内重名按兜底规则处理。
 - `settings.yaml`：`thinking.levels` 的标签为空、有首尾空白 / 控制字符或重复 = 拒收；删掉仍被引用的档位、模型默认档不在目录里 = 拒绝；拼错键 / 未知键 / 相对的主机只读根 / 非法路径 = 启动即报 `settings.yaml 配置非法`；`require` 文件系统 / 网络围栏与 `windows.write_acl: false` 并用 = 保存拒绝；`storage` 字段范围保存时校验。
 - 密钥边界：通道密钥只在 `providers.yaml` 与核心发起的出站调用里存在，永不进入提示词、转录、日志、模块工作区。
-- 密钥边界：模块隐秘字段的值只存在 `.home/` 的隐秘登记处；核心按模块作用域经环境变量注入该模块自己的工具 / 服务进程——值不进提示词、转录、日志、模块工作区与命令行；字段的声明与注入名在 `module.yaml` 的 `secrets:`。
+- 密钥边界：模块隐秘字段的值只存在 `data/.home/` 的隐秘登记处；核心按模块作用域经环境变量注入该模块自己的工具 / 服务进程——值不进提示词、转录、日志、模块工作区与命令行；字段的声明与注入名在 `module.yaml` 的 `secrets:`。
 - 密钥边界：界面与报告只呈现「供应商 id + 端点」与「模型 id + 展示名」，永不携带密钥。
 - 密钥边界：出站错误信息经脱敏后才出适配层；日志与转录里出现的永远是 id，不是密钥。
 - 核心只校验，不纠正：解析失败 = 如实报错（装配失败），不静默兜底。

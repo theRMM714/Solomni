@@ -139,7 +139,7 @@ node run-tests.js
 | 入口 re-exec | 项目内 node 在场入口改由它跑；守卫在场不再 re-exec；未登记 / 项目内 node 起不来照宿主继续并如实报 |
 
 - dlltool 只在 Windows、Zig 引导只在 POSIX：各自平台缺的另一条路如实 `[探针]` 跳过，不算通过。
-- **引导链分工**：`env.js` 做 Rust / MinGW / Zig cc / Python / Node 引导（`node env.js setup`）——运行前提与 Rust 同等待遇：缺就征得同意装进项目内（无 TTY 无 `--yes` 不下载），装完写产品台账身份（`.vm/state/deps.json`，与 Rust `install_identity` 逐字节同口径，两侧各有钉住用例）并合并登记 `active.json`；同时把 `active.json` 登记的项目内 python / node / cc bin 前置进门禁与启动器子进程的 PATH（判据同产品侧 compose）。产品 `node start.js --provision --ensure=toolchain --yes` 仍是运行期用户的补齐入口（`kind: toolchain` 组别名只补缺项，按探针 + 台账身份判已装，全齐时打印「没有缺项，无需补齐」且不联网）；两条路共用同一安装路径与清单，产品补齐时按磁盘在场项重写 `active.json`。
+- **引导链分工**：`env.js` 做 Rust / MinGW / Zig cc / Python / Node 引导（`node env.js setup`）——运行前提与 Rust 同等待遇：缺就征得同意装进项目内（无 TTY 无 `--yes` 不下载），装完写产品台账身份（`data/.vm/state/deps.json`，与 Rust `install_identity` 逐字节同口径，两侧各有钉住用例）并合并登记 `active.json`；同时把 `active.json` 登记的项目内 python / node / cc bin 前置进门禁与启动器子进程的 PATH（判据同产品侧 compose）。产品 `node start.js --provision --ensure=toolchain --yes` 仍是运行期用户的补齐入口（`kind: toolchain` 组别名只补缺项，按探针 + 台账身份判已装，全齐时打印「没有缺项，无需补齐」且不联网）；两条路共用同一安装路径与清单，产品补齐时按磁盘在场项重写 `active.json`。
 
 ### 依赖哈希检查（`pins.js`）
 
@@ -400,7 +400,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 1. **先比 `sha`**：`meta.json` 的 `sha` 必须等于要验收的那个提交；不等 = 这次 CI 还没覆盖它，别拿旧结论当新证据。
 2. 再看 `failed` 与 `qualityFailed`（都为假才算通过）。
 3. 再读 `test-report.json` 的 `steps` 与 `envSkips`：**CI 上的 env-skip 同样不算通过**，它只说明那条围栏没被验收。
-4. 失败时从 `logs/` 取断言原文，不在摘要里找感觉。
+4. 失败时从 `data/logs/` 取断言原文，不在摘要里找感觉。
 
 > `envSkips` 的来源是探针级 `[探针]` 标记：`run-tests.js` 只认行首（`skipsIn`），`tests/ci-e2e.mjs` 按包含匹配。
 > 诊断输出一律用 `[诊断]`，别用 `[探针]`，否则会被算成"跳过"。

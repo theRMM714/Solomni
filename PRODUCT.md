@@ -24,7 +24,7 @@
 
 ## 三、供应商、模型与密钥
 
-- 供应商与模型是**产品级资源**，分开保存、由用户经界面管理（`.home/`，git 忽略）。字段与设置项全表见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)。
+- 供应商与模型是**产品级资源**，分开保存、由用户经界面管理（`data/.home/`，git 忽略）。字段与设置项全表见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)。
 
 - **密钥只在两处存在**：`providers.yaml` 与核心发起的出站调用；永不进入提示词、转录、日志、模块工作区，也不回显给界面。
 - **模型选择发生在建工作之前**：逐个 agent 指定，或让核心按模块简述与需求**推荐**（附理由，用户可改）；选择随会话落盘，只记模型 id。
@@ -54,7 +54,7 @@
 - **只有 agent 发言。** 模块是能力摘要、工具用法与工具的载体，agent 是发言人：模块被装进哪个 agent，就以那个 agent 的名义说话（转录里的说话人、沙箱目录名、同意 / 撤回 / 回报的归属都是 agent 实例名；没有「模块发言」这回事）。
 
 - 一个 agent = 名字 + 它具备的模块（可以为空：只用内置文件工具与 shell）+ 模型 + 人设（可选）+ 自己的沙箱；单 agent = 恰 1 个 agent（0 到多个模块合成一个 agent），协作 = N 个 agent。
-- agent 存在 `.home/agents.yaml`，在设置里管理；建工作时可**临时用**（transient，不写登记处），也可顺手存成常驻。
+- agent 存在 `data/.home/agents.yaml`，在设置里管理；建工作时可**临时用**（transient，不写登记处），也可顺手存成常驻。
 - 建会话时把 agent 的组合（名字 / 模块 / 模型 / 人设）取一份 **copy** 落进会话；之后改登记处不影响已开会话，会话配置里改的也只是这份 copy。
 - `note` 是给人看的一句话说明；`chara` 是给模型看的人设 / 身份，进这个 agent 的身份提示词（空 = 不产生人设块）。
 - 同一个模块可以在一次工作里被多个 agent 共用（各自独立沙箱、各自调用）；agent 重名时核心自动加 `-2` / `-3` 尾号，并先让用户裁决是否改名。
@@ -62,7 +62,7 @@
 
 ## 六、工作的落盘与沙箱
 
-- 每个工作一个目录 `session/<工作名>/`：`work/` 是本工作的共享区主副本（用户投喂与成品；根会话可绑定产品目录之外的目录作为共享区根），版本库固定在会话目录的 `.work/`，每个 agent 有自己的私有沙箱（也就是它的工作副本），子会话落在它的 `children/` 下（可再嵌套）——完整布局与命名规则见 [docs/session/session-model.md](docs/session/session-model.md)。
+- 每个工作一个目录 `data/session/<工作名>/`：`work/` 是本工作的共享区主副本（用户投喂与成品；根会话可绑定产品目录之外的目录作为共享区根），版本库固定在会话目录的 `.work/`，每个 agent 有自己的私有沙箱（也就是它的工作副本），子会话落在它的 `children/` 下（可再嵌套）——完整布局与命名规则见 [docs/session/session-model.md](docs/session/session-model.md)。
 - agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml`）。
 
 - **构建 / 测试 / 跑脚本用 shell**（执行类系统工具）：cwd 固定私有沙箱，授予也是固定的——私有沙箱读写、模块目录与基础 / 项目工具链、主机只读根只读，网络按会话档位（离线不放行）；调用参数里没有范围旋钮。共享区主副本不进容器（读 / 改先 `work_pull`，发布走 `work_commit` + `work_push`），模块 userdata 不可写，不注入模块 secrets。
@@ -85,7 +85,7 @@
 > 已真机验收：Linux、Windows；未验：macOS（缺口见 `tests/macos/gaps.yaml`）。
 <!-- END:platform-status -->
 - guest 默认 Debian stable（13 / trixie）；QEMU 等依赖**不预置、不分发**，由 provision 能力在 Linux / Windows 上按清单下载并解包进项目内（需用户同意），产品检测、指路并给出"怎么补"（入口 `--provision`，清单与字段见 [dependencies.yaml](dependencies.yaml)，机制见 [docs/provision/README.md](docs/provision/README.md)）。
-- **运行能力**：模块用 `runtimes` 声明需要的能力。本机档按**宿主目标**装载 `runtimes/` 里的 `prefix` 包（包 `bin/` 前置到本次执行的 PATH），基础工具链（Python / Node / C-C++，装进 `.tools/toolchains`）是运行前提，启动时拼进产品 PATH，shell 的只读根也对它们放行；模块 `runtimes/` 包按该 agent 的模块进本次 PATH / 只读根；宿主 PATH 是回退（Windows 上还要围栏能授权）；`system` 类包只服务虚拟机档。
+- **运行能力**：模块用 `runtimes` 声明需要的能力。本机档按**宿主目标**装载 `data/runtimes/` 里的 `prefix` 包（包 `bin/` 前置到本次执行的 PATH），基础工具链（Python / Node / C-C++，装进 `.tools/toolchains`）是运行前提，启动时拼进产品 PATH，shell 的只读根也对它们放行；模块 `data/runtimes/` 包按该 agent 的模块进本次 PATH / 只读根；宿主 PATH 是回退（Windows 上还要围栏能授权）；`system` 类包只服务虚拟机档。
 - 虚拟机档按 guest 平台装载包，能力也可由 guest 画像（`guest.yaml` 的 `runtimes`）满足。
 - 缺能力 = 本机档那次执行如实拒绝并说明缺什么，虚拟机档在「开始」前**拒绝创建**（没有工具用户完不成工作）；两者都**不是**会话崩溃（契约见 [docs/vm/README.md](docs/vm/README.md) 的「判据与预检」）。
 - **三层隔离，各说各的实际强度**：
@@ -100,7 +100,7 @@
 - **未授权不等于无围栏**：Windows 的容器围栏（路径级可达范围与断网）要授权才装得上；Linux / macOS 的围栏在守门进程里自足，不受授权影响。进程树与环境白名单两种时段都生效；启动报告把"本机能力"与"本次实际"分两行说清。
 - **围栏要用就征得同意**：Windows 的路径级围栏要写本机权限项，程序**默认不写**——只有显式授权（`settings.yaml` 的 `sandbox.policy.windows.write_acl: true` 或 `SOLOMNI_FENCE_WRITE=1`）才做；授权后每次写入逐条列出并记进台账。
 - 授权台账、启动对账与按条处置的语义见 [docs/kernel/README.md](docs/kernel/README.md)；分层边界见 [ARCHITECTURE.md](ARCHITECTURE.md)。
-- **首次启动先问一次**：没有 `.home/settings.yaml` 时，Windows 上先问是否授权写 ACL；选是就写盘并整体重启，选否不写任何设置，直接进入启动门（本次无围栏 / 重设 / 退出）。本机能力缺失与“未授权”分开报。
+- **首次启动先问一次**：没有 `data/.home/settings.yaml` 时，Windows 上先问是否授权写 ACL；选是就写盘并整体重启，选否不写任何设置，直接进入启动门（本次无围栏 / 重设 / 退出）。本机能力缺失与“未授权”分开报。
 - 重设只修能修的那一项：未授权写授权，能力缺失则明确询问是否把强制等级降为 `best_effort`。
 - **配置一致性**：Windows 上 `require` 文件系统/网络围栏 + `windows.write_acl: false` 是**非法组合**：保存时拒绝，已存在的 `settings.yaml` 启动报 `配置非法`。首启没有文件不拦（交给引导）。
 - **Web 围栏横幅**：只有「本进程已降级」或「启动要求未满足」时显示；正常与用户主动选的 `best_effort` 不显示（后者在设置里看得见）。保存策略后整体重启并重新计算，横幅随新状态显示或消失；无 TTY 且要求未满足时启动门退出，恢复走 `start.bat` / 终端或 `SOLOMNI_FENCE_WRITE=1`。红色「要求未满足」只作为 bug 指示器——应用自己写不出矛盾配置。
@@ -218,7 +218,7 @@ $ start.bat                 # Windows（或 node start.js）；macOS/Linux 用 .
 - **停止会话 / 已停止**：从侧栏菜单二次确认后整棵子树不再接受派发与唤醒，输入区收起、只留「启用会话」；这不是终态，也不是删除。
 - 它是会话的上下文动作，不是历史回放的入口（入口是启用）。
 - **撤回同意**：协作里某个 agent 的 `agree` 可单独撤回，核心按剩余转录重新判定收敛。
-- **基本设置**（写回 `.home/settings.yaml`，字段全表见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)）：流式传输、思维链显示（渲染在回答上方，**永远默认折叠、点击才展开**）、思考等级标签（默认 off/low/high/max，可追加任意标签）、单次模型调用的超时、一轮内最多提醒几次、上下文用到百分之多少就压缩、可回收缓存的空间预算与保留策略。
+- **基本设置**（写回 `data/.home/settings.yaml`，字段全表见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)）：流式传输、思维链显示（渲染在回答上方，**永远默认折叠、点击才展开**）、思考等级标签（默认 off/low/high/max，可追加任意标签）、单次模型调用的超时、一轮内最多提醒几次、上下文用到百分之多少就压缩、可回收缓存的空间预算与保留策略。
 - **存储空间**（设置 → 存储空间）：看构建缓存 / 下载缓存 / 过期可写层 / 日志 / 虚拟根 / 会话 / 模块产物的体积；到上限自动回收一次，不拒绝构建；全局周期回收间隔可设（默认且至少 15 分钟，可关闭周期回收；构建前 headroom 始终启用）；可整卷 / 按模块清理、压缩构建卷；虚拟根可“还原到初始状态”（不备份，红字警告 + 二次确认）。
 - 回档 / 继续 / 改需求只改会话，不改世界；生成过程中的即时播报不写进历史，历史只记定稿后的内容。
 

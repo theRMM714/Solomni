@@ -33,12 +33,12 @@
 - 根解析后立即应用**基础工具链**：读 `.tools/toolchains/active.json`（由 provision 的 `kind: toolchain` 写入），把项目内 `bin` 前置到 PATH；目标不符 / 路径不安全 / bin 不在场只报告，不阻断启动。**每次启动**都打印基础 profile 的项目内 / 宿主回退（Windows 探围栏能否授权）/ 缺失与补全指令；之后 `--doctor`、`--build`、会话工具与常驻服务都看这份生效 PATH。
 - 产品维护命令不由入口分派：工具链就位后，`flags.command` 交给启动相（`src/presentation/cli/boot.rs`，经 `system` 单元执行）。围栏台账系列（`--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke <SID> <路径>` / `--fence-profile-rm` / `--fence-clean`）仍留在入口：只需要产品根，不装配核心；撤授权按 SID + 路径两个参数，其它 arity 打用法退 2。
 - 装配期失败一律打印 `[装配失败]` 并以 1 退出（`src/main.rs`）：登记处四份 yaml 读不了、提示词册缺文件 / 缺键、工具总表与机制面不自洽、模块清单装配失败、隐秘字段加载失败、核心执行线程起不来；日志文件起不来只降级到 stderr（进程继续）。
-- **启动对账**在会话开工前跑两份：围栏授权台账（`confine::reconcile`）与长驻子进程账（`ProcessBook::reconcile`，`.home/processes.json`）。
+- **启动对账**在会话开工前跑两份：围栏授权台账（`confine::reconcile`）与长驻子进程账（`ProcessBook::reconcile`，`data/state/processes.json`）。
   - 围栏台账只回收归属明确已死的授权。
   - 进程账清掉已不在的登记，并按**能证明的身份**收掉上次留下的孤儿：Unix 看命令行标记，Windows 看进程创建时间；认不出身份的只报不动手（不误杀别人的进程）。机制见 [kernel 的「长驻子进程的账与回收」](../kernel/README.md)。
 - **围栏写权限**：`SOLOMNI_FENCE_WRITE=1/0` 优先，否则读设置里的 `sandbox.policy.windows.write_acl`；这一份值在**预检前**只读一次，预检、启动报告与工具进程共用（Linux / macOS 的围栏在守门进程里自足）。启动报告把「本机能力」与「本次实际」分开打印：Unix 的「本次实际」等于本机能力；Windows 未授权时 fs/net 为假（容器围栏不装），进程树仍生效。
 - **启动门**：解析 argv 只决定形态；要不要过工具链 / 构建 / 设置 / 围栏预检只看命令声明的 `runtime`（`systools/commands.yaml`）——`runtime: services`（默认 CLI、`--web`、会话、模块工具调用）要过，`runtime: none` 的一次性命令（`modules`、手册、`work` …）不看围栏授权，在常驻服务与视图盘之前跑完（判定在 `src/presentation/cli/shell.rs` 的 `needs_runtime`，门与分派共用这一份）。围栏要求没满足时只能本次降级 / 重设 / 退出（`src/main.rs`）；没有可回答的前端（非 TTY）时 stderr 逐项列出缺项（`[沙箱] <名字>：<原因>`）与三条能整行复制的出路（`SOLOMNI_FENCE_WRITE=1 <原命令>` / 设置里写 `write_acl: true` / 把 `enforce` 降为 `best_effort`），本机能力缺失的项只给最后一条，然后以 1 退出；`on_unavailable=refuse` 且不重设 = 退出，不会起 CLI 或 Web。`--web` 不是绕过，门通过后才会 `serve_web`。
-- **首次启动**（没有 `.home/settings.yaml`）：Windows 上先问一次是否授权写 ACL；选是写盘并以退出码 75 整体重启，选否不写盘、进入启动门。授权成功后立刻跑一次机器级预授（同一套 ensure、逐条显示进度）；之后的启动只做 O(深度) 只读对账，缺项打一条 `[便携]` 提示并指向 `--setup=fence`，不静默慢写、不阻断启动。重设只修能修的那一项：未授权写授权；本机能力缺失则明确问是否把 `enforce` 降为 `best_effort`。手动预授 `--setup=fence` 预授成功后会顺手把 `sandbox.policy.windows.write_acl: true` 记进设置（下次启动不再被授权轴拦住）。
+- **首次启动**（没有 `data/.home/settings.yaml`）：Windows 上先问一次是否授权写 ACL；选是写盘并以退出码 75 整体重启，选否不写盘、进入启动门。授权成功后立刻跑一次机器级预授（同一套 ensure、逐条显示进度）；之后的启动只做 O(深度) 只读对账，缺项打一条 `[便携]` 提示并指向 `--setup=fence`，不静默慢写、不阻断启动。重设只修能修的那一项：未授权写授权；本机能力缺失则明确问是否把 `enforce` 降为 `best_effort`。手动预授 `--setup=fence` 预授成功后会顺手把 `sandbox.policy.windows.write_acl: true` 记进设置（下次启动不再被授权轴拦住）。
 - **配置一致性**：Windows 上 `require` 文件系统 / 网络围栏 + `write_acl: false` 保存时拒绝、已存在的 `settings.yaml` 加载时报 `配置非法`；首启没有文件不拦（交给引导）。
 - **全局沙箱策略**：`sandbox.policy` 是进程级启动事实；保存后整体重启。默认 `require`，机制不可用时启动门按 `on_unavailable` 询问本进程降级（不落盘）、重设或退出；`SOLOMNI_SANDBOX_DEGRADED=1/0` 只供测试 / CI 注入。
 - **常驻服务**按有效启停拉起（`ResidentOps::start_enabled`，进程级租约，不属于任何会话）。

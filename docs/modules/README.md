@@ -13,9 +13,9 @@
 
 - 入站面：`api::ModulesOps`（只读面：`roster` / `module_enabled` / `service_enabled`）+ `api::Modules`（用例面：再加 `set_module_enabled` / `set_service_enabled`）。
 - 出站端口：`ModuleSource` 与 `ModuleStateStore` **只由 `service.rs` 持有**（R12）。
-- 启停语义：有效值 = 用户覆盖（`.home/` 的 `modules.yaml`）?? 作者默认（`module.yaml` 顶层 `enabled` 与 `services.<名>.enabled`）；**模块停用 ⇒ 它的服务一律有效地停用**（`src/units/catalog/modules/domain/state.rs`）。
+- 启停语义：有效值 = 用户覆盖（`data/.home/` 的 `modules.yaml`）?? 作者默认（`module.yaml` 顶层 `enabled` 与 `services.<名>.enabled`）；**模块停用 ⇒ 它的服务一律有效地停用**（`src/units/catalog/modules/domain/state.rs`）。
 - 契约类型：`Module` / `ModuleManifest` / `Roster` / `ToolDecl` / `ServiceDecl` / `SecretDecl` / `Param` / `ParamType` 由本单元拥有，其它单元只经 `api` 引用。
-- 状态归属：模块清单与启停状态由本单元持有；落盘的用户覆盖在 `.home/` 的 `modules.yaml`，作者默认在 `module.yaml`。
+- 状态归属：模块清单与启停状态由本单元持有；落盘的用户覆盖在 `data/.home/` 的 `modules.yaml`，作者默认在 `module.yaml`。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 - 所属单元：`catalog`（环 2）；本页的子业务同单元的 `packages` / `registry` / `secrets` 子业务直接调用，不经 `api`。
