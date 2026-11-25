@@ -32,3 +32,10 @@ pub trait Modules: Send + Sync {
     /// 目的：写入服务启用覆盖（落盘）；模块或服务不存在 = 报错。
     fn set_service_enabled(&self, module: &str, service: &str, on: bool) -> Result<(), String>;
 }
+/// 目的：模块源码根（安装根下的 `modules/`）——模块的源码与它自己的构建产物都在各自目录里。
+/// 参数：`install` = 产品安装根。
+/// 返回：模块源码根；某个模块的构建产物在 `<根>/<id>/build`。
+/// 约束：模块私有数据不在这里（在数据根的 `data/modules/<id>/userdata`，归 `content`）。
+pub fn source_dir(install: &std::path::Path) -> std::path::PathBuf {
+    crate::kernel::domain::layout::modules_src(install)
+}

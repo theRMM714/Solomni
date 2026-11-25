@@ -4,7 +4,8 @@
  *   要么在本文件登记并写清归谁——根目录再变乱时立刻红，而不是等 code review 发现。
  * 判据二：旧的介质名（`.home` / `.vm` / `logs` / `session` / `runtimes`）不许回到根目录：产品只写 `data/`。
  * 判据三：模块源码树（`modules/<id>`）里不许长 `userdata/`——私有区在 `data/modules/<id>/userdata`
- *   （`content` 单元确保存在）；构建产物 `build/` 暂时豁免，见 `tests/gaps.yaml` 的 `content-build-landing`。
+ *   （`content` 单元确保存在）；构建产物 `build/` 在模块目录里是正常的（`builds` 的 cwd 就在模块根），
+ *   由 `.gitignore` 忽略，不进版本库、也不进数据根。
  * 零豁免：命中即失败，没有基线文件可销账。
  */
 "use strict";

@@ -54,12 +54,6 @@ impl ModuleArea {
     pub fn userdata(&self) -> PathBuf {
         self.root.join("userdata")
     }
-
-    /// 目的：模块的构建产物区（模块自己的构建脚本往里写，不进源码树）。
-    /// 返回：`data/modules/<id>/build`。
-    pub fn build(&self) -> PathBuf {
-        self.root.join("build")
-    }
 }
 
 /// 目的：把模块 id 变成单层安全的路径段（防穿越、防跳目录）。
@@ -100,14 +94,6 @@ mod tests {
                 .join("modules")
                 .join("harvest")
                 .join("userdata")
-        );
-        assert_eq!(
-            p.area("harvest").build(),
-            Path::new("product")
-                .join("data")
-                .join("modules")
-                .join("harvest")
-                .join("build")
         );
     }
 

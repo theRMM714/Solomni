@@ -97,7 +97,7 @@ pub fn vm(install: &Path) -> PathBuf {
     data(install).join(VM)
 }
 
-/// 目的：模块私有区根目录的绝对路径（`<id>/userdata`、`<id>/build` 落在它下面）。
+/// 目的：模块私有区根目录的绝对路径（`<id>/userdata` 落在它下面；构建产物回写安装根的 `modules/<id>/build`）。
 /// 参数：`install` 安装根。
 /// 返回：`data/modules`。
 pub fn modules_data(install: &Path) -> PathBuf {

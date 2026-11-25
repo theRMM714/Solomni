@@ -304,7 +304,7 @@ pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, Str
     let modules: Arc<dyn crate::units::catalog::modules::api::Modules + Send + Sync> = Arc::new(
         crate::units::catalog::modules::service::ModulesService::new(
             Arc::new(crate::units::catalog::modules::detail::FsModules::new(
-                layout::modules_src(root),
+                crate::units::catalog::modules::api::source_dir(root),
                 crate::units::tools::api::names(),
                 // 启动相没有工具单元可问：命令词直接取编译进来的命令表投影；
                 // 名字表的 modules 块由核心装配在装载工具单元后再并入（启动相不派发模块动作）。

@@ -498,7 +498,7 @@ fn main() {
     let mut module_reserved = units::tools::api::Tools::reserved_modules(&*systools);
     module_reserved.extend(command_ops().ids());
     let source = units::catalog::modules::detail::FsModules::new(
-        layout::modules_src(&root),
+        units::catalog::modules::api::source_dir(&root),
         units::tools::api::names(),
         module_reserved,
         entry::assembly::content(&root),
