@@ -13,7 +13,7 @@ pub(crate) fn work_status_reports_the_work_line_five_states() {
     use crate::units::workspace::api::{StatusReport, WorkState};
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
+    ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
     let find =
         |st: &StatusReport, path: &str| st.entries.iter().find(|e| e.path == path).map(|e| e.state);
@@ -77,7 +77,7 @@ pub(crate) fn work_status_reports_the_work_line_five_states() {
 #[test]
 pub(crate) fn work_versions_reports_text_and_binary_without_guessing() {
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     let binary: &[u8] = &[0, 159, 146, 150, 0, 255];
     ws.work_commit_user("w", "image.bin", binary, 2, 0).unwrap();
@@ -111,7 +111,7 @@ pub(crate) fn work_versions_reports_media_type_and_marks_oversize_metadata_only(
     let dirs = Arc::new(InMemoryWorkspace::new());
     let store = Arc::new(InMemoryWorkStore::new());
     let ws = test_workspace_store_with_max(dirs.clone(), store.clone(), 1024);
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let png = [0x89u8, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
     ws.work_commit_user("w", "cover.png", &png, 1, 0).unwrap();
     ws.work_pull("w", "a", &["cover.png".to_string()]).unwrap();
@@ -150,7 +150,7 @@ pub(crate) fn work_versions_reports_media_type_and_marks_oversize_metadata_only(
 pub(crate) fn work_media_conflict_requires_explicit_side() {
     use crate::units::workspace::api::{ResolveAction, ResolveTake};
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
+    ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
     let base: &[u8] = &[0, 0, 0, 24, b'f', b't', b'y', b'p'];
     ws.work_commit_user("w", "clip.mp4", base, 1, 0).unwrap();
@@ -189,7 +189,7 @@ pub(crate) fn work_media_conflict_requires_explicit_side() {
 pub(crate) fn work_asset_paths_do_not_use_whole_file_reads() {
     use crate::units::workspace::api::ResolveTake;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     // 之后任何整文件读取都会失败：生产资产路径必须走 stat / scan / ingest / copy。
     store.fail_times("read_under", 100);
@@ -216,7 +216,7 @@ pub(crate) fn work_asset_paths_do_not_use_whole_file_reads() {
 pub(crate) fn work_commits_store_roots_and_deltas_but_read_full_tree() {
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "a.md", b"1", 1, 0).unwrap();
     ws.work_commit_user("w", "b.md", b"2", 2, 0).unwrap();
     ws.work_commit_user("w", "c.md", b"3", 3, 0).unwrap();
@@ -269,7 +269,7 @@ pub(crate) fn work_handlers_are_taken_only_when_the_seat_face_allows_them() {
 pub(crate) fn work_status_counts_content_not_pending_commits() {
     use crate::units::workspace::api::{render_push, render_status};
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
 
     let st = ws.work_status("w", "a", &[]).unwrap();
@@ -333,7 +333,7 @@ pub(crate) fn work_status_counts_content_not_pending_commits() {
 pub(crate) fn work_status_lists_the_work_line_with_parents() {
     use crate::units::workspace::api::{ResetRequest, render_status};
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
 
     let st = ws.work_status("w", "a", &[]).unwrap();

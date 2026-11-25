@@ -412,7 +412,7 @@ impl Turn {
         // 沙箱锚在**顶层工作**上：该 agent 的目录在共享区那一层已经建好。
         let work = work_root(self.history.as_ref(), parent)?;
         self.workspace
-            .prepare(&work, std::slice::from_ref(&a.name))?;
+            .ensure_layout(&work, std::slice::from_ref(&a.name))?;
         self.history.create(&meta)?;
         self.ensure_session(&child, registry, probe)?;
         Ok(child)
@@ -676,7 +676,7 @@ impl Turn {
     ) -> Result<Vec<SessionEvent>, String> {
         if let Some(roster) = confirmed {
             let names: Vec<String> = roster.iter().map(|a| a.name.clone()).collect();
-            self.workspace.prepare(sid, &names)?;
+            self.workspace.ensure_layout(sid, &names)?;
             let (mut meta, _) = self.history.load(sid)?;
             meta.agents = roster.clone();
             meta.modules = flat_modules(&roster);

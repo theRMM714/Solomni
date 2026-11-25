@@ -10,7 +10,7 @@ use crate::tests::workspace::support::*;
 pub(crate) fn work_commit_reports_conflicts_and_restore_returns_a_commit_point() {
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
+    ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
 
@@ -69,7 +69,7 @@ pub(crate) fn work_commit_reports_conflicts_and_restore_returns_a_commit_point()
 #[test]
 pub(crate) fn work_log_and_commit_preview_keep_off_line_commits_visible() {
     let (ws, _dirs, _store) = work_ws();
-    ws.prepare("w", &[]).unwrap();
+    ws.ensure_layout("w", &[]).unwrap();
     let id1 = ws.work_commit_user("w", "a.txt", b"one", 10, 0).unwrap();
     let id2 = ws
         .work_commit_user("w", "b.bin", &[0, 1, 2], 11, 0)
@@ -144,7 +144,7 @@ pub(crate) fn work_log_and_commit_preview_keep_off_line_commits_visible() {
 pub(crate) fn work_rewind_to_materializes_by_line_anchor_and_discards_later_commits() {
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
     let shared = shared_of(&ws, "w");
     let root = ws.roots("w", &[]).unwrap().store;
@@ -195,7 +195,7 @@ pub(crate) fn work_rewind_to_materializes_by_line_anchor_and_discards_later_comm
 #[test]
 pub(crate) fn work_restore_is_visible_to_a_new_agent_on_pull() {
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
+    ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
     let id1 = ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     let id2 = ws.work_commit_user("w", "note.md", b"v2", 2, 0).unwrap();
@@ -222,7 +222,7 @@ pub(crate) fn work_restore_is_visible_to_a_new_agent_on_pull() {
 #[test]
 pub(crate) fn work_rewind_to_ignores_commits_off_the_current_head() {
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
     let shared = shared_of(&ws, "w");
 
@@ -272,7 +272,7 @@ pub(crate) fn work_rewind_to_ignores_commits_off_the_current_head() {
 #[test]
 pub(crate) fn work_user_commit_is_authoritative_and_pull_tracks_the_baseline() {
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     // 权威覆盖：同名再投喂直接成为新的 head，不报冲突。
     let id = ws.work_commit_user("w", "note.md", b"v2", 2, 0).unwrap();
@@ -304,7 +304,7 @@ pub(crate) fn work_user_commit_is_authoritative_and_pull_tracks_the_baseline() {
 #[test]
 pub(crate) fn work_pull_never_clobbers_and_empty_commits_are_refused() {
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
+    ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     let sb_a = sandbox_of(&ws, "w", "a");
@@ -352,7 +352,7 @@ pub(crate) fn work_pull_never_clobbers_and_empty_commits_are_refused() {
 #[test]
 pub(crate) fn work_pull_persists_partial_baseline_on_later_failure() {
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "a.txt", b"a1", 1, 0).unwrap();
     ws.work_commit_user("w", "b.txt", b"b1", 2, 0).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
@@ -389,7 +389,7 @@ pub(crate) fn work_pull_persists_partial_baseline_on_later_failure() {
 #[test]
 pub(crate) fn work_delete_is_explicit_in_the_commit_request() {
     let (ws, _dirs, _store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
 

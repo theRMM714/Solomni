@@ -12,7 +12,7 @@ use crate::units::session_model::api::SINGLE;
 pub(crate) fn work_resolve_local_marks_merged_result_and_commit_succeeds() {
     use crate::units::workspace::api::ResolveAction;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
+    ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     let sb_a = sandbox_of(&ws, "w", "a");
@@ -52,7 +52,7 @@ pub(crate) fn work_resolve_local_marks_merged_result_and_commit_succeeds() {
 pub(crate) fn work_resolve_handles_upstream_deletion_by_side() {
     use crate::units::workspace::api::{ResolveAction, ResolveTake};
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
+    ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
     ws.work_commit_user("w", "gone.txt", b"v1", 1, 0).unwrap();
     ws.work_commit_user("w", "keep.bin", b"bin1", 2, 0).unwrap();
@@ -112,7 +112,7 @@ pub(crate) fn work_resolve_handles_upstream_deletion_by_side() {
 pub(crate) fn work_resolve_local_rejects_unmerged_and_stale_head() {
     use crate::units::workspace::api::{ResolveAction, ResolveRequest, ResolveTake};
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
+    ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     let sb_a = sandbox_of(&ws, "w", "a");
@@ -160,7 +160,7 @@ pub(crate) fn work_resolve_local_rejects_unmerged_and_stale_head() {
 pub(crate) fn work_resolve_local_warns_when_local_missing_or_no_base() {
     use crate::units::workspace::api::ResolveWarningKind;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     ws.work_commit_user("w", "other.md", b"o1", 2, 0).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
@@ -193,7 +193,7 @@ pub(crate) fn work_resolve_upstream_backs_up_and_work_lost_restores() {
     use crate::units::workspace::api::{ResolveAction, ResolveTake};
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
+    ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     let sb_a = sandbox_of(&ws, "w", "a");
@@ -268,7 +268,7 @@ pub(crate) fn work_resolve_upstream_backs_up_and_work_lost_restores() {
 pub(crate) fn work_resolve_upstream_backs_up_before_removing_local() {
     use crate::units::workspace::api::{ResolveAction, ResolveTake};
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
+    ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
     ws.work_commit_user("w", "gone.txt", b"v1", 1, 0).unwrap();
     let sb_a = sandbox_of(&ws, "w", "a");
@@ -305,7 +305,7 @@ pub(crate) fn work_resolve_upstream_backs_up_before_removing_local() {
 #[test]
 pub(crate) fn work_resolve_refuses_empty_and_reports_missing() {
     let (ws, _dirs, _store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     assert!(
         ws.work_resolve("w", "a", &resolve_local_req(&ws, "w", &[]))
@@ -326,7 +326,7 @@ pub(crate) fn work_resolve_refuses_empty_and_reports_missing() {
 #[test]
 pub(crate) fn abandoned_user_commit_pending_is_recovered() {
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     store.fail_times("write_commit", 2);
     assert!(ws.work_commit_user("w", "note.md", b"v1", 1, 0).is_err());
     let st = ws.work_status("w", "a", &[]).unwrap();
@@ -338,7 +338,7 @@ pub(crate) fn abandoned_user_commit_pending_is_recovered() {
 #[test]
 pub(crate) fn commit_ids_stay_monotonic_after_discard_and_restore() {
     let (ws, _dirs, _store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let id1 = ws.work_commit_user("w", "a.txt", b"1", 1, 0).unwrap();
     let id2 = ws.work_commit_user("w", "b.txt", b"2", 2, 0).unwrap();
     let id3 = ws.work_commit_user("w", "c.txt", b"3", 3, 0).unwrap();
@@ -358,7 +358,7 @@ pub(crate) fn commit_ids_stay_monotonic_after_discard_and_restore() {
 pub(crate) fn abandoned_commit_pending_is_recovered_by_next_status() {
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
     ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
@@ -391,7 +391,7 @@ pub(crate) fn abandoned_commit_pending_is_recovered_by_next_status() {
 pub(crate) fn commit_pending_recovers_immediately_when_the_failure_clears() {
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
     ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
@@ -419,7 +419,7 @@ pub(crate) fn commit_pending_recovers_immediately_when_the_failure_clears() {
 #[test]
 pub(crate) fn abandoned_restore_pending_is_recovered_by_next_head_read() {
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let id1 = ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     ws.work_commit_user("w", "note.md", b"v2", 2, 0).unwrap();
 
@@ -441,7 +441,7 @@ pub(crate) fn abandoned_restore_pending_is_recovered_by_next_head_read() {
 pub(crate) fn abandoned_discard_pending_keeps_head_valid_and_is_recovered() {
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let id1 = ws.work_commit_user("w", "a.txt", b"1", 1, 0).unwrap();
     let id2 = ws.work_commit_user("w", "b.txt", b"2", 2, 0).unwrap();
     let id3 = ws.work_commit_user("w", "c.txt", b"3", 3, 0).unwrap();
@@ -462,7 +462,7 @@ pub(crate) fn abandoned_discard_pending_keeps_head_valid_and_is_recovered() {
 pub(crate) fn work_gc_keeps_index_and_commit_objects_and_removes_the_rest() {
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let root = ws.roots("w", &[]).unwrap().store;
     let id1 = ws.work_commit_user("w", "keep.txt", b"k1", 1, 0).unwrap();
     let id2 = ws.work_commit_user("w", "gone.txt", b"g1", 2, 0).unwrap();
@@ -597,7 +597,7 @@ pub(crate) fn agent_sandboxes_from_a_work_are_read_only_for_the_shared_area() {
 pub(crate) fn work_gc_reclaims_commits_only_after_refs_drop() {
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "a.md", b"1", 1, 0).unwrap();
     ws.work_commit_user("w", "b.md", b"2", 2, 0).unwrap();
     let sd = ws.roots("w", &[]).unwrap().store;

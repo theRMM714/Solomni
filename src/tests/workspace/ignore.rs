@@ -11,7 +11,7 @@ use crate::units::workspace::ports::WorkStore;
 #[test]
 pub(crate) fn work_ignore_lists_seed_then_add_dedupes_and_remove_drops() {
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let path = ws.roots("w", &[]).unwrap().store.join(WORKIGNORE);
 
     let listed = ws.work_ignore("w", "list", &[]).unwrap();
@@ -51,7 +51,7 @@ pub(crate) fn work_ignore_lists_seed_then_add_dedupes_and_remove_drops() {
 #[test]
 pub(crate) fn work_ignore_rejects_bad_rules_and_bad_ops_without_writing() {
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let path = ws.roots("w", &[]).unwrap().store.join(WORKIGNORE);
 
     let err = ws
@@ -82,7 +82,7 @@ pub(crate) fn work_ignore_rejects_bad_rules_and_bad_ops_without_writing() {
 #[test]
 pub(crate) fn sandbox_listing_follows_workignore_but_named_files_still_count() {
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let sandbox = sandbox_of(&ws, "w", "a");
     store.seed(&sandbox, "src/main.rs", "fn main() {}\n");
     store.seed(

@@ -10,7 +10,7 @@ use super::support::*;
 pub(crate) fn work_archive_moves_every_sandbox_to_one_point_and_keeps_uncommitted_in_lost() {
     let (ws, _dirs, store) = work_ws();
     let agents = ["a".to_string(), "b".to_string(), "c".to_string()];
-    ws.prepare("w", &agents).unwrap();
+    ws.ensure_layout("w", &agents).unwrap();
     let shared = shared_of(&ws, "w");
     let sa = sandbox_of(&ws, "w", "a");
     let sb = sandbox_of(&ws, "w", "b");
@@ -88,7 +88,7 @@ pub(crate) fn work_restore_archive_rewinds_every_sandbox_and_drops_the_fork() {
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     let agents = ["a".to_string(), "b".to_string()];
-    ws.prepare("w", &agents).unwrap();
+    ws.ensure_layout("w", &agents).unwrap();
     let shared = shared_of(&ws, "w");
     let sa = sandbox_of(&ws, "w", "a");
     let sb = sandbox_of(&ws, "w", "b");
@@ -164,7 +164,7 @@ pub(crate) fn work_delete_rolls_every_sandbox_back_and_prunes_archives() {
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     let agents = ["a".to_string(), "b".to_string()];
-    ws.prepare("w", &agents).unwrap();
+    ws.ensure_layout("w", &agents).unwrap();
     let shared = shared_of(&ws, "w");
     let sa = sandbox_of(&ws, "w", "a");
     let sb = sandbox_of(&ws, "w", "b");
@@ -234,7 +234,7 @@ pub(crate) fn work_delete_rolls_every_sandbox_back_and_prunes_archives() {
 pub(crate) fn work_archive_puts_each_sandbox_on_its_own_save_snapshot() {
     let (ws, _dirs, store) = work_ws();
     let agents = ["a".to_string()];
-    ws.prepare("w", &agents).unwrap();
+    ws.ensure_layout("w", &agents).unwrap();
     let shared = shared_of(&ws, "w");
     let sa = sandbox_of(&ws, "w", "a");
 

@@ -10,7 +10,7 @@ use crate::tests::workspace::support::*;
 pub(crate) fn work_gate_info_distinguishes_tracked_base_and_current() {
     use crate::units::workspace::api::content_hash;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "base.md", b"base\n", 1, 0)
         .unwrap();
     let base_hash = content_hash(b"base\n");
@@ -77,7 +77,7 @@ pub(crate) fn session_gate_rejects_unobserved_and_stale_tracked_paths() {
     use crate::units::workspace::api::content_hash;
 
     let (ws, _dirs, _store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "base.md", b"one\ntwo\n", 1, 0)
         .unwrap();
     let version = content_hash(b"one\ntwo\n");
@@ -208,7 +208,7 @@ pub(crate) fn compaction_drops_read_authorization() {
     use crate::units::workspace::api::content_hash;
 
     let (ws, _dirs, _store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "base.md", b"one\ntwo\n", 1, 0)
         .unwrap();
     let fact = ObservationFact {
@@ -246,7 +246,7 @@ pub(crate) fn compaction_drops_read_authorization() {
 pub(crate) fn judge_reads_separates_shifted_from_changed() {
     use crate::units::workspace::api::{ReadQuery, ReadVerdict, content_hash};
     let (ws, _dirs, _store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let v1 = b"a\nb\nc\n";
     ws.work_commit_user("w", "note.md", v1, 1, 0).unwrap();
     let q = |from: u64, to: u64, blob: String| ReadQuery {
@@ -362,7 +362,7 @@ pub(crate) fn judge_reads_follow_the_sandbox_copy() {
     use crate::units::workspace::api::{ReadQuery, ReadVerdict, content_hash};
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
     let v1 = b"one\ntwo\nthree\n";
     store.write_under(&sb, "draft.md", v1).unwrap();

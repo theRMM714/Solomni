@@ -722,7 +722,7 @@ pub(crate) fn read_in_the_same_batch_does_not_authorize_write() {
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(InMemoryWorkStore::new()),
     );
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "base.md", b"base\n", 1, 0)
         .unwrap();
     let write = || ToolCall {
@@ -784,7 +784,7 @@ pub(crate) fn work_commit_refuses_unobserved_tracked_changes() {
     let io = Arc::new(InMemorySysIo::new());
     let store = Arc::new(InMemoryWorkStore::new());
     let ws = test_workspace_store(Arc::new(InMemoryWorkspace::new()), store.clone());
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "base.md", b"base\n", 1, 0)
         .unwrap();
     // 沙箱里改过、但模型没读过：账本为空，commit 必须拒绝。

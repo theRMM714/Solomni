@@ -10,7 +10,7 @@ use crate::tests::workspace::support::*;
 pub(crate) fn work_push_delete_vs_modify_is_rejected_with_a_working_remedy() {
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
+    ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
     let sb_a = sandbox_of(&ws, "w", "a");
     store.write_under(&sb_a, "note.md", b"v1\n").unwrap();
@@ -45,7 +45,7 @@ pub(crate) fn work_accept_upstream_after_a_delete_converges() {
     use crate::units::workspace::api::ResolveTake;
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
+    ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
     let sb_a = sandbox_of(&ws, "w", "a");
     store.write_under(&sb_a, "note.md", b"v1\n").unwrap();
@@ -92,7 +92,7 @@ pub(crate) fn work_reset_before_the_delete_then_pull_converges() {
     use crate::units::workspace::api::ResetRequest;
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
+    ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
     let sb_a = sandbox_of(&ws, "w", "a");
     store.write_under(&sb_a, "note.md", b"v1\n").unwrap();
@@ -150,7 +150,7 @@ pub(crate) fn work_sync_records_external_edits_on_the_main_line() {
     use crate::units::workspace::api::WorkState;
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
+    ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
     let shared = shared_of(&ws, "w");
     let sandbox_a = sandbox_of(&ws, "w", "a");
@@ -214,7 +214,7 @@ pub(crate) fn work_sync_records_external_edits_on_the_main_line() {
 #[test]
 pub(crate) fn work_archive_point_skips_a_sync_after_the_keep_line() {
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
     let shared = shared_of(&ws, "w");
     store.write_under(&sb, "note.md", b"v119").unwrap();
@@ -254,7 +254,7 @@ pub(crate) fn work_archive_point_skips_a_sync_after_the_keep_line() {
 #[test]
 pub(crate) fn work_archive_point_takes_a_sync_before_the_keep_line() {
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
     let shared = shared_of(&ws, "w");
     store.write_under(&sb, "note.md", b"v1").unwrap();
@@ -285,7 +285,7 @@ pub(crate) fn work_archive_point_takes_a_sync_before_the_keep_line() {
 pub(crate) fn work_restore_archive_puts_the_work_line_back_to_its_archived_head() {
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
     let root = ws.roots("w", &[]).unwrap().store;
     store.write_under(&sb, "note.md", b"v1").unwrap();

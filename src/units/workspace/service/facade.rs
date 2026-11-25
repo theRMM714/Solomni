@@ -1,5 +1,5 @@
 //! 目的：`Workspace` 用例面的唯一 trait 实现——基础用例写在这里，其余逐条转发到同级子模块。
-//! 管：入站用例到实现的映射（bind / prepare / discard / work_has / files / usage / roots 直接实现）。
+//! 管：入站用例到实现的映射（bind / ensure_layout / discard_layout / work_has / files / usage / roots 直接实现）。
 //! 不管：具体用例逻辑（commit / sync / history / resolve / lifecycle 各子模块）、端口适配（detail）。
 //! 联动：Rust 不允许 trait impl 分块，故用例实现都在子模块里做成 pub(super) 方法，本文件只做转发。
 
@@ -17,12 +17,12 @@ impl Workspace for WorkspaceService {
         self.dirs.bind(session, root)
     }
 
-    fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String> {
-        self.dirs.prepare(session, agents)
+    fn ensure_layout(&self, session: &str, agents: &[String]) -> Result<(), String> {
+        self.dirs.ensure_layout(session, agents)
     }
 
-    fn discard(&self, session: &str, agents: &[String]) -> Result<(), String> {
-        self.dirs.discard(session, agents)
+    fn discard_layout(&self, session: &str, agents: &[String]) -> Result<(), String> {
+        self.dirs.discard_layout(session, agents)
     }
 
     fn work_has(&self, session: &str, name: &str) -> bool {
