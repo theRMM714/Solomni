@@ -172,7 +172,7 @@ impl ResidentOps for ResidentsService {
         let env = self.secrets.resolve(module)?;
         // 服务围栏：与"人直接跑模块工具"同一条口径（模块根递归只读 + userdata 可写），并挂上会话租约。
         let mut fence =
-            crate::kernel::api::fence::FencePlan::standalone(&m.root, None, m.has_userdata);
+            crate::kernel::api::fence::FencePlan::standalone(&m.root, m.private.as_deref(), None);
         fence.net = crate::kernel::api::fence::NetPolicy::from_flag(self.network);
         fence.lease = lease.to_string();
         fence.agent = format!("resident/{}/{}", module, name);

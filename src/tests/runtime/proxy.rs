@@ -482,7 +482,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
             secrets: Default::default(),
         },
         root: PathBuf::from("modules").join("m1"),
-        has_userdata: false,
+        private: None,
     };
     let (handle, faces) = super::super::ops_with(vec![module], vec![]);
     let proxy = handle
@@ -550,7 +550,7 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
             secrets: Default::default(),
         },
         root: PathBuf::from("modules").join("m1"),
-        has_userdata: false,
+        private: None,
     };
     let (handle, faces) = super::super::ops_with(vec![module], vec![]);
     let proxy = handle

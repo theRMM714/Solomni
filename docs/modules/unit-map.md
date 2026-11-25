@@ -14,5 +14,5 @@
 | `src/units/catalog/modules/ports.rs` | 出站端口：`ModuleSource`（扫描 `modules/`） |
 | `src/units/catalog/modules/domain/module.rs` | `module.yaml` 契约、参数类型、校验与清单（`Roster` / `listing`） |
 | `src/units/catalog/modules/domain/state.rs` | 启停覆盖值与文件形态（`data/.home/modules.yaml` 的 serde 形态） |
-| `src/units/catalog/modules/detail/fs_modules.rs` | 适配器：扫描目录、解析清单、确保 `userdata/` 存在 |
+| `src/units/catalog/modules/detail/fs_modules.rs` | 适配器：扫描目录、解析清单；私有区是否可用问 `content`（`ensure_userdata`），自己不在源码树里建目录 |
 | `src/units/catalog/modules/detail/yaml_module_state.rs` | 适配器：读写 `data/.home/modules.yaml` |

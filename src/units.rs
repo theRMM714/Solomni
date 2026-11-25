@@ -6,6 +6,7 @@
 pub mod agentloop;
 pub mod catalog;
 pub mod collab;
+pub mod content;
 pub mod conversation;
 pub mod home;
 pub mod sessions;

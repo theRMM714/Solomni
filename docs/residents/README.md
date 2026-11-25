@@ -32,7 +32,7 @@
 - 生命周期动作 `control_resident`（只给 user）：start / stop / enable / disable。
 - 会话删除时按租约回收（`reap`）；失败态也按租约清掉。
 - 起服务时按 `secrets::resolve` 注入 env；回执经 `secrets::redact` 脱敏。
-- 起服务时的围栏与「人直接跑模块工具」同一条口径：模块根递归只读、`userdata/` 可写，并挂上本次实例的会话租约（`lease`）。
+- 起服务时的围栏与「人直接跑模块工具」同一条口径：模块根递归只读、私有区（`data/modules/<id>/userdata`）可写，并挂上本次实例的会话租约（`lease`）。
 - 模块动作 `module.<id>.<service>.<op>` 转给 `ResidentOps::call`。
 - MCP stdio 适配器（`detail::McpAdapter`）：握手 / `tools/list` / `tools/call`；长驻会话走 kernel 的 `SessionHost`。
 - 父死子亡：`SessionHost::open` 走 `procs::guard` → `spawn` → `attach`（Linux `PR_SET_PDEATHSIG` / macOS `--proc-watchdog` / Windows 作业对象）；核心被强杀不留服务进程。守门进程登记进进程账（`purpose = resident`，归属 `resident/<模块>/<服务>`）：会话收掉时注销，挂不上父死子亡时如实记进账，孤儿由启动对账按身份收掉。机制见 [kernel 的「长驻子进程的账与回收」](../kernel/README.md)。

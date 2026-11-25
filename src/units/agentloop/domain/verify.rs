@@ -50,7 +50,7 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
     sb.agent = "核心".to_string();
     sb.private = sb.shared.clone();
     sb.modules.clear();
-    sb.modules_with_userdata.clear();
+    sb.module_data.clear();
     let book = spec.book.clone();
     let residents = crate::units::residents::api::NoResidents;
     let seat = assemble(FaceInput {

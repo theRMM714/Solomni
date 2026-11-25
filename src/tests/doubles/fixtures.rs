@@ -92,7 +92,7 @@ pub(crate) fn test_sandbox(agent: &str, modules: &[&str]) -> crate::units::works
         shared: abs(&["demo", "work"]),
         private: abs(&["demo", agent]),
         modules: map,
-        modules_with_userdata: std::collections::BTreeSet::new(),
+        module_data: std::collections::BTreeMap::new(),
         permissions: Default::default(),
         scope: Default::default(),
         path_codec: None,

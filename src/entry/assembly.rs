@@ -98,6 +98,14 @@ pub(crate) fn sessions(root: &Path) -> Arc<dyn crate::units::sessions::api::Sess
     ))
 }
 
+/// 目的：内容盘（`data/modules` 与 `data/runtimes` 归 `content` 单元）——组合根只在这里装一次。
+pub(crate) fn content(root: &Path) -> Arc<dyn crate::units::content::api::Content + Send + Sync> {
+    Arc::new(crate::units::content::service::ContentService::new(
+        root,
+        Box::new(crate::units::content::detail::FsContentFs),
+    ))
+}
+
 /// 目的：按 settings.yaml 取存储策略；读不到用默认。
 fn storage_policy(root: &Path) -> StoragePolicy {
     read_settings(root)
@@ -184,7 +192,7 @@ pub(crate) fn build_service(root: &Path) -> Result<BuildsService, String> {
     let packages: Arc<dyn crate::units::catalog::packages::api::Packages + Send + Sync> = Arc::new(
         crate::units::catalog::packages::service::PackagesService::with_base(
             Arc::new(crate::units::catalog::packages::detail::FsPackages::new(
-                layout::runtimes(root),
+                content(root).runtimes(),
             )),
             crate::entry::toolchains::base_facts(root),
         ),
@@ -299,6 +307,7 @@ pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, Str
                 crate::units::tools::api::CommandBook::builtin()
                     .map(|b| crate::units::tools::api::OpBook::from_commands(b).ids())
                     .unwrap_or_default(),
+                content(root),
             )),
             Arc::new(
                 crate::units::catalog::modules::detail::YamlModuleState::new(home_docs(root)),

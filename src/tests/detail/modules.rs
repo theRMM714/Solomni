@@ -5,6 +5,14 @@
 
 use super::*;
 
+/// 目的：给扫描用的内容盘适配——私有区落在隔离根下的 `data/modules`，不碰源码树。
+fn content_at(root: &std::path::Path) -> std::sync::Arc<dyn crate::units::content::api::Content + Send + Sync> {
+    std::sync::Arc::new(crate::units::content::service::ContentService::new(
+        root,
+        Box::new(crate::units::content::detail::FsContentFs),
+    ))
+}
+
 #[test]
 fn fs_modules_accepts_valid_folders_and_rejects_each_illegal_form_with_a_reason() {
     let root = scratch("fs-modules");
@@ -42,6 +50,7 @@ fn fs_modules_accepts_valid_folders_and_rejects_each_illegal_form_with_a_reason(
         dir,
         crate::units::tools::api::names(),
         vec!["taken".to_string()],
+        content_at(&root),
     )
     .scan();
     let ids: Vec<&str> = roster
@@ -70,7 +79,13 @@ fn fs_modules_accepts_valid_folders_and_rejects_each_illegal_form_with_a_reason(
     assert!(all.contains("没写 version"), "缺版本要拒收并说明：{}", all);
 
     // 目录整个不存在 = 空清单（放入即出现，移出即消失）。
-    let gone = FsModules::new(root.join("没有这个目录"), Vec::new(), Vec::new()).scan();
+    let gone = FsModules::new(
+        root.join("没有这个目录"),
+        Vec::new(),
+        Vec::new(),
+        content_at(&root),
+    )
+    .scan();
     assert!(gone.modules.is_empty() && gone.rejected.is_empty());
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -98,7 +113,13 @@ fn fs_modules_validates_service_and_secret_declarations() {
         "id: noenv\nversion: 0.1.0\nbrief: b\nsystem: s\nsecrets:\n  token:\n    desc: 缺 env\n",
     );
 
-    let roster = FsModules::new(dir, crate::units::tools::api::names(), Vec::new()).scan();
+    let roster = FsModules::new(
+        dir,
+        crate::units::tools::api::names(),
+        Vec::new(),
+        content_at(&root),
+    )
+    .scan();
     let ids: Vec<&str> = roster
         .modules
         .iter()
@@ -111,9 +132,10 @@ fn fs_modules_validates_service_and_secret_declarations() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// 载入即确保模块有 `userdata/`：没有就建出来，已存在的不动（幂等）；建不了才置 false。
+/// 载入即确保每个模块有私有区（`data/modules/<id>/userdata`）：没有就建出来，已存在的不动（幂等）；
+/// 源码树里不长数据；建不了才置 None。
 #[test]
-fn fs_modules_reads_the_userdata_fact() {
+fn fs_modules_reads_the_private_area_fact() {
     let root = scratch("fs-modules-userdata");
     let dir = root.join("modules");
     let put = |folder: &str| {
@@ -127,30 +149,40 @@ fn fs_modules_reads_the_userdata_fact() {
     };
     put("with");
     put("without");
-    std::fs::create_dir_all(dir.join("with").join("userdata")).expect("建 userdata");
-    std::fs::write(dir.join("with").join("userdata").join("keep.txt"), "x").expect("放已有的状态");
+    let kept = root.join("data").join("modules").join("with").join("userdata");
+    std::fs::create_dir_all(&kept).expect("建已有的私有区");
+    std::fs::write(kept.join("keep.txt"), "x").expect("放已有的状态");
 
-    let roster = FsModules::new(dir.clone(), crate::units::tools::api::names(), Vec::new()).scan();
+    let roster = FsModules::new(
+        dir.clone(),
+        crate::units::tools::api::names(),
+        Vec::new(),
+        content_at(&root),
+    )
+    .scan();
     let fact = |id: &str| {
         roster
             .modules
             .iter()
             .find(|m| m.manifest.id == id)
-            .map(|m| m.has_userdata)
-            .expect("模块在清单里")
+            .and_then(|m| m.private.clone())
+            .expect("模块在清单里且拿到私有区")
     };
-    assert!(
-        fact("with") && fact("without"),
-        "载入后每个模块都拿到私有可写落点"
+    assert_eq!(
+        fact("with"),
+        kept,
+        "已有的私有区就地复用：data/modules/<id>/userdata"
+    );
+    assert_eq!(
+        fact("without"),
+        root.join("data").join("modules").join("without").join("userdata"),
+        "原本没有的会被建出来，且落在 data/ 下"
     );
     assert!(
-        dir.join("without").join("userdata").is_dir(),
-        "原本没有的会被建出来"
+        !dir.join("without").join("userdata").exists(),
+        "源码树里不长数据"
     );
-    assert!(
-        dir.join("with").join("userdata").join("keep.txt").is_file(),
-        "已存在的不动（幂等）"
-    );
+    assert!(kept.join("keep.txt").is_file(), "已存在的不动（幂等）");
     let _ = std::fs::remove_dir_all(&root);
 }
 

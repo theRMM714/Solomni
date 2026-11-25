@@ -4,7 +4,7 @@
 //! 不管：取事实（history / workspace / registry / 清单在 `runtime`）、落盘、启停 guest 与工具进程。
 //! 联动：`runtime/service/env.rs` 取好事实后转调这里；行为与错误文案必须逐字一致。
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -68,7 +68,7 @@ pub struct SandboxesFacts<'a> {
     pub agents: &'a [AgentMeta],
     /// 目的：工作区端口给出的根（共享区、会话根、每个 agent 的私有根）。
     pub roots: &'a WorkRoots,
-    /// 目的：模块清单（模块 id → 目录与是否有 userdata）。
+    /// 目的：模块清单（模块 id → 源码目录与私有区）。
     pub roster: &'a Roster,
     /// 目的：虚拟机档给 guest↔宿主的路径翻译器。
     pub codec: Option<Arc<dyn PathCodec>>,
@@ -114,12 +114,12 @@ pub fn sandboxes(
             .ok_or_else(|| format!("工作区没有给出 agent {} 的沙箱路径", a.name))?;
         let seat = access(&a.name)?;
         let mut modules = BTreeMap::new();
-        let mut modules_with_userdata = BTreeSet::new();
+        let mut module_data = BTreeMap::new();
         for id in &a.modules {
             if let Some(m) = facts.roster.modules.iter().find(|m| &m.manifest.id == id) {
                 modules.insert(id.clone(), m.root.clone());
-                if m.has_userdata {
-                    modules_with_userdata.insert(id.clone());
+                if let Some(private) = &m.private {
+                    module_data.insert(id.clone(), private.clone());
                 }
             }
         }
@@ -130,7 +130,7 @@ pub fn sandboxes(
             shared: facts.roots.shared.clone(),
             private,
             modules,
-            modules_with_userdata,
+            module_data,
             permissions: seat.permissions.clone(),
             scope: seat.scope.clone(),
             path_codec: facts.codec.clone(),

@@ -113,8 +113,8 @@ impl Handle {
         let work = work.map(std::path::PathBuf::from);
         let mut fence = crate::kernel::api::fence::FencePlan::standalone(
             &module.root,
+            module.private.as_deref(),
             work.as_deref(),
-            module.has_userdata,
         );
         fence.net = crate::kernel::api::fence::NetPolicy::from_flag(
             self.settings()?.sandbox.policy.network,

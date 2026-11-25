@@ -137,14 +137,15 @@ fn sandbox_places_are_fixed_except_the_shared_scope() {
     assert!(!sb.can_read(&Place::Shared, &shared.join("docs").join("x")));
 }
 
-/// 目的：围栏按固定规则推——私有区 + 模块 userdata 可写，模块目录只读，共享区永不进围栏。
+/// 目的：围栏按固定规则推——私有区 + 模块私有区可写，模块源码目录只读，共享区永不进围栏。
 #[test]
 fn fence_spec_grants_fixed_surfaces() {
     use crate::kernel::api::fence::{Access, FencePlan, Reach};
     let mut sb = test_sandbox("a1", &[]);
     let module = abs(&["mods", "data"]);
     sb.modules.insert("data".to_string(), module.clone());
-    sb.modules_with_userdata.insert("data".to_string());
+    sb.module_data
+        .insert("data".to_string(), module.join("userdata"));
 
     let session = FencePlan::for_session(&sb, &[], false);
     assert!(
