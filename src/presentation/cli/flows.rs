@@ -5,7 +5,7 @@
 
 use super::shell::Outcome;
 use super::*;
-use crate::capabilities::system::api::System;
+use crate::units::system::api::System;
 use crate::presentation::faces::Faces;
 use serde_json::{Value, json};
 
@@ -122,7 +122,7 @@ pub(super) fn single_flow(
     let picked: Vec<AgentMeta> = if names.trim().is_empty() {
         views
             .iter()
-            .map(crate::capabilities::catalog::registry::api::agent_meta)
+            .map(crate::units::catalog::registry::api::agent_meta)
             .collect()
     } else {
         match pick_agents(faces, &split_names(&names)) {

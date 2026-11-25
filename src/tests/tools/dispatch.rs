@@ -1,11 +1,11 @@
 //! 目的：钉工具面同名冲突、越权拒绝与事件顺序。
 //! 管：同名工具跨模块不再冲突、各自根运行、无模块外部工具拒绝、工具事件先于下轮、提及工具不误判、工具循环跑已声明工具、VM 层模块工具进 guest。
 //! 不管：工具面发放细目（face.rs）与内置工具参数（run_loop.rs）。
-//! 联动：src/capabilities/tools/、session 工具面。
+//! 联动：src/units/tools/、session 工具面。
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::capabilities::conversation::session::api::{MEETING, SINGLE};
+use crate::units::conversation::session::api::{MEETING, SINGLE};
 #[test]
 pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
     let mut a = module_of("a");
@@ -284,7 +284,7 @@ pub(crate) fn tool_call_event_is_emitted_before_the_next_round() {
                 _ => "other",
             });
         };
-        let io = crate::capabilities::conversation::session::api::TurnIo {
+        let io = crate::units::conversation::session::api::TurnIo {
             llm: Default::default(),
             ask: None,
         };

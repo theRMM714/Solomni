@@ -4,7 +4,7 @@
 //! 联动：`cli.rs`、`cli/gate.rs`、`docs/presentation/contracts.md`
 
 use super::*;
-use crate::capabilities::conversation::collab::api::CollabEvent;
+use crate::units::conversation::collab::api::CollabEvent;
 use crate::presentation::faces::Faces;
 
 /// 目的：启动页副行：终端转录中心、版本与根路径。
@@ -122,14 +122,14 @@ pub(super) fn print_roster(faces: &Faces) {
         ));
     }
     // 虚拟机档的诊断：缺包之外（多版本未定版 / 定版不存在 / 路径冲突）会挡住「开始」，在这里如实说明。
-    let hard: Vec<crate::capabilities::work::api::RuntimeDiagnosis> = report
+    let hard: Vec<crate::units::work::api::RuntimeDiagnosis> = report
         .diagnoses
         .iter()
         .filter(|d| {
             !matches!(
                 d,
-                crate::capabilities::work::api::RuntimeDiagnosis::Package(
-                    crate::capabilities::catalog::packages::api::Problem::Missing { .. }
+                crate::units::work::api::RuntimeDiagnosis::Package(
+                    crate::units::catalog::packages::api::Problem::Missing { .. }
                 )
             )
         })
@@ -138,7 +138,7 @@ pub(super) fn print_roster(faces: &Faces) {
     if !hard.is_empty() {
         term::say(&format!(
             "[档位诊断] {}（虚拟机档要先解决这些才能开始会话）",
-            crate::capabilities::work::api::diagnose_text(&hard)
+            crate::units::work::api::diagnose_text(&hard)
         ));
     }
     for r in &report.rejected_packages {
@@ -435,7 +435,7 @@ fn check_mark(status: &str) -> (&'static str, theme::Ink) {
     }
 }
 
-fn render_lines(lines: &[crate::capabilities::conversation::session::api::LineView]) {
+fn render_lines(lines: &[crate::units::conversation::session::api::LineView]) {
     for l in lines {
         if l.kind == "compacted" {
             let up_to = l
@@ -502,7 +502,7 @@ fn render_lines(lines: &[crate::capabilities::conversation::session::api::LineVi
     }
 }
 
-fn print_tool(t: &crate::capabilities::conversation::session::api::ToolCallView) {
+fn print_tool(t: &crate::units::conversation::session::api::ToolCallView) {
     let (glyph, ink) = if t.ok {
         ("✓", theme::Ink::Green)
     } else {

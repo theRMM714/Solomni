@@ -1,6 +1,6 @@
 //! 目的：一次外部进程执行的**中性结果**——只陈述成败、轻重、输出与结构化说明，不解释业务含义。
 //! 管：`RunOutcome { ok, severity, output, notes }` 这一种形状。
-//! 不管：工具回执的业务映射（在 `capabilities/tools`）；进程怎么跑（在 `kernel/detail/process.rs`）。
+//! 不管：工具回执的业务映射（在 `units/tools`）；进程怎么跑（在 `kernel/detail/process.rs`）。
 //! 联动：`ProcessRunner` 端口返回它；工具能力把它包成对外的 `ToolOutcome`。
 
 use crate::kernel::contracts::note::{Note, Severity};

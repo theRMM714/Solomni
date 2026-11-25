@@ -1,12 +1,12 @@
 //! 目的：命令线程边界——命令在核心自己的线程上跑，读不排在长生成后面。
 //! 管：命令可见性、长生成期间的读、缺会话与坏输入、panic 不带走核心。
 //! 不管：事件事实（`events.rs`）、动作目录（`tools.rs`）。
-//! 联动：`src/capabilities/runtime/api/handle.rs`。
+//! 联动：`src/units/runtime/api/handle.rs`。
 
 use super::super::doubles::module_of;
 use super::super::{single_work, slow_ops};
 use super::support::spawn;
-use crate::capabilities::runtime::api::Output;
+use crate::units::runtime::api::Output;
 use crate::kernel::api::types::Tier;
 use crate::presentation::faces::Faces;
 use std::sync::Arc;
@@ -124,7 +124,7 @@ fn missing_sessions_and_bad_inputs_come_back_as_errors() {
             .runtime
             .rewind(
                 "没这个会话",
-                crate::capabilities::lifecycle::api::RewindTarget::Archive(0)
+                crate::units::lifecycle::api::RewindTarget::Archive(0)
             )
             .is_err()
     );

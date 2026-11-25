@@ -117,7 +117,7 @@ fn receipt_markers_are_structured_codes() {
     assert_eq!(codes_of(&fenced), vec![codes::FENCE_FAILED]);
     assert!(fenced.output.is_empty(), "文案不进正文");
 
-    // 装配层不做截断：超限只由送回模型前的工具预算统一收口（capabilities::tools::domain::budget）。
+    // 装配层不做截断：超限只由送回模型前的工具预算统一收口（units::tools::domain::budget）。
     let long = "字".repeat(20_000);
     let whole = tools.assemble(long, String::new(), false, Some(0));
     assert_eq!(whole.output.chars().count(), 20_000, "装配层原样交出");
@@ -576,8 +576,8 @@ impl crate::kernel::ports::AskUser for RecordingAsk {
 fn unwritable_interpreter_dir_never_silently_runs_unfenced() {
     #[cfg(windows)]
     let _fence = crate::tests::fence_acl_guard();
-    use crate::capabilities::tools::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
-    use crate::capabilities::tools::service::fence::ToolFenceGate;
+    use crate::units::tools::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
+    use crate::units::tools::service::fence::ToolFenceGate;
     use crate::kernel::detail::acl::FencePart;
     if !fence_live() {
         eprintln!("[探针] 未开启真机围栏测试：本探针要写本机权限项，已跳过；要真跑加 --fence-live");

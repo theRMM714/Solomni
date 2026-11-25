@@ -1,7 +1,7 @@
 //! 目的：内存会话历史替身与模型目录替身——供用例断言落盘与回放。
 //! 管：会话元数据、事件追加与替换、列出与删除；模型名回放。
 //! 不管：登记处（`registry.rs`）、提示词来源（`chat.rs`）。
-//! 联动：`src/capabilities/session/ports.rs` 的 `HistoryStore` 与 `src/capabilities/llm/ports.rs`。
+//! 联动：`src/units/session/ports.rs` 的 `HistoryStore` 与 `src/units/llm/ports.rs`。
 
 use super::*;
 
@@ -177,8 +177,8 @@ impl ModelCatalog for FakeCatalog {
 pub(crate) struct VecSource(pub(crate) Vec<Module>);
 
 impl ModuleSource for VecSource {
-    fn scan(&self) -> crate::capabilities::catalog::modules::api::Roster {
-        crate::capabilities::catalog::modules::api::Roster {
+    fn scan(&self) -> crate::units::catalog::modules::api::Roster {
+        crate::units::catalog::modules::api::Roster {
             modules: self.0.clone(),
             rejected: Vec::new(),
         }

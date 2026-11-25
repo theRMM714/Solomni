@@ -1,15 +1,15 @@
 //! 目的：终端转录中心：解析命令 → 用入站能力面 → 渲染事件流。
 //! 管：命令分发、启动页事实、退出或转入 Web 的去向。
 //! 不管：业务决策与状态（都在各能力内部）；终端 I/O 与配色（`cli/term.rs`、`cli/theme.rs`）。
-//! 联动：能力面来自 `src/capabilities/*/api.rs`；事件词汇与 `src/presentation/web/` 并列共用；模块声明见 `src/presentation.rs`。
+//! 联动：能力面来自 `src/units/*/api.rs`；事件词汇与 `src/presentation/web/` 并列共用；模块声明见 `src/presentation.rs`。
 
-use crate::capabilities::catalog::registry::api::AgentMeta;
-use crate::capabilities::catalog::registry::api::{ModelView, ProviderView};
-use crate::capabilities::runtime::api::Output;
-use crate::capabilities::runtime::api::{Acted, ActionCall, Caller};
-use crate::capabilities::runtime::api::{DecisionCard, DecisionWaiter, SessionEvent, Tier};
-use crate::capabilities::system::api::System;
-use crate::capabilities::tools::api::Op;
+use crate::units::catalog::registry::api::AgentMeta;
+use crate::units::catalog::registry::api::{ModelView, ProviderView};
+use crate::units::runtime::api::Output;
+use crate::units::runtime::api::{Acted, ActionCall, Caller};
+use crate::units::runtime::api::{DecisionCard, DecisionWaiter, SessionEvent, Tier};
+use crate::units::system::api::System;
+use crate::units::tools::api::Op;
 use crate::presentation::faces::Faces;
 
 /// 目的：输入框下方命令列表的一行：补全用的写法（含前导 `/`）与一句说明。

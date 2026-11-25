@@ -314,7 +314,7 @@ impl ProcTools {
 
     /// 目的：拼 shell 回执：正文分区 + 退出码 / 超时 / 用户停止 / 围栏失败。
     /// 约束：形状与本机/guest 共用（见 kernel::domain::receipt）；cwd 与耗时由工具层追加；
-    ///   这里不截断——超限由送回模型前的唯一预算（capabilities::tools::domain::budget）收口。
+    ///   这里不截断——超限由送回模型前的唯一预算（units::tools::domain::budget）收口。
     fn assemble_shell(
         &self,
         out: String,

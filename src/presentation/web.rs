@@ -1,11 +1,11 @@
 //! 目的：Web 转录中心：tiny_http 服务器 + 长轮询增量事件推送。
 //! 管：HTTP 协议适配（请求分发、静态资源、长轮询与**入站能力面**之间的转译）、服务器生命周期；只绑 127.0.0.1，密钥永不进任何响应（能力面只给 id）。
 //! 不管：渲染（在浏览器 `src/presentation/web/assets/app/main.js` 起的分层模块）；路由目录与匹配（`src/presentation/web/routes.rs`）。
-//! 联动：核心状态在核心自己的线程上——这里拿不到它、也拿不到任何核心锁，「停止」直接说给核心听；请求经 `Faces`（`src/capabilities/*/api.rs`）进入。
+//! 联动：核心状态在核心自己的线程上——这里拿不到它、也拿不到任何核心锁，「停止」直接说给核心听；请求经 `Faces`（`src/units/*/api.rs`）进入。
 
-use crate::capabilities::runtime::api::Output;
-use crate::capabilities::runtime::api::{Acted, ActionCall, Caller, SessionEvent};
-use crate::capabilities::workspace::api::MAX_ASSET_BYTES;
+use crate::units::runtime::api::Output;
+use crate::units::runtime::api::{Acted, ActionCall, Caller, SessionEvent};
+use crate::units::workspace::api::MAX_ASSET_BYTES;
 use crate::presentation::faces::Faces;
 pub(crate) mod assets;
 mod host_fs;
@@ -178,7 +178,7 @@ const POLL_TICK: Duration = Duration::from_millis(300);
 pub(crate) fn route(
     faces: &Faces,
     fence: &FenceInfo,
-    log: &Arc<dyn crate::capabilities::runtime::api::LogOps + Send + Sync>,
+    log: &Arc<dyn crate::units::runtime::api::LogOps + Send + Sync>,
     method: &str,
     url: &str,
     body: &str,
@@ -280,7 +280,7 @@ pub(crate) fn route(
                         && let Ok(s) = faces.registry.settings()
                     {
                         faces.storage.set_policy(
-                            crate::capabilities::maintenance::storage::api::StoragePolicy::from(
+                            crate::units::maintenance::storage::api::StoragePolicy::from(
                                 &s.storage,
                             ),
                         );
@@ -377,7 +377,7 @@ pub(crate) fn route(
             Ok((meta, events)) => {
                 let (live, head) = faces.events.tail_excluding(&name, &events);
                 // 状态栏的 shell 快照按转录派生：回放 / 重建 / 重启后前端不再"没有 chip 可画"。
-                let shell = crate::capabilities::conversation::session::api::last_shell(&events);
+                let shell = crate::units::conversation::session::api::last_shell(&events);
                 ok_json(
                     json!({ "meta": meta, "events": events, "live": live, "head": head, "shell": shell }),
                 )
@@ -464,7 +464,7 @@ pub(crate) fn route(
                 Ok(v) => v,
                 Err(e) => return complaint(400, e),
             };
-            let kind = match crate::capabilities::maintenance::storage::api::CleanKind::parse(
+            let kind = match crate::units::maintenance::storage::api::CleanKind::parse(
                 &str_field(&req, "kind"),
             ) {
                 Ok(k) => k,
@@ -486,7 +486,7 @@ pub(crate) fn route(
                 .get("confirm")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            let req = crate::capabilities::maintenance::storage::api::CleanRequest {
+            let req = crate::units::maintenance::storage::api::CleanRequest {
                 kind,
                 id,
                 module,
@@ -655,7 +655,7 @@ fn state_json(faces: &Faces, fence: &FenceInfo) -> Result<serde_json::Value, Str
         .map(|v| serde_json::to_value(&v).unwrap_or_else(|_| json!({})))
         .collect();
     let settings = faces.registry.settings()?;
-    let lang = crate::capabilities::runtime::api::i18n::pick(&settings.lang);
+    let lang = crate::units::runtime::api::i18n::pick(&settings.lang);
     Ok(json!({
         "modules": roster.modules.iter().map(|m| json!({
             "id": m.manifest.id,
@@ -693,8 +693,8 @@ fn state_json(faces: &Faces, fence: &FenceInfo) -> Result<serde_json::Value, Str
         // 回执说明的界面词表：语言按设置协商，模板源文本由后端给（前端只做参数替换）。
         "i18n": {
             "lang": lang.tag(),
-            "available": crate::capabilities::runtime::api::i18n::available(),
-            "messages": crate::capabilities::runtime::api::i18n::messages(lang)
+            "available": crate::units::runtime::api::i18n::available(),
+            "messages": crate::units::runtime::api::i18n::messages(lang)
                 .into_iter()
                 .collect::<std::collections::BTreeMap<_, _>>(),
         },

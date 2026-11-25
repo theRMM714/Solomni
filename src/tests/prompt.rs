@@ -1,11 +1,11 @@
 //! 目的：钉提示词册装载、渲染与 @ 改写的契约。
 //! 管：渲染占位替换与拒绝缺失、册按环境分发、yaml 装载、单花括号保留、ref 改写前缀/说话人/标点、会话路径方言、@ 根、补丁指南示例、用户 @ 引用。
 //! 不管：讨论发言与协作状态（collab）。
-//! 联动：src/capabilities/prompt/、session 路径方言。
+//! 联动：src/units/prompt/、session 路径方言。
 
 use super::builders::*;
 use super::prelude::*;
-use crate::capabilities::conversation::session::api::SINGLE;
+use crate::units::conversation::session::api::SINGLE;
 
 #[test]
 pub(crate) fn prompt_render_replaces_and_rejects_missing() {
@@ -96,7 +96,7 @@ pub(crate) fn prompt_render_keeps_single_braces() {
 // ---------- 登记处解析链与密钥治理 ----------
 #[test]
 pub(crate) fn refs_rewrite_covers_prefixes_speakers_and_punctuation() {
-    use crate::capabilities::prompt::api::{RefRoots, rewrite};
+    use crate::units::prompt::api::{RefRoots, rewrite};
     // 文案由 refs 代码返回：期望值在测试里同样直接构造。
     let foreign = |path: &str, agent: &str| {
         format!(
@@ -287,7 +287,7 @@ pub(crate) fn refs_rewrite_covers_prefixes_speakers_and_punctuation() {
 
 #[test]
 pub(crate) fn session_at_roots_go_by_the_session_guest() {
-    use crate::capabilities::conversation::session::api::SessionParams;
+    use crate::units::conversation::session::api::SessionParams;
     // 会话的 @ 根由参数派生：没有 guest（本机档）就恒等，有 guest 就与同一 guest 造的桥给同一种写法。
     let sb = test_sandbox("甲", &["data"]);
     let host = SessionParams::from_workspace("甲", &sb, &[], "solo");
@@ -299,15 +299,15 @@ pub(crate) fn session_at_roots_go_by_the_session_guest() {
     );
     assert_eq!(host_roots.private, Some(sb.private.clone()));
     for g in [
-        crate::capabilities::vm::api::GuestOs::Linux,
-        crate::capabilities::vm::api::GuestOs::Macos,
-        crate::capabilities::vm::api::GuestOs::Windows,
+        crate::units::vm::api::GuestOs::Linux,
+        crate::units::vm::api::GuestOs::Macos,
+        crate::units::vm::api::GuestOs::Windows,
     ] {
         let p = SessionParams::from_workspace("甲", &sb, &[], "solo").with_guest(Some(g));
         let r = p.ref_roots();
         let codec = r.path_codec.as_ref().expect("带 guest 的会话要有翻译器");
         // 三种 guest 各自给的写法必须与各自方言的桥一致（提示词里的写法与转录里的写法同源）。
-        let want = crate::capabilities::vm::api::PathBridge::for_session(
+        let want = crate::units::vm::api::PathBridge::for_session(
             std::env::consts::OS,
             Some(g.dialect()),
         );

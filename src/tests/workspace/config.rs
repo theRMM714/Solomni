@@ -5,7 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::capabilities::conversation::session::api::SINGLE;
+use crate::units::conversation::session::api::SINGLE;
 
 #[test]
 pub(crate) fn session_config_reports_tier_missing_and_runtimes_dir() {

@@ -11,8 +11,8 @@
 
 | 东西 | 定义在 | 形态 |
 | --- | --- | --- |
-| 能力接口 | **各能力自己的 `api.rs`** | `Faces` 的字段：`WorkOps` 在 `src/capabilities/work/api.rs`（工作用例与核心推荐）、`TurnOps` 在 `src/capabilities/turn/turn/api.rs`（回合推进）、`RuntimeOps` / `ActionOps` / `LogOps` 在 `src/capabilities/runtime/api.rs`（启用 / 改需求 / 回档 / 停止、动作目录与分发、埋点门面），`RegistryOps` 在 `src/capabilities/catalog/registry/api.rs`，`HistoryOps` 在 `src/capabilities/conversation/session/api.rs`，`ModulesOps` 在 `src/capabilities/catalog/modules/api.rs`，`ResidentOps` / `SecretOps` / `Provision` 各在 `src/capabilities/<能力>/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `src/capabilities/runtime/service/contracts.rs` 里 `Handle` 的队列代理（`impl` 在核心线程上执行）|
-| 事件台 | `src/capabilities/turn/turn/api.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
+| 能力接口 | **各能力自己的 `api.rs`** | `Faces` 的字段：`WorkOps` 在 `src/units/work/api.rs`（工作用例与核心推荐）、`TurnOps` 在 `src/units/turn/turn/api.rs`（回合推进）、`RuntimeOps` / `ActionOps` / `LogOps` 在 `src/units/runtime/api.rs`（启用 / 改需求 / 回档 / 停止、动作目录与分发、埋点门面），`RegistryOps` 在 `src/units/catalog/registry/api.rs`，`HistoryOps` 在 `src/units/conversation/session/api.rs`，`ModulesOps` 在 `src/units/catalog/modules/api.rs`，`ResidentOps` / `SecretOps` / `Provision` 各在 `src/units/<能力>/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `src/units/runtime/service/contracts.rs` 里 `Handle` 的队列代理（`impl` 在核心线程上执行）|
+| 事件台 | `src/units/turn/turn/api.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
 
 规则：
 
@@ -62,7 +62,7 @@
   判据取视图自己的 run 与运行态，**不取历史列表里那份打开时的快照**——快照会一直停在「已停止」。
   理由：会话被解冻的那一刻 `run` 就变了，任何按快照渲染的入口都会在生成期间变成假入口（`app/features/transcript/page.js`）。
 - **「继续」不等回包**：`control_session{action:continue}` 在服务端是**同步跑完整轮**才返回（`TurnOps::continue_flow`，
-  `src/capabilities/turn/turn/api.rs`），所以界面发出去就立刻对账并启用视图，进度与失败都从事件与转录看；
+  `src/units/turn/turn/api.rs`），所以界面发出去就立刻对账并启用视图，进度与失败都从事件与转录看；
   等回包再启用会让整轮回答都停在只读条后面，用户既看不到回答也点不到「中断」（`app/features/actions/actions.js`，
   同一个理由也适用于输入区的「启用会话」：它只解冻、不跑模型，回包即真相）。
 - **一次命令 panic 不带垮核心**：接住并继续服务（回包通道断开，调用方得到「无回应」）。

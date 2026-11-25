@@ -8,7 +8,7 @@ use crate::tests::workspace::support::*;
 /// 目的：三方比较的核心承诺：a、b 同基线各改同一文件，后者提交必须**报冲突**而不是覆盖；任一提交点都能还原出当时的共享区内容。
 #[test]
 pub(crate) fn work_commit_reports_conflicts_and_restore_returns_a_commit_point() {
-    use crate::capabilities::workspace::ports::WorkStore;
+    use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -142,7 +142,7 @@ pub(crate) fn work_log_and_commit_preview_keep_off_line_commits_visible() {
 /// 目的：按行锚精确物化共享区：agent 第 1 行提交 v1、第 3 行提交 v3；回档到第 1 行 → 共享区回到 v1；再丢弃非祖先提交 → 第 3 行的提交记录真的没了。
 #[test]
 pub(crate) fn work_rewind_to_materializes_by_line_anchor_and_discards_later_commits() {
-    use crate::capabilities::workspace::ports::WorkStore;
+    use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
@@ -400,7 +400,7 @@ pub(crate) fn work_delete_is_explicit_in_the_commit_request() {
     assert_eq!(rep.changes.len(), 1);
     assert_eq!(
         rep.changes[0].kind,
-        crate::capabilities::workspace::api::ChangeKind::Delete
+        crate::units::workspace::api::ChangeKind::Delete
     );
     assert!(ws.work_has("w", "note.md"), "没推送之前共享区里还在");
     push(&ws, "w", "a", "删掉", 2, 2).unwrap();

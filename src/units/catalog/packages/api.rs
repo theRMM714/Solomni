@@ -1,0 +1,27 @@
+//! 目的：packages 能力的入站面——其它能力与呈现层只准用这里。
+//! 管：Packages 用例 trait、包库快照、目标选择、PackagePlan 与包选择诊断。
+//! 不管：纯逻辑实现（domain/）与端口（ports.rs）。
+//! 联动：被 vm / runtime / entry::probes / residents 消费；契约见 RUNTIME_SPEC.md。
+
+pub use crate::units::catalog::packages::domain::manifest::{
+    KIND_SYSTEM, Library, Target, library_for_guest,
+};
+#[allow(unused_imports)] // 目的：ExecProbe 的实现在测试与组合根；能力内只经 Facts 传。
+pub use crate::units::catalog::packages::domain::plan::{
+    BaseFacts, ExecProbe, Facts, HostExec, HostFallback, PackagePlan, PinPolicy, PlannedPackage,
+    Problem, Provider, absent, build_packages, diagnose_text, diagnoses, plan_guest, plan_host,
+    plan_host_requests, requests_for,
+};
+
+/// 目的：运行包库的用例面（service.rs 实现）——包库快照与依赖文件夹路径走这里。
+/// 约束：出站端口 PackageSource 只由 service.rs 持有（R12）。
+pub trait Packages: Send + Sync {
+    /// 运行包库：可用的包清单（每次重扫）。
+    fn library(&self) -> Library;
+    /// 包库所在目录（界面上要如实告诉用户"把包放哪儿"）。
+    fn runtimes_dir(&self) -> std::path::PathBuf;
+    /// 项目内基础 profile 与宿主回退事实（组合根算好；测试替身缺省为空）。
+    fn base(&self) -> BaseFacts {
+        BaseFacts::default()
+    }
+}

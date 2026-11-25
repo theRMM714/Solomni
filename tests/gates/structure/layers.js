@@ -1,7 +1,7 @@
 /**
  * 结构审查·能力分层门禁：能力只能依赖严格更低层，同层不得互相依赖。
  * 分层表在 layers.yaml（唯一权威）：kernel 是 0，能力从 1 起，层号连续。
- * 判据：① src/capabilities/<名字>/ 必须归层，表里的名字也必须有目录——归层不许留静默空洞；
+ * 判据：① src/units/<名字>/ 必须归层，表里的名字也必须有目录——归层不许留静默空洞；
  *       ② 依赖边的目标层必须严格小于来源层（向上与同层都失败）——这是「业务保持向下依赖」的机器判定；
  *       ③ 声明层号必须等于按现有依赖重算的层号——表是分层事实的缓存，不是可以写宽的意图；
  *       ④ 层号从 1 起连续、kernel 为 0，不许用 T37 这类号把单元藏到没人注意的位置。
@@ -18,7 +18,7 @@ const { stripTestModules } = require("./dependency.js");
 const TABLE = "layers.yaml";
 
 const dirsOf = (root) => fs
-  .readdirSync(path.join(root, "src", "capabilities"), { withFileTypes: true })
+  .readdirSync(path.join(root, "src", "units"), { withFileTypes: true })
   .filter((e) => e.isDirectory())
   .map((e) => e.name)
   .sort();
@@ -58,8 +58,8 @@ function shapeProblems(tiers, dirs) {
   if (!tiers.has("kernel")) problems.push("分层：" + TABLE + " 必须给 kernel 归层 0");
   else if (tiers.get("kernel") !== 0) problems.push("分层：kernel 必须是第 0 层，实际 " + tiers.get("kernel"));
   const caps = [...tiers.keys()].filter((k) => k !== "kernel");
-  for (const d of dirs) if (!tiers.has(d)) problems.push("分层：src/capabilities/" + d + "/ 没有在 " + TABLE + " 里归层");
-  for (const c of caps) if (!dirs.includes(c)) problems.push("分层：" + TABLE + " 里的 " + c + " 在 src/capabilities/ 下没有目录");
+  for (const d of dirs) if (!tiers.has(d)) problems.push("分层：src/units/" + d + "/ 没有在 " + TABLE + " 里归层");
+  for (const c of caps) if (!dirs.includes(c)) problems.push("分层：" + TABLE + " 里的 " + c + " 在 src/units/ 下没有目录");
   const nums = caps.map((c) => tiers.get(c)).filter((n) => n > 0).sort((a, b) => a - b);
   const max = nums.length ? nums[nums.length - 1] : 0;
   for (let n = 1; n <= max; n++) if (!nums.includes(n)) problems.push("分层：能力层号必须从 1 起连续，缺第 " + n + " 层");
@@ -67,18 +67,18 @@ function shapeProblems(tiers, dirs) {
   return problems;
 }
 
-/** 依赖边：能力 A 的文件引用了 crate::capabilities::B（剔除注释与测试模块）。
+/** 依赖边：能力 A 的文件引用了 crate::units::B（剔除注释与测试模块）。
  *  同一对边只记一处首个命中文件与引用处数（次数给结构图当粗细，判据不看它）；
  *  forward 记「这条边全是 pub use 再导出」——纯转发只回执，不当真依赖。 */
 function edgesOf(root, dirs) {
   const edges = new Map();
   for (const cap of dirs) {
-    for (const f of rsFilesOf(path.join(root, "src", "capabilities", cap))) {
+    for (const f of rsFilesOf(path.join(root, "src", "units", cap))) {
       const text = stripTestModules(fs.readFileSync(f, "utf8"));
       for (const raw of text.split(/\r?\n/)) {
         if (!raw.trim() || raw.trim().startsWith("//")) continue;
         const forward = /^\s*pub\s+use\b/.test(raw);
-        for (const m of raw.matchAll(/crate::capabilities::([a-z_][a-z0-9_]*)/g)) {
+        for (const m of raw.matchAll(/crate::units::([a-z_][a-z0-9_]*)/g)) {
           const to = m[1];
           if (to === cap) continue;
           const key = cap + ">" + to;

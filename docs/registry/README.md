@@ -1,6 +1,6 @@
 # registry（登记处）
 > 定位：供应商 / 模型 / agent / 设置四份 yaml 的内存形态、解析链、写面与探测行为。
-> 效力：规范｜核对：2026-11-04｜依据：`src/capabilities/catalog/registry/api.rs`
+> 效力：规范｜核对：2026-11-04｜依据：`src/units/catalog/registry/api.rs`
 
 ## 管什么 / 不管什么
 - 管：四份 yaml 的内存形态与用例、解析链（含思考强度目录与模型映射）、agent 登记处与名字校验、代拟名单落地、密钥回显边界。
@@ -11,7 +11,7 @@
 - 能力面：`api::Registry`（读 `&self`、写 `&mut self`；`probe_replay_shape` 只读）。
 - 状态住在协调业务的执行线程上，靠单线程命令队列互斥，不额外上锁。
 - 出站端口 `SettingsStore` 只由 `service.rs` 持有。
-- 落盘形态归本单元：`.home/` 下四份 yaml，读写与解析在 `src/capabilities/catalog/registry/detail/yaml_settings.rs`。
+- 落盘形态归本单元：`.home/` 下四份 yaml，读写与解析在 `src/units/catalog/registry/detail/yaml_settings.rs`。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 - 经 `::api` 用到：`kernel`、`llm`、`modules`、`permission`、`prompt`、`session`
@@ -42,20 +42,20 @@
 
 ## 四、写回与写面
 - 探测写回只发生在 `--probe-tools`：`envelope` / `native` 都写回 `models.yaml` 的 `tools`；`--probe-replay` 永不写回。
-- 写面（登记 / 移除 / 设核心默认 / 探测 / 改设置）以用户动作暴露：声明在 `systools/tools.yaml`（`callers: [user]`），执行体在 `src/capabilities/runtime/service/action.rs` 的 `execute_registry`。
+- 写面（登记 / 移除 / 设核心默认 / 探测 / 改设置）以用户动作暴露：声明在 `systools/tools.yaml`（`callers: [user]`），执行体在 `src/units/runtime/service/action.rs` 的 `execute_registry`。
 - 这些动作默认不开放给任何席位（供应商与密钥是产品级资源）。
 - 改一个写方法要同时改动作表、执行体与前端调用点。
 - 密钥回显边界：界面只呈现「供应商 id + 端点」与「模型 id + 展示名」，永不携带密钥；更新供应商时 `api_key` 留空 = 保留原值。
 
 ## 五、四份 yaml 的读写
 - `.home/` 下四份文件分开读写：`load` 逐份读，缺哪份就用哪份的默认；`save` 会同时写四份。
-- 结构定义在 `src/capabilities/catalog/registry/domain/providers.rs` 与 `src/capabilities/catalog/registry/domain/agents.rs`；解析与写盘在 `src/capabilities/catalog/registry/detail/yaml_settings.rs`。
+- 结构定义在 `src/units/catalog/registry/domain/providers.rs` 与 `src/units/catalog/registry/domain/agents.rs`；解析与写盘在 `src/units/catalog/registry/detail/yaml_settings.rs`。
 - yaml 非法（解析失败）= 装配失败并指出是哪一份。
 - 字段、默认值与拒收规则见 `REGISTRY_SPEC.md`。
 
 ## 改动本单元时必须同步
 - `REGISTRY_SPEC.md` → 字段与拒收规则的唯一权威；`src/tests/registry.rs` → 用例。
-- `systools/tools.yaml` + `src/capabilities/runtime/service/action.rs` + `web` 的设置页 → 写方法三处同改。
+- `systools/tools.yaml` + `src/units/runtime/service/action.rs` + `web` 的设置页 → 写方法三处同改。
 - `docs/permission/README.md` → 权限与围栏语义；密钥永不进入提示词 / 转录 / 日志 / 模块工作区。
 
 ## 本目录

@@ -1,15 +1,15 @@
 //! 目的：便携维护（--setup）的单元测试：PATH 分段纯函数、端口替身驱动的 path/unset/undo、shim 与状态 JSON。
 //! 管：分段去重与幂等、备份与还原、端口错误透传、shim 渲染、状态字段。
 //! 不管：注册表与广播的真实行为（归 kernel 的 UserPath 适配器）；真实用户 PATH 与用户目录不被触碰。
-//! 联动：被测面 src/capabilities/system/detail/setup/ 下的 mod.rs、path.rs、shim.rs、fence.rs；端口契约见 src/kernel/ports.rs 的 UserPath。
+//! 联动：被测面 src/units/system/detail/setup/ 下的 mod.rs、path.rs、shim.rs、fence.rs；端口契约见 src/kernel/ports.rs 的 UserPath。
 
-use crate::capabilities::system::api::{FencePolicy, SetupMode, SetupOps};
-use crate::capabilities::system::detail::setup::SetupHost;
+use crate::units::system::api::{FencePolicy, SetupMode, SetupOps};
+use crate::units::system::detail::setup::SetupHost;
 #[cfg(not(windows))]
-use crate::capabilities::system::detail::setup::fence;
-use crate::capabilities::system::detail::setup::path as p;
+use crate::units::system::detail::setup::fence;
+use crate::units::system::detail::setup::path as p;
 #[cfg(windows)]
-use crate::capabilities::system::detail::setup::shim;
+use crate::units::system::detail::setup::shim;
 use crate::kernel::ports::{PathValue, UserPath};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -332,7 +332,7 @@ fn setup_modes_round_trip_through_their_ids() {
 /// 目的：启动期的围栏对账——两个档位（有/没有 ACL 一步）与三种结果（就绪、缺项、对账失败）都说对话。
 #[test]
 fn portable_fence_report_covers_every_branch() {
-    use crate::capabilities::system::api::Fault;
+    use crate::units::system::api::Fault;
     use crate::entry::portable::{ensure_grants, fence_report};
 
     /// 目的：便携维护端口的替身：缺项与预授结果由字段决定，收到的进度行全记录。

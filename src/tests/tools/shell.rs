@@ -3,8 +3,8 @@
 //! 不管：真实进程 / 平台围栏（在 kernel 的 process 测试）与 VM 引擎实现。
 //! 联动：systools/tools.yaml 的 shell 声明、tools/domain/shell.rs、session 的 engine/tools。
 use super::super::prelude::*;
-use crate::capabilities::permission::api::{PermissionDefaults, ProfileId};
-use crate::capabilities::tools::api::ToolBook;
+use crate::units::permission::api::{PermissionDefaults, ProfileId};
+use crate::units::tools::api::ToolBook;
 
 /// 目的：档位不再裁剪工具面——两档都给 shell，差别只在网络。
 #[test]
@@ -12,7 +12,7 @@ pub(crate) fn profile_does_not_change_the_tool_face() {
     let book: ToolBook = crate::tests::doubles::test_systools().tools;
     assert!(book.contains_key("shell"), "shell 要在工具书里");
     let face = vec!["shell".to_string()];
-    let ids = crate::capabilities::conversation::session::api::face_tools(face, &book);
+    let ids = crate::units::conversation::session::api::face_tools(face, &book);
     assert_eq!(ids, vec!["shell".to_string()], "席位面就是授权面");
     let net = |profile: ProfileId| {
         PermissionDefaults { profile }
@@ -29,14 +29,14 @@ pub(crate) fn runtime_base_roots_are_only_put_on_host_member_tools() {
     let core = core_with(Vec::new(), gw(BTreeMap::new(), vec!["[]".into()]))
         .with_base_roots(vec![abs(&["base"])]);
     let sb = test_sandbox("a", &[]);
-    let plan = crate::capabilities::catalog::packages::api::PackagePlan::default();
+    let plan = crate::units::catalog::packages::api::PackagePlan::default();
     let host = core.turn.member_face(
         core.registry.as_ref(),
         &[],
         &sb,
         BTreeMap::new(),
         false,
-        crate::capabilities::llm::api::ToolMode::Envelope,
+        crate::units::llm::api::ToolMode::Envelope,
         "solo",
         crate::kernel::api::types::Tier::Host,
         String::new(),
@@ -52,7 +52,7 @@ pub(crate) fn runtime_base_roots_are_only_put_on_host_member_tools() {
         &sb,
         BTreeMap::new(),
         false,
-        crate::capabilities::llm::api::ToolMode::Envelope,
+        crate::units::llm::api::ToolMode::Envelope,
         "solo",
         crate::kernel::api::types::Tier::Vm,
         "guest".to_string(),

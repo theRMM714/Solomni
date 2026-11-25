@@ -1,7 +1,7 @@
 # 工具与机制席位
 
 > 定位：系统工具、机制与席位（身份）与"谁能用哪些工具"的唯一权威。
-> 效力：规范｜核对：2026-11-24｜依据：`systools/tools.yaml`、`src/capabilities/conversation/session/domain/mechanism.rs`
+> 效力：规范｜核对：2026-11-24｜依据：`systools/tools.yaml`、`src/units/conversation/session/domain/mechanism.rs`
 
 ## 适用与判据
 - 声明系统工具、机制席位与越权校验时以本文为准（`docs/tools/tools-and-roles.md`）。
@@ -10,9 +10,9 @@
 
 ## 一、两张表与字段
 
-- 工具**是什么**在 `systools/tools.yaml`；这个**身份有什么**在 `src/capabilities/conversation/session/domain/mechanism.rs` 的机制与席位声明（席位记着发哪些工具、能不能写、能不能发布、带哪段提示词）。
+- 工具**是什么**在 `systools/tools.yaml`；这个**身份有什么**在 `src/units/conversation/session/domain/mechanism.rs` 的机制与席位声明（席位记着发哪些工具、能不能写、能不能发布、带哪段提示词）。
 - 授权只有这两处；`systools/names.yaml` 是布局的第三份（`session/<工作>/` 的保留目录名），不是工具或席位授权。
-- 代码里**不得**出现"哪个席位能调哪个工具"的名单：只有三个动作——**机制只声明需求**（`Seat` 记着发哪些工具、能不能写、能不能发布、带哪段提示词）、**会话的装配机现拼这一席的面**（`src/capabilities/conversation/session/domain/assemble.rs` 的 `assemble`，唯一实现）、**按面校验调用**（`src/capabilities/conversation/session/service/engine/tools.rs` 的 `face_has`）。
+- 代码里**不得**出现"哪个席位能调哪个工具"的名单：只有三个动作——**机制只声明需求**（`Seat` 记着发哪些工具、能不能写、能不能发布、带哪段提示词）、**会话的装配机现拼这一席的面**（`src/units/conversation/session/domain/assemble.rs` 的 `assemble`，唯一实现）、**按面校验调用**（`src/units/conversation/session/service/engine/tools.rs` 的 `face_has`）。
 
 ```yaml
 tools:
@@ -32,7 +32,7 @@ tools:
 - **授权面 = 席位面，工具声明不再决定能不能调**：`capability` 只是标签（说明与“核心先核实”筛选用），没有 `effect` / `reach` / `scope` 三键。档位只管出站网络，不逐工具裁剪。
 - **唯一的逐工具面标记是 `publish`**：它只回答一件事——这个动作会不会改共享工作区。沙箱里的 `write` / `edit` / `patch` / `delete` / `shell` 都改不到共享区（围栏只给私有沙箱写权，见 [workspace](../workspace/README.md)），真正能改的只有 11 个 `work_*`，所以席位上的 r/w 塌缩成**能不能发布**这一个布尔。标记与 `workspace::api::is_work_tool` 一一对应（`src/tests/tools/face.rs` 锁定）。
 - **没有工具卡**：权限侧不产生 `ask`，因此没有 `allow` / `deny` / `allow_turn` 这套确认链路；需要人定夺的是核心各关卡（建会话、验收、定版）。
-- **`callers` 是授权判据**：`user` = 人经呈现层调用，其余是席位 id（运行时动作授权按它判，`src/capabilities/runtime/service/action.rs`）。它与席位的工具面是**同一关系的两面**，由 `mechanism::problems(&ToolBook)` 双向锁死——任何一边漏写 / 多写都是装配错误。
+- **`callers` 是授权判据**：`user` = 人经呈现层调用，其余是席位 id（运行时动作授权按它判，`src/units/runtime/service/action.rs`）。它与席位的工具面是**同一关系的两面**，由 `mechanism::problems(&ToolBook)` 双向锁死——任何一边漏写 / 多写都是装配错误。
 - **列目录是"核实"的前提**：`read` 只读文件、`grep` 按模式找行，**没有 `list` 就确认不了"资料齐不齐"**；`read` 遇到目录会如实引导到 `list`。
 - **`grep` 的默认过滤是检索面口径**：目录递归时按 `.gitignore` + 版本库目录里的 `.workignore`、点号开头的隐藏文件、二进制（前 8 KiB 含 NUL）剪枝，不跟符号链接；`hidden` / `no_ignore` 是逃生口，显式给单个文件路径时不过滤。过滤名单只有一份，与「哪些文件算工作区内容」共用，维护入口是 `work_ignore`（见 [workspace](../workspace/README.md)）。
 - 参数不合法 → **如实拒绝并落工具行**。
@@ -67,12 +67,12 @@ Mechanism { id: "discuss", flow: true, seats: &["core_proxy", "discussant"] }
 | 机制动作 | 席位自己声明的（`say` / `submit_report` / `plan` / `node_verdict` …） | 席位的 `tools` |
 | 模块面 | 该 agent 的模块工具 | 席位的 `module_tools` |
 
-- **为什么 `shell` 在读面**：围栏恒为「私有沙箱 rw + 模块目录只读 + 主机只读根只读」，共享区主副本永不进容器——它改不到共享区，发不发不构成安全问题（`src/capabilities/tools/domain/fence.rs`）。
+- **为什么 `shell` 在读面**：围栏恒为「私有沙箱 rw + 模块目录只读 + 主机只读根只读」，共享区主副本永不进容器——它改不到共享区，发不发不构成安全问题（`src/units/tools/domain/fence.rs`）。
 - **为什么写面不恒发**：核心席（`planner` / `orchestrator` / `core_proxy`）只做核实与判定，恒发写面只会把四个用不上的工具塞进它们的提示词。
 - 越权防线分两段：**席位面**决定这个身份有哪些工具，**权限档位**决定其中哪些还能用（deny 的工具不发放，ask 的照常发放）；模块工具查**该成员有没有这个模块**（module 消歧）。两段缺一不可。
 
 - **注入口径（唯一）**：**总表不进提示词**。每回合由核心查"这一回合的身份能用的工具"：信封通道把说明与参数作为一条系统消息注入；原生通道由**声明槽**下发（名字 / 说明 / JSON Schema），不再重复文字清单，只保留 patch 这类声明表达不了的写法。
-- **回执预算（唯一）**：所有工具回执（read / grep / list / shell / 模块工具 / 核心操作的只读核实）送回模型前受**两级预算**。第一级是单条静态上限 16k 字符（开头约 1/4、结尾约 3/4），超出时把正文换成「开头 + 结尾」。第二级按**本批**剩余上下文收紧：`ResultBudget` 取 `min(16k, (窗口 - 已用 - reserve) × 4 × 50% / 本批调用数)`，`reserve = min(2000 token, 窗口 / 10)`；算出的每条上限低于 1000 字符即视为上下文枯竭，**整批预检失败、任何工具都不执行**（避免 shell 已产生副作用却看不到回执）。只要没枯竭，生产者在生成回执时就按本批上限截断：read 只显示能放下的行，并只把实际显示的行记成观察事实；shell / 模块工具与核心操作的只读核实同受此限；会话层再用同一预算兜底，已按更大上限截过的回执允许二次收缩。截断加 `result.truncated`（原始字符数、实际保留数、本批上限）与 `result.truncated.context`（提示先压缩会话或分页读取）两条 `Note`；文件类续读给 read 的 offset/limit，执行类给「缩小命令输出 / 写到文件再 read」。实现唯一在 `src/capabilities/tools/domain/budget.rs`，本机与虚拟机档都经过它；read 的续读 offset、shell 的状态行 / 末行都在尾部，因此保留。
+- **回执预算（唯一）**：所有工具回执（read / grep / list / shell / 模块工具 / 核心操作的只读核实）送回模型前受**两级预算**。第一级是单条静态上限 16k 字符（开头约 1/4、结尾约 3/4），超出时把正文换成「开头 + 结尾」。第二级按**本批**剩余上下文收紧：`ResultBudget` 取 `min(16k, (窗口 - 已用 - reserve) × 4 × 50% / 本批调用数)`，`reserve = min(2000 token, 窗口 / 10)`；算出的每条上限低于 1000 字符即视为上下文枯竭，**整批预检失败、任何工具都不执行**（避免 shell 已产生副作用却看不到回执）。只要没枯竭，生产者在生成回执时就按本批上限截断：read 只显示能放下的行，并只把实际显示的行记成观察事实；shell / 模块工具与核心操作的只读核实同受此限；会话层再用同一预算兜底，已按更大上限截过的回执允许二次收缩。截断加 `result.truncated`（原始字符数、实际保留数、本批上限）与 `result.truncated.context`（提示先压缩会话或分页读取）两条 `Note`；文件类续读给 read 的 offset/limit，执行类给「缩小命令输出 / 写到文件再 read」。实现唯一在 `src/units/tools/domain/budget.rs`，本机与虚拟机档都经过它；read 的续读 offset、shell 的状态行 / 末行都在尾部，因此保留。
 
 | 回合 | 席位 | 这一份是什么 |
 | --- | --- | --- |
@@ -120,7 +120,7 @@ Mechanism { id: "discuss", flow: true, seats: &["core_proxy", "discussant"] }
 
 ## 四、动作与分发（一张表，两条执行路径）
 
-- **动作表是参数契约与授权的唯一真相**：每条动作声明参数契约与 `callers`，校验按声明做、授权按 `callers` 判——这两步只有一套规则，不随调用方变。**执行**有两条实现，各在自己的能力里：呈现侧（人）走 `runtime` 的 `ActionOps::act`（`src/capabilities/runtime/service/action.rs`，校验 → 授权 → 执行 → 审计四步在一处），模型代理侧走 `ProxyTools::call`（`src/capabilities/conversation/proxy/service/proxy.rs`，同样是查表 → 校验 → 授权 → 交宿主，另有幂等账）。两条路径共用同一张表与同一份授权规则，但**不共用同一段执行代码**——把它们写成一处需要呈现层与模型回环互相依赖，会成环。
+- **动作表是参数契约与授权的唯一真相**：每条动作声明参数契约与 `callers`，校验按声明做、授权按 `callers` 判——这两步只有一套规则，不随调用方变。**执行**有两条实现，各在自己的能力里：呈现侧（人）走 `runtime` 的 `ActionOps::act`（`src/units/runtime/service/action.rs`，校验 → 授权 → 执行 → 审计四步在一处），模型代理侧走 `ProxyTools::call`（`src/units/conversation/proxy/service/proxy.rs`，同样是查表 → 校验 → 授权 → 交宿主，另有幂等账）。两条路径共用同一张表与同一份授权规则，但**不共用同一段执行代码**——把它们写成一处需要呈现层与模型回环互相依赖，会成环。
 
 - **两个适配器**：模型侧（`ToolHandler`，按名字认领）与呈现侧（`POST /api/actions/{id}`、`GET /api/actions` 动作目录）都只负责造一次 `ActionCall`（动作 id + 参数 + 调用者身份）并各按自己的媒介呈现结果——模型侧拿文本回执，呈现侧拿结构化结果。**同一份声明，两种呈现。**
 - **读取与视图不进动作表**：会话列表 / 配置 / 文件清单 / 历史是读接口，事实仍只有**事件台**一条来路。
@@ -128,7 +128,7 @@ Mechanism { id: "discuss", flow: true, seats: &["core_proxy", "discussant"] }
 - **登记处动作只给 user**：供应商 / 密钥 / 模型 / agent / 设置的写面（`upsert_provider` / `remove_provider` / `discover_models` / `upsert_model` / `remove_model` / `set_core_model` / `probe_model_tools` / `probe_replay_shape` / `upsert_agent` / `remove_agent` / `set_settings`）的 `callers` 只有 `user`——产品级资源默认不开放给任何席位；`api_key` 只进登记处，不进动作目录、不进审计。读（`GET /api/settings`、`/api/state`）仍是独立读接口。
 - **工作区回滚动作也只给 user**：`restore_work_commit`（`session_id` / `commit` / `expect_head`）——非破坏性物化共享区，目标之后的提交仍保留；同一工作子树里有会话在生成时拒绝；成功后由核心落一条可回放的 `notice` 行。
 - 提交历史 / 详情 / 文件预览是**只读视图**（`WorkOps::work_log` / `work_commit_view` / `work_commit_file`），不进动作表。
-- **guest 只读诊断动作也只给 user**：`guest_diagnose`（`session_id` 必填非空）——诊断虚拟机档会话的 guest：进程表（pid / ppid / 状态 / CPU / 内存 / 运行时长 / 命令与参数）、CPU 汇总、内存、负载、挂载与内核 / 核数；只读、不写 guest 文件（沿用既有 fenced 执行的临时策略文件，helper 读取后即删）、不改会话状态，不是 agent 工具、不进任何席位面（`systools/tools.yaml`）。它在 guest 内走 helper 的只读诊断模式（不套 per-agent 围栏），宿主侧只用已持有的 QGA 通道、不新增外部端口（`src/capabilities/vm/service.rs` 的 `guest_diagnose`）。
+- **guest 只读诊断动作也只给 user**：`guest_diagnose`（`session_id` 必填非空）——诊断虚拟机档会话的 guest：进程表（pid / ppid / 状态 / CPU / 内存 / 运行时长 / 命令与参数）、CPU 汇总、内存、负载、挂载与内核 / 核数；只读、不写 guest 文件（沿用既有 fenced 执行的临时策略文件，helper 读取后即删）、不改会话状态，不是 agent 工具、不进任何席位面（`systools/tools.yaml`）。它在 guest 内走 helper 的只读诊断模式（不套 per-agent 围栏），宿主侧只用已持有的 QGA 通道、不新增外部端口（`src/units/vm/service.rs` 的 `guest_diagnose`）。
 - **常驻服务的生命周期动作也只给 user**：`control_resident`（`start` / `stop` / `enable` / `disable`，参数 `module` / `name` / `action` / `lease`）——agent 用已启动的实例，不负责拉起；服务清单是独立只读视图（`ResidentOps::services`，CLI `resident`）。会话删除时按租约回收该会话拉起的实例。
 - **已启动常驻服务的操作也走模块动作**：id = `module.<模块id>.<服务名>.<操作名>`（静态模块工具优先，其次常驻服务操作）。
   - 人可直接调（`ResidentOps::call`）。
@@ -144,22 +144,22 @@ Mechanism { id: "discuss", flow: true, seats: &["core_proxy", "discussant"] }
 
 - `systools/tools.yaml` 的 `shell` 是唯一的执行类系统工具，参数里没有任何范围旋钮；它不新建执行机制：host 走 kernel 的 `ProcessRunner`，VM 走 guest helper。
 
-- 参数：`command`（必填）、`local_ports`（可选，数组，最多 8 个、元素 1–65535：本机档下让容器里的 `127.0.0.2:<端口>` 经中继到达宿主的 `127.0.0.1:<端口>`；清单外连不上，产品自己监听的端口一律拒——判据是监听者 pid 在本产品进程树里、或它跑的就是本产品这个可执行文件，不靠端口表，见 `src/kernel/detail/container/windows/relay.rs`；只有 Windows 能落，其它平台与虚拟机档给了就拒绝执行，见 `src/kernel/detail/confine/job.rs`）、`timeout_secs`（缺省 120，最大 600；只约束命令子进程，从启动命令起算——Windows 首次为会话准备围栏（建容器、写 ACL）不计入，可能额外耗时，截止时间在 spawn 之后才起算，见 `src/kernel/detail/process.rs`）。cwd 固定私有沙箱；无交互 stdin / TTY；输出超限由回执预算统一收口（16k：约 4k 开头 + 约 12k 结尾，按完整行取整；单行超长时按字符切，见 `src/capabilities/tools/domain/budget.rs`）；命令上限 8000 字符。
+- 参数：`command`（必填）、`local_ports`（可选，数组，最多 8 个、元素 1–65535：本机档下让容器里的 `127.0.0.2:<端口>` 经中继到达宿主的 `127.0.0.1:<端口>`；清单外连不上，产品自己监听的端口一律拒——判据是监听者 pid 在本产品进程树里、或它跑的就是本产品这个可执行文件，不靠端口表，见 `src/kernel/detail/container/windows/relay.rs`；只有 Windows 能落，其它平台与虚拟机档给了就拒绝执行，见 `src/kernel/detail/confine/job.rs`）、`timeout_secs`（缺省 120，最大 600；只约束命令子进程，从启动命令起算——Windows 首次为会话准备围栏（建容器、写 ACL）不计入，可能额外耗时，截止时间在 spawn 之后才起算，见 `src/kernel/detail/process.rs`）。cwd 固定私有沙箱；无交互 stdin / TTY；输出超限由回执预算统一收口（16k：约 4k 开头 + 约 12k 结尾，按完整行取整；单行超长时按字符切，见 `src/units/tools/domain/budget.rs`）；命令上限 8000 字符。
 - **别用 Unix 重定向惯用法**：Windows 宿主的 shell 是 PowerShell，`1>/dev/null` 会把 `/dev/null` 当成路径（实测报 `Could not find a part of the path ...`，其中盘符是视图盘）；丢弃输出写 `| Out-Null` 或 `1>$null` / `2>$null`。POSIX 宿主与 VM guest（`/bin/sh`）照旧可用 `>/dev/null`（围栏基线对该节点例外给写权，见本条末）。
 - **回执结构**（正文与结束说明由 `src/kernel/domain/receipt.rs` 装配，落点与耗时由工具层补；模型看到的文本由 `src/kernel/detail/i18n.rs` 按源语言渲染）：正文（stdout；有 stderr 时折成 `[stderr]` 段）在 `output`，结束状态与落点是 `Note`（稳定码 + 参数 + 轻重），模型通道把说明逐行接在正文后，于是看到：正文 / 空行 / 状态行 / 末行。末行是 `[shell] cwd <本环境写法> · 耗时 <N> 秒`，围栏准备 ≥1 秒时另起一行 `[shell] 围栏准备 <M> 秒（已含在耗时里）`（`N` 是整次调用墙钟，含围栏准备）：
   - 状态行四种：`[shell] 退出码 N`、`[shell] 超时（N 秒）：工具进程与它拉起的整棵进程树已被终止`、`[shell] 用户停止：工具进程与它拉起的整棵进程树已被终止`、`[shell] 退出码未知（被信号结束）`。
-  - 末行恒为 cwd·耗时、上一行恒为状态行：两条都在 = 这次调用真的跑过；都没有 = 没跑（围栏拒绝 / 无租约 / helper 起不来 / 共享同步失败），此时不补落点行（判据是说明里有没有 `shell.*`，`src/capabilities/tools/domain/shell.rs` 的 `did_run`；没跑成的调用仍有结构化事实，界面据此显示"最近一次尝试"）。
-  - 截断由唯一的回执预算在送回模型前施加（`src/capabilities/tools/domain/budget.rs`）：只切一次、只留一组说明；状态行与 cwd·耗时（说明）不随正文被切（`src/kernel/domain/receipt.rs` 只装配、不截断）。开头 / 结尾**按完整行取整**（单行超长时退化为按字符切），说明报的是实际保留字符数。
+  - 末行恒为 cwd·耗时、上一行恒为状态行：两条都在 = 这次调用真的跑过；都没有 = 没跑（围栏拒绝 / 无租约 / helper 起不来 / 共享同步失败），此时不补落点行（判据是说明里有没有 `shell.*`，`src/units/tools/domain/shell.rs` 的 `did_run`；没跑成的调用仍有结构化事实，界面据此显示"最近一次尝试"）。
+  - 截断由唯一的回执预算在送回模型前施加（`src/units/tools/domain/budget.rs`）：只切一次、只留一组说明；状态行与 cwd·耗时（说明）不随正文被切（`src/kernel/domain/receipt.rs` 只装配、不截断）。开头 / 结尾**按完整行取整**（单行超长时退化为按字符切），说明报的是实际保留字符数。
   - 退出码是**整条脚本**的收尾状态：脚本显式 `exit N` 时就是 N；Windows 宿主上否则取**最后一次原生命令**的 `$LASTEXITCODE`（`src/kernel/detail/process/windows.rs` 的 `PS_TAIL`），脚本中间失败、后面又跑成功的内置命令不会把它清零——所以 `cmd /c exit 3; echo done` 的退出码仍是 3（PowerShell 自身不传播原生进程码，这条尾行是让中间失败可见的唯一机制）；POSIX 取脚本最后一条命令的退出码。要看单条命令的退出码按平台写：POSIX（Linux / macOS 宿主与 VM guest 的 /bin/sh）用 `cmd; echo exit=$?`；Windows 宿主跑 PowerShell，`$?` 是**布尔**（上一条命令成功与否）不是退出码，退出码看 `$LASTEXITCODE`，写 `cmd /c exit 3; echo exit=$LASTEXITCODE`（由原生命令写、cmdlet 不写；首个原生命令之前它是空而不是 0）。要让「任一关键步骤失败就整体失败」，在关键命令后显式判：`if (-not $?) { exit 1 }` 或 `exit $LASTEXITCODE`（`cmd || exit $?` 这种 bash 写法在 PowerShell 里不成立——`exit` 是语句不是管道命令）。
   - **降级错误等于放弃退出码**：脚本里用 `-ErrorAction Continue` / `SilentlyContinue`、把 `$ErrorActionPreference` 改成 `Continue`、或在 try/catch 里吞掉错误后，失败只进 stderr、包装器看不到它——退出码照常是 0（`src/kernel/detail/process/windows.rs` 的 `PS_TAIL` 只看 `$LASTEXITCODE`，而 cmdlet 不写它；`src/kernel/detail/process/tests.rs` 的 `generated_shell_script_fails_on_unhandled_powershell_errors` 钉住这个口径）。要靠退出码判成败就别降级；要容错就在 try/catch 里自己判并 `exit 1`。
-  - 超时与用户停止没有命令退出码（`src/capabilities/tools/domain/shell.rs` 的 `exit_code` 从说明里取，取不到就是 None），只用状态行表达，不伪造 124 / 143。
-  - cwd 用本环境写法：本机档 = 视图盘打开时的视图写法（**视图写法目前只用于 shell（cwd == 私有沙箱）的容器 cwd 与程序名；模块工具沿用宿主 cwd，不参与视图盘收敛**）（如 `S:\session\<工作>\<agent>`，盘符按实例分配，别假设恒为 Z:；宿主路径由路径码翻译；`SOLOMNI_VIEW_DRIVE=0` 或视图盘不可用时回退宿主路径）；虚拟机档 = guest 内路径（路径桥，宿主 `D:\a\b` → `/solomni-host/d/a/b`，见 `src/capabilities/vm/domain/paths.rs`；UNC 外部根在 guest 里是 `/solomni-host/unc/<server>/<share>/…`，模型照此写法给路径即可）。
-- 回放只读结构化事实：`src/capabilities/conversation/session/domain/tools.rs` 的 `last_shell` 取最后一条带命令的 shell 工具行的 `shell` 事实（cwd / 耗时毫秒 / 围栏准备 / 退出码 / 状态 / 是否截断），不解析回执正文；没有结构化事实的行跳过。派生快照标 `historical`。
+  - 超时与用户停止没有命令退出码（`src/units/tools/domain/shell.rs` 的 `exit_code` 从说明里取，取不到就是 None），只用状态行表达，不伪造 124 / 143。
+  - cwd 用本环境写法：本机档 = 视图盘打开时的视图写法（**视图写法目前只用于 shell（cwd == 私有沙箱）的容器 cwd 与程序名；模块工具沿用宿主 cwd，不参与视图盘收敛**）（如 `S:\session\<工作>\<agent>`，盘符按实例分配，别假设恒为 Z:；宿主路径由路径码翻译；`SOLOMNI_VIEW_DRIVE=0` 或视图盘不可用时回退宿主路径）；虚拟机档 = guest 内路径（路径桥，宿主 `D:\a\b` → `/solomni-host/d/a/b`，见 `src/units/vm/domain/paths.rs`；UNC 外部根在 guest 里是 `/solomni-host/unc/<server>/<share>/…`，模型照此写法给路径即可）。
+- 回放只读结构化事实：`src/units/conversation/session/domain/tools.rs` 的 `last_shell` 取最后一条带命令的 shell 工具行的 `shell` 事实（cwd / 耗时毫秒 / 围栏准备 / 退出码 / 状态 / 是否截断），不解析回执正文；没有结构化事实的行跳过。派生快照标 `historical`。
 - **授予固定，调用参数里没有范围旋钮**：每次调用的围栏都一样——私有沙箱 rw、模块目录 / 基础与项目工具链 / 主机只读根 ro、net 按会话档位（`offline` 恒 false）；共享区主副本永不进容器（读 / 改先 `work_pull`）。要够到沙箱外的东西，只有「先拉进沙箱」这一条路。唯一的显式例外是 `local_ports`：它不扩大文件系统范围，只把清单里的本机回环端口经中继露给容器（第三态 `NetPolicy::Local`，见 [permission/README.md](../permission/README.md)）。
 - profile：只有 offline / online 两档，差别只在出站；`online` 仍受全局 `sandbox.policy.network` 上限。每次都要求围栏真强制（`allow_degraded=false`），装不上就拒绝。
 - 围栏：shell 的 `for_call` 另加 `runtime_roots`（项目内基础工具链 + 本 agent 模块运行包根）；`home` 恒为私有沙箱（隐含一条写授予）、写授予另加有 `userdata` 的模块，全部模块目录是只读子树，没有按 reach 的分支。`runtime_roots` 这类**可信执行基座**在 Windows 上一次性授给**本产品的能力 SID**（`S-1-15-3-*`，见 [kernel/README.md](../kernel/README.md) 的「授权主体分两个」）、按机器级归属记台账（`scope=machine`、无归属，启动对账不回收）、不参与按次授权。shell 的容器 cwd 走视图盘（产品根映射成实例独占的盘符；模块工具仍用宿主 cwd），PowerShell 逐级解析只经过产品根内的层级，产品根之外的祖先不授；产品根上的一条 `(OI)(CI)` 读属性是机器级授权——授给同一个能力 SID、跨会话复用（对账时不回收），不再每次会话重写。容器身份按 `会话 + agent` 派生（不含根集合），授权按会话持有（调用结束不释放，会话改配/删除时回收）；一次性调用（构建/独立模块工具）各自唯一租约、跑完即撤。首次真写 ACL 前 stderr 提示一次（解释器目录 / 祖先链 / 受保护根 / 可信基座），完成后一条汇总；回执行文不变（仍只报总秒数）。
-- 平台：Linux / macOS 用 sh；Windows 用 PowerShell（pwsh 7 优先、5.1 回退；`pwsh` 是 Microsoft Store 的应用执行别名——0 字节重解析点——时不选它，那种文件在围栏里起不来，判据在 `src/kernel/detail/process/windows.rs` 的 `exe_fact`；`-File` 临时 .ps1，UTF-8 BOM；脚本先设 `$ErrorActionPreference = 'Stop'`，未处理的 cmdlet 错误中止并以非 0 结束，要容错就在脚本里显式 `-ErrorAction SilentlyContinue` 或 try/catch）；VM Linux guest 用 /bin/sh，helper 按 `timeout_secs` 杀树；host 停止经 QGA 给 helper 发 SIGTERM，立即杀整棵进程树。guest 通道产出与本机同形的正文与说明：超时 / 信号由 `src/capabilities/vm/detail/guest_helper.rs` 的机器标记（`solomni-guest-fence: timeout` / `solomni-guest-fence: signal`）表达、用户停止按宿主取消旗判定，由通道翻译成 `shell.timeout` / `shell.signal` 说明；cwd·耗时由工具层在通道返回后统一补（`src/capabilities/conversation/session/service/engine/tools.rs`）。围栏拒绝（helper 的 `solomni-guest-fence:` 诊断）没有结束说明——命令没有执行。
-- 围栏基线：本机 Linux / macOS 的只读运行基线**只对 `/dev/null` 例外给写权**（标准重定向要能丢弃输出，`>/dev/null` / `2>/dev/null` 不能用 EACCES 把脚本带偏）；guest helper 同一口径。其余 `/dev` 节点不放行（`src/kernel/detail/confine/linux.rs` 的 `WRITABLE_BASELINE`、`src/kernel/detail/confine/macos.rs` 的 profile、`src/capabilities/vm/detail/guest_helper.rs` 的基线）。
+- 平台：Linux / macOS 用 sh；Windows 用 PowerShell（pwsh 7 优先、5.1 回退；`pwsh` 是 Microsoft Store 的应用执行别名——0 字节重解析点——时不选它，那种文件在围栏里起不来，判据在 `src/kernel/detail/process/windows.rs` 的 `exe_fact`；`-File` 临时 .ps1，UTF-8 BOM；脚本先设 `$ErrorActionPreference = 'Stop'`，未处理的 cmdlet 错误中止并以非 0 结束，要容错就在脚本里显式 `-ErrorAction SilentlyContinue` 或 try/catch）；VM Linux guest 用 /bin/sh，helper 按 `timeout_secs` 杀树；host 停止经 QGA 给 helper 发 SIGTERM，立即杀整棵进程树。guest 通道产出与本机同形的正文与说明：超时 / 信号由 `src/units/vm/detail/guest_helper.rs` 的机器标记（`solomni-guest-fence: timeout` / `solomni-guest-fence: signal`）表达、用户停止按宿主取消旗判定，由通道翻译成 `shell.timeout` / `shell.signal` 说明；cwd·耗时由工具层在通道返回后统一补（`src/units/conversation/session/service/engine/tools.rs`）。围栏拒绝（helper 的 `solomni-guest-fence:` 诊断）没有结束说明——命令没有执行。
+- 围栏基线：本机 Linux / macOS 的只读运行基线**只对 `/dev/null` 例外给写权**（标准重定向要能丢弃输出，`>/dev/null` / `2>/dev/null` 不能用 EACCES 把脚本带偏）；guest helper 同一口径。其余 `/dev` 节点不放行（`src/kernel/detail/confine/linux.rs` 的 `WRITABLE_BASELINE`、`src/kernel/detail/confine/macos.rs` 的 profile、`src/units/vm/detail/guest_helper.rs` 的基线）。
 - 状态：最近一次 shell 在会话状态栏出 chip（运行中；结束后按 `ShellLive.status` 分退出码 / 超时 / 停止 / 信号 + 耗时），点开看命令、cwd、状态、退出码、耗时与回执预览；数据来自 `SessionView.shell`，不替代转录里的工具行。重建 / 回放的会话按转录派生（`historical`）：cwd 与耗时只读工具行的结构化事实，起止时间不伪造。
 - 席位：读面恒发，所有席位都有 `shell`（`discussant` / `planner` / `orchestrator` / `core_proxy` 只读核实，`solo` / `executor` 干活）。代理的 shell 只做验收性核对，不替执行席产出；共享区主副本不进它的容器（要读先 work_pull），仍没有 work_pull / work_commit / work_push / work_sync / work_diff / work_reset / 模块工具。
 - 路径：shell 不接受模型给的 path 参数，**不适用** §七 的路径寻址表；边界是围栏。共享区内容先 work_pull 进沙箱；模块目录与主机只读根恒以只读进围栏，联网按会话档位，共享区主副本不进容器。
@@ -173,7 +173,7 @@ Mechanism { id: "discuss", flow: true, seats: &["core_proxy", "discussant"] }
 - **为什么**：这些载荷要驱动下一步（建会话、派发、推进或定向返工）；正文 JSON 既没有 schema 校验、也不进工具台账，写坏就整轮失败。
 - **普通说话仍可以是正文**：不驱动核心的发言（讨论意见、执行席的收尾话）不必包成工具——这就是"说话"与"操作"的分界。
 - **工具与载荷形状**在 `systools/tools.yaml`（`plan` / `node_verdict` / `checklist` / `slate` / `submit_report` …）。
-- **核心代理的工具面**（`core_proxy`，逐项见「席位与工具面」表）同样只从工具参数取载荷；外部动作经 `proxy::api` 的 `ProxyHost`（生产宿主是 `src/capabilities/runtime/service/bridge.rs` 的队列桥，见「边界」）。子会话**不把整份转录推给核心**：门与意外停止由机制送达，正文经 `read_session_messages` 倒查。
+- **核心代理的工具面**（`core_proxy`，逐项见「席位与工具面」表）同样只从工具参数取载荷；外部动作经 `proxy::api` 的 `ProxyHost`（生产宿主是 `src/units/runtime/service/bridge.rs` 的队列桥，见「边界」）。子会话**不把整份转录推给核心**：门与意外停止由机制送达，正文经 `read_session_messages` 倒查。
 - **载荷不合法 → 如实失败并中止这一步**（不猜、不回落正文 JSON）。
 - **核心可以先核实**：模型先请求 `read` / `grep` 时，核心执行并把结果回灌，然后再要那一次核心操作调用；它用的是**只读**小环境（根 = 本次工作的共享区，只发声明里 `capability: fs-read` 的工具）。没有这条回路，模型一想核实就会被判"没有调用 X"而整步中断。
 
@@ -196,8 +196,8 @@ Mechanism { id: "discuss", flow: true, seats: &["core_proxy", "discussant"] }
 | `{{module_roots}}` | 该 agent 使用的模块目录的绝对路径（只读表头 + 一行一个；无模块时给「成员模块目录：无」） | 只有使用该模块的 agent（**对 agent 的内置文件工具永久只读，含 `userdata/`**：agent 只有使用权；模块工具 / 服务进程可写自己的 `userdata/`） |
 
 - **越界即拒绝**：
-  - 路径必须是列出的真实根**之下**的绝对路径（`src/capabilities/tools/domain/fence.rs`）。
-  - 相对路径、`..` 跳出、不在任何根之内：一律拒绝，并把允许的根列回去（如实报错，不纠正）（`src/capabilities/tools/service.rs`）。
+  - 路径必须是列出的真实根**之下**的绝对路径（`src/units/tools/domain/fence.rs`）。
+  - 相对路径、`..` 跳出、不在任何根之内：一律拒绝，并把允许的根列回去（如实报错，不纠正）（`src/units/tools/service.rs`）。
   - **这张表只管系统工具**：模块工具的入参不查它；可达范围由围栏（本机档）/ guest 边界（虚拟机档）约束。
 - **可达根与直接父目录可判断存在性**：`exists` / `stat` 在围栏里得到真实结果，「产物目录不存在就先建」这类写法可用；Windows 依赖容器父目录只读项（默认开启，关掉会让这条走偏，报错来自命令自己）。写进未授权目录仍会失败，且失败只发生在该路径所在的调用，不连累无关路径。
 - **Windows 下路径仍统一写 `/`**：守门进程只把**程序名**里的 `/` 换成 `\` 再交 `cmd` 解释；参数里的路径不动。
@@ -207,7 +207,7 @@ Mechanism { id: "discuss", flow: true, seats: &["core_proxy", "discussant"] }
   - 私有沙箱不受共享区路径范围限制；模块目录对内置文件工具永久只读。
   - `work_versions` / `work_diff` / `work_resolve` / `work_lost` 走读作用域（它们不写共享主副本，发布仍由 `work_push` 收口；`work_lost` 的 restore 只写自己的沙箱）；`work_sync` 走写作用域（它推进共享区 head，但不改工作区内容）。
   - 语义见 [docs/permission/README.md](../permission/README.md)。
-- **编码**：内置 `read` / `write` 读严格 UTF-8（非法字节按替换字符呈现并如实标注——**本程序不猜编码**），写一律 UTF-8（`src/capabilities/tools/detail/sys_io.rs`）；
+- **编码**：内置 `read` / `write` 读严格 UTF-8（非法字节按替换字符呈现并如实标注——**本程序不猜编码**），写一律 UTF-8（`src/units/tools/detail/sys_io.rs`）；
 - `work_pull` / `work_commit` / `work_push` / `work_sync` / `work_versions` / `work_resolve` 按**字节**处理，图片、视频与其它二进制不走 UTF-8 假设。
 - 内容按块流式读写、不整份进上下文；单文件有上限（`MAX_ASSET_BYTES`，见 [workspace](../workspace/README.md)），超限提交 / 上传整次拒绝。
 - **二进制内容由模块工具或用户投喂产出**，内置 `write` 不是二进制通道；产出后用 `work_commit` 记进工作线、`work_push` 发布。
@@ -228,7 +228,7 @@ prompts/
 - 每份文件里**具体有哪些键、每个键干什么**：[prompts.md](../prompt/prompts.md)。
 
 - **席位声明 = 提示词 + 工具面 + 渲染规则，三者同处声明**（`mechanism.rs` 的 `Seat`）：信封模式下该席位能用的信封清单**要渲染进该回合的上下文**（原生通道则由声明槽给出），分开声明必然漂。
-- **席位必须可派生**：提示词与工具面决定了上下文与转录，重启 / 回档后必须重建出**同样的席位与上下文**（回放与实时产出同样的消息），所以席位**不能**是运行时内存里的临时状态；每回合由 `TurnRun.seat` 现给（`src/capabilities/prompt/domain/prompt.rs`）。
+- **席位必须可派生**：提示词与工具面决定了上下文与转录，重启 / 回档后必须重建出**同样的席位与上下文**（回放与实时产出同样的消息），所以席位**不能**是运行时内存里的临时状态；每回合由 `TurnRun.seat` 现给（`src/units/prompt/domain/prompt.rs`）。
 - **planner 与 orchestrator 分开**（上下文不同、工具面不同、指令互斥），只共享**背景知识**（链的语义、节点状态定义、信封协议）——共享的是背景，不是指令。
 - **executor 是全新上下文**：讨论内容只经任务提示词带入，不继承讨论转录。
 - **solo 与 executor 只差回报工具**：`submit_report` 的消费者只有协作的节点；用户建的单 agent 会话没有消费者——发了它只会多一次工具往返、把最终答复塞进工具参数。
@@ -302,8 +302,8 @@ prompts/
 
 ## 十四、产品命令面
 
-- **命令表是命令面的唯一声明**：`systools/commands.yaml` 写每条产品命令的名字、别名、分组、`phase`（`boot` 装配核心前跑完退出 / `core` 转录中心里输入）、执行者（`core` / `system` / `ui`）、一句话说明、确认门槛与参数声明（与动作面同一种形状：类型、位置序号、可选值、缺省值）；表经 `src/capabilities/tools/domain/op.rs` 投影成 `Op` 书，手册、菜单、Tab 补全、未知命令建议与文本解析都是它的派生。
-- **与工具表同族**：两张表都是"声明在文本层的契约"，读表在 `src/capabilities/tools/domain/commands.rs`（`CommandBook`），文本→JSON 的解析与校验只在 `src/capabilities/tools/domain/op.rs` 一处（`parse` / `usage` / `complete`）；命令面**不拥有行为**——执行者三分：`system` 交 `src/presentation/cli/boot.rs`（启动相，装配核心之前）、`core` 与 `ui` 交 `src/presentation/cli/shell.rs`（装配之后，命令行一次性调用与转录中心提示符共用同一条）。
+- **命令表是命令面的唯一声明**：`systools/commands.yaml` 写每条产品命令的名字、别名、分组、`phase`（`boot` 装配核心前跑完退出 / `core` 转录中心里输入）、执行者（`core` / `system` / `ui`）、一句话说明、确认门槛与参数声明（与动作面同一种形状：类型、位置序号、可选值、缺省值）；表经 `src/units/tools/domain/op.rs` 投影成 `Op` 书，手册、菜单、Tab 补全、未知命令建议与文本解析都是它的派生。
+- **与工具表同族**：两张表都是"声明在文本层的契约"，读表在 `src/units/tools/domain/commands.rs`（`CommandBook`），文本→JSON 的解析与校验只在 `src/units/tools/domain/op.rs` 一处（`parse` / `usage` / `complete`）；命令面**不拥有行为**——执行者三分：`system` 交 `src/presentation/cli/boot.rs`（启动相，装配核心之前）、`core` 与 `ui` 交 `src/presentation/cli/shell.rs`（装配之后，命令行一次性调用与转录中心提示符共用同一条）。
 - **编译进二进制**：表用 `include_str!` 编进来，`solomni --help` 在任何目录下都可用，不依赖产品根上的 yaml 是否就位；这与运行时读盘的 `tools.yaml` 有意不同（命令是产品语法，不是用户策略）。
 - **声明自洽在装配期硬失败**：相位与执行者必须配对（启动相只能 `system`，转录相不得 `system`）、位置序号唯一、`rest` 不再写序号、可选值只给字符串——任一条不成立，`src/main.rs` 的 `command_ops()` 逐条报错并退出 1，不靠测试阶段的字面量比对兜底。
 - **调用面不止命令**：模块工具与命令共用同一套词法与回执——`solomni <模块 id>` 是模块手册（版本、状态、`system` 原文、工具表），`solomni <模块 id> <工具名> --help` 是工具手册，`solomni modules` 是清单（含版本、启停与拒收原因）；`solomni <模块 id> --version` 是模块版本，工具没有自己的版本。模块工具的调用与 agent 侧同一个 `ActionCall`（id = `module.<模块 id>.<工具名>`）。

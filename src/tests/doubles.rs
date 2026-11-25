@@ -1,35 +1,35 @@
 //! 目的：测试替身与测试组合根（doubles）——内存适配器、共享夹具与装配辅助。
 //! 管：各出站端口的内存实现、测试用能力面工厂、核心装配变体；本模块对“只有用例才用到”的项放行 dead_code。
-//! 不管：用例本身（各业务测试文件）、真实适配器（`src/capabilities/*/detail/`）。
+//! 不管：用例本身（各业务测试文件）、真实适配器（`src/units/*/detail/`）。
 //! 联动：语义规范见 docs/testing/doubles.md；端口契约测试与它同处一层（`src/tests/`）。
 
 #![allow(dead_code)]
 
 use super::builders::SilentRunner;
-use crate::capabilities::catalog::registry::api::AgentMeta;
-use crate::capabilities::runtime::api::SessionEvent;
-use crate::capabilities::work::api::WorkSpec;
+use crate::units::catalog::registry::api::AgentMeta;
+use crate::units::runtime::api::SessionEvent;
+use crate::units::work::api::WorkSpec;
 
-use crate::capabilities::catalog::modules::api::{Module, ModuleManifest};
-use crate::capabilities::catalog::modules::ports::ModuleSource;
-use crate::capabilities::catalog::packages::domain::manifest::{Library, PackageManifest};
-use crate::capabilities::catalog::packages::ports::PackageSource;
-use crate::capabilities::catalog::registry::api::{ModelEntry, Provider, Settings};
-use crate::capabilities::catalog::registry::ports::SettingsStore;
-use crate::capabilities::conversation::session::api::{HistoryView, SessionMeta, TurnIo};
-use crate::capabilities::conversation::session::ports::HistoryStore;
-use crate::capabilities::llm::api::Channel;
-use crate::capabilities::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
-use crate::capabilities::llm::detail::fake_chat::FakeChat;
-use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
-use crate::capabilities::prompt::api::Prompt;
-use crate::capabilities::prompt::domain::prompt::Prompts;
-use crate::capabilities::prompt::ports::PromptSource;
-use crate::capabilities::runtime::service::Core;
-use crate::capabilities::tools::ports::SystoolsSource;
-use crate::capabilities::tools::ports::{FileRead, SysIo};
-use crate::capabilities::workspace::domain::asset::{AssetScanner, FileVersion};
-use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
+use crate::units::catalog::modules::api::{Module, ModuleManifest};
+use crate::units::catalog::modules::ports::ModuleSource;
+use crate::units::catalog::packages::domain::manifest::{Library, PackageManifest};
+use crate::units::catalog::packages::ports::PackageSource;
+use crate::units::catalog::registry::api::{ModelEntry, Provider, Settings};
+use crate::units::catalog::registry::ports::SettingsStore;
+use crate::units::conversation::session::api::{HistoryView, SessionMeta, TurnIo};
+use crate::units::conversation::session::ports::HistoryStore;
+use crate::units::llm::api::Channel;
+use crate::units::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
+use crate::units::llm::detail::fake_chat::FakeChat;
+use crate::units::llm::ports::{ChatGateway, ModelCatalog};
+use crate::units::prompt::api::Prompt;
+use crate::units::prompt::domain::prompt::Prompts;
+use crate::units::prompt::ports::PromptSource;
+use crate::units::runtime::service::Core;
+use crate::units::tools::ports::SystoolsSource;
+use crate::units::tools::ports::{FileRead, SysIo};
+use crate::units::workspace::domain::asset::{AssetScanner, FileVersion};
+use crate::units::workspace::ports::{WorkStore, Workdirs};
 use crate::kernel::api::types::Tier;
 use crate::kernel::ports::ProcessRunner;
 use std::collections::{BTreeMap, BTreeSet};

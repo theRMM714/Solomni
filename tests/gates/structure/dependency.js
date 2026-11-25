@@ -35,11 +35,11 @@ function direction(root) {
   const problems = [];
 
   // 归一：能力路径截到「分区段」为止——::api / ::service / ::domain / ::detail / ::ports 是唯一合法入口与内部的判据段，
-  // 分区段之前可以有任意层子业务（如 capabilities/conversation/session/domain）。截断到分区段才能既认出 ::api，又认出 ::ports。
+  // 分区段之前可以有任意层子业务（如 units/conversation/session/domain）。截断到分区段才能既认出 ::api，又认出 ::ports。
   const PARTITIONS = ["api", "service", "domain", "detail", "ports"];
   const normTarget = (full) => {
     const parts = full.split("::");
-    if (parts[0] !== "capabilities") return "crate::" + parts.slice(0, 2).join("::");
+    if (parts[0] !== "units") return "crate::" + parts.slice(0, 2).join("::");
     const at = parts.findIndex((p, i) => i >= 2 && PARTITIONS.includes(p));
     const depth = at >= 0 ? at + 1 : 3;
     return "crate::" + parts.slice(0, Math.min(depth, parts.length)).join("::");
@@ -50,15 +50,15 @@ function direction(root) {
     // 程序入口层：组合根 + 机器可读探针 + 围栏守门进程 + 入口层共用机制。它依赖所有人，任何人都不许依赖它。
     if (r === "src/main.rs" || r === "src/entry.rs" || r === "src/guard.rs" || r.startsWith("src/entry/") || r.startsWith("src/guard/")) return "entry";
     if (r === "src/kernel.rs" || r.startsWith("src/kernel/")) return "kernel";
-    if (r === "src/capabilities.rs" || r.startsWith("src/capabilities/")) return "capabilities";
+    if (r === "src/units.rs" || r.startsWith("src/units/")) return "units";
     if (r === "src/tests.rs" || r.startsWith("src/tests/")) return "tests";
     if (r === "src/main.rs") return "main";
     return null;
   };
   // 层 → 它不得引用的层。端口由能力定义、它的 detail（与 kernel 的机制实现）实现，永不反向。
   const FORBIDDEN = {
-    kernel: ["capabilities", "presentation", "entry"],
-    capabilities: ["presentation", "entry"],
+    kernel: ["units", "presentation", "entry"],
+    units: ["presentation", "entry"],
   };
 
   const rsFiles = [];
@@ -112,45 +112,45 @@ function direction(root) {
       }
       if ((FORBIDDEN[layer] || []).includes(targetLayer)) reverse.add(f + " -> " + t);
       // 呈现层只认入站能力面：某个能力的 ::api（顶层编排 runtime 也不例外）。
-      const presOk = t.startsWith("crate::capabilities::") && t.endsWith("::api");
+      const presOk = t.startsWith("crate::units::") && t.endsWith("::api");
       if (layer === "presentation" && !presOk && targetLayer !== "presentation") presentation.add(f + " -> " + t);
       // 业务之间只经对方的 api 交流（R1）；跨能力引用 ::ports / ::domain / ::detail 一律不许。
-      if (layer === "capabilities" && targetLayer === "capabilities") {
+      if (layer === "units" && targetLayer === "units") {
         const selfCap = f.split("/")[2];
         const otherCap = t.split("::")[2];
         if (otherCap && otherCap !== selfCap && !t.endsWith("::api")) apiOnly.add(f + " -> " + t);
       }
       // domain 是纯逻辑：不得引用任何能力端口（自己的也不行，引了就不是纯的了）。
-      if (f.includes("/domain/") && t.startsWith("crate::capabilities::") && t.endsWith("::ports")) domainPorts.add(f + " -> " + t);
+      if (f.includes("/domain/") && t.startsWith("crate::units::") && t.endsWith("::ports")) domainPorts.add(f + " -> " + t);
       // 端口只由定义它的能力持有（R12）：任何非入口层引用别的能力的 ports 都是违规。
       if (
         layer !== "entry" &&
-        t.startsWith("crate::capabilities::") &&
+        t.startsWith("crate::units::") &&
         t.endsWith("::ports") &&
-        t.split("::")[2] !== (layer === "capabilities" ? f.split("/")[2] : null)
+        t.split("::")[2] !== (layer === "units" ? f.split("/")[2] : null)
       ) {
         apiOnly.add(f + " -> " + t);
       }
       // api.rs 是入站用例面：不得把能力端口再导出去。
-      if (f.endsWith("/api.rs") && t.startsWith("crate::capabilities::") && t.endsWith("::ports")) apiPorts.add(f + " -> " + t);
+      if (f.endsWith("/api.rs") && t.startsWith("crate::units::") && t.endsWith("::ports")) apiPorts.add(f + " -> " + t);
       // ::detail 是实现：跨能力引用一律不许，只有入口层的组合根能构造它。
-      if (layer !== "entry" && t.startsWith("crate::capabilities::") && t.endsWith("::detail") && t.split("::")[2] !== f.split("/")[2]) {
+      if (layer !== "entry" && t.startsWith("crate::units::") && t.endsWith("::detail") && t.split("::")[2] !== f.split("/")[2]) {
         apiOnly.add(f + " -> " + t);
       }
-      // 环的节点：能力用 capabilities/<名字>（协调业务与别的能力同处一张图）。
-      const selfNode = "capabilities/" + f.split("/")[2];
-      const otherNode = targetLayer === "capabilities" ? "capabilities/" + t.split("::")[2] : null;
+      // 环的节点：能力用 units/<名字>（协调业务与别的能力同处一张图）。
+      const selfNode = "units/" + f.split("/")[2];
+      const otherNode = targetLayer === "units" ? "units/" + t.split("::")[2] : null;
       if (otherNode && otherNode !== selfNode) {
         (coreGraph[selfNode] = coreGraph[selfNode] || new Set()).add(otherNode);
       }
     }
     // 不许给别的能力的类型写 impl（R1）：这是另一种"互相引入"，use 边看不见它。
     if (layer !== "entry") {
-      const selfCap = layer === "capabilities" ? f.split("/")[2] : null;
+      const selfCap = layer === "units" ? f.split("/")[2] : null;
       const foreignPaths = (s) =>
         [...s.matchAll(/crate::([a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)*)/g)]
           .map((m) => normTarget(m[1]))
-          .filter((t2) => t2.startsWith("crate::capabilities::") && t2.split("::")[2] !== selfCap);
+          .filter((t2) => t2.startsWith("crate::units::") && t2.split("::")[2] !== selfCap);
       for (const line of text.split("\n")) {
         if (!/^impl\b/.test(line)) continue;
         // impl Trait for Type → 只看 Type（实现别人的 api trait 是正当的队列代理）；impl Type → 看 Type。

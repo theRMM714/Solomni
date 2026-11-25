@@ -1,11 +1,11 @@
 //! 目的：`work_ignore` 工具面与「规则只管发现」的语义——名单读改写、越界拒绝、显式点名仍生效。
 //! 管：list / add / remove 三种 op、去重、删规则、坏规则整次拒绝且不落盘、沙箱清单按规则剪枝。
 //! 不管：规则匹配语义（`filter.rs`）；目录遍历剪枝（`tests::detail::fs`）。
-//! 联动：`src/capabilities/workspace/service/ignore.rs`；`.gitignore` 不在这里改。
+//! 联动：`src/units/workspace/service/ignore.rs`；`.gitignore` 不在这里改。
 
 use super::support::*;
-use crate::capabilities::workspace::api::{Rules, WORKIGNORE};
-use crate::capabilities::workspace::ports::WorkStore;
+use crate::units::workspace::api::{Rules, WORKIGNORE};
+use crate::units::workspace::ports::WorkStore;
 
 /// 目的：没有名单文件时按种子答话；add 去重、立刻生效、remove 精确删行。
 #[test]

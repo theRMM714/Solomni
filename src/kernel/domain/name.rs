@@ -1,7 +1,7 @@
 //! 目的：会成为目录名的名字的两条纯规则——校验与重名后缀。
 //! 管：`validate_dir_name`（非空、无首尾空白、不是 `.` / `..`、不含 Windows 非法字符与控制字符、不是设备保留名）与 `dedup_suffix`（占用时依次追加 `-2` / `-3`）。
 //! 不管：名字从哪来、查重查的是哪个集合（`exists` 由调用方给）、报错怎么呈现。
-//! 联动：agent 名（`src/capabilities/catalog/registry/domain/agents.rs`）与工作名（`src/capabilities/work/domain.rs`、`src/capabilities/conversation/session/domain/session.rs`）经 `kernel::api` 共用这两条。
+//! 联动：agent 名（`src/units/catalog/registry/domain/agents.rs`）与工作名（`src/units/work/domain.rs`、`src/units/conversation/session/domain/session.rs`）经 `kernel::api` 共用这两条。
 
 /// 目的：校验一个即将成为目录名的名字。
 /// 参数：`what` 只进报错文案（如「agent 名」「工作名」），不参与判断。

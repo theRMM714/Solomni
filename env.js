@@ -1206,7 +1206,7 @@ function readToolchainDep(tool) {
 }
 
 /**
- * 目的：安装身份指纹——与 Rust 侧 `src/capabilities/provision/domain.rs` 的 install_identity 逐字节同口径。
+ * 目的：安装身份指纹——与 Rust 侧 `src/units/provision/domain.rs` 的 install_identity 逐字节同口径。
  * 为什么：env.js 装完把同一身份写进产品台账（.vm/state/deps.json），产品补齐时按探针 + 身份判「已装」，不重复下载。
  * 约束：材料布局 / schema 变更必须两侧同步（各有钉住用例）；pin 取 links.yaml 的 `<source>.sha256`。
  */

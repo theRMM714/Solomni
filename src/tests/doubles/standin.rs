@@ -6,11 +6,11 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use crate::capabilities::conversation::session::api::{
+use crate::units::conversation::session::api::{
     Flow, Gate, GateTicket, Handback, MemberAsk, MemberTurn, SessionEvent, Settle,
 };
-use crate::capabilities::llm::api::{CompleteOpts, Msg};
-use crate::capabilities::tools::api::Tools;
+use crate::units::llm::api::{CompleteOpts, Msg};
+use crate::units::tools::api::Tools;
 
 /// 目的：最小流程：开场推一条自己的事件，问名单里第一个成员一回合，吸收后收工。
 /// 约束：只用流程面（不认协作的任何字段）；事件走 `SessionEvent::Push`，呈现侧不必认识它。

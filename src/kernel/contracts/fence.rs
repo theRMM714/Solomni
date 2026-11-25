@@ -1,7 +1,7 @@
 //! 目的：围栏的**意图**——谁（agent + 租约）要在哪些路径上得到什么访问、网络要不要；平台无关的纯数据。
 //! 管：`FencePlan` / `Grant` / `Access` / `Reach` / `NetPolicy`、执行宽严 `FenceRunPolicy`、
 //!   落点授不上的中性事实 `FenceBlocked`、守门进程的失败退出码 `FENCE_FAILED`。
-//! 不管：意图怎么从沙箱与模块事实派生（`capabilities/tools/domain/fence.rs`）；
+//! 不管：意图怎么从沙箱与模块事实派生（`units/tools/domain/fence.rs`）；
 //!   意图怎么落到本机机制（`detail/confine` 的平台实现）；按次租约与全局沙箱要求（`kernel/domain/fence.rs`）。
 //! 联动：由 `src/kernel/api/fence.rs` 重导出；守门进程协议与工具执行层消费它。
 

@@ -1,7 +1,7 @@
 //! 目的：虚拟机引擎与 guest 通道替身——不起真 VM，只记录启动/执行/停止。
 //! 管：启动规格与延迟、挂载与共享后端、guest 通道执行、诊断回放。
-//! 不管：真实引擎（`src/capabilities/vm/detail/qemu.rs`）、工作区（`workspace.rs`）。
-//! 联动：`src/capabilities/vm/ports.rs` 与 `src/capabilities/vm/api.rs`。
+//! 不管：真实引擎（`src/units/vm/detail/qemu.rs`）、工作区（`workspace.rs`）。
+//! 联动：`src/units/vm/ports.rs` 与 `src/units/vm/api.rs`。
 
 use super::*;
 
@@ -16,7 +16,7 @@ pub(crate) struct FakeEngine {
     pub fenced_result: Option<crate::kernel::api::types::ToolOutcome>,
     pub exec_result: Option<crate::kernel::api::types::ToolOutcome>,
     // 每次 `boot()` 收到的 `GuestSpec` 快照（含 `mounts`；失败尝试也记——"试过哪个计划"同样是事实）。
-    pub specs: Arc<Mutex<Vec<crate::capabilities::vm::domain::guest::GuestSpec>>>,
+    pub specs: Arc<Mutex<Vec<crate::units::vm::domain::guest::GuestSpec>>>,
 }
 
 impl FakeEngine {
@@ -26,20 +26,20 @@ impl FakeEngine {
     }
 }
 
-impl crate::capabilities::vm::ports::VmEngine for FakeEngine {
+impl crate::units::vm::ports::VmEngine for FakeEngine {
     fn id(&self) -> &'static str {
         "fake"
     }
 
-    fn supports(&self, _guest: &crate::capabilities::vm::domain::guest::GuestImage) -> bool {
+    fn supports(&self, _guest: &crate::units::vm::domain::guest::GuestImage) -> bool {
         true
     }
 
     fn boot(
         &self,
-        spec: &crate::capabilities::vm::domain::guest::GuestSpec,
-        _share: &crate::capabilities::vm::ports::SharePlan,
-    ) -> Result<Box<dyn crate::capabilities::vm::ports::GuestVm>, String> {
+        spec: &crate::units::vm::domain::guest::GuestSpec,
+        _share: &crate::units::vm::ports::SharePlan,
+    ) -> Result<Box<dyn crate::units::vm::ports::GuestVm>, String> {
         if let Some(delay) = self.boot_delay {
             std::thread::sleep(delay);
         }
@@ -78,7 +78,7 @@ impl FakeShare {
     }
 }
 
-impl crate::capabilities::vm::ports::ShareBackend for FakeShare {
+impl crate::units::vm::ports::ShareBackend for FakeShare {
     fn id(&self) -> &'static str {
         "fake"
     }
@@ -86,7 +86,7 @@ impl crate::capabilities::vm::ports::ShareBackend for FakeShare {
     fn supports(
         &self,
         _engine: &str,
-        _guest: &crate::capabilities::vm::domain::guest::GuestImage,
+        _guest: &crate::units::vm::domain::guest::GuestImage,
     ) -> bool {
         true
     }
@@ -94,18 +94,18 @@ impl crate::capabilities::vm::ports::ShareBackend for FakeShare {
     fn prepare(
         &self,
         _engine: &str,
-        _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
+        _mounts: &[crate::units::vm::domain::guest::GuestMount],
         _share_tool: Option<&str>,
     ) -> Result<
         (
-            crate::capabilities::vm::ports::SharePlan,
-            Box<dyn crate::capabilities::vm::ports::ShareGuard>,
+            crate::units::vm::ports::SharePlan,
+            Box<dyn crate::units::vm::ports::ShareGuard>,
         ),
         String,
     > {
         self.calls.lock().expect("锁").push("prepare".to_string());
         Ok((
-            crate::capabilities::vm::ports::SharePlan {
+            crate::units::vm::ports::SharePlan {
                 kind: "fake",
                 engine_args: Vec::new(),
                 net_options: Vec::new(),
@@ -121,8 +121,8 @@ impl crate::capabilities::vm::ports::ShareBackend for FakeShare {
 
     fn sync_in(
         &self,
-        _channel: &mut dyn crate::capabilities::vm::ports::GuestChannel,
-        _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
+        _channel: &mut dyn crate::units::vm::ports::GuestChannel,
+        _mounts: &[crate::units::vm::domain::guest::GuestMount],
     ) -> Result<(), String> {
         self.calls.lock().expect("锁").push("sync_in".to_string());
         Ok(())
@@ -130,8 +130,8 @@ impl crate::capabilities::vm::ports::ShareBackend for FakeShare {
 
     fn sync_out(
         &self,
-        _channel: &mut dyn crate::capabilities::vm::ports::GuestChannel,
-        _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
+        _channel: &mut dyn crate::units::vm::ports::GuestChannel,
+        _mounts: &[crate::units::vm::domain::guest::GuestMount],
     ) -> Result<(), String> {
         self.calls.lock().expect("锁").push("sync_out".to_string());
         Ok(())
@@ -169,7 +169,7 @@ impl NamedShare {
     }
 }
 
-impl crate::capabilities::vm::ports::ShareBackend for NamedShare {
+impl crate::units::vm::ports::ShareBackend for NamedShare {
     fn id(&self) -> &'static str {
         self.name
     }
@@ -181,7 +181,7 @@ impl crate::capabilities::vm::ports::ShareBackend for NamedShare {
     fn supports(
         &self,
         _engine: &str,
-        _guest: &crate::capabilities::vm::domain::guest::GuestImage,
+        _guest: &crate::units::vm::domain::guest::GuestImage,
     ) -> bool {
         self.ok
     }
@@ -189,18 +189,18 @@ impl crate::capabilities::vm::ports::ShareBackend for NamedShare {
     fn prepare(
         &self,
         _engine: &str,
-        _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
+        _mounts: &[crate::units::vm::domain::guest::GuestMount],
         _share_tool: Option<&str>,
     ) -> Result<
         (
-            crate::capabilities::vm::ports::SharePlan,
-            Box<dyn crate::capabilities::vm::ports::ShareGuard>,
+            crate::units::vm::ports::SharePlan,
+            Box<dyn crate::units::vm::ports::ShareGuard>,
         ),
         String,
     > {
         self.calls.lock().expect("锁").push("prepare".to_string());
         Ok((
-            crate::capabilities::vm::ports::SharePlan {
+            crate::units::vm::ports::SharePlan {
                 kind: self.name,
                 engine_args: Vec::new(),
                 net_options: Vec::new(),
@@ -216,8 +216,8 @@ impl crate::capabilities::vm::ports::ShareBackend for NamedShare {
 
     fn sync_in(
         &self,
-        _channel: &mut dyn crate::capabilities::vm::ports::GuestChannel,
-        _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
+        _channel: &mut dyn crate::units::vm::ports::GuestChannel,
+        _mounts: &[crate::units::vm::domain::guest::GuestMount],
     ) -> Result<(), String> {
         self.calls.lock().expect("锁").push("sync_in".to_string());
         Ok(())
@@ -225,8 +225,8 @@ impl crate::capabilities::vm::ports::ShareBackend for NamedShare {
 
     fn sync_out(
         &self,
-        _channel: &mut dyn crate::capabilities::vm::ports::GuestChannel,
-        _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
+        _channel: &mut dyn crate::units::vm::ports::GuestChannel,
+        _mounts: &[crate::units::vm::domain::guest::GuestMount],
     ) -> Result<(), String> {
         self.calls.lock().expect("锁").push("sync_out".to_string());
         Ok(())
@@ -238,7 +238,7 @@ pub(crate) struct FakeGuard2 {
     pub(crate) calls: Arc<Mutex<Vec<String>>>,
 }
 
-impl crate::capabilities::vm::ports::ShareGuard for FakeGuard2 {
+impl crate::units::vm::ports::ShareGuard for FakeGuard2 {
     fn release(&mut self) {
         self.calls.lock().expect("锁").push("release".to_string());
     }
@@ -249,7 +249,7 @@ struct FakeGuard {
     calls: Arc<Mutex<Vec<String>>>,
 }
 
-impl crate::capabilities::vm::ports::ShareGuard for FakeGuard {
+impl crate::units::vm::ports::ShareGuard for FakeGuard {
     fn release(&mut self) {
         self.calls.lock().expect("锁").push("release".to_string());
     }
@@ -272,7 +272,7 @@ struct FakeChannel {
     exec_result: Option<crate::kernel::api::types::ToolOutcome>,
 }
 
-impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
+impl crate::units::vm::ports::GuestChannel for FakeChannel {
     /// 目的：替身通道就当 agent 已在——等待用例不必真等。
     fn ping(&mut self) -> bool {
         true
@@ -280,7 +280,7 @@ impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
 
     fn exec(
         &mut self,
-        run: &crate::capabilities::vm::domain::guest::GuestRun,
+        run: &crate::units::vm::domain::guest::GuestRun,
     ) -> crate::kernel::api::types::ToolOutcome {
         self.calls
             .lock()
@@ -293,8 +293,8 @@ impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
 
     fn exec_fenced(
         &mut self,
-        _run: &crate::capabilities::vm::domain::guest::GuestRun,
-        access: &crate::capabilities::vm::domain::guest::GuestAccess,
+        _run: &crate::units::vm::domain::guest::GuestRun,
+        access: &crate::units::vm::domain::guest::GuestAccess,
     ) -> crate::kernel::api::types::ToolOutcome {
         // 记录形状沿用既有前缀（既有用例按 `fenced:<租约>:<agent>:<cwd>:<rw>` 断言），
         // 后面再追加只读根与诊断标记——诊断用例据此断言「走的是只读系统允许集」。
@@ -318,8 +318,8 @@ impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
     }
 }
 
-impl crate::capabilities::vm::ports::GuestVm for FakeVm {
-    fn channel(&mut self) -> &mut dyn crate::capabilities::vm::ports::GuestChannel {
+impl crate::units::vm::ports::GuestVm for FakeVm {
+    fn channel(&mut self) -> &mut dyn crate::units::vm::ports::GuestChannel {
         &mut self.channel
     }
 
@@ -340,7 +340,7 @@ pub(crate) struct RecordingVm {
         Vec<(
             String,
             u64,
-            crate::capabilities::vm::domain::guest::OutputLimit,
+            crate::units::vm::domain::guest::OutputLimit,
         )>,
     >,
     // 已拉起的租约（`guest_leases` 的事实来源；`guest_start` 记、`guest_stop` 删）。
@@ -351,10 +351,10 @@ pub(crate) struct RecordingVm {
     pub fenced_result: Mutex<Option<crate::kernel::api::types::ToolOutcome>>,
 }
 
-impl crate::capabilities::vm::api::Vm for RecordingVm {
+impl crate::units::vm::api::Vm for RecordingVm {
     fn guest_start(
         &self,
-        spec: &crate::capabilities::vm::domain::guest::GuestSpec,
+        spec: &crate::units::vm::domain::guest::GuestSpec,
     ) -> Result<(), String> {
         self.leases.lock().expect("锁").push(spec.lease.clone());
         Ok(())
@@ -363,7 +363,7 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
     fn guest_run(
         &self,
         _lease: &str,
-        run: &crate::capabilities::vm::domain::guest::GuestRun,
+        run: &crate::units::vm::domain::guest::GuestRun,
     ) -> crate::kernel::api::types::ToolOutcome {
         self.runs.lock().expect("锁").push(run.command.clone());
         crate::kernel::api::types::ToolOutcome::new(true, "guest".to_string())
@@ -372,7 +372,7 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
     fn guest_run_fenced(
         &self,
         _lease: &str,
-        run: &crate::capabilities::vm::domain::guest::GuestRun,
+        run: &crate::units::vm::domain::guest::GuestRun,
         _fence: &crate::kernel::api::fence::FencePlan,
     ) -> crate::kernel::api::types::ToolOutcome {
         self.runs
@@ -427,8 +427,8 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
 
 /// 目的：测试用的 **vm 能力面**——把 guest 替身装进 `VmService`（与生产同一条路，R12）。
 /// 约束：共享档替身同时持 `9p` 与 `smb`（都是用户链里的挂载式档，不需要外部工具），Linux/macOS 的真实候选能挑到 9p，Windows 能挑到 smb；copy 是 emergency 档，空候选不会被自动选中。
-pub(crate) fn test_vm() -> Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
-    Arc::new(crate::capabilities::vm::service::VmService::new(
+pub(crate) fn test_vm() -> Arc<dyn crate::units::vm::api::Vm + Send + Sync> {
+    Arc::new(crate::units::vm::service::VmService::new(
         Arc::new(FakeEngine::new()),
         vec![
             Arc::new(NamedShare::new("9p", true)),
@@ -440,8 +440,8 @@ pub(crate) fn test_vm() -> Arc<dyn crate::capabilities::vm::api::Vm + Send + Syn
 /// 目的：带可控"起 guest 耗时 / 失败"的 vm 能力面——验核心不被慢步骤占住、失败不留痕。
 pub(crate) fn test_vm_with_engine(
     engine: FakeEngine,
-) -> Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
-    Arc::new(crate::capabilities::vm::service::VmService::new(
+) -> Arc<dyn crate::units::vm::api::Vm + Send + Sync> {
+    Arc::new(crate::units::vm::service::VmService::new(
         Arc::new(engine),
         vec![
             Arc::new(NamedShare::new("9p", true)),
@@ -453,11 +453,11 @@ pub(crate) fn test_vm_with_engine(
 /// 目的：测试用的 **packages 能力面**——把内存包库装进 `PackagesService`（与生产同一条路，R12）。
 pub(crate) fn test_packages(
     packages: Arc<dyn PackageSource + Send + Sync>,
-) -> Arc<dyn crate::capabilities::catalog::packages::api::Packages + Send + Sync> {
+) -> Arc<dyn crate::units::catalog::packages::api::Packages + Send + Sync> {
     Arc::new(
-        crate::capabilities::catalog::packages::service::PackagesService::with_base(
+        crate::units::catalog::packages::service::PackagesService::with_base(
             packages,
-            crate::capabilities::catalog::packages::api::BaseFacts::default(),
+            crate::units::catalog::packages::api::BaseFacts::default(),
         ),
     )
 }
@@ -465,15 +465,15 @@ pub(crate) fn test_packages(
 /// 目的：测试用的 packages 能力面，带"宿主回退可用"的事实（由测试 probe 声明它有什么）。
 pub(crate) fn test_packages_with_base(
     packages: Arc<dyn PackageSource + Send + Sync>,
-    base: crate::capabilities::catalog::packages::api::BaseFacts,
-) -> Arc<dyn crate::capabilities::catalog::packages::api::Packages + Send + Sync> {
+    base: crate::units::catalog::packages::api::BaseFacts,
+) -> Arc<dyn crate::units::catalog::packages::api::Packages + Send + Sync> {
     Arc::new(
-        crate::capabilities::catalog::packages::service::PackagesService::with_base(packages, base),
+        crate::units::catalog::packages::service::PackagesService::with_base(packages, base),
     )
 }
 
 /// 目的：模块启停覆盖的内存存储（测试用；与 yaml 实现同一条端口）。
 #[derive(Default)]
 pub(crate) struct InMemoryModuleState {
-    pub(crate) state: Mutex<crate::capabilities::catalog::modules::domain::state::EnabledState>,
+    pub(crate) state: Mutex<crate::units::catalog::modules::domain::state::EnabledState>,
 }

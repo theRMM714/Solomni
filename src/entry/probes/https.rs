@@ -13,8 +13,8 @@ pub fn https_check(args: &[String], i: usize) -> i32 {
         eprintln!("用法：solomni --https-check <https url>");
         return 2;
     }
-    let backend = crate::capabilities::llm::detail::http_agent::tls_backend();
-    let agent = crate::capabilities::llm::detail::http_agent::agent(10, 20);
+    let backend = crate::units::llm::detail::http_agent::tls_backend();
+    let agent = crate::units::llm::detail::http_agent::agent(10, 20);
     match agent.get(&url).call() {
         Ok(resp) => {
             println!("[HTTPS] ok {} {} {}", resp.status().as_u16(), backend, url);
@@ -23,7 +23,7 @@ pub fn https_check(args: &[String], i: usize) -> i32 {
         Err(e) => {
             println!(
                 "[HTTPS] {} {} {}",
-                crate::capabilities::llm::detail::http_agent::classify(&e),
+                crate::units::llm::detail::http_agent::classify(&e),
                 backend,
                 e
             );

@@ -1,13 +1,13 @@
 //! 目的：钉收敛后的权限模型——两档网络开关、共享区路径归属、固定授予的围栏，以及工作区提交工具的消费。
 //! 管：档位与父子收窄、共享区三态与覆盖/收窄/黑名单、沙箱落点、围栏规格、提交与读作用域过滤。
 //! 不管：平台真机验收（tests/<平台>/）；确认队列本身（见 src/tests/session/）。
-//! 联动：src/capabilities/permission/、src/capabilities/workspace/domain/scope.rs、docs/permission/README.md。
+//! 联动：src/units/permission/、src/units/workspace/domain/scope.rs、docs/permission/README.md。
 
-use crate::capabilities::permission::api::{
+use crate::units::permission::api::{
     PermissionDefaults, PermissionLayer, PermissionSet, ProfileId, SessionSandbox,
 };
-use crate::capabilities::workspace::api::{ScopeMode, SharedEdit, SharedScope, validate_entry};
-use crate::capabilities::workspace::domain::workspace::Place;
+use crate::units::workspace::api::{ScopeMode, SharedEdit, SharedScope, validate_entry};
+use crate::units::workspace::domain::workspace::Place;
 use crate::tests::doubles::{
     InMemoryWorkStore, InMemoryWorkspace, abs, test_sandbox, test_workspace, test_workspace_store,
 };
@@ -211,7 +211,7 @@ fn external_shared_root_is_not_a_shell_write_surface() {
 /// 目的：work_status 的路径清单按读归属过滤，显式越界路径直接拒绝。
 #[test]
 fn work_status_filters_paths_outside_read_scope() {
-    use crate::capabilities::workspace::api::{CommitRequest, PushRequest, WorkHandler};
+    use crate::units::workspace::api::{CommitRequest, PushRequest, WorkHandler};
     use crate::kernel::ports::{ToolCtx, ToolHandler};
 
     let dirs = std::sync::Arc::new(InMemoryWorkspace::new());
@@ -289,7 +289,7 @@ fn work_status_filters_paths_outside_read_scope() {
 /// 目的：work_lost 的清单与恢复也按读归属收口，不能拿备份绕过范围。
 #[test]
 fn work_lost_is_scoped_by_read_permission() {
-    use crate::capabilities::workspace::api::WorkHandler;
+    use crate::units::workspace::api::WorkHandler;
     use crate::kernel::ports::{ToolCtx, ToolHandler};
 
     let dirs = std::sync::Arc::new(InMemoryWorkspace::new());
@@ -340,7 +340,7 @@ fn work_lost_is_scoped_by_read_permission() {
 /// 目的：work_versions / work_resolve 也按读归属收口，不能拿它们绕过范围。
 #[test]
 fn work_versions_and_resolve_are_scoped_by_read_permission() {
-    use crate::capabilities::workspace::api::WorkHandler;
+    use crate::units::workspace::api::WorkHandler;
     use crate::kernel::ports::{ToolCtx, ToolHandler};
     let ws = test_workspace(std::sync::Arc::new(InMemoryWorkspace::new()));
     let scope = SharedScope {
@@ -375,7 +375,7 @@ fn work_versions_and_resolve_are_scoped_by_read_permission() {
 /// 目的：没有提交范围时，work_commit / work_push 直接拒绝——范围是准入门槛，不是提示。
 #[test]
 fn no_write_scope_refuses_commit_and_push() {
-    use crate::capabilities::workspace::api::WorkHandler;
+    use crate::units::workspace::api::WorkHandler;
     use crate::kernel::ports::{ToolCtx, ToolHandler};
     let ws = test_workspace(std::sync::Arc::new(InMemoryWorkspace::new()));
     let scope = SharedScope {
@@ -416,30 +416,30 @@ fn entries_must_be_clean_relative_paths() {
     assert!(why.contains("shared.read"), "{}", why);
 
     // 黑名单命中：空表 = 不拦；"." = 整棵拦截；按组件匹配。
-    assert!(!crate::capabilities::workspace::api::hit(&[], "docs/x"));
-    assert!(crate::capabilities::workspace::api::hit(
+    assert!(!crate::units::workspace::api::hit(&[], "docs/x"));
+    assert!(crate::units::workspace::api::hit(
         &paths(&["docs"]),
         "docs/x"
     ));
-    assert!(crate::capabilities::workspace::api::hit(
+    assert!(crate::units::workspace::api::hit(
         &paths(&["docs"]),
         "docs"
     ));
-    assert!(!crate::capabilities::workspace::api::hit(
+    assert!(!crate::units::workspace::api::hit(
         &paths(&["docs"]),
         "docsx/y"
     ));
-    assert!(crate::capabilities::workspace::api::hit(
+    assert!(crate::units::workspace::api::hit(
         &paths(&["."]),
         "anything"
     ));
     // 两侧空白与尾部分隔符削掉；组件内部的空格是合法目录名，原样保留。
     assert_eq!(
-        crate::capabilities::workspace::api::normalize("  docs\\sub\\ "),
+        crate::units::workspace::api::normalize("  docs\\sub\\ "),
         "docs/sub"
     );
     assert_eq!(
-        crate::capabilities::workspace::api::normalize("docs/ 子 目录"),
+        crate::units::workspace::api::normalize("docs/ 子 目录"),
         "docs/ 子 目录"
     );
 }

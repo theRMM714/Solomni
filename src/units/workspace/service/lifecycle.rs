@@ -1,0 +1,632 @@
+//! 目的：工作区的生命周期用例——丢失文件、回收、还原、归档与删除。
+//! 管：work_lost / restore_lost / recover / gc / restore(_force) / head / rewind_to / archive / delete / archives / restore_archive / restore_point / discard_after。
+//! 不管：常规提交（commit.rs）、拉取同步（sync.rs）。
+//! 联动：service.rs 的锁与树物化、commit.rs 的归档标记与锚点。
+
+use super::*;
+use crate::units::workspace::api::{
+    ArchiveReport, DeleteReport, LostEntry, LostReport, RestoreLostReport, WorkGcReport,
+};
+
+impl WorkspaceService {
+    pub(super) fn work_lost(
+        &self,
+        work: &str,
+        agent: &str,
+        path: Option<&str>,
+    ) -> Result<LostReport, String> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (_shared, store, sandbox) = self.agent_roots(work, agent)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &_shared, &store)?;
+        let lost = lost_root(&store, agent)?;
+        // 备份目录里存的是 `@<来源>/<原路径>`：过滤与当前指纹都按原路径判，回执里把两边都报出来。
+        let filter = match path {
+            Some(p) => Some(clean_rel(p)?),
+            None => None,
+        };
+        let mut rels = self.store.list(&lost)?;
+        rels.retain(|r| !is_lost_temp(r));
+        if let Some(f) = &filter {
+            rels.retain(|r| {
+                let (_, original) = split_backup(r);
+                r == f || original == f || original.starts_with(&format!("{}/", f))
+            });
+        }
+        // 同一路径的多份备份挨在一起（按原路径排，再按备份位置排）。
+        rels.sort_by(|a, b| {
+            let (_, pa) = split_backup(a);
+            let (_, pb) = split_backup(b);
+            pa.cmp(pb).then_with(|| a.cmp(b))
+        });
+        let total = rels.len();
+        let truncated = total > MAX_LOST;
+        rels.truncate(MAX_LOST);
+        let mut entries = Vec::new();
+        for rel in rels {
+            let Some(v) = self.store.scan_under(&lost, &rel, None)? else {
+                continue;
+            };
+            let (origin, path) = split_backup(&rel);
+            let current = self.store.scan_under(&sandbox, path, None)?;
+            entries.push(LostEntry {
+                path: path.to_string(),
+                backup: rel.clone(),
+                origin: origin.map(str::to_string),
+                hash: v.hash,
+                size: v.size,
+                current_hash: current.map(|c| c.hash),
+            });
+        }
+        Ok(LostReport {
+            agent: agent.to_string(),
+            total,
+            entries,
+            truncated,
+        })
+    }
+
+    pub(super) fn work_restore_lost(
+        &self,
+        work: &str,
+        agent: &str,
+        path: &str,
+        expect_current: &str,
+    ) -> Result<RestoreLostReport, String> {
+        let raw = clean_rel(path)?;
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (_shared, store, sandbox) = self.agent_roots(work, agent)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &_shared, &store)?;
+        let lost = lost_root(&store, agent)?;
+        // path 认两种写法：原路径（唯一一份时直取）、备份位置 `@<来源>/<原路径>`（同一路径有多份备份时点名）。
+        let mut hits: Vec<String> = Vec::new();
+        for stored in self.store.list(&lost)? {
+            if is_lost_temp(&stored) {
+                continue;
+            }
+            let (_, original) = split_backup(&stored);
+            if stored == raw || original == raw {
+                hits.push(stored);
+            }
+        }
+        let stored = match hits.len() {
+            0 => {
+                return Err(format!(
+                    "没有这个被覆盖的本地版本：{}（先用 work_lost 看可恢复清单）",
+                    raw
+                ));
+            }
+            1 => hits.remove(0),
+            _ => {
+                return Err(format!(
+                    "{} 有 {} 份备份：{}。恢复要指明一份：把 path 传成备份位置（`@<来源>/<路径>`，work_lost 的清单里有）",
+                    raw,
+                    hits.len(),
+                    hits.join("、")
+                ));
+            }
+        };
+        let rel = split_backup(&stored).1.to_string();
+        let Some(backup) = self.store.scan_under(&lost, &stored, None)? else {
+            return Err(format!("备份文件不存在：{}", stored));
+        };
+        let current = self.store.scan_under(&sandbox, &rel, None)?;
+        let current_hash = current.as_ref().map(|v| v.hash.clone());
+        let matches = match current_hash.as_deref() {
+            None => expect_current.is_empty(),
+            Some(hash) => hash == expect_current,
+        };
+        if !matches {
+            return Err(format!(
+                "当前沙箱内容与 expect_current 不符：当前={}；先 work_lost 重新看当前 hash，确认后再恢复。",
+                current_hash.as_deref().unwrap_or("不存在")
+            ));
+        }
+        let size = self
+            .store
+            .copy_under_to_under(&lost, &stored, &sandbox, &rel, &backup.hash)?;
+        Ok(RestoreLostReport {
+            path: rel,
+            backup: stored,
+            hash: backup.hash,
+            size,
+            previous: current_hash,
+        })
+    }
+
+    pub(super) fn work_recover(&self, work: &str) -> Result<(), String> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)
+    }
+
+    pub(super) fn work_gc(&self, work: &str, apply: bool) -> Result<WorkGcReport, String> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+
+        // 先让旧布局的 head 升级成 refs/main，再只从引用出发算活集合：
+        // 引用指向的提交 + 祖先链；不在这条集合里的提交与对象都可回收。
+        let _ = self.store.head(&store)?;
+        let refs = self.store.list_refs(&store)?;
+        let mut stack: Vec<u64> = Vec::new();
+        for r in refs.values() {
+            stack.extend(r.target);
+            stack.extend(r.heads.values().flatten().copied());
+        }
+        let mut live: BTreeSet<u64> = BTreeSet::new();
+        let mut reachable: BTreeSet<String> = BTreeSet::new();
+        while let Some(id) = stack.pop() {
+            if !live.insert(id) {
+                continue;
+            }
+            let Some(commit) = self.store.read_commit(&store, id)? else {
+                continue;
+            };
+            for ch in &commit.changes {
+                if !ch.hash.is_empty() {
+                    reachable.insert(ch.hash.clone());
+                }
+            }
+            if let Some(tree) = &commit.tree {
+                reachable.extend(tree.values().cloned());
+            }
+            if let Some(parent) = commit.parent {
+                stack.push(parent);
+            }
+        }
+        // 只被基线引用的对象也必须保留。
+        for (_, index) in self.store.list_indexes(&store)? {
+            reachable.extend(index.values().cloned());
+        }
+
+        let mut report = WorkGcReport {
+            applied: apply,
+            ..WorkGcReport::default()
+        };
+        for object in self.store.list_objects(&store)? {
+            if !is_content_hash(&object.hash) {
+                report.ignored_files += 1;
+                if apply {
+                    self.store
+                        .remove_object(&store, &object.hash)
+                        .map_err(|e| format!("清临时文件 {} 失败：{}", object.hash, e))?;
+                    report.removed_ignored += 1;
+                }
+                continue;
+            }
+            report.objects += 1;
+            report.bytes += object.size;
+            if reachable.contains(&object.hash) {
+                report.reachable_objects += 1;
+                report.reachable_bytes += object.size;
+            } else {
+                report.unreachable_objects += 1;
+                report.unreachable_bytes += object.size;
+                if apply {
+                    self.store
+                        .remove_object(&store, &object.hash)
+                        .map_err(|e| format!("回收对象 {} 失败：{}", object.hash, e))?;
+                    report.removed_objects += 1;
+                    report.removed_bytes += object.size;
+                }
+            }
+        }
+        if apply {
+            let ids = self.store.list_commits(&store)?;
+            for id in ids {
+                if !live.contains(&id) {
+                    self.store.remove_commit(&store, id)?;
+                    report.removed_commits += 1;
+                }
+            }
+        }
+        Ok(report)
+    }
+
+    pub(super) fn work_restore(&self, work: &str, commit: u64) -> Result<(), String> {
+        self.restore_impl(work, commit, false)
+    }
+
+    pub(super) fn work_restore_force(&self, work: &str, commit: u64) -> Result<(), String> {
+        self.restore_impl(work, commit, true)
+    }
+
+    pub(super) fn work_head(&self, work: &str) -> Result<Option<u64>, String> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+        self.store.head(&store)
+    }
+
+    #[cfg(test)]
+    pub(super) fn work_rewind_to(
+        &self,
+        work: &str,
+        keep_by_agent: &BTreeMap<String, u64>,
+    ) -> Result<Option<u64>, String> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+        // 只沿**当前 head 的祖先链**选点：用户回滚离开过的提交仍在库里，但不在当前线上，
+        // 不能被后续转录回档误选回来。
+        let head = self.store.head(&store)?;
+        let target = self.archive_point(&store, head, keep_by_agent)?;
+        let conflicts = self.external_materialize_conflicts(work, &shared, &store, target)?;
+        if !conflicts.is_empty() {
+            return Err(format!(
+                "回档会覆盖工作区里被外部改动的内容：{}——先 work_sync 采纳外部版本；强制覆盖需要用户危险确认。",
+                conflicts.join("、")
+            ));
+        }
+        self.pin_head(&store)?;
+        // 沙箱跟着各自的存档线回到这条转录行之前的快照：主线树不描述沙箱草稿，不能拿它铺。
+        let prefix = format!("rewind-{}", Self::delete_prefix(target));
+        let base = match target {
+            Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
+            None => Tree::new(),
+        };
+        for (agent, line) in keep_by_agent {
+            let save = self.save_point_at(&store, agent, *line)?;
+            // 有存档快照就铺它（沙箱草稿属于各自 agent）；没有存档历史时退回主线树，保持旧观感。
+            let sandbox_tree = match save {
+                Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
+                None => base.clone(),
+            };
+            let (_, _, sandbox) = self.agent_roots(work, agent)?;
+            self.lay_down_tree(&store, &sandbox, &sandbox_tree, agent, Some(&prefix))?;
+            self.reset_agent_point(&store, agent, target, save, &base)?;
+        }
+        let pending = Pending::Restore { target };
+        self.store.write_pending(&store, &pending)?;
+        let result = WorkspaceService::materialize(self.store.as_ref(), &shared, &store, target);
+        self.settle(work, &shared, &store, result)?;
+        Ok(target)
+    }
+
+    pub(super) fn work_archive(
+        &self,
+        work: &str,
+        keep_by_agent: &BTreeMap<String, u64>,
+        agents: &[String],
+        mark: u64,
+    ) -> Result<ArchiveReport, String> {
+        if mark == 0 {
+            return Err("档案号不能是 0".to_string());
+        }
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+        let name = format!("archive/{}", mark);
+        if self.store.read_ref(&store, &name)?.is_some() {
+            return Err(format!("档案 {} 已存在", mark));
+        }
+        let head = self.store.head(&store)?;
+        let target = self.archive_point(&store, head, keep_by_agent)?;
+        let tree = match target {
+            Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
+            None => Tree::new(),
+        };
+        let conflicts = self.external_materialize_conflicts(work, &shared, &store, target)?;
+        if !conflicts.is_empty() {
+            return Err(format!(
+                "留档会覆盖工作区里被外部改动的内容：{}——先 work_sync 采纳外部版本。",
+                conflicts.join("、")
+            ));
+        }
+        let mut uniq: BTreeSet<String> = BTreeSet::new();
+        for agent in agents {
+            if !agent.is_empty() {
+                uniq.insert(agent.clone());
+            }
+        }
+        // 引用先落：它记着留档前的主线与各 agent 的存档头；此时文件还没动，失败可以整次撤销。
+        // heads = 各 agent 自己的工作线头，saves = 存档线头，since = 留档时刻的下一个提交号。
+        let mut heads: BTreeMap<String, Option<u64>> = BTreeMap::new();
+        let mut saves: BTreeMap<String, Option<u64>> = BTreeMap::new();
+        for agent in &uniq {
+            heads.insert(agent.clone(), self.work_line_head(&store, agent)?);
+            saves.insert(agent.clone(), self.save_head(&store, agent)?);
+        }
+        // 存档端口没写过下一个号时从现有提交推：`since` 必须是真正「下一条」的号。
+        let since = match self.store.read_next_id(&store)? {
+            Some(next) => next,
+            None => {
+                self.store
+                    .list_commits(&store)?
+                    .last()
+                    .copied()
+                    .unwrap_or(0)
+                    + 1
+            }
+        };
+        self.store.write_ref(
+            &store,
+            &name,
+            &Ref {
+                kind: RefKind::Archive,
+                target: head,
+                heads: heads.clone(),
+                saves: saves.clone(),
+                since,
+            },
+        )?;
+        let mut backed_up: BTreeMap<String, usize> = BTreeMap::new();
+        let result = (|| -> Result<(), String> {
+            for agent in &uniq {
+                let (_, _, sandbox) = self.agent_roots(work, agent)?;
+                let prefix = format!("archive-{}", mark);
+                let (save, sandbox_tree) = match keep_by_agent.get(agent).copied() {
+                    Some(line) => {
+                        let save = self.save_point_at(&store, agent, line)?;
+                        let sandbox_tree = match save {
+                            Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
+                            None => tree.clone(),
+                        };
+                        (save, sandbox_tree)
+                    }
+                    None => (saves.get(agent).copied().flatten(), tree.clone()),
+                };
+                let n =
+                    self.lay_down_tree(&store, &sandbox, &sandbox_tree, agent, Some(&prefix))?;
+                self.reset_agent_point(&store, agent, target, save, &tree)?;
+                backed_up.insert(agent.clone(), n);
+            }
+            let pending = Pending::Restore { target };
+            self.store.write_pending(&store, &pending)?;
+            let result =
+                WorkspaceService::materialize(self.store.as_ref(), &shared, &store, target);
+            self.settle(work, &shared, &store, result)
+        })();
+        if result.is_err() {
+            let _ = self.store.remove_ref(&store, &name);
+        }
+        result?;
+        Ok(ArchiveReport {
+            mark,
+            shared: head,
+            point: target,
+            backed_up,
+        })
+    }
+
+    pub(super) fn work_delete(
+        &self,
+        work: &str,
+        keep_by_agent: &BTreeMap<String, u64>,
+        agents: &[String],
+        keep_marks: &[u64],
+    ) -> Result<DeleteReport, String> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+        let head = self.store.head(&store)?;
+        let target = self.archive_point(&store, head, keep_by_agent)?;
+        let tree = match target {
+            Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
+            None => Tree::new(),
+        };
+        let conflicts = self.external_materialize_conflicts(work, &shared, &store, target)?;
+        if !conflicts.is_empty() {
+            return Err(format!(
+                "删除会覆盖工作区里被外部改动的内容：{}——先 work_sync 采纳外部版本；强制覆盖需要用户危险确认。",
+                conflicts.join("、")
+            ));
+        }
+        let mut uniq: BTreeSet<String> = BTreeSet::new();
+        for agent in agents {
+            if !agent.is_empty() {
+                uniq.insert(agent.clone());
+            }
+        }
+        // 每个 agent 的沙箱回到「它自己存档线上这条转录行之前的快照」，主线树不描述沙箱草稿。
+        let mut saves: BTreeMap<String, Option<u64>> = BTreeMap::new();
+        let mut sandbox_trees: BTreeMap<String, Tree> = BTreeMap::new();
+        for agent in &uniq {
+            let save = match keep_by_agent.get(agent).copied() {
+                Some(line) => self.save_point_at(&store, agent, line)?,
+                None => self.save_head(&store, agent)?,
+            };
+            let sandbox_tree = match save {
+                Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
+                None => tree.clone(),
+            };
+            saves.insert(agent.clone(), save);
+            sandbox_trees.insert(agent.clone(), sandbox_tree);
+        }
+        // 先落恢复日志：中途崩了，下一次操作会按同一份名单把沙箱与主副本一起补完。
+        let pending = Pending::Discard {
+            keep: target,
+            agents: uniq.iter().cloned().collect(),
+            saves: saves.clone(),
+        };
+        self.store.write_pending(&store, &pending)?;
+        let mut backed_up: BTreeMap<String, usize> = BTreeMap::new();
+        let result = (|| -> Result<(), String> {
+            let prefix = Self::delete_prefix(target);
+            for agent in &uniq {
+                let (_, _, sandbox) = self.agent_roots(work, agent)?;
+                let save = saves.get(agent).copied().flatten();
+                let sandbox_tree = sandbox_trees.get(agent).cloned().unwrap_or_default();
+                let n =
+                    self.lay_down_tree(&store, &sandbox, &sandbox_tree, agent, Some(&prefix))?;
+                self.reset_agent_point(&store, agent, target, save, &tree)?;
+                backed_up.insert(agent.clone(), n);
+            }
+            WorkspaceService::materialize(self.store.as_ref(), &shared, &store, target)?;
+            self.discard_commits_locked(&store, target, &saves)
+        })();
+        self.settle(work, &shared, &store, result)?;
+        // 提交已丢：不在保留转录里的留档引用一并作废（它们的标记已随转录被截掉）。
+        let pruned = self.prune_archives_locked(&store, keep_marks)?;
+        Ok(DeleteReport {
+            point: target,
+            backed_up,
+            pruned,
+        })
+    }
+
+    pub(super) fn work_archives(&self, work: &str) -> Result<Vec<u64>, String> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
+        let (_shared_root, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        let mut out = Vec::new();
+        for (name, r) in self.store.list_refs(&store)? {
+            if r.kind != RefKind::Archive {
+                continue;
+            }
+            if let Some(id) = name
+                .strip_prefix("archive/")
+                .and_then(|s| s.parse::<u64>().ok())
+            {
+                out.push(id);
+            }
+        }
+        out.sort_unstable();
+        Ok(out)
+    }
+
+    pub(super) fn work_restore_archive(
+        &self,
+        work: &str,
+        mark: u64,
+    ) -> Result<Option<u64>, String> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+        let name = format!("archive/{}", mark);
+        let Some(reference) = self.store.read_ref(&store, &name)? else {
+            return Err(format!("没有档案 {}（可能已恢复）", mark));
+        };
+        let target = reference.target;
+        if let Some(id) = target
+            && self.store.read_commit(&store, id)?.is_none()
+        {
+            return Err(format!("档案 {} 指向的提交 {} 不在了", mark, id));
+        }
+        if reference.since == 0 {
+            // 留档时间点缺失 = 不知道这份档案之后长出了什么，恢复会留下一条分叉。
+            return Err(format!(
+                "档案 {} 没有记下留档时间点，无法确定留档之后新增了哪些提交；请重新留档后再恢复",
+                mark
+            ));
+        }
+        let conflicts = self.external_materialize_conflicts(work, &shared, &store, target)?;
+        if !conflicts.is_empty() {
+            return Err(format!(
+                "恢复会覆盖工作区里被外部改动的内容：{}——先 work_sync 采纳外部版本。",
+                conflicts.join("、")
+            ));
+        }
+        // 不钉当前线：恢复要丢掉留档之后的分叉，钉住的线会立刻变成悬空引用。
+        let base = match target {
+            Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
+            None => Tree::new(),
+        };
+        for agent in reference.heads.keys() {
+            let (_, _, sandbox) = self.agent_roots(work, agent)?;
+            let prefix = format!("restore-{}", mark);
+            let save = reference.saves.get(agent).copied().flatten();
+            let sandbox_tree = match save {
+                Some(id) => Self::tree_of(self.store.as_ref(), &store, id)?,
+                None => base.clone(),
+            };
+            self.lay_down_tree(&store, &sandbox, &sandbox_tree, agent, Some(&prefix))?;
+            // 工作线回到留档时它自己的头：不是主线头（那会把没推送的本地提交一并丢掉）。
+            let work_point = reference.heads.get(agent).copied().flatten();
+            self.reset_agent_point(&store, agent, work_point, save, &base)?;
+        }
+        let pending = Pending::Restore { target };
+        self.store.write_pending(&store, &pending)?;
+        let result = WorkspaceService::materialize(self.store.as_ref(), &shared, &store, target);
+        self.settle(work, &shared, &store, result)?;
+        // 恢复 = 回到留档操作前：留档之后长出来的提交整条作废（含更晚的档案指向的提交）。
+        self.discard_since_locked(&store, reference.since)?;
+        self.store.remove_ref(&store, &name)?;
+        Ok(target)
+    }
+
+    #[cfg(test)]
+    pub(super) fn work_restore_point(&self, work: &str, commit: Option<u64>) -> Result<(), String> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+        if let Some(id) = commit
+            && self.store.read_commit(&store, id)?.is_none()
+        {
+            return Err(format!("没有提交点 {}", id));
+        }
+        let conflicts = self.external_materialize_conflicts(work, &shared, &store, commit)?;
+        if !conflicts.is_empty() {
+            return Err(format!(
+                "回档会覆盖工作区里被外部改动的内容：{}——先 work_sync 采纳外部版本；强制覆盖需要用户危险确认。",
+                conflicts.join("、")
+            ));
+        }
+        self.pin_head(&store)?;
+        let pending = Pending::Restore { target: commit };
+        self.store.write_pending(&store, &pending)?;
+        let result = WorkspaceService::materialize(self.store.as_ref(), &shared, &store, commit);
+        self.settle(work, &shared, &store, result)
+    }
+
+    #[cfg(test)]
+    pub(super) fn work_discard_after(&self, work: &str, keep: Option<u64>) -> Result<(), String> {
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _shared = self.dirs.lock_shared(work)?;
+        let (shared, store) = self.work_roots(work)?;
+        let _lock = self.store.lock(&store)?;
+        self.recover_locked(work, &shared, &store)?;
+        if let Some(id) = keep
+            && self.store.read_commit(&store, id)?.is_none()
+        {
+            return Err(format!("没有提交点 {}", id));
+        }
+        let conflicts = self.external_materialize_conflicts(work, &shared, &store, keep)?;
+        if !conflicts.is_empty() {
+            return Err(format!(
+                "回档会覆盖工作区里被外部改动的内容：{}——先 work_sync 采纳外部版本；强制覆盖需要用户危险确认。",
+                conflicts.join("、")
+            ));
+        }
+        // 先物化到 keep、写 head，再删非祖先提交；崩溃时 head 不会指向被删提交。
+        let pending = Pending::Discard {
+            keep,
+            agents: Vec::new(),
+            saves: BTreeMap::new(),
+        };
+        self.store.write_pending(&store, &pending)?;
+        let result = (|| {
+            WorkspaceService::materialize(self.store.as_ref(), &shared, &store, keep)?;
+            self.discard_commits_locked(&store, keep, &BTreeMap::new())
+        })();
+        self.settle(work, &shared, &store, result)
+    }
+}

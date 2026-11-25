@@ -1,7 +1,7 @@
 //! 目的：常驻服务、日志与隐秘的替身——注入服务面、记录日志、内存隐秘表。
 //! 管：服务启动与调用、停不下来的适配器、日志记录、隐秘读写。
-//! 不管：真实服务进程（`src/capabilities/residents/detail/`）。
-//! 联动：`src/capabilities/residents/ports.rs` 与 `src/capabilities/secrets/ports.rs`。
+//! 不管：真实服务进程（`src/units/residents/detail/`）。
+//! 联动：`src/units/residents/ports.rs` 与 `src/units/secrets/ports.rs`。
 
 use super::*;
 
@@ -32,7 +32,7 @@ struct FakeServiceInstance {
     env: Vec<(String, String)>,
 }
 
-impl crate::capabilities::residents::ports::ServiceInstance for FakeServiceInstance {
+impl crate::units::residents::ports::ServiceInstance for FakeServiceInstance {
     fn call(&mut self, op: &str, args: &serde_json::Value) -> Result<String, String> {
         self.calls.lock().expect("锁").push(format!("call:{}", op));
         let env: Vec<String> = self
@@ -47,17 +47,17 @@ impl crate::capabilities::residents::ports::ServiceInstance for FakeServiceInsta
     }
 }
 
-impl crate::capabilities::residents::ports::ServiceAdapter for FakeServiceAdapter {
+impl crate::units::residents::ports::ServiceAdapter for FakeServiceAdapter {
     fn id(&self) -> &str {
         "fake"
     }
     fn start(
         &self,
-        spec: &crate::capabilities::residents::ports::LaunchSpec,
+        spec: &crate::units::residents::ports::LaunchSpec,
     ) -> Result<
         (
-            Box<dyn crate::capabilities::residents::ports::ServiceInstance>,
-            Vec<crate::capabilities::residents::api::Operation>,
+            Box<dyn crate::units::residents::ports::ServiceInstance>,
+            Vec<crate::units::residents::api::Operation>,
         ),
         String,
     > {
@@ -76,7 +76,7 @@ impl crate::capabilities::residents::ports::ServiceAdapter for FakeServiceAdapte
                 calls: Arc::clone(&self.calls),
                 env: spec.env.clone(),
             }),
-            vec![crate::capabilities::residents::api::Operation {
+            vec![crate::units::residents::api::Operation {
                 name: "echo".to_string(),
                 description: "回显参数".to_string(),
                 // 带一份 JSON Schema：工具面"原样声明"的断言要用它。
@@ -93,23 +93,23 @@ impl crate::capabilities::residents::ports::ServiceAdapter for FakeServiceAdapte
 /// 目的：一启动就"死"的假适配器——实例调用恒失败且 is_alive = false（崩溃检测用例用）。
 pub(crate) struct DyingServiceAdapter;
 
-impl crate::capabilities::residents::ports::ServiceAdapter for DyingServiceAdapter {
+impl crate::units::residents::ports::ServiceAdapter for DyingServiceAdapter {
     fn id(&self) -> &str {
         "dying"
     }
     fn start(
         &self,
-        _spec: &crate::capabilities::residents::ports::LaunchSpec,
+        _spec: &crate::units::residents::ports::LaunchSpec,
     ) -> Result<
         (
-            Box<dyn crate::capabilities::residents::ports::ServiceInstance>,
-            Vec<crate::capabilities::residents::api::Operation>,
+            Box<dyn crate::units::residents::ports::ServiceInstance>,
+            Vec<crate::units::residents::api::Operation>,
         ),
         String,
     > {
         Ok((
             Box::new(DyingServiceInstance),
-            vec![crate::capabilities::residents::api::Operation {
+            vec![crate::units::residents::api::Operation {
                 name: "boom".to_string(),
                 description: String::new(),
                 parameters: None,
@@ -120,7 +120,7 @@ impl crate::capabilities::residents::ports::ServiceAdapter for DyingServiceAdapt
 
 struct DyingServiceInstance;
 
-impl crate::capabilities::residents::ports::ServiceInstance for DyingServiceInstance {
+impl crate::units::residents::ports::ServiceInstance for DyingServiceInstance {
     fn call(&mut self, _op: &str, _args: &serde_json::Value) -> Result<String, String> {
         Err("服务进程已结束（EOF）".to_string())
     }
@@ -197,7 +197,7 @@ impl InMemorySecretStore {
     }
 }
 
-impl crate::capabilities::catalog::secrets::ports::SecretStore for InMemorySecretStore {
+impl crate::units::catalog::secrets::ports::SecretStore for InMemorySecretStore {
     fn load(&self) -> Result<BTreeMap<String, String>, String> {
         Ok(self.values.lock().expect("锁").clone())
     }
@@ -245,14 +245,14 @@ pub(crate) fn python() -> Option<&'static str> {
 /// 目的：一个带给定常驻服务操作的最小成员工具环境（模型侧工具面用例用）。
 pub(crate) fn member_with_service_tools(
     module: &str,
-    residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
-    op: crate::capabilities::conversation::session::api::ServiceOp,
-) -> crate::capabilities::conversation::session::domain::tools::MemberTools {
+    residents: Arc<dyn crate::units::residents::api::ResidentOps + Send + Sync>,
+    op: crate::units::conversation::session::api::ServiceOp,
+) -> crate::units::conversation::session::domain::tools::MemberTools {
     let sb = test_sandbox(module, &[]);
     let mut modules = BTreeMap::new();
     modules.insert(
         module.to_string(),
-        crate::capabilities::conversation::session::domain::tools::ModuleTools {
+        crate::units::conversation::session::domain::tools::ModuleTools {
             root: abs(&["mods", module]),
             commands: BTreeMap::new(),
             books: BTreeMap::new(),
@@ -260,15 +260,15 @@ pub(crate) fn member_with_service_tools(
             services: [(op.tool.clone(), op)].into_iter().collect(),
         },
     );
-    crate::capabilities::conversation::session::domain::tools::MemberTools {
-        face: crate::capabilities::conversation::session::api::ToolFace {
-            mode: crate::capabilities::llm::api::ToolMode::Envelope,
+    crate::units::conversation::session::domain::tools::MemberTools {
+        face: crate::units::conversation::session::api::ToolFace {
+            mode: crate::units::llm::api::ToolMode::Envelope,
             modules,
             tier: crate::kernel::api::types::Tier::Host,
             guest_lease: String::new(),
             sandbox: sb.clone(),
             tools_this_turn: test_prompts()
-                .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+                .text(crate::units::prompt::api::Segment::ToolsThisTurn)
                 .to_string(),
             builtin_tools: test_systools().tools,
             unavailable: BTreeMap::new(),
@@ -276,7 +276,7 @@ pub(crate) fn member_with_service_tools(
             module_env: Default::default(),
             runtime_path: None,
             runtime_roots: Vec::new(),
-            allowed: crate::capabilities::tools::api::names(),
+            allowed: crate::units::tools::api::names(),
             seat: "solo".to_string(),
             with_modules: true,
             notes: Default::default(),

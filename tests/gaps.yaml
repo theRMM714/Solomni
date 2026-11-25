@@ -181,7 +181,7 @@
     回执不再声称失败原因：围栏拒绝发生在工具子进程内部（ACL / Landlock / seatbelt / 容器 SID），
     守门进程只看得到退出码与被本地化的 OS 文案，任何平台都没有「本次确被围栏拒绝」的机器可读事实，
     因此回执只交退出码与信号（`shell.exit` / `shell.signal` 等稳定码），可达范围与网络状态只进
-    工具行的结构化事实（`ShellFacts`，`src/capabilities/tools/domain/shell.rs`），界面可见、模型不可见。
+    工具行的结构化事实（`ShellFacts`，`src/units/tools/domain/shell.rs`），界面可见、模型不可见。
     代价是**模型侧没有可靠信号**：围栏里的越界失败与普通失败在模型眼里一样，
     模型不会知道「可达哪里」；直接补固定提示会退回「任何非零退出都像越界」的老问题。
   how: |

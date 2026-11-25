@@ -5,54 +5,54 @@
 
 pub(crate) use super::doubles::*;
 
-pub use crate::capabilities::conversation::collab::service::discussion::{
+pub use crate::units::conversation::collab::service::discussion::{
     Discussion, MAX_ROUNDS, Member, TurnOut,
 };
 
-pub use crate::capabilities::llm::api::Channel;
+pub use crate::units::llm::api::Channel;
 
-pub use crate::capabilities::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
+pub use crate::units::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
 
-pub use crate::capabilities::llm::detail::fake_chat::FakeChat;
+pub use crate::units::llm::detail::fake_chat::FakeChat;
 
-pub use crate::capabilities::llm::ports::ChatGateway;
+pub use crate::units::llm::ports::ChatGateway;
 
-pub use crate::capabilities::prompt::api::{Prompt, Segment};
+pub use crate::units::prompt::api::{Prompt, Segment};
 
-pub use crate::capabilities::prompt::domain::prompt::render;
+pub use crate::units::prompt::domain::prompt::render;
 
-pub use crate::capabilities::catalog::registry::api::{ModelDraft, ModelEntry, Provider, Settings};
+pub use crate::units::catalog::registry::api::{ModelDraft, ModelEntry, Provider, Settings};
 
-pub use crate::capabilities::catalog::registry::api::AgentMeta;
-pub use crate::capabilities::conversation::session::api::{RunState, SessionMeta};
+pub use crate::units::catalog::registry::api::AgentMeta;
+pub use crate::units::conversation::session::api::{RunState, SessionMeta};
 
-pub use crate::capabilities::conversation::session::domain::tools::MemberTools;
-pub use crate::capabilities::conversation::session::domain::tools::ModuleTools;
+pub use crate::units::conversation::session::domain::tools::MemberTools;
+pub use crate::units::conversation::session::domain::tools::ModuleTools;
 
-pub use crate::capabilities::conversation::session::ports::HistoryStore;
+pub use crate::units::conversation::session::ports::HistoryStore;
 
-pub use crate::capabilities::tools::api::ToolExec;
+pub use crate::units::tools::api::ToolExec;
 pub use crate::kernel::ports::ProcessRunner;
 
-pub use crate::capabilities::catalog::modules::api::Module;
+pub use crate::units::catalog::modules::api::Module;
 
-pub use crate::capabilities::vm::api::{self as exec};
+pub use crate::units::vm::api::{self as exec};
 pub use crate::kernel::api::types::ExecSpec;
 
-pub use crate::capabilities::catalog::modules::ports::ModuleSource;
-pub use crate::capabilities::workspace::ports::Workdirs;
+pub use crate::units::catalog::modules::ports::ModuleSource;
+pub use crate::units::workspace::ports::Workdirs;
 
-pub use crate::capabilities::runtime::api::SessionEvent;
-pub use crate::capabilities::work::api::{ConfigAgent, SessionEdit, WorkSpec};
+pub use crate::units::runtime::api::SessionEvent;
+pub use crate::units::work::api::{ConfigAgent, SessionEdit, WorkSpec};
 
-pub use crate::capabilities::conversation::collab::api::{CollabEvent, Pending};
+pub use crate::units::conversation::collab::api::{CollabEvent, Pending};
 
 /// 目的：裁决卡的选项 id（契约）：测试按它作答，不按文案。
-pub use crate::capabilities::conversation::collab::api::{
+pub use crate::units::conversation::collab::api::{
     OPT_BEGIN, OPT_PLAN_SAY, OPT_SLATE_CONFIRM,
 };
 
-pub(crate) use crate::capabilities::runtime::service::Core;
+pub(crate) use crate::units::runtime::service::Core;
 
 pub use crate::kernel::api::types::Tier;
 

@@ -1,0 +1,776 @@
+//! 目的：核心代理（core_proxy）工具的纯逻辑——入参解析、授权校验、载荷规整与回执拼装。
+//! 管：工具 id 与席位面判定、任务级授权校验（`Grant`）、各工具的参数语义校验与规整载荷，
+//!   以及只读清单事实与回执的拼装（`Catalog` / `Snapshot` / `MessagesPage` / `ControlState`）。
+//! 不管：会话读写与外部动作（一律经 `api.rs` 的 `ProxyHost`，见 service/proxy.rs）；不碰端口、不认识会话。
+//! 联动：宿主实现（runtime 的 `ProxyBridge`）把事实填进这些结构，systools/tools.yaml 声明入参形状。
+
+use serde::{Deserialize, Serialize};
+
+use crate::units::catalog::registry::api::AgentMeta;
+
+pub const CATALOG: &str = "catalog_agents";
+pub const CREATE: &str = "create_session";
+pub const SEND: &str = "send_session_message";
+pub const OBSERVE: &str = "observe_session";
+pub const CONTROL: &str = "control_session";
+/// 目的：消息查询——按“最新→更早”倒查子会话的消息（不把整份转录推给代理）。
+pub const MESSAGES: &str = "read_session_messages";
+
+/// 目的：这六个 id 就是“代理工具面”（`core_proxy` 席位的 `tools` 引用它们）。
+pub fn is_proxy_tool(name: &str) -> bool {
+    name == CATALOG
+        || name == CREATE
+        || name == SEND
+        || name == OBSERVE
+        || name == CONTROL
+        || name == MESSAGES
+}
+
+/// 目的：任务级授权（真实用户授予，机制注入）：本轮只做**全权**——`tools` 用席位面合成的整套
+///   代理工具面构造，`models`/`sessions` 留空 = 不限制，无有效期。
+///   核心不得自行授予或扩大；`tools` 仍是硬条件（不在里面 = 越范围）。
+///   细粒度范围、期限与**撤销**属独立的“会话权限状态”能力，本轮不做
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Grant {
+    /// 目的：允许调用的代理工具 id。
+    pub tools: Vec<String>,
+    /// 目的：允许使用的模型（空 = 不限制）。
+    pub models: Vec<String>,
+    /// 目的：允许操作的会话（空 = 不限制）。
+    pub sessions: Vec<String>,
+    /// 目的：到期时间（Unix 秒；None = 不过期）。
+    pub expires_at: Option<i64>,
+}
+
+/// 目的：一次代理调用的上下文——授权、父会话与当前时间。
+#[derive(Debug, Clone)]
+pub struct ProxyCall {
+    pub grant: Option<Grant>,
+    pub parent: Option<String>,
+    pub now: i64,
+}
+
+/// 目的：授权校验（纯逻辑）——没有授权、越范围、超期、模型或会话不在授权内，都如实拒绝。
+pub fn authorize(
+    call: &ProxyCall,
+    tool: &str,
+    model: Option<&str>,
+    session: Option<&str>,
+) -> Result<(), String> {
+    let Some(grant) = call.grant.as_ref() else {
+        return Err("没有代理授权：核心不能自行授予权限，需要真实用户先授予任务级授权".to_string());
+    };
+    if let Some(at) = grant.expires_at
+        && call.now > at
+    {
+        return Err(format!("代理授权已过期（有效期到 {}）", at));
+    }
+    if !grant.tools.iter().any(|t| t == tool) {
+        return Err(format!("代理授权不包含这个工具：{}（越出授权范围）", tool));
+    }
+    if !grant.models.is_empty()
+        && let Some(m) = model
+        && !grant.models.iter().any(|x| x == m)
+    {
+        return Err(format!("代理授权不覆盖这个模型：{}（越出授权范围）", m));
+    }
+    if !grant.sessions.is_empty()
+        && let Some(s) = session
+        && !grant.sessions.iter().any(|x| x == s)
+    {
+        return Err(format!("代理授权不覆盖这个会话：{}（越出授权范围）", s));
+    }
+    Ok(())
+}
+
+/// 目的：catalog_agents 的 scope。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatalogScope {
+    Agents,
+    Modules,
+    Models,
+    All,
+}
+
+impl CatalogScope {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "agents" => Ok(Self::Agents),
+            "modules" => Ok(Self::Modules),
+            "models" => Ok(Self::Models),
+            "all" => Ok(Self::All),
+            other => Err(format!(
+                "scope 只能是 agents / modules / models / all：{}",
+                other
+            )),
+        }
+    }
+    pub fn covers_agents(self) -> bool {
+        matches!(self, Self::Agents | Self::All)
+    }
+    pub fn covers_modules(self) -> bool {
+        matches!(self, Self::Modules | Self::All)
+    }
+    pub fn covers_models(self) -> bool {
+        matches!(self, Self::Models | Self::All)
+    }
+}
+
+/// 目的：send_session_message 的消息种类。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageKind {
+    Task,
+    UserReply,
+    FollowUp,
+    Review,
+    Rework,
+}
+
+impl MessageKind {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "task" => Ok(Self::Task),
+            "user_reply" => Ok(Self::UserReply),
+            "follow_up" => Ok(Self::FollowUp),
+            "review" => Ok(Self::Review),
+            "rework" => Ok(Self::Rework),
+            other => Err(format!(
+                "kind 只能是 task / user_reply / follow_up / review / rework：{}",
+                other
+            )),
+        }
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Task => "task",
+            Self::UserReply => "user_reply",
+            Self::FollowUp => "follow_up",
+            Self::Review => "review",
+            Self::Rework => "rework",
+        }
+    }
+}
+
+/// 目的：observe_session 要看的那一面。**没有“最新消息”这一面**：正文一律经
+///   read_session_messages 主动倒查（子会话不把整份转录推给代理）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObserveView {
+    Status,
+    Pending,
+    Artifacts,
+    Full,
+}
+
+impl ObserveView {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "status" => Ok(Self::Status),
+            "pending" => Ok(Self::Pending),
+            "artifacts" => Ok(Self::Artifacts),
+            "full" => Ok(Self::Full),
+            other => Err(format!(
+                "view 只能是 status / pending / artifacts / full：{}",
+                other
+            )),
+        }
+    }
+}
+
+/// 目的：control_session 的动作。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControlAction {
+    Interrupt,
+    Stop,
+    Continue,
+    /// 归档：整棵子树从主列表收起，不再被派发或唤醒（不是终态——删除才是）。
+    Archive,
+    /// 恢复归档：把归档的整棵子树翻回 Active，**不唤醒**。
+    Restore,
+}
+
+impl ControlAction {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "interrupt" => Ok(Self::Interrupt),
+            "stop" => Ok(Self::Stop),
+            "continue" => Ok(Self::Continue),
+            "archive" => Ok(Self::Archive),
+            "restore" => Ok(Self::Restore),
+            other => Err(format!(
+                "action 只能是 interrupt / stop / continue / archive / restore：{}",
+                other
+            )),
+        }
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Interrupt => "interrupt",
+            Self::Stop => "stop",
+            Self::Continue => "continue",
+            Self::Archive => "archive",
+            Self::Restore => "restore",
+        }
+    }
+}
+
+/// 目的：代理转达要代答的那张卡时，校验它给的选项 id **属于那张卡的选项集**（不合法如实拒绝）。
+/// 约束：代理**只认选项 id**，不给任何"从一句话猜选项"的规则——猜会替用户做主
+///   （围栏卡的第一项正是"无围栏跑一次"，猜出来就是把用户的权限授出去）。
+pub fn relay_reply(
+    options: &[crate::units::conversation::session::api::OptionView],
+    reply: &str,
+) -> Result<String, String> {
+    let id = reply.trim();
+    if id.is_empty() {
+        return Err("代答要写选项 id（reply）：空串不算代答".to_string());
+    }
+    if options.iter().any(|o| o.id == id) {
+        Ok(id.to_string())
+    } else {
+        Err(format!(
+            "这张卡上没有这个选项：{}（卡上的选项：{}）",
+            id,
+            options
+                .iter()
+                .map(|o| o.id.as_str())
+                .collect::<Vec<_>>()
+                .join(" / ")
+        ))
+    }
+}
+
+/// 目的：一次控制动作写进目标会话的**可回放记录**文案（机制写，前端照同一条显示）。
+///   记的是"谁、为什么动了这条会话"——不静默改运行态。
+pub fn control_note(action: ControlAction, reason: &str) -> String {
+    // 人经呈现层的控制与核心代理的控制都走这里：不冒充"代理"，只记一条控制事实。
+    format!("[控制] {} 这条会话：{}", action.as_str(), reason)
+}
+
+/// 目的：一次转达写进目标会话的**来源记录**文案：说清接下来这条**不是用户原话**，
+///   而是核心代理转达的——这条记录是它的可回放凭据。
+pub fn relay_note(kind: MessageKind) -> String {
+    format!("[代理] 接下来这条由核心代理转达（{}）", kind.as_str())
+}
+
+/// 目的：只读清单事实——只含公开信息（无密钥、无真实私有路径、无私有工作区内容）。
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Catalog {
+    pub agents: Vec<crate::units::catalog::registry::api::AgentView>,
+    pub modules: Vec<ModuleFact>,
+    pub models: Vec<ModelFact>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ModuleFact {
+    pub id: String,
+    pub tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelFact {
+    pub id: String,
+    pub name: String,
+    pub tools: String,
+}
+
+/// 目的：建立一个会话后的稳定引用。
+#[derive(Debug, Clone, Serialize)]
+pub struct Created {
+    pub session: String,
+    pub agents: Vec<String>,
+}
+
+/// 目的：一次观察的规范化视图 + 下一游标（`full` 之外的字段可选）。
+///   **不回消息正文**：正文一律经 `read_session_messages` 主动倒查。
+#[derive(Debug, Clone, Serialize)]
+pub struct Snapshot {
+    pub session: String,
+    pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifacts: Option<Vec<String>>,
+    /// 目的：该会话的消息总条数（`read_session_messages` 倒查的上界）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_count: Option<usize>,
+    /// 目的：游标 = 消息条数的字符串形式；下次观察把它当 `since` 传回来即可。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    /// 目的：自 `since` 以来的新增消息条数（给了 `since` 才有；解不出数字就当没给）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_messages: Option<usize>,
+}
+
+/// 目的：`read_session_messages` 回给代理的**一页消息**：`from` 是“距最新多少条”（0 = 最新一条），
+///   消息按**新→旧**排列；`next` 是继续往更早翻的下一 `from`（到底了为 None）。
+#[derive(Debug, Clone, Serialize)]
+pub struct MessagesPage {
+    pub session: String,
+    pub messages: Vec<MessageLine>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next: Option<usize>,
+}
+
+/// 目的：一条消息（转录行的对外形态）——稳定行 id + 结构化身份 + 正文。
+#[derive(Debug, Clone, Serialize)]
+pub struct MessageLine {
+    pub id: u64,
+    pub speaker: String,
+    pub verb: String,
+    pub kind: String,
+    pub text: String,
+}
+
+/// 目的：一次控制之后会话的实际状态（不是“请求已提交”）。
+#[derive(Debug, Clone, Serialize)]
+pub struct ControlState {
+    pub session: String,
+    pub action: ControlAction,
+    pub state: String,
+}
+
+/// 目的：建会话的规整载荷（工具层解析完交给宿主；宿主不再解析模型参数）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewSession {
+    /// 目的：会话类型名（会话类型表里的一个；装配时按它解析成落盘声明）；临时拼装固定是 `custom`。
+    pub kind: String,
+    /// 目的：临时拼装选的流程 id 列表（None = 按 `kind` 查会话类型表）；席位与人数由流程自己报。
+    pub flows: Option<Vec<String>>,
+    pub agents: Vec<AgentMeta>,
+    /// 目的：**这个会话的开头 / 本次需求**：single = 它的第一句（点火用的派发），collab = 本次需求。
+    ///   建好就开始——不是"给某个 agent 的任务"（见宿主实现的 `create_session`）。
+    pub task: String,
+    pub request_id: String,
+    /// 目的：工作名——给了就用它，没给由宿主派生（代理建的子工作按 agent 名派生）。
+    pub name: Option<String>,
+    /// 目的：执行档位——给了就用它，没给由宿主按父会话或设置定。
+    pub tier: Option<String>,
+    /// 目的：虚拟机档的虚拟根名——给了就用它，没给由宿主按父会话定（顶层为空，建好后在会话配置里选）。
+    pub guest: Option<String>,
+    /// 目的：父会话——由**机制**从调用上下文填，不从模型参数取（模型不能自选父）。
+    pub parent: Option<String>,
+    /// 目的：创建时的权限档位；None = 用设置默认（子会话忽略并继承父 ceiling）。
+    pub permission: Option<crate::units::permission::api::ProfileId>,
+    /// 目的：外部工作区根（仅人经呈现层：产品目录之外的绝对路径）；None = 产品内布局。
+    /// 约束：子会话不接受（沿父会话继承），核心代理的建会话工具也不暴露这个字段。
+    pub workspace: Option<String>,
+    /// 目的：创建时就打开过期内容替换（None = 关）：`(开, 保底百分比)`，只对顶层生效。
+    pub freshness: Option<(bool, u8)>,
+}
+
+/// 目的：一条要转达的消息（元信息 + 正文）——正文由工具层从参数取，宿主据此真正投递。
+#[derive(Debug, Clone, PartialEq)]
+pub struct Relayed {
+    pub kind: MessageKind,
+    pub parent: Option<String>,
+    pub text: String,
+    /// 目的：目标挂着裁决卡时按这个选项 id 代答（`None` = 不代答——代理不替用户选）。
+    pub reply: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CatalogArgs {
+    pub scope: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateArgs {
+    /// 目的：会话类型名（会话类型表里的一个；代理不能往代理里套）；临时拼装时省略。
+    #[serde(default)]
+    pub kind: String,
+    /// 目的：临时拼装选的流程 id 列表（与 `kind` 二选一；id 是否在册在装配期校验）。
+    #[serde(default)]
+    pub flows: Option<Vec<String>>,
+    /// 目的：每项是对象，形状在 parse_agents 里逐条校验（数组元素形状声明层表达不了）；省略 = 空（代理形态 / 代拟）。
+    #[serde(default)]
+    pub agents: Vec<serde_json::Value>,
+    /// 目的：本次需求 / 单模式的开头——代理必填（建好就开工），用户可省（单模式先建空会话）。
+    #[serde(default)]
+    pub task: Option<String>,
+    #[serde(default)]
+    pub request_id: String,
+    /// 目的：工作名（可省 = 由宿主派生）。
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 目的：创建时的权限档位（只对人经呈现层有效；代理建子会话时忽略并继承父 ceiling）。
+    #[serde(default)]
+    pub permission: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SendArgs {
+    pub targets: Vec<String>,
+    pub message: String,
+    pub kind: String,
+    pub request_id: String,
+    /// 目的：目标正挂着一张裁决卡时**要按哪个选项 id 代答**；不写 = 不代答（代理不替用户猜）。
+    #[serde(default)]
+    pub reply: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ObserveArgs {
+    pub session_id: String,
+    pub view: String,
+    /// 目的：上次观察的游标（消息条数）；只用来算 `new_messages`，回执仍是幂等快照。
+    #[serde(default)]
+    pub since: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ControlArgs {
+    pub session_id: String,
+    pub action: String,
+    pub reason: String,
+    pub request_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MessagesArgs {
+    pub session_id: String,
+    /// 目的：0 = 最新一条；1 = 倒数第二条；省略 = 0。
+    #[serde(default)]
+    pub from: Option<i64>,
+    /// 目的：本次取几条（1..=50）；省略 = 10。
+    #[serde(default)]
+    pub count: Option<i64>,
+}
+
+/// 解析出来的一条 agent 声明（尚未与登记处事实核对）。
+struct ParsedAgent {
+    name: String,
+    reuse: bool,
+    modules: Vec<String>,
+    model: Option<String>,
+    chara: String,
+}
+
+/// 目的：catalog_agents——scope 只认四个值。
+pub fn catalog_scope(args: &CatalogArgs) -> Result<CatalogScope, String> {
+    CatalogScope::parse(args.scope.trim())
+}
+
+/// 目的：create_session——把模型给的名字/模块/模型与登记处事实核对后规整成载荷。
+///   失败一律如实报错——调用方据此拒绝整次调用，不留半成品。
+pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSession, String> {
+    let wanted = args.kind.trim().to_string();
+    let flows = match args.flows.as_deref() {
+        Some([]) => return Err("临时拼装至少要有一个流程".to_string()),
+        Some(flows) => {
+            if !wanted.is_empty() {
+                return Err("kind 与 flows 只能给一个（临时拼装省略 kind）".to_string());
+            }
+            Some(flows.to_vec())
+        }
+        None => None,
+    };
+    let kind = if flows.is_some() {
+        String::new()
+    } else {
+        if wanted.is_empty() {
+            return Err("kind 不能为空（要会话类型表里的一个；临时拼装改用 flows）".to_string());
+        }
+        wanted
+    };
+    let request_id = args.request_id.trim().to_string();
+    if request_id.is_empty() {
+        return Err("request_id 不能为空（幂等标识）".to_string());
+    }
+    let task = args.task.clone().unwrap_or_default().trim().to_string();
+    if task.is_empty() {
+        return Err(
+            "task 不能为空（这个会话的开头：没有流程就是它的第一句，有流程就是本次需求）"
+                .to_string(),
+        );
+    }
+    let name = args
+        .name
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    // 环境参数只属于人经呈现层的主会话：核心代理建出的子会话整段继承父会话的环境，
+    // 这里不接受模型自选档位 / 虚拟根（父会话由机制填，子会话由 prepare_session 继承）。
+    let agents = parse_agents(&args.agents)?;
+    let mut resolved: Vec<AgentMeta> = Vec::new();
+    for (i, a) in agents.into_iter().enumerate() {
+        let (name, modules, model, chara, transient) = if a.reuse {
+            let fact = catalog
+                .agents
+                .iter()
+                .find(|f| f.name == a.name)
+                .ok_or_else(|| format!("agents[{}]：agent {} 不在登记处", i, a.name))?;
+            (
+                fact.name.clone(),
+                fact.modules.clone(),
+                fact.model.clone(),
+                fact.chara.clone(),
+                false,
+            )
+        } else {
+            for id in &a.modules {
+                if !catalog.modules.iter().any(|m| m.id == *id) {
+                    return Err(format!(
+                        "agents[{}]：无此模块 {}（在册的模块 id：{}）",
+                        i,
+                        id,
+                        catalog
+                            .modules
+                            .iter()
+                            .map(|m| m.id.as_str())
+                            .collect::<Vec<_>>()
+                            .join("、")
+                    ));
+                }
+            }
+            if let Some(m) = &a.model
+                && !catalog.models.iter().any(|x| x.id == *m)
+            {
+                return Err(format!(
+                    "agents[{}]：无此模型 {}（在册的模型 id：{}）",
+                    i,
+                    m,
+                    catalog
+                        .models
+                        .iter()
+                        .map(|x| x.id.as_str())
+                        .collect::<Vec<_>>()
+                        .join("、")
+                ));
+            }
+            (
+                a.name.clone(),
+                a.modules.clone(),
+                a.model.clone(),
+                a.chara.clone(),
+                true,
+            )
+        };
+        crate::units::catalog::registry::api::validate_name(&name)
+            .map_err(|e| format!("agents[{}] 的名字不合法：{}", i, e))?;
+        resolved.push(AgentMeta::normalized(
+            name, modules, model, chara, transient,
+        ));
+    }
+    let permission = args
+        .permission
+        .as_deref()
+        .map(crate::units::permission::api::ProfileId::parse)
+        .transpose()?;
+    Ok(NewSession {
+        kind,
+        flows,
+        agents: resolved,
+        task,
+        request_id,
+        name,
+        tier: None,
+        guest: None,
+        parent: None,
+        permission,
+        // 工作区只由人经呈现层给；核心代理建的子会话整段继承父会话。
+        workspace: None,
+        // 核心代理建的会话没有上下文开关的人机入口，保底取默认。
+        freshness: None,
+    })
+}
+
+/// 目的：send_session_message——目标与种类的语义校验；多目标在这里规整成一张表。
+pub fn relay(args: &SendArgs, call: &ProxyCall) -> Result<(Vec<String>, Relayed), String> {
+    let targets: Vec<String> = args
+        .targets
+        .iter()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+    if targets.is_empty() {
+        return Err("targets 不能为空".to_string());
+    }
+    if args.message.trim().is_empty() {
+        return Err("message 不能为空".to_string());
+    }
+    if args.request_id.trim().is_empty() {
+        return Err("request_id 不能为空（幂等标识）".to_string());
+    }
+    let kind = MessageKind::parse(args.kind.trim())?;
+    let reply = args
+        .reply
+        .as_ref()
+        .map(|r| r.trim().to_string())
+        .filter(|r| !r.is_empty());
+    Ok((
+        targets,
+        Relayed {
+            kind,
+            parent: call.parent.clone(),
+            text: args.message.trim().to_string(),
+            reply,
+        },
+    ))
+}
+
+/// 目的：observe_session——会话 id、view 与游标的语义校验。
+pub fn observe_request(
+    args: &ObserveArgs,
+) -> Result<(String, ObserveView, Option<String>), String> {
+    let session = args.session_id.trim().to_string();
+    if session.is_empty() {
+        return Err("session_id 不能为空".to_string());
+    }
+    let view = ObserveView::parse(args.view.trim())?;
+    let since = args
+        .since
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    Ok((session, view, since))
+}
+
+/// 目的：control_session——会话 id、action、reason 与幂等标识的语义校验。
+pub fn control_request(
+    args: &ControlArgs,
+) -> Result<(String, ControlAction, String, String), String> {
+    let session = args.session_id.trim().to_string();
+    if session.is_empty() {
+        return Err("session_id 不能为空".to_string());
+    }
+    let action = ControlAction::parse(args.action.trim())?;
+    let reason = args.reason.trim().to_string();
+    if reason.is_empty() {
+        return Err("reason 不能为空（它会进可回放记录）".to_string());
+    }
+    let request_id = args.request_id.trim().to_string();
+    if request_id.is_empty() {
+        return Err("request_id 不能为空（幂等标识）".to_string());
+    }
+    Ok((session, action, reason, request_id))
+}
+
+/// 目的：read_session_messages——会话 id + 倒查起点/条数的语义校验（`from` 以最新为 0）。
+pub fn messages_request(args: &MessagesArgs) -> Result<(String, usize, usize), String> {
+    let session = args.session_id.trim().to_string();
+    if session.is_empty() {
+        return Err("session_id 不能为空".to_string());
+    }
+    let from = args.from.unwrap_or(0);
+    if from < 0 {
+        return Err("from 不能为负（0 = 最新一条）".to_string());
+    }
+    let count = args.count.unwrap_or(10);
+    if !(1..=50).contains(&count) {
+        return Err("count 只能是 1 到 50".to_string());
+    }
+    Ok((session, from as usize, count as usize))
+}
+
+/// 目的：清单回执——只回请求的 scope（不给无关字段，也就不会顺手泄漏）。
+pub fn render_catalog(scope: CatalogScope, c: &Catalog) -> Result<String, String> {
+    let mut out = serde_json::Map::new();
+    if scope.covers_agents() {
+        out.insert(
+            "agents".to_string(),
+            serde_json::to_value(&c.agents).map_err(|e| e.to_string())?,
+        );
+    }
+    if scope.covers_modules() {
+        out.insert(
+            "modules".to_string(),
+            serde_json::to_value(&c.modules).map_err(|e| e.to_string())?,
+        );
+    }
+    if scope.covers_models() {
+        out.insert(
+            "models".to_string(),
+            serde_json::to_value(&c.models).map_err(|e| e.to_string())?,
+        );
+    }
+    Ok(serde_json::Value::Object(out).to_string())
+}
+
+fn parse_agents(items: &[serde_json::Value]) -> Result<Vec<ParsedAgent>, String> {
+    if items.is_empty() {
+        return Err("agents 不能为空".to_string());
+    }
+    let mut out = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        let obj = item
+            .as_object()
+            .ok_or_else(|| format!("agents[{}] 必须是对象", i))?;
+        if let Some(rv) = obj.get("ref") {
+            let reference = rv
+                .as_str()
+                .ok_or_else(|| format!("agents[{}].ref 必须是字符串", i))?
+                .trim();
+            if reference.is_empty() {
+                return Err(format!("agents[{}].ref 不能为空", i));
+            }
+            reject_extra(obj, &["ref"], i)?;
+            out.push(ParsedAgent {
+                name: reference.to_string(),
+                reuse: true,
+                modules: Vec::new(),
+                model: None,
+                chara: String::new(),
+            });
+        } else {
+            let name = match obj.get("name").and_then(|v| v.as_str()) {
+                Some(s) if !s.trim().is_empty() => s.trim().to_string(),
+                _ => return Err(format!("agents[{}] 缺少 name（新 agent 的名字）", i)),
+            };
+            // modules 可以省略、也可以为空：零模块 agent 只用内建文件工具。
+            let modules = match obj.get("modules").and_then(|v| v.as_array()) {
+                Some(a) => {
+                    let mut ids = Vec::new();
+                    for m in a {
+                        let id = m
+                            .as_str()
+                            .ok_or_else(|| format!("agents[{}].modules 里有非字符串项", i))?
+                            .trim();
+                        if id.is_empty() {
+                            return Err(format!("agents[{}].modules 里有空模块 id", i));
+                        }
+                        ids.push(id.to_string());
+                    }
+                    ids
+                }
+                None => Vec::new(),
+            };
+            let model = obj
+                .get("model")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            let chara = obj
+                .get("chara")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            reject_extra(obj, &["name", "modules", "model", "chara"], i)?;
+            out.push(ParsedAgent {
+                name,
+                reuse: false,
+                modules,
+                model,
+                chara,
+            });
+        }
+    }
+    Ok(out)
+}
+
+fn reject_extra(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    allowed: &[&str],
+    i: usize,
+) -> Result<(), String> {
+    for k in obj.keys() {
+        if !allowed.contains(&k.as_str()) {
+            return Err(format!("agents[{}] 里有不认识的键：{}", i, k));
+        }
+    }
+    Ok(())
+}
+#[cfg(test)]
+mod tests;

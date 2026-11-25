@@ -5,7 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::capabilities::conversation::session::api::{MEETING, SINGLE, SessionSpec};
+use crate::units::conversation::session::api::{MEETING, SINGLE, SessionSpec};
 
 #[test]
 pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
@@ -45,8 +45,8 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
             guest: Some(guest.clone()),
             pins: BTreeMap::new(),
             permission: None,
-            shared: Some(crate::capabilities::workspace::api::SharedEdit {
-                write: Some(crate::capabilities::workspace::api::ScopeMode::Paths(vec![
+            shared: Some(crate::units::workspace::api::SharedEdit {
+                write: Some(crate::units::workspace::api::ScopeMode::Paths(vec![
                     "docs".to_string(),
                 ])),
                 ..Default::default()
@@ -59,7 +59,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     assert_eq!(cfg.tier, "vm");
     assert_eq!(
         cfg.permission.shared.write,
-        crate::capabilities::workspace::api::ScopeMode::Paths(vec!["docs".to_string()])
+        crate::units::workspace::api::ScopeMode::Paths(vec!["docs".to_string()])
     );
     let (meta, events) = hist.load(&sid).unwrap();
     assert_eq!(
@@ -70,7 +70,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     assert_eq!(meta.exec.tier, Tier::Vm);
     assert_eq!(
         meta.shared.write,
-        Some(crate::capabilities::workspace::api::ScopeMode::Paths(vec![
+        Some(crate::units::workspace::api::ScopeMode::Paths(vec![
             "docs".to_string()
         ])),
         "会话级共享区归属写回 meta"
@@ -287,7 +287,7 @@ pub(crate) fn deleting_a_session_releases_its_fence_lease() {
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
-        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
+        Arc::new(crate::units::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -298,8 +298,8 @@ pub(crate) fn deleting_a_session_releases_its_fence_lease() {
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         crate::tests::doubles::test_host_probe(),
-        Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        Arc::new(crate::units::residents::api::NoResidents),
+        Arc::new(crate::units::catalog::secrets::api::NoSecrets),
         crate::tests::doubles::test_profiles(),
     );
     assert!(

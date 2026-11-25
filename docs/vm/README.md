@@ -1,14 +1,14 @@
 # vm（虚拟机档）
 > 定位：执行档位的选型诊断、就绪检测与 guest 生命周期；运行包由 `packages` 选好，本单元只消费 `PackagePlan`。
-> 效力：规范｜核对：2026-11-06｜依据：`src/capabilities/vm/api.rs`
+> 效力：规范｜核对：2026-11-06｜依据：`src/units/vm/api.rs`
 
 ## 管什么 / 不管什么
-- 管：执行档位（本机 / 虚拟机）的选型诊断、执行计划派生（`src/capabilities/vm/service/plan.rs`：运行包由 `packages` 选好，本能力只消费 `PackagePlan`）、就绪检测（本机能不能承载虚拟机档；缺哪几项、每项怎么补），以及 guest 生命周期（按会话租约起 / 跑 / 销毁）与 guest 只读诊断。
+- 管：执行档位（本机 / 虚拟机）的选型诊断、执行计划派生（`src/units/vm/service/plan.rs`：运行包由 `packages` 选好，本能力只消费 `PackagePlan`）、就绪检测（本机能不能承载虚拟机档；缺哪几项、每项怎么补），以及 guest 生命周期（按会话租约起 / 跑 / 销毁）与 guest 只读诊断。
 - 不管：运行包契约、包库与选包（`packages`）、会话与档案（`session`）、工作区与沙箱（`workspace`，本能力只收它给的中立路径）、模块清单（`modules`，只消费它声明的 `runtimes`）、实际执行工具（`tools`）。
 
 ## 入站契约与状态归属
 - 入站面：`api::Vm`（`guest_start` / `guest_run` / `guest_wait_agent` / `guest_stop` / `guest_leases` / `guest_diagnose`）+ 档位与计划的纯函数（`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_capability` / `capability_refusal` / …）。
-- 管：**一次销毁的自足任务** `GuestStop`（`src/capabilities/vm/service/job.rs`）——调用方算出租约、在本线程 `run`，销毁要等 guest 落盘。
+- 管：**一次销毁的自足任务** `GuestStop`（`src/units/vm/service/job.rs`）——调用方算出租约、在本线程 `run`，销毁要等 guest 落盘。
 - 出站端口 `VmEngine` / `ShareBackend` 只由 `service.rs` 持有（R12）；`GuestVm` / `GuestChannel` 由引擎在 boot 时交出。
 - `ExecSpec` 是共享形状（在 `kernel`），本能力只读它；包库与选包在 `packages`。
 - 状态归属：虚拟根在项目内 `.vm/guest/<名>`；可写层在 `.vm/overlays/<租约>.qcow2`；构建缓存卷在 `.vm/build-cache/`（归 `builds`）；guest 租约按主会话树。
@@ -41,8 +41,8 @@
 
 - 组合：Linux QEMU/KVM + virtiofs（virtiofsd 不在场或不能执行时退 9p）；Windows QEMU/WHPX + SMB guestfwd（缺 smbd 时虚拟机档不可用，先补齐，不降级）。
 - Windows 验收前提：硬件加速（WHPX）可用；当前只验过物理宿主，嵌套虚拟化宿主未验，不声称支持。
-- guest 内诊断入口：CLI 交互命令 `diagnose <会话>` 造一次 `guest_diagnose` 动作（`systools/tools.yaml`，`callers: [user]`，参数 `session_id` 必填非空）——只读列出 guest 进程表（pid / ppid / 状态 / CPU 占用 / RSS / 运行时长 / 命令与参数）、CPU 汇总、内存、负载、挂载与内核 / 核数；诊断本身只读、不写 guest 文件（为复用既有 fenced 通道，宿主会按既有机制写一份策略临时文件，helper 读取后立即删除）、不改会话状态、不套 per-agent 围栏，guest 内走 helper 的只读诊断模式，宿主侧只用已持有的 QGA 通道（不新增外部端口，见 `src/capabilities/vm/service.rs` 的 `guest_diagnose`）。
-- 诊断失败如实分类：没有活 guest / 只有 Linux guest / QGA 通道不通 / guest 诊断助手不在或不支持 / guest 缺 python3 / 诊断超时 / 输出不可解析；「读不到」不说成「没有进程」（`src/capabilities/vm/domain/diagnose.rs`）。
+- guest 内诊断入口：CLI 交互命令 `diagnose <会话>` 造一次 `guest_diagnose` 动作（`systools/tools.yaml`，`callers: [user]`，参数 `session_id` 必填非空）——只读列出 guest 进程表（pid / ppid / 状态 / CPU 占用 / RSS / 运行时长 / 命令与参数）、CPU 汇总、内存、负载、挂载与内核 / 核数；诊断本身只读、不写 guest 文件（为复用既有 fenced 通道，宿主会按既有机制写一份策略临时文件，helper 读取后立即删除）、不改会话状态、不套 per-agent 围栏，guest 内走 helper 的只读诊断模式，宿主侧只用已持有的 QGA 通道（不新增外部端口，见 `src/units/vm/service.rs` 的 `guest_diagnose`）。
+- 诊断失败如实分类：没有活 guest / 只有 Linux guest / QGA 通道不通 / guest 诊断助手不在或不支持 / guest 缺 python3 / 诊断超时 / 输出不可解析；「读不到」不说成「没有进程」（`src/units/vm/domain/diagnose.rs`）。
 - 验收证据：引擎级探针（`vm_live_guest_runs_command_inside_guest`）+ 并发可写层探针（`vm_live_two_guests_share_one_base_without_writing_it`）与 e2e 的虚拟机档会话场景都过（虚拟根默认 `debian-13`，`SOLOMNI_VM_GUEST` 可换）；外部工作区往返探针 `vm_live_external_workspace_round_trip` 与 e2e 的外部工作区场景已在 Windows 真机通过（WHPX + SMB：guest 内读外部根、写私沙落宿主、写共享区被拒、删会话不删外部根），Linux 的 virtiofs / 9p 两变体已在 KVM 上通过；两端的 QEMU 与 guest 镜像由 provision 能力按清单装入。
 - 诊断的真机探针 `vm_live_guest_diagnose_lists_processes`（`SOLOMNI_VM_LIVE=1` + `SOLOMNI_VM_QEMU`，默认 `[探针]` 跳过）验：guest 里起一个忙进程后诊断能列出该 pid 与 CPU / 内存 / 负载 / 挂载，停 guest 后如实报没有活 guest。
 - 多台虚拟机档会话并发时各写自己的每租约可写层（不共写基础镜像），同时台上限 `max_guests`（见「五、并发与可写层」）。
@@ -73,17 +73,17 @@
 
 ## 五、并发与可写层
 - 每个主会话树一条 guest 租约（固定 `-m 2048 -smp 2`）；协作子会话与 proxy 子工作都共用这一条。
-- 同时台上限是设置项 `max_guests`（默认 2，0 = 不限制），按主会话树计数，到上限如实拒绝；同一租约重启不占新名额（见 `REGISTRY_SPEC.md` 与 `src/capabilities/vm/domain/exec.rs` 的 `admit_guest`）。
+- 同时台上限是设置项 `max_guests`（默认 2，0 = 不限制），按主会话树计数，到上限如实拒绝；同一租约重启不占新名额（见 `REGISTRY_SPEC.md` 与 `src/units/vm/domain/exec.rs` 的 `admit_guest`）。
 - 会话启动时用 qemu-img 在基础镜像上建一份每租约可写层（`.vm/overlays/<租约>.qcow2`），删会话即丢——多台并发不同写一份基础镜像；供给编排直写基础镜像（它要改的就是镜像本身，`GuestSpec.isolated = false`）。
 - 启用 = 按基础镜像重建 guest：guest 内未落到宿主挂载点（共享区 / 外部工作区 / 沙箱 / 模块目录）的改动不保留。
 - root 只有磁盘镜像一种（qcow2 / raw ext4；`classify_base` 只认这个）：会话每次叠一份每租约可写层，谁也不写基础镜像；有内核就直启（`root=/dev/vda`），没有就靠镜像自带引导。
 - 还原到初始状态：设置 → 存储空间 / `solomni --provision --reset=<虚拟根> --yes` 会删掉 `.vm/guest/<名>` 再按清单重装（不备份、不可撤销）；成功后同时清该虚拟根的构建缓存；它不是删除虚拟根：基础镜像仍会重建出来；有活跃 guest 或构建锁时拒绝。
 - guest 内 per-agent 围栏：宿主把该 agent 的围栏翻成 guest 路径与允许集，经 guest 内 Linux helper（Landlock + no_new_privs）执行；helper 缺失或装不上时 fail-closed，不回退到无围栏执行。
 - per-agent 围栏只支持 Linux guest；Windows / macOS guest 未适配，按不支持处理；同 guest 内仍是同一 UID/root，per-agent 进程信号、`/proc` 与 `system` 包的全局可见性不在承诺内。
-- 本次隔离覆盖文件系统可达范围，并对齐本机 Linux 的只读基线、解释器目录、`cwd`、env 白名单、按 `GuestRun.timeout_secs` 超时杀整棵进程树与输出体积护栏（传输/内存用，1M 字符；模型可见的 16k 由宿主预算统一收口）。只读基线里的 `/dev/null` 例外给写权（标准重定向要能丢弃输出，`2>/dev/null` 不能 EACCES）。guest 通道产出与本机同形的正文与状态行（`[shell]` 收尾四态；cwd·耗时尾行由工具层追加）：超时 / 信号由 `src/capabilities/vm/detail/guest_helper.rs` 的机器标记（`solomni-guest-fence: timeout` / `solomni-guest-fence: signal`）表达、用户停止按宿主取消旗判定，通道翻译成状态行、不写人读句（装配见 `src/kernel/domain/receipt.rs`）。
+- 本次隔离覆盖文件系统可达范围，并对齐本机 Linux 的只读基线、解释器目录、`cwd`、env 白名单、按 `GuestRun.timeout_secs` 超时杀整棵进程树与输出体积护栏（传输/内存用，1M 字符；模型可见的 16k 由宿主预算统一收口）。只读基线里的 `/dev/null` 例外给写权（标准重定向要能丢弃输出，`2>/dev/null` 不能 EACCES）。guest 通道产出与本机同形的正文与状态行（`[shell]` 收尾四态；cwd·耗时尾行由工具层追加）：超时 / 信号由 `src/units/vm/detail/guest_helper.rs` 的机器标记（`solomni-guest-fence: timeout` / `solomni-guest-fence: signal`）表达、用户停止按宿主取消旗判定，通道翻译成状态行、不写人读句（装配见 `src/kernel/domain/receipt.rs`）。
 - 网络按 per-call `GuestAccess.net`：false 时 helper 在子进程前 `unshare(CLONE_NEWNET)`，失败 fail-closed；QEMU 网卡仍受 VM 级全局开关。
 - 用户在生成中按停止：host 置取消旗后经 QGA 给 guest helper 发 SIGTERM，helper 杀掉子进程组并退出；`timeout_secs` 仍照常收口。
-- 稳定挂载根：共享 guest 只挂三个稳定根——会话树根（各 agent 私沙与 `.work` 的父目录，rw）、外部工作区根（仅根会话绑定外部工作区时，rw）、模块树根（rw）；内部布局下共享区在会话树内、不重复挂，外部绑定时会话树根与外部根互不包含、各挂一条。新 agent 沙箱按会话树根出现、新模块目录按模块树根出现，不逐项枚举挂载；具体某个 agent 能看什么由当次围栏决定。外部工作区根挂 rw：`src/capabilities/vm/service.rs` 会把只读挂载无条件并入每次调用的允许集，只读会让它绕过按次授权；**共享区主副本不进任何按次允许集**——容器里的进程要读 / 要改先 `work_pull`，发布走宿主侧 `work_commit` + `work_push`。
+- 稳定挂载根：共享 guest 只挂三个稳定根——会话树根（各 agent 私沙与 `.work` 的父目录，rw）、外部工作区根（仅根会话绑定外部工作区时，rw）、模块树根（rw）；内部布局下共享区在会话树内、不重复挂，外部绑定时会话树根与外部根互不包含、各挂一条。新 agent 沙箱按会话树根出现、新模块目录按模块树根出现，不逐项枚举挂载；具体某个 agent 能看什么由当次围栏决定。外部工作区根挂 rw：`src/units/vm/service.rs` 会把只读挂载无条件并入每次调用的允许集，只读会让它绕过按次授权；**共享区主副本不进任何按次允许集**——容器里的进程要读 / 要改先 `work_pull`，发布走宿主侧 `work_commit` + `work_push`。
 - 运行包集合仍是启动期装配：新子会话只加模块、不加新包时直接加入运行中的 guest；包集合变化按新计划重建共享 guest（要求树空闲）；`system` 包仍按 guest 全局叠写，per-agent 只保证文件可达范围，不承诺系统包隔离。
 - 每个 QEMU 与共享进程起时记账（`.home/` 的 `processes.json`，`src/kernel/detail/procs.rs`：用途 + 归属 + 标记），销毁时注销。
 - 共享守护进程（`virtiofsd` / SMB helper）由对应共享后端按租约起停：起时进同一份进程账并绑父死子亡，释放时清理（`virtiofsd` 按进程组）。
@@ -119,7 +119,7 @@
 - 模块构建也能落 guest（创建会话前自动补编；手动入口是 `solomni --build=<模块 id> --guest=<虚拟根>`），细节见 `docs/builds/README.md`。
 - 包库在 `packages` 单元：契约、扫描与选包都在那里；`vm` 只消费 `PackagePlan` 做挂载 / 软链 / 叠写，不再持有 `PackageSource`。
 - 就绪检测按组合逐项报"现状 + 怎么补"；"验过没有"是数据表（`VERIFIED_HOSTS`），不是平台 `cfg`。
-- 路径桥（`src/capabilities/vm/domain/paths.rs`）：宿主路径 ↔ guest 路径只有一座桥；同方言时恒等（宿主路径原样在 guest 里成立）；跨方言时编进镜像根（宿主 `D:\a\b` → POSIX guest `/solomni-host/d/a/b`；POSIX 宿主 → Windows guest `C:\solomni-host\…`，非法字符转义）；UNC 根编成保留段（宿主 `\\server\share\a` → `/solomni-host/unc/server/share/a`，盘符段只可能是单字母，两种段不会撞）；宿主文件系统自己的错误（例如 Windows 对 `<>` 这类非法文件名的错误码）会原样出现在 guest 的回执里——这是共享盘语义，不是 guest 内核的判定。
+- 路径桥（`src/units/vm/domain/paths.rs`）：宿主路径 ↔ guest 路径只有一座桥；同方言时恒等（宿主路径原样在 guest 里成立）；跨方言时编进镜像根（宿主 `D:\a\b` → POSIX guest `/solomni-host/d/a/b`；POSIX 宿主 → Windows guest `C:\solomni-host\…`，非法字符转义）；UNC 根编成保留段（宿主 `\\server\share\a` → `/solomni-host/unc/server/share/a`，盘符段只可能是单字母，两种段不会撞）；宿主文件系统自己的错误（例如 Windows 对 `<>` 这类非法文件名的错误码）会原样出现在 guest 的回执里——这是共享盘语义，不是 guest 内核的判定。
 - 挂载表优先：宿主路径落在某个已挂稳定根 / 包根内时用该挂载的 guest 点，表外才退镜像根；外部工作区根同样由桥给挂载点（内部布局下共享区在会话树内，不额外挂）。
 - 挂载点与命令装配（`cwd` / 路径型 `env`）都走路径桥；反向也走它：系统工具跑在宿主侧，靠它把模型给的 guest 写法译回宿主路径（`PathCodec`，见 `docs/tools/tools-and-roles.md` 的「路径模型」）。起 guest 前校验每个稳定根都能经桥往返（`check_stable_roots`）；UNC 经保留段编码后往返成立（虚拟机档因此支持 UNC 外部根），卷 GUID 与非 UTF-8 如实拒绝。
 - 工作环境提示词按环境分发（`prompts/shared/tools.yaml` 的 `env_hosts` / `env_guests` / `envs`）：本机档按宿主平台给，虚拟机档按 guest 的 os 给——虚拟机档给出的路径就是 guest 内路径；系统工具与模块工具同一套写法（路径规矩只在提示词册的 `path_rules` 里说一次，核心在寻址前翻译）。

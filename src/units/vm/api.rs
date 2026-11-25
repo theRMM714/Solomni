@@ -1,0 +1,85 @@
+//! 目的：vm 能力的入站面——其它能力与呈现层只准用这里。
+//! 管：Vm 用例 trait（guest 生命周期）与销毁任务 `GuestStop`，以及档位、计划、入口诊断、就绪检测、运行计划派生（宿主/guest 包选型、模块可用性、路径翻译器）的重导出。
+//! 不管：纯逻辑实现（domain/）与端口（ports.rs）；运行包契约与选包在 packages 能力。
+//! 联动：被 runtime / collab / cli 与入口层消费。
+
+pub use crate::units::vm::detail::qemu::create_disk;
+pub use crate::units::vm::domain::diagnose::GuestDiagnosis;
+pub use crate::units::vm::domain::exec::resolve_guest;
+pub use crate::units::vm::domain::exec::{
+    COPY_SHARE_ENV, ExecPlan, MissingEntry, VmInputs, VmRequirement, admit_guest,
+    capability_refusal, copy_share_enabled, diagnose_text_for, guest_platform, missing_entries_for,
+    plan, plan_summary, runs_on_target, share_chain, tier_readiness, tier_refusal, vm_capability,
+    vm_requirements,
+};
+pub use crate::units::vm::domain::guest::{GuestArch, GuestClients, GuestOs};
+pub use crate::units::vm::domain::guest::{
+    GuestImage, GuestRun, GuestSpec, OutputLimit, SeedDocs, classify_base, mounts_from,
+    package_setup_scripts,
+};
+pub use crate::units::vm::domain::paths::PathBridge;
+pub use crate::units::vm::service::job::GuestStop;
+#[allow(unused_imports)] // 入站面：运行计划派生的唯一出口（能力外只经这里取用）
+pub use crate::units::vm::service::plan::{
+    guest_image_of, guest_os_of, guest_platform_of, guest_runtimes_of, host_plan_for, library_for,
+    path_codec_of, plan_for_spec, unavailable_modules,
+};
+
+/// 目的：虚拟机档的**用例面**（`service.rs` 实现）——guest 生命周期走这里。
+/// 约束：出站端口 `VmEngine` / `ShareBackend` 只由 `service.rs` 持有（R12）；运行包库在 packages 能力。
+pub trait Vm: Send + Sync {
+    /// 按规格拉起会话级 guest（同一租约重复拉起 = 先销毁旧的）。
+    fn guest_start(&self, spec: &GuestSpec) -> Result<(), String>;
+    /// 在该租约的 guest 里跑一次工具（没有这个 guest = 如实失败）。
+    fn guest_run(&self, lease: &str, run: &GuestRun) -> crate::kernel::api::types::ToolOutcome;
+    /// 目的：按某个 agent 的围栏在 guest 里跑一次工具；通道不支持围栏就如实失败。
+    fn guest_run_fenced(
+        &self,
+        lease: &str,
+        run: &GuestRun,
+        fence: &crate::kernel::api::fence::FencePlan,
+    ) -> crate::kernel::api::types::ToolOutcome;
+    /// 目的：在 guest 里跑一次可取消的围栏执行；默认退回 `guest_run_fenced`（测试 / 其它引擎）。
+    fn guest_run_fenced_cancellable(
+        &self,
+        lease: &str,
+        run: &GuestRun,
+        fence: &crate::kernel::api::fence::FencePlan,
+        _cancel: Option<&std::sync::atomic::AtomicBool>,
+    ) -> crate::kernel::api::types::ToolOutcome {
+        self.guest_run_fenced(lease, run, fence)
+    }
+    /// 目的：把模块声明的相对入口复制进 guest 本地并给执行位（共享盘不承载执行位：cifs 的合成权限位没有 x）。
+    /// 参数：`lease` = 会话租约；`module` = 模块 id（落点目录）；`host` = 宿主上的入口文件；`entry` = 相对模块根的入口。
+    /// 返回：guest 里的绝对路径（调用方据此重写命令的首个 token）。
+    /// 错误：入口不合法或读不到、复制或 chmod 失败、租约不在场——都如实拒绝（不回退到共享路径执行）。
+    fn stage_exec(
+        &self,
+        lease: &str,
+        module: &str,
+        host: &std::path::Path,
+        entry: &str,
+    ) -> Result<String, String>;
+
+    /// 目的：这台 guest 启动时装载的运行包（id@version，排序去重）；没有活 guest = None。
+    fn guest_packages(&self, lease: &str) -> Option<Vec<String>>;
+    /// 目的：把本次启动实际装载的运行包记进租约（供"新子会话要不要重建"判断）。
+    fn guest_set_packages(&self, lease: &str, packages: Vec<String>);
+    /// 目的：等 guest 的命令通道就绪（首启装 agent 期间轮询它）。
+    /// 返回：到期限仍不通给 false；租约不在场也给 false。
+    /// 约束：必须**有界**返回，不能在没有 agent 时干等。
+    fn guest_wait_agent(&self, lease: &str, timeout: std::time::Duration) -> bool;
+    /// 销毁该租约的 guest 与它的磁盘（幂等）。
+    fn guest_stop(&self, lease: &str);
+    /// 目的：此刻活着的租约名（并发上限判断用；按名字升序）。
+    fn guest_leases(&self) -> Vec<String>;
+
+    /// 目的：在该租约的 guest 里采一次**只读诊断**（进程表 / CPU / 内存 / 负载 / 挂载）。
+    /// 约束：系统动作、只读、不写 guest；失败如实区分原因（没有活 guest / 非 Linux / 通道不通 /
+    ///   helper 不可用 / 缺 python3 / 超时 / 输出不可解析），绝不返回空诊断。
+    /// 默认实现：这台引擎没有诊断能力（替身不必全改）。
+    fn guest_diagnose(&self, lease: &str) -> Result<GuestDiagnosis, String> {
+        let _ = lease;
+        Err("这台 guest 引擎没有诊断能力".to_string())
+    }
+}

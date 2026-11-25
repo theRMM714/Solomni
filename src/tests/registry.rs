@@ -1,11 +1,11 @@
 //! 目的：钉供应商、模型、agent、设置与通道解析的不变式。
 //! 管：设置解析通道、供应商生命周期与密钥不泄、上下文 0 回落 128K、核心默认守卫、目录解析、端点候选回落、探测只回写结论、保留目录名。
 //! 不管：HTTP 入站（routes.rs）。
-//! 联动：src/capabilities/registry/。
+//! 联动：src/units/registry/。
 
 use super::builders::*;
 use super::prelude::*;
-use crate::capabilities::conversation::session::api::{MEETING, SINGLE};
+use crate::units::conversation::session::api::{MEETING, SINGLE};
 
 #[test]
 pub(crate) fn settings_resolves_model_to_channel() {
@@ -24,7 +24,7 @@ pub(crate) fn settings_resolves_model_to_channel() {
             api_model: "real-model".into(),
             provider: "p".into(),
             note: String::new(),
-            tools: crate::capabilities::llm::api::ToolMode::Native,
+            tools: crate::units::llm::api::ToolMode::Native,
             context: 32_000,
             thinking: Default::default(),
         },
@@ -55,7 +55,7 @@ pub(crate) fn settings_resolves_model_to_channel() {
             .iter()
             .find(|v| v.id == "d")
             .map(|v| v.tools),
-        Some(crate::capabilities::llm::api::ToolMode::Native),
+        Some(crate::units::llm::api::ToolMode::Native),
         "不填 tools 的模型缺省走原生"
     );
     assert_eq!(
@@ -63,7 +63,7 @@ pub(crate) fn settings_resolves_model_to_channel() {
             .iter()
             .find(|v| v.id == "m")
             .map(|v| v.tools),
-        Some(crate::capabilities::llm::api::ToolMode::Native),
+        Some(crate::units::llm::api::ToolMode::Native),
         "模型视图要带上形态（前端显示与探测结果都靠它）"
     );
     assert!(s.resolve("ghost").is_err(), "未知模型必须报错");
@@ -145,7 +145,7 @@ pub(crate) fn agent_meta_is_the_single_conversion_from_a_registry_view() {
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
     agent_upsert_chara(&mut core, "调研", &["a"], "m", "说明", " 严谨 ").unwrap();
     let view = core.registry().agent_views().remove(0);
-    let meta = crate::capabilities::catalog::registry::api::agent_meta(&view);
+    let meta = crate::units::catalog::registry::api::agent_meta(&view);
     assert_eq!(meta.name, view.name);
     assert!(!meta.transient, "登记处来的 agent 不是临时 agent");
     assert_eq!(meta.modules, view.modules);
@@ -281,8 +281,8 @@ pub(crate) fn agent_crud_and_work_with_agents() {
 // ---------- 模块清单（内存来源） ----------
 #[test]
 pub(crate) fn a_probe_writes_back_only_conclusive_results() {
-    use crate::capabilities::llm::api::ToolMode;
-    use crate::capabilities::runtime::api::ProbeOutcome;
+    use crate::units::llm::api::ToolMode;
+    use crate::units::runtime::api::ProbeOutcome;
     let fresh = |outcome: ProbeOutcome| {
         let mut core = core_with_gateway(
             vec![],
@@ -358,19 +358,19 @@ pub(crate) fn a_probe_writes_back_only_conclusive_results() {
 pub(crate) fn reserved_directory_names_are_rejected_case_insensitively() {
     let reserved = vec!["work".to_string(), "children".to_string()];
     assert!(
-        crate::capabilities::catalog::registry::api::check_reserved("children", &reserved).is_err()
+        crate::units::catalog::registry::api::check_reserved("children", &reserved).is_err()
     );
     assert!(
-        crate::capabilities::catalog::registry::api::check_reserved("CHILDREN", &reserved).is_err(),
+        crate::units::catalog::registry::api::check_reserved("CHILDREN", &reserved).is_err(),
         "Windows 文件系统不区分大小写"
     );
-    assert!(crate::capabilities::catalog::registry::api::check_reserved("甲", &reserved).is_ok());
+    assert!(crate::units::catalog::registry::api::check_reserved("甲", &reserved).is_ok());
 }
 
 /// 目的：登记时就拒掉目录外的档、悬空的默认档与被保留键的片段；删掉仍被模型使用的等级也要拒绝。
 #[test]
 pub(crate) fn thinking_registration_rejects_unknown_levels_defaults_and_reserved_keys() {
-    use crate::capabilities::catalog::registry::api::ThinkingSpec;
+    use crate::units::catalog::registry::api::ThinkingSpec;
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
     core.registry_mut()
         .provider_upsert("p1", "http://x", "k")

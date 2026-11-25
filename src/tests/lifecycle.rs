@@ -4,7 +4,7 @@
 //! 联动：src/tests 各处用 `crate::tests::lifecycle::rewind` 回档；单元说明见 docs/lifecycle/README.md。
 
 use super::prelude::*;
-use crate::capabilities::lifecycle::api::{Lifecycle, RebuildDeps, RewindTarget};
+use crate::units::lifecycle::api::{Lifecycle, RebuildDeps, RewindTarget};
 
 /// 目的：测试用回档入口——把会话本体与重建要的两个能力面一并交给生命周期，返回主会话活动视图。
 pub(crate) fn rewind(

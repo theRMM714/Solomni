@@ -8,7 +8,7 @@ title: 生命周期：回档、留档、删除
 mutation:
   schedule: none
   files:
-    - src/capabilities/lifecycle/service/rewind.rs
+    - src/units/lifecycle/service/rewind.rs
 cases:
   - id: cargo/tests::lifecycle
     tier: T1

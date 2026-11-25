@@ -3,8 +3,8 @@
 //! 不管：安装器（provision 能力的 `kind: toolchain`）、真实进程围栏与 guest 工具链。
 //! 联动：被测实现见 src/entry/toolchains.rs；启动期调用见 src/main.rs。
 
-use crate::capabilities::catalog::packages::api::{BaseFacts, HostFallback};
-use crate::capabilities::system::api::toolchain_lines;
+use crate::units::catalog::packages::api::{BaseFacts, HostFallback};
+use crate::units::system::api::toolchain_lines;
 use crate::entry::toolchains::{active_roots, compose, target};
 
 type ToolSpec<'a> = (&'a str, &'a str, &'a [&'a str], &'a [(&'a str, &'a str)]);
@@ -61,7 +61,7 @@ pub(crate) fn installed_toolchains_are_registered_and_read_back_at_startup() {
             "node",
         ),
     ];
-    crate::capabilities::provision::sync_toolchain_active(&root, &deps).expect("登记 active.json");
+    crate::units::provision::sync_toolchain_active(&root, &deps).expect("登记 active.json");
     let file = root.join(".tools").join("toolchains").join("active.json");
     let raw = std::fs::read_to_string(&file).expect("active.json 要在场");
     let c = compose(&root, &raw, std::ffi::OsStr::new(""), target).expect("启动期要能读");
@@ -85,8 +85,8 @@ fn toolchain_dep(
     install: &str,
     bins: &[&str],
     tool: &str,
-) -> crate::capabilities::provision::Dep {
-    crate::capabilities::provision::Dep {
+) -> crate::units::provision::Dep {
+    crate::units::provision::Dep {
         id: id.to_string(),
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
@@ -95,7 +95,7 @@ fn toolchain_dep(
         source: "toolchain.python.3.14.9.windows-x86_64".to_string(),
         kind: "toolchain".to_string(),
         guest: None,
-        toolchain: Some(crate::capabilities::provision::ToolchainSpec {
+        toolchain: Some(crate::units::provision::ToolchainSpec {
             tool: tool.to_string(),
             version: "9.9.9".to_string(),
             target: Some(target.to_string()),

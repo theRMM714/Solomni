@@ -1,17 +1,17 @@
 //! 目的：装配组合根——把替身装进各能力面与核心，和生产的接线同一条路。
 //! 管：能力面工厂、核心装配的各种变体、agent 登记辅助。
 //! 不管：替身实现（各 `*.rs`）。
-//! 联动：`src/capabilities/runtime/service/` 与 `docs/testing/doubles.md`。
+//! 联动：`src/units/runtime/service/` 与 `docs/testing/doubles.md`。
 
 use super::*;
 
 /// 目的：登记处能力的测试装配：内存登记处 + 指定模型目录 + 指定通道 + 空日志。生产里这些端口由组合根注入，测试这里用替身顶。
 pub(crate) fn registry_service(
     store: InMemorySettings,
-    llm: Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync>,
-) -> Box<dyn crate::capabilities::catalog::registry::api::Registry> {
+    llm: Arc<dyn crate::units::llm::api::Llm + Send + Sync>,
+) -> Box<dyn crate::units::catalog::registry::api::Registry> {
     Box::new(
-        crate::capabilities::catalog::registry::service::RegistryService::new(
+        crate::units::catalog::registry::service::RegistryService::new(
             Arc::new(store),
             llm,
             Arc::new(crate::kernel::ports::NoopLog),
@@ -22,10 +22,10 @@ pub(crate) fn registry_service(
 
 /// 目的：测试用的 **llm 能力面**：把通道工厂 + 模型目录装进 `LlmService`（修信封用 `NoRepair`）。与生产同一条路——组合根装 service，别人只拿 `api::Llm` 面（R12）。
 pub(crate) fn test_llm(
-    gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync>,
+    gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync>,
     catalog: Arc<FakeCatalog>,
-) -> Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync> {
-    Arc::new(crate::capabilities::llm::service::LlmService::new(
+) -> Arc<dyn crate::units::llm::api::Llm + Send + Sync> {
+    Arc::new(crate::units::llm::service::LlmService::new(
         gateway,
         catalog,
         Arc::new(NoRepair),
@@ -34,32 +34,32 @@ pub(crate) fn test_llm(
 
 /// 目的：同上，但指定信封修复器（"修信封"路径的用例用真修复器）。
 pub(crate) fn test_llm_with_repair(
-    repair: Arc<dyn crate::capabilities::llm::ports::EnvelopeRepair + Send + Sync>,
-) -> Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync> {
-    Arc::new(crate::capabilities::llm::service::LlmService::new(
-        Arc::new(crate::capabilities::llm::detail::fake_chat::DemoGateway),
+    repair: Arc<dyn crate::units::llm::ports::EnvelopeRepair + Send + Sync>,
+) -> Arc<dyn crate::units::llm::api::Llm + Send + Sync> {
+    Arc::new(crate::units::llm::service::LlmService::new(
+        Arc::new(crate::units::llm::detail::fake_chat::DemoGateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
         repair,
     ))
 }
 
 /// 目的：只要一个 llm 面（不关心通道与修复）的用例用它：演示通道 + 不修。
-pub(crate) fn test_llm_demo() -> Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync> {
+pub(crate) fn test_llm_demo() -> Arc<dyn crate::units::llm::api::Llm + Send + Sync> {
     test_llm_with_repair(Arc::new(NoRepair))
 }
 
 /// 目的：测试用的 **workspace 能力面**：把两个出站端口装进 `WorkspaceService`（与生产同一条路，R12）。版本库默认用内存替身；要观察主副本/提交记录的用例用 `test_workspace_store`。
 pub(crate) fn test_workspace(
     dirs: Arc<dyn Workdirs + Send + Sync>,
-) -> Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> {
+) -> Arc<dyn crate::units::workspace::api::Workspace + Send + Sync> {
     test_workspace_store(dirs, Arc::new(InMemoryWorkStore::new()))
 }
 
 pub(crate) fn test_workspace_store(
     dirs: Arc<dyn Workdirs + Send + Sync>,
     store: Arc<dyn WorkStore + Send + Sync>,
-) -> Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> {
-    Arc::new(crate::capabilities::workspace::service::WorkspaceService::new(dirs, store))
+) -> Arc<dyn crate::units::workspace::api::Workspace + Send + Sync> {
+    Arc::new(crate::units::workspace::service::WorkspaceService::new(dirs, store))
 }
 
 /// 目的：用指定的单文件上限装配 workspace 面（测试超限分支时避免造 64 MiB 数据）。
@@ -67,9 +67,9 @@ pub(crate) fn test_workspace_store_with_max(
     dirs: Arc<dyn Workdirs + Send + Sync>,
     store: Arc<dyn WorkStore + Send + Sync>,
     max: u64,
-) -> Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> {
+) -> Arc<dyn crate::units::workspace::api::Workspace + Send + Sync> {
     Arc::new(
-        crate::capabilities::workspace::service::WorkspaceService::with_max_asset_bytes(
+        crate::units::workspace::service::WorkspaceService::with_max_asset_bytes(
             dirs, store, max,
         ),
     )
@@ -84,15 +84,15 @@ impl InMemoryModuleState {
     }
 }
 
-impl crate::capabilities::catalog::modules::ports::ModuleStateStore for InMemoryModuleState {
+impl crate::units::catalog::modules::ports::ModuleStateStore for InMemoryModuleState {
     fn load(
         &self,
-    ) -> Result<crate::capabilities::catalog::modules::domain::state::EnabledState, String> {
+    ) -> Result<crate::units::catalog::modules::domain::state::EnabledState, String> {
         Ok(self.state.lock().expect("锁").clone())
     }
     fn save(
         &self,
-        state: &crate::capabilities::catalog::modules::domain::state::EnabledState,
+        state: &crate::units::catalog::modules::domain::state::EnabledState,
     ) -> Result<(), String> {
         *self.state.lock().expect("锁") = state.clone();
         Ok(())
@@ -102,17 +102,17 @@ impl crate::capabilities::catalog::modules::ports::ModuleStateStore for InMemory
 /// 目的：测试用的**模块能力面**——把清单来源与覆盖存储装进 `ModulesService`（与生产同一条路，R12）。
 pub(crate) fn test_modules(
     source: Arc<dyn ModuleSource + Send + Sync>,
-) -> Arc<dyn crate::capabilities::catalog::modules::api::Modules + Send + Sync> {
+) -> Arc<dyn crate::units::catalog::modules::api::Modules + Send + Sync> {
     test_modules_store(source, Arc::new(InMemoryModuleState::new()))
 }
 
 /// 目的：测试用的模块能力面（指定覆盖存储；断言落盘/有效值的用例用它）。
 pub(crate) fn test_modules_store(
     source: Arc<dyn ModuleSource + Send + Sync>,
-    store: Arc<dyn crate::capabilities::catalog::modules::ports::ModuleStateStore + Send + Sync>,
-) -> Arc<dyn crate::capabilities::catalog::modules::api::Modules + Send + Sync> {
+    store: Arc<dyn crate::units::catalog::modules::ports::ModuleStateStore + Send + Sync>,
+) -> Arc<dyn crate::units::catalog::modules::api::Modules + Send + Sync> {
     Arc::new(
-        crate::capabilities::catalog::modules::service::ModulesService::new(source, store)
+        crate::units::catalog::modules::service::ModulesService::new(source, store)
             .expect("装模块能力"),
     )
 }
@@ -148,10 +148,10 @@ pub(crate) fn core_with_services(
     modules: Vec<Module>,
     gateway: ScriptGateway,
     runner: Arc<dyn crate::kernel::ports::ProcessRunner>,
-    residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
-    secrets: Arc<dyn crate::capabilities::catalog::secrets::api::SecretOps + Send + Sync>,
+    residents: Arc<dyn crate::units::residents::api::ResidentOps + Send + Sync>,
+    secrets: Arc<dyn crate::units::catalog::secrets::api::SecretOps + Send + Sync>,
 ) -> Core {
-    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
     let llm = test_llm(
         Arc::clone(&gateway),
@@ -166,7 +166,7 @@ pub(crate) fn core_with_services(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
-        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
+        Arc::new(crate::units::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             runner,
@@ -193,7 +193,7 @@ pub(crate) fn core_with_workspace(
     gateway: ScriptGateway,
     ws: Arc<InMemoryWorkspace>,
 ) -> Core {
-    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
     let llm = test_llm(
         Arc::clone(&gateway),
@@ -208,7 +208,7 @@ pub(crate) fn core_with_workspace(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
-        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
+        Arc::new(crate::units::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -219,8 +219,8 @@ pub(crate) fn core_with_workspace(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         test_host_probe(),
-        Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        Arc::new(crate::units::residents::api::NoResidents),
+        Arc::new(crate::units::catalog::secrets::api::NoSecrets),
         test_profiles(),
     )
 }
@@ -232,7 +232,7 @@ pub(crate) fn core_with_workdirs(
     gateway: ScriptGateway,
     dirs: Arc<dyn Workdirs + Send + Sync>,
 ) -> Core {
-    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
     let llm = test_llm(
         Arc::clone(&gateway),
@@ -247,7 +247,7 @@ pub(crate) fn core_with_workdirs(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
-        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
+        Arc::new(crate::units::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -258,8 +258,8 @@ pub(crate) fn core_with_workdirs(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         test_host_probe(),
-        Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        Arc::new(crate::units::residents::api::NoResidents),
+        Arc::new(crate::units::catalog::secrets::api::NoSecrets),
         test_profiles(),
     )
 }
@@ -288,16 +288,16 @@ pub(crate) fn core_with_workdirs_vm(
     dirs: Arc<dyn Workdirs + Send + Sync>,
     engine: FakeEngine,
 ) -> Core {
-    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
     let llm = test_llm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
-    let history: Arc<dyn crate::capabilities::conversation::session::api::History + Send + Sync> =
+    let history: Arc<dyn crate::units::conversation::session::api::History + Send + Sync> =
         Arc::new(
-            crate::capabilities::conversation::session::service::SessionService::new(Arc::new(
-                crate::capabilities::conversation::session::detail::fs_history::FsHistory::new(
+            crate::units::conversation::session::service::SessionService::new(Arc::new(
+                crate::units::conversation::session::detail::fs_history::FsHistory::new(
                     root.join("session"),
                 ),
             )),
@@ -311,7 +311,7 @@ pub(crate) fn core_with_workdirs_vm(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
-        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
+        Arc::new(crate::units::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -322,8 +322,8 @@ pub(crate) fn core_with_workdirs_vm(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         vm_capable_host_probe(),
-        Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        Arc::new(crate::units::residents::api::NoResidents),
+        Arc::new(crate::units::catalog::secrets::api::NoSecrets),
         test_profiles(),
     )
 }
@@ -348,7 +348,7 @@ pub(crate) fn core_with_io(
 /// 参数：`modules` = 清单事实；`builds` = 构建能力面（用例给真实现或替身）。
 pub(crate) fn core_with_builds(
     modules: Vec<Module>,
-    builds: Arc<dyn crate::capabilities::maintenance::builds::api::Builds + Send + Sync>,
+    builds: Arc<dyn crate::units::maintenance::builds::api::Builds + Send + Sync>,
 ) -> Core {
     let gateway: Arc<dyn ChatGateway + Send + Sync> = Arc::new(gw(BTreeMap::new(), Vec::new()));
     let llm = test_llm(
@@ -375,8 +375,8 @@ pub(crate) fn core_with_builds(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         test_host_probe(),
-        Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        Arc::new(crate::units::residents::api::NoResidents),
+        Arc::new(crate::units::catalog::secrets::api::NoSecrets),
         test_profiles(),
     )
 }
@@ -466,11 +466,11 @@ pub(crate) fn core_with_pkgs_probe(
     packages: Arc<InMemoryPackages>,
     probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
 ) -> Core {
-    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
     let llm = test_llm(Arc::clone(&gateway), catalog);
     // 测试里的宿主回退：probe 说有的基础能力就当作"围栏可用"，与生产里组合根给的事实同形。
-    let mut base = crate::capabilities::catalog::packages::api::BaseFacts::default();
+    let mut base = crate::units::catalog::packages::api::BaseFacts::default();
     for id in ["python", "node", "cc"] {
         let names: &[&str] = match id {
             "python" => &["python", "python3"],
@@ -481,7 +481,7 @@ pub(crate) fn core_with_pkgs_probe(
         if names.iter().any(|n| probe.has_exe(n)) {
             base.fallback.insert(
                 id.to_string(),
-                crate::capabilities::catalog::packages::api::HostFallback {
+                crate::units::catalog::packages::api::HostFallback {
                     path: std::path::PathBuf::from(id),
                     fenced: true,
                     why: String::new(),
@@ -498,15 +498,15 @@ pub(crate) fn core_with_pkgs_probe(
         test_packages_with_base(packages, base),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
-        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
+        Arc::new(crate::units::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(runner, io, Arc::new(NoFenceHost)),
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         probe,
-        Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        Arc::new(crate::units::residents::api::NoResidents),
+        Arc::new(crate::units::catalog::secrets::api::NoSecrets),
         test_profiles(),
     )
 }
@@ -518,7 +518,7 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Core {
 
 /// 目的：同上设置装配，但指定模块清单（建带模块的会话时用）。
 pub(crate) fn core_with_settings_modules(store: InMemorySettings, modules: Vec<Module>) -> Core {
-    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gw(BTreeMap::new(), Vec::new()));
     let llm = test_llm(
         Arc::clone(&gateway),
@@ -533,7 +533,7 @@ pub(crate) fn core_with_settings_modules(store: InMemorySettings, modules: Vec<M
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
-        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
+        Arc::new(crate::units::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -544,8 +544,8 @@ pub(crate) fn core_with_settings_modules(store: InMemorySettings, modules: Vec<M
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         test_host_probe(),
-        Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        Arc::new(crate::units::residents::api::NoResidents),
+        Arc::new(crate::units::catalog::secrets::api::NoSecrets),
         test_profiles(),
     )
 }
@@ -564,7 +564,7 @@ pub(crate) fn core_with_io_gateway(
     gateway: impl ChatGateway + Send + Sync + 'static,
     io: Arc<InMemorySysIo>,
 ) -> Core {
-    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
     let llm = test_llm(
         Arc::clone(&gateway),
@@ -579,15 +579,15 @@ pub(crate) fn core_with_io_gateway(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
-        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
+        Arc::new(crate::units::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         test_host_probe(),
-        Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        Arc::new(crate::units::residents::api::NoResidents),
+        Arc::new(crate::units::catalog::secrets::api::NoSecrets),
         test_profiles(),
     )
 }
@@ -606,7 +606,7 @@ pub(crate) fn core_with_gateway_probe(
     gateway: impl ChatGateway + Send + Sync + 'static,
     probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
 ) -> Core {
-    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
     let llm = test_llm(
         Arc::clone(&gateway),
@@ -621,7 +621,7 @@ pub(crate) fn core_with_gateway_probe(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
-        Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
+        Arc::new(crate::units::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -632,8 +632,8 @@ pub(crate) fn core_with_gateway_probe(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         probe,
-        Arc::new(crate::capabilities::residents::api::NoResidents),
-        Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        Arc::new(crate::units::residents::api::NoResidents),
+        Arc::new(crate::units::catalog::secrets::api::NoSecrets),
         test_profiles(),
     )
 }

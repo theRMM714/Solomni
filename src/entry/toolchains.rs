@@ -3,13 +3,13 @@
 //! 不管：下载 / 解包 / 版本选择（provision 能力的 `kind: toolchain`）；guest 内工具链；模块工具协议与围栏。
 //! 联动：由 main 在根解析后调用；环境随后由 fence_env / interpreter_dirs / HostProbe 共用。
 
-use crate::capabilities::catalog::packages::api::{BaseFacts, HostFallback};
+use crate::units::catalog::packages::api::{BaseFacts, HostFallback};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::path::{Component, Path, PathBuf};
 
 /// 目的：基础 profile 的工具 id——与清单 dependencies.yaml 的 toolchain 条目同一组（active.json 缺失时仍能报出缺哪几个）。
-pub(crate) const PROFILE: [&str; 3] = crate::capabilities::system::api::TOOLCHAIN_PROFILE;
+pub(crate) const PROFILE: [&str; 3] = crate::units::system::api::TOOLCHAIN_PROFILE;
 
 /// 目的：当前宿主的目标名（与 dependencies.yaml 的 `toolchain.target`、安装布局同一套写法）。
 pub(crate) fn target() -> Option<&'static str> {

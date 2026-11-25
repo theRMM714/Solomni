@@ -5,8 +5,8 @@
 > "哪个席位用哪份提示词、拿哪些工具"见 [tools-and-roles.md](../tools/tools-and-roles.md) 的「提示词按席位分配」；
 > 模块自己的能力摘要（`brief`）与工具用法（`system`）见 [MODULE_SPEC.md](../../MODULE_SPEC.md)。
 
-册子按**共享 / 席位**两个目录切分；加载经 `PromptSource` 端口（`capabilities/prompt/ports.rs`，实现在 `capabilities/prompt/detail/yaml_prompts.rs`），
-`{{key}}` 渲染与"缺键即报错"在 `capabilities/prompt/domain/prompt.rs`（纯逻辑，不读文件）。
+册子按**共享 / 席位**两个目录切分；加载经 `PromptSource` 端口（`units/prompt/ports.rs`，实现在 `units/prompt/detail/yaml_prompts.rs`），
+`{{key}}` 渲染与"缺键即报错"在 `units/prompt/domain/prompt.rs`（纯逻辑，不读文件）。
 键的完整清单就是下面这张表——**本表由结构审查的 docsTruth 门禁（`tests/gates/structure/docsTruth.js`）与盘上的册子双向比对**（gate id 见 `node run-tests.js --list`）：加了键没改表、表里的键已不存在，都是硬失败。
 
 ## 一、结构与键
@@ -38,16 +38,16 @@
 
 ## 二、怎么被装载、怎么被取用
 
-- `PromptSource` 端口（`capabilities/prompt/ports.rs`，实现在 `detail/yaml_prompts.rs`）按文件装配成
+- `PromptSource` 端口（`units/prompt/ports.rs`，实现在 `detail/yaml_prompts.rs`）按文件装配成
   `Prompts`：各文件的**顶层键合并**成 `core:` 的内容（键在两份文件里重复 = 装配错误，不静默覆盖）；
-- **册子只由提示词能力持有一次**（`capabilities/prompt/service.rs`）：组合根 `prompt::service::load()` 得到
+- **册子只由提示词能力持有一次**（`units/prompt/service.rs`）：组合根 `prompt::service::load()` 得到
   `Arc<dyn Prompt>`，协调业务持它、协作会话与它**共享同一份**；
 - **别的能力不点字段路径**，取用只有一条路：**按名字取一段**——`Prompt::text(Segment::…)`（原文）
-  或 `Prompt::render(Segment::…, vars)`（渲染）；名字表是 `capabilities/prompt/domain/prompt.rs` 的 `Segment`——
+  或 `Prompt::render(Segment::…, vars)`（渲染）；名字表是 `units/prompt/domain/prompt.rs` 的 `Segment`——
   **加一段提示词 = 册子加键 + 这里加变体**（缺了编译不过）。运行时回执不由本能力返回。
-- 渲染（`{{key}}` 替换、缺键 / 缺变量即报错）在 `capabilities/prompt/domain/prompt.rs`（纯逻辑，不读文件）；
+- 渲染（`{{key}}` 替换、缺键 / 缺变量即报错）在 `units/prompt/domain/prompt.rs`（纯逻辑，不读文件）；
 - **工具总表与机制席位不在这份册子里**：`systools/tools.yaml`（工具是什么）与 `session/domain/mechanism.rs` 的 `SEATS`（身份有什么）
-  由 `capabilities/tools/detail/yaml_systools.rs` 的 `YamlSystools` 装配成 `SystemTools`，**与册子分开注入**——
+  由 `units/tools/detail/yaml_systools.rs` 的 `YamlSystools` 装配成 `SystemTools`，**与册子分开注入**——
   挂进册子会让提示词反过来依赖工具，两边成环（见 [layers.md](../architecture/layers.md)）；
 - **组装（哪一回合发哪几段）留在各业务**：身份块归 `session`、工具说明归 `tools`、清单文本归 `registry` / `workspace`
   ——prompt 只给"段"，不替它们拼（否则它反过来要认识会话与工具）。

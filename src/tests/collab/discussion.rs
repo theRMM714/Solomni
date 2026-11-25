@@ -1,7 +1,7 @@
 //! 目的：钉讨论泵与发言规则：表态、退场、自裁、提醒与回合上限。
 //! 管：成员先核实再发言、按机制席位校验工具面、拿不到模块工具、逐轮定稿与回档同口径、无信封原文不算表态。
 //! 不管：协作状态派生/回档（state.rs）与端到端五阶段（flow.rs）。
-//! 联动：src/capabilities/collab/、docs/session/session-model.md、tests/doubles。
+//! 联动：src/units/collab/、docs/session/session-model.md、tests/doubles。
 
 use super::super::builders::*;
 use super::super::prelude::*;
@@ -334,7 +334,7 @@ pub(crate) fn discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_di
     );
     assert_eq!(tool_turn, said_turn, "同一个回合的行带同一个回合号");
     // ② 实时与重建同口径：把会话从表里丢掉，再取一次 = 按落盘转录重建。
-    let shown = |s: &crate::capabilities::conversation::session::api::AgentSession| {
+    let shown = |s: &crate::units::conversation::session::api::AgentSession| {
         s.dialogue()
             .iter()
             .map(|m| format!("{}:{}", m.role, m.content))
@@ -369,7 +369,7 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
     let members = vec![Member::new(
         "m0",
         crate::tests::doubles::test_params("m0"),
-        crate::capabilities::llm::api::ToolMode::Envelope,
+        crate::units::llm::api::ToolMode::Envelope,
         scripted(vec!["我觉得可以".into()]),
     )];
     let mut disc = Discussion::new(
@@ -403,7 +403,7 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
 
     // 线格式：只在为真时写出这两个字段
     let yes = SessionEvent::Transcript(vec![
-        crate::capabilities::conversation::session::api::LineView {
+        crate::units::conversation::session::api::LineView {
             id: 0,
             line: "x".into(),
             system: true,
@@ -415,7 +415,7 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
     assert_eq!(yes["lines"][0]["system"], serde_json::Value::Bool(true));
     assert_eq!(yes["lines"][0]["degraded"], serde_json::Value::Bool(true));
     let no = SessionEvent::Transcript(vec![
-        crate::capabilities::conversation::session::api::LineView {
+        crate::units::conversation::session::api::LineView {
             id: 0,
             line: "x".into(),
             ..Default::default()

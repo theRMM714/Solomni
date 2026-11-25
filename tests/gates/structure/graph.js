@@ -1,7 +1,7 @@
 /**
  * 结构审查·结构图：每次跑门禁把当前架构画成一张离线 HTML（仓库根 Structure.html）。
  * 目的：把「分层 / 依赖方向 / 出口 / 文件头四槽」变成一眼可见的东西——节点与边的颜色只表示门禁会拦什么，不自己判好坏。
- * 管：一张全景 + 四个视图。全景只画四层与层间聚合数（entry 装配 → presentation 屏 → capabilities 单元 → kernel 机制）；
+ * 管：一张全景 + 四个视图。全景只画四层与层间聚合数（entry 装配 → presentation 屏 → units 单元 → kernel 机制）；
  *     各视图调各自门禁的判据收事实（layers / kernel-mechanisms / entry-tiers / presentation-inbound 的层表与边，
  *     以及 dependency / capability / values / size / comments / unit-map 的问题清单），按各自的登记表分层排布；
  *     点节点下钻到文件级依赖，点文件看四槽与命中问题；产物每次覆盖，不进库（.gitignore 已忽略）。
@@ -43,7 +43,7 @@ const VIEWS = [
 /** 每个视图右栏的说明；改文案只改这里。 */
 const HINTS = {
   overview:
-    "<h2>怎么看 · 全景</h2><p class=hint>四层从上到下：entry 装配 → presentation 屏 → capabilities 单元 → kernel 机制。带内数字是聚合事实，细边在各自的视图里。点任一带进入该视图；红边是门禁会拦的向上/同层依赖。</p>",
+    "<h2>怎么看 · 全景</h2><p class=hint>四层从上到下：entry 装配 → presentation 屏 → units 单元 → kernel 机制。带内数字是聚合事实，细边在各自的视图里。点任一带进入该视图；红边是门禁会拦的向上/同层依赖。</p>",
   caps:
     "<h2>怎么看 · 能力层</h2><p class=hint>边是能力之间的引用（数字为引用处数，粗细按它放大）；红色边是门禁会拦的向上/同层依赖。虚线框是扇出最大的三个单元（只回执，不设预算）。点节点下钻，点文件看目的 / 管 / 不管 / 联动。</p>",
   mech:
@@ -59,7 +59,7 @@ const relOf = (root, f) => f.slice(root.length + 1).replace(/\\/g, "/");
 
 /** 路径所属能力；不在能力目录下返回空串。 */
 function capOf(rel) {
-  const m = /^src\/capabilities\/([a-z_][a-z0-9_]*)\//.exec(rel);
+  const m = /^src\/units\/([a-z_][a-z0-9_]*)\//.exec(rel);
   return m ? m[1] : "";
 }
 
@@ -219,7 +219,7 @@ function capView(root, rows, problems) {
   const fileHit = attachByFiles(problems);
   const byCap = new Map();
   for (const p of problems) {
-    const hit = pathsIn(p.text).map((x) => x.replace(/:\d+$/, "")).find((x) => x.startsWith("src/capabilities/"));
+    const hit = pathsIn(p.text).map((x) => x.replace(/:\d+$/, "")).find((x) => x.startsWith("src/units/"));
     const cap = hit ? capOf(hit) : "";
     if (!cap) continue;
     if (!byCap.has(cap)) byCap.set(cap, []);
@@ -227,7 +227,7 @@ function capView(root, rows, problems) {
   }
   const nodes = dirs.map((name) => {
     const layer = tiers.has(name) ? tiers.get(name) : 0;
-    const rels = L.rsFilesOf(path.join(root, "src", "capabilities", name)).map((f) => relOf(root, f)).sort();
+    const rels = L.rsFilesOf(path.join(root, "src", "units", name)).map((f) => relOf(root, f)).sort();
     return { name: name, layer: layer, out: 0, inn: 0, files: fileRows(rows, rels, fileHit), issues: byCap.get(name) || [] };
   });
   const byName = new Map(nodes.map((c) => [c.name, c]));
@@ -242,7 +242,7 @@ function capView(root, rows, problems) {
   }
   const fe = {};
   for (const node of nodes) {
-    fe[node.name] = edgesWithin(root, node.files.map((f) => f.path), [["crate", "capabilities", node.name]]);
+    fe[node.name] = edgesWithin(root, node.files.map((f) => f.path), [["crate", "units", node.name]]);
   }
   return { nodes: nodes, edges: edges, fe: fe };
 }
@@ -340,7 +340,7 @@ function crossCounts(root, capsView, mechViewData, entryViewData, pres) {
   for (const [mod, files] of mods) {
     for (const f of files) {
       const text = mask(dependency.stripTestModules(fs.readFileSync(f, "utf8")));
-      for (const m of text.matchAll(/crate::capabilities::([a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)*)/g)) pairs.entryCap.add(mod + ">" + P.unitOf(m[1]));
+      for (const m of text.matchAll(/crate::units::([a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)*)/g)) pairs.entryCap.add(mod + ">" + P.unitOf(m[1]));
       for (const m of text.matchAll(/crate::presentation(?:::[a-z_][a-z0-9_]*)+/g)) pairs.entryPres.add(mod + ">" + m[0]);
       if (/crate::kernel::api/.test(text)) pairs.entryKernel.add(mod);
     }
@@ -563,7 +563,7 @@ function presSvg(pres, wide) {
   return out.join("");
 }
 
-/** 全景：entry 一列装配三层，主链 presentation → capabilities → kernel；只画聚合数。 */
+/** 全景：entry 一列装配三层，主链 presentation → units → kernel；只画聚合数。 */
 function overviewSvg(meta, entry) {
   const W = 1080;
   const ex = 20;
@@ -579,7 +579,7 @@ function overviewSvg(meta, entry) {
   const entryLines = [...groups.keys()].sort((a, b) => b - a).map((k) => segNames[k] + "：" + groups.get(k).sort().join(" · "));
   const bands = [
     { view: "pres", y: 20, h: 100, title: "presentation · " + meta.screens + " 屏 / " + meta.screenFiles + " 个文件", lines: ["每屏只取清单里的能力单元：" + meta.unitCount + " 个单元、" + meta.cross.screenEdges + " 处屏→单元引用（docs/presentation/inbound.yaml）"], tag: "点这里看屏面入站面" },
-    { view: "caps", y: 164, h: 110, title: "capabilities · " + meta.caps + " 单元 / " + meta.files + " 个文件", lines: ["单元之间 " + meta.edges + " 条依赖边，只许向下（docs/layers.yaml）", "对外只经 kernel 的 " + meta.cross.faces + " 个 api 面（" + meta.cross.capKernel + " 处取用）"], tag: "点这里看能力层" },
+    { view: "caps", y: 164, h: 110, title: "units · " + meta.caps + " 单元 / " + meta.files + " 个文件", lines: ["单元之间 " + meta.edges + " 条依赖边，只许向下（docs/layers.yaml）", "对外只经 kernel 的 " + meta.cross.faces + " 个 api 面（" + meta.cross.capKernel + " 处取用）"], tag: "点这里看能力层" },
     { view: "mech", y: 318, h: 110, title: "kernel · " + meta.mech + " 机制 / " + meta.mechLayers + " 层", lines: ["机制之间 " + meta.mechEdges + " 条边，严格下行、无环（docs/kernel/mechanisms.yaml）", "对外面按概念切成 " + meta.cross.faces + " 个，内核内部不绕道面"], tag: "点这里看机制分层" },
   ];
   const out = [];
@@ -712,7 +712,7 @@ function page(data) {
     " out.push('</svg>');return out.join('');}",
     "function drawNode(){var view=cur.v,name=cur.n;stage.scrollTop=0;stage.scrollLeft=0;",
     " var n=nodeOf(view,name);if(!n)return;",
-    " var prefix=view==='caps'?'src/capabilities/'+name:view==='mech'?'src/kernel/'+name:view==='entry'?'src/entry/':view==='pres'?'src/presentation/':'';",
+    " var prefix=view==='caps'?'src/units/'+name:view==='mech'?'src/kernel/'+name:view==='entry'?'src/entry/':view==='pres'?'src/presentation/':'';",
     " var fe=(view==='caps'?D.fe[name]:view==='mech'?D.mech.fe[name]:view==='entry'?D.entry.fe[name]:null)||[];",
     " crumb([['全景',''],[TAB[view],'view:'+view],[view==='pres'?n.name:n.name,view==='pres'?'v:'+view+':'+n.file:'v:'+view+':'+name]]);",
     " stage.innerHTML=fileGraph(n.files,fe,prefix);",
