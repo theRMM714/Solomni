@@ -498,8 +498,9 @@ fn main() {
         module_reserved,
     );
     // **模块子业务**：清单来源与启停覆盖落盘只由它的 service 持有（R12）；它是模块事实的唯一上游。
-    let module_state =
-        units::catalog::modules::detail::YamlModuleState::new(home.join("modules.yaml"));
+    let module_state = units::catalog::modules::detail::YamlModuleState::new(
+        entry::assembly::home_docs(&root),
+    );
     let modules: Arc<dyn units::catalog::modules::api::Modules + Send + Sync> =
         match units::catalog::modules::service::ModulesService::new(
             Arc::new(source),

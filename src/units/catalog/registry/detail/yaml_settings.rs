@@ -1,22 +1,20 @@
-//! 目的：登记处持久化适配器——四份 yaml 的读写（实现 ports::SettingsStore）。
-//! 管：providers / models / settings / agents 四份 yaml 的读写；密钥只落 providers.yaml（unix 下 0600）；平台限制如实告知。
-//! 不管：内存形态与校验（在 domain）；状态与用例（在 service.rs）；通道与模型发现（在 llm）。
+//! 目的：登记处持久化适配器——四份 yaml 的解码与编码（实现 ports::SettingsStore）。
+//! 管：providers / models / settings / agents 四份 yaml 的文件形态、解码与校验；写回经 `Home` 端口。
+//! 不管：文件机制与权限（在 `home` 单元）；内存形态与校验规则（在 domain）；状态与用例（在 service.rs）。
 //! 联动：实现 registry/ports.rs 的 SettingsStore，由组合根装配给 service。
 
 use crate::units::catalog::registry::api::{AppSettings, Settings};
 use crate::units::catalog::registry::ports::SettingsStore;
+use crate::units::home::api::{Doc, Home};
 use crate::units::pure::registry_model::api::Agents;
 use crate::units::pure::registry_model::api::ModelEntry;
 use crate::units::pure::registry_model::api::Provider;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 pub struct YamlSettingsStore {
-    providers_path: PathBuf,
-    models_path: PathBuf,
-    settings_path: PathBuf,
-    agents_path: PathBuf,
+    home: Arc<dyn Home>,
 }
 
 /// agents.yaml 的文件形态。
@@ -43,73 +41,50 @@ struct ModelsFile {
 }
 
 impl YamlSettingsStore {
-    pub fn new(
-        providers_path: PathBuf,
-        models_path: PathBuf,
-        settings_path: PathBuf,
-        agents_path: PathBuf,
-    ) -> YamlSettingsStore {
-        YamlSettingsStore {
-            providers_path,
-            models_path,
-            settings_path,
-            agents_path,
-        }
-    }
-
-    /// 写一个 yaml 文件：建目录 → 写盘 → 收紧为私密文件（Unix 0600，其余平台空操作）。
-    fn write(path: &Path, text: &str) -> Result<(), String> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| format!("建登记处目录失败：{}", e))?;
-        }
-        std::fs::write(path, text).map_err(|e| e.to_string())?;
-        let _ = crate::kernel::api::fs_meta::restrict_private_file(path);
-        Ok(())
+    /// 目的：用登记处读写面造一个存储（组合根给 `data/.home`）。
+    pub fn new(home: Arc<dyn Home>) -> YamlSettingsStore {
+        YamlSettingsStore { home }
     }
 }
 
 impl SettingsStore for YamlSettingsStore {
     fn load(&self) -> Result<Settings, String> {
-        let providers = match std::fs::read_to_string(&self.providers_path) {
-            Ok(t) => {
+        let providers = match self.home.read(Doc::Providers)? {
+            Some(t) => {
                 yaml_serde::from_str::<ProvidersFile>(&t)
                     .map_err(|e| format!("providers.yaml 非法：{}", e))?
                     .providers
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
-            Err(e) => return Err(e.to_string()),
+            None => BTreeMap::new(),
         };
-        let (models, core) = match std::fs::read_to_string(&self.models_path) {
-            Ok(t) => {
+        let (models, core) = match self.home.read(Doc::Models)? {
+            Some(t) => {
                 let f: ModelsFile =
                     yaml_serde::from_str(&t).map_err(|e| format!("models.yaml 非法：{}", e))?;
                 (f.models, f.core)
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (BTreeMap::new(), None),
-            Err(e) => return Err(e.to_string()),
+            None => (BTreeMap::new(), None),
         };
-        let app = match std::fs::read_to_string(&self.settings_path) {
-            Ok(t) => {
+        let app = match self.home.read(Doc::Settings)? {
+            Some(t) => {
                 let app = yaml_serde::from_str::<AppSettings>(&t)
                     .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
-                // 首启没有文件时上面的 NotFound 分支不拦（交给引导决定）；已存在的文件必须自洽。
+                // 首启没有文件时上面的 None 分支不拦（交给引导决定）；已存在的文件必须自洽。
                 crate::units::catalog::registry::domain::providers::validate_sandbox_authorization(
                     &app.sandbox.policy,
                 )
                 .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
                 app
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => AppSettings::default(),
-            Err(e) => return Err(e.to_string()),
+            None => AppSettings::default(),
         };
-        let agents = match std::fs::read_to_string(&self.agents_path) {
-            Ok(t) => {
+        let agents = match self.home.read(Doc::Agents)? {
+            Some(t) => {
                 yaml_serde::from_str::<AgentsFile>(&t)
                     .map_err(|e| format!("agents.yaml 非法：{}", e))?
                     .agents
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Agents::new(),
-            Err(e) => return Err(e.to_string()),
+            None => Agents::new(),
         };
         Ok(Settings {
             providers,
@@ -125,23 +100,23 @@ impl SettingsStore for YamlSettingsStore {
             providers: settings.providers.clone(),
         };
         let text = yaml_serde::to_string(&providers).map_err(|e| e.to_string())?;
-        Self::write(&self.providers_path, &text)?;
+        self.home.write(Doc::Providers, &text)?;
 
         let models = ModelsFile {
             models: settings.models.clone(),
             core: settings.core.clone(),
         };
         let text = yaml_serde::to_string(&models).map_err(|e| e.to_string())?;
-        Self::write(&self.models_path, &text)?;
+        self.home.write(Doc::Models, &text)?;
 
         let text = yaml_serde::to_string(&settings.app).map_err(|e| e.to_string())?;
-        Self::write(&self.settings_path, &text)?;
+        self.home.write(Doc::Settings, &text)?;
 
         let agents = AgentsFile {
             agents: settings.agents.clone(),
         };
         let text = yaml_serde::to_string(&agents).map_err(|e| e.to_string())?;
-        Self::write(&self.agents_path, &text)?;
+        self.home.write(Doc::Agents, &text)?;
         Ok(())
     }
 }

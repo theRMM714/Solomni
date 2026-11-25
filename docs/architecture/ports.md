@@ -21,8 +21,10 @@
 | `Chat` | 一次模型会话：收消息列表（可带工具声明）回 `Completion`（正文 + 结束原因 + 原生工具调用）；`on` 逐片回调，返回 `false` 即要求中止 |
 | `ChatGateway` | 按**已解析**的通道建会话（核心 / 成员）；**不选择**模型、不回落假模型；探测一条通道支不支持原生工具调用 |
 | `ModelCatalog` | 按端点与密钥列出一条通道当前可用的模型名 |
-| `SettingsStore` | 登记处持久化（providers / models / settings / agents 四个 yaml） |
-| `ModuleSource` | 模块清单来源（扫描 `modules/`） |
+| `Home` | `data/.home` 的入站面：按 `Doc` 读原样文本（不存在 = `None`）、整份原子写、私密文档收紧权限；文档形态与解码不在这里 |
+| `HomeFiles` | 登记处的文件机制：按文件名读、原子写（临时文件 + rename）、可选私密权限；只由 `home` 的 service 持有 |
+| `SettingsStore` | 登记处持久化（providers / models / settings / agents 四个 yaml；文件机制走 `Home`） |
+| `ModuleSource` | 模块清单来源（扫描安装根的 `modules/`，模块私有区在 `data/modules/`） |
 | `ModuleStateStore` | 模块与服务的启停覆盖落盘（`data/.home/modules.yaml`） |
 | `PackageSource` | 运行包库来源（扫描依赖文件夹 `data/runtimes/`） |
 | `SourceDigest` | 模块源指纹：构建命令、构建期能力、网络开关与全部源文件内容 → 一段稳定指纹（缓存命中的判据） |
