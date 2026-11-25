@@ -1,7 +1,7 @@
 # 单元地图 · registry
 
 > 定位：registry（登记处）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-04｜依据：`src/units/catalog/registry/api.rs`
+> 效力：契约｜核对：2026-11-25｜依据：`src/units/catalog/registry/api.rs`
 
 > 本文是 **registry** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -9,7 +9,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/units/catalog/registry/api.rs` | 入站能力面：登记处 DTO 的重导出、`Registry` 能力面与呈现层的队列面 `RegistryOps`（内部线程 + 命令队列） |
+| `src/units/catalog/registry/api.rs` | 入站面：登记处 DTO 的重导出、`Registry` 入站对象与呈现层的队列面 `RegistryOps`（内部线程 + 命令队列） |
 | `src/units/catalog/registry/service.rs` | 登记处的状态与用例：持四份 yaml 的内存形态（`Settings`），改完即经 `SettingsStore` 落盘 |
 | `src/units/catalog/registry/ports.rs` | 出站端口：四份 yaml 的持久化 `SettingsStore`（load / save） |
 | `src/units/catalog/registry/domain/providers.rs` | 登记处的设置状态与通道解析：`AppSettings`（`settings.yaml` 的基本设置）、`SandboxSettings` 全家（硬约束 + 会话默认权限）、`Settings`（四份 yaml 的内存合体）与 `impl Settings` 的通道解析、工具形态、上下文窗口、思考片段与视图；设置 / 沙箱 / 压缩的校验（沙箱授权互斥校验用 kernel 平台事实 `HAS_EXTERNAL_ACL_STEP`）；供应商与模型的值形态在环 1 的 registry_model |

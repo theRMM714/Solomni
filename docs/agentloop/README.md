@@ -11,7 +11,7 @@
 - 管：回合引擎——五个回合入口（发言 / 派发 / 讨论席回合 / 继续 / 压缩）、轮循环与行构造、工具循环与放行策略、回合端口与结论类型；核心操作回路 `core_operation`。
 - 管：回档的行 / 事件算术与消息回灌（`reply_msgs` / `tool_result_body`）。
 - 不管：会话身份与声明（元信息、类型表、机制席位、留档策略在 `src/units/session_model/`）。
-- 不管：历史落盘（`src/units/conversation/session/detail/`）、裁决队列与流程面（`src/units/conversation/session/domain/`）、会话树与装配入口（`src/units/conversation/session/service/`）、呈现与命令队列（`presentation` / `runtime`）。
+- 不管：历史落盘（`src/units/conversation/session/detail/`）、裁决队列与流程面（`src/units/turn_state/domain/`）、会话树派生（`src/units/conversation/session/service/tree.rs`）、呈现与命令队列（`presentation` / `runtime`）。
 - 不管：模型通道与工具机制（在 `llm` / `tools` / `workspace` / `vm` / `residents` 各自端口后）。
 
 ## 入站契约与状态归属
@@ -22,8 +22,8 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`session_model`、`transcript`、`llm`、`prompt`、`tools`、`catalog`、`residents`、`workspace`、`vm`、`pure::registry_model`、`pure::exec_model`、`kernel` 的值与端口。
-- 谁在用我：`conversation`（会话装配与流程面）、`turn`（生成流程）、`work`、`collab`、`runtime`（核心操作与压缩）、`presentation`，以及测试。
+- 经 `::api` 用到：`catalog`、`exec_model`、`kernel`、`llm`、`prompt`、`registry_model`、`residents`、`session_model`、`tools`、`transcript`、`vm`、`workspace`
+- 谁在用我：`collab`、`conversation`、`lifecycle`、`presentation`、`runtime`、`turn`、`turn_state`、`work`
 
 ## 一、为什么是独立单元
 
@@ -37,7 +37,7 @@
 - 改 `AgentSession` 的字段或簿记方法 → `docs/session/session-model.md`、`src/units/turn/`（驱动点）、`src/tests/session/`。
 - 改工具面装配（`assemble` / `seat_face` / `resolve`）→ 会话单元的席位自洽断言（`src/units/conversation/session/domain/seat_check.rs`）、`docs/tools/tools-and-roles.md`。
 - 改回合引擎的端口或结论类型 → `src/units/turn/turn/service/`、`src/tests/tools/`、`docs/session/session-model.md`。
-- 改核心操作回路 → `docs/tools/tools-and-roles.md`、`src/units/conversation/{collab,slate}/` 的调用点。
+- 改核心操作回路 → `docs/tools/tools-and-roles.md`、`src/units/collab/` 与 `src/units/conversation/slate/` 的调用点。
 
 ## 本目录
 

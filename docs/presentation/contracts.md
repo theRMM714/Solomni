@@ -1,24 +1,24 @@
 # 呈现层入站契约（命令/事件 + 路由目录）
 
-> 本文是**呈现层入站契约的唯一权威**：能力接口、事件台、命令/事件规则，以及机器可读的 HTTP 路由目录。
+> 本文是**呈现层入站契约的唯一权威**：单元接口、事件台、命令/事件规则，以及机器可读的 HTTP 路由目录。
 > 分层与端口见 [architecture/README.md](../architecture/README.md)，逐文件职责见 [cli/unit-map.md](cli/unit-map.md) 与 [web/unit-map.md](web/unit-map.md)。
 > **下面的路由表由契约测试机器比对**（`src/tests/routes.rs` 直接读本文件）：表与
 > `web/routes.rs` 的 `ROUTES` 对不上就是测试失败，不靠人记得改文档。
 
-## 一、能力接口与事件台
+## 一、单元接口与事件台
 
 **核心常驻自己的执行线程、独占全部状态**：呈现层拿不到 `Core`、也拿不到任何核心锁。两侧只通过两样东西来往：
 
 | 东西 | 定义在 | 形态 |
 | --- | --- | --- |
-| 能力接口 | **各能力自己的 `api.rs`** | `Faces` 的字段：`WorkOps` 在 `src/units/work/api.rs`（工作用例与核心推荐）、`TurnOps` 在 `src/units/turn/turn/api.rs`（回合推进）、`RuntimeOps` / `ActionOps` / `LogOps` 在 `src/units/runtime/api.rs`（启用 / 改需求 / 回档 / 停止、动作目录与分发、埋点门面），`RegistryOps` 在 `src/units/catalog/registry/api.rs`，`HistoryOps` 在 `src/units/turn_state/api.rs`，`ModulesOps` 在 `src/units/catalog/modules/api.rs`，`ResidentOps` / `SecretOps` / `Provision` 各在 `src/units/<能力>/api.rs`。**入站面只出自己的用例，别处单元的形状一律从定义它的 `api` 直接 import**（`runtime/api.rs` 只转出内核词汇 `i18n` / `Note` / `Severity`）；**全 `&self`、可替换成假实现**；实现都是 `src/units/runtime/service/contracts.rs` 里 `Handle` 的队列代理（`impl` 在核心线程上执行）|
+| 单元接口 | **各单元自己的 `api.rs`** | `Faces` 的字段：`WorkOps` 在 `src/units/work/api.rs`（工作用例与核心推荐）、`TurnOps` 在 `src/units/turn/turn/api.rs`（回合推进）、`RuntimeOps` / `ActionOps` / `LogOps` 在 `src/units/runtime/api.rs`（启用 / 改需求 / 回档 / 停止、动作目录与分发、埋点门面），`RegistryOps` 在 `src/units/catalog/registry/api.rs`，`HistoryOps` 在 `src/units/turn_state/api.rs`，`ModulesOps` 在 `src/units/catalog/modules/api.rs`，`ResidentOps` / `SecretOps` / `Provision` 各在 `src/units/<单元>/api.rs`。**入站面只出自己的用例，别处单元的形状一律从定义它的 `api` 直接 import**（`runtime/api.rs` 只转出内核词汇 `i18n` / `Note` / `Severity`）；**全 `&self`、可替换成假实现**；实现都是 `src/units/runtime/service/contracts.rs` 里 `Handle` 的队列代理（`impl` 在核心线程上执行）|
 | 事件台 | `src/units/turn/turn/api.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
 
 规则：
 
-- **命令**：呈现层调能力接口 → 核心在自己的线程上执行 → 同步回包（`Advance`：**事件台头部序号**）。
+- **命令**：呈现层调单元接口 → 核心在自己的线程上执行 → 同步回包（`Advance`：**事件台头部序号**）。
   命令**不携带事实**——事实只有一条来路（事件台）；回包里的 `head` 只是"我现在说到哪了"。
-- **按屏幕取面**：`Faces`（`src/presentation/faces.rs`）是根装配出的面袋，每个字段是一个入站契约或一个根填的值（`provision` / `storage` / `toolchains`）；呈现层按屏幕取自己需要的面，不再有一个字段全塞的桶（现 14 个字段），也没有「会话中心」这种横跨三个单元的接口。**每屏到底许取哪几个能力单元**见 [inbound.yaml](inbound.yaml)（T0 双向比对）。
+- **按屏幕取面**：`Faces`（`src/presentation/faces.rs`）是根装配出的面袋，每个字段是一个入站契约或一个根填的值（`provision` / `storage` / `toolchains`）；呈现层按屏幕取自己需要的面，不再有一个字段全塞的桶（现 14 个字段），也没有「会话中心」这种横跨三个单元的接口。**每屏到底许取哪几个单元**见 [inbound.yaml](inbound.yaml)（T0 双向比对）。
 - **动作只有一条路**：`GET /api/actions` 是**动作目录**（这个调用者此刻能做什么，含可用性），`POST /api/actions/{id}` 是**唯一分发**；
   参数按动作表（`systools/tools.yaml`）校验 → 按 `callers` 授权 → 执行 → 审计，各只有一处。
   模型侧经 `ToolHandler` 走**同一份声明与同一处授权**——两个适配器，两种呈现，事实同源。
@@ -67,7 +67,7 @@
   同一个理由也适用于输入区的「启用会话」：它只解冻、不跑模型，回包即真相）。
 - **一次命令 panic 不带垮核心**：接住并继续服务（回包通道断开，调用方得到「无回应」）。
 - **传输的线格式归呈现层**：请求形状、路由、错误码在 `src/presentation/web/routes.rs`；**事实**的线格式（`SessionEvent`、`*View`）
-  仍在协调业务：通用事件在 `session`，机制自己的事件走 `SessionEvent::Push`、词汇归各自能力（协作在 `collab`）。两者不混——混在一起就是「到处内联 JSON 拼装」的成因。
+  仍在协调业务：通用事件在 `session`，机制自己的事件走 `SessionEvent::Push`、词汇归各自单元（协作在 `collab`）。两者不混——混在一起就是「到处内联 JSON 拼装」的成因。
 - **工具卡按结构化轻重上色，说明书由词表渲染**：工具行带 `severity`（`info` / `warning` / `error`）与 `notes`（稳定码 + 类型化参数），
   卡片据此三色（绿勾 / 黄叹号 / 红叉）并把 `notes` 逐行接在正文后（`src/presentation/web/assets/app/features/transcript/parts.js`）；
   **呈现层不解析回执正文**——结束状态、退出码、落点、耗时都是工具行里的结构化字段。

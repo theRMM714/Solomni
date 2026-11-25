@@ -1,6 +1,6 @@
 # builds（模块构建）
 > 定位：模块 `build:` 声明在目标环境里的执行、产物复验、构建缓存与失败归因。
-> 效力：规范｜核对：2026-11-04｜依据：`src/units/maintenance/builds/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/maintenance/builds/api.rs`
 
 ## 管什么 / 不管什么
 - 管：一次"确保产物可用"的用例（入口在场即跳过、缺失才编、编完复验）、构建期能力选包、源指纹缓存与 `.vm/build-state/` 落点、构建缓存卷与目标环境。
@@ -13,8 +13,9 @@
 - 构建是系统动作，不申请容器身份；围栏、guest 与进程由 `vm` / `kernel` 提供，本单元只给规格。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
-- 经 `::api` 用到：`kernel`、`modules`、`packages`、`provision`、`storage`、`vm`、`workspace`
-- 谁在用我：`runtime`（建 / 启用会话前补编）、`system`（`--build` 与体检）、`main`（组合根装配）
+- 所属单元：`maintenance`（环 3）；本页的子业务同单元的 `storage` 子业务直接调用，不经 `api`。
+- 本子业务经 `::api` 用到：`catalog`（`modules` / `packages`）、`exec_model`、`kernel`、`maintenance`（`storage`）、`provision`、`vm`、`workspace`
+- 谁在用本子业务：`entry`、`runtime`（建 / 启用会话前补编）、`system`（`--build` 与体检）
 
 ## 一、两个调用方与跳过判据
 - 创建会话 / 启用历史会话前（自动）：本次名单里的模块，若声明了 `build:` 且 `build-state.target` 不是目标环境（或入口不在场），就先在目标环境编一次；编成继续建 / 启用，编不成则创建或启用失败并如实报原因（不留下半成品、不落构建状态）。

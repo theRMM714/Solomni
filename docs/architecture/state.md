@@ -1,15 +1,15 @@
 <!-- docs-template: spec -->
 # 状态、落盘与运行时契约
 > 定位：状态归谁、什么落盘、日志与提示词册的契约；改布局与改状态前先读本文。
-> 效力：规范｜核对：2026-11-17｜依据：`src/units/session_model/domain/history.rs`、`src/kernel/detail/file_log.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/session_model/domain/history.rs`、`src/kernel/detail/file_log.rs`
 
 ## 适用与判据
 - 动状态归属、落盘布局、日志埋点或提示词册前读本文；违反由 T0 结构审查（状态归属）与文档审查判定。
 
 ## 一、每个状态只有一个家
-- 会话状态归 `session`、构建状态归 `builds`、空间台账归 `storage`；别的单元读写只能经该能力的 `api`，不直接读对方文件（R1 / R4，判据在 `tests/gates/structure/dependency.js`）。
-- **跨层共享的形状有唯一家**（R6）：`kernel` 只托管端口载荷（`SessionId` / `ToolOutcome` / `Ask`），不含端口的产品词汇归环 1（`exec_model` 的 `Tier` / `ExecSpec` / `JobState`）；`kernel` 不解释业务语义、不构造业务决策与面向用户的文案；业务自己的入参 / 出参留在本能力 `api`。
-- **持状态的能力只能写自己的状态**；别人的状态只经 `api` 拿（`src/units/runtime/service/core.rs` 只聚合 `turn` / `work` / `lifecycle` 与各能力的 `api`，不代写它们的状态）。
+- 会话身份与历史视图归 `session_model`、转录落盘归 `conversation` 的 `session`、回合运行态归 `turn_state`、一席的会话本体归 `agentloop`、构建状态归 `builds`、空间台账归 `storage`；别的单元读写只能经该单元的 `api`，不直接读对方文件（R1 / R4，判据在 `tests/gates/structure/dependency.js`）。
+- **跨层共享的形状有唯一家**（R6）：`kernel` 只托管端口载荷（`SessionId` / `ToolOutcome` / `Ask`），不含端口的产品词汇归环 1（`exec_model` 的 `Tier` / `ExecSpec` / `JobState`）；`kernel` 不解释业务语义、不构造业务决策与面向用户的文案；业务自己的入参 / 出参留在本单元 `api`。
+- **持状态的单元只能写自己的状态**；别人的状态只经 `api` 拿（`src/units/runtime/service/core.rs` 只持有 `turn_state` / `session_model` / `work` / `lifecycle` 等单元的入站对象并薄转发，不代写它们的状态）。
 - 状态归谁的三条判据（有不变式的参与方 / 依赖图上最高的使用方 / owner 的派生值）见 [boundaries.md](boundaries.md)。
 
 ## 二、落盘契约
@@ -27,13 +27,13 @@
 
 ## 四、提示词册（`prompts/`）
 - **所有发给 LLM 的指令、身份、协议、环境提示词一律写入 `prompts/`**，禁止硬编码进代码；改文案只改册子。占位符 `{{key}}` 在调用现场替换，缺文件 / 缺键 / 缺变量**报错暴露**，禁止静默兜底（`src/units/prompt/domain/prompt.rs`）。
-- **册子只由提示词能力持有一次**（`Arc` 共享）；别的能力**按名字取段**（`Prompt::text` / `render` + `Segment`），不点字段路径；"哪个回合发哪几段"的组装留在各业务。
+- **册子只由 `prompt` 单元持有一次**（`Arc` 共享）；别的单元**按名字取段**（`Prompt::text` / `render` + `Segment`），不点字段路径；"哪个回合发哪几段"的组装留在各业务。
 - **不进册子的两类**：行身份是结构化字段（认 `LineView` 的 `speaker` / `verb` / `kind`，不认文案）；只给用户看的呈现层文案（各类 `Notice`、工具轨迹行的成败字样、面向界面 / CLI 的 `Err`）。
 - 运行时回执**按产生它的模块归属**：判断标准是"谁做决定谁拥有文案"，不是"进上下文就进册子"。
 - 键清单与册子规则：[../prompt/prompts.md](../prompt/prompts.md)。
 
 ## 检查
-- 状态归属与跨能力只走 api → `tests/gates/structure/dependency.js`。
+- 状态归属与跨单元只走 api → `tests/gates/structure/dependency.js`。
 - 布局名字不散写 → 结构审查的 `dependency.js` / 注释契约；布局常量在 `src/kernel/domain/layout.rs`。
 - 文档与布局同步 → `node run-tests.js --audit=docs`、`node tests/docs-sync.mjs`。
 

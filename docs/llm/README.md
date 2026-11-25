@@ -1,25 +1,25 @@
 # llm（模型通道与协议）
 
 > 定位：建通道、跑一次模型会话、信封解析与补救。
-> 效力：规范｜核对：2026-11-04｜依据：`src/units/llm/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/llm/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
-- 管：通道与协议词汇（`Chat` / `Msg` / `Completion` / `Chunk` / `ToolCall` / `ToolDecl` / `Channel` / `ToolMode`）、按已解析通道建会话、把登记处解析好的思考片段并入请求体、实测一条通道支不支持原生工具调用、实测回放形状、模型发现、信封解析与不合法的补救、出站 HTTP 代理与端点记忆。
+- 管：通道与协议词汇（`Chat` / `Msg` / `Completion` / `Chunk` / `ToolCall` / `ToolDecl` / `Channel`；`ToolMode` 是登记事实，在 `registry_model`）、按已解析通道建会话、把登记处解析好的思考片段并入请求体、实测一条通道支不支持原生工具调用、实测回放形状、模型发现、信封解析与不合法的补救、出站 HTTP 代理与端点记忆。
 - 不管：**不选择用哪个模型**（「用哪个」是登记处解析链里的策略）。
 - 不管：不落盘、不管会话。
 
 ## 入站契约与状态归属
 
-- 入站面：`api::Llm`（造通道 / 探测 / 发现 / 修信封）+ 对外协议类型（`Chat` 的调用方是别的能力，所以契约在 `api`）。
+- 入站面：`api::Llm`（造通道 / 探测 / 发现 / 修信封）+ 对外协议类型（`Chat` 的调用方是别的单元，所以契约在 `api`）。
 - 出站端口：`ChatGateway` / `ModelCatalog` / `EnvelopeRepair` **只由 `src/units/llm/service.rs` 持有**（R12），**不进 `api`**。
 - 状态归属：不落盘、不管会话；通道实例与端点记忆由本单元在内存持有，会话状态归 `session`。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`kernel`、`prompt`
-- 谁在用我：`collab`、`runtime`、`registry`、`session`、`slate`、`tools`
+- 经 `::api` 用到：`kernel`
+- 谁在用我：`agentloop`、`catalog`、`collab`、`conversation`、`presentation`、`runtime`、`tools`、`transcript`、`turn`、`turn_state`、`work`
 
 ## 一、token 用量与流式回退
 

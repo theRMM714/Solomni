@@ -1,21 +1,21 @@
 # runtime（顶层编排）
 
-> 定位：最顶层只做编排——命令队列与门面、长步骤的两段式、动作分发、代理工具的宿主桥；用例的身体一律留在下层能力。
-> 效力：规范｜核对：2026-11-16｜依据：`src/units/runtime/api.rs`
+> 定位：最顶层只做编排——命令队列与门面、长步骤的两段式、动作分发、代理工具的宿主桥；用例的身体一律留在内环单元。
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/runtime/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
-- 管：会话中心——命令队列与派发闸；会话在世表、运行态与创建占位在 `turn` 里，只经它的 `api` 读写。
+- 管：会话中心——命令队列与派发闸；会话在世表、运行态与创建占位在 `turn_state` 里，只经它的 `api` 读写。
 - 管：**回合推进的宿主侧**——生成 / 协作泵 / 压缩的线程由队列手柄点火（线程名 `solomni-*` 不变）；推进规则、事件台与逐轮落盘在 `turn`（见 [../turn/README.md](../turn/README.md)）。
 - 管：**代理工具的宿主与时序**（`src/units/runtime/service/bridge.rs`）：队列桥 `ProxyBridge` 实现 `proxy` 的 `ProxyHost`（清单 / 建会话 / 转达 / 观察 / 控制 / 消息都回到核心线程），以及代理工具面在代理会话里的挂载（`src/units/runtime/service/bridge.rs` 的 `inject_proxy_handler`）；工具面、授权判据与幂等账在 `proxy`（见 [../proxy/README.md](../proxy/README.md)），代理会话的装配在 `turn` 的 `build_proxy`，「建一个代理工作」的用例在 `work`。
 - 管：**长步骤的边界**（见「一、长步骤的边界」）：生成、协作泵、压缩、起 / 停 guest 都不在队列里跑，队列只占「取 / 交」两步；建会话 / 启用历史会话 / 改配 / 删会话的 guest 启停在调用方线程上（起停对象在 `src/units/work/service/guest_job.rs`）。
 - 管：动作分发（`src/units/runtime/service/action.rs`）：参数校验 → 按 `callers` 授权 → 执行 → 审计。
 - 管：**历史生命周期的时机**——回档三模式、历史列表 / 只读打开与删除的调用点在这里（用例与顺序在 `lifecycle`，见 [../lifecycle/README.md](../lifecycle/README.md)）。
 - 管：**同名薄转发**——工作用例（建工作两段、改配、视图、运行报告、建议、激活）的实现在 `work`，这里保留同名方法让队列与呈现层的调用点不变。
-- 管：把各能力的能力接口装配成呈现层要的几个窄面（`src/presentation/faces.rs` 的 `Faces`）。
+- 管：把各单元的入站面装配成呈现层要的几个窄面（`src/presentation/faces.rs` 的 `Faces`）。
 - 运行态分两层：**短暂**的「这一刻谁在干活」（`SessionEvent::Working`，不落盘）与**持久**的「还该不该被驱动」（`meta.run`：`active` / `stopped` / `archived`，派发前过 `dispatch_gate`）。
-- 不管：不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——机制一律下沉各能力的 `detail/`（见 `src/units/runtime/service/core.rs`）；不持任何别人的端口（R12）；不替用户选人、选形态。
+- 不管：不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——机制一律下沉各单元的 `detail/`（见 `src/units/runtime/service/core.rs`）；不持任何别人的端口（R12）；不替用户选人、选形态。
 - 不管：**工作是什么样**——工作形态的判据、建工作两段、改配、视图与运行报告在 `work`（见 [../work/README.md](../work/README.md)）。
 - 不管：**用例的身体**——本单元的方法体只允许一行 `self.call(...)` 或一行转发（见「二、三条护栏」，实现面在 `src/units/runtime/service/contracts.rs`）。
 
@@ -26,8 +26,8 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`collab`、`env`、`kernel`、`lifecycle`、`llm`、`modules`、`permission`、`prompt`、`proxy`、`provision`、`registry`、`residents`、`secrets`、`session`、`slate`、`taskchain`、`tools`、`turn`、`vm`、`work`、`workspace`
-- 谁在用我：`cli`、`web`（都经 `src/presentation/faces.rs` 取面）、`src/main.rs`（装配）、`src/tests/runtime.rs`、`src/tests/runtime/proxy.rs`、`src/tests/api/session.rs`（提问与裁决卡片）
+- 经 `::api` 用到：`agentloop`、`catalog`、`collab`、`conversation`、`exec_model`、`kernel`、`lifecycle`、`llm`、`maintenance`、`permission`、`prompt`、`provision`、`proxy`、`registry_model`、`residents`、`session_model`、`tools`、`transcript`、`turn`、`turn_state`、`vm`、`work`、`workspace`
+- 谁在用我：`presentation`
 
 ## 一、长步骤的边界
 
@@ -39,7 +39,7 @@
 
 ## 二、三条护栏
 
-- 护栏一·只向下依赖：本单元的依赖边只指向它下面的能力，层号在 `layers.yaml`，由 `tests/gates/structure/layers.js` 判红。
+- 护栏一·只向下依赖：本单元的依赖边只指向更内环的单元，环号在 `layers.yaml`，由 `tests/gates/structure/layers.js` 判红。
 - 护栏二·谁都不许反向引用：任何单元不得 `use crate::units::runtime`（含全路径 `crate::units::runtime::…`）；反向边由 `tests/gates/structure/layers.js` 判红，本单元自己内部的 `crate::units::runtime::` 边被跳过。
 - 护栏三·只编排不搬身体：本单元的方法体只允许一行 `self.call(...)` 或一行转发，出现 `if` / 循环 / 校验就是把用例放错了层——用例身体在 `work` / `turn` / `lifecycle` / `proxy`（`src/units/runtime/service/contracts.rs`）。
 
@@ -47,7 +47,7 @@
 
 - 呈现层按屏幕取面，不再有一个装着全部会话命令的桶：`Faces` 的每个字段都是某一单元自己的窄契约或值（`src/presentation/faces.rs`）。
 - 根只装配、不新增判定：`src/main.rs` 造出手柄后补上 `provision` / `storage` / `toolchains` 三个由组合根注入的面，其余字段由 `Faces::from_handle` 一次装好。
-- 契约面名单以 `src/units/runtime/api.rs` 与各能力的 `api.rs` 为准；路由与屏幕的对应在 [docs/presentation/contracts.md](../presentation/contracts.md)。
+- 契约面名单以 `src/units/runtime/api.rs` 与各单元的 `api.rs` 为准；路由与屏幕的对应在 [docs/presentation/contracts.md](../presentation/contracts.md)。
 
 ## 改动本单元时必须同步
 

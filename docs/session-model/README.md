@@ -20,8 +20,8 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`permission`、`workspace`、`transcript`、`pure::registry_model`。
-- 谁在用我：`conversation`、`turn`、`work`、`lifecycle`、`runtime`、`presentation` 与测试。
+- 经 `::api` 用到：`exec_model`、`permission`、`registry_model`、`transcript`、`workspace`（历史里嵌着的档位、权限面与工作区绑定由这些单元定义，本单元只搬值）
+- 谁在用我：`agentloop`、`collab`、`conversation`、`lifecycle`、`presentation`、`proxy`、`runtime`、`turn`、`turn_state`、`work`
 
 ## 一、为什么是独立单元
 

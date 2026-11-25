@@ -1,7 +1,7 @@
 # residents（常驻服务）
 
 > 定位：模块声明的常驻外部服务（按行 JSON-RPC 一类，当前 MCP stdio）的统一管理——拉起、发现操作、调用、停止、按租约回收。
-> 效力：规范｜核对：2026-11-04｜依据：`src/units/residents/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/residents/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -24,8 +24,8 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`kernel`（长驻进程机制）、`modules`（取模块清单事实）、`secrets`（起进程时解析隐秘字段）
-- 谁在用我：`collab`、`runtime`、`session`（`Faces` 字段与成员工具面，由组合根注入）
+- 经 `::api` 用到：`exec_model`、`kernel`
+- 谁在用我：`agentloop`、`lifecycle`、`presentation`、`runtime`、`turn_state`
 
 ## 一、当前能力与适配器约束
 

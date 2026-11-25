@@ -19,8 +19,8 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：无（环 1，只依赖标准库与 serde）。
-- 谁在用我：`catalog`、`slate`、`turn`、`env`、`runtime`、`work`、`lifecycle`、`presentation` 与测试。
+- 经 `::api` 用到：`kernel`（`api::name` 的目录名文法），其余只用标准库与 `serde`
+- 谁在用我：`agentloop`、`catalog`、`collab`、`conversation`、`maintenance`、`presentation`、`proxy`、`runtime`、`session_model`、`turn`、`turn_state`、`work`
 
 ## 一、为什么是独立单元
 

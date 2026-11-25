@@ -1,7 +1,7 @@
 # 工具与机制席位
 
 > 定位：系统工具、机制与席位（身份）与"谁能用哪些工具"的唯一权威。
-> 效力：规范｜核对：2026-11-24｜依据：`systools/tools.yaml`、`src/units/session_model/domain/mechanism.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`systools/tools.yaml`、`src/units/session_model/domain/mechanism.rs`
 
 ## 适用与判据
 - 声明系统工具、机制席位与越权校验时以本文为准（`docs/tools/tools-and-roles.md`）。
@@ -31,7 +31,7 @@ tools:
 
 - **授权面 = 席位面，工具声明不再决定能不能调**：`capability` 只是标签（说明与“核心先核实”筛选用），没有 `effect` / `reach` / `scope` 三键。档位只管出站网络，不逐工具裁剪。
 - **唯一的逐工具面标记是 `publish`**：它只回答一件事——这个动作会不会改共享工作区。沙箱里的 `write` / `edit` / `patch` / `delete` / `shell` 都改不到共享区（围栏只给私有沙箱写权，见 [workspace](../workspace/README.md)），真正能改的只有 11 个 `work_*`，所以席位上的 r/w 塌缩成**能不能发布**这一个布尔。标记与 `workspace::api::is_work_tool` 一一对应（`src/tests/tools/face.rs` 锁定）。
-- **没有工具卡**：权限侧不产生 `ask`，因此没有 `allow` / `deny` / `allow_turn` 这套确认链路；需要人定夺的是核心各关卡（建会话、验收、定版）。
+- **没有工具卡**：权限侧不产生裁决卡，也没有逐次「允许 / 拒绝 / 本轮放行」的确认链路；需要人定夺的是核心各关卡（建会话、验收、定版）与工具层的围栏裁决（授不上必要落点时问一次，见本文件「授权面」）。
 - **`callers` 是授权判据**：`user` = 人经呈现层调用，其余是席位 id（运行时动作授权按它判，`src/units/runtime/service/action.rs`）。它与席位的工具面是**同一关系的两面**，由 `mechanism::problems(&ToolBook)` 双向锁死——任何一边漏写 / 多写都是装配错误。
 - **列目录是"核实"的前提**：`read` 只读文件、`grep` 按模式找行，**没有 `list` 就确认不了"资料齐不齐"**；`read` 遇到目录会如实引导到 `list`。
 - **`grep` 的默认过滤是检索面口径**：目录递归时按 `.gitignore` + 版本库目录里的 `.workignore`、点号开头的隐藏文件、二进制（前 8 KiB 含 NUL）剪枝，不跟符号链接；`hidden` / `no_ignore` 是逃生口，显式给单个文件路径时不过滤。过滤名单只有一份，与「哪些文件算工作区内容」共用，维护入口是 `work_ignore`（见 [workspace](../workspace/README.md)）。
@@ -120,7 +120,7 @@ Mechanism { id: "discuss", flow: true, seats: &["core_proxy", "discussant"] }
 
 ## 四、动作与分发（一张表，两条执行路径）
 
-- **动作表是参数契约与授权的唯一真相**：每条动作声明参数契约与 `callers`，校验按声明做、授权按 `callers` 判——这两步只有一套规则，不随调用方变。**执行**有两条实现，各在自己的能力里：呈现侧（人）走 `runtime` 的 `ActionOps::act`（`src/units/runtime/service/action.rs`，校验 → 授权 → 执行 → 审计四步在一处），模型代理侧走 `ProxyTools::call`（`src/units/proxy/service/proxy.rs`，同样是查表 → 校验 → 授权 → 交宿主，另有幂等账）。两条路径共用同一张表与同一份授权规则，但**不共用同一段执行代码**——把它们写成一处需要呈现层与模型回环互相依赖，会成环。
+- **动作表是参数契约与授权的唯一真相**：每条动作声明参数契约与 `callers`，校验按声明做、授权按 `callers` 判——这两步只有一套规则，不随调用方变。**执行**有两条实现，各在自己的单元里：呈现侧（人）走 `runtime` 的 `ActionOps::act`（`src/units/runtime/service/action.rs`，校验 → 授权 → 执行 → 审计四步在一处），模型代理侧走 `ProxyTools::call`（`src/units/proxy/service/proxy.rs`，同样是查表 → 校验 → 授权 → 交宿主，另有幂等账）。两条路径共用同一张表与同一份授权规则，但**不共用同一段执行代码**——把它们写成一处需要呈现层与模型回环互相依赖，会成环。
 
 - **两个适配器**：模型侧（`ToolHandler`，按名字认领）与呈现侧（`POST /api/actions/{id}`、`GET /api/actions` 动作目录）都只负责造一次 `ActionCall`（动作 id + 参数 + 调用者身份）并各按自己的媒介呈现结果——模型侧拿文本回执，呈现侧拿结构化结果。**同一份声明，两种呈现。**
 - **读取与视图不进动作表**：会话列表 / 配置 / 文件清单 / 历史是读接口，事实仍只有**事件台**一条来路。
@@ -258,7 +258,7 @@ prompts/
 
 | 场景 | 约定 |
 | --- | --- |
-| 代理工具 | 当前：六个工具 + `shell` + `core_proxy` 席位 + 队列桥宿主（真实会话）。代理档位由用户建会话时显式选择并落盘（预设全可达，不再硬编码 full），代理有真实私有沙箱 `.proxy`；权限语义见 [docs/permission/README.md](../permission/README.md)。代理的 `shell` 只做验收性核对（跑测试 / 看产物），不替执行席产出；共享区只读，仍没有 `work_pull` / `work_commit` / `work_push` / `work_diff` / `work_reset` / 模块工具；`net` 跟随全局 `sandbox.policy.network`。命中 ask 的调用经统一裁决通道让用户选 `allow` / `deny` / `allow_turn`；没有可回答前端一律拒绝。孩子不把转录推给代理：门的通知、意外停止通知 + `read_session_messages` 主动倒查 |
+| 代理工具 | 当前：六个工具 + `shell` + `core_proxy` 席位 + 队列桥宿主（真实会话）。代理档位由用户建会话时显式选择并落盘（预设全可达，不再硬编码 full），代理有真实私有沙箱 `.proxy`；权限语义见 [docs/permission/README.md](../permission/README.md)。代理的 `shell` 只做验收性核对（跑测试 / 看产物），不替执行席产出；共享区只读，仍没有 `work_pull` / `work_commit` / `work_push` / `work_diff` / `work_reset` / 模块工具；`net` 跟随全局 `sandbox.policy.network`。授不上必要落点的调用经统一裁决通道让用户选 `fence_unfenced_once` / `fence_abort`；没有可回答前端一律拒绝。孩子不把转录推给代理：门的通知、意外停止通知 + `read_session_messages` 主动倒查 |
 | 建会话 = 建 + 写开头 + 开工 | `create_session` 一份声明两处调用：**人经呈现层**给 `name` / `kind`（会话类型表里的一个 id）/ `agents`（可省 `tier`；虚拟机档时给 `guest`（虚拟根名））先建出会话，后续用 `send_message` 发言推进；**核心代理**给 `kind` 或 `flows`（临时拼装：内联流程 id 列表，与 `kind` 二选一，落盘类型 `custom`）+ `agents`（只写身份：`ref` 或 `name`+`modules`+`model`+`chara`；`chara` 可选，复用项取登记处自己的）+ `task`，**建好就开工**（有流程的类型以 task 当本次需求，没有流程的以它当第一句；有流程的类型按流程的席位要求凑够人数，不够就拒）。后续补充 / 返工 / 代答门仍走 `send_session_message`（**代答要显式给 `reply` = 那张卡上的选项 id**；给不出就不作代答，不替用户猜） |
 | 历史态的启用 / 继续 / 恢复归档 | 历史态（只读历史与 `stopped`）只给这一状态下有用的那一个动作：`archived` 给「恢复归档」（翻回 `active`，不唤醒）、`stopped` 与其余给「启用会话」（`activate_session` 从盘上重建、确保 guest、解冻整棵子树，**不跑模型**）。停着不给「继续」——派发会被闸拒。启用后 `SessionView.continue` 说有断点时才显示上下文动作（单 agent「继续」/ 协作「恢复协作」），走 `control_session` 的 `continue`；它**不替用户发言**（末条已是用户发言就直接问模型）；代理不显示。 |
 | 代理工具的生命周期 | `interrupt` = 取消整棵子树在跑的生成、作废等裁决的队，**不动运行态**（会话照常可派发，界面上的「中断」就是这一下）；`stop` = 先整棵子树落成 `stopped`（拦住派发与唤醒）再中断，顺序不能反；`continue` = 解冻（`stopped` → `active`）并按形态重开一轮；`archive` = 整棵子树标成 `archived`、从列表收起，**不是终态**；`restore` = 翻回 `active`，不唤醒、不产生模型调用。中断 / 继续、停止 / 继续、归档 / 恢复各是一对逆操作，没有单独的暂停；都不改写历史 |

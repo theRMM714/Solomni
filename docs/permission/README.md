@@ -1,7 +1,7 @@
 # permission（权限）
 
-> 定位：独立于会话的一类能力——只回答「这个会话能不能出站」。
-> 效力：规范｜核对：2026-11-22｜依据：`src/units/pure/permission/api.rs`
+> 定位：独立于会话的一类纯领域规则——只回答「这个会话能不能出站」。
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/pure/permission/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -19,8 +19,8 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：无（纯领域，不自持端口）
-- 谁在用我：`registry`（全局默认）、`session`（meta 的 ceiling / narrowing）、`workspace`（`Sandbox.permissions`）、`tools`（围栏的 net）、`turn`（求合并）、`runtime`（解析与装配）
+- 经 `::api` 用到：无（纯领域，不依赖别的单元）
+- 谁在用我：`catalog`、`proxy`、`runtime`、`session_model`、`turn`、`work`、`workspace`
 
 ## 一、只有网络是权限
 
@@ -55,7 +55,7 @@
 - shell 的每次调用都用同一套授予：cwd = 私有沙箱，私有沙箱 rw；模块目录、基础 / 项目工具链、主机只读根 ro；`net` = 全局开关与档位求交（显式给 `local_ports` 时改成只放行那几个本机回环端口，见「一」的第三态）。**调用参数里没有范围旋钮**，也没有第二条「外部落点」的路。
 - 要够到沙箱外的东西只有一条路：先 `work_pull` 拉进沙箱；共享区主副本永不进围栏，模块 `userdata` 不可写，模块 secrets 不注入。
 - 围栏装不上就拒绝（`allow_degraded=false`），不回退到无围栏执行。
-- 没有工具级确认队列：不存在 `ask` / `allow_turn` / 工具卡；需要人确认的是核心自己的关卡（建会话、验收、定版），不是权限判定。
+- 没有工具级确认：权限侧不产生裁决卡，也没有「本轮放行」这类开关；需要人定夺的是核心自己的关卡（建会话、验收、定版）与工具层的围栏裁决（授不上必要落点时问一次「无围栏跑 / 放弃」，见 [tools-and-roles.md](../tools/tools-and-roles.md)）。
 
 ## 五、围栏派生
 

@@ -1,7 +1,7 @@
 # proxy（核心代理工具）
 
 > 定位：核心代理（`core_proxy`）的工具面——六个代理工具的载荷与回执、授权判据、幂等账与成员侧执行者；宿主契约 `ProxyHost` 由它声明。
-> 效力：规范｜核对：2026-11-16｜依据：`src/units/proxy/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/proxy/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -12,7 +12,7 @@
 - 管：**成员侧执行者** `ProxyHandler`（`kernel::ports::ToolHandler`）：代理会话那一回合把这六个工具接到 `ProxyTools` 上，其余工具不认领。
 - 管：**宿主契约** `ProxyHost`（`src/units/proxy/api.rs`）：`catalog` / `create_session` / `send` / `observe` / `control` / `messages` 六个动作；方法注释即约束（只读动作不推进、建会话不留半成品、失败如实回报）。
 - 不管：真实会话动作、命令队列与生成——生产宿主是 `runtime` 的 `ProxyBridge`（`src/units/runtime/service/bridge.rs`），装配在 `src/units/runtime/service/handle.rs` 的 `inject_proxy_handler`。
-- 不管：会话本体与运行态（`turn`）、转录（`session`）、工作区（`workspace`）；授予读会话的 `meta.delegation`，本单元不另存一份。
+- 不管：会话本体与运行态（`turn_state`）、转录（`session`）、工作区（`workspace`）；授予读会话的 `meta.delegation`，本单元不另存一份。
 - 不管：工具声明、席位面与提示词——`systools/tools.yaml`、`src/units/session_model/domain/mechanism.rs` 的 `SEATS`（声明）、会话装配机 `src/units/agentloop/domain/assemble.rs`（现拼）与 `prompts/roles/core_proxy.yaml` 是它们的唯一落点。
 
 ## 入站契约与状态归属
@@ -22,8 +22,8 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`permission`（`ProfileId`）、`registry_model`（`validate_name` / `AgentMeta`）、`session`（`OptionView`）；`tools` 的 `ToolBook` / `ToolOutcome` 与 `kernel::ports::ToolHandler`。
-- 谁在用我：`runtime`（`src/units/runtime/service/handle.rs` 装配 `ProxyHandler`；`src/units/runtime/service/action.rs` 与 `src/units/runtime/service/{action,bridge}.rs` 用值类型与 `ProxyHost`）、测试。
+- 经 `::api` 用到：`collab`、`permission`、`registry_model`、`session_model`、`tools`、`transcript`
+- 谁在用我：`runtime`
 - **不引用 `runtime`**：依赖只向下，`proxy` 在 `runtime` 之下（`layers.yaml`）。
 
 ## 一、一次工具调用的顺序

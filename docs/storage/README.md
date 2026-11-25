@@ -1,13 +1,13 @@
 # storage（存储空间）
 
 > 定位：可回收缓存的盘点、预算、自动 / 手动回收与显式清理；虚拟根还原入口。
-> 效力：规范｜核对：2026-11-04｜依据：`src/units/maintenance/storage/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/maintenance/storage/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)；设置字段见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md)。
 
 ## 管什么 / 不管什么
 
 - 管：构建缓存卷、依赖下载缓存、过期可写层、日志的体积与回收；策略（预算 / 保留天数 / 单卷大小 / 最低剩余）；构建前 headroom 检查；虚拟根「还原到初始状态」的作业入口与进度；空间报告（含虚拟根、会话、模块产物的大小，只读）。
-- 不管：构建怎么跑（`builds`）、guest 怎么起（`vm`）、下载怎么装（`provision`）、工作对象回收（`workspace` 的 `work_gc`：可达性判定、工作锁与事务恢复属于 `workspace`，本能力保持现状）。
+- 不管：构建怎么跑（`builds`）、guest 怎么起（`vm`）、下载怎么装（`provision`）、工作对象回收（`workspace` 的 `work_gc`：可达性判定、工作锁与事务恢复属于 `workspace`，本单元保持现状）。
 
 ## 入站契约与状态归属
 
@@ -16,9 +16,9 @@
 - 状态归属：策略与作业状态由 `StorageService` 持有（`policy` / `job` 两个 `Mutex`）；策略由呈现层保存设置后推入，不落盘。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
-
-- 经 `::api` 用到：`provision`（还原与补齐状态）、`kernel`（日志端口 `Log`）
-- 谁在用我：`builds`（`ensure_headroom`）、`runtime`（`Faces` 的 `storage` 字段）、`presentation`（`/api/storage`）、`system`（`--storage` / `--gc`）
+- 所属单元：`maintenance`（环 3）；本页的子业务同单元的 `builds` 子业务直接调用，不经 `api`。
+- 本子业务经 `::api` 用到：`exec_model`、`kernel`、`provision`、`registry_model`
+- 谁在用本子业务：`entry`、`maintenance`（`builds` 的 `ensure_headroom`）、`presentation`、`system`（`--storage` / `--gc`）
 
 ## 一、策略与语义
 

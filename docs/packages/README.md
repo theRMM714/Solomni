@@ -1,7 +1,7 @@
 # packages（运行包）
 
 > 定位：运行包契约、包库扫描、目标筛选与选包计划。
-> 效力：规范｜核对：2026-11-04｜依据：`src/units/catalog/packages/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/catalog/packages/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；作者契约见 [RUNTIME_SPEC.md](../../RUNTIME_SPEC.md)，分层与业务边界见 [boundaries.md](../architecture/boundaries.md)。
 
 ## 管什么 / 不管什么
@@ -16,9 +16,9 @@
 - 状态归属：本单元不落盘；包库事实来自 `runtimes/`，选包计划交给调用方。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
-
-- 经 `::api` 用到：`modules`（清单事实里的 `Module`）
-- 谁在用我：`builds`、`runtime`、`residents`、`vm`
+- 所属单元：`catalog`（环 2）；本页的子业务同单元的 `modules` / `registry` / `secrets` 子业务直接调用，不经 `api`。
+- 本子业务经 `::api` 用到：`catalog`（`modules`）、`exec_model`、`kernel`
+- 谁在用本子业务：`entry`、`maintenance`（`builds`）、`presentation`、`residents`、`runtime`、`system`、`turn`（`env` / `turn`）、`turn_state`、`vm`、`work`
 
 ## 一、边界
 

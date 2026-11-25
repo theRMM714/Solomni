@@ -1,7 +1,7 @@
 # 单元地图 · proxy
 
 > 定位：proxy（核心代理工具）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-16｜依据：`src/units/proxy/api.rs`
+> 效力：契约｜核对：2026-11-25｜依据：`src/units/proxy/api.rs`
 
 > 本文是 **proxy** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -12,7 +12,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/units/proxy.rs` | 能力入口与公开面（`api` / `domain` / `service` 三个分区） |
+| `src/units/proxy.rs` | 单元入口与公开面（`api` / `domain` / `service` 三个分区） |
 | `src/units/proxy/api.rs` | 唯一入口：`src/units/proxy/domain/proxy.rs` 的值类型与纯规则经这里转出，执行面 `ProxyHandler` / `ProxyTools`，以及宿主契约 `ProxyHost`（六个动作） |
 | `src/units/proxy/domain.rs` | 纯形状分区入口（`proxy` 子模块） |
 | `src/units/proxy/service.rs` | 执行面分区入口（`proxy` 子模块） |

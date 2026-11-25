@@ -20,6 +20,11 @@ const TPL_DIR = path.join(ROOT, "docs", "templates");
 const CFG = JSON.parse(fs.readFileSync(path.join(TPL_DIR, "index.json"), "utf8"));
 const SKIP_DIRS = new Set(["target", ".git", "node_modules", ".tools", ".home", ".vm", "dependencies", "logs", "session", "runtimes", "platform", "demo", "modules", "tests"]);
 
+// 结构性重复（不是同源事实）：指向同一权威的指针行、模板必填的单位级「无端口」事实。
+const STRUCTURAL = [
+  /^-\s*硬要求清单 R1–R20：\[boundaries\.md\]\(boundaries\.md\)$/,
+  /^-\s*出站端口：无（纯领域，不自持端口）。$/,
+];
 const esc = (s) => s.replace(/[.*+?^$()|[\]\\]/g, "\\$&");
 const globRe = (g) => new RegExp("^" + esc(g).replace(/\\\*\\\*/g, ".*").replace(/\\\*/g, "[^/]*") + "$");
 function resolveType(rel) {
@@ -27,6 +32,27 @@ function resolveType(rel) {
   for (const e of CFG.exceptions) if (globRe(e.path).test(rel)) return "exception";
   return null;
 }
+const IGNORED = ignoredDirs();
+function ignoredDirs() {
+  // 受治理的是版本化的文档；被 .gitignore 忽略的目录（.shots、.tmp、target…）是本地草稿，不入候选清单。
+  let out = "";
+  try {
+    out = execFileSync("git", ["status", "--ignored=matching", "--porcelain=v1", "-z"], { cwd: ROOT, encoding: "utf8" });
+  } catch {
+    return new Set();
+  }
+  const dirs = new Set();
+  for (const e of out.split("\0")) {
+    if (!e.startsWith("!! ")) continue;
+    const rel = e.slice(3);
+    if (rel.endsWith("/")) dirs.add(rel.slice(0, -1));
+  }
+  return dirs;
+}
+const underIgnored = (rel) => {
+  for (const d of IGNORED) if (rel === d || rel.startsWith(d + "/")) return true;
+  return false;
+};
 function collect() {
   const out = [];
   const walk = (abs, rel) => {
@@ -36,7 +62,7 @@ function collect() {
       if (e.isDirectory()) {
         const always = e.name === "target" || e.name === ".git" || e.name === "node_modules";
         const rootData = rel === "" && SKIP_DIRS.has(e.name);
-        if (!always && !rootData) walk(a, r);
+        if (!always && !rootData && !underIgnored(r)) walk(a, r);
       } else if (e.name.endsWith(".md")) out.push(r);
     }
   };
@@ -85,6 +111,8 @@ for (const rel of docs) {
       status.push({ line: i + 1, text: t.slice(0, 100) });
     }
     if (/原则[：:]/.test(t)) principles.push({ line: i + 1, text: t.slice(0, 100) });
+    if (/^<!--/.test(t)) continue;
+    if (STRUCTURAL.some((re) => re.test(t))) continue;
     const boiler = /^-\s*(文档结构|分层与依赖方向|测试缺口|经\s*`?::api|本目录|会话、围栏与并发模型|呈现层入站契约)/;
     if (boiler.test(t)) continue;
     if (t.length >= 20 && t.replace(/\[[^\]]*\]\([^)]*\)/g, "").replace(/[`*_>\s，。；、：|]/g, "").length >= 10) {

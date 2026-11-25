@@ -1,6 +1,6 @@
-# 呈现层每屏入站面：唯一权威。每一屏（一个 .rs）只许取这里登记过的能力单元，取多了门禁就红。
-# 单元写法：能力名（work）或能力/子单元（catalog/registry）；kernel 是机制层的入站面，默认没人许取。
-# 没有登记的屏 = 这一屏不直接取能力（只吃 Faces 的字段）：新增一屏先正常写，红了再回来登记。
+# 呈现层每屏入站面：唯一权威。每一屏（一个 .rs）只许取这里登记过的单元，取多了门禁就红。
+# 单元写法：单元名（work）或 单元/子业务（catalog/registry）；kernel 是环 0 的入站面，默认没人许取。
+# 没有登记的屏 = 这一屏不直接取单元（只吃 Faces 的字段）：新增一屏先正常写，红了再回来登记。
 # 门禁：tests/gates/structure/presentation-inbound.js（T0 结构审查）双向比对——清单外的 import 报外溢，
 # 清单里有但源码没取报过期；呈现层内部还有一条：只许取根（presentation.rs / faces.rs / cli.rs / web.rs），
 # 兄弟文件之间不得互相引用。详细判据见 docs/presentation/README.md。

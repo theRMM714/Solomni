@@ -1,12 +1,12 @@
 # tools（工具与围栏）
 
 > 定位：系统工具总表与一次工具执行的围栏。
-> 效力：规范｜核对：2026-11-04｜依据：`src/units/tools/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/tools/api.rs`
 > 系统侧的门户是 [SYSTOOL.md](../../SYSTOOL.md)（入口与真相源表）；本目录是它的细则。本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
-- 管：系统工具总表与名字表（`systools/` 两份），以及「按表校验调用」的判据；席位面由会话能力的唯一装配机（src/units/agentloop/domain/assemble.rs）按席位现拼。
+- 管：系统工具总表与名字表（`systools/` 两份），以及「按表校验调用」的判据；席位面由 `agentloop` 单元的唯一装配机（src/units/agentloop/domain/assemble.rs）按席位现拼。
 - 管：内置文件工具（read / list / write / edit / patch / delete / grep）的执行编排与纯规则、工具参数契约、补丁通道。
 - 管：执行类系统工具 `shell` 的参数 / 超时规则与派发；host 的拉起与围栏机制是 kernel 共享的 `ProcessRunner` / `confine`，VM 走 guest。
 - 管：模块工具进程的执行编排；拉起与围栏机制是 kernel 共享的 `ProcessRunner` / `confine`。
@@ -24,8 +24,8 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`kernel`、`llm`、`modules`、`prompt`、`workspace`
-- 谁在用我：`collab`、`runtime`、`session`、`slate`
+- 经 `::api` 用到：`catalog`、`kernel`、`llm`、`prompt`、`workspace`
+- 谁在用我：`agentloop`、`collab`、`conversation`、`entry`、`lifecycle`、`presentation`、`proxy`、`runtime`、`transcript`、`turn`、`turn_state`、`work`
 
 ## 改动本单元时必须同步
 

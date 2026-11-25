@@ -1,7 +1,7 @@
 # prompt（提示词册）
 
 > 定位：册子的唯一持有者——按名字给段，不替业务拼回合。
-> 效力：规范｜核对：2026-11-04｜依据：`src/units/prompt/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/prompt/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -20,7 +20,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`
-- 谁在用我：`collab`、`runtime`、`llm`、`modules`、`registry`、`session`、`slate`、`tools`、`workspace`
+- 谁在用我：`agentloop`、`collab`、`conversation`、`runtime`、`tools`、`turn`、`turn_state`、`work`、`workspace`
 
 ## 改动本单元时必须同步
 

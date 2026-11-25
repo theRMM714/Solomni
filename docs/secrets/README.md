@@ -1,13 +1,13 @@
 # secrets（隐秘字段）
 
 > 定位：模块声明的隐秘信息（如 MCP server 的令牌）的值存储与按模块解析——值只落 `.home/`，只给起进程的一侧注入。
-> 效力：规范｜核对：2026-11-04｜依据：`src/units/catalog/secrets/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/catalog/secrets/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
 - 管：模块隐秘字段的声明视图（配置了没有）、置值 / 清值与落盘、按模块解析注入项（env 名 → 值）、按已知值脱敏。
-- 不管：模块声明的解析（在 `workspace`）。
+- 不管：模块声明的解析（在 `modules`）。
 - 不管：通道密钥（归 `registry` 的 `providers.yaml`）。
 - 不管：实际注入子进程（由工具 / 常驻服务在起进程时按 `resolve` 消费）。
 
@@ -18,9 +18,9 @@
 - 状态归属：值缓存（键 = 模块 / 字段）+ 存储端口；文件实现在 `src/units/catalog/secrets/detail/yaml_secrets.rs`（`.home/` 的 `secrets.yaml`，unix 下 0600）。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
-
-- 经 `::api` 用到：`modules`（取模块清单事实）
-- 谁在用我：`runtime`（`Faces` 的 `secrets` 字段）、`residents`（起服务时解析注入项）；都由组合根注入。
+- 所属单元：`catalog`（环 2）；本页的子业务同单元的 `modules` / `packages` / `registry` 子业务直接调用，不经 `api`。
+- 本子业务经 `::api` 用到：`catalog`（`modules`）、`kernel`
+- 谁在用本子业务：`entry`、`presentation`（`Faces.secrets`）、`residents`（起服务时解析注入项）、`runtime`、`turn_state`
 
 ## 改动本单元时必须同步
 

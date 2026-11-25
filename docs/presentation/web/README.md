@@ -64,7 +64,7 @@
 - 改令牌、字号阶梯、间距或对比度配对 → 同改 `tokens.smoke.cjs`（5 档字号严格递增且 `--fs-base: 16px`、`--sp-*` 是 4 的倍数、颜色令牌为不透明 hex、未引用令牌失败、23 组对比度）；改组件外观 → 同步 `src/presentation/web/assets/dev/gallery.js` 的对应分区并跑 `src/presentation/web/assets/dev/gallery.smoke.cjs`。
 - 改首层文案 → 落进该功能的 `copy.js`（`lead` / `detail` / `safety` 三段），跑 `copy.smoke.cjs`；不要为了省事把长说明塞回首层。
 - 增删或移动前端模块 → 依赖方向由 `tests/gates/structure/webLayers.js` 判定（`structure/web-layers`），并跑 `node run-tests.js` 的 `frontend-smoke`；分区职责改完同步本页与 [`unit-map.md`](unit-map.md)。
-- 测试缺口：本单元**不是业务能力**，没有独立的缺口账；缺口记在 `tests/gaps.yaml`；格式见 [docs/testing/gaps-acceptance.md](../../../docs/testing/gaps-acceptance.md) 的「缺口账」。
+- 测试缺口：本单元是适配器、不是业务单元，没有独立的缺口账；缺口记在 `tests/gaps.yaml`；格式见 [docs/testing/gaps-acceptance.md](../../../docs/testing/gaps-acceptance.md) 的「缺口账」。
 
 ## 本目录
 

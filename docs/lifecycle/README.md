@@ -1,7 +1,7 @@
 # lifecycle（会话历史生命周期）
 
 > 定位：会话历史做什么——历史列表与只读打开、删除的报账与收尾、回档三模式（留档 / 删除 / 还原）。
-> 效力：规范｜核对：2026-11-16｜依据：`src/units/lifecycle/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/lifecycle/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -11,7 +11,7 @@
 - 管：**历史列表与只读打开**（`history_list` / `history_open`）：列表按树序派生；打开时截到最后一个压缩点（`truncate_events`）。
 - 管：**删除的报账与收尾**（`delete_bookkeeping` / `SessionDelete::run`）：撤权的先后、常驻服务回收、移出内存与待删目录的收集；收尾段先停 guest、再删目录、最后后台撤围栏授权。
 - 管：**回档标记的续号**（`next_mark_id`）与**按 agent 收窗**（`keep_by_agent`）：留档 / 删除时各会话保留到哪一行。
-- 不管：行与事件的算术、留档标记的解析（`session` 的 `domain::rewind`）与落盘机制（`session` 的 `History` 端口）。
+- 不管：行与事件的算术、留档标记的解析（`agentloop` 的 `domain::rewind`）与落盘机制（`session` 的 `History` 端口）。
 - 不管：命令队列、生成驱动与事件台——谁在什么时候回档 / 删除、结果推给谁，由 `runtime` 决定。
 - 不管：沙箱与版本化机制（`workspace`）、虚拟机的起停实现（`vm` 的 `GuestStop`）；本单元只按用例顺序调用它们。
 
@@ -19,12 +19,12 @@
 
 - 入站面：`api` 的 `RewindTarget`（留档 / 删除按**行 id**，还原按**标记 id**）、`RewindOutcome`（主会话活动视图 + 受影响的子会话视图）与 `RebuildDeps`（重建要的登记处与探针，按次传入）。
 - 删除的收尾对象：`SessionDelete`（`run` 在调用方线程上跑，返回「目标会话是否删成功」）与撤权回调 `ReleaseByLease`。
-- 状态归属：`Lifecycle` 只持能力面（`history` / `workspace` / `tools` / `vm` / `residents` / `log`），**不自持会话状态**：会话本体、在世表与运行态归 `turn`，经形参 `&mut Turn` / `&Turn` 读写；`registry` / `probe` 经 `RebuildDeps` 按次传入（R12）。
+- 状态归属：`Lifecycle` 只持其它单元的入站面（`history` / `workspace` / `tools` / `vm` / `residents` / `log`），**不自持会话状态**：会话本体、在世表与运行态归 `turn`，经形参 `&mut Turn` / `&Turn` 读写；`registry` / `probe` 经 `RebuildDeps` 按次传入（R12）。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`registry`、`residents`、`session`、`tools`、`turn`、`vm`、`work`、`workspace`；`kernel` 的 `Log` / `HostProbe`。
-- 谁在用我：`runtime`（`RewindTarget` / `RewindOutcome` 直接从 `lifecycle::api` 取：`RuntimeOps::rewind` 收前者、`RebuildDeps` 也由它构造；回档与删除的时机由它给）。
+- 经 `::api` 用到：`agentloop`、`collab`、`kernel`、`residents`、`session_model`、`tools`、`turn_state`、`vm`、`workspace`
+- 谁在用我：`runtime`
 - **不引用 `runtime`**：依赖只向下，`lifecycle` 在 `runtime` 之下（`layers.yaml`）。
 
 ## 一、回档三模式的顺序

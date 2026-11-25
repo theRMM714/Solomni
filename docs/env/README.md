@@ -1,7 +1,7 @@
 # env（环境事实）
 
 > 定位：环境事实的唯一派生者——权限面、沙箱清单、一席的围栏 / 进程环境 / 工具链根与 guest 租约，全部由入参算出。
-> 效力：规范｜核对：2026-11-16｜依据：`src/units/turn/env/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/turn/env/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -20,15 +20,15 @@
 - 状态归属：**不持任何状态**——历史、工作区根、模块名册、包计划与 registry 设置都是入参；派生结果随调用返回，本单元没有字段、没有缓存、没有后台任务。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
-
-- 经 `::api` 用到：`session`（`SessionMeta`）、`workspace`（`Sandbox` / `Sandboxes` / `WorkRoots`）、`modules`（`Roster`）、`packages`（`PackagePlan`）、`permission`（`PermissionSet`）、`registry`（`AppSettings`）、`registry_model`（`AgentMeta`）、`kernel`（`FencePlan`、`ports::PathCodec`）、`exec_model`（`Tier`）
-- 谁在用我：`runtime`（`src/units/runtime/service/env.rs` 的三条薄入口：guest 诊断准备与两席沙箱 / 权限）、`turn`（`src/units/turn/turn/service/facts.rs` 取事实后转调派生函数）、`collab`（`src/units/collab/service/collab.rs` 的会话设置取网络开关与宿主只读根）、`cli` / `web`（入口装配取网络开关与宿主只读根条数）、`src/tests/env.rs`
+- 所属单元：`turn`（环 3）；本页的子业务同单元的 `turn` 子业务直接调用，不经 `api`。
+- 本子业务经 `::api` 用到：`catalog`（`modules` / `packages` / `registry`）、`exec_model`、`kernel`、`permission`、`registry_model`、`session_model`、`workspace`
+- 谁在用本子业务：`entry`、`runtime`（`src/units/runtime/service/env.rs` 的三条薄入口：guest 诊断准备与两席沙箱 / 权限）、`turn`（`src/units/turn/turn/service/facts.rs` 取事实后转调派生函数）、`work`
 
 ## 一、事实进、结果出
 
 - 围栏只有一处算法：`FencePlan::for_session` 先按沙箱与本席的宿主读根建底，再把包根并成只读子树授予，末尾 `normalize()` 排序去重；packages 侧不再各自拼围栏。
 - 工具链根按档位分流：只有 `Tier::Host` 才带 `base_roots`，`Tier::Vm` 只留包根，同样排序去重——`src/units/turn/env/domain/env.rs` 的 `member` 是唯一判定点。
-- 权限链的收口在顺序：根 ceiling → 逐层 narrowing → 硬黑名单 → 视需要 `without_shared`；换顺序就会放宽本该收紧的面。
+- 两条链各有唯一顺序：网络档位 = 全局默认 → 根 ceiling → 逐层 narrowing（`permissions`）；共享区归属 = 全局默认 → 根覆盖 → 逐层收窄 → 全局硬黑名单（`shared_scope`）。换顺序就会放宽本该收紧的面。
 - 全局策略也只有一处算法：网络开关直接取 `sandbox.policy.network`；宿主只读根逐条 `trim`、丢掉空串、其余转 `PathBuf`——空白项与空串不算根，判定点只有 `src/units/turn/env/domain/env.rs` 的 `network_allowed` / `host_read_roots`。
 
 ## 改动本单元时必须同步

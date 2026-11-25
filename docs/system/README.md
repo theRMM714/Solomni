@@ -1,7 +1,7 @@
 # system（系统维护与自检）
 
 > 定位：系统维护与自检——把「这台机器能承载什么、占了多少钱、缺什么、怎么清」做成一份可执行的结论，供启动相命令与 Web 共用。
-> 效力：规范｜核对：2026-11-15｜依据：`src/units/system/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/system/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -23,13 +23,13 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`builds`、`kernel`、`modules`、`packages`、`provision`、`storage`、`workspace`
-- 谁在用我：`presentation`（启动相命令）、`entry`（装配）
+- 经 `::api` 用到：`catalog`、`exec_model`、`kernel`、`maintenance`、`provision`、`vm`、`workspace`
+- 谁在用我：`entry`、`presentation`
 
 ## 一、命令面与执行面的分工
 
 - 命令名、参数与确认门槛的唯一声明是 `systools/commands.yaml`；操作数由 `src/units/tools/domain/op.rs` 的 `parse` 按声明转成 JSON，`src/presentation/cli/boot.rs` 只按字段名取值、翻成 `api::System` 的一次调用并排版回执。
-- 确认门槛由能力判，不靠命令行拦：`ensure` / `reset` 缺 `confirm` 报 `Fault::usage`；`gc` 无类别时缺省 dry-run（返回 0 并给预览），带类别时缺 `--yes` 由呈现层按预览退出 2——与迁移前的旗语行为逐条一致。
+- 确认门槛由实现单元判，不靠命令行拦：`ensure` / `reset` 缺 `confirm` 报 `Fault::usage`；`gc` 无类别时缺省 dry-run（返回 0 并给预览），带类别时缺 `--yes` 由呈现层按预览退出 2——与迁移前的旗语行为逐条一致。
 - 退出码口径：0 成功 / 1 执行失败 / 2 用法或确认门槛不对，由 `Fault` 的两个构造器区分。
 - 状态视图：`setup status` 的回执是平台 / 根 / PATH 入口 / 围栏缺项的键值块，呈现层不带 `--json` 时排成三行（`[便携]` 前缀），带 `--json` 时原样打这份 JSON。
 - 机器回执：呈现层加 `--json` 时只输出一段 JSON，字段逐命令写在 `systools/commands.yaml` 的 `json`（本单元给的是值，排版与“加法”在 `boot.rs`）；失败时 stderr 一行 `{"error","code","domain"}`，退出码与人工模式一致。
@@ -51,7 +51,7 @@
 - `systools/commands.yaml` → 命令名、分组、参数声明与确认门槛；装配期由 `src/main.rs` 的 `command_ops` 对声明做硬失败自检，表与两处分派的对齐由 `src/tests/commands.rs` 锁死。
 - `src/entry/assembly.rs` → `SystemDeps` 的装配；新增端口注入只在这里落一次。
 - `docs/entry/README.md` → 组合根不再执行产品命令；启动相清单以本页与命令表为准。
-- 测试缺口：本单元是业务能力，缺口记在 `tests/gaps.yaml`；格式见 [docs/testing/gaps-acceptance.md](../testing/gaps-acceptance.md) 的「缺口账」。
+- 测试缺口：本单元是业务单元，缺口记在 `tests/gaps.yaml`；格式见 [docs/testing/gaps-acceptance.md](../testing/gaps-acceptance.md) 的「缺口账」。
 
 ## 本目录
 

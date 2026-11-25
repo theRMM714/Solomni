@@ -1,7 +1,7 @@
 # 文档审计与治理
 
 > 定位：用户启动「文档审计 / 治理」时的专用流程：怎么检查、改什么、按什么验收。
-> 效力：规范｜核对：2026-11-14｜依据：`tests/docs-gov.mjs`、`tests/docs-audit.mjs`、`tests/docs-sync.mjs`
+> 效力：规范｜核对：2026-11-25｜依据：`tests/docs-gov.mjs`、`tests/docs-audit.mjs`、`tests/docs-sync.mjs`
 
 ## 适用与判据
 

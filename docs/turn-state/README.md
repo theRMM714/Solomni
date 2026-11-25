@@ -6,7 +6,7 @@
 
 ## 管什么 / 不管什么
 
-- 管：会话本体 `Turn`——在世会话表（`Session` 两种形态）、运行态与创建占位（`TurnState`）、每会话的裁决通道与 shell 活进程槽，以及装配一席要用的能力面（`session_ports`）。
+- 管：会话本体 `Turn`——在世会话表（`Session` 两种形态）、运行态与创建占位（`TurnState`）、每会话的裁决通道与 shell 活进程槽，以及装配一席要用的端口（`session_ports`）。
 - 管：裁决队——一条通道的排队与等待（`Decisions` / `Gates`）、队首可见可答、回答校验、整队作废（停止 = 拒绝）、卡号发放与续号。
 - 管：流程插件契约——`Flow`（推一步 / 取走让出的一步 / 交回处置 / 处置自己发的关卡）、`MemberAsk`、`Handback`、`Settle`、`WorkPlan`，以及按 id 造流程的工厂 `Flows` / `FlowSetup` 与串段器 `sequence_of` / `Sequence`。
 - 管：提问桥 `session_ask`——工具层的 `AskUser` 端口实现：登记卡、外送并落盘、停会话都走该会话同一条道。
@@ -23,13 +23,13 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`session_model`、`transcript`、`llm`、`prompt`、`tools`、`vm`、`workspace`、`residents`、`catalog`、`agentloop`、`pure::registry_model`、`kernel` 的值与端口。
-- 谁在用我：`turn`（驱动与生成）、`runtime`（放取会话、队列代理）、`work`、`lifecycle`、`conversation`（协作实现流程）、`presentation`，以及测试。
+- 经 `::api` 用到：`agentloop`、`catalog`、`kernel`、`llm`、`prompt`、`registry_model`、`residents`、`session_model`、`tools`、`transcript`、`vm`、`workspace`
+- 谁在用我：`collab`、`conversation`、`lifecycle`、`presentation`、`runtime`、`turn`、`work`
 
 ## 一、为什么是独立单元
 
 - 回合状态与流程契约原本摊在 `turn`（4.4k 行）与 `conversation/session` 两处：`runtime`、`lifecycle`、`work` 三方都要读在世表与运行态，于是三个用例单元互相依赖、并反向依赖 `turn`。
-- 拆出来以后：**状态与契约**在环 2，所有用例（`turn` / `runtime` / `lifecycle` / `work`）都只向下；「一个能力依赖多个能力」变成「大家都依赖同一份状态与契约」。
+- 拆出来以后：**状态与契约**在环 2，所有用例（`turn` / `runtime` / `lifecycle` / `work`）都只向下；「一个单元依赖多个单元」变成「大家都依赖同一份状态与契约」。
 - 为什么是环 2 而不是环 1：持跨回合状态、等用户回答（`Condvar` + 队列）、按端口驱动（落盘与裁决），不满足 H2 的「无 IO、无状态、无端口」。
 - 为什么不把驱动一起搬：驱动要认识生成线程、命令队列与事件台（`turn` / `runtime` 的用例），搬进来会让环 2 反向依赖环 3。
 

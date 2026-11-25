@@ -1,18 +1,18 @@
 # kernel（地基库）
 
 > 定位：没有领域语义的机制库；不是层，是依赖图最底层的地基。
-> 效力：规范｜核对：2026-11-24｜依据：`src/kernel/api.rs`、`docs/kernel/mechanisms.yaml`
+> 效力：规范｜核对：2026-11-25｜依据：`src/kernel/api.rs`、`docs/kernel/mechanisms.yaml`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；机制与机制之间的层号在 `docs/kernel/mechanisms.yaml`（门禁 `tests/gates/structure/kernel-mechanisms.js`），分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
 - 管：运行日志端口、宿主探测端口、**提问端口**（请用户裁决）、**本地时间**（`clock`：此刻的本机民用时间与到分钟流水戳）。
 - 管：生成中作业的取消表。
-- 管：跨层共享的**形状**（DTO，在 `contracts`）与路径的对外书写形式。
+- 管：**端口载荷形状**（`contracts`：`SessionId` / `ToolOutcome` / `Ask`）与路径的对外书写形式；其余跨层共享形状归环 1 单元（`Tier` / `ExecSpec` / `JobState` 在 `exec_model`）。
 - 管：**外部进程执行**——一次性的 `ProcessRunner` 与长驻的 `SessionHost`；围栏裁决经 `FenceGate` 原样转交，机制不解释裁决的业务变体。
 - 管：**长驻子进程的账与回收**（`procs`）。
 - 管：**围栏机制**（`confine`）——可达范围、出站网络、进程树、平台实现与 Windows 授权台账。
-- 不管：**不认识任何能力 / 呈现层 / 根**。
+- 不管：**不认识任何单元 / 呈现层 / 根**。
 - 不管：不解释共享形状的业务语义——它不需要知道什么是回合、回复、工具执行。
 - 不管：**不决定**可达范围（策略由调用方派生后传入）。
 
@@ -162,12 +162,12 @@
 - 当前 33 个机制、12 层，读到顶的顺序是 `detail/launch`（5）→ `detail/container`（6）→ `detail/acl`（7）→ `detail/ledger`（8）→ `detail/confine`（9）→ `detail/process`（10）→ `detail/session`（11）：越往上越是装配别人的机制。
 - 围栏这一族按职责切成五个机制，每个只依赖下一层：`launch`（命令怎么起：PATH 解析、环境白名单、程序名改写）、`container`（容器身份与容器内拉起）、`acl`（逐路径改 DACL、读完整性标签）、`ledger`（授权台账与按条回收）、`confine`（编排：授权→执行→收尾，平台后端的策略判据）。
 - 动过一条边就 `node tests/gates/structure/kernel-mechanisms.js --write` 重算全表；不想抬层就消掉那条边。层级理由写在 diff 里，不在散文里。
-- 粒度区别：能力（`layers.yaml`）按业务用例切、可以互相调用对方的 `api`；机制（本表）没有业务语义、只许单向。机制不因调用方多就升格成能力。
+- 粒度区别：单元（`layers.yaml`）按业务用例切、可以互相调用对方的 `api`；机制（本表）没有业务语义、只许单向。机制不因调用方多就升格成单元。
 - 第五条判据：内核内部只走机制路径，不经 `api` 面（见「六、对外面」）。
 
 ## 六、对外面（`api/`）
 
-- 一个文件一个**对外概念**：`src/kernel/api.rs` 只声明模块，条目在各面文件里重导出。面是能力与装配层取形状与机制的唯一入口（`crate::kernel::api::<面>::<条目>`）。
+- 一个文件一个**对外概念**：`src/kernel/api.rs` 只声明模块，条目在各面文件里重导出。面是单元与装配层取形状与机制的唯一入口（`crate::kernel::api::<面>::<条目>`）。
 - **内核内部不经此面**：机制之间直取所属机制（`crate::kernel::contracts|domain|detail::<机制>::…`）。判据是 `tests/gates/structure/kernel-mechanisms.js` 的第五条——`src/kernel` 下（除 `api/` 面自身）出现 `kernel::api` 就判红。
   - 理由一：面是给外面的形状，不是内部捷径；内部绕道面会让面与实现互相牵制（改一个条目的归属要连着改面）。
   - 理由二：绕道 `api` 的依赖在机制表里是**隐形**的（`api` 不是机制，边扫不到）；直取机制后机制边才如实，层号才是事实。

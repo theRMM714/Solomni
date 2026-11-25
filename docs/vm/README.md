@@ -1,21 +1,21 @@
 # vm（虚拟机档）
 > 定位：执行档位的选型诊断、就绪检测与 guest 生命周期；运行包由 `packages` 选好，本单元只消费 `PackagePlan`。
-> 效力：规范｜核对：2026-11-06｜依据：`src/units/vm/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/vm/api.rs`
 
 ## 管什么 / 不管什么
-- 管：执行档位（本机 / 虚拟机）的选型诊断、执行计划派生（`src/units/vm/service/plan.rs`：运行包由 `packages` 选好，本能力只消费 `PackagePlan`）、就绪检测（本机能不能承载虚拟机档；缺哪几项、每项怎么补），以及 guest 生命周期（按会话租约起 / 跑 / 销毁）与 guest 只读诊断。
-- 不管：运行包契约、包库与选包（`packages`）、会话与档案（`session`）、工作区与沙箱（`workspace`，本能力只收它给的中立路径）、模块清单（`modules`，只消费它声明的 `runtimes`）、实际执行工具（`tools`）。
+- 管：执行档位（本机 / 虚拟机）的选型诊断、执行计划派生（`src/units/vm/service/plan.rs`：运行包由 `packages` 选好，本单元只消费 `PackagePlan`）、就绪检测（本机能不能承载虚拟机档；缺哪几项、每项怎么补），以及 guest 生命周期（按会话租约起 / 跑 / 销毁）与 guest 只读诊断。
+- 不管：运行包契约、包库与选包（`packages`）、会话与档案（`session`）、工作区与沙箱（`workspace`，本单元只收它给的中立路径）、模块清单（`modules`，只消费它声明的 `runtimes`）、实际执行工具（`tools`）。
 
 ## 入站契约与状态归属
 - 入站面：`api::Vm`（`guest_start` / `guest_run` / `guest_wait_agent` / `guest_stop` / `guest_leases` / `guest_diagnose`）+ 档位与计划的纯函数（`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_capability` / `capability_refusal` / …）。
 - 管：**一次销毁的自足任务** `GuestStop`（`src/units/vm/service/job.rs`）——调用方算出租约、在本线程 `run`，销毁要等 guest 落盘。
 - 出站端口 `VmEngine` / `ShareBackend` 只由 `service.rs` 持有（R12）；`GuestVm` / `GuestChannel` 由引擎在 boot 时交出。
-- `ExecSpec` 是共享形状（在 `exec_model`），本能力只读它；包库与选包在 `packages`。
+- `ExecSpec` 是共享形状（在 `exec_model`），本单元只读它；包库与选包在 `packages`。
 - 状态归属：虚拟根在项目内 `.vm/guest/<名>`；可写层在 `.vm/overlays/<租约>.qcow2`；构建缓存卷在 `.vm/build-cache/`（归 `builds`）；guest 租约按主会话树。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
-- 经 `::api` 用到：`kernel`、`modules`
-- 谁在用我：`cli`、`collab`、`runtime`、`session`（成员工具面带本能力的 guest 面）、`provision`（`guest-runtime` 的运行期编排要起 guest）、入口层（`--doctor`）
+- 经 `::api` 用到：`catalog`、`exec_model`、`kernel`
+- 谁在用我：`agentloop`、`collab`、`entry`、`lifecycle`、`maintenance`、`provision`、`runtime`、`system`、`turn`、`turn_state`、`work`
 
 ## 一、适配器与组合
 - 引擎：`QemuEngine`（唯一引擎）。
@@ -40,7 +40,7 @@
 <!-- END:platform-status -->
 
 - 组合：Linux QEMU/KVM + virtiofs（virtiofsd 不在场或不能执行时退 9p）；Windows QEMU/WHPX + SMB guestfwd（缺 smbd 时虚拟机档不可用，先补齐，不降级）。
-- Windows 验收前提：硬件加速（WHPX）可用；当前只验过物理宿主，嵌套虚拟化宿主未验，不声称支持。
+- Windows 验收前提：硬件加速（WHPX）可用——`accel` 取 `whpx`（`src/units/vm/detail/qemu.rs:25`）；取不到时虚拟机档就绪项判否，启动如实报「本平台没有可用的硬件加速：虚拟机档只走硬件加速（KVM / WHPX / HVF），不退回软件模拟」（`src/units/vm/detail/qemu.rs:308`），不降级。
 - guest 内诊断入口：CLI 交互命令 `diagnose <会话>` 造一次 `guest_diagnose` 动作（`systools/tools.yaml`，`callers: [user]`，参数 `session_id` 必填非空）——只读列出 guest 进程表（pid / ppid / 状态 / CPU 占用 / RSS / 运行时长 / 命令与参数）、CPU 汇总、内存、负载、挂载与内核 / 核数；诊断本身只读、不写 guest 文件（为复用既有 fenced 通道，宿主会按既有机制写一份策略临时文件，helper 读取后立即删除）、不改会话状态、不套 per-agent 围栏，guest 内走 helper 的只读诊断模式，宿主侧只用已持有的 QGA 通道（不新增外部端口，见 `src/units/vm/service.rs` 的 `guest_diagnose`）。
 - 诊断失败如实分类：没有活 guest / 只有 Linux guest / QGA 通道不通 / guest 诊断助手不在或不支持 / guest 缺 python3 / 诊断超时 / 输出不可解析；「读不到」不说成「没有进程」（`src/units/vm/domain/diagnose.rs`）。
 - 验收证据：引擎级探针（`vm_live_guest_runs_command_inside_guest`）+ 并发可写层探针（`vm_live_two_guests_share_one_base_without_writing_it`）与 e2e 的虚拟机档会话场景都过（虚拟根默认 `debian-13`，`SOLOMNI_VM_GUEST` 可换）；外部工作区往返探针 `vm_live_external_workspace_round_trip` 与 e2e 的外部工作区场景已在 Windows 真机通过（WHPX + SMB：guest 内读外部根、写私沙落宿主、写共享区被拒、删会话不删外部根），Linux 的 virtiofs / 9p 两变体已在 KVM 上通过；两端的 QEMU 与 guest 镜像由 provision 能力按清单装入。
@@ -92,8 +92,8 @@
 - 执行路径上 guest 表锁只用来取租约，`exec` 在该租约自己的锁下跑：跨租约并行、同一租约串行；工作区版本库的写闸同理按工作分。
 
 ## 六、依赖、虚拟根与运行期自证
-- 依赖由 `provision` 能力按清单（`dependencies.yaml` + `links.yaml`，需用户同意、只写项目内）装进 `.vm/`。
-- 依赖（QEMU / `virtiofsd` / SMB helper / 镜像）不预置、不分发（解归档的入口程序装完补可执行位——便携包里的 zip 常常不带 unix 权限位），由 provision 能力在 Linux / Windows 上按 `dependencies.yaml` + `links.yaml` 下载并解包进项目内 `.vm/`（需用户同意；入口 `solomni --provision --ensure --yes`；下载后按台账核对 sha256——自托管资产在清单条目里（`release:<tag>/<资产>` + `sha256:`）、链接类在 `links.yaml` 里成对，不 pin 的源如实不校验）。
+- 依赖由 `provision` 单元按清单（`dependencies.yaml` + `links.yaml`，需用户同意、只写项目内）装进 `.vm/`。
+- 依赖（QEMU / `virtiofsd` / SMB helper / 镜像）不预置、不分发（解归档的入口程序装完补可执行位——便携包里的 zip 常常不带 unix 权限位），由 `provision` 单元在 Linux / Windows 上按 `dependencies.yaml` + `links.yaml` 下载并解包进项目内 `.vm/`（需用户同意；入口 `solomni --provision --ensure --yes`；下载后按台账核对 sha256——自托管资产在清单条目里（`release:<tag>/<资产>` + `sha256:`）、链接类在 `links.yaml` 里成对，不 pin 的源如实不校验）。
 - 产品检测、指路并给出补齐入口；`qemu_path` / `virtiofsd_path` / `smbd_path` 可登记。
 - Linux：QEMU（pkgforge Anylinux AppImage）、virtiofsd 与默认虚拟根 `debian-13`（cloud 镜像 rootfs → `rootfs.ext4` 磁盘镜像 + 通用内核 + initrd + qemu-guest-agent，装进 `.vm/guest/debian-13/`；会话的可写层叠在镜像上）；构造配方按清单 `family: debian` 取，当前只有 Debian 一份。
 - Windows：官方源码在 MSYS2（mingw-w64）下自建的 QEMU 11.1.1 便携包（`--enable-slirp`，固件按真实文件打包）、Debian cloud qcow2（与 Linux 同一个虚拟根 `debian-13`，装进 `.vm/guest/debian-13/`）与 `guest.yaml`。
@@ -129,7 +129,7 @@
 - 开发 / 应急 copy：进程启动时设 `SOLOMNI_VM_SHARE=copy`，该进程的 VM 会话强制走 copy（QGA 复制），日志打警告；它不在用户链、不进用户界面；只在开发 / 运维细则里出现，普通进程不装配它。
 
 ## 改动本单元时必须同步
-- `RUNTIME_SPEC.md` → 包契约；`docs/builds/README.md` → 构建；本能力的用例测试在 `src/tests/vm/`。
+- `RUNTIME_SPEC.md` → 包契约；`docs/builds/README.md` → 构建；本单元的用例测试在 `src/tests/vm/`。
 - 改虚拟根构造或运行期编排 → `docs/provision/README.md`；改 `GuestSpec.seed` / `guest_wait_agent` 要同时改那里的编排。
 - 新增端口或替身 → `docs/testing/doubles.md` 的端口矩阵。
 - `REGISTRY_SPEC.md` → `max_guests` 等设置字段；`docs/tools/tools-and-roles.md` → 路径模型与系统工具寻址。

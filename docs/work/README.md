@@ -1,7 +1,7 @@
 # work（工作用例）
 
 > 定位：工作是什么样——建工作的两段、改配、档案与视图、模型视图、运行报告、guest 生命周期、建议与激活。
-> 效力：规范｜核对：2026-11-16｜依据：`src/units/work/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/work/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -15,19 +15,19 @@
 - 管：**guest 生命周期**——`GuestBoot` / `EditGuest` / `GuestDiagnose` 的起停诊断两段式（单次销毁的 `GuestStop` 归 `vm`），以及稳定根的判据（`stable_roots` / `check_stable_roots`）。
 - 管：**建议与激活**——`suggest_models` 按需求拟名单、`activation_build_request` / `prepare_activation` / `commit_activation` 启用历史会话的两段。
 - 不管：命令队列与生成驱动——谁在什么时候取走会话、生成完怎么放回，由 `runtime` 决定（本单元只提供用例方法）。
-- 不管：会话本体、在世表与运行态（`turn`）、落盘与转录（`session`）、沙箱与工作区机制（`workspace`）、虚拟机实现与计划派生（`vm`）。
+- 不管：会话本体（`turn` 的 `AgentSession`）、在世表与运行态（`turn_state`）、落盘与转录（`session`）、沙箱与工作区机制（`workspace`）、虚拟机实现与计划派生（`vm`）。
 - 不管：登记处与探针本体——`&dyn Registry` / `&dyn HostProbe` 由调用方按次传入，`Work` 不持有它们（R12）。
 
 ## 入站契约与状态归属
 
-- 入站面：`api` 的 DTO（`WorkSpec` / `WorkOpened` / `SessionTypeView`（会话类型表给界面的那份）/ `SessionConfig` / `SessionEdit` / `SessionView` / `ContinueView` / `FilesView` / `RuntimeReport` / `TierChoices` / `PermissionView` / `ThinkingView` / `AgentSuggestion` / `ConfigAgent` / `WorkMode`）与 guest 三类（`GuestBoot` / `GuestStop` / `EditGuest` / `GuestDiagnose`）；`work` 自己的 `WorkOps`、`turn` 的 `TurnOps` 与 `runtime` 的 `RuntimeOps` 签名直接用这些类型。
-- 状态归属：`Work` 只持能力面（`root` / `history` / `workspace` / `vm` / `packages` / `provision` / `modules` / `llm` / `tools` / `prompt` / `systools` / `log`），**不自持会话状态**：会话在世表、运行态与裁决队都在 `turn`，经形参 `&Turn` / `&mut Turn` 读写；`registry` / `probe` 同样按次传入。
-- 两段式的中间产物（`PreparedWork` / `PendingWork` / `PreparedEdit` / `PreparedActivation`）只在本能力内流转，不在 `api` 出现。
+- 入站面：`api` 的 DTO（`WorkSpec` / `WorkOpened` / `SessionTypeView`（会话类型表给界面的那份）/ `SessionConfig` / `SessionEdit` / `SessionView` / `ContinueView` / `FilesView` / `RuntimeReport` / `TierChoices` / `PermissionView` / `ThinkingView` / `AgentSuggestion` / `ConfigAgent` / `SessionTypeView`）与 guest 三类（`GuestBoot` / `GuestStop` / `EditGuest` / `GuestDiagnose`）；`work` 自己的 `WorkOps`、`turn` 的 `TurnOps` 与 `runtime` 的 `RuntimeOps` 签名直接用这些类型。
+- 状态归属：`Work` 只持各单元的入站面（`root` / `history` / `workspace` / `vm` / `packages` / `provision` / `modules` / `llm` / `tools` / `prompt` / `systools` / `log`），**不自持会话状态**：会话在世表、运行态与裁决队都在 `turn`，经形参 `&Turn` / `&mut Turn` 读写；`registry` / `probe` 同样按次传入。
+- 两段式的中间产物（`PreparedWork` / `PendingWork` / `PreparedEdit` / `PreparedActivation`）只在本单元内流转，不在 `api` 出现。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`collab`、`env`、`llm`、`modules`、`packages`、`permission`、`prompt`、`provision`、`registry`、`session`、`slate`、`tools`、`turn`、`vm`、`workspace`；`kernel` 的 `SessionId` / `Log` / `HostProbe`；`exec_model` 的 `Tier` / `ExecSpec`。
-- 谁在用我：`runtime`（`WorkOps` / `TurnOps` / `RuntimeOps` 的薄转发与 `Faces` 装配）、`presentation`（视图类型与 `diagnose_text`）。
+- 经 `::api` 用到：`agentloop`、`catalog`、`conversation`、`exec_model`、`kernel`、`llm`、`permission`、`prompt`、`provision`、`registry_model`、`session_model`、`tools`、`transcript`、`turn_state`、`vm`、`workspace`
+- 谁在用我：`presentation`、`runtime`
 - **不引用 `runtime`**：依赖只向下，`work` 在 `runtime` 之下（`layers.yaml`）。
 
 ## 一、两段式：准备与提交
@@ -42,8 +42,8 @@
 - `src/units/work/service/views.rs` → `SessionView` 的继续判据与文件视图是行为契约：改判据必须同改 `src/tests/api/session.rs`、`src/tests/routes.rs`、`src/tests/runtime/proxy.rs` 的断言。
 - `src/units/work/service/create.rs` → 建工作的顺序、日志 key 与失败撤销是行为契约：改一处必须同改 `src/tests/runtime.rs`、`src/tests/api/compaction.rs`、`src/tests/session/lifecycle.rs` 的断言与 e2e 的建工作旅程。
 - `src/units/work/service/guest_job.rs` → 稳定根判据与 guest 规格是行为契约：改一处必须同改 e2e 的 vm 档会话场景与 `SOLOMNI_VM_LIVE` 真机探针（`tests/cross-platform/gaps.yaml`）。
-- `src/units/work/domain.rs` → 工作名校验与自由函数（`dedup_modules` / `merge_into_one` / `session_started`）是纯逻辑，行为由 e2e 的建工作与协作旅程覆盖（具体实现的用例已移除）。
-- `src/units/turn/turn/service/facts.rs` 的 `Turn::build_single`（装配落 `src/units/agentloop/domain/assembly.rs`）→ 本单元 `commit_work` 的唯一装配入口：改签名必须同改这里、`src/units/turn/turn/unit-map` 的对应行与 `Turn` 的用例。
+- `src/units/work/domain.rs` → 纯判据（`merge_into_one` / `session_started` / `validate_work_name`）不碰入站面、不读盘、不发事件：行为由 e2e 的建工作与协作旅程覆盖（具体实现的用例已移除）。
+- `src/units/turn/turn/service/facts.rs` 的 `Turn::build_single`（装配落 `src/units/agentloop/domain/assembly.rs`）→ 本单元 `commit_work` 的唯一装配入口：改签名必须同改这里、[`docs/turn/unit-map.md`](../turn/unit-map.md) 的对应行与 `Turn` 的用例。
 
 ## 本目录
 
