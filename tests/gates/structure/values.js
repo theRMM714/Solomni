@@ -4,6 +4,8 @@
  *       豁免三条：&mut self、端口借用 &mut dyn Trait、泛型与回调边界里的 &mut（impl FnOnce(&mut T) 之类）——硬判；
  *       ② api*.rs 的值（pub struct）与它经 pub use 转出的同能力结构带内部可变（Mutex / RwLock / RefCell / Cell / UnsafeCell / Atomic），或字段是具名状态的可变借用 / 闭包（借端口 `&mut dyn Trait` 不算：那是把端口借进来）；
  *       ③ 跨能力的同形结构（字段名与类型全同）——②③ 只进 notes，等顶层编排定稿后转硬。
+ *       ④ 契约唯一家与镜像禁令（H4）：同一个名字不得在两个契约面上各定义一次；
+ *          呈现层/入口不得定义与契约同名的 pub 类型（那是复制 DTO，不是防腐）。
  */
 "use strict";
 const fs = require("fs");
@@ -160,6 +162,45 @@ function borrowedProblems(root, file) {
   return problems;
 }
 
+/**
+ * ④ 契约唯一家与镜像禁令（H4）：一个名字只属于一个契约面。
+ *   契约面 = `src/kernel/contracts/*.rs` 与 `src/units/<unit>/api{.rs,/}`；
+ *   同一个名字在两个契约面上各出现一次，或呈现层/入口再造一份同名的 pub 类型，都是复制契约。
+ *   防腐层（同义模型 + 翻译）只准在 `units/<unit>/detail`、呈现层的屏幕装配、入口适配处，且不得同名镜像。
+ */
+function contractProblems(root) {
+  const files = rsFilesOf(path.join(root, "src")).filter((f) => !f.includes(path.sep + "tests" + path.sep));
+  const isContract = (r) => /^src\/kernel\/contracts\//.test(r) || /\/api\.rs$/.test(r) || /\/api\//.test(r);
+  const isAdapter = (r) => /^src\/(presentation|entry)\//.test(r);
+  const defs = new Map();
+  for (const file of files) {
+    const r = rel(root, file);
+    const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/^\s*pub\s+(?:struct|enum|type)\s+([A-Za-z_][A-Za-z0-9_]*)/);
+      if (!m) continue;
+      if (!defs.has(m[1])) defs.set(m[1], []);
+      defs.get(m[1]).push({ at: r + ":" + (i + 1), contract: isContract(r), adapter: isAdapter(r) });
+    }
+  }
+  const problems = [];
+  for (const [name, list] of defs) {
+    const contracts = list.filter((d) => d.contract);
+    if (!contracts.length) continue;
+    if (new Set(contracts.map((d) => d.at.split(":")[0])).size > 1) {
+      problems.push("契约唯一家：" + name + " 在两个契约面上各定义一次（H4）：" + contracts.map((d) => d.at).join("、"));
+      continue;
+    }
+    const mirrors = list.filter((d) => !d.contract && d.adapter);
+    if (mirrors.length) {
+      problems.push(
+        "契约镜像：" + name + " 已有契约定义（" + contracts[0].at + "），适配层又造了一份（H4）：" + mirrors.map((d) => d.at).join("、"),
+      );
+    }
+  }
+  return problems;
+}
+
 /** 值边界（api 面）与同形重复（全能力面）：返回 {problems, notes}。 */
 function values(root) {
   const dir = path.join(root, "src", "units");
@@ -243,6 +284,7 @@ function values(root) {
     const names = [...new Set(group.map((s) => (s.cap ? s.cap + "::" : "") + s.name))];
     notes.push("值边界：跨能力同形结构（R15 迁移清单）：" + names.join(" = "));
   }
+  problems.push(...contractProblems(root));
   return { problems, notes };
 }
 

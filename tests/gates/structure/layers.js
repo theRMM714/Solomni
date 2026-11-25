@@ -5,7 +5,8 @@
  * H1 硬判：跨单元边只能指向严格更低的环；同环只允许指向 rank 更低的单元——rank 由同环边算，
  *          只回执、不设预算（同环先后是机制栈的真实顺序，不是需要消灭的耦合）。
  * H2 硬判：环 1 的单元不得出现 IO（std::fs/net/process/env/thread、tokio、reqwest、sqlx）、
- *          ports/ 目录、可变全局（static mut / Mutex / RwLock / OnceLock / lazy_static），也不得依赖 kernel。
+ *          ports/ 目录、可变全局（static mut / Mutex / RwLock / OnceLock / lazy_static），也不得依赖 kernel 的机制面
+ *          （只放行 crate::kernel::contracts 与 kernel::api::{types,note} 的纯契约值）。
  * 只回执：同环 rank 序、扇出、纯转发边。H3（跨切片共用值应下沉环 1）与 N2 在 P3 接入。
  */
 "use strict";
@@ -141,14 +142,13 @@ function edgeProblem(tiers, rank, from, to) {
   return "同环逆序（" + from + " rank " + ra + " 依赖了 " + to + " rank " + rb + "，同环只能指向 rank 更低的单元）";
 }
 
-/** H2：纯层不得有 IO、端口、可变全局与 kernel 依赖。 */
+/** H2：纯层不得有 IO、端口、可变全局与 kernel 机制依赖；kernel 的纯契约值放行。 */
 function pureProblems(root, unit) {
   const problems = [];
   const dir = path.join(root, "src", "units", unit);
   if (fs.existsSync(path.join(dir, "ports"))) problems.push("纯层：环 1 的 " + unit + " 不得有 ports/ 目录（端口是 IO 的门，纯层不设门）");
   const bad = [
     [/^\s*use\s+(std::(?:fs|net|process|env|thread)|tokio|reqwest|sqlx)\b/, "IO 依赖"],
-    [/^\s*use\s+crate::kernel\b/, "kernel 依赖"],
     [/^\s*(?:pub\s+)?static\s+mut\b/, "可变全局"],
     [/\blazy_static!?\s*\{/, "可变全局（lazy_static）"],
     [/\b(?:Mutex|RwLock|OnceLock|OnceCell|Atomic[A-Z]\w*)\b/, "状态/同步原语"],
@@ -159,6 +159,9 @@ function pureProblems(root, unit) {
     text.split(/\r?\n/).forEach((line, i) => {
       if (!line.trim() || line.trim().startsWith("//")) return;
       for (const [re, why] of bad) if (re.test(line)) problems.push("纯层：环 1 的 " + unit + " 出现" + why + "，见 " + rel + ":" + (i + 1));
+      // kernel 是环 0 的共享内核：纯契约值（contracts、api 的两个值面）可用；机制面与访问器不行。
+      if (/^\s*use\s+crate::kernel\b/.test(line) && !/^\s*use\s+crate::kernel::(?:contracts\b|api::(?:types|note)\b)/.test(line))
+        problems.push("纯层：环 1 的 " + unit + " 依赖 kernel 的机制面（只准 contracts 与 api::types/note 的纯值），见 " + rel + ":" + (i + 1));
     });
   }
   return problems;
