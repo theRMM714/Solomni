@@ -149,7 +149,8 @@
 
 ## 四、运行日志（`Log` 端口）
 
-- `src/kernel/ports.rs` 定义 `Log`（`info` / `warn` / `error`），业务只**调用**；文件、时间戳与目录机制在 `src/kernel/detail/file_log.rs`。
+- `src/kernel/ports.rs` 定义 `Log`（`info` / `warn` / `error` / `purge`），业务只**调用**；文件、时间戳与目录机制在 `src/kernel/detail/file_log.rs`。
+- **旧日志只经 `purge` 删**：清理整类日志时由 `Log::purge(name)` 删，本次运行那份由 `FileLog` 自己拒删（比较文件名）；`Log` 的默认实现不删，无声日志与测试替身因此没有盘可动。业务单元不自己 `remove_file` 日志。
 - **唯一实例**：组合根创建一个 `FileLog` 并注入协调业务与呈现层；测试用 `NoopLog`。
 - **按运行分文件**：每次运行在数据根 `data/logs/` 下按时间戳建一个 `.log` 文件；`data/logs/` 不入库。一次运行的因果链在同一份文件里，排查不跨文件拼。
 - **时间戳取本机时区**：文件名与行首时刻都由 `clock` 机制给出（`src/kernel/detail/clock.rs` 的 `local_now`），不再按固定偏移折算。

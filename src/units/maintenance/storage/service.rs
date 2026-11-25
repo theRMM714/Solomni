@@ -396,7 +396,9 @@ impl Storage for StorageService {
                     if item.active || !item.cleanable {
                         continue;
                     }
-                    self.reclaim.remove(CAT_LOGS, &item.id)?;
+                    if !self.log.purge(&item.id) {
+                        continue;
+                    }
                     actions.push(GcAction {
                         category: CAT_LOGS.to_string(),
                         id: item.id.clone(),

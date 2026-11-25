@@ -3,9 +3,7 @@
 //! 不管：哪些该删（domain）、什么时候删（service）、路径约定（paths）。
 //! 联动：service 经 SpaceReclaim 端口消费；删除用的路径与 survey 共用 detail/paths.rs。
 
-use crate::units::maintenance::storage::api::{
-    CAT_BUILD, CAT_DOWNLOAD, CAT_LOGS, CAT_OVERLAYS, LastGc,
-};
+use crate::units::maintenance::storage::api::{CAT_BUILD, CAT_DOWNLOAD, CAT_OVERLAYS, LastGc};
 use crate::units::maintenance::storage::domain::safe_id;
 use crate::units::maintenance::storage::ports::{ReclaimLease, SpaceReclaim};
 use std::path::{Path, PathBuf};
@@ -38,7 +36,6 @@ impl SpaceReclaim for DiskReclaim {
             CAT_BUILD => remove_build_volume(root, id),
             CAT_DOWNLOAD => remove_entry(&paths::download_dir(root).join(id)),
             CAT_OVERLAYS => remove_entry(&paths::overlay_dir(root).join(format!("{}.qcow2", id))),
-            CAT_LOGS => remove_entry(&paths::log_dir(root).join(id)),
             _ => Err(format!("不支持自动回收的类别：{}", category)),
         }
     }

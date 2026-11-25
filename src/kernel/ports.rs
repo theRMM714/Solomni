@@ -3,11 +3,20 @@
 //! 不管：机制实现（文件、时间戳、目录在 `detail/`）；谁在什么时机调用（策略在调用方）；某个单元私有的端口（那是它自己的 `ports.rs`）。
 //! 联动：实现见 `src/kernel/detail/`；按 R12 的例外全项目共享，不属于任何单元。
 
-/// 目的：运行日志端口（三级）。
+/// 目的：运行日志端口（三级写 + 旧日志清理）。
+/// 约束：日志这块盘（`data/logs`）是机制私产——写的文件名由实现决定，删也只能经本端口。
 pub trait Log: Send + Sync {
     fn info(&self, at: &str, msg: &str);
     fn warn(&self, at: &str, msg: &str);
     fn error(&self, at: &str, msg: &str);
+    /// 目的：删掉一份**不是本次运行**的旧日志（清理空间用）。
+    /// 参数：`name` = 日志目录下的文件名，不含目录。
+    /// 返回：删掉为 true；是本次运行那份、或删不掉为 false。
+    /// 约束：默认不删——无声日志与测试替身没有盘；只有 `FileLog` 覆盖。
+    fn purge(&self, name: &str) -> bool {
+        let _ = name;
+        false
+    }
 }
 
 /// 目的：测试与纯逻辑场景的无声日志（不落任何盘）。
