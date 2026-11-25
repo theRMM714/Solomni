@@ -23,6 +23,54 @@ fn fill_if_empty(target: &mut String, found: Option<String>) {
     }
 }
 
+/// 目的：一份 app 设置必须与现有模型登记自洽才能落盘（整份设置与单项授权两个写入口共用）。
+/// 约束：不合法就如实拒绝，不把坏的策略（绝对路径 / .. / 未知字段 / 悬空思考档）落进登记处。
+fn validate_app(
+    app: &AppSettings,
+    models: &std::collections::BTreeMap<String, ModelEntry>,
+) -> Result<(), String> {
+    crate::capabilities::catalog::registry::domain::providers::validate_sandbox_settings(
+        &app.sandbox,
+    )
+    .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+    providers::validate_compact_settings(app, models)
+        .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+    providers::validate_storage_settings(app)
+        .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+    crate::capabilities::catalog::registry::domain::providers::validate_sandbox_authorization(
+        &app.sandbox.policy,
+    )
+    .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+    // 思考目录：新目录必须自洽，且不能删掉仍被模型引用的档位（否则旧映射悬空）。
+    providers::validate_thinking_catalog(&app.thinking)
+        .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+    for (mid, m) in models {
+        for level in m.thinking.levels.keys() {
+            if !app.thinking.levels.iter().any(|l| &l.id == level) {
+                return Err(format!(
+                    "思考档位 {} 仍被模型 {} 使用：先改模型登记再删它",
+                    level, mid
+                ));
+            }
+        }
+        if let Some(d) = &m.thinking.default
+            && !app.thinking.levels.iter().any(|l| &l.id == d)
+        {
+            return Err(format!("模型 {} 的默认思考档位 {} 不在新目录里", mid, d));
+        }
+    }
+    Ok(())
+}
+
+/// 目的：不经进程内的登记处状态、直接把"允许写 ACL"记进 settings.yaml——`--setup fence` 在装配登记处之前就要落这一笔。
+/// 约束：只改这一项；走与整份设置同一套校验与落盘（四份 yaml 一并刷新）。
+pub fn grant_write_acl(store: &dyn SettingsStore) -> Result<(), String> {
+    let mut settings = store.load()?;
+    settings.app.sandbox.policy.windows.write_acl = true;
+    validate_app(&settings.app, &settings.models)?;
+    store.save(&settings)
+}
+
 /// 目的：登记处能力：持四份 yaml 的内存形态，按用例读写、改完即落盘。
 pub struct RegistryService {
     /// **状态**：登记处的内存形态。私有——别的能力只经 `Registry` 读。
@@ -387,37 +435,7 @@ impl Registry for RegistryService {
     }
 
     fn set_app_settings(&mut self, app: AppSettings) -> Result<(), String> {
-        // 不合法就如实拒绝，不把坏的策略（绝对路径 / .. / 未知字段）落进登记处。
-        crate::capabilities::catalog::registry::domain::providers::validate_sandbox_settings(
-            &app.sandbox,
-        )
-        .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
-        providers::validate_compact_settings(&app, &self.settings.models)
-            .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
-        providers::validate_storage_settings(&app)
-            .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
-        crate::capabilities::catalog::registry::domain::providers::validate_sandbox_authorization(
-            &app.sandbox.policy,
-        )
-        .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
-        // 思考目录：新目录必须自洽，且不能删掉仍被模型引用的档位（否则旧映射悬空）。
-        providers::validate_thinking_catalog(&app.thinking)
-            .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
-        for (mid, m) in &self.settings.models {
-            for level in m.thinking.levels.keys() {
-                if !app.thinking.levels.iter().any(|l| &l.id == level) {
-                    return Err(format!(
-                        "思考档位 {} 仍被模型 {} 使用：先改模型登记再删它",
-                        level, mid
-                    ));
-                }
-            }
-            if let Some(d) = &m.thinking.default
-                && !app.thinking.levels.iter().any(|l| &l.id == d)
-            {
-                return Err(format!("模型 {} 的默认思考档位 {} 不在新目录里", mid, d));
-            }
-        }
+        validate_app(&app, &self.settings.models)?;
         self.settings.app = app;
         self.save("registry::set_app_settings")
     }

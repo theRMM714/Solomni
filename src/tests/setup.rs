@@ -3,7 +3,7 @@
 //! 不管：注册表与广播的真实行为（归 kernel 的 UserPath 适配器）；真实用户 PATH 与用户目录不被触碰。
 //! 联动：被测面 src/capabilities/system/detail/setup/ 下的 mod.rs、path.rs、shim.rs、fence.rs；端口契约见 src/kernel/ports.rs 的 UserPath。
 
-use crate::capabilities::system::api::{SetupMode, SetupOps};
+use crate::capabilities::system::api::{FencePolicy, SetupMode, SetupOps};
 use crate::capabilities::system::detail::setup::SetupHost;
 #[cfg(not(windows))]
 use crate::capabilities::system::detail::setup::fence;
@@ -11,7 +11,9 @@ use crate::capabilities::system::detail::setup::path as p;
 #[cfg(windows)]
 use crate::capabilities::system::detail::setup::shim;
 use crate::kernel::ports::{PathValue, UserPath};
+use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// 目的：UserPath 端口的替身：一次读、写调用全记录、广播计数；错误用 Err 注入。
 struct FakeUserPath {
@@ -457,5 +459,100 @@ fn portable_hooks_pass_quietly_without_an_acl_step() {
         assert!(err.contains("本平台"), "{err}");
     }
 
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：FencePolicy 端口的替身：记调用次数，可注入失败；成功时回一行带键名的文案。
+struct FakePolicy {
+    calls: AtomicUsize,
+    failure: Option<String>,
+}
+
+impl FakePolicy {
+    fn new(failure: Option<&str>) -> FakePolicy {
+        FakePolicy {
+            calls: AtomicUsize::new(0),
+            failure: failure.map(str::to_string),
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+impl FencePolicy for FakePolicy {
+    fn record_authorization(&self) -> Result<String, String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        match &self.failure {
+            Some(e) => Err(e.clone()),
+            None => Ok("sandbox.policy.windows.write_acl = true（已记进设置）".to_string()),
+        }
+    }
+}
+
+/// 目的：预授成功后把授权记进设置——只有写入类模式记一次，状态与路径不碰设置；没有 ACL 一步的平台一律不记。
+#[test]
+fn fence_records_the_authorization_after_a_successful_grant() {
+    let root = crate::tests::scratch("setup-fence-policy");
+    let policy = Arc::new(FakePolicy::new(None));
+    let host = SetupHost::new(&root).with_policy(policy.clone(), true);
+
+    host.apply(SetupMode::Status, &mut |_| {})
+        .expect("状态要读得到");
+    host.apply(SetupMode::Path, &mut |_| {}).expect("PATH 一行");
+    assert_eq!(policy.calls(), 0, "只读模式不写授权");
+
+    let value = host.apply(SetupMode::Fence, &mut |_| {}).expect("预授");
+    assert_eq!(policy.calls(), 1);
+    let lines: Vec<&str> = value["lines"]
+        .as_array()
+        .expect("进度行")
+        .iter()
+        .filter_map(|l| l.as_str())
+        .collect();
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("sandbox.policy.windows.write_acl = true")),
+        "{lines:?}"
+    );
+
+    host.apply(SetupMode::All, &mut |_| {}).expect("全量");
+    assert_eq!(policy.calls(), 2, "写入类模式各记一次");
+
+    // 用例注入"平台没有 ACL 一步"：模式照走，settings.yaml 一笔都不写。
+    let quiet = Arc::new(FakePolicy::new(None));
+    SetupHost::new(&root)
+        .with_policy(quiet.clone(), false)
+        .apply(SetupMode::Fence, &mut |_| {})
+        .expect("没有 ACL 一步也要能跑完");
+    assert_eq!(quiet.calls(), 0, "没有 ACL 一步时不记授权");
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：记授权失败只降级成一行进度：预授本身已成功，不报错、不改退出码，且如实给原因。
+#[test]
+fn failed_authorization_write_only_degrades_to_a_progress_line() {
+    let root = crate::tests::scratch("setup-fence-policy-fail");
+    let policy = Arc::new(FakePolicy::new(Some("没有管理员权限")));
+    let value = SetupHost::new(&root)
+        .with_policy(policy.clone(), true)
+        .apply(SetupMode::Fence, &mut |_| {})
+        .expect("预授本身已成功，不因记授权失败而报错");
+    let lines: Vec<&str> = value["lines"]
+        .as_array()
+        .expect("进度行")
+        .iter()
+        .filter_map(|l| l.as_str())
+        .collect();
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("未写 sandbox.policy.windows.write_acl：没有管理员权限")),
+        "{lines:?}"
+    );
+    assert_eq!(policy.calls(), 1);
     let _ = std::fs::remove_dir_all(&root);
 }
