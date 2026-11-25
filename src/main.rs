@@ -232,9 +232,10 @@ fn main() {
     );
     eprintln!("[围栏] {}", fence_cap.note);
     let store = entry::assembly::settings_store(&root);
+    let sessions = entry::assembly::sessions(&root);
     let history =
-        units::conversation::session::detail::fs_history::FsHistory::new(layout::session(&root));
-    let workspace = units::workspace::detail::FsWorkspace::new(layout::session(&root));
+        units::conversation::session::detail::fs_history::FsHistory::new(sessions.root());
+    let workspace = units::workspace::detail::FsWorkspace::new(sessions.root());
     let workstore = units::workspace::detail::FsWorkStore::new();
     // 运行包能力：依赖文件夹 runtimes/（一个包 = 一个文件夹 + package.yaml）。
     let packages: Arc<dyn units::catalog::packages::api::Packages + Send + Sync> = Arc::new(

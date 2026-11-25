@@ -90,6 +90,14 @@ pub(crate) fn home_docs(root: &Path) -> Arc<dyn crate::units::home::api::Home + 
     )))
 }
 
+/// 目的：会话盘面（`data/session` 这块盘归 `sessions` 单元）——组合根只在这里装一次，转录与共享区适配器都从它取根。
+pub(crate) fn sessions(root: &Path) -> Arc<dyn crate::units::sessions::api::Sessions + Send + Sync> {
+    Arc::new(crate::units::sessions::service::SessionsService::new(
+        layout::session(root),
+        Box::new(crate::units::sessions::detail::FsSessionDirs::new()),
+    ))
+}
+
 /// 目的：按 settings.yaml 取存储策略；读不到用默认。
 fn storage_policy(root: &Path) -> StoragePolicy {
     read_settings(root)
@@ -276,11 +284,9 @@ pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, Str
         Arc::new(build_service(root)?);
     let workspace: Arc<dyn crate::units::workspace::api::Workspace + Send + Sync> =
         Arc::new(crate::units::workspace::service::WorkspaceService::new(
-            Arc::new(
-                crate::units::workspace::detail::fs_workspace::FsWorkspace::new(layout::session(
-                    root,
-                )),
-            ),
+            Arc::new(crate::units::workspace::detail::fs_workspace::FsWorkspace::new(
+                sessions(root).root(),
+            )),
             Arc::new(crate::units::workspace::detail::fs_workstore::FsWorkStore::new()),
         ));
     let modules: Arc<dyn crate::units::catalog::modules::api::Modules + Send + Sync> = Arc::new(
@@ -351,6 +357,7 @@ pub(crate) fn system_with(
     Ok(SystemService::with_facts(
         SystemDeps {
             root: root.to_path_buf(),
+            sessions: sessions(root),
             storage: ports.storage,
             provision: ports.provision,
             builds: ports.builds,
