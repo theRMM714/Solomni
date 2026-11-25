@@ -78,30 +78,31 @@ function renderSuccessMarkers() {
   ].join("\n");
 }
 
-/** 分层表：层 / 单元 / 可依赖，全部取自 layers.yaml；层数与单元数由它现算，不写死在文档里。 */
+/** 环表：环 / 单元 / 可依赖，全部取自 layers.yaml；环数与单元数由它现算，不写死在文档里。 */
 function renderLayerTable() {
   const { parseLayers } = require("./gates/structure/layers.js");
   const { tiers, problems } = parseLayers(ROOT);
   if (problems.length) throw new Error(problems.join("；"));
-  const byTier = new Map();
-  for (const [name, tier] of tiers) {
+  const byRing = new Map();
+  for (const [name, ring] of tiers) {
     if (name === "kernel") continue;
-    if (!byTier.has(tier)) byTier.set(tier, []);
-    byTier.get(tier).push(name);
+    if (!byRing.has(ring)) byRing.set(ring, []);
+    byRing.get(ring).push(name);
   }
-  const top = [...byTier.keys()].sort((a, b) => a - b);
-  const rows = ["| 0（地基库） | `kernel` | 无 |"];
+  const top = [...byRing.keys()].sort((a, b) => a - b);
+  const title = { 1: "1（纯）", 2: "2（状态与机制）", 3: "3（用例）" };
+  const rows = ["| 0（地基） | `kernel` | 无 |"];
   for (const t of top) {
-    rows.push("| " + t + " | " + byTier.get(t).sort().map((n) => "`" + n + "`").join("、") + " | " + (t === 1 ? "0" : "0–" + (t - 1)) + " |");
+    rows.push("| " + (title[t] || String(t)) + " | " + byRing.get(t).sort().map((n) => "`" + n + "`").join("、") + " | " + (t === 1 ? "0" : "0–" + (t - 1)) + " |");
   }
   const caps = [...tiers.keys()].filter((k) => k !== "kernel").length;
   return [
     "<!-- BEGIN:layer-table -->",
-    "| 层 | 单元 | 可依赖 |",
+    "| 环 | 单元 | 可依赖 |",
     "| --- | --- | --- |",
     ...rows,
     "",
-    "> " + top.length + " 层、" + caps + " 个能力 + `kernel`：本表由 `layers.yaml` 生成（`node tests/docs-sync.mjs --write`），不手写。",
+    "> 4 环、" + caps + " 个单元 + `kernel`：本表由 `layers.yaml` 生成（`node tests/docs-sync.mjs --write`），不手写；环 4（`presentation/`、`entry/`）是适配器，不入表。",
     "<!-- END:layer-table -->",
   ].join("\n");
 }

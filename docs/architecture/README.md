@@ -29,6 +29,6 @@
 ## 改动时必须同步
 
 - 本目录增删或改名细则 → 本页路由表、`docs/templates/index.json` 的 spec 登记、`ARCHITECTURE.md` 的路由表（三处同次改）
-- 改 `layers.yaml` 的层或边 → 同次跑 `node tests/gates/structure/layers.js --write` 重算层表，层表生成段由 `node tests/docs-sync.mjs --write` 写回
+- 改 `layers.yaml` 的环或边 → 同次跑 `node tests/gates/structure/layers.js` 看环表、rank 与命中，环表生成段由 `node tests/docs-sync.mjs --write` 写回
 - 改硬要求 R 清单 → `AGENTS.md` 文档路由表里的 R 编号范围与 `TESTING.md` 的判据引用同次核对
 - 本页增删入口 → `docs/README.md` 的架构分区同次改

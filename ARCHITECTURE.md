@@ -36,5 +36,5 @@
 ## 改动时必须同步
 
 - 改分层、端口、状态、边界或注释契约 → `docs/architecture/` 对应细则与本页路由表同次改
-- 新增或删除能力 → `layers.yaml`、层表重算（`node tests/gates/structure/layers.js --write`）、`docs/README.md` 的单元表与 `AGENTS.md` 的文档路由同次改
+- 新增或删除单元 → `layers.yaml` 归环、`docs/README.md` 的单元表与 `AGENTS.md` 的文档路由同次改（环由人决定，改环在 PR 说明理由）
 - 本页增删入口 → `AGENTS.md` 的文档路由表与 `docs/README.md` 同次改
