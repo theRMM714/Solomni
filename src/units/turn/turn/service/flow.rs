@@ -811,9 +811,7 @@ impl Turn {
         // 队列只搬 Gate（kind + payload + 卡）：这一关是哪一种由协作流程自己解释。
         Ok(self.desk().peek_gate(sid).and_then(|d| {
             d.head()
-                .and_then(|(_, gate)| {
-                    crate::units::collab::api::Pending::from_gate(&gate)
-                })
+                .and_then(|(_, gate)| crate::units::collab::api::Pending::from_gate(&gate))
                 .map(|(p, _)| p)
         }))
     }

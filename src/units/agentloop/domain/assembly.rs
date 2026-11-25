@@ -11,6 +11,7 @@ use std::sync::Arc;
 use crate::kernel::api::fence::FencePlan;
 use crate::units::agentloop::domain::assemble::{FaceInput, assemble as assemble_face};
 use crate::units::agentloop::domain::member_tools::{MemberTools, ShellSlot, ToolFace};
+use crate::units::agentloop::domain::ports::SessionPorts;
 use crate::units::agentloop::domain::session::{AgentSession, CompactChatFactory, SessionParams};
 use crate::units::catalog::modules::api::Module;
 use crate::units::llm::api::{Channel, Msg};
@@ -20,7 +21,6 @@ use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::pure::registry_model::api::ToolMode;
 use crate::units::tools::api::{ObservationFact, Observations};
 use crate::units::transcript::api::{ContextUsage, SessionEvent};
-use crate::units::agentloop::domain::ports::SessionPorts;
 use crate::units::vm::api::GuestOs;
 use crate::units::workspace::api::{ReadFact, Sandbox};
 
