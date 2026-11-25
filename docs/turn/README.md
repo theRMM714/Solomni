@@ -14,7 +14,7 @@
 - 管：**准入与派发闸**——`admit` 先落盘再进在世表，`ensure_session` 不在世就按转录重建，`dispatch_gate` 按运行态拒绝派发，`resume_subtree` 把停掉的子树拉回运行态。
 - 管：**按需重建**——`rebuild_session` 按落盘的事件与元数据重建单 agent / 协作 / 代理三种形态，`workspace_binding_of` 做加载复检，`replay_dialogue` / `replay_reads` 还原对话与读事实，`build_proxy` 装配代理会话。
 - 管：**一席事实的取用**——沙箱清单、权限面、`env::api::member` 算出的工具环境（`MemberEnvParts`）与上下文预算（`src/units/turn/turn/service/facts.rs`）；事实都经各能力的 `api` 取。
-- 不管：**一席的装配**——工具面与三种在世形态的构造归 `session`（`src/units/conversation/session/service/assemble.rs` 的 `single_session` / `rebuild_single` / `proxy_session`）；本单元只取事实、组 `MemberSpec` 后转调。`Turn::build_single` 仍是 `work` 建工作两段的入口。
+- 不管：**一席的装配**——工具面与三种在世形态的构造归 `agentloop`（`src/units/agentloop/domain/assembly.rs` 的 `single_session` / `rebuild_single` / `proxy_session`）；本单元只取事实、组 `MemberSpec` 后转调。`Turn::build_single` 仍是 `work` 建工作两段的入口。
 - 不管：会话对象（`session` 的 `AgentSession`、`collab` 的 `CollabSession`）怎么长、怎么跑——本单元只放取、标记与重建。
 - 管：**回合推进**——单 agent 与节点的生成准备（工具形态刷新、预算刷新、身份、前缀事件、`Prepared`）与同步生成入口、取放会话的两段（`take_single` / `take_collab` / `put_single` / `put_collab`）、裁决作废与派发目标、协作流水线推进与协作动作（链推进、节点派发、裁决卡动作、改需求）。
 - 管：**生成驱动**——单 agent / 节点、成员、协作泵、压缩五条生成链，以及七条点火器（节点执行、继续、代理回合、协作推进、裁决处置）；线程名 `solomni-*` 是行为契约的一部分，线程本身经宿主的 `TurnHost::spawn` 起。
@@ -30,7 +30,7 @@
 - 入站面（生成与事件台）：`api::single_generation` / `api::node_generation` / `api::collab_generation` / `api::compact`，七条点火器 `api::spawn_detached_*` / `api::start_child_collab`，`api::EventBus`（`push` / `push_rewound` / `head` / `snapshot` / `tail_excluding`）、`api::EventLine`，以及值类型 `Output` / `Advance` / `Prepared` / `CollabWork` / `AskReq` / `RestoreRequest`。
 - 入站面（宿主端口）：`api::TurnHost`——业务循环自己做不了、必须宿主在核心线程上代做的入口（取放状态、事件台、guest 起停、裁决队与提问端口、生成登记、线程点火、回答裁决卡）；`api::session_ask` 是提问端口的工厂。
 - 入站面（重建与代理）：`api::replay_dialogue(&[Value], ToolMode) -> (对话, 标记, 回复号, 行号, 压缩截至行, 压缩截至回复)`、`api::PROXY_PRIVATE_DIR` / `api::SPEAKER`（代理会话的私有目录名与说话人，只有一处）。
-- 入站面（装配）：本单元只出 `Turn::member_env -> MemberEnvParts`（`env::api::member` 的取数结果，逐字段拷成值）与 `Turn::build_single`；装配本身在 `session::api`（`single_session` / `rebuild_single` / `proxy_session`，收 `SessionPorts` 与该能力自己的 `MemberSpec`）；`runtime` 只负责取事实与转调。
+- 入站面（装配）：本单元只出 `Turn::member_env -> MemberEnvParts`（`env::api::member` 的取数结果，逐字段拷成值）与 `Turn::build_single`；装配本身在 `agentloop::api`（`single_session` / `rebuild_single` / `proxy_session`，收 `SessionPorts` 与该单元自己的 `MemberSpec`；装配机必须与工具面活对象同单元）；`runtime` 只负责取事实与转调。
 - 状态归属：**它自己写，别人只经 `api` 取**（R4）——在世表、运行态、创建占位、裁决队与 shell 槽只有这里增删；能力面是构造时注入的借用方，`Turn` 不拥有它们的内部状态。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
@@ -49,7 +49,7 @@
 
 - `src/units/runtime/service/core.rs` → `turn` 字段是唯一读写口（访问器在 `Turn` 上，runtime 只转调）：增删访问器必须同改调用点与 [`unit-map.md`](unit-map.md)。
 - `src/units/turn/turn/service.rs` / `session.rs` → `Turn::new` 的能力面与 `Core::new` 的注入列表一一对应：加一处必须同改另一处，且 `session_ports` 要一并给出。
-- `src/units/conversation/session/service/assemble.rs` → 装配顺序、条件与错误文案是行为契约（`build_single` 的形参变化必须同改 `src/units/work/service/create.rs`）：改判据必须同改 `src/tests/tools/shell.rs`、`src/tests/runtime.rs` 的断言；本单元只负责取事实与转调（`src/units/turn/turn/service/facts.rs`）。
+- `src/units/agentloop/domain/assembly.rs` → 装配顺序、条件与错误文案是行为契约（`build_single` 的形参变化必须同改 `src/units/work/service/create.rs`）：改判据必须同改 `src/tests/tools/shell.rs`、`src/tests/runtime.rs` 的断言；本单元只负责取事实与转调（`src/units/turn/turn/service/facts.rs`）。
 - `src/units/turn/turn/service/facts.rs` → 沙箱 / 权限 / 工作区授权 / 工具环境（`env::api::member`）/ 预算的取数判据只有这一处：`src/units/runtime/service/env.rs` 的三个薄入口与建会话、回档、代理三条调用链都跟着它；改取数必须同改 `src/tests/workspace/resolve.rs`、`src/tests/runtime.rs` 的断言。
 - `src/units/turn/turn/service/rebuild.rs` → 重建与代理装配的行为契约（与实时逐条一致）：改一处必须同改 `src/tests/api/compaction.rs`、`src/tests/collab/flow.rs`、`src/tests/session/rewind.rs`、`src/tests/runtime/proxy.rs` 的断言。
 - `src/units/turn/turn/service/admit.rs` → 准入、按需重建、派发闸与子树续跑的唯一实现：`runtime` 的启用、派发与协作推进都经它，改语义必须同改 `src/tests/session/turn.rs` 的用例。

@@ -1,18 +1,17 @@
 //! 目的：一席工具面与单 agent 会话对象的装配——把能力面的事实拼成能跑的会话。
-//! 管：`MemberEnvParts` / `MemberSpec` / `SingleSpec` 三个参数对象（`SessionPorts` 在 `turn_state`），
+//! 管：`MemberEnvParts` / `MemberSpec` / `SingleSpec` 三个参数对象（`SessionPorts` 在本单元的 `domain::ports`），
 //!   `member_tools` / `single_session` 两个装配入口，以及重建与代理两场的整场装配（`rebuild_single` / `proxy_session`）。
-//! 不管：落盘（本能力的 `service.rs`）、生成驱动（`runtime`）、纯派生规则（在 `session::domain::assemble`）。
-//! 联动：`turn` 侧取事实、算 `env` 并组 spec 后经本文件装配；`MemberTools`（工具面的活对象）**只活在会话里**，不出本能力。
+//! 不管：落盘（会话单元的 `service.rs`）、生成驱动（`engine`）、纯派生规则（在 `session::assemble`）。
+//! 联动：`turn` 侧取事实、算 `env` 并组 spec 后经本文件装配；`MemberTools`（工具面的活对象）**只在本单元内构造与持有**，不出 `api`。
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::kernel::api::fence::FencePlan;
-use crate::units::agentloop::api::{
-    AgentSession, CompactChatFactory, FaceInput, MemberTools, SessionParams, ShellSlot, ToolFace,
-    assemble as assemble_face,
-};
+use crate::units::agentloop::domain::assemble::{FaceInput, assemble as assemble_face};
+use crate::units::agentloop::domain::member_tools::{MemberTools, ShellSlot, ToolFace};
+use crate::units::agentloop::domain::session::{AgentSession, CompactChatFactory, SessionParams};
 use crate::units::catalog::modules::api::Module;
 use crate::units::llm::api::{Channel, Msg};
 use crate::units::prompt::api::Segment;
@@ -21,13 +20,13 @@ use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::pure::registry_model::api::ToolMode;
 use crate::units::tools::api::{ObservationFact, Observations};
 use crate::units::transcript::api::{ContextUsage, SessionEvent};
-use crate::units::turn_state::api::SessionPorts;
+use crate::units::agentloop::domain::ports::SessionPorts;
 use crate::units::vm::api::GuestOs;
 use crate::units::workspace::api::{ReadFact, Sandbox};
 
 /// 目的：一席的工具环境事实（围栏 / 模块注入项 / 运行路径 / 工具链根）——由 `env` 能力从
 ///   （沙箱、权限、运行包计划、模块隐私）派生后**逐字段拷进来**的值结构。
-/// 约束：本能力是第 4 层，不引 `env`；派生留在 turn 侧，这里只收结果，装配时不再重算。
+/// 约束：本单元是环 2，不引 `env`；派生留在 turn 侧，这里只收结果，装配时不再重算。
 #[derive(Debug, Clone)]
 pub struct MemberEnvParts {
     /// 目的：本成员工具进程的围栏（可达范围 + 断网）。

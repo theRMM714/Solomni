@@ -11,8 +11,12 @@ use crate::units::catalog::modules::api::{Module, Roster};
 use crate::units::catalog::packages::api::PackagePlan;
 use crate::units::catalog::registry::api::Registry;
 
-use crate::units::agentloop::api::AgentSession;
-use crate::units::conversation::session::api::{MemberSpec, SingleSpec, work_root_of};
+#[cfg(test)]
+use crate::units::agentloop::api::member_face;
+use crate::units::agentloop::api::{
+    AgentSession, MemberEnvParts, MemberSpec, SingleSpec, single_session,
+};
+use crate::units::conversation::session::api::work_root_of;
 use crate::units::llm::api::Channel;
 use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::permission::api::PermissionSet;
@@ -129,7 +133,7 @@ impl Turn {
 
     /// 目的：一席的工具环境事实：模块注入项 + 宿主可读根 / 网络 / 档位 / 包计划，交给 `env` 派生后**逐字段拷成值结构**。
     /// 参数：`registry` = 登记处（宿主可读根）；`host_plan` = 本席的包计划。
-    /// 约束：`env` 的调用留在这里——`session` 是第 4 层，拿不到 `env`；它只收 `MemberEnvParts` 这个值。
+    /// 约束：`env` 的调用留在这里——装配机在环 2 的 `agentloop`，拿不到 `env`；它只收 `MemberEnvParts` 这个值。
     pub(crate) fn member_env(
         &self,
         registry: &dyn Registry,
@@ -138,7 +142,7 @@ impl Turn {
         net: bool,
         tier: Tier,
         host_plan: &PackagePlan,
-    ) -> crate::units::conversation::session::api::MemberEnvParts {
+    ) -> MemberEnvParts {
         let module_vars: BTreeMap<String, Vec<(String, String)>> = modules
             .iter()
             .map(|m| {
@@ -159,7 +163,7 @@ impl Turn {
                 plan: host_plan,
                 module_vars: &module_vars,
             });
-        crate::units::conversation::session::api::MemberEnvParts {
+        MemberEnvParts {
             fence: menv.fence,
             module_env: menv.module_env,
             runtime_path: menv.runtime_path,
@@ -168,7 +172,7 @@ impl Turn {
     }
 
     /// 目的：一席的**工具面值**（围栏 / 工具链根 / 发放名单）薄入口：给不建会话、只看围栏的调用方与测试。
-    /// 约束：只回值结构，工具面（活对象）不出 `session`。
+    /// 约束：只回值结构，工具面（活对象）不出 `agentloop`。
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn member_face(
@@ -185,7 +189,7 @@ impl Turn {
         guest_lease: String,
         host_plan: &PackagePlan,
     ) -> crate::units::agentloop::api::ToolFace {
-        let spec = crate::units::conversation::session::api::MemberSpec {
+        let spec = MemberSpec {
             modules,
             sandbox: sb,
             unavailable,
@@ -196,10 +200,10 @@ impl Turn {
             shell: self.shell_slot(&sb.session),
             env: self.member_env(registry, modules, sb, net, tier, host_plan),
         };
-        crate::units::conversation::session::api::member_face(&self.session_ports(), &spec)
+        member_face(&self.session_ports(), &spec)
     }
 
-    /// 目的：单 agent 会话的整场装配——取本席事实（含 `env` 派生）、解析形态与预算，交给 `session` 装配。
+    /// 目的：单 agent 会话的整场装配——取本席事实（含 `env` 派生）、解析形态与预算，交给 `agentloop` 的装配机。
     /// 约束：不插入会话中心；插入与落盘由调用方（`work` 的提交段）统一做。
     // 会话装配把这一场单 agent 会话一次说全；收口成参数对象只是把参数挪个地方。
     // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
@@ -238,7 +242,7 @@ impl Turn {
             context: self.context_budget(registry, a.model.as_deref()),
             core_model: registry.core_model(),
         };
-        crate::units::conversation::session::api::single_session(&self.session_ports(), &spec)
+        single_session(&self.session_ports(), &spec)
     }
 
     /// 目的：本会话的上下文预算：窗口按模型现算（缺省用核心默认），阈值与保留百分比来自全局设置。

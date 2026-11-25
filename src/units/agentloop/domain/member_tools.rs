@@ -252,7 +252,7 @@ pub struct ToolFace {
 }
 
 /// 目的：成员的工具执行环境：工具面（值）+ 注入的执行端口 + 本成员的活状态。
-pub struct MemberTools {
+pub(crate) struct MemberTools {
     /// 目的：工具面（值部分）：这一回合的工具面与身份（见 `ToolFace`）。
     pub face: ToolFace,
     /// 目的：llm 用例面（**不持它的端口**，R12）：手写信封不合法时问它能不能按无歧义的写法修好。

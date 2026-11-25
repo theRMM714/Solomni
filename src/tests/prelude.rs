@@ -28,8 +28,9 @@ pub use crate::units::pure::registry_model::api::ModelEntry;
 pub use crate::units::pure::registry_model::api::Provider;
 pub use crate::units::session_model::api::{RunState, SessionMeta};
 
-pub use crate::units::agentloop::api::MemberTools;
+// 工具面活对象只在 `agentloop` 内构造与持有（`api` 不转出）：测试直接拿它来断言围栏与续号。
 pub use crate::units::agentloop::api::ModuleTools;
+pub(crate) use crate::units::agentloop::domain::member_tools::MemberTools;
 
 pub use crate::units::conversation::session::ports::HistoryStore;
 

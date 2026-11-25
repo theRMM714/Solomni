@@ -10,14 +10,14 @@
 - 管：裁决队——一条通道的排队与等待（`Decisions` / `Gates`）、队首可见可答、回答校验、整队作废（停止 = 拒绝）、卡号发放与续号。
 - 管：流程插件契约——`Flow`（推一步 / 取走让出的一步 / 交回处置 / 处置自己发的关卡）、`MemberAsk`、`Handback`、`Settle`、`WorkPlan`，以及按 id 造流程的工厂 `Flows` / `FlowSetup` 与串段器 `sequence_of` / `Sequence`。
 - 管：提问桥 `session_ask`——工具层的 `AskUser` 端口实现：登记卡、外送并落盘、停会话都走该会话同一条道。
-- 管：两个端口面 `History`（直连面，由会话单元实现）与 `HistoryOps`（队列面，由 runtime 的队列代理实现），以及装配一席的参数对象 `SessionPorts`。
+- 管：两个端口面 `History`（直连面，由会话单元实现）与 `HistoryOps`（队列面，由 runtime 的队列代理实现），以及在世会话的状态与流程契约。
 - 不管：回合驱动与生成（准入、重建、生成线程在 `src/units/turn/`）。
 - 不管：任何具体流程的状态机（协作在 `src/units/conversation/collab/`）。
 - 不管：落盘实现（`src/units/conversation/session/service.rs` 与 `detail/`）、会话身份与声明（`src/units/session_model/`）、呈现与命令队列（`presentation` / `runtime`）。
 
 ## 入站契约与状态归属
 
-- 入站面：`api`——转出 `Turn` / `Session`、裁决队、流程契约与工厂、`session_ask`、`History` / `HistoryOps`、`SessionPorts`；`domain` 不出单元。
+- 入站面：`api`——转出 `Turn` / `Session`、裁决队、流程契约与工厂、`session_ask`、`History` / `HistoryOps`；`domain` 不出单元，装配一席的 `SessionPorts` 随装配机在 `agentloop`。
 - 出站端口：无自有 IO 端口；`History` 由会话单元实现、`Flow` 由协作实现、`Flows` 由组合根注入——本单元只认契约。
 - 状态归属：`Turn` 是**核心线程上唯一持有在世会话与运行态的地方**，`runtime` 与 `turn` 经它放取；`TurnState` 不出单元（宿主与测试只经 `Turn` 的访问器）。
 

@@ -10,12 +10,15 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/units/agentloop.rs` | 单元根：声明 `api` / `domain` / `engine` 三个入口 |
-| `src/units/agentloop/api.rs` | 入站面：重导出会话对象与回合事实、工具面与核实环境、面装配、回档算术、消息回灌与核心操作回路 |
-| `src/units/agentloop/domain.rs` | 定义入口：声明 `assemble` / `member_tools` / `reply` / `rewind` / `session` 五个概念子模块 |
+| `src/units/agentloop/api.rs` | 入站面：重导出会话对象与回合事实、面装配与整场装配（含 `SessionPorts` 与三种在世形态的入口）、核实环境、回档算术、消息回灌与核心操作回路 |
+| `src/units/agentloop/domain.rs` | 定义入口：声明 `assemble` / `assembly` / `member_tools` / `ports` / `reply` / `rewind` / `session` / `verify` 八个概念子模块 |
 | `src/units/agentloop/domain/session.rs` | 单 agent 会话运行时：上下文、行 id、回合与回复簿记、压缩与回档、观察账本与新鲜度判定 |
 | `src/units/agentloop/domain/session/prompt.rs` | 系统提示拼装：agent 与席位两条身份入口、模块提示、回合参数、环境块 |
 | `src/units/agentloop/domain/member_tools.rs` | 成员工具面：本回合可调的工具、观察账本与沙箱；只含值的 `ToolFace` 与核实用例端口 `CoreVerify`；shell 状态槽与按转录派生最近一次 shell（`last_shell`） |
 | `src/units/agentloop/domain/assemble.rs` | 工具面的**唯一装配机**：`assemble(FaceInput) -> SeatFace` 按席位现拼（席位需求展开 → 总表过滤 → 模块表与服务工具 → 说明块 → 发布工具执行者），另含纯派生 `face_tools` / `service_ops_of` / `serviced_tools` 与席位面展开 `seat_face` / `resolve` |
+| `src/units/agentloop/domain/assembly.rs` | 一席的整场装配：参数对象 `MemberEnvParts` / `MemberSpec` / `SingleSpec` / `RebuildSpec` / `ProxySpec`，`member_tools` 造工具面活对象（**只在本单元内构造与持有**），以及 `single_session` / `rebuild_single` / `proxy_session` 三个在世形态入口 |
+| `src/units/agentloop/domain/verify.rs` | 核实用例环境：按 `VerifySpec` 装配一个只读核实用例 `CoreVerify`（席位面、放行名单、围栏）；调用方给沙箱，本文件不取事实 |
+| `src/units/agentloop/domain/ports.rs` | 装配一席的能力面参数对象 `SessionPorts`（llm / 日志 / 提示词册 / 工具总表 / 工具执行 / 虚拟机 / 常驻服务 / 工作区 / 压缩通道）；与装配机同单元，否则环 2 内成环 |
 | `src/units/agentloop/domain/rewind.rs` | 回档的行 / 事件算术（纯函数，不碰 IO）：回合归属、回复边界、行 id 推进、截断与保留 |
 | `src/units/agentloop/domain/reply.rs` | 消息回灌：一次模型回复与工具结果 → 发给模型的消息序列（实时与重建的唯一来源） |
 | `src/units/agentloop/engine.rs` | 引擎门面：声明 `core_op` / `decls` / `driver` / `fence` / `io` / `round` / `tools` 七个子模块 |

@@ -1,7 +1,8 @@
 //! 目的：回合状态与裁决机制的入站面——别的单元与呈现层只准用这里（不许碰 `domain`）。
 //! 管：在世会话与回合状态（`Turn` / `Session`）、裁决队端口、流程插件契约与工厂、提问桥、
-//!   落盘与队列两个端口面（`History` / `HistoryOps`）、装配一席的能力面（`SessionPorts`）。
-//! 不管：`domain` 的内部实现、回合驱动与生成（在 `turn`）、落盘实现（在 `conversation::session`）。
+//!   落盘与队列两个端口面（`History` / `HistoryOps`）。
+//! 不管：`domain` 的内部实现、回合驱动与生成（在 `turn`）、落盘实现（在 `conversation::session`）；
+//!   装配一席的端口参数对象随装配机留在 `agentloop`（`SessionPorts`），这里不再转出。
 //! 联动：`turn` 的驱动与生成线程按 `Flow` 推进任何流程；`collab` 实现 `Flow`；`runtime` 持有 `Turn`。
 
 use std::sync::Arc;
@@ -21,8 +22,6 @@ pub use crate::units::turn_state::domain::flows::{FlowSetup, Flows, sequence_of}
 /// 目的：在世会话形态（宿主与测试只经它取用）。
 ///   回合状态本身（`TurnState`）是内部结构：它只被 `Turn` 持有，不出单元。
 pub use crate::units::turn_state::domain::live::Session;
-/// 目的：能力面参数对象：装配一席时会话单元按字段取用。
-pub use crate::units::turn_state::domain::ports::SessionPorts;
 /// 目的：复合流程：装配期把若干段流程串成一条。
 #[allow(unused_imports)]
 pub use crate::units::turn_state::domain::sequence::Sequence;

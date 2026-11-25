@@ -174,7 +174,7 @@ impl Turn {
                     crate::units::catalog::packages::api::PackagePlan::default()
                 };
                 // 工具环境事实（围栏 / 注入项 / 运行路径 / 工具链根）由这里经 `env` 派生后按值拷进 `session`。
-                let member = crate::units::conversation::session::api::MemberSpec {
+                let member = crate::units::agentloop::api::MemberSpec {
                     modules: &modules,
                     sandbox: &sb,
                     unavailable,
@@ -198,7 +198,7 @@ impl Turn {
                     self.context_budget(registry, a.model.as_deref());
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
                 let (observations, reads) = replay_ledgers(events, compacted_upto);
-                let spec = crate::units::conversation::session::api::RebuildSpec {
+                let spec = crate::units::agentloop::api::RebuildSpec {
                     params,
                     member,
                     channel,
@@ -217,7 +217,7 @@ impl Turn {
                     observations,
                     usage: crate::units::agentloop::api::last_usage(events),
                 };
-                Session::Single(crate::units::conversation::session::api::rebuild_single(
+                Session::Single(crate::units::agentloop::api::rebuild_single(
                     &self.session_ports(),
                     spec,
                 ))
@@ -534,7 +534,7 @@ impl Turn {
         // 流程 / 环境 / 调用约定仍与 agent 身份同一份口径（见 workspace 的 render_system）。
         let mut params = SessionParams::from_workspace(SPEAKER, &sb, &[], "core_proxy");
         params.seat_system = Some(crate::units::prompt::api::Segment::ProxySystem);
-        let member = crate::units::conversation::session::api::MemberSpec {
+        let member = crate::units::agentloop::api::MemberSpec {
             modules: &[],
             sandbox: &sb,
             unavailable: BTreeMap::new(),
@@ -553,7 +553,7 @@ impl Turn {
             ),
         };
         let (window, percent, keep_percent) = self.context_budget(registry, None);
-        let spec = crate::units::conversation::session::api::ProxySpec {
+        let spec = crate::units::agentloop::api::ProxySpec {
             params,
             member,
             channel: channel.clone(),
@@ -562,7 +562,7 @@ impl Turn {
             freshness: meta.context_freshness,
             freshness_keep_percent: meta.freshness_keep_percent,
         };
-        Ok(crate::units::conversation::session::api::proxy_session(
+        Ok(crate::units::agentloop::api::proxy_session(
             &self.session_ports(),
             spec,
         ))

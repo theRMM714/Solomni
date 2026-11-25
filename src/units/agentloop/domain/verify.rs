@@ -1,13 +1,14 @@
 //! 目的：核心核实用的小工具环境——**只读**、根是本次工作的共享区。
 //! 管：`VerifySpec`（核实环境的全部事实与端口）与 `verify_tools`（装配成 `CoreVerify`）。
-//! 不管：核心操作的回路（在 `service::core_operation`）；谁该核实（在 `collab` / `slate` 的调用点）。
+//! 不管：核心操作的回路（在 `engine::core_op`）；谁该核实（在 `collab` / `slate` 的调用点）。
 //! 联动：`collab` 的各关卡在调核心操作前按席位装配一份；工具面只发**该席位声明里的工具**。
 
 use std::sync::Arc;
 
 use crate::kernel::api::fence::FencePlan;
 use crate::kernel::ports::Log;
-use crate::units::agentloop::api::{CoreVerify, FaceInput, MemberTools, ToolFace, assemble};
+use crate::units::agentloop::domain::assemble::{FaceInput, assemble};
+use crate::units::agentloop::domain::member_tools::{CoreVerify, MemberTools, ToolFace};
 use crate::units::llm::api::Llm;
 use crate::units::prompt::api::Prompt;
 use crate::units::pure::exec_model::api::Tier;
