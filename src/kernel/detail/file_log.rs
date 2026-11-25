@@ -82,4 +82,16 @@ impl Log for FileLog {
     fn error(&self, at: &str, msg: &str) {
         self.write("错误", at, msg);
     }
+    fn purge(&self, name: &str) -> bool {
+        let Some(dir) = self.path.parent() else {
+            return false;
+        };
+        if name.is_empty() || name.contains('/') || name.contains('\\') {
+            return false;
+        }
+        if self.path.file_name().and_then(|n| n.to_str()) == Some(name) {
+            return false;
+        }
+        fs::remove_file(dir.join(name)).is_ok()
+    }
 }

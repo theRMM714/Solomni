@@ -136,15 +136,30 @@ fn clean_logs_deletes_all_but_the_active_file() {
     std::fs::create_dir_all(&logs).unwrap();
     std::fs::write(logs.join("old.log"), b"old").unwrap();
     std::fs::write(logs.join("mid.log"), b"mid").unwrap();
-    std::fs::write(logs.join("active.log"), b"live").unwrap();
-    let svc = service_with_active(&root, Some(logs.join("active.log")));
+    let log = std::sync::Arc::new(
+        crate::kernel::detail::file_log::FileLog::new(&root, "storage-logs-clean")
+            .expect("建运行日志"),
+    );
+    let active = log.path().to_path_buf();
+    let svc = crate::entry::assembly::storage(
+        &root,
+        crate::tests::doubles::test_provision(),
+        StoragePolicy::default(),
+        log,
+        Some(active.clone()),
+    );
+    let active_name = active
+        .file_name()
+        .expect("文件名")
+        .to_string_lossy()
+        .to_string();
 
     let r = svc.report().unwrap();
     let cat = r.categories.iter().find(|c| c.id == "logs").unwrap();
     assert_eq!(cat.items.len(), 3);
-    let active = cat.items.iter().find(|i| i.id == "active.log").unwrap();
-    assert!(active.active, "运行中的日志要标为 active");
-    assert!(!active.cleanable, "运行中的日志不可清理");
+    let running = cat.items.iter().find(|i| i.id == active_name).unwrap();
+    assert!(running.active, "运行中的日志要标为 active");
+    assert!(!running.cleanable, "运行中的日志不可清理");
 
     let req = CleanRequest {
         kind: CleanKind::Logs,
@@ -157,7 +172,7 @@ fn clean_logs_deletes_all_but_the_active_file() {
     };
     assert_eq!(report.actions.len(), 2, "两份历史日志都要删");
     assert_eq!(report.freed_bytes, 6);
-    assert!(logs.join("active.log").exists(), "运行中的日志要留下");
+    assert!(active.exists(), "运行中的日志要留下");
     assert!(!logs.join("old.log").exists());
     assert!(!logs.join("mid.log").exists());
 
@@ -178,7 +193,14 @@ fn clean_logs_without_a_running_file_deletes_everything() {
     let logs = crate::kernel::domain::layout::logs(&root);
     std::fs::create_dir_all(&logs).unwrap();
     std::fs::write(logs.join("a.log"), b"1234567890").unwrap();
-    let svc = service(&root);
+    let log = std::sync::Arc::new(PurgingLog { dir: logs.clone() });
+    let svc = crate::entry::assembly::storage(
+        &root,
+        crate::tests::doubles::test_provision(),
+        StoragePolicy::default(),
+        log,
+        None,
+    );
     let req = CleanRequest {
         kind: CleanKind::Logs,
         id: None,
@@ -192,6 +214,20 @@ fn clean_logs_without_a_running_file_deletes_everything() {
     assert_eq!(report.freed_bytes, 10);
     assert!(!logs.join("a.log").exists());
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 目的：把清理打到指定日志目录的替身——没有“本次运行那份”，用来验证清空整类。
+struct PurgingLog {
+    dir: std::path::PathBuf,
+}
+
+impl crate::kernel::ports::Log for PurgingLog {
+    fn info(&self, _at: &str, _msg: &str) {}
+    fn warn(&self, _at: &str, _msg: &str) {}
+    fn error(&self, _at: &str, _msg: &str) {}
+    fn purge(&self, name: &str) -> bool {
+        std::fs::remove_file(self.dir.join(name)).is_ok()
+    }
 }
 
 /// 目的：不是产品清单构造的虚拟根不能“还原”，避免把用户自备 guest 删掉却重建不出来。
