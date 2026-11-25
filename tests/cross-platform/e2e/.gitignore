@@ -1,15 +1,16 @@
 # 端到端跑出来的东西不入库（夹具本身入库）：
-# 提示词册是产品的一部分，每次运行从产品根整份复制（它已按角色分成目录）；.home 与 session/logs/userdata 都是运行期状态。
+# 提示词册是产品的一部分，每次运行从产品根整份复制（它已按角色分成目录）。
 root/prompts/
 root/systools/
 # 项目内工具链由编排器链进夹具（junction / symlink，不是副本）：不入库。
 # 不带尾斜杠：工具链是 symlink，带斜杠的规则只匹配目录，匹配不到链接本身。
 root/.tools
-root/.home
+# 数据根整块是运行期状态（登记处、会话、日志、台账、运行包）：每次从零重建，不混真跑出来的盘面。
+# 运行包夹具的**源**在 root/runtimes/（入库），编排器每次复制进 data/runtimes/。
+root/data/
+# 夹具模块的清单与工具脚本由编排器按平台生成；驱动读的样本文件也在运行期写进去。
 root/modules/toolbox/module.yaml
-root/session/
-root/logs/
-root/modules/*/userdata/
+root/modules/toolbox/e2e.txt
 # 真模块（harvest / render / indexer）由编排器**每次从仓库源码重新复制**进夹具：
 # 它们是生成的副本，不是第二个真相；入库反而会与真模块漂移。构建产物同理。
 root/modules/harvest/

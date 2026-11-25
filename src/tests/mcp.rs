@@ -113,7 +113,7 @@ fn mcp_adapter_talks_to_a_real_stdio_server() {
     );
     let mut spec = launch();
     spec.command = format!("{} tests/fixtures/mcp_echo.py", py);
-    spec.fence = FencePlan::standalone(&root, None, false);
+    spec.fence = FencePlan::standalone(&root, None, None);
 
     let (mut instance, faces) = adapter.start(&spec).expect("真实服务要握手成功");
     assert!(

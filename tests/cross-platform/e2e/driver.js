@@ -108,7 +108,7 @@ async function waitPidGone(pid, ms) {
     await new Promise((r) => setTimeout(r, 50));
   }
 }
-const dir = (name) => path.join(ROOT, 'session', name);
+const dir = (name) => path.join(ROOT, 'data', 'session', name);
 /** 两个绝对路径是不是同一落点：Windows 大小写不敏感、分隔符统一（核心存的是 native 绝对路径）。 */
 const samePath = (a, b) =>
   path.resolve(String(a || '')).toLowerCase().replace(/\\/g, '/') ===
@@ -512,8 +512,7 @@ if (process.env.E2E_FENCE_LIVE !== '1') {
 
 await journey('modules', async () => {
 // 单 agent 带 2 个模块，且外部工具属于「第二个」模块：必须在它自己模块的目录里跑
-fs.mkdirSync(path.join(ROOT, 'modules', 'toolbox', 'userdata'), { recursive: true });
-fs.writeFileSync(path.join(ROOT, 'modules', 'toolbox', 'userdata', 'e2e.txt'), '第一行内容\n第二行内容\n');
+fs.writeFileSync(path.join(ROOT, 'modules', 'toolbox', 'e2e.txt'), '第一行内容\n第二行内容\n');
 const name1b = 'e2e-multi-' + Date.now();
 const c1b = await api('POST', '/api/actions/create_session', {
   name: name1b, kind: 'single',
@@ -961,7 +960,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
    * 工具用真进程，所以路径必须是**提示词里给出的真实绝对路径**（相对路径会被围栏拒绝）。
    */
   const nameR = 'e2e-realtools-' + Date.now();
-  const workDir = path.join(ROOT, 'session', nameR, 'work');
+  const workDir = path.join(ROOT, 'data', 'session', nameR, 'work');
   const cR = await api('POST', '/api/actions/create_session', {
     name: nameR, kind: 'single',
     agents: [{ name: '资料手', transient: true, modules: ['harvest', 'render', 'indexer'], model: 'm1' }],
@@ -1034,7 +1033,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
     '运行包 bin/ 真的进了本次 PATH',
     JSON.stringify(pkgDirect.json).slice(0, 300),
   );
-  const directRoot = path.join(ROOT, 'session', 'e2e-direct-' + Date.now());
+  const directRoot = path.join(ROOT, 'data', 'session', 'e2e-direct-' + Date.now());
   const directIn = path.join(directRoot, 'in');
   fs.mkdirSync(directIn, { recursive: true });
   fs.writeFileSync(path.join(directIn, '甲.md'), '# 甲\n\n不经 AI 直接跑模块。\n', 'utf8');
@@ -1294,7 +1293,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
   } else {
     const MCP_MODULE = 'mcp-toolbox';
     const MCP_SERVICE = 'toolbox';
-    const pidfile = path.join(ROOT, 'modules', 'mcp-toolbox', 'userdata', 'mcp-service.pid');
+    const pidfile = path.join(ROOT, 'data', 'modules', 'mcp-toolbox', 'userdata', 'mcp-service.pid');
     fs.rmSync(pidfile, { force: true });
     const again = await reg('control_resident', { module: MCP_MODULE, name: MCP_SERVICE, action: 'start' });
     assert(again.status === 200, '为父死子亡场景再拉起 MCP 服务', again.text.slice(0, 300));

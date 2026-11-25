@@ -102,7 +102,10 @@ node run-tests.js
 - T0 与业务测试在同一次运行里出结果，但结论分开记：质量失败不能被业务测试通过抵消，反之亦然。
 
 > L4 端到端在 `tests/cross-platform/e2e/root/` 下**现场生成**夹具：`orchestrator.js` 把产品根的
-> `prompts/`、`systools/` 与三个真模块（`harvest` / `render` / `indexer`）拷进去再启动产品。那是**运行时副本、不是文档面**——
+> `prompts/`、`systools/` 与三个真模块（`harvest` / `render` / `indexer`）拷进去再启动产品；
+> `root/runtimes/` 是**运行包夹具的源**（入库），每次复制进夹具的 `data/runtimes/`——产品从安装根的 `data/runtimes` 找运行包。
+> 夹具的 `data/` 是运行期盘面（登记处、会话、日志、台账、运行包），每跑一次整块重建、不入库
+> （`tests/cross-platform/e2e/.gitignore`）。这些副本是**运行时副本、不是文档面**——
 > 不要手改、不要当文档审计；要改就改产品根的那一份，副本每次重跑都会覆盖。
 > 安全模式（默认）不给真机围栏授权，而容器 shell 是**严格**围栏（不许降级）：这一步里的 shell 场景如实记一条
 > `[探针]` 跳过、不判失败；真机围栏（`--fence-live` / CI 的 `e2e` job）才跑它。
@@ -289,7 +292,7 @@ MUTATION_SHARD=2/4 node tests/ci-mutation.mjs     # 只跑第 2 片
 | `quality` | 平台门禁 + 供应链 + L1 单元 + 平台探针 + 前端冒烟 + 前端类型检查（tsc） + 开发回路 / 变更分流 / 环境引导自检（**跳过 L4 与结构审查**） | `node run-tests.js --fence-live --skip-e2e --skip-audit --strict-env` |
 | `e2e` | L4 端到端 HTTP 与浏览器两条（自己构建产品，与 `quality` 并行） | `node tests/ci-e2e.mjs`（CI 专用；本地整跑用 `node run-tests.js --fence-live`） |
 | `coverage` | 覆盖率报告（Linux，含测试进程与 L4 子进程；只报不拦：不进 `gate` 判定，`continue-on-error` 让它红了也不改 workflow 结论） | `node tests/coverage.mjs --collect` |
-| `cache-seed` | 仅 `push` 到 `main`：三平台各自用 `lookup-only` 查工具链缓存，未命中才装工具链并保存（只播工具链，不播 cargo / `target`） | `node env.js setup --yes` + `node setup-dev.js --yes` |
+| `cache-seed` | 仅 `push` 到 `main`：三平台各自用 `lookup-only` 查工具链缓存，未命中才装工具链并保存（只播工具链含 `cargo/bin` 的 rustup 代理，不播 cargo 依赖与 `target`） | `node env.js setup --yes` + `node setup-dev.js --yes` |
 | `changes` | 判定 `code_changed` / `docs_changed`；从 base 取分类器副本，自测 + `include_str!/include_bytes!` 文档消费自检 | `node tests/ci-changes.mjs`（副本） |
 | `docs` | 有文档变更：文档审查（门户 / 链接 / 根文档路由） | `node run-tests.js --audit=docs` |
 | `structure` | 始终跑：结构审查（代码↔文档结构；文档与真相源比对 + 纯文本检查） | `node run-tests.js --audit=structure` |
@@ -339,7 +342,7 @@ MUTATION_SHARD=2/4 node tests/ci-mutation.mjs     # 只跑第 2 片
 > 规则集是仓库外的事实（GitHub 设置），本仓由用户在 GitHub 设置里改；核实用只读命令：
 > `gh api repos/<owner>/<repo>/rulesets --jq '.[].id'`，再取对应 id 的 `required_status_checks`。
 
-- `workflow_dispatch` 的 `clean` 输入（`true`）跳过缓存恢复，按干净机器跑；PR 触发没有这个输入，缓存照用。缓存覆盖**项目内**路径，分两份：**工具链缓存**（`platform/<os>/rustup`、`.tools/toolchains`、`.tools/mingw64`、`.tools/bin`；key = `dependencies.yaml` + `links.yaml` + `dev-tools.js` 哈希，不给 restore-keys——半套工具链比全新安装更坏；由 `cache-seed`（`push` 到 `main`）与 `quality`（手动派发到 `main`）保存，e2e / coverage / mutants 只恢复，免得空 `.tools/bin` 抢住同 key）；**依赖与编译产物缓存**（`platform/<os>/cargo` 含 registry / git / 工具，以及 `target/debug`；key 含 `Cargo.lock`）。**不缓存 `target/` 根**（报告与日志必须来自本次运行）。
+- `workflow_dispatch` 的 `clean` 输入（`true`）跳过缓存恢复，按干净机器跑；PR 触发没有这个输入，缓存照用。缓存覆盖**项目内**路径，分两份：**工具链缓存**（`platform/<os>/rustup`、`platform/<os>/cargo/bin`、`.tools/toolchains`、`.tools/mingw64`、`.tools/bin`；key = `dependencies.yaml` + `links.yaml` + `dev-tools.js` 哈希，不给 restore-keys——半套工具链比全新安装更坏；`cargo/bin` 里的 rustup 代理与 `rustup/` 里的工具链同进同出，只恢复一半时项目内 `cargo` 能打印版本却选不出 toolchain）；由 `cache-seed`（`push` 到 `main`）与 `quality`（手动派发到 `main`）保存，e2e / coverage / mutants 只恢复，免得空 `.tools/bin` 抢住同 key）；**依赖与编译产物缓存**（`platform/<os>/cargo/registry`、`platform/<os>/cargo/git`，以及 `target/debug`；key 含 `Cargo.lock`）。**不缓存 `target/` 根**（报告与日志必须来自本次运行）。
 - **恢复与保存拆开**：所有 ref 都用 `actions/cache/restore`（PR 读 main 的缓存），只有 `main` 上的运行才 `actions/cache/save`——PR 的缓存作用域只对同分支可见，存了只会挤掉主线缓存项；save 失败不挡验收。合并 PR 就是一次 `main` 上的 `push`：`cache-seed` 先用 `lookup-only` 查工具链缓存，未命中才装并保存——工具链缓存因此随合并自动刷新，命中后该 job 只花几秒。依赖与编译产物缓存仍只由「手动派发到 main」的 `quality` 刷新：播种 run 里没有源码依赖图，存下去是空 `target`，而缓存键不可覆盖，会毒化后续 PR 的编译缓存。缓存身份包含 `path`，改路径即新缓存项，首次冷启动重下一次。旧项由 GitHub 的淘汰策略回收，分两层：没配 `restore-keys` 的（工具链）失联后 7 天未访问即删除；配了前缀回退的（`cargo` / `coverage-cargo` / `playwright`）会被回退命中、不断刷新最后访问时间，7 天规则不触发，只在仓库缓存总量触到 10 GB 上限时按最后访问时间从旧到新淘汰——要立刻回收只能用 `gh api -X DELETE /repos/<owner>/<repo>/actions/caches/<id>` 逐条删。
 - **CI 开发工具链统一项目内（与本机同一口径）**：quality / e2e / coverage 跑 `node env.js setup --yes`（quality / coverage 再跑 `node setup-dev.js --yes`）装齐 Rust / cc / python / node / 组件 / 供应链工具，探针在场即跳过；`setup-node` 固定 24 只作点火，门禁入口 re-exec 到项目内 node。cargo-mutants（CI 专用，不在开发清单）仍用 `taiki-e/install-action` 预编译装，落项目内 `CARGO_HOME/bin`——不写项目外。
 - 工具链预安装用时经 `SOLOMNI_CI_PREINSTALL_MS` 带进门禁报告，在 `steps` 里以「CI 前置：开发工具链安装」出现——安装不在 `run-tests.js` 内，只能这样进报告。
