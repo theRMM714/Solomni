@@ -79,6 +79,81 @@ pub(crate) fn run_line(faces: &Faces, system: &dyn System, line: &str, opts: &Op
     run_words(faces, system, &refs, opts)
 }
 
+/// 目的：一个词表切出来的事实：三个修饰的最终值，以及摘掉它们之后剩下的词（第一个是命令或模块头）。
+/// 约束：分派与「要不要常驻运行时」共用这一份切分，两处不得各写一套（否则判据会漂移）。
+pub(crate) struct Words<'a> {
+    pub(crate) json: bool,
+    pub(crate) help: bool,
+    pub(crate) version: bool,
+    pub(crate) rest: Vec<&'a str>,
+}
+
+/// 目的：切一次词：摘掉 `--json` / `--help` / `--version`，`--` 之后的词一律当值。
+/// 返回：单个短横的多字符词原样返回给调用方报用法错（R8：短旗只认 -h / -v）。
+fn split_words<'a>(
+    words: &[&'a str],
+    json: bool,
+    help: bool,
+    version: bool,
+) -> Result<Words<'a>, &'a str> {
+    let mut cut = Words {
+        json,
+        help,
+        version,
+        rest: Vec::new(),
+    };
+    let mut flags_done = false;
+    for word in words {
+        if !flags_done {
+            match *word {
+                "--" => {
+                    flags_done = true;
+                    cut.rest.push(word);
+                    continue;
+                }
+                "--json" => {
+                    cut.json = true;
+                    continue;
+                }
+                "--help" | "-h" => {
+                    cut.help = true;
+                    continue;
+                }
+                "--version" | "-v" => {
+                    cut.version = true;
+                    continue;
+                }
+                _ => {
+                    if short_flag(word) {
+                        return Err(word);
+                    }
+                }
+            }
+        }
+        cut.rest.push(*word);
+    }
+    Ok(cut)
+}
+
+/// 目的：这一次调用要不要常驻运行时（视图盘、存储自动任务、常驻服务、围栏授权）。
+/// 判据只认命令声明里的 `runtime`，不另立名单：手册与版本永远不要，模块工具调用要。
+/// 约束：不查模块清单——非命令词的无尾词只可能是模块手册或拼错的命令，两者都只打印，不执行任何东西。
+pub(crate) fn needs_runtime(words: &[&str], help: bool, version: bool) -> bool {
+    let Ok(cut) = split_words(words, false, help, version) else {
+        return true;
+    };
+    if cut.help || cut.version {
+        return false;
+    }
+    let Some(head) = cut.rest.first().copied() else {
+        return true;
+    };
+    if let Some(op) = catalog::ops().find(head) {
+        return op.runtime == Runtime::Services;
+    }
+    cut.rest.len() > 1
+}
+
 /// 目的：一个词表的分派：先认命令目录（启动相 / 转录相），再认模块 id 与模块工具。
 /// 约束：`--` 之后只当值（否定数、以短横线开头的值都写在它后面）。
 pub(crate) fn run_words(
@@ -87,51 +162,26 @@ pub(crate) fn run_words(
     words: &[&str],
     opts: &Opts,
 ) -> Outcome {
-    let mut json = opts.json;
-    let mut help = opts.help;
-    let mut version = opts.version;
-    let mut rest: Vec<&str> = Vec::new();
-    let mut flags_done = false;
-    for word in words {
-        if !flags_done {
-            match *word {
-                "--" => {
-                    flags_done = true;
-                    rest.push(word);
-                    continue;
-                }
-                "--json" => {
-                    json = true;
-                    continue;
-                }
-                "--help" | "-h" => {
-                    help = true;
-                    continue;
-                }
-                "--version" | "-v" => {
-                    version = true;
-                    continue;
-                }
-                _ => {
-                    if short_flag(word) {
-                        println!(
-                            "[用法] 没有旗语 {}（短旗只认 -h / -v）；要旗语请用一个短横，如 --help",
-                            word
-                        );
-                        return Outcome::Done(2);
-                    }
-                }
-            }
+    let cut = match split_words(words, opts.json, opts.help, opts.version) {
+        Ok(cut) => cut,
+        Err(word) => {
+            println!(
+                "[用法] 没有旗语 {}（短旗只认 -h / -v）；要旗语请用一个短横，如 --help",
+                word
+            );
+            return Outcome::Done(2);
         }
-        rest.push(*word);
-    }
-    let Some(head) = rest.first().copied() else {
+    };
+    let json = cut.json;
+    let help = cut.help;
+    let version = cut.version;
+    let Some(head) = cut.rest.first().copied() else {
         if help {
             print!("{}", catalog::help_text(false));
         }
         return Outcome::Done(0);
     };
-    let tail = &rest[1..];
+    let tail = &cut.rest[1..];
     if let Some(op) = catalog::ops().find(head) {
         return run_op(faces, system, op, tail, opts);
     }
