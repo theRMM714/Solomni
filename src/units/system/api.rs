@@ -9,7 +9,6 @@ use serde_json::Value;
 use crate::units::catalog::packages::api::BaseFacts;
 use crate::units::maintenance::builds::api::Built;
 use crate::units::maintenance::storage::api::{CleanOutcome, GcReport, Storage};
-use crate::units::provision::api::Provision;
 pub use crate::units::pure::exec_model::api::JobState;
 use crate::units::workspace::api::WorkGcReport;
 
@@ -30,10 +29,11 @@ pub trait Facts: Send + Sync {
     /// 目的：本机围栏能力（生产路径只取一次）。
     fn fence(&self) -> FenceFacts;
     /// 目的：按给定围栏事实出一份自检报告（字段见 docs/system 的「自检报告」）。
+    /// 参数：tools = 虚拟机档外部工具的位置事实——与界面同一份口径，自检不再自拼路径。
     fn doctor(
         &self,
         root: &std::path::Path,
-        provision: &dyn Provision,
+        tools: &crate::units::vm::api::VmTools,
         storage: &dyn Storage,
         toolchains: &BaseFacts,
         fence: FenceFacts,

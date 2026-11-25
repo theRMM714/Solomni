@@ -24,11 +24,9 @@ impl Work {
         let root_meta = self.history.meta(&root)?;
         let tier = meta.exec.tier;
         // 机器能力（与某条会话无关）：界面据此决定虚拟机档能不能**选**；虚拟根是会话级，另行校验。
-        let qemu = self.qemu_path(registry);
-        let share_tool = self.share_tool_path(registry);
+        let tools = self.virtual_tools(registry);
         let inputs = crate::units::vm::api::VmInputs {
-            qemu: qemu.as_deref(),
-            share_tool: share_tool.as_deref(),
+            tools: &tools,
             probe,
         };
         let cap = crate::units::vm::api::vm_capability(&inputs);
@@ -36,13 +34,8 @@ impl Work {
         let vm_reason = crate::units::vm::api::capability_refusal(&inputs).unwrap_or_default();
         let vm_requirements = cap.requirements;
         // 会话级判据（机器能力 + 这条会话选的虚拟根）只算一次：两处读同一个结论，不各算一遍。
-        let readiness = crate::units::vm::api::tier_readiness(
-            &self.root,
-            &meta.exec,
-            qemu.as_deref(),
-            share_tool.as_deref(),
-            probe,
-        );
+        let readiness =
+            crate::units::vm::api::tier_readiness(&self.root, &meta.exec, &tools, probe);
         Ok(SessionConfig {
             sid: meta.name.clone(),
             kind: meta.spec.kind.clone(),
@@ -207,18 +200,11 @@ impl Work {
         if staying_vm {
             // 留在 vm 档：只校验用户这次填的基础根（填错路径就是填错路径），
             // 不拿"本机能不能提供 vm 档"去拦一条已经存在的会话。
-            let qemu = self.qemu_path(registry);
-            let share_tool = self.share_tool_path(registry);
-            let base_item = crate::units::vm::api::tier_readiness(
-                &self.root,
-                &spec,
-                qemu.as_deref(),
-                share_tool.as_deref(),
-                host,
-            )
-            .requirements
-            .into_iter()
-            .find(|r| r.id == "base");
+            let tools = self.virtual_tools(registry);
+            let base_item = crate::units::vm::api::tier_readiness(&self.root, &spec, &tools, host)
+                .requirements
+                .into_iter()
+                .find(|r| r.id == "base");
             if let Some(item) = base_item
                 && !item.met
             {
@@ -227,8 +213,7 @@ impl Work {
         } else if let Some(why) = crate::units::vm::api::tier_refusal(
             &self.root,
             &spec,
-            self.qemu_path(registry).as_deref(),
-            self.share_tool_path(registry).as_deref(),
+            &self.virtual_tools(registry),
             host,
         ) {
             return Err(why);

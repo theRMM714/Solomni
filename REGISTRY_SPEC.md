@@ -96,7 +96,7 @@ data/.home/
 | `sandbox.scope.read` | 字符串／数组 | 否 | `all` | 默认共享区读范围三态：`all` / `none` / 路径数组 |
 | `sandbox.scope.write` | 字符串／数组 | 否 | `all` | 默认共享区写范围三态 |
 | `sandbox.scope.deny` | 字符串数组 | 否 | `[]` | 默认追加黑名单；全局 `policy.deny` 仍是硬底线 |
-| `qemu_path` | 字符串 | 否 | 空 | 虚拟机档 QEMU 可执行文件路径；空 = 取项目内补齐的那个，否则看 PATH |
+| `qemu_path` | 字符串 | 否 | 空 | 虚拟机档 QEMU 可执行文件路径；登记值优先，空 = 自动发现（项目内补齐 → PATH） |
 | `virtiofsd_path` | 字符串 | 否 | 空 | 虚拟机档共享后端的外部程序路径；口径同 `qemu_path` |
 | `smbd_path` | 字符串 | 否 | 空 | 虚拟机档 smb 共享档的 helper 路径；口径同 `qemu_path` |
 | `max_guests` | 整数 | 否 | `2` | 虚拟机档同时最多几台 guest（0 = 不限制；每台固定 `-m 2048 -smp 2`） |
@@ -112,6 +112,7 @@ data/.home/
 | `compact_keep_percent` | 整数 | 否 | `15` | 压缩时至少保留最近多少内容（占模型窗口 %；0 = 只留摘要） |
 | `compact_model` | 字符串 | 否 | 空 | 压缩用模型 id；空 = 会话同模型 |
 | `discuss_remind_cap` | 整数 | 否 | `3` | 讨论里一轮内对同一个成员最多提醒几次 |
+- 三个 `*_path` 的位置解析只有一处：设置登记 > 项目内补齐 > PATH；清空 = 恢复自动发现，不重启即生效。
 - `thinking.levels` 是全局思考等级标签目录：默认四档，用户可追加任意标签（例如 `xhigh`、`高`、`极高 档`）；标签可以任意字符，但不能为空、不能有首尾空白或控制字符，不能重复。
 - 删掉仍被模型 `thinking.levels` 引用的档位 = 拒绝并列出模型；模型默认档不在新目录里 = 同样拒绝。
 - 会话里切档是会话级事实（写在 `data/session/` 下那张 `meta.yaml` 的 `thinking`，工作根持有、子会话共享）；状态栏与配置页只列这组模型都登记了的档，没选过档时直接显示共同默认档（见 `docs/session/session-model.md`）。

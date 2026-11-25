@@ -38,6 +38,8 @@ pub struct SystemDeps {
     pub toolchains: BaseFacts,
     /// 目的：全局出站网络开关（模块构建要不要放行由它与模块声明取交集）。
     pub net: bool,
+    /// 目的：虚拟机档外部工具的位置事实——组合根注入（与界面同一份口径），自检现算不缓存。
+    pub vm_tools: Arc<dyn Fn() -> crate::units::vm::api::VmTools + Send + Sync>,
 }
 
 /// 目的：系统维护与自检的唯一实现。
@@ -61,9 +63,10 @@ impl SystemService {
 
     /// 目的：按调用方给的本机围栏事实出自检（用例注入合成值，免得再触发一次围栏自检）。
     pub fn doctor_with(&self, fence: FenceFacts) -> Value {
+        let tools = (self.deps.vm_tools)();
         self.facts.doctor(
             &self.deps.root,
-            self.deps.provision.as_ref(),
+            &tools,
             self.deps.storage.as_ref(),
             &self.deps.toolchains,
             fence,

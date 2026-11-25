@@ -16,6 +16,7 @@ use crate::units::provision::domain::{
 };
 use crate::units::provision::ports::{Fetcher, GuestImage, HostFs, Installers, Ledger, Procs};
 use crate::units::pure::exec_model::api::JobState;
+use crate::units::vm::api::ToolPath;
 use crate::units::vm::api::Vm;
 
 /// 目的：一次补齐要用的端口组合——由 `ProvisionService` 借出，后台线程自己持有一份。
@@ -276,22 +277,9 @@ impl Provision for ProvisionService {
         ProvisionService::ensure_spec(self, spec, on_line)
     }
 
-    fn tool_path(&self, tool: HostTool, registered: &str) -> Option<String> {
-        let registered = registered.trim();
-        if !registered.is_empty() {
-            return Some(registered.to_string());
-        }
-        // 没登记：按本机清单里在场的那一条取（**绝对路径**——清单里的 probe 是相对产品根的写法）。
-        let prefix = match tool {
-            HostTool::Qemu => "vm.qemu.",
-            HostTool::Virtiofsd => "vm.virtiofsd.",
-            HostTool::Smbd => "vm.smbd.",
-        };
-        self.status()
-            .ok()?
-            .iter()
-            .find(|d| d.present && d.id.starts_with(prefix))
-            .map(|d| self.root.join(&d.probe).to_string_lossy().into_owned())
+    fn tool_location(&self, tool: HostTool, registered: &str) -> ToolPath {
+        let status = self.status().unwrap_or_default();
+        crate::units::provision::domain::tool_location(tool, registered, &self.root, &status)
     }
 }
 

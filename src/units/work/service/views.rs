@@ -145,15 +145,9 @@ impl Work {
                     .to_string();
                 // 记的档位来自落盘 meta（权威）：环境变了也要如实提示——**不拦打开**（记录是用户的）。
                 let exec = entry.map(|h| h.exec.clone()).unwrap_or_default();
-                let qemu = self.qemu_path(registry);
-                let share_tool = self.share_tool_path(registry);
-                let readiness = crate::units::vm::api::tier_readiness(
-                    &self.root,
-                    &exec,
-                    qemu.as_deref(),
-                    share_tool.as_deref(),
-                    probe,
-                );
+                let tools = self.virtual_tools(registry);
+                let readiness =
+                    crate::units::vm::api::tier_readiness(&self.root, &exec, &tools, probe);
                 // 「改需求」能力位：有本次需求行才给。在表里看会话种类；不在表里（生成中/未打开）
                 // 看落盘 meta 的形态（那是名单与形态的单一真相）。
                 let can_update_task = match turn.session(&sid) {

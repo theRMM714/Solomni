@@ -1,9 +1,10 @@
 //! 目的：依赖补齐单元的入站契约——状态、虚拟根清单、作业快照与两条动作；DTO 是呈现层序列化的形状。
-//! 管：Provision trait 与 DepStatus / GuestBase DTO、宿主工具取法的 HostTool 词表、未接入的 NoProvision；作业快照 `JobState` 是共享形状，家在 `src/units/pure/exec_model/`。
+//! 管：Provision trait 与 DepStatus / GuestBase DTO、宿主工具取法的 HostTool 词表与 `vm_tools`（设置值→位置事实）、未接入的 NoProvision；作业快照 `JobState` 是共享形状，家在 `src/units/pure/exec_model/`。
 //! 不管：清单怎么解析、怎么下载（在 service）。
 //! 联动：`presentation::faces::Faces.provision` 持它；Web 的 setup 路由与 CLI 探针都经它；runtime 的"选虚拟机"经 `guest_bases` 取候选。
 
 use crate::units::pure::exec_model::api::JobState;
+use crate::units::vm::api::{ToolPath, VmTools};
 use serde::Serialize;
 
 /// 目的：一条长驻子进程（`--doctor` 与界面"现在在跑什么"）：它是产品亲手起的，还是上次留下的。
@@ -100,10 +101,31 @@ pub trait Provision: Send + Sync {
     fn ensure(&self, ids: &[String], on_line: &mut dyn FnMut(&str)) -> Result<(), String>;
     /// 目的：按 kind 组别名或 id 列表补齐（启动相命令的 `--ensure=<spec>` 写法）。
     fn ensure_spec(&self, spec: &str, on_line: &mut dyn FnMut(&str)) -> Result<(), String>;
-    /// 目的：一个宿主工具的**唯一**取法：登记值（`registered`，已 trim）非空就直接用它；
-    ///   否则用本机清单里**已装好**的那一条（探针相对产品根，回绝对路径）。
+    /// 目的：一个宿主工具的**唯一**取法：给出"登记值 + 项目内补齐那份"两份位置事实。
+    /// 参数：`registered` 是设置里的原文（空串 = 没登记）；两份都没有时调用方再兜底 PATH。
     /// 约束：每次现算——补完立刻能被判据看见，没有"装完还得重启"这一步。
-    fn tool_path(&self, tool: HostTool, registered: &str) -> Option<String>;
+    fn tool_location(&self, tool: HostTool, registered: &str) -> ToolPath;
+}
+
+/// 目的：按设置里那几个登记值取齐虚拟机档的两件外部工具——"哪个平台用哪件"只在这里判一次。
+/// 参数：`host_os` = 宿主平台（`std::env::consts::OS` 的取值）；三个登记值是设置里的原文（空串 = 没登记）。
+/// 约束：调用方（业务层与自检）都经这里拿，不自己挑字段、不自己判平台，两处口径因此不可能分叉。
+pub fn vm_tools(
+    provision: &dyn Provision,
+    host_os: &str,
+    qemu: &str,
+    virtiofsd: &str,
+    smbd: &str,
+) -> VmTools {
+    let share = if host_os == "windows" {
+        (HostTool::Smbd, smbd)
+    } else {
+        (HostTool::Virtiofsd, virtiofsd)
+    };
+    VmTools {
+        qemu: provision.tool_location(HostTool::Qemu, qemu),
+        share: provision.tool_location(share.0, share.1),
+    }
 }
 
 /// 目的：未接入的补齐面——组合根未注入时的默认值；调用如实失败，不假装可用。
@@ -135,7 +157,7 @@ impl Provision for NoProvision {
     fn ensure_spec(&self, _spec: &str, _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
         Err("依赖补齐未接入".to_string())
     }
-    fn tool_path(&self, _tool: HostTool, _registered: &str) -> Option<String> {
-        None
+    fn tool_location(&self, _tool: HostTool, _registered: &str) -> ToolPath {
+        ToolPath::default()
     }
 }

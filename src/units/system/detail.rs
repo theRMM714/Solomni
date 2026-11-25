@@ -10,7 +10,6 @@ use serde_json::Value;
 
 use crate::units::catalog::packages::api::BaseFacts;
 use crate::units::maintenance::storage::api::Storage;
-use crate::units::provision::api::Provision;
 use crate::units::system::api::{Facts, FenceFacts};
 
 /// 目的：本机围栏能力（自检用；生产路径只取一次）。
@@ -34,11 +33,11 @@ impl Facts for HostFacts {
     fn doctor(
         &self,
         root: &std::path::Path,
-        provision: &dyn Provision,
+        tools: &crate::units::vm::api::VmTools,
         storage: &dyn Storage,
         toolchains: &BaseFacts,
         fence: FenceFacts,
     ) -> Value {
-        doctor::build(root, provision, storage, toolchains, fence)
+        doctor::build(root, tools, storage, toolchains, fence)
     }
 }

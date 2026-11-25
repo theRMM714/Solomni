@@ -20,9 +20,12 @@ pub(crate) fn vm_capability_is_machine_only_while_session_readiness_needs_base()
         .exes
         .push(if cfg!(windows) { "smbd" } else { "virtiofsd" }.to_string());
     let q = qemu.to_string_lossy().into_owned();
+    let tools = crate::units::vm::api::VmTools {
+        qemu: crate::units::vm::api::ToolPath::new(Some(&q), None),
+        share: crate::units::vm::api::ToolPath::default(),
+    };
     let cap = vm_capability(&VmInputs {
-        qemu: Some(q.as_str()),
-        share_tool: None,
+        tools: &tools,
         probe: &probe,
     });
     if cfg!(any(target_os = "windows", target_os = "linux")) {
@@ -49,13 +52,7 @@ pub(crate) fn vm_capability_is_machine_only_while_session_readiness_needs_base()
         guest: None,
         ..Default::default()
     };
-    let session = exec::tier_readiness(
-        &crate::tests::root_dir(),
-        &spec,
-        Some(q.as_str()),
-        None,
-        &probe,
-    );
+    let session = exec::tier_readiness(&crate::tests::root_dir(), &spec, &tools, &probe);
     assert!(
         !session.ready(),
         "base 没填，会话级判据不成立：{:?}",

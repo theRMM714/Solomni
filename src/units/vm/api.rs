@@ -18,6 +18,7 @@ pub use crate::units::vm::domain::guest::{
     package_setup_scripts,
 };
 pub use crate::units::vm::domain::paths::PathBridge;
+pub use crate::units::vm::domain::tool::{ToolPath, VmTools};
 pub use crate::units::vm::service::job::GuestStop;
 #[allow(unused_imports)] // 入站面：运行计划派生的唯一出口（能力外只经这里取用）
 pub use crate::units::vm::service::plan::{

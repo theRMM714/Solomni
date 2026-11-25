@@ -9,6 +9,7 @@ use crate::units::catalog::packages::api::PlannedPackage;
 use crate::units::pure::exec_model::api::ExecSpec;
 use crate::units::pure::exec_model::api::Tier;
 use crate::units::vm::domain::guest::{GuestAgent, GuestImage, GuestOs};
+use crate::units::vm::domain::tool::{ToolPath, ToolSource, VmTools};
 use serde::Serialize;
 use std::path::Path;
 
@@ -132,11 +133,10 @@ pub struct VmRequirement {
     pub how: String,
 }
 
-/// 目的：虚拟机档检测的入参：会话选型 + 设置里登记的路径（None = 没登记，兜底看 PATH）+ 宿主探测端口。
+/// 目的：虚拟机档检测的入参：两件外部工具的位置事实（登记值 + 项目内补齐）+ 宿主探测端口。
 pub struct VmInputs<'a> {
-    pub qemu: Option<&'a str>,
-    /// 目的：设置里登记的**共享后端外部工具**路径（如 virtiofsd；None = 兜底看 PATH）。
-    pub share_tool: Option<&'a str>,
+    /// 目的：这一对工具的位置事实；来源与优先级见 domain::tool。
+    pub tools: &'a VmTools,
     /// 目的：本机事实探测（读环境、查路径存在性都在它后面，见 ports::HostProbe）。
     pub probe: &'a dyn HostProbe,
 }
@@ -149,7 +149,7 @@ const QEMU_BIN: &str = "qemu-system-x86_64";
 /// 约束：虚拟根属于**会话选型**，不在这里；含虚拟根的严格判据见 tier_readiness。
 pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
     let hyper = vm.probe.hypervisor_available();
-    let combo = effective_combo_label(vm.share_tool, vm.probe);
+    let combo = effective_combo_label(&vm.tools.share, vm.probe);
     vec![
         VmRequirement {
             id: "hypervisor",
@@ -210,9 +210,9 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
             },
         },
         // 共享档：**硬前置**——用户链为空就判否；copy 只在开发/应急开关下出现。
-        share_requirement(vm.share_tool, vm.probe),
-        // QEMU：不预置、不分发（可由 setup 脚本装进项目内）。没登记就看 PATH——检测那件东西在不在。
-        qemu_requirement(vm.qemu, vm.probe),
+        share_requirement(&vm.tools.share, vm.probe),
+        // QEMU：不预置、不分发（可由 setup 脚本装进项目内）。没登记就看项目内那份，再兜底 PATH。
+        qemu_requirement(&vm.tools.qemu, vm.probe),
     ]
 }
 
@@ -346,26 +346,77 @@ pub fn share_carries(share: &str, engine: &str, guest: &GuestImage) -> bool {
     }
 }
 
-/// 目的：一个外部工具在不在场——登记路径优先（登记了就必须是那个文件），否则看 PATH。
-fn tool_available(name: &str, registered: Option<&str>, probe: &dyn HostProbe) -> bool {
-    match registered.map(str::trim) {
-        // 登记了就以登记的为准，而且得**能直接执行**——只在场（比如权限位丢了）不算可用，
-        // 否则组合会选它、到启动那一步才炸；这里如实判"不在场"，让就绪文案说真话。
-        Some(p) if !p.is_empty() => probe.is_executable(Path::new(p)),
-        _ => probe.has_exe(name),
+/// 目的：这一项要判到哪一步——有只要在场的，有非得能直接跑起来才算的。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Need {
+    /// 目的：文件在场即可（QEMU 交给它自己的启动流程报错）。
+    Present,
+    /// 目的：必须能直接执行（共享 helper 是最后一步才用的，不能到启动那步才炸）。
+    Runnable,
+}
+
+/// 目的：一份位置事实的最后结论——用哪份、够不够用。
+enum Chosen {
+    /// 目的：可用：落地的路径 + 来源。
+    Usable(String, ToolSource),
+    /// 目的：登记值 / 项目内那份在场，但没到"能用"那一步。
+    Unusable,
+    /// 目的：两份都没有，PATH 上也没有。
+    Missing,
+}
+
+/// 目的：按"登记值 → 项目内补齐 → PATH"的顺序判这一项，给出结论（唯一判据）。
+/// 约束：登记了就以登记的为准——不因为项目内那份更顺眼就偷偷换掉用户的选择。
+fn choose(tool: &ToolPath, name: &str, need: Need, probe: &dyn HostProbe) -> Chosen {
+    if let Some((p, src)) = tool.pick() {
+        let path = Path::new(p);
+        let ok = match need {
+            Need::Present => probe.is_file(path),
+            Need::Runnable => probe.is_executable(path),
+        };
+        return if ok {
+            Chosen::Usable(p.to_string(), src)
+        } else {
+            Chosen::Unusable
+        };
+    }
+    if probe.has_exe(name) {
+        return Chosen::Usable(name.to_string(), ToolSource::Path);
+    }
+    Chosen::Missing
+}
+
+/// 目的：工具不可用时的现状一句话——把"试过哪条路、那条路上有没有东西"如实写出来。
+/// 约束：文案直接给出修法（清空登记即可改用项目内那份），不让用户自己猜优先级。
+fn tool_fault(tool: &ToolPath, need: Need, probe: &dyn HostProbe) -> String {
+    let why = |p: &str| {
+        if !probe.is_file(Path::new(p)) {
+            "不在场"
+        } else if need == Need::Runnable && !probe.is_executable(Path::new(p)) {
+            "不能执行"
+        } else {
+            "不能用"
+        }
+    };
+    match (tool.registered.as_deref(), tool.provisioned.as_deref()) {
+        (Some(r), Some(q)) => format!(
+            "登记的 {} {}；项目内补齐的那份在 {}（清空登记即可改用）",
+            r,
+            why(r),
+            q
+        ),
+        (Some(r), None) => format!("登记的 {} {}，项目内也没有补齐", r, why(r)),
+        (None, Some(q)) => format!("项目内补齐的那份{}：{}", why(q), q),
+        (None, None) => "PATH 上没有，项目内也没有补齐".to_string(),
     }
 }
 
 /// 目的：这次启动**可试**的用户共享后端 id，按本平台"性能优先"的顺序；工具不在场的档不列。
-/// 参数：host = 宿主平台（std::env::consts::OS 的取值）；share_tool = 本平台共享工具路径（None = 兜底 PATH）；probe = 宿主事实。
-/// 约束：只判"用户档 + 工具在场"（share_available）；copy 不在用户链里，由 `copy_share_enabled` 单独决定。
+/// 参数：host = 宿主平台（std::env::consts::OS 的取值）；share_tool = 本平台共享工具的位置事实；probe = 宿主事实。
+/// 约束：只判"用户档 + 工具能用"（share_available）；copy 不在用户链里，由 `copy_share_enabled` 单独决定。
 /// 约束：落不落到这台引擎 / 这份 guest 上由 `share_carries` 判——选档发生在起 guest 那一刻，不是装配期定一次。
 /// 约束：引擎恒按 qemu 筛（当前唯一已实现引擎）；返回空表 = 本平台没有可试的用户共享档。
-pub fn share_chain(
-    host: &str,
-    share_tool: Option<&str>,
-    probe: &dyn HostProbe,
-) -> Vec<&'static str> {
+pub fn share_chain(host: &str, share_tool: &ToolPath, probe: &dyn HostProbe) -> Vec<&'static str> {
     default_combos(host)
         .iter()
         .filter(|c| c.engine == "qemu" && share_available(c.share, share_tool, probe))
@@ -412,18 +463,21 @@ pub fn runs_on_target(path: &Path, target_os: &str) -> bool {
 
 /// 目的：某个用户共享档在不在场：先要是用户档，再要它要的外部工具在场（不需要工具的档恒在场）。
 /// 约束：组合选择（组合根）与就绪说明共用这一份，避免"说要验 A、实际跑 B"；copy 不在用户档里。
-pub fn share_available(share: &str, share_tool: Option<&str>, probe: &dyn HostProbe) -> bool {
+pub fn share_available(share: &str, share_tool: &ToolPath, probe: &dyn HostProbe) -> bool {
     if !USER_SHARES.contains(&share) {
         return false;
     }
     match share_tool_of(share) {
         None => true,
-        Some(name) => tool_available(name, share_tool, probe),
+        Some(name) => matches!(
+            choose(share_tool, name, Need::Runnable, probe),
+            Chosen::Usable(..)
+        ),
     }
 }
 
 /// 目的：本平台用户链**实际会选**的组合标签（"引擎/共享"）；开发/应急开关打开时标出 copy。
-fn effective_combo_label(share_tool: Option<&str>, probe: &dyn HostProbe) -> String {
+fn effective_combo_label(share_tool: &ToolPath, probe: &dyn HostProbe) -> String {
     if copy_share_enabled() {
         return "qemu/copy（应急）".to_string();
     }
@@ -436,7 +490,7 @@ fn effective_combo_label(share_tool: Option<&str>, probe: &dyn HostProbe) -> Str
 /// 目的：共享档的现状——本平台用户链有没有能用的挂载式后端；没有就如实判否。
 /// 约束：这是**硬前置**，不再回退 copy；Linux 缺 virtiofsd 时 9p 仍算可用。
 ///   "怎么补"写在 how 里；copy 只由开发/应急开关启用，并在 detail 里明确标出。
-fn share_requirement(share_tool: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
+fn share_requirement(share_tool: &ToolPath, probe: &dyn HostProbe) -> VmRequirement {
     if copy_share_enabled() {
         return VmRequirement {
             id: "share",
@@ -459,22 +513,11 @@ fn share_requirement(share_tool: Option<&str>, probe: &dyn HostProbe) -> VmRequi
             Some(c) => {
                 let detail = match share_tool_of(c.share) {
                     None => format!("共享档 {} 不可用：本平台用户链为空", c.share),
-                    Some(name) => match share_tool.map(str::trim) {
-                        Some(p)
-                            if !p.is_empty()
-                                && probe.is_file(Path::new(p))
-                                && !probe.is_executable(Path::new(p)) =>
-                        {
-                            format!(
-                                "共享档 {} 登记的那个不能执行（{}）：虚拟机档不可用",
-                                c.share, p
-                            )
-                        }
-                        _ => format!(
-                            "共享档 {} 不在场（没找到 {}）：虚拟机档不可用",
-                            c.share, name
-                        ),
-                    },
+                    Some(_) => format!(
+                        "共享档 {} 不可用（{}）：虚拟机档不可用",
+                        c.share,
+                        tool_fault(share_tool, Need::Runnable, probe)
+                    ),
                 };
                 (detail, share_how(c.share))
             }
@@ -489,26 +532,21 @@ fn share_requirement(share_tool: Option<&str>, probe: &dyn HostProbe) -> VmRequi
     let best = chain[0];
     let detail = match top {
         Some(c) if c.share == best => match share_tool_of(best) {
-            Some(name) => format!("共享档 {} 可用（找到 {}）", best, name),
+            Some(name) => match choose(share_tool, name, Need::Runnable, probe) {
+                Chosen::Usable(p, src) => {
+                    format!("共享档 {} 可用（{}：{}）", best, src.label(), p)
+                }
+                _ => format!("共享档 {} 可用（{}）", best, name),
+            },
             None => format!("共享档 {}（不需要外部工具）", best),
         },
         Some(c) => match share_tool_of(c.share) {
-            Some(name) => match share_tool.map(str::trim) {
-                Some(p)
-                    if !p.is_empty()
-                        && probe.is_file(Path::new(p))
-                        && !probe.is_executable(Path::new(p)) =>
-                {
-                    format!(
-                        "共享档 {} 登记的那个不能执行（{}）：使用 {}；给它执行位，或换成 PATH 上的 {} 即可启用",
-                        c.share, p, best, name
-                    )
-                }
-                _ => format!(
-                    "共享档 {} 不在场（没找到 {}）：使用 {}；把 {} 放进 PATH，或在设置里登记它的完整路径即可启用",
-                    c.share, name, best, name
-                ),
-            },
+            Some(_) => format!(
+                "共享档 {} 不可用（{}）：使用 {}",
+                c.share,
+                tool_fault(share_tool, Need::Runnable, probe),
+                best
+            ),
             None => format!("共享档 {}（不需要外部工具）", best),
         },
         None => format!("共享档 {} 可用", best),
@@ -550,25 +588,27 @@ fn hypervisor_how() -> &'static str {
     }
 }
 
-/// QEMU 检测：登记了就用登记的路径，没登记就看 PATH（依赖不预置、不分发，可由 setup 脚本装进项目内）。
-fn qemu_requirement(registered: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
-    // "登记的路径" 也包含核心在没登记时自动采用的那一份（项目内补齐的包）：对用户是同一件事——按路径找到了。
-    let (found, where_from) = match registered.map(str::trim) {
-        Some(p) if !p.is_empty() => (probe.is_file(Path::new(p)), "设置登记或项目内补齐的路径"),
-        _ => (probe.has_exe(QEMU_BIN), "PATH"),
+/// QEMU 检测：登记值优先，其次项目内补齐那份，最后看 PATH（依赖不预置、不分发，可由 setup 脚本装进项目内）。
+fn qemu_requirement(tool: &ToolPath, probe: &dyn HostProbe) -> VmRequirement {
+    let (met, detail) = match choose(tool, QEMU_BIN, Need::Present, probe) {
+        Chosen::Usable(p, src) => (true, format!("QEMU 可用（{}：{}）", src.label(), p)),
+        _ => (
+            false,
+            format!(
+                "没有找到 {}（{}）",
+                QEMU_BIN,
+                tool_fault(tool, Need::Present, probe)
+            ),
+        ),
     };
     VmRequirement {
         id: "qemu",
-        met: found,
-        detail: if found {
-            format!("QEMU 可用（按{}找到 {}）", where_from, QEMU_BIN)
-        } else {
-            format!("没有找到 {}（按{}找过）", QEMU_BIN, where_from)
-        },
-        how: if found {
+        met,
+        detail,
+        how: if met {
             String::new()
         } else {
-            "在创建向导或配置界面点「补齐虚拟机依赖」把它下载进项目内（只写项目内，需用户同意）；也可自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径。集成环境里没有界面时可用 solomni --provision --ensure --yes"
+            "在创建向导或配置界面点「补齐虚拟机依赖」把它下载进项目内（只写项目内，需用户同意）；也可自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径（登记值失效时清空即可恢复自动发现）。集成环境里没有界面时可用 solomni --provision --ensure --yes"
                 .to_string()
         },
     }
@@ -657,7 +697,7 @@ fn guest_requirement(root: &Path, guest: Option<&str>, probe: &dyn HostProbe) ->
 fn guest_share_requirement(
     root: &Path,
     guest: Option<&str>,
-    share_tool: Option<&str>,
+    share_tool: &ToolPath,
     probe: &dyn HostProbe,
 ) -> Option<VmRequirement> {
     let name = guest.map(str::trim).filter(|g| !g.is_empty())?;
@@ -741,8 +781,7 @@ pub fn capability_refusal(vm: &VmInputs<'_>) -> Option<String> {
 pub fn tier_readiness(
     root: &Path,
     spec: &ExecSpec,
-    qemu: Option<&str>,
-    share_tool: Option<&str>,
+    tools: &VmTools,
     probe: &dyn HostProbe,
 ) -> TierReadiness {
     if spec.tier != Tier::Vm {
@@ -750,15 +789,11 @@ pub fn tier_readiness(
             requirements: Vec::new(),
         };
     }
-    let mut requirements = vm_requirements(&VmInputs {
-        qemu,
-        share_tool,
-        probe,
-    });
+    let mut requirements = vm_requirements(&VmInputs { tools, probe });
     // 虚拟根是这条会话的选型，不是机器能力：保存 /「开始」时才要求它。
     requirements.push(guest_requirement(root, spec.guest.as_deref(), probe));
     // 共享档也按这台 guest 再判一次：用户链里有档可用，不代表这份 guest 声明了对应客户端。
-    if let Some(share) = guest_share_requirement(root, spec.guest.as_deref(), share_tool, probe) {
+    if let Some(share) = guest_share_requirement(root, spec.guest.as_deref(), &tools.share, probe) {
         requirements.push(share);
     }
     TierReadiness { requirements }
@@ -768,11 +803,10 @@ pub fn tier_readiness(
 pub fn tier_refusal(
     root: &Path,
     spec: &ExecSpec,
-    qemu: Option<&str>,
-    share_tool: Option<&str>,
+    tools: &VmTools,
     probe: &dyn HostProbe,
 ) -> Option<String> {
-    let readiness = tier_readiness(root, spec, qemu, share_tool, probe);
+    let readiness = tier_readiness(root, spec, tools, probe);
     if readiness.ready() {
         return None;
     }

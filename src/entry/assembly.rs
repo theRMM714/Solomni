@@ -365,6 +365,20 @@ pub(crate) fn system_with(
             crate::kernel::api::platform::HAS_EXTERNAL_ACL_STEP,
         ),
     );
+    // 目的：虚拟机档外部工具的位置事实——与界面同一份口径（设置登记 + 项目内补齐），自检每次现算。
+    let tools_provision = ports.provision.clone();
+    let tools_root = root.to_path_buf();
+    let vm_tools: Arc<dyn Fn() -> crate::units::vm::api::VmTools + Send + Sync> =
+        Arc::new(move || {
+            let app = read_settings(&tools_root).unwrap_or_default();
+            crate::units::provision::api::vm_tools(
+                tools_provision.as_ref(),
+                std::env::consts::OS,
+                &app.qemu_path,
+                &app.virtiofsd_path,
+                &app.smbd_path,
+            )
+        });
     Ok(SystemService::with_facts(
         SystemDeps {
             root: root.to_path_buf(),
@@ -376,6 +390,7 @@ pub(crate) fn system_with(
             modules: ports.modules,
             toolchains: base.clone(),
             net: network_allowed(root),
+            vm_tools,
         },
         facts,
         setup,

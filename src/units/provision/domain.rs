@@ -1,6 +1,6 @@
 //! 目的：provision 的领域模型与纯规则——清单行、宿主筛选、安装身份与 pin 解析。
 //! 管：Dep / ToolchainSpec / GuestProfile 类型，内嵌 dependencies.yaml 与 links.yaml 的解析，
-//!   路径落点（under）、宿主筛选（for_host）与安装身份指纹（install_identity）。
+//!   路径落点（under）、宿主筛选（for_host）、安装身份指纹（install_identity）与宿主工具位置（tool_location）。
 //! 不管：网络、磁盘与进程（在 detail）；装什么、按什么顺序装（在 service）。
 //! 联动：service 与 detail 都只读这里的类型与纯函数。
 
@@ -182,6 +182,27 @@ pub(crate) fn install_identity(dep: &Dep) -> String {
     crate::units::workspace::api::content_hash(material.as_bytes())
 }
 
+/// 目的：一个宿主工具的位置事实——登记值优先，其次本机清单里**已装好**那条的绝对路径（probe 相对产品根）。
+/// 约束：生产与测试替身共用这一份，免得"判据一套、替身另一套"。
+pub fn tool_location(
+    tool: crate::units::provision::api::HostTool,
+    registered: &str,
+    root: &Path,
+    status: &[crate::units::provision::api::DepStatus],
+) -> crate::units::vm::api::ToolPath {
+    use crate::units::provision::api::HostTool;
+    let prefix = match tool {
+        HostTool::Qemu => "vm.qemu.",
+        HostTool::Virtiofsd => "vm.virtiofsd.",
+        HostTool::Smbd => "vm.smbd.",
+    };
+    let provisioned = status
+        .iter()
+        .find(|d| d.present && d.id.starts_with(prefix))
+        .map(|d| root.join(&d.probe).to_string_lossy().into_owned());
+    crate::units::vm::api::ToolPath::new(Some(registered), provisioned.as_deref())
+}
+
 /// 目的：这条依赖 pin 的 sha256——**校验值与它守护的那条连接写在同一条**：
 ///   自托管 release 资产在清单条目里（`sha256:`），链接类源在 `links.yaml` 的 `<source>.sha256`。
 /// 返回：小写十六进制；没 pin 给 None（`latest` 这种会滚动的源只能这样，如实不校验）。
@@ -203,4 +224,78 @@ pub(crate) fn join_rel(base: &str, rel: &str) -> String {
         out.push_str(seg);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::units::provision::api::{DepStatus, HostTool};
+    use std::path::Path;
+
+    fn dep(id: &str, present: bool, probe: &str) -> DepStatus {
+        DepStatus {
+            id: id.to_string(),
+            guest: None,
+            present,
+            stale: false,
+            install: String::new(),
+            probe: probe.to_string(),
+            source: String::new(),
+            url: None,
+            size_mb: 0,
+            note: String::new(),
+        }
+    }
+
+    /// 目的：位置事实两条路——登记值原样保留，项目内那份回成绝对路径；空登记 = 没登记。
+    #[test]
+    fn tool_location_keeps_registration_and_absolutizes_the_provisioned_one() {
+        let root = Path::new("/p");
+        let status = vec![dep(
+            "vm.qemu.linux",
+            true,
+            "data/.vm/qemu/bin/qemu-system-x86_64",
+        )];
+        let t = tool_location(HostTool::Qemu, "  ", root, &status);
+        assert_eq!(t.registered, None, "空白登记按没登记处理");
+        let want = root.join("data/.vm/qemu/bin/qemu-system-x86_64");
+        assert_eq!(
+            t.provisioned.as_deref(),
+            Some(want.to_string_lossy().as_ref())
+        );
+        let t = tool_location(HostTool::Qemu, "C:\\tools\\qemu.exe", root, &status);
+        assert_eq!(t.registered.as_deref(), Some("C:\\tools\\qemu.exe"));
+        assert_eq!(t.pick().map(|(p, _)| p), Some("C:\\tools\\qemu.exe"));
+    }
+
+    /// 目的：没装好、或装的是别的工具（前缀不匹配）时不给项目内那份，免得指向不存在的文件。
+    #[test]
+    fn tool_location_reports_nothing_when_the_dependency_is_absent() {
+        let root = Path::new("/p");
+        let status = vec![dep(
+            "vm.qemu.linux",
+            false,
+            "data/.vm/qemu/bin/qemu-system-x86_64",
+        )];
+        assert_eq!(
+            tool_location(HostTool::Qemu, "", root, &status).provisioned,
+            None
+        );
+        let status = vec![dep(
+            "vm.virtiofsd.linux",
+            true,
+            "data/.vm/virtiofsd/virtiofsd",
+        )];
+        assert_eq!(
+            tool_location(HostTool::Smbd, "", root, &status).provisioned,
+            None
+        );
+        let want = root.join("data/.vm/virtiofsd/virtiofsd");
+        assert_eq!(
+            tool_location(HostTool::Virtiofsd, "", root, &status)
+                .provisioned
+                .as_deref(),
+            Some(want.to_string_lossy().as_ref())
+        );
+    }
 }
