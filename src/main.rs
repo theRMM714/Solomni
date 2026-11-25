@@ -329,8 +329,7 @@ fn main() {
     entry::startup::print_fence_report(&fence_report, sandbox_cfg.policy.host_read_roots.len());
 
     // 这一次调用要不要常驻运行时：判据只认命令声明里的 `runtime`（`systools/commands.yaml`）。
-    // 分派与启动门共用这一份判定：一次性命令不占视图盘、不起存储自动任务、不拉常驻服务，也不被围栏授权拦住
-    // （它们不跑任何被围栏的进程）；会话、Web 与模块工具调用照旧。
+    // 分派与启动门共用这一份判定：一次性命令不占视图盘、不起存储自动任务、不拉常驻服务，也不被围栏授权拦住。
     let runtime_needed = {
         let words: Vec<&str> = flags.positionals.iter().map(String::as_str).collect();
         presentation::cli::shell::needs_runtime(&words, flags.help, flags.version)
@@ -781,8 +780,7 @@ fn main() {
     // 所以死登记常见「映射还在、记录还在」；放在分配之前、不受开关影响，`SOLOMNI_VIEW_DRIVE=0` 时也要清。
     view_drive_sweep(&home);
     // 视图盘唯一的分配点：维护旗、探针与启动期早退都已返回；`std::process::exit` 不走 Drop，早分配必然泄漏盘符。
-    // 一次性命令（`runtime: none`）不分配：它们跑完就退，占一个盘符没有用处。
-    // 细节与逃生口见 `view_drive_begin` 的目的/约束。
+    // 一次性命令（`runtime: none`）不分配（跑完就退）；细节与逃生口见 `view_drive_begin`。
     let view_drive = runtime_needed && view_drive_begin(&root, &home);
     // 核心搬到它自己的执行线程：此后呈现层只持有**入站能力面**——拿不到核心本体，也拿不到任何核心锁。
     let handle = match capabilities::runtime::api::Handle::spawn(core) {

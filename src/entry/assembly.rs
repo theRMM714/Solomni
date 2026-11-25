@@ -20,6 +20,7 @@ use crate::capabilities::provision::detail::ledger::FileLedger;
 use crate::capabilities::provision::detail::procs::BookProcs;
 use crate::capabilities::provision::ports::Fetcher;
 use crate::capabilities::provision::service::{ProvisionDeps, ProvisionService};
+use crate::capabilities::system::api::FencePolicy;
 use crate::capabilities::system::service::{SystemDeps, SystemService};
 use crate::capabilities::vm::api::Vm;
 
@@ -330,6 +331,27 @@ pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, Str
     )
 }
 
+/// 目的：预授成功后把"允许写 ACL"记进设置——只改 `sandbox.policy.windows.write_acl` 一项，走登记处同一套校验与写盘。
+struct WriteAclPolicy {
+    root: PathBuf,
+}
+
+impl FencePolicy for WriteAclPolicy {
+    fn record_authorization(&self) -> Result<String, String> {
+        crate::capabilities::catalog::registry::service::grant_write_acl(&settings_store(
+            &self.root,
+        ))?;
+        Ok("sandbox.policy.windows.write_acl = true（已记进设置）".to_string())
+    }
+}
+
+/// 目的：把设置写入面接到便携维护端口上：`--setup fence` 预授成功后顺带记下授权。
+pub(crate) fn write_acl_policy(root: &Path) -> Arc<dyn FencePolicy> {
+    Arc::new(WriteAclPolicy {
+        root: root.to_path_buf(),
+    })
+}
+
 /// 目的：用调用方已经装好的端口拼出系统维护能力面（主程序复用同一份存储 / 补齐 / 构建 / 工作区 / 模块）。
 pub(crate) fn system_with(
     root: &Path,
@@ -342,7 +364,7 @@ pub(crate) fn system_with(
     // 目的：便携维护端口——用户 PATH 与围栏机器级预授的写入实现都在 detail，service 只认端口。
     let setup: Arc<dyn crate::capabilities::system::api::SetupOps + Send + Sync> = Arc::new(
         crate::capabilities::system::detail::setup::SetupHost::new(root).with_policy(
-            crate::entry::portable::write_acl_policy(root),
+            write_acl_policy(root),
             crate::kernel::api::platform::HAS_EXTERNAL_ACL_STEP,
         ),
     );

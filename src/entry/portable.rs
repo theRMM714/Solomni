@@ -1,33 +1,12 @@
-//! 目的：启动期的便携对账——围栏机器级预授的缺项提示与首次授权后的一次性预授；`--setup fence` 成功后把授权记进设置。
-//! 管：两个启动钩子（缺项提示、授权后预授）与它们的输出前缀；授权落盘的适配器 WriteAclPolicy。
-//! 不管：`--setup` 的模式分派与状态回执（在 capabilities::system 的 SetupOps 与 presentation/cli/boot.rs）；设置校验与写盘（在登记处）。
-//! 联动：main.rs 在启动授权后调 ensure_after_authorize、在启动报告里调 fence_hint；组合根把 write_acl_policy 接到便携维护端口上。
+//! 目的：启动期的便携对账——围栏机器级预授的缺项提示与首次授权后的一次性预授。
+//! 管：两个启动钩子（缺项提示、授权后预授）与它们的输出前缀；对账判定的两档 ACL 能力。
+//! 不管：`--setup` 的模式分派与状态回执（在 capabilities::system 的 SetupOps 与 presentation/cli/boot.rs）；设置校验、写盘与授权落盘适配器（在登记处与组合根）。
+//! 联动：main.rs 在启动授权后调 ensure_after_authorize、在启动报告里调 fence_hint。
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::path::Path;
 
-use crate::capabilities::system::api::{FencePolicy, SetupOps};
+use crate::capabilities::system::api::SetupOps;
 use crate::capabilities::system::detail::setup::SetupHost;
-
-/// 目的：预授成功后把"允许写 ACL"记进设置——只改 `sandbox.policy.windows.write_acl` 一项，走登记处同一套校验与写盘。
-struct WriteAclPolicy {
-    root: PathBuf,
-}
-
-impl FencePolicy for WriteAclPolicy {
-    fn record_authorization(&self) -> Result<String, String> {
-        let store = crate::entry::assembly::settings_store(&self.root);
-        crate::capabilities::catalog::registry::service::grant_write_acl(&store)?;
-        Ok("sandbox.policy.windows.write_acl = true（已记进设置）".to_string())
-    }
-}
-
-/// 目的：把设置写入面接到便携维护端口上（组合根用）：`--setup fence` 预授成功后顺带记下授权。
-pub(crate) fn write_acl_policy(root: &Path) -> Arc<dyn FencePolicy> {
-    Arc::new(WriteAclPolicy {
-        root: root.to_path_buf(),
-    })
-}
 
 /// 目的：启动期只读对账：机器级预授缺项时打一条提示（不静默慢写、不阻断启动）。
 /// 返回：true = 已就绪；false = 有缺项（调用方只提示一次）。
