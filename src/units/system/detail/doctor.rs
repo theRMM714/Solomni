@@ -10,35 +10,21 @@ use serde_json::Value;
 
 use crate::units::catalog::packages::api::BaseFacts;
 use crate::units::maintenance::storage::api::Storage;
-use crate::units::provision::api::Provision;
 use crate::units::system::api::{FenceFacts, toolchain_json};
 
 /// 目的：自检事实本体。
-/// 参数：root = 产品根；provision / storage = 已装配的用例面；facts = 工具链事实；fence = 本机围栏能力。
+/// 参数：root = 产品根；tools = 虚拟机档外部工具的位置事实（与界面同口径）；storage = 空间盘面；
+///   facts = 工具链事实；fence = 本机围栏能力。
 pub(crate) fn build(
     root: &Path,
-    provision: &dyn Provision,
+    tools: &crate::units::vm::api::VmTools,
     storage: &dyn Storage,
     facts: &BaseFacts,
     fence: FenceFacts,
 ) -> Value {
-    // 虚拟机档的逐项前置（只读事实）：项目内补齐过就按那一份问，否则按 PATH 问（与核心同一把尺子）。
-    let installed = provision.status().unwrap_or_default();
-    let installed_at = |prefix: &str| {
-        installed
-            .iter()
-            .find(|d| d.present && d.id.starts_with(prefix))
-            .map(|d| root.join(&d.probe).to_string_lossy().into_owned())
-    };
-    let qemu = installed_at("vm.qemu.");
-    let share_tool = installed_at(if crate::kernel::api::platform::IS_WINDOWS {
-        "vm.smbd."
-    } else {
-        "vm.virtiofsd."
-    });
+    // 虚拟机档的逐项前置（只读事实）：登记值 / 项目内补齐 / PATH 三条路与界面同一把尺子。
     let vm = crate::units::vm::api::vm_requirements(&crate::units::vm::api::VmInputs {
-        qemu: qemu.as_deref(),
-        share_tool: share_tool.as_deref(),
+        tools,
         probe: &crate::kernel::detail::HostProbeAdapter,
     });
     // 长驻子进程：账本里还活着的那几条（自检只报事实，不动手收）。

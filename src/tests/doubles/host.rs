@@ -235,28 +235,14 @@ pub(crate) fn test_provision_with_root(
         fn ensure_spec(&self, _spec: &str, _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
             Err("测试不跑补齐".to_string())
         }
-        fn tool_path(
+        fn tool_location(
             &self,
             tool: crate::units::provision::api::HostTool,
             registered: &str,
-        ) -> Option<String> {
-            let registered = registered.trim();
-            if !registered.is_empty() {
-                return Some(registered.to_string());
-            }
-            let prefix = match tool {
-                crate::units::provision::api::HostTool::Qemu => "vm.qemu.",
-                crate::units::provision::api::HostTool::Virtiofsd => "vm.virtiofsd.",
-                crate::units::provision::api::HostTool::Smbd => "vm.smbd.",
-            };
-            let dep = self
-                .0
-                .iter()
-                .find(|d| d.present && d.id.starts_with(prefix))?;
-            Some(match &self.1 {
-                Some(root) => root.join(&dep.probe).to_string_lossy().into_owned(),
-                None => dep.probe.clone(),
-            })
+        ) -> crate::units::vm::api::ToolPath {
+            // 与生产同一份解析：登记值优先，其余按已装好的那条依赖的 probe 回绝对路径。
+            let root = self.1.clone().unwrap_or_default();
+            crate::units::provision::domain::tool_location(tool, registered, &root, &self.0)
         }
     }
     Arc::new(FixedProvision(deps, root.map(std::path::Path::to_path_buf)))

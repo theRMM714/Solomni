@@ -46,8 +46,12 @@ pub(crate) fn a_guest_without_supported_clients_is_rejected_before_boot() {
         guest: Some(guest.to_string()),
         ..Default::default()
     };
+    let tools = crate::units::vm::api::VmTools {
+        qemu: crate::units::vm::api::ToolPath::default(),
+        share: crate::units::vm::api::ToolPath::new(None, Some(tool.as_str())),
+    };
     let find = |guest: &str| {
-        let readiness = tier_readiness(&root, &spec(guest), None, Some(tool.as_str()), &probe);
+        let readiness = tier_readiness(&root, &spec(guest), &tools, &probe);
         readiness
             .requirements
             .into_iter()

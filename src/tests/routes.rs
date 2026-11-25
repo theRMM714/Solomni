@@ -176,24 +176,17 @@ impl crate::units::provision::api::Provision for FakeProvision {
     fn ensure(&self, _ids: &[String], _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
         self.guard()
     }
-    fn tool_path(
+    fn tool_location(
         &self,
         tool: crate::units::provision::api::HostTool,
         registered: &str,
-    ) -> Option<String> {
-        let registered = registered.trim();
-        if !registered.is_empty() {
-            return Some(registered.to_string());
-        }
-        let prefix = match tool {
-            crate::units::provision::api::HostTool::Qemu => "vm.qemu.",
-            crate::units::provision::api::HostTool::Virtiofsd => "vm.virtiofsd.",
-            crate::units::provision::api::HostTool::Smbd => "vm.smbd.",
-        };
-        fake_deps()
-            .into_iter()
-            .find(|d| d.present && d.id.starts_with(prefix))
-            .map(|d| d.probe)
+    ) -> crate::units::vm::api::ToolPath {
+        crate::units::provision::domain::tool_location(
+            tool,
+            registered,
+            std::path::Path::new(""),
+            &fake_deps(),
+        )
     }
     fn ensure_spec(&self, _spec: &str, _on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
         self.guard()

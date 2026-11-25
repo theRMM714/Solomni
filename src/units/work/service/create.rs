@@ -353,8 +353,7 @@ impl Work {
         if let Some(why) = crate::units::vm::api::tier_refusal(
             &self.root,
             &meta.exec,
-            self.qemu_path(registry).as_deref(),
-            self.share_tool_path(registry).as_deref(),
+            &self.virtual_tools(registry),
             host,
         ) {
             return Err(why);
@@ -684,17 +683,14 @@ impl Work {
         restart: bool,
         lease: &str,
     ) -> GuestBoot {
-        let share_tool = self.share_tool_path(registry);
+        let tools = self.virtual_tools(registry);
+        let share_tool = tools.share.located().map(str::to_string);
         // 开发/应急开关打开时，本进程的 VM 会话强制走 copy（不追加成回退链）；
         // 普通进程没有这个开关，share_chain 只给用户档。
         let shares = if crate::units::vm::api::copy_share_enabled() {
             vec!["copy"]
         } else {
-            crate::units::vm::api::share_chain(
-                std::env::consts::OS,
-                share_tool.as_deref(),
-                probe.as_ref(),
-            )
+            crate::units::vm::api::share_chain(std::env::consts::OS, &tools.share, probe.as_ref())
         };
         GuestBoot::new(
             Arc::clone(&self.vm),
@@ -703,7 +699,7 @@ impl Work {
             Arc::clone(&self.log),
             registry.app().max_guests,
             crate::units::turn::env::api::host_read_roots(registry.app()),
-            self.qemu_path(registry),
+            tools.qemu.located().map(str::to_string),
             share_tool,
             shares,
             lease.to_string(),
@@ -758,8 +754,7 @@ impl Work {
         if let Some(why) = crate::units::vm::api::tier_refusal(
             &self.root,
             &exec,
-            self.qemu_path(registry).as_deref(),
-            self.share_tool_path(registry).as_deref(),
+            &self.virtual_tools(registry),
             probe,
         ) {
             return Err(why);

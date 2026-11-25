@@ -31,15 +31,30 @@ fn try_lock_answers_at_once_and_held_leaves_no_trace() {
     );
     assert!(!path.exists(), "只问不该建出锁文件");
 
-    let first = try_lock(&path, "构建缓存卷").expect("要能问").expect("首把锁");
+    let first = try_lock(&path, "构建缓存卷")
+        .expect("要能问")
+        .expect("首把锁");
     assert!(held(&path, "构建缓存卷").expect("问在场的锁"), "有人持着");
-    assert!(try_lock(&path, "构建缓存卷").expect("要能问").is_none(), "第二把立刻拿不到，不等待");
+    assert!(
+        try_lock(&path, "构建缓存卷").expect("要能问").is_none(),
+        "第二把立刻拿不到，不等待"
+    );
     drop(first);
-    assert!(!held(&path, "构建缓存卷").expect("问放掉的锁"), "放掉后没人持");
+    assert!(
+        !held(&path, "构建缓存卷").expect("问放掉的锁"),
+        "放掉后没人持"
+    );
     assert!(path.exists(), "问与拿都不删锁文件");
 
     std::fs::write(&path, "pid 999999 at dead").expect("写残锁");
-    assert!(!held(&path, "构建缓存卷").expect("问残锁"), "残留的锁文件不算被持有");
-    drop(try_lock(&path, "构建缓存卷").expect("要能问").expect("残锁不该阻塞"));
+    assert!(
+        !held(&path, "构建缓存卷").expect("问残锁"),
+        "残留的锁文件不算被持有"
+    );
+    drop(
+        try_lock(&path, "构建缓存卷")
+            .expect("要能问")
+            .expect("残锁不该阻塞"),
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

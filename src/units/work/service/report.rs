@@ -67,15 +67,8 @@ impl Work {
             (diagnoses, plan.unusable, available)
         };
         missing.retain(|_, caps| !caps.is_empty());
-        let qemu = self.qemu_path(registry);
-        let share_tool = self.share_tool_path(registry);
-        let readiness = crate::units::vm::api::tier_readiness(
-            &self.root,
-            spec,
-            qemu.as_deref(),
-            share_tool.as_deref(),
-            probe,
-        );
+        let tools = self.virtual_tools(registry);
+        let readiness = crate::units::vm::api::tier_readiness(&self.root, spec, &tools, probe);
         RuntimeReport {
             tier: spec.tier.as_str().to_string(),
             declared: declared(&roster.modules),
@@ -95,11 +88,9 @@ impl Work {
     pub fn tier_choices(&self, registry: &dyn Registry, probe: &dyn HostProbe) -> TierChoices {
         let default = registry.app().tier;
         // 这是**与某条会话无关的机器能力**：虚拟根属于会话选型，不在这里判（创建时另行收集）。
-        let qemu = self.qemu_path(registry);
-        let share_tool = self.share_tool_path(registry);
+        let tools = self.virtual_tools(registry);
         let inputs = crate::units::vm::api::VmInputs {
-            qemu: qemu.as_deref(),
-            share_tool: share_tool.as_deref(),
+            tools: &tools,
             probe,
         };
         let cap = crate::units::vm::api::vm_capability(&inputs);

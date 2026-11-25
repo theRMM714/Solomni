@@ -18,6 +18,7 @@
 | `src/units/vm/domain/exec.rs` | 执行档位诊断、执行计划派生（消费 `PackagePlan`）、承载判定、就绪检测与并发准入（纯逻辑；hypervisor 提示与类型用 kernel 平台事实） |
 | `src/units/vm/domain/guest.rs` | guest 镜像判定（`GuestImage`）、挂载清单、prefix 软链与 system 叠写脚本、`GuestRun` 的按次超时与输出上限选项（传输/内存护栏，模型可见的截断在宿主预算；纯逻辑，宿主架构用 kernel 平台事实） |
 | `src/units/vm/domain/paths.rs` | 宿主 ↔ guest 路径桥（恒等 / 镜像根，可逆；盘符与 UNC 各有单射编码，纯逻辑） |
+| `src/units/vm/domain/tool.rs` | 外部工具的位置事实（`ToolPath` / `VmTools` / `ToolSource`）：登记值与项目内补齐那份的优先序，以及"这次用的是哪一份"的如实标注（纯值，不解析路径、不判可执行） |
 | `src/units/vm/detail/guest_helper.rs` | Linux guest 内执行助手：脚本文本、装进 guest、按 host 翻好的允许集走 Landlock + no_new_privs、按策略 `timeout_secs` 杀树；缺失/装不上 fail-closed |
 | `src/units/vm/detail/qemu.rs` | `VmEngine` 的 QEMU 实现：基础参数（加速器、内存、内核、串口与 QGA、首启种子；加速器与可执行名用 kernel 平台事实）、按需用 qemu-img 建每租约可写层、启动与销毁 |
 | `src/units/vm/detail/qemu/qga.rs` | `GuestChannel` / `GuestVm` 的 QGA 通道实现：一次 boot 的连接与重连、JSON 收发、guest 命令回执（按次超时与输出上限护栏）、文件搬运与收尾 |

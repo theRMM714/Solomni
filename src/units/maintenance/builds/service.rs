@@ -391,7 +391,7 @@ impl BuildsService {
             share_path: share_tool.clone(),
             shares: vm::share_chain(
                 std::env::consts::OS,
-                share_tool.as_deref(),
+                &vm::ToolPath::new(None, share_tool.as_deref()),
                 self.probe.as_ref(),
             ),
             seed: None,
