@@ -249,9 +249,14 @@ impl Provision for ProvisionService {
         }
         let dir = crate::units::vm::api::resolve_guest(&self.root, guest)?;
         let lock = crate::units::vmstore::api::paths(&self.root).build_lock(guest);
-        if self.host.exists(&lock) {
+        // 抢住构建锁并持到重建完成：判断与动手之间不留空档，崩溃残留的锁文件也不挡路。
+        let Some(_lease) = self
+            .host
+            .try_lock(&lock)
+            .map_err(|e| format!("检查构建锁失败：{}", e))?
+        else {
             return Err("这个虚拟根有构建在跑：等构建结束再还原".to_string());
-        }
+        };
         if self.host.is_dir(&dir) {
             on_line(&format!("删除旧虚拟根 {}", guest));
             self.host

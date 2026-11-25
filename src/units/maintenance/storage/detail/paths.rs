@@ -1,5 +1,5 @@
 //! 目的：回收各处的落点与构建卷占用判定——survey 与 reclaim 共用同一套路径。
-//! 管：把盘点用的名字映射到 `vmstore` 的布局上，并给出"构建锁还在不在"的判定。
+//! 管：把盘点用的名字映射到 `vmstore` 的布局上，并问内核"构建锁此刻有没有人持"。
 //! 不管：怎么扫（survey）、怎么删（reclaim）、回收锁（lock）；落点本身归 `vmstore`。
 //! 联动：detail::survey 与 detail::reclaim 都经它取路径，扫与删不会各写一份；布局见 `units::vmstore`。
 
@@ -46,29 +46,12 @@ pub fn log_dir(root: &Path) -> PathBuf {
     crate::kernel::api::layout::logs(root)
 }
 
-/// 目的：这个虚拟根是不是有构建在跑（构建锁仍有效）。
+/// 目的：这个虚拟根是不是有构建在跑（有人此刻持着构建锁）。
 pub fn build_locked(root: &Path, guest: &str) -> bool {
     lock_held(&build_lock(root, guest))
 }
 
-/// 目的：构建锁是否仍有效——pid 还活着，或是三小时内建的（读不到按有效处理，不抢）。
+/// 目的：构建锁此刻有没有人持——问内核文件锁；问不清时按"有人持"处理（宁可不删）。
 pub fn lock_held(path: &Path) -> bool {
-    let Ok(meta) = std::fs::metadata(path) else {
-        return false;
-    };
-    let text = std::fs::read_to_string(path).unwrap_or_default();
-    if let Some(pid) = text
-        .split_whitespace()
-        .skip_while(|w| *w != "pid")
-        .nth(1)
-        .and_then(|s| s.parse::<u32>().ok())
-        && crate::kernel::detail::procs::alive(pid)
-    {
-        return true;
-    }
-    meta.modified()
-        .ok()
-        .and_then(|t| std::time::SystemTime::now().duration_since(t).ok())
-        .map(|d| d < std::time::Duration::from_secs(3 * 3600))
-        .unwrap_or(false)
+    crate::kernel::api::lock::held(path, "构建缓存卷").unwrap_or(true)
 }

@@ -40,6 +40,11 @@ impl HostFs for RealHost {
     fn make_executable(&self, path: &Path) {
         crate::kernel::api::fs_meta::make_executable(path);
     }
+
+    fn try_lock(&self, path: &Path) -> Result<Option<Box<dyn Send>>, String> {
+        let file = crate::kernel::api::lock::try_lock(path, "构建缓存卷")?;
+        Ok(file.map(|f| Box::new(f) as Box<dyn Send>))
+    }
 }
 
 /// 目的：建软链（平台机制由 kernel 的 `fs_meta` 后端提供；Windows 如实报不支持）。

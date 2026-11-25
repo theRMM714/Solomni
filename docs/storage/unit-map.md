@@ -21,5 +21,5 @@
 | `src/units/maintenance/storage/detail/space/unix.rs` | `space` 的 Unix 后端：`statvfs` |
 | `src/units/maintenance/storage/detail/space/windows.rs` | `space` 的 Windows 后端：`GetDiskFreeSpaceExW` |
 | `src/units/maintenance/storage/detail/space/other.rs` | `space` 的兜底后端：如实返回 None |
-| `src/units/maintenance/storage/detail/lock.rs` | 跨进程回收锁 |
+| `src/units/maintenance/storage/detail/lock.rs` | 跨进程回收锁：非阻塞抢 `data/.vm/storage.lock`（内核文件锁，进程退出即释放） |
 | `src/units/maintenance/storage/detail/state.rs` | `data/.vm/storage.json` 上次回收摘要 |

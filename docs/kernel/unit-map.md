@@ -43,7 +43,7 @@
 | `src/kernel/detail/fs_meta/windows.rs` | `fs_meta` 的 Windows 后端：可执行性按文件、权限位空操作、重解析点判定、占用按长度 |
 | `src/kernel/detail/fs_meta/unix.rs` | `fs_meta` 的 Unix 后端：模式位、软链、0600、块占用、0755 脚本 |
 | `src/kernel/detail/fs_meta/other.rs` | `fs_meta` 的兜底后端：没有模式位与软链，如实降级 |
-| `src/kernel/detail/lock.rs` | 跨进程文件锁的获取协议（门面）：`lock_within` 打开锁文件、25ms 轮询 `try_lock`、有界等待，超时与打开失败都报原因 |
+| `src/kernel/detail/lock.rs` | 跨进程文件锁的协议（门面）：`lock_within` 打开锁文件、25ms 轮询 `try_lock`、有界等待；`try_lock` 非阻塞拿锁（有人持着给 `None`）；`held` 只问不拿（不建锁文件）。超时与打开失败都报原因 |
 | `src/kernel/detail/lock/tests.rs` | 文件锁协议的契约用例：真文件真句柄，拿到后第二次在等待上限内超时、放掉后可再拿（`#[cfg(test)] mod tests;` 指向） |
 | `src/kernel/detail/locus.rs` | 落点身份（门面）：按卷 + 文件 id 判同一物理对象与物理包含；平台实现在 `src/kernel/detail/locus/windows.rs` / `src/kernel/detail/locus/unix.rs` |
 | `src/kernel/detail/locus/windows.rs` | `locus` 的 Windows 后端：卷序列号 + 文件 id、UNC 与映射盘判定 |

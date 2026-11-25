@@ -95,11 +95,9 @@ fn active_volume_is_protected_and_module_cleanup_is_queued() {
     let cache = crate::kernel::domain::layout::vm(&root).join("build-cache");
     std::fs::create_dir_all(&cache).unwrap();
     std::fs::write(cache.join("busy.qcow2"), b"busy").unwrap();
-    std::fs::write(
-        cache.join("busy.lock"),
-        format!("pid {} at now", std::process::id()),
-    )
-    .unwrap();
+    let lease = crate::kernel::api::lock::try_lock(&cache.join("busy.lock"), "构建缓存卷")
+        .unwrap()
+        .expect("要拿得到构建锁");
     let svc = service(&root);
     let policy = StoragePolicy {
         cap_bytes: 1,
@@ -110,7 +108,7 @@ fn active_volume_is_protected_and_module_cleanup_is_queued() {
     let plan = svc.gc(true).unwrap();
     assert!(plan.actions.iter().all(|a| a.id != "busy"));
     assert!(cache.join("busy.qcow2").exists());
-    std::fs::remove_file(cache.join("busy.lock")).unwrap();
+    drop(lease);
     let req = CleanRequest {
         kind: CleanKind::BuildCache,
         id: Some("busy".to_string()),

@@ -151,7 +151,7 @@
 | `SessionHost`（kernel 共享） | `ScriptedHost`（按脚本逐行应答；可演 `list_changed` 通知与 EOF）；返回的 `Session` 替身是 `ScriptedSession` | `sent`（发出的每一行与关闭） | 脚本用尽 = 如实报错 | EOF / 读错误 = `alive()` 转 false（崩溃检测） | `ProcessSessions`（返回 `FencedSession`；真实 MCP 服务端到端见 `src/tests/mcp.rs`，非 unix 或缺 python 时如实跳过） | 已验收 |
 | `SecretStore`（secrets） | `InMemorySecretStore` | `values`、写入次数 | 由替身注入失败 | 不适用 | `detail::YamlSecrets`（`data/.home/` 的 `secrets.yaml`，unix 0600） | 生产消费点已接入（CLI `secret`、常驻服务与一次性模块工具的 env 注入、常驻服务回执脱敏） |
 | `SpaceSurvey`（storage） | 不适用（用真实 `DiskSurvey` + 临时产品根） | `SpaceFacts` 可观察（时间戳、宿主余量、分类与条目；非 full 不扫用户数据） | 不适用（读不到按 0 计） | 不适用 | `storage/detail::survey::DiskSurvey` | 契约测试已验收（`src/tests/storage.rs`） |
-| `SpaceReclaim`（storage） | 同上 | 锁独占与 drop 释放、删除后现场、排队标记内容、上次摘要往返、构建占用拒绝 | 构建锁在场时拒绝删除 | 不适用 | `storage/detail::reclaim::DiskReclaim` | 契约测试已验收（`src/tests/storage.rs`） |
+| `SpaceReclaim`（storage） | 同上 | 锁独占与 drop 释放、删除后现场、排队标记内容、上次摘要往返、构建占用拒绝 | 构建锁被人持着时拒绝删除（抢锁而非看文件） | 不适用 | `storage/detail::reclaim::DiskReclaim` | 契约测试已验收（`src/tests/storage.rs`） |
 | `GuestLiveness`（storage） | 同上 | 无台账时如实说没有 | 不适用 | 不适用 | `storage/detail::guests::ProcessGuests` | 契约测试已验收（`src/tests/storage.rs`） |
 | `Fetcher`（provision） | 不适用（用真实 `HttpFetch` + 临时产品根；联网用例才真下载） | `digest` 按内容稳定、两次同值；下载的选源与续传在适配层内部 | 不适用（网络失败如实报错，由 service 落进 `job.lines`） | 不适用 | `provision/detail::fetch::HttpFetch` | 契约测试已验收（`src/tests/provision/`） |
 | `HostFs`（provision） | 同上（真实 `RealHost`） | 目录 / 文件的建、查、删往返；unix 执行位真的落上 | 不适用（错误文案由适配层给） | 不适用 | `provision/detail::host::RealHost` | 契约测试已验收（`src/tests/provision/`） |
