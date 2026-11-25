@@ -54,6 +54,16 @@ function charLiteralEnd(text, q) {
 
 /** 抹掉注释与字面量；返回与入参等长、换行位置不变的串。 */
 function mask(text) {
+  return maskWith(text, false);
+}
+
+/** 只抹注释、保留字面量：判"代码里写了哪些路径字面量"时用。 */
+function maskComments(text) {
+  return maskWith(text, true);
+}
+
+/** 参数：`keep` 为真时不抹字符串与字符字面量（注释照样抹）。 */
+function maskWith(text, keep) {
   const out = text.split("");
   const n = text.length;
   let i = 0;
@@ -99,7 +109,7 @@ function mask(text) {
         const close = '"' + "#".repeat(hashes);
         const found = text.indexOf(close, p + 1);
         const stop = found === -1 ? n : found + close.length;
-        blank(out, text, i, stop);
+        if (!keep) blank(out, text, i, stop);
         i = stop;
         continue;
       }
@@ -120,7 +130,7 @@ function mask(text) {
         }
         j++;
       }
-      blank(out, text, i, j);
+      if (!keep) blank(out, text, i, j);
       i = j;
       continue;
     }
@@ -129,7 +139,7 @@ function mask(text) {
       const q = c === "'" ? i : i + 1;
       const end = charLiteralEnd(text, q);
       if (end !== -1) {
-        blank(out, text, i, end);
+        if (!keep) blank(out, text, i, end);
         i = end;
         continue;
       }
@@ -141,4 +151,4 @@ function mask(text) {
   return out.join("");
 }
 
-module.exports = { mask };
+module.exports = { mask, maskComments };

@@ -22,7 +22,7 @@ impl FileLog {
     /// 目的：创建本次运行的时间戳日志文件（落在 `root/logs/`）。
     /// 参数：`origin` 是这次运行的说明（进程参数），写进文件头供对账。
     pub fn new(root: &std::path::Path, origin: &str) -> Result<FileLog, String> {
-        let dir = root.join("logs");
+        let dir = crate::kernel::domain::layout::logs(root);
         fs::create_dir_all(&dir).map_err(|e| format!("建日志目录失败：{}", e))?;
         // 时间戳：本地时区的可读名 + 毫秒（防同秒重启覆盖）。
         let now = clock::local_now();

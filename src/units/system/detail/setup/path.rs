@@ -5,6 +5,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::kernel::api::layout;
+
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
@@ -36,7 +38,7 @@ pub(crate) struct PathInfo {
 
 /// 目的：<root>/bin 在 PATH 里的写法（不带尾斜杠）。
 pub(crate) fn bin_text(root: &Path) -> String {
-    root.join("bin").display().to_string()
+    layout::bin(root).display().to_string()
 }
 
 /// 目的：备份文件路径（备份只在「真的要改 PATH」时写）。

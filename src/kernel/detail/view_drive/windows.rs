@@ -740,7 +740,9 @@ mod tests {
             letter: "Z:".to_string(),
             root: root.clone(),
         };
-        let host = root.join("session").join("test").join("test");
+        let host = crate::kernel::domain::layout::session(&root)
+            .join("test")
+            .join("test");
         let view = drive.view_of(&host).expect("根下路径要能译成视图写法");
         assert_eq!(view, PathBuf::from(r"Z:\session\test\test"));
         assert_eq!(drive.host_of(&view), Some(host.clone()));

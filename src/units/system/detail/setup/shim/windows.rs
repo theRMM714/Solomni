@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 /// 目的：shim 的落点：产品根的 bin 目录（与 .tools 等产品内目录同级）。
 pub(crate) fn shim_path(root: &Path) -> PathBuf {
-    root.join("bin").join("solomni.cmd")
+    crate::kernel::api::layout::bin(root).join("solomni.cmd")
 }
 
 /// 目的：shim 内容：调用本程序并固定 `--root`，其余参数原样透传（`%*`）。

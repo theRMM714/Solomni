@@ -43,7 +43,7 @@ pub fn overlay_dir(root: &Path) -> PathBuf {
 
 /// 目的：运行日志目录。
 pub fn log_dir(root: &Path) -> PathBuf {
-    root.join("logs")
+    layout::logs(root)
 }
 
 /// 目的：这个虚拟根是不是有构建在跑（构建锁仍有效）。

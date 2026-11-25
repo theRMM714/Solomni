@@ -5,6 +5,7 @@
 //!   契约见 docs/runtime/README.md 的「长步骤」与 docs/vm/README.md 的「并发」。
 
 use crate::kernel::api::fence::FencePlan;
+use crate::kernel::api::layout;
 use crate::kernel::ports::{HostProbe, Log};
 use crate::units::vm::api::{
     ExecPlan, GuestDiagnosis, GuestRun, GuestSpec, Vm, admit_guest, classify_base, mounts_from,
@@ -98,7 +99,7 @@ impl GuestBoot {
         let (mut rw, ro_tree) = stable_roots(&sandboxes);
         // 建 guest 时树里可能还没有模块（proxy 的第一个子工作可以只用内建工具）：
         // 模块根也按稳定根挂上，后面新子会话加模块时不用重建 guest。
-        let modules_root = root.join("modules");
+        let modules_root = layout::modules_data(&root);
         if probe.is_dir(&modules_root) && !rw.contains(&modules_root) {
             rw.push(modules_root);
             rw.sort();
