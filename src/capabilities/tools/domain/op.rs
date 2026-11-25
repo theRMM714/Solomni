@@ -7,7 +7,7 @@
 //!   文本永远只是 JSON 的投影：CLI/TUI 写的是同一份 schema 的位置参数与旗语，GUI 与模型直接传 JSON，
 //!   两条路进的是同一份 `check`。
 
-use super::commands::{CommandBook, Phase};
+use super::commands::{CommandBook, Phase, Runtime};
 use super::schema::{ArgFault, ToolSchema};
 use crate::capabilities::catalog::modules::api::{Param, ParamType};
 use serde::Deserialize;
@@ -51,6 +51,8 @@ pub struct Op {
     pub executor: Executor,
     /// 目的：这条命令有写操作，需要 `--yes` 才算数（缺省只预览或只报状态）。
     pub confirm: bool,
+    /// 目的：要不要常驻运行时：`none` 的命令在装配核心后立即分派退出，不占视图盘、不起后台任务与常驻服务。
+    pub runtime: Runtime,
     /// 目的：参数契约——模型侧说明、JSON Schema、文本解析与校验都读它。
     pub schema: ToolSchema,
     /// 目的：`--json` 时的机器回执字段（给手册用；回执本身由呈现层排版）。
@@ -83,6 +85,7 @@ impl OpBook {
                 phase: c.phase,
                 executor: c.executor,
                 confirm: c.confirm,
+                runtime: c.runtime,
                 schema: ToolSchema {
                     desc: c.brief.clone(),
                     params: c.params.clone(),
@@ -156,6 +159,13 @@ impl OpBook {
                     "{} 是转录相命令，执行者不能是 system（装配核心之前不会跑它）",
                     op.id
                 )),
+            }
+            // 运行需求与相位必须自洽：启动相在核心装配之前跑完，永远走轻量路径。
+            if op.phase == Phase::Boot && op.runtime == Runtime::Services {
+                out.push(format!(
+                    "{} 是启动相命令，不能声明 runtime: services（装配核心之前没有常驻运行时）",
+                    op.id
+                ));
             }
             out.extend(schema_problems(&op.id, op.schema.params.as_ref()));
         }

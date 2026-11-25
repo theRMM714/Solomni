@@ -6,7 +6,7 @@
 pub use crate::capabilities::tools::domain::budget::{
     ResultBudget, cap_result_with, continuation_for,
 };
-pub use crate::capabilities::tools::domain::commands::{CommandBook, Phase};
+pub use crate::capabilities::tools::domain::commands::{CommandBook, Phase, Runtime};
 pub use crate::capabilities::tools::domain::op::{
     Executor, Op, OpBook, complete as complete_op, parse as parse_op, usage as op_usage,
     usage_named,

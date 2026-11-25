@@ -1,11 +1,13 @@
 # 目的：命令面——产品对外暴露的每一条命令的**唯一声明**（转录相 core 与启动相 boot 共用一张表）。
-# 管：命令名、别名、分组、一句话说明、确认门槛、参数契约（params）、执行者（executor）。
+# 管：命令名、别名、分组、一句话说明、确认门槛、参数契约（params）、执行者（executor）、运行需求（runtime）。
 # 不管：命令怎么执行（各执行者自己的入口）、手册怎么排版（presentation/cli 的目录渲染）。
 # 约束：名字与别名全局唯一；phase=boot 的命令用长旗语形式调用（--name），phase=core 的命令在转录中心里输入；
 #   清单顺序即手册顺序（分组按首次出现排序）。
 #   params 与动作面（systools/tools.yaml）是**同一种形状**：位置序号（positional）、可选值（values）、
 #   类型、必填、缺省值都写在这里；写法、手册、补全与校验全部从它派生，不再手写位置参数字符串。
 #   executor 决定最后一步落在哪：core（走能力面 act）/ system（装配核心前就能跑）/ ui（纯界面动作）。
+#   runtime 决定要不要常驻运行时：none（缺省，跑完即回——不占视图盘、不起存储自动任务、不拉起常驻服务、免围栏授权）
+#   或 services（进会话/生成、Web、常驻服务、模块工具调用）；启动相命令不得声明 services。
 # 联动：解析与校验在 src/capabilities/tools/domain/{commands,op}.rs；覆盖门禁在 src/tests/commands.rs。
 
 commands:
@@ -14,6 +16,7 @@ commands:
     group: 会话
     phase: core
     executor: core
+    runtime: services
     brief: 发起单 agent 会话，进入转录提示符
     params:
       agents:
@@ -25,6 +28,7 @@ commands:
     group: 会话
     phase: core
     executor: core
+    runtime: services
     brief: 多 agent 协作，由同一个主持人收口
     params:
       agents:
@@ -39,6 +43,7 @@ commands:
     group: 会话
     phase: core
     executor: core
+    runtime: services
     brief: 决定权整块交给核心（不看单席约束）
 
   - name: rewind
@@ -94,6 +99,7 @@ commands:
     group: 转录
     phase: core
     executor: core
+    runtime: services
     brief: 只读诊断一条虚拟机档会话（进程 / CPU / 内存 / 挂载）
     params:
       session:
@@ -173,6 +179,7 @@ commands:
     group: 后台
     phase: core
     executor: core
+    runtime: services
     brief: 常驻服务：列清单、启停、调用操作
     params:
       action:
@@ -236,6 +243,7 @@ commands:
     group: 界面
     phase: core
     executor: ui
+    runtime: services
     brief: 转入 Web 转录中心（Ctrl+C 回到这里）
     params:
       port:
