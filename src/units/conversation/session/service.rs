@@ -10,9 +10,7 @@ use crate::units::transcript::api::SessionEvent;
 use crate::units::turn_state::api::History;
 use std::sync::Arc;
 
-pub mod assemble;
 pub(crate) mod tree;
-pub mod verify;
 
 /// 目的：会话能力：持历史落盘端口，按用例答话。
 pub struct SessionService {

@@ -247,7 +247,7 @@ pub(crate) fn member_with_service_tools(
     module: &str,
     residents: Arc<dyn crate::units::residents::api::ResidentOps + Send + Sync>,
     op: crate::units::agentloop::api::ServiceOp,
-) -> crate::units::agentloop::api::MemberTools {
+) -> crate::units::agentloop::domain::member_tools::MemberTools {
     let sb = test_sandbox(module, &[]);
     let mut modules = BTreeMap::new();
     modules.insert(
@@ -260,7 +260,7 @@ pub(crate) fn member_with_service_tools(
             services: [(op.tool.clone(), op)].into_iter().collect(),
         },
     );
-    crate::units::agentloop::api::MemberTools {
+    crate::units::agentloop::domain::member_tools::MemberTools {
         face: crate::units::agentloop::api::ToolFace {
             mode: crate::units::pure::registry_model::api::ToolMode::Envelope,
             modules,

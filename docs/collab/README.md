@@ -7,7 +7,7 @@
 ## 管什么 / 不管什么
 
 - 管：协作会话对象与状态（名单、方案、任务链、挂起）、讨论泵与轮转发言、整理出链、链驱动、节点与总验收及定向返工、断点续跑。
-- 不管：不落盘（经 `session::api`）、不建会话（`runtime` 建）、不选模型（`registry` 解析）、不画界面（`cli` / `web`）；成员回合的驱动 / 轮循环 / 工具循环在 `session` 的 `service/engine/`（见 [`docs/session/unit-map.md`](../session/unit-map.md)）；核实环境（只读核实用例）也由 `session` 装配——本单元只按 `session::api::VerifySpec` 递事实、拿回 `Option<Box<dyn CoreVerify>>` 并以 `Option<&mut dyn CoreVerify>` 传给 `session` 的核心操作回路（`src/units/conversation/session/service/verify.rs`）。
+- 不管：不落盘（经 `session::api`）、不建会话（`runtime` 建）、不选模型（`registry` 解析）、不画界面（`cli` / `web`）；成员回合的驱动 / 轮循环 / 工具循环在 `agentloop` 的 `engine/`（见 [`docs/agentloop/unit-map.md`](../agentloop/unit-map.md)）；核实环境（只读核实用例）也由 `agentloop` 装配——本单元只按 `agentloop::api::VerifySpec` 递事实、拿回 `Option<Box<dyn CoreVerify>>` 并以 `Option<&mut dyn CoreVerify>` 传给 `agentloop` 的核心操作回路（`src/units/agentloop/domain/verify.rs`）。
 
 ## 入站契约与状态归属
 
@@ -25,7 +25,7 @@
 
 ## 改动本单元时必须同步
 
-- 核实环境的规格（`VerifySpec` 的字段与构造）只有 `src/units/conversation/session/service/verify.rs` 一处：改字段必须同改 `src/units/conversation/collab/service/turn_io.rs` 的 `verify_env` 与 `src/tests/collab/` 的核实用例。
+- 核实环境的规格（`VerifySpec` 的字段与构造）只有 `src/units/agentloop/domain/verify.rs` 一处：改字段必须同改 `src/units/conversation/collab/service/turn_io.rs` 的 `verify_env` 与 `src/tests/collab/` 的核实用例。
 - 状态派生（`src/units/conversation/collab/domain/`）与驱动（`src/units/agentloop/engine/driver.rs`）必须同改；同步 `src/tests/collab/` 五份用例、`docs/collab/task-chain.md`、`docs/session/session-model.md`、`docs/tools/tools-and-roles.md`。
 
 ## 本目录

@@ -19,7 +19,7 @@ use crate::units::tools::api::{ToolExec, Tools};
 use crate::units::turn_state::api::{Flows, History};
 use crate::units::turn_state::domain::decisions::Gates;
 use crate::units::turn_state::domain::live::{Session, TurnState};
-use crate::units::turn_state::domain::ports::SessionPorts;
+use crate::units::agentloop::api::SessionPorts;
 use crate::units::vm::api::Vm;
 use crate::units::workspace::api::Workspace;
 

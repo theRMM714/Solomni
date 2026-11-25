@@ -43,7 +43,7 @@
 - `src/units/work/service/create.rs` → 建工作的顺序、日志 key 与失败撤销是行为契约：改一处必须同改 `src/tests/runtime.rs`、`src/tests/api/compaction.rs`、`src/tests/session/lifecycle.rs` 的断言与 e2e 的建工作旅程。
 - `src/units/work/service/guest_job.rs` → 稳定根判据与 guest 规格是行为契约：改一处必须同改 e2e 的 vm 档会话场景与 `SOLOMNI_VM_LIVE` 真机探针（`tests/cross-platform/gaps.yaml`）。
 - `src/units/work/domain.rs` → 工作名校验与自由函数（`dedup_modules` / `merge_into_one` / `session_started`）是纯逻辑，行为由 e2e 的建工作与协作旅程覆盖（具体实现的用例已移除）。
-- `src/units/turn/turn/service/facts.rs` 的 `Turn::build_single`（装配落 `src/units/conversation/session/service/assemble.rs`）→ 本单元 `commit_work` 的唯一装配入口：改签名必须同改这里、`src/units/turn/turn/unit-map` 的对应行与 `Turn` 的用例。
+- `src/units/turn/turn/service/facts.rs` 的 `Turn::build_single`（装配落 `src/units/agentloop/domain/assembly.rs`）→ 本单元 `commit_work` 的唯一装配入口：改签名必须同改这里、`src/units/turn/turn/unit-map` 的对应行与 `Turn` 的用例。
 
 ## 本目录
 

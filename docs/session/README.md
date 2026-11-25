@@ -23,7 +23,7 @@
 
 ## 改动本单元时必须同步
 
-- 一条会话的运行时（`src/units/agentloop/domain/session.rs`）或回合引擎（`src/units/agentloop/engine/`）一改 → 本单元的装配入口（`src/units/conversation/session/service/assemble.rs`）与驱动（`src/units/turn/`）同跟。
+- 一条会话的运行时（`src/units/agentloop/domain/session.rs`）或回合引擎（`src/units/agentloop/engine/`）一改 → 装配入口（`src/units/agentloop/domain/assembly.rs`，在 `agentloop`）与驱动（`src/units/turn/`）同跟。
 - 行与事件词汇（`src/units/transcript/domain/events.rs`、`LineView` 字段）一改 → `collab` 的状态派生、`runtime` 的视图、`cli` / `web` 渲染、`src/tests/session/` 全跟。
 - 机制自己的事件与关卡（`Push` 的 `kind` / `payload`、`Gate`）改 → 对应机制的词汇文件（协作在 `src/units/conversation/collab/domain/events.rs` 与 `src/units/conversation/collab/domain/gates.rs`）与它的渲染；会话侧不跟着改。
 - 流程面（`src/units/turn_state/domain/flow.rs` 的 `Flow` / `MemberAsk` / `Handback` / `WorkPlan`，归 `turn_state`）一改 → 每个流程的实现（协作在 `src/units/conversation/collab/service/flow.rs`）与驱动（`src/units/turn/turn/service/flow.rs`、`src/units/turn/turn/service/generation/collab.rs`）一起改。

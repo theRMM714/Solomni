@@ -1,23 +1,13 @@
 //! 目的：会话能力的入站面——其它能力与呈现层只准用这里（不许碰 `domain` / `ports`）。
-//! 管：重导出会话装配（参数对象与整场入口）、核心核实环境、落盘手柄、会话树派生与席位自洽断言。
+//! 管：重导出落盘手柄、会话树派生与席位自洽断言。
 //! 不管：`domain` / `ports` 的内部实现；裁决队与流程面（在 `turn_state`）；落盘与队列两个面由 `turn_state` 定义；
 //!   会话运行时（在 `agentloop`）；会话身份与声明（在 `session_model`）。
 //! 联动：别的能力经 `turn_state::api::History` 造会话、追流水、读元信息、删会话；`turn` 从 `turn_state` 取流程面、
-//!   从这里取会话装配；呈现层经 runtime 的队列代理调 `HistoryOps`。
+//!   从 `agentloop::api` 取整场装配（它构造工具面活对象，装配机必须与工具面同单元）；呈现层经 runtime 的队列代理调 `HistoryOps`。
 
 // 席位与机制声明在 `session_model`；这里只留自洽断言（它要同时读工具总表与工具面，读不了环 2 的纯值单元）。
 #[allow(unused_imports)]
 pub use crate::units::conversation::session::domain::seat_check::problems as mechanism_problems;
-// 会话装配：参数对象与三个整场入口（加上只取工具面值的 `member_face`）。
-// `MemberTools`（工具面的活对象）**不经这里转出**：跨能力只传值结构（R16）。
-#[cfg(test)]
-pub use crate::units::conversation::session::service::assemble::member_face;
-pub use crate::units::conversation::session::service::assemble::{
-    MemberEnvParts, MemberSpec, ProxySpec, RebuildSpec, SingleSpec, proxy_session, rebuild_single,
-    single_session,
-};
-// 核心核实环境：`collab` 的各关卡按席位装配只读核实工具，装配逻辑留在本能力。
-pub use crate::units::conversation::session::service::verify::{VerifySpec, verify_tools};
 // 落盘手柄：工作线程按"一次模型调用"的粒度增量落盘。
 #[allow(unused_imports)]
 pub use crate::units::conversation::session::service::{Persister, persist_events, record_events};

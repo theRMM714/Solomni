@@ -47,7 +47,7 @@
 - **动作表不等于分发器**：`runtime` 的 `ActionOps::act` 是**入口分发**（查表 → 校验 → 授权 → 审计，`src/units/runtime/service/action.rs`），执行体仍在各能力的用例里；把它写成什么都干的「万能分发器」等于把下层用例搬进顶层。
 - **聚合面不是业务**：`Faces`（`src/presentation/faces.rs`）只做装配——回答「这块屏幕取哪几个面」，不得长判定；判定与编排留在 `runtime`，机制留在各能力的 `detail/`。
 - **把可变借用当参数传**：账本这类纯值按值进出——交一份、拿回更新后的那份，不借别人的 `&mut`（`src/units/tools/api.rs` 的 `Recorded`；R16）。
-- **把环境包当参数传**：把端口、状态与值拼成一个结构递给别的能力，等于传活对象；改成只传值 + 少量窄端口（`src/units/agentloop/domain/member_tools.rs`、R16）：该文件里的 `ToolFace` 是抽出来的值面，端口与活状态仍留在 `MemberTools`；核实用例只借一个窄端口 `CoreVerify`，不把 `MemberTools` 写进 api 签名。`session` 的 `api` 不转出 `MemberTools`：装配入口（`src/units/conversation/session/service/assemble.rs` 的 `single_session` / `rebuild_single` / `proxy_session`）只收端口与值，核实环境经 `verify_tools(&VerifySpec)`（`src/units/conversation/session/service/verify.rs`）取。
+- **把环境包当参数传**：把端口、状态与值拼成一个结构递给别的能力，等于传活对象；改成只传值 + 少量窄端口（`src/units/agentloop/domain/member_tools.rs`、R16）：该文件里的 `ToolFace` 是抽出来的值面，端口与活状态仍留在 `MemberTools`；核实用例只借一个窄端口 `CoreVerify`，不把 `MemberTools` 写进 api 签名。`agentloop` 的 `api` 不转出 `MemberTools`：装配入口（`src/units/agentloop/domain/assembly.rs` 的 `single_session` / `rebuild_single` / `proxy_session`）只收端口与值，核实环境经 `verify_tools(&VerifySpec)`（`src/units/agentloop/domain/verify.rs`）取。
 
 ## 五、粒度上限
 
