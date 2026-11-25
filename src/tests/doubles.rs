@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 
 use super::builders::SilentRunner;
-use crate::units::catalog::registry::api::AgentMeta;
+use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::runtime::api::SessionEvent;
 use crate::units::work::api::WorkSpec;
 

@@ -1,10 +1,8 @@
-//! 目的：agent 的存档形态与解析——用户配置的具名能力组合。
-//! 管：Agent / AgentView；名字校验与保留名检查；RosterPick 解析与唯一实例命名；列表文案。
-//! 不管：能力注册表（在 modules/ 公地）；落盘（在 detail/yaml_settings.rs）；登记处用例（在 service.rs）。
-//! 联动：被 registry/api.rs 重导出；service.rs 读写；runtime 按 agent 名取 Roster。
+//! 目的：agent 的存档形态——登记处里具名能力组合的纯值模型。
+//! 管：Agent / AgentView / AgentMeta / AgentDraft 与名单 DTO；名字校验与保留名检查；名录视图与按名点名；列表文案。
+//! 不管：落盘（在 catalog 的 detail/yaml_settings.rs）；名单落地与唯一实例命名（在 catalog 的 domain/picks.rs）；登记处用例（在 catalog 的 service.rs）。
+//! 联动：会话名单、登记处、runtime 与呈现层都经 registry_model::api 取这些形状。
 
-use crate::units::catalog::modules::api::Roster;
-use crate::units::catalog::registry::domain::providers::ModelEntry;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -177,22 +175,6 @@ pub fn listing(known: &Agents) -> String {
         .join("\n")
 }
 
-/// 目的：可用模型清单（拟名单时给模型看）：id / 名称 / api_model / 说明。
-pub fn model_listing(models: &BTreeMap<String, ModelEntry>) -> String {
-    models
-        .iter()
-        .map(|(id, m)| {
-            let note = if m.note.trim().is_empty() {
-                String::new()
-            } else {
-                format!("；{}", m.note)
-            };
-            format!("- {}：{}（{}{}）", id, m.name, m.api_model, note)
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 /// 目的：核心拟名单时的一条：复用已存 agent，或组装一个新的（JSON 里二选一；Reuse 在前）。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
@@ -217,102 +199,13 @@ pub enum RosterPick {
 }
 
 impl RosterPick {
-    fn why(&self) -> String {
+    pub fn why(&self) -> String {
         match self {
             RosterPick::Reuse { why, .. } | RosterPick::Build { why, .. } => why.clone(),
         }
     }
 }
 
-/// 目的：把核心拟的名单落地成 agent 实例：逐条校验（存在性、模型真实），
-///    非法条目整条拒收并给出原因（不静默改写）。同一模块可以被多个 agent 共用，同一 agent 内重复只留一份。
-///    返回（已接受的实例 + 理由, 拒收说明）。
-pub fn resolve_picks(
-    picks: Vec<RosterPick>,
-    known: &Agents,
-    roster: &Roster,
-    models: &BTreeMap<String, ModelEntry>,
-) -> (Vec<(AgentMeta, String)>, Vec<String>) {
-    let mut out: Vec<(AgentMeta, String)> = Vec::new();
-    let mut rejected: Vec<String> = Vec::new();
-    let mut names: Vec<String> = Vec::new();
-    for p in picks {
-        let why = p.why();
-        // 复用项以登记处为准（模块与模型都取它自己的，核心不代拟模型）。
-        let (base, modules, model, chara, transient) = match p {
-            RosterPick::Reuse { agent, .. } => match known.get(agent.trim()) {
-                Some(a) => (
-                    agent.trim().to_string(),
-                    a.modules.clone(),
-                    a.model.clone(),
-                    a.chara.clone(),
-                    false,
-                ),
-                None => {
-                    rejected.push(format!("agent {} 不在登记处", agent.trim()));
-                    continue;
-                }
-            },
-            RosterPick::Build {
-                name,
-                modules,
-                model,
-                chara,
-                ..
-            } => {
-                let label = if name.trim().is_empty() {
-                    "组装项".to_string()
-                } else {
-                    name.trim().to_string()
-                };
-                if !models.contains_key(&model) {
-                    rejected.push(format!("{} 指定的模型 {} 不存在", label, model));
-                    continue;
-                }
-                (label, modules, Some(model), chara.trim().to_string(), true)
-            }
-        };
-        let label = base.clone();
-        let mut local: Vec<String> = Vec::new();
-        let mut bad = false;
-        for id in &modules {
-            if !roster.modules.iter().any(|m| &m.manifest.id == id) {
-                rejected.push(format!("{} 的模块 {} 不存在", label, id));
-                bad = true;
-                break;
-            }
-            if !local.contains(id) {
-                local.push(id.clone());
-            }
-        }
-        if bad {
-            continue;
-        }
-        if local.is_empty() {
-            rejected.push(format!("{} 没有任何模块", label));
-            continue;
-        }
-        // 名字不合法就用首个模块 id 兜底；同名单内重名追加尾号。
-        let name = if validate_name(&base).is_ok() {
-            base
-        } else {
-            local[0].clone()
-        };
-        let name = unique_instance_name(&name, &names);
-        names.push(name.clone());
-        out.push((
-            AgentMeta::normalized(name, local, model, chara, transient),
-            why,
-        ));
-    }
-    (out, rejected)
-}
-
-/// 目的：同一工作内 agent 名去重：重名时依次追加 -2、-3（用户不改名时的兜底）。
-///   后缀探测是内核的名字契约（`kernel::api::name::dedup_suffix`），这里只把 `taken` 变成本次已占集合。
-pub fn unique_instance_name(base: &str, taken: &[String]) -> String {
-    crate::kernel::api::name::dedup_suffix(base, |c| taken.iter().any(|t| t == c))
-}
 /// 目的：登记处全部 agent 的视图（空登记处不是错误——调用方据此给引导）。
 pub fn views(agents: &Agents) -> Vec<AgentView> {
     agents

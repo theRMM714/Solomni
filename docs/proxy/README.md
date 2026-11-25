@@ -22,7 +22,7 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`permission`（`ProfileId`）、`registry`（`validate_name` / `AgentMeta`）、`session`（`OptionView`）；`tools` 的 `ToolBook` / `ToolOutcome` 与 `kernel::ports::ToolHandler`。
+- 经 `::api` 用到：`permission`（`ProfileId`）、`registry_model`（`validate_name` / `AgentMeta`）、`session`（`OptionView`）；`tools` 的 `ToolBook` / `ToolOutcome` 与 `kernel::ports::ToolHandler`。
 - 谁在用我：`runtime`（`src/units/runtime/service/handle.rs` 装配 `ProxyHandler`；`src/units/runtime/service/action.rs` 与 `src/units/runtime/service/{action,bridge}.rs` 用值类型与 `ProxyHost`）、测试。
 - **不引用 `runtime`**：依赖只向下，`proxy` 在 `runtime` 之下（`layers.yaml`）。
 

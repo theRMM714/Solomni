@@ -7,9 +7,9 @@
 
 use crate::kernel::api::types::SessionId;
 use crate::kernel::ports::{HostProbe, Log};
-use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::conversation::session::api::HistoryView;
 use crate::units::pure::exec_model::api::Tier;
+use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::transcript::api::{OptionView, SessionEvent};
 use crate::units::vm::api::{ExecPlan, GuestStop, Vm};
 use crate::units::workspace::api::Sandboxes;

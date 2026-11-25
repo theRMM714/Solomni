@@ -21,10 +21,10 @@ use crate::units::work::api::{
 use crate::presentation::web::routes::{self, ROUTES};
 use crate::presentation::web::{self, FenceInfo};
 use crate::units::catalog::modules::api::{ModulesOps, Roster};
-use crate::units::catalog::registry::api::AgentView;
 use crate::units::catalog::registry::api::RegistryOps;
 use crate::units::catalog::registry::api::{AppSettings, ModelView, ProviderView};
 use crate::units::pure::exec_model::api::Tier;
+use crate::units::pure::registry_model::api::AgentView;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::path::Path;

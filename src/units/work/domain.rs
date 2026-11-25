@@ -3,7 +3,7 @@
 //! 不管：谁在什么时机调用它们（create.rs / config.rs / runtime 的代理入口）。
 //! 联动：create.rs、config.rs 与 runtime 的代理入口共用这里，避免同一规则两处实现。
 
-use crate::units::catalog::registry::api::AgentMeta;
+use crate::units::pure::registry_model::api::AgentMeta;
 
 /// 目的：单模式的组合语义——多个 agent 的模块并成一个**临时组合**实例（去重、保序；模型取核心默认）。
 /// 约束：人设取空——多份人设无法诚实合并，由用户在会话配置里补。

@@ -1,9 +1,9 @@
 # registry（登记处）
-> 定位：供应商 / 模型 / agent / 设置四份 yaml 的内存形态、解析链、写面与探测行为。
+> 定位：供应商 / 模型 / agent / 设置四份 yaml 的内存形态、解析链、写面与探测行为（agent 的形状与名字规则在环 1 的 [`registry_model`](../registry-model/README.md)）。
 > 效力：规范｜核对：2026-11-04｜依据：`src/units/catalog/registry/api.rs`
 
 ## 管什么 / 不管什么
-- 管：四份 yaml 的内存形态与用例、解析链（含思考强度目录与模型映射）、agent 登记处与名字校验、代拟名单落地、密钥回显边界。
+- 管：四份 yaml 的内存形态与用例、解析链（含思考强度目录与模型映射）、agent 登记处的写用例与代拟名单落地、密钥回显边界。
 - 不管：不建通道（`llm` 的 `detail`）、不替用户选模型（用户选，登记处只解析）、不碰会话。
 
 ## 入站契约与状态归属
@@ -14,7 +14,7 @@
 - 落盘形态归本单元：`.home/` 下四份 yaml，读写与解析在 `src/units/catalog/registry/detail/yaml_settings.rs`。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
-- 经 `::api` 用到：`kernel`、`llm`、`modules`、`permission`、`prompt`、`session`
+- 经 `::api` 用到：`kernel`、`llm`、`modules`、`permission`、`prompt`、`session`、`registry_model`
 - 谁在用我：`cli`、`collab`、`runtime`、`slate`；`web` 经 `Faces.registry`（`RegistryOps`）调用
 
 ## 一、工具调用探测（`--probe-tools`）
@@ -49,7 +49,7 @@
 
 ## 五、四份 yaml 的读写
 - `.home/` 下四份文件分开读写：`load` 逐份读，缺哪份就用哪份的默认；`save` 会同时写四份。
-- 结构定义在 `src/units/catalog/registry/domain/providers.rs` 与 `src/units/catalog/registry/domain/agents.rs`；解析与写盘在 `src/units/catalog/registry/detail/yaml_settings.rs`。
+- 结构定义在 `src/units/catalog/registry/domain/providers.rs`；agent 的形状与名字规则在环 1 的 `src/units/pure/registry_model/domain/agents.rs`，名单落地在 `src/units/catalog/registry/domain/picks.rs`；解析与写盘在 `src/units/catalog/registry/detail/yaml_settings.rs`。
 - yaml 非法（解析失败）= 装配失败并指出是哪一份。
 - 字段、默认值与拒收规则见 `REGISTRY_SPEC.md`。
 

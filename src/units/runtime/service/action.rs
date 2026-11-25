@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::kernel::api::clock;
-use crate::units::catalog::registry::api::AgentMeta;
+use crate::units::pure::registry_model::api::AgentMeta;
 
 // 三个子模块各管一类动作：建会话 / 模块工具 / 登记处。
 mod module;

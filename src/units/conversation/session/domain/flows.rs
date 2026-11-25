@@ -5,13 +5,14 @@
 
 use std::sync::Arc;
 
-use crate::units::catalog::registry::api::{AgentMeta, Settings};
+use crate::units::catalog::registry::api::Settings;
 use crate::units::conversation::session::domain::decisions::Gates;
 use crate::units::conversation::session::domain::flow::Flow;
 use crate::units::conversation::session::domain::history::SessionMeta;
 use crate::units::conversation::session::domain::profile::Profiles;
 use crate::units::conversation::session::domain::sequence::Sequence;
 use crate::units::llm::api::Channel;
+use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::workspace::api::Sandboxes;
 
 /// 目的：造一段流程要的现场（每一段按 id 自己取用，本段不用的部分不消费）。

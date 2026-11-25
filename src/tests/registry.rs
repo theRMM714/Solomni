@@ -145,7 +145,7 @@ pub(crate) fn agent_meta_is_the_single_conversion_from_a_registry_view() {
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
     agent_upsert_chara(&mut core, "调研", &["a"], "m", "说明", " 严谨 ").unwrap();
     let view = core.registry().agent_views().remove(0);
-    let meta = crate::units::catalog::registry::api::agent_meta(&view);
+    let meta = crate::units::pure::registry_model::api::agent_meta(&view);
     assert_eq!(meta.name, view.name);
     assert!(!meta.transient, "登记处来的 agent 不是临时 agent");
     assert_eq!(meta.modules, view.modules);
@@ -357,12 +357,14 @@ pub(crate) fn a_probe_writes_back_only_conclusive_results() {
 #[test]
 pub(crate) fn reserved_directory_names_are_rejected_case_insensitively() {
     let reserved = vec!["work".to_string(), "children".to_string()];
-    assert!(crate::units::catalog::registry::api::check_reserved("children", &reserved).is_err());
     assert!(
-        crate::units::catalog::registry::api::check_reserved("CHILDREN", &reserved).is_err(),
+        crate::units::pure::registry_model::api::check_reserved("children", &reserved).is_err()
+    );
+    assert!(
+        crate::units::pure::registry_model::api::check_reserved("CHILDREN", &reserved).is_err(),
         "Windows 文件系统不区分大小写"
     );
-    assert!(crate::units::catalog::registry::api::check_reserved("甲", &reserved).is_ok());
+    assert!(crate::units::pure::registry_model::api::check_reserved("甲", &reserved).is_ok());
 }
 
 /// 目的：登记时就拒掉目录外的档、悬空的默认档与被保留键的片段；删掉仍被模型使用的等级也要拒绝。

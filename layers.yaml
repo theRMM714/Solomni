@@ -10,6 +10,7 @@ kernel: 0
 # 环 1 纯
 exec_model: 1
 permission: 1
+registry_model: 1
 taskchain: 1
 
 # 环 2 状态与机制

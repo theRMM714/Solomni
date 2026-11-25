@@ -6,9 +6,9 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::conversation::session::api::{GateTicket, MemberTurn};
 use crate::units::llm::api::{CompleteOpts, Msg};
+use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::transcript::api::{Gate, SessionEvent};
 use crate::units::workspace::api::Sandboxes;
 

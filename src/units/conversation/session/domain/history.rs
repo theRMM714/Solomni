@@ -4,8 +4,8 @@
 //! 不管：落盘机制（在 `detail/fs_history.rs` 的 `HistoryStore` 实现）；会话状态派生（在 `session.rs`）。
 //! 联动：由 `service.rs` 与 `ports.rs` 使用，`api.rs` 对外重导出。
 
-use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::conversation::session::domain::profile::SessionSpec;
+use crate::units::pure::registry_model::api::AgentMeta;
 use serde::{Deserialize, Serialize};
 
 /// 目的：会话元信息：创建工作时由用户决定的身份（形态 / 名单 / 档位 / 归属），

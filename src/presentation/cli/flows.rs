@@ -122,7 +122,7 @@ pub(super) fn single_flow(
     let picked: Vec<AgentMeta> = if names.trim().is_empty() {
         views
             .iter()
-            .map(crate::units::catalog::registry::api::agent_meta)
+            .map(crate::units::pure::registry_model::api::agent_meta)
             .collect()
     } else {
         match pick_agents(faces, &split_names(&names)) {

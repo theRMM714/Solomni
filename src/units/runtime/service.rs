@@ -8,7 +8,7 @@ use crate::units::catalog::modules::api::{Module, Modules, Roster};
 use crate::units::catalog::packages::api::Packages;
 use crate::units::catalog::registry::api::Registry;
 use crate::units::catalog::registry::api::{
-    AgentView, AppSettings, ModelView, ProviderView, RegistryOps, StorageSettings,
+    AppSettings, ModelView, ProviderView, RegistryOps, StorageSettings,
 };
 use crate::units::conversation::proxy::api as d;
 use crate::units::conversation::session::api::subtree_of;
@@ -23,6 +23,7 @@ use crate::units::maintenance::builds::api::Builds;
 use crate::units::prompt::api::Prompt;
 use crate::units::provision::api::Provision;
 use crate::units::pure::exec_model::api::Tier;
+use crate::units::pure::registry_model::api::AgentView;
 use crate::units::runtime::api::{
     Acted, ActionCall, ActionOps, ActionParamView, ActionView, Advance, Caller, CollabWork, Events,
     LogOps, Output, RebuildDeps, RewindOutcome, RewindTarget, RuntimeOps,

@@ -403,7 +403,7 @@ pub(crate) fn pick_agents(faces: &Faces, names: &[String]) -> Result<Vec<AgentMe
     let views = faces.registry.pick_agents(names)?;
     Ok(views
         .iter()
-        .map(crate::units::catalog::registry::api::agent_meta)
+        .map(crate::units::pure::registry_model::api::agent_meta)
         .collect())
 }
 
