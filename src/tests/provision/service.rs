@@ -161,6 +161,10 @@ fn install_identity_follows_the_manifest() {
     let mut resized = dep.clone();
     resized.size_mb = 999;
     assert_ne!(base, install_identity(&resized), "体积变了身份要变");
+    let mut moved = dep.clone();
+    moved.install = ".t/elsewhere".to_string();
+    moved.probe = ".t/elsewhere/bin".to_string();
+    assert_eq!(base, install_identity(&moved), "只换位置不算换了内容");
 }
 
 /// 目的：安装身份与脚本侧 env.js 逐字节同口径——同一份合成清单两侧必须算出同一指纹。
@@ -186,7 +190,7 @@ fn install_identity_is_pinned_across_languages() {
     });
     assert_eq!(
         install_identity(&dep),
-        "99076528b675dd67741122f3fa801f6c8ca87f9359bb883441b13d657537eb26",
+        "c936afade0b996008570b9bd08a26bcb0e085ebe2ed14581635f2ea4f9d8c043",
         "身份材料布局要与 env.js 的 installIdentity 逐字节一致"
     );
 }
@@ -1010,6 +1014,86 @@ fn install_core_uses_cache_and_checks_probe() {
         lines
     );
     assert!(lines.iter().any(|l| l.contains("用缓存")), "{:?}", lines);
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// 目的：内容没变、清单只把落点改了时只搬家——不重下也不重解（连缓存都没了也照样成）。
+/// 约束：搬家后旧位置不再留着，台账落点跟着新位置走（否则下次又判成位置变了）。
+#[test]
+fn a_moved_placement_relocates_without_downloading() {
+    let root = crate::tests::scratch("provision-relocate");
+    let cache = crate::kernel::domain::layout::vm(&root).join("cache");
+    fs::create_dir_all(&cache).expect("建缓存");
+    let tar_path = cache.join("a.tar");
+    {
+        let f = fs::File::create(&tar_path).expect("建 tar");
+        let mut b = tar::Builder::new(f);
+        let mut h = tar::Header::new_gnu();
+        h.set_size(5);
+        h.set_mode(0o644);
+        h.set_cksum();
+        b.append_data(&mut h, "f.txt", &b"hello"[..])
+            .expect("写文件");
+        b.finish().expect("收尾");
+    }
+    let mut dep = Dep {
+        id: "x".to_string(),
+        os: "any".to_string(),
+        arch: "any".to_string(),
+        kind: "archive".to_string(),
+        install: "data/.vm/x".to_string(),
+        probe: "data/.vm/x/f.txt".to_string(),
+        guest: None,
+        family: None,
+        toolchain: None,
+        source: "release:a.tar".to_string(),
+        strip: 0,
+        size_mb: 0,
+        sha256: String::new(),
+        note: String::new(),
+    };
+    let mut links = BTreeMap::new();
+    links.insert(
+        "release.base".to_string(),
+        "https://example.invalid".to_string(),
+    );
+    run(
+        &root,
+        std::slice::from_ref(&dep),
+        &links,
+        &[],
+        &AtomicBool::new(false),
+        &mut |_| {},
+        None,
+    )
+    .expect("先按旧落点装好");
+    fs::remove_file(&tar_path).expect("删掉缓存");
+    dep.install = "data/.vm/y".to_string();
+    dep.probe = "data/.vm/y/f.txt".to_string();
+    let mut lines: Vec<String> = Vec::new();
+    run(
+        &root,
+        std::slice::from_ref(&dep),
+        &links,
+        &[],
+        &AtomicBool::new(false),
+        &mut |l| lines.push(l.to_string()),
+        None,
+    )
+    .expect("换位置只该搬家，不该碰网络");
+    assert!(
+        lines.iter().any(|l| l.contains("位置变了")),
+        "要如实说搬了：{:?}",
+        lines
+    );
+    assert!(
+        under(&root, "data/.vm/y/f.txt").is_file(),
+        "产物要在新落点：{:?}",
+        lines
+    );
+    assert!(!under(&root, "data/.vm/x").exists(), "旧落点不该留着");
+    let entry = read_ledger(&root).remove("x").expect("台账还在");
+    assert_eq!(entry.placement.install, "data/.vm/y", "台账落点跟新位置");
     let _ = fs::remove_dir_all(&root);
 }
 

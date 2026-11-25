@@ -4,7 +4,7 @@
 //! 不管：网络、磁盘与进程（在 detail）；装什么、按什么顺序装（在 service）。
 //! 联动：service 与 detail 都只读这里的类型与纯函数。
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -147,8 +147,33 @@ pub(crate) fn is_toolchain(dep: &Dep) -> bool {
 /// 目的：安装身份的模式版本——安装布局或判定口径变了就加一，让所有旧安装自动算作过期。
 const INSTALL_SCHEMA: u32 = 1;
 
+/// 目的：一条依赖「装出来是什么」——安装目录与探针，都相对产品根、用 `/` 书写。
+/// 约束：落点是**位置**不是内容：同一份东西换个位置装，身份不变（见 install_identity）。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Placement {
+    pub install: String,
+    pub probe: String,
+}
+
+/// 目的：从清单条目取落点。
+pub fn placement_of(dep: &Dep) -> Placement {
+    Placement {
+        install: dep.install.clone(),
+        probe: dep.probe.clone(),
+    }
+}
+
+/// 目的：台账里的一条记录——装的是哪份内容（身份）+ 装在哪（落点），两件事分开存。
+/// 约束：判「装好了」只看身份与探针在场；位置变了只搬家，内容变了才重装。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Entry {
+    pub identity: String,
+    pub placement: Placement,
+}
+
 /// 目的：一条依赖「按当前清单装出来应该是什么」的指纹：清单字段 + pin 的 sha256 + 工具链载荷。
-/// 约束：纯函数，不碰网络与磁盘；pin 与校验闸用同一个来源（`dep.sha256` 或 `links.yaml` 的 `<source>.sha256`）。
+/// 约束：纯函数，不碰网络与磁盘；pin 与校验闸用同一个来源（`dep.sha256` 或 `links.yaml` 的 `<source>.sha256`）；
+///   不含安装目录与探针——位置不是内容，换了位置不该触发重下。
 pub(crate) fn install_identity(dep: &Dep) -> String {
     let pin = pinned_sha256(dep, &links().unwrap_or_default()).unwrap_or_default();
     let tool = dep
@@ -166,12 +191,10 @@ pub(crate) fn install_identity(dep: &Dep) -> String {
         })
         .unwrap_or_default();
     let material = format!(
-        "schema={}\nid={}\nkind={}\ninstall={}\nprobe={}\nsource={}\npin={}\nguest={}\nfamily={}\nsize={}\ntoolchain={}\n",
+        "schema={}\nid={}\nkind={}\nsource={}\npin={}\nguest={}\nfamily={}\nsize={}\ntoolchain={}\n",
         INSTALL_SCHEMA,
         dep.id,
         dep.kind,
-        dep.install,
-        dep.probe,
         dep.source,
         pin,
         dep.guest.clone().unwrap_or_default(),

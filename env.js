@@ -1207,15 +1207,14 @@ function readToolchainDep(tool) {
 
 /**
  * 目的：安装身份指纹——与 Rust 侧 `src/units/provision/domain.rs` 的 install_identity 逐字节同口径。
- * 为什么：env.js 装完把同一身份写进产品台账（.vm/state/deps.json），产品补齐时按探针 + 身份判「已装」，不重复下载。
+ * 为什么：env.js 装完把同一身份写进产品台账（data/.vm/state/deps.json），产品补齐时按探针 + 身份判「已装」，不重复下载。
  * 约束：材料布局 / schema 变更必须两侧同步（各有钉住用例）；pin 取 links.yaml 的 `<source>.sha256`。
  */
 function installIdentity(dep) {
   const own = String(dep.sha256 || "").trim();
   const pin = (own || LINKS[dep.source + ".sha256"] || "").toLowerCase();
   const toolchain = dep.tool + "|" + dep.version + "|" + dep.target + "|" + dep.binsJoined + "|" + dep.wrappers;
-  const material = "schema=1\nid=" + dep.id + "\nkind=toolchain\ninstall=" + dep.installRel +
-    "\nprobe=" + dep.probeRel + "\nsource=" + dep.source + "\npin=" + pin +
+  const material = "schema=1\nid=" + dep.id + "\nkind=toolchain\nsource=" + dep.source + "\npin=" + pin +
     "\nguest=\nfamily=\nsize=" + dep.sizeMb + "\ntoolchain=" + toolchain + "\n";
   return crypto.createHash("sha256").update(material, "utf8").digest("hex");
 }
@@ -1223,13 +1222,15 @@ function installIdentity(dep) {
 /** 目的：把 env.js 装好的工具链身份写进产品台账（保留其它条目；临时文件 + 改名，与产品写入口同形）。 */
 function recordToolchainLedger(installed) {
   if (!installed.length) return;
-  const file = path.join(ROOT, ".vm", "state", "deps.json");
+  const file = path.join(ROOT, "data", ".vm", "state", "deps.json");
   let ledger = {};
   try {
     const cur = JSON.parse(fs.readFileSync(file, "utf8"));
     if (cur && typeof cur === "object" && !Array.isArray(cur)) ledger = cur;
   } catch (e) { /* 不在场或坏 JSON 都按空台账（与产品 read_ledger 同口径） */ }
-  for (const dep of installed) ledger[dep.id] = installIdentity(dep);
+  for (const dep of installed) {
+    ledger[dep.id] = { identity: installIdentity(dep), placement: { install: dep.installRel, probe: dep.probeRel } };
+  }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + ".tmp";
   fs.writeFileSync(tmp, JSON.stringify(ledger, null, 2) + "\n");

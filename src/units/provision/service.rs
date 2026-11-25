@@ -12,7 +12,8 @@ use std::sync::{Arc, Mutex};
 use crate::kernel::ports::HostProbe;
 use crate::units::provision::api::{DepStatus, GuestBase, HostTool, ProcInfo, Provision};
 use crate::units::provision::domain::{
-    Dep, deps, for_host, install_identity, is_toolchain, links, pinned_sha256, source_url, under,
+    Dep, Entry, deps, for_host, install_identity, is_toolchain, links, pinned_sha256, placement_of,
+    source_url, under,
 };
 use crate::units::provision::ports::{Fetcher, GuestImage, HostFs, Installers, Ledger, Procs};
 use crate::units::pure::exec_model::api::JobState;
@@ -345,10 +346,14 @@ pub(crate) fn push_line(job: &Mutex<JobState>, line: &str) {
 /// 约束：只看探针在场不算装好（pin 升级后旧产物仍然在场，这正是上一版会漏掉的缺口）。
 pub(crate) fn installed(
     ledger: &dyn Ledger,
-    snapshot: &BTreeMap<String, String>,
+    snapshot: &BTreeMap<String, Entry>,
     dep: &Dep,
 ) -> bool {
-    ledger.present(dep) && snapshot.get(&dep.id) == Some(&install_identity(dep))
+    ledger.present(dep)
+        && snapshot
+            .get(&dep.id)
+            .map(|e| e.identity == install_identity(dep))
+            .unwrap_or(false)
 }
 
 /// 目的：`--ensure` 取值的两种含义——依赖 id 列表（原语义），或按清单 kind 的组别名（只补缺项）。
@@ -490,7 +495,22 @@ pub(crate) fn run(
         let asset = asset_name(&url);
         let cached = cache.join(&asset);
         let identity = install_identity(dep);
-        let stale = pipeline.ledger.present(dep) && ledger.get(&dep.id) != Some(&identity);
+        // 内容没变、只是清单把位置改了：搬过去就是，不必重下（台账按「身份 + 落点」分开记）。
+        if let Some(entry) = ledger.get(&dep.id).cloned()
+            && entry.identity == identity
+            && entry.placement != placement_of(dep)
+            && pipeline.ledger.relocate(dep, &entry.placement)?
+        {
+            on_line(&format!("{}：位置变了，搬到 {}", dep.id, dep.install));
+            pipeline.ledger.record(dep)?;
+            ledger = pipeline.ledger.snapshot();
+            continue;
+        }
+        let stale = pipeline.ledger.present(dep)
+            && ledger
+                .get(&dep.id)
+                .map(|e| e.identity != identity)
+                .unwrap_or(true);
         if stale {
             on_line(&format!("{}：装的是旧版本，清掉重装", dep.id));
             pipeline.ledger.clear(dep)?;

@@ -699,7 +699,7 @@ function toolchainIdentityPin() {
   };
   assert.equal(
     envLayer.installIdentity(dep),
-    "99076528b675dd67741122f3fa801f6c8ca87f9359bb883441b13d657537eb26",
+    "c936afade0b996008570b9bd08a26bcb0e085ebe2ed14581635f2ea4f9d8c043",
     "身份材料布局要与 Rust install_identity 逐字节一致"
   );
   console.log("PASS toolchain-identity-pin");
@@ -813,7 +813,7 @@ async function toolchainInstallCases() {
   });
   const reset = () => {
     fs.rmSync(path.join(dir, ".tools", "toolchains"), { recursive: true, force: true });
-    fs.rmSync(path.join(dir, ".vm"), { recursive: true, force: true });
+    fs.rmSync(path.join(dir, "data", ".vm"), { recursive: true, force: true });
     for (const f of fs.readdirSync(path.join(dir, ".tools"))) {
       if (/^(python|node)\.(tar\.gz|zip|tar\.xz)$/.test(f)) fs.rmSync(path.join(dir, ".tools", f), { force: true });
     }
@@ -827,9 +827,11 @@ async function toolchainInstallCases() {
     assert.equal(r.status, 0, "setup --yes 要成功：error=" + (r.error && r.error.message) + " signal=" + r.signal + "\n" + (r.stderr || "") + (r.stdout || ""));
     assert.ok(fs.existsSync(pyProbe), "python 探针要在场");
     assert.ok(fs.existsSync(nodeProbe), "node 探针要在场");
-    const ledger = readJson(path.join(dir, ".vm", "state", "deps.json"));
-    assert.equal(ledger[pyDep.id], envLayer.installIdentity({ ...pyDep, sha256: pyArc.sha }), "python 台账身份需要与指纹函数一致");
-    assert.equal(ledger[nodeDep.id], envLayer.installIdentity({ ...nodeDep, sha256: nodeArc.sha }), "node 台账身份需要与指纹函数一致");
+    const ledger = readJson(path.join(dir, "data", ".vm", "state", "deps.json"));
+    assert.equal(ledger[pyDep.id].identity, envLayer.installIdentity({ ...pyDep, sha256: pyArc.sha }), "python 台账身份需要与指纹函数一致");
+    assert.equal(ledger[nodeDep.id].identity, envLayer.installIdentity({ ...nodeDep, sha256: nodeArc.sha }), "node 台账身份需要与指纹函数一致");
+    assert.equal(ledger[pyDep.id].placement.install, pyDep.installRel, "python 台账落点要记 install");
+    assert.equal(ledger[pyDep.id].placement.probe, pyDep.probeRel, "python 台账落点要记 probe");
     const active = readJson(path.join(dir, ".tools", "toolchains", "active.json"));
     for (const dep of [pyDep, nodeDep]) {
       const t = active.tools.find((x) => x && x.id === dep.tool);

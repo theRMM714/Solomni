@@ -37,8 +37,10 @@ pub trait HostFs: Send + Sync {
 /// 目的：安装台账与在场的判定——编排只问"这条装好了吗 / 记下装好了 / 清掉它"，落盘格式在适配层。
 /// 约束：`snapshot` 与 `record` / `forget` 都以磁盘为准，编排不缓存台账。
 pub trait Ledger: Send + Sync {
-    /// 目的：当前台账（依赖 id → 安装身份）。
-    fn snapshot(&self) -> std::collections::BTreeMap<String, String>;
+    /// 目的：当前台账（依赖 id → 装的是哪份内容 + 装在哪）。
+    fn snapshot(
+        &self,
+    ) -> std::collections::BTreeMap<String, crate::units::provision::domain::Entry>;
     /// 目的：这条依赖的探针是否已在场（文件或目录）。
     fn present(&self, dep: &crate::units::provision::domain::Dep) -> bool;
     /// 目的：读一个虚拟根目录里的画像（`guest.yaml`；缺省 = 空画像）。
@@ -49,6 +51,13 @@ pub trait Ledger: Send + Sync {
     fn clear(&self, dep: &crate::units::provision::domain::Dep) -> Result<(), String>;
     /// 目的：从台账里划掉一条（旧版本重装前）。
     fn forget(&self, id: &str) -> Result<(), String>;
+    /// 目的：把旧落点的产物搬到清单现在写的位置；旧落点没有东西就如实给 false（交给重装）。
+    /// 返回：搬了（或本来就在新位置）给 true，调用方据此免掉下载与解包。
+    fn relocate(
+        &self,
+        dep: &crate::units::provision::domain::Dep,
+        from: &crate::units::provision::domain::Placement,
+    ) -> Result<bool, String>;
     /// 目的：把已在场的基础工具链登记进 `.tools/toolchains/active.json`（启动期只读这一份）。
     fn sync_active(&self, all: &[crate::units::provision::domain::Dep]) -> Result<(), String>;
 }
