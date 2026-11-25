@@ -402,9 +402,9 @@ impl Handle {
     ///   执行经队列桥回到核心线程，核心状态的所有权不变；非代理会话、或已装过，原样交回。
     pub(super) fn inject_proxy_handler(
         &self,
-        mut session: crate::units::conversation::session::api::AgentSession,
+        mut session: crate::units::agentloop::api::AgentSession,
         sid: &str,
-    ) -> Result<crate::units::conversation::session::api::AgentSession, String> {
+    ) -> Result<crate::units::agentloop::api::AgentSession, String> {
         use crate::units::conversation::proxy::api as dp;
         let wanted = session.tools.as_ref().is_some_and(|tools| {
             tools.handlers.is_empty() && tools.face.allowed.iter().any(|t| dp::is_proxy_tool(t))

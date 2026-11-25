@@ -3,7 +3,7 @@
 //! 不管：协作泵的推进策略、会话装配。
 //! 联动：`generation/collab.rs`、`turn::api::TurnHost`
 
-use crate::units::conversation::session::api::{AgentSession, MemberTurn, TurnIo};
+use crate::units::agentloop::api::{AgentSession, MemberTurn, TurnIo};
 use crate::units::transcript::api::SessionEvent;
 use crate::units::turn::turn::api::{AskReq, TurnHost};
 

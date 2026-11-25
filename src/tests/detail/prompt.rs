@@ -8,7 +8,7 @@ use super::*;
 /// 这一份面同时喂三处：回合注入的工具块、原生声明槽、越权校验——所以判据只有它一个。
 #[test]
 fn a_seat_face_comes_from_the_mechanism_declaration() {
-    use crate::units::conversation::session::api::{resolve, seat_face};
+    use crate::units::agentloop::api::{resolve, seat_face};
     use crate::units::session_model::api::seat;
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let st = YamlSystools::new(root.join("systools"))
@@ -123,8 +123,7 @@ fn system_tools_and_mechanism_faces_are_self_consistent() {
     );
     // 越权判据只有一处：**这一回合的工具面**（机制按席位合成），给了的放行、没给的不放行。
     let has = |id: &str, tool: &str| {
-        crate::units::conversation::session::api::seat_face(seat(id).expect("席位在册"))
-            .contains(&tool)
+        crate::units::agentloop::api::seat_face(seat(id).expect("席位在册")).contains(&tool)
     };
     assert!(has("discussant", "read"), "讨论席该能读");
     assert!(!has("discussant", "create_session"), "没给的工具必须不放行");

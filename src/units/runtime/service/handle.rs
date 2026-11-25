@@ -216,9 +216,9 @@ impl crate::units::turn::turn::api::TurnHost for Handle {
 
     fn inject_proxy_handler(
         &self,
-        session: crate::units::conversation::session::api::AgentSession,
+        session: crate::units::agentloop::api::AgentSession,
         sid: &str,
-    ) -> Result<crate::units::conversation::session::api::AgentSession, String> {
+    ) -> Result<crate::units::agentloop::api::AgentSession, String> {
         Handle::inject_proxy_handler(self, session, sid)
     }
 

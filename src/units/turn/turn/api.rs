@@ -41,8 +41,9 @@ pub use crate::units::turn::turn::service::state::Session;
 
 use crate::kernel::api::types::SessionId;
 use crate::kernel::ports::{AskUser, HostProbe};
+use crate::units::agentloop::api::AgentSession;
 use crate::units::catalog::registry::api::Registry;
-use crate::units::conversation::session::api::{AgentSession, Gates, Persister};
+use crate::units::conversation::session::api::{Gates, Persister};
 use crate::units::session_model::api::SessionMeta;
 use crate::units::transcript::api::{DecisionQueue, SessionEvent};
 

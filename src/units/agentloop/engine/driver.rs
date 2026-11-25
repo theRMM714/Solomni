@@ -5,9 +5,7 @@
 
 use super::io::{CompactedTurn, MemberTurn, TurnIo};
 use super::round::{Round, RoundSink, assemble, build_round_lines, converse_with};
-use crate::units::conversation::session::api::{
-    AgentSession, TurnRun, delta_visible, stream_piece,
-};
+use crate::units::agentloop::api::{AgentSession, TurnRun, delta_visible, stream_piece};
 use crate::units::llm::api::{Chunk, Msg};
 use crate::units::transcript::api::{LineView, SessionEvent, ToolCallView};
 use std::sync::atomic::AtomicBool;
@@ -17,7 +15,7 @@ use std::sync::atomic::AtomicBool;
 pub fn compact_turn(
     s: &mut AgentSession,
     prompt: &str,
-    plan: &crate::units::conversation::session::api::CompactionPlan,
+    plan: &crate::units::agentloop::api::CompactionPlan,
     identity: &str,
 ) -> Result<String, String> {
     let decl = s
@@ -346,7 +344,7 @@ fn run_rounds(
         s.cur_reply = round.reply;
         // 读台账：完整读的观察事实跟着它那条工具结果消息的正文走（发送视图据此判过期）。
         for c in views.iter().filter_map(|v| v.tool.as_ref()) {
-            let body = crate::units::conversation::session::api::tool_result_body(c);
+            let body = crate::units::agentloop::api::tool_result_body(c);
             for fact in &c.observations {
                 for read in fact.read_facts() {
                     s.note_read_at(body.clone(), fact.reply, read);
@@ -434,14 +432,14 @@ fn freshness_now(
     s: &AgentSession,
 ) -> Option<(
     Vec<crate::units::llm::api::Msg>,
-    crate::units::conversation::session::api::FreshnessStats,
+    crate::units::agentloop::api::FreshnessStats,
 )> {
     if !s.context_freshness() || s.reads().is_empty() {
         return None;
     }
     let tools = s.tools.as_ref()?;
     let ws = tools.workspace.as_ref()?;
-    let reads: Vec<&crate::units::conversation::session::api::ReadAt> = s.reads().iter().collect();
+    let reads: Vec<&crate::units::agentloop::api::ReadAt> = s.reads().iter().collect();
     let queries: Vec<crate::units::workspace::api::ReadQuery> = reads
         .iter()
         .map(|r| crate::units::workspace::api::ReadQuery {
@@ -467,14 +465,14 @@ fn freshness_now(
         .into_iter()
         .map(|v| v.is_stale())
         .collect();
-    let judged: Vec<(&crate::units::conversation::session::api::ReadAt, bool)> =
+    let judged: Vec<(&crate::units::agentloop::api::ReadAt, bool)> =
         reads.into_iter().zip(stale).collect();
     // 保底按**字符**算（与压缩估算同一口径：4 字符 ≈ 1 token）。
     let total_chars: usize = s.dialogue.iter().map(|m| m.content.chars().count()).sum();
     let keep_percent = s.freshness_keep_percent();
     let keep_chars = total_chars * keep_percent as usize / 100;
     let (view, mut stats) =
-        crate::units::conversation::session::api::freshness_view(&s.dialogue, &judged, keep_chars);
+        crate::units::agentloop::api::freshness_view(&s.dialogue, &judged, keep_chars);
     stats.keep_percent = keep_percent;
     Some((view, stats))
 }

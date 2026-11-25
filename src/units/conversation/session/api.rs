@@ -1,11 +1,7 @@
 //! 目的：会话能力的入站面——其它能力与呈现层只准用这里（不许碰 `domain` / `ports`）。
-//! 管：重导出会话运行事实（回档算术、工具面、裁决队列、流程面）、会话装配（参数对象与整场入口）、核心核实环境与核心操作回路、席位与工具总表的自洽断言；定义 `History` / `HistoryOps` 两个面。
-//! 不管：`domain` / `ports` 的内部实现；`HistoryOps` 的队列代理实现（在 `runtime`）。
-//! 联动：呈现层经 runtime 的队列代理调 `HistoryOps`；别的能力经 `History` 造会话、追流水、读元信息、删会话。
-
-/// 目的：测试直调工具批执行器；生产路径只经会话引擎，不从这里取。
-#[cfg(test)]
-pub(crate) use crate::units::conversation::session::service::engine::tools::run_batch;
+//! 管：重导出裁决队列、流程面、会话装配（参数对象与整场入口）、核心核实环境、落盘手柄与席位自洽断言；定义 `History` / `HistoryOps` 两个面。
+//! 不管：`domain` / `ports` 的内部实现；`HistoryOps` 的队列代理实现（在 `runtime`）；会话运行时（在 `agentloop`）。
+//! 联动：呈现层经 runtime 的队列代理调 `HistoryOps`；别的能力经 `History` 造会话、追流水、读元信息、删会话；`turn` 从这里取流程面与会话装配。
 
 use crate::units::session_model::api::{HistoryView, SessionMeta};
 
@@ -21,22 +17,6 @@ pub use crate::units::conversation::session::domain::flow::{
 pub use crate::units::conversation::session::domain::seat_check::problems as mechanism_problems;
 // 流程工厂面：组合根把实现注入 turn / work，装配点只按 id 取段。
 pub use crate::units::conversation::session::domain::flows::{FlowSetup, Flows, sequence_of};
-// 工具面：机制席位 → 实际可调的工具（档位只管网络，不再逐工具裁剪）。
-#[allow(unused_imports)]
-pub use crate::units::conversation::session::domain::assemble::{face_tools, resolve, seat_face};
-pub use crate::units::conversation::session::domain::rewind::{
-    align_keep, archive_label, cut_before_line, last_line_within, last_usage, max_reply,
-    next_line_id, rewind_marks, truncate_events, turn_of_line,
-};
-pub use crate::units::conversation::session::domain::session::{
-    AgentSession, CompactChatFactory, CompactChatSpec, CompactionPlan, FreshnessStats, ReadAt,
-    SessionParams, TurnRun, delta_visible, freshness_view, keep_whole_replies, stream_piece,
-    summary_message, unique_work_name,
-};
-#[allow(unused_imports)]
-pub use crate::units::conversation::session::domain::tools::{
-    CoreVerify, ServiceOp, ShellLive, ShellSlot, ToolFace, last_shell, service_ops_for_modules,
-};
 // 会话装配：参数对象与三个整场入口（加上只取工具面值的 `member_face`）。
 // `MemberTools`（工具面的活对象）**不经这里转出**：跨能力只传值结构（R16）。
 #[cfg(test)]
@@ -47,18 +27,9 @@ pub use crate::units::conversation::session::service::assemble::{
 };
 // 核心核实环境：`collab` 的各关卡按席位装配只读核实工具，装配逻辑留在本能力。
 pub use crate::units::conversation::session::service::verify::{VerifySpec, verify_tools};
-
-// 回合引擎：TurnIo（一次回合的 IO 槽位）、两类回合结果与轮循环（由 `service/engine/` 实现）。
-pub use crate::units::conversation::session::service::engine::io::{MemberTurn, TurnIo};
+// 落盘手柄：工作线程按"一次模型调用"的粒度增量落盘。
 #[allow(unused_imports)]
-pub use crate::units::conversation::session::service::engine::round::{
-    LineSink, Round, build_round_lines, converse_with, verb_tag,
-};
-// 核心操作回路 + 原生回灌消息：`service.rs` 实现（它驱动 IO，不是纯派生）。
-#[allow(unused_imports)]
-pub use crate::units::conversation::session::service::{
-    Persister, core_operation, persist_events, record_events, reply_msgs, tool_result_body,
-};
+pub use crate::units::conversation::session::service::{Persister, persist_events, record_events};
 // 会话树派生：父子关系、工作根、配置归属、树级装配 meta 与 guest 作用域（只读 `History`）。
 #[allow(unused_imports)]
 pub use crate::units::conversation::session::service::tree::{
@@ -81,7 +52,7 @@ pub trait HistoryOps: Send + Sync {
 ///   面向呈现层；`History` 由能力自己实现、面向别的能力。这里的四个写操作（create / save_meta /
 ///   append / delete）**不开放给呈现层**——呈现层要写就经协调业务的用例。
 ///   这一面刻意与端口**一一对应**：会话落盘没有别的不变式可编排（追加原子性、元信息唯一真相
-///   已在 `domain/history.rs` 与 store 契约里），它的价值是**唯一持有者**（R12），不是新增逻辑。
+///   已在 `session_model` 的 history 与 store 契约里），它的价值是**唯一持有者**（R12），不是新增逻辑。
 pub trait History: Send + Sync {
     /// 建一个会话目录（meta + 空流水）。
     fn create(&self, meta: &SessionMeta) -> Result<(), String>;

@@ -562,8 +562,7 @@ impl CollabSession {
                         kind = "start";
                     }
                     crate::units::llm::api::Chunk::Text(t) => {
-                        let (send, next) =
-                            crate::units::conversation::session::api::stream_piece(&acc, t);
+                        let (send, next) = crate::units::agentloop::api::stream_piece(&acc, t);
                         piece = send;
                         acc = next;
                     }
@@ -573,7 +572,7 @@ impl CollabSession {
                     }
                 }
                 // 空片段不刷事件流（与各回合同一条规则）。
-                if crate::units::conversation::session::api::delta_visible(kind, &piece) {
+                if crate::units::agentloop::api::delta_visible(kind, &piece) {
                     sink(crate::units::transcript::api::SessionEvent::Delta {
                         speaker: "核心".to_string(),
                         kind: kind.to_string(),
@@ -639,7 +638,7 @@ impl CollabSession {
             // 形态按该 agent 的模型（或核心默认）解析：身份块里的调用约定与实际协议必须一致
             let mode = self.settings.tool_mode_for(a.model.as_deref());
             // **会话参数**：身份块每回合由它现渲染，不存进任何人的消息列表。
-            let params = crate::units::conversation::session::api::SessionParams::from_workspace(
+            let params = crate::units::agentloop::api::SessionParams::from_workspace(
                 &a.name,
                 &sandbox,
                 &modules,

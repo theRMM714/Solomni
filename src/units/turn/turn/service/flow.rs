@@ -7,8 +7,9 @@
 use crate::kernel::ports::HostProbe;
 use crate::units::catalog::registry::api::Registry;
 
+use crate::units::agentloop::api::TurnIo;
 use crate::units::conversation::session::api::{
-    Answered, Flow, GateTicket, Handback, TurnIo, flat_modules, work_root,
+    Answered, Flow, GateTicket, Handback, flat_modules, work_root,
 };
 use crate::units::prompt::api::Segment;
 use crate::units::pure::registry_model::api::AgentMeta;
@@ -482,7 +483,7 @@ impl Turn {
     pub(crate) fn put_single(
         &mut self,
         sid: &str,
-        mut s: crate::units::conversation::session::api::AgentSession,
+        mut s: crate::units::agentloop::api::AgentSession,
     ) -> Option<String> {
         let usage_delta = s.take_usage_delta();
         self.unmark_running(sid);
@@ -511,7 +512,7 @@ impl Turn {
     pub(crate) fn put_single_recorded(
         &mut self,
         sid: &str,
-        mut s: crate::units::conversation::session::api::AgentSession,
+        mut s: crate::units::agentloop::api::AgentSession,
         events: &[SessionEvent],
     ) {
         let usage_delta = s.take_usage_delta();
@@ -725,7 +726,7 @@ impl Turn {
         };
         let text = f.adapt_text(text);
         let (meta, raw) = self.history.load(sid)?;
-        let next = crate::units::conversation::session::api::next_line_id(&raw);
+        let next = crate::units::agentloop::api::next_line_id(&raw);
         let mut kept = Vec::with_capacity(raw.len() + 1);
         for ev in &raw {
             if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {

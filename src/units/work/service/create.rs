@@ -13,7 +13,7 @@ use crate::units::vm::api::GuestStop;
 impl Work {
     /// 目的：工作名的缺省与唯一化（命名策略在 `session`；这里只提供"存在吗"）。
     pub fn unique_work_name(&self, turn: &Turn, base: &str, fallback: &str) -> String {
-        crate::units::conversation::session::api::unique_work_name(base, fallback, |n| {
+        crate::units::agentloop::api::unique_work_name(base, fallback, |n| {
             turn.holds(n) || self.history.load(n).is_ok()
         })
     }

@@ -289,7 +289,7 @@ impl CollabSession {
         opts: crate::units::llm::api::CompleteOpts<'static>,
         mode: crate::units::pure::registry_model::api::ToolMode,
         core_chat: &mut dyn Chat,
-        verify: Option<&mut (dyn crate::units::conversation::session::api::CoreVerify + 'static)>,
+        verify: Option<&mut (dyn crate::units::agentloop::api::CoreVerify + 'static)>,
         kind: &str,
         payload: &str,
         text: &str,
@@ -311,7 +311,7 @@ impl CollabSession {
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
             return Err("已停止".to_string());
         }
-        let payload = crate::units::conversation::session::api::core_operation(
+        let payload = crate::units::agentloop::api::core_operation(
             systools,
             "planner",
             "verdict",
@@ -349,7 +349,7 @@ impl CollabSession {
         opts: crate::units::llm::api::CompleteOpts<'static>,
         mode: crate::units::pure::registry_model::api::ToolMode,
         core_chat: &mut dyn Chat,
-        verify: Option<&mut (dyn crate::units::conversation::session::api::CoreVerify + 'static)>,
+        verify: Option<&mut (dyn crate::units::agentloop::api::CoreVerify + 'static)>,
         // 上一次填错了要它重填的话（核心据此**一直重填**到合法，不设次数上限）。
         retry: Option<&str>,
         // 核心这一轮的行推给谁。
@@ -385,7 +385,7 @@ impl CollabSession {
         }
         // 核心操作走工具调用：节点验收结论由 node_verdict 工具承载。
         // 带核实回路：模型想先读/查落盘物时，核心执行只读工具再回灌（不再直接判"没调用"）。
-        let payload = crate::units::conversation::session::api::core_operation(
+        let payload = crate::units::agentloop::api::core_operation(
             systools,
             "orchestrator",
             "node_verdict",

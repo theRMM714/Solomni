@@ -3,8 +3,8 @@
 //! 不管：提示词文案（在提示词册）；模式收束的纯规则（domain/proposal.rs）；前置判据提示（归调用方）。
 //! 联动：协议只有这一处——两个调用方（推荐 / 代拟）走同一条 slate 工具载荷；入口 slate::api::propose。
 
+use crate::units::agentloop::api::core_operation;
 use crate::units::catalog::registry::api::{model_listing, resolve_picks};
-use crate::units::conversation::session::api::core_operation;
 use crate::units::conversation::slate::api::{Mode, Parties, Pick, Proposal, Request};
 use crate::units::conversation::slate::domain::proposal::collapse;
 use crate::units::llm::api::Msg;

@@ -403,7 +403,7 @@ pub(crate) fn envelope_tool_parses_name_and_args() {
 #[test]
 pub(crate) fn streaming_stops_at_the_envelope_brace() {
     // 正文开头照常流；一旦出现 "{"（信封开始）就不再外送后续片段。
-    use crate::units::conversation::session::api::stream_piece;
+    use crate::units::agentloop::api::stream_piece;
     let (send, acc) = stream_piece("", "我先看看。");
     assert_eq!(send, "我先看看。");
     let (send, acc) = stream_piece(&acc, "{\"type\":\"tool\"}");
@@ -423,7 +423,7 @@ pub(crate) fn streaming_stops_at_the_envelope_brace() {
 
 #[test]
 pub(crate) fn suppressed_stream_pieces_do_not_emit_delta_events() {
-    use crate::units::conversation::session::api::delta_visible;
+    use crate::units::agentloop::api::delta_visible;
     assert!(delta_visible("start", ""), "start 用来重置本轮流，必须外送");
     assert!(delta_visible("text", "正文"));
     assert!(delta_visible("reasoning", "想一想"));
@@ -535,7 +535,7 @@ pub(crate) fn an_aborted_generation_never_executes_a_repairable_envelope() {
     // 取消标志在生成开始前就已置位 = 用户按下了「停止」：引擎据此收尾，
     // 不再发起下一次调用（工具调用没有上限兜底，这条出口必须自己站住）。
     let events = {
-        let io = crate::units::conversation::session::api::TurnIo {
+        let io = crate::units::agentloop::api::TurnIo {
             llm: Default::default(),
             ask: None,
         };
@@ -576,7 +576,7 @@ pub(crate) fn a_cancelled_generation_never_executes_a_valid_tool_envelope() {
         core_with_io_gateway(vec![module_of("a")], AbortGateway { raw }, Arc::clone(&io));
     let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = {
-        let io = crate::units::conversation::session::api::TurnIo {
+        let io = crate::units::agentloop::api::TurnIo {
             llm: Default::default(),
             ask: None,
         };
@@ -625,7 +625,7 @@ pub(crate) fn an_interrupted_generation_keeps_the_half_sentence_as_a_cut_line() 
     );
     let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = {
-        let io = crate::units::conversation::session::api::TurnIo {
+        let io = crate::units::agentloop::api::TurnIo {
             llm: Default::default(),
             ask: None,
         };

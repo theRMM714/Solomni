@@ -257,7 +257,7 @@ pub fn cut_before_line(events: &[serde_json::Value], keep: u64) -> Vec<serde_jso
     out
 }
 
-/// 目的：把"保留 id < keep"对齐到**回复边界**（见 crate::units::conversation::session::api::keep_whole_replies）：
+/// 目的：把"保留 id < keep"对齐到**回复边界**（见 super::session::keep_whole_replies）：
 ///   keep 落在某次回复内部时退到该回复第一行之前，返回新的 keep（没有这样的行 = u64::MAX，即不截）。
 pub fn align_keep(events: &[serde_json::Value], keep: u64) -> u64 {
     let rows: Vec<&serde_json::Value> = events
@@ -276,7 +276,7 @@ pub fn align_keep(events: &[serde_json::Value], keep: u64) -> u64 {
         })
         .unwrap_or(rows.len());
     let replies: Vec<u64> = rows.iter().map(|l| line_reply_of(l)).collect();
-    let aligned = crate::units::conversation::session::api::keep_whole_replies(&replies, idx);
+    let aligned = super::session::keep_whole_replies(&replies, idx);
     rows.get(aligned)
         .and_then(|l| l.get("id").and_then(|i| i.as_u64()))
         .unwrap_or(u64::MAX)

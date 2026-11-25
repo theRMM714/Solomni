@@ -261,7 +261,7 @@ pub(crate) fn native_member(
     WithTools {
         member: m,
         tools: Some(MemberTools {
-            face: crate::units::conversation::session::api::ToolFace {
+            face: crate::units::agentloop::api::ToolFace {
                 mode: crate::units::pure::registry_model::api::ToolMode::Native,
                 seat: "solo".to_string(),
                 modules,

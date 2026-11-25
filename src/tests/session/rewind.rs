@@ -113,7 +113,7 @@ pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
 /// 目的：留档：只标记并折叠尾部，文件字节一个不少，新行从最大 id 续号；恢复把标记及其后真的删掉。
 #[test]
 pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
-    use crate::units::conversation::session::api::next_line_id;
+    use crate::units::agentloop::api::next_line_id;
     use crate::units::lifecycle::api::RewindTarget;
     let say = |t: &str| serde_json::json!({"type": "say", "text": t}).to_string();
     let mut member = BTreeMap::new();
@@ -189,7 +189,7 @@ pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
         "标签取折叠区间里最后一条内容行"
     );
     assert_eq!(
-        crate::units::conversation::session::api::truncate_events(&raw)
+        crate::units::agentloop::api::truncate_events(&raw)
             .iter()
             .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
             .flatten()

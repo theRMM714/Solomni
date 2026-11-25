@@ -8,9 +8,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use crate::kernel::api::types::SessionId;
-use crate::units::conversation::session::api::{
-    AgentSession, Decisions, Flow, Gates, ShellSlot, decisions,
-};
+use crate::units::agentloop::api::{AgentSession, ShellSlot};
+use crate::units::conversation::session::api::{Decisions, Flow, Gates, decisions};
 
 /// 目的：一份在世会话的两种形态：单 agent（含代理会话与子会话）与一个**流程**（协作只是已注册的一个流程）。
 /// 约束：流程槽是装箱的 trait 对象——会话形态不再是一张封闭清单，新流程不改这里。
@@ -158,10 +157,7 @@ impl TurnState {
     }
 
     /// 目的：读会话最近一次 shell 的快照；没跑过就是 None（状态栏据此决定要不要出 chip）。
-    pub fn shell_view(
-        &self,
-        sid: &str,
-    ) -> Option<crate::units::conversation::session::api::ShellLive> {
+    pub fn shell_view(&self, sid: &str) -> Option<crate::units::agentloop::api::ShellLive> {
         self.shell_slots
             .lock()
             .unwrap_or_else(|e| e.into_inner())

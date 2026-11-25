@@ -284,7 +284,7 @@ pub(crate) fn tool_call_event_is_emitted_before_the_next_round() {
                 _ => "other",
             });
         };
-        let io = crate::units::conversation::session::api::TurnIo {
+        let io = crate::units::agentloop::api::TurnIo {
             llm: Default::default(),
             ask: None,
         };

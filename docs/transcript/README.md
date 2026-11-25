@@ -30,7 +30,7 @@
 
 ## 改动本单元时必须同步
 
-- 改行 / 事件形状（`LineView` 字段、`SessionEvent` 变体、`kind` 词）→ 会话的派生与回放（`src/units/conversation/session/domain/session.rs`、`src/units/conversation/session/domain/decisions.rs`、`src/units/conversation/session/service/engine/`）、`collab` 的状态派生、`runtime` 的视图、`cli` / `web` 的渲染、`src/tests/session/`，以及 [session-model.md](../session/session-model.md)。
+- 改行 / 事件形状（`LineView` 字段、`SessionEvent` 变体、`kind` 词）→ 会话的派生与回放（`src/units/agentloop/domain/session.rs`、`src/units/conversation/session/domain/decisions.rs`、`src/units/agentloop/engine/`）、`collab` 的状态派生、`runtime` 的视图、`cli` / `web` 的渲染、`src/tests/session/`，以及 [session-model.md](../session/session-model.md)。
 - 改裁决卡形状或选项 id 的语义 → 会话的裁决队列、各机制的关卡词汇（协作在 `src/units/conversation/collab/domain/`）与 [session-model.md](../session/session-model.md) 的「请用户裁决」。
 - 改上下文用量字段 → 状态栏与压缩判定（`service/engine/compact`、`presentation` 的状态栏）。
 

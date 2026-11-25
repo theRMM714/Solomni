@@ -23,7 +23,7 @@ pub fn draft_plan(
     mode: crate::units::pure::registry_model::api::ToolMode,
     opts: crate::units::llm::api::CompleteOpts<'static>,
     cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-    verify: Option<&mut (dyn crate::units::conversation::session::api::CoreVerify + 'static)>,
+    verify: Option<&mut (dyn crate::units::agentloop::api::CoreVerify + 'static)>,
     sink: &mut dyn FnMut(SessionEvent),
 ) -> Result<
     (
@@ -48,7 +48,7 @@ pub fn draft_plan(
         return Err("已停止".to_string());
     }
     // 核心操作走工具调用：载荷形状是 plan + nodes，入口是 plan 工具。
-    let payload = crate::units::conversation::session::api::core_operation(
+    let payload = crate::units::agentloop::api::core_operation(
         systools,
         "planner",
         "plan",
@@ -174,7 +174,7 @@ impl Execution {
         systools: &dyn crate::units::tools::api::Tools,
         llm: crate::units::llm::api::LlmOpts,
         mode: crate::units::pure::registry_model::api::ToolMode,
-        verify: Option<&mut (dyn crate::units::conversation::session::api::CoreVerify + 'static)>,
+        verify: Option<&mut (dyn crate::units::agentloop::api::CoreVerify + 'static)>,
         // 核心这一轮的行推给谁（总验收也要能看到它在核对什么）。
         sink: &mut dyn FnMut(SessionEvent),
     ) {
@@ -206,7 +206,7 @@ impl Execution {
         let opts =
             crate::units::llm::api::CompleteOpts::plain(llm.stream).with_timeout(llm.timeout_secs);
         // 核心操作走工具调用：总验收清单由 checklist 工具承载。
-        let made = crate::units::conversation::session::api::core_operation(
+        let made = crate::units::agentloop::api::core_operation(
             systools,
             "orchestrator",
             "checklist",

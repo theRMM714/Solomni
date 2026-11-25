@@ -70,7 +70,7 @@ pub(crate) fn run_execution<S: Seat>(
         let mut noop = |_c: crate::units::llm::api::Chunk| true;
         let mut sink = |_e: crate::units::transcript::api::SessionEvent| {};
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let rounds = crate::units::conversation::session::service::engine::round::converse_with(
+        let rounds = crate::units::agentloop::engine::round::converse_with(
             member.chat.as_mut().expect("测试通道").as_mut(),
             tools,
             &identity,
@@ -81,7 +81,7 @@ pub(crate) fn run_execution<S: Seat>(
             &cancel,
             &mut noop,
             &mut |v: &crate::units::transcript::api::ToolCallView| views.push(v.clone()),
-            &mut |_r: &crate::units::conversation::session::service::engine::round::Round,
+            &mut |_r: &crate::units::agentloop::engine::round::Round,
                   _s: &mut dyn FnMut(crate::units::transcript::api::SessionEvent)| {},
             &mut sink,
             // 不接工具层提问：默认路径就是"没有可回答的前端 = fail-closed 拒绝"。

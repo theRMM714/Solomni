@@ -263,10 +263,7 @@ impl Core {
         }
     }
 
-    pub fn single_reads(
-        &self,
-        sid: &str,
-    ) -> Option<Vec<crate::units::conversation::session::api::ReadAt>> {
+    pub fn single_reads(&self, sid: &str) -> Option<Vec<crate::units::agentloop::api::ReadAt>> {
         match self.turn.session(sid) {
             Some(Session::Single(s)) => Some(s.reads().to_vec()),
             _ => None,

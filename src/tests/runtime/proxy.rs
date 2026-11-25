@@ -59,7 +59,7 @@ pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
         assert!(schema.params.is_some(), "{} 缺参数契约", name);
     }
     let seat = crate::units::session_model::api::seat("core_proxy").expect("代理席在册");
-    let face: Vec<String> = crate::units::conversation::session::api::seat_face(seat)
+    let face: Vec<String> = crate::units::agentloop::api::seat_face(seat)
         .into_iter()
         .map(|s| s.to_string())
         .collect();
@@ -87,7 +87,7 @@ pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
     );
     for role in ["discussant", "solo", "executor", "planner", "orchestrator"] {
         let seat = crate::units::session_model::api::seat(role).expect("席位在册");
-        let rface: Vec<String> = crate::units::conversation::session::api::seat_face(seat)
+        let rface: Vec<String> = crate::units::agentloop::api::seat_face(seat)
             .into_iter()
             .map(|s| s.to_string())
             .collect();

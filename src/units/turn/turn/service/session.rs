@@ -8,12 +8,11 @@ use std::sync::Arc;
 
 use crate::kernel::api::types::SessionId;
 use crate::kernel::ports::Log;
+use crate::units::agentloop::api::{CompactChatFactory, ShellLive, ShellSlot};
 use crate::units::catalog::modules::api::Modules;
 use crate::units::catalog::packages::api::Packages;
 use crate::units::catalog::secrets::api::SecretOps;
-use crate::units::conversation::session::api::{
-    CompactChatFactory, Gates, History, ShellLive, ShellSlot,
-};
+use crate::units::conversation::session::api::{Gates, History};
 use crate::units::llm::api::Llm;
 use crate::units::prompt::api::Prompt;
 use crate::units::residents::api::ResidentOps;

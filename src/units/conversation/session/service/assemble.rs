@@ -10,12 +10,11 @@ use std::sync::Arc;
 
 use crate::kernel::api::fence::FencePlan;
 use crate::kernel::ports::Log;
-use crate::units::catalog::modules::api::Module;
-use crate::units::conversation::session::api::{
-    AgentSession, CompactChatFactory, SessionParams, ShellSlot, ToolFace,
+use crate::units::agentloop::api::{
+    AgentSession, CompactChatFactory, FaceInput, MemberTools, SessionParams, ShellSlot, ToolFace,
+    assemble as assemble_face,
 };
-use crate::units::conversation::session::domain::assemble::{FaceInput, assemble as assemble_face};
-use crate::units::conversation::session::domain::tools::MemberTools;
+use crate::units::catalog::modules::api::Module;
 use crate::units::llm::api::{Channel, Llm, Msg};
 use crate::units::prompt::api::{Prompt, Segment};
 use crate::units::pure::exec_model::api::Tier;
