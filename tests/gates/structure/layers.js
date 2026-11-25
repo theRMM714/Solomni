@@ -1,14 +1,12 @@
 /**
- * 结构审查·能力分层门禁：能力只能依赖严格更低层，同层不得互相依赖。
- * 分层表在 layers.yaml（唯一权威）：kernel 是 0，能力从 1 起，层号连续。
- * 判据：① src/units/<名字>/ 必须归层，表里的名字也必须有目录——归层不许留静默空洞；
- *       ② 依赖边的目标层必须严格小于来源层（向上与同层都失败）——这是「业务保持向下依赖」的机器判定；
- *       ③ 声明层号必须等于按现有依赖重算的层号——表是分层事实的缓存，不是可以写宽的意图；
- *       ④ 层号从 1 起连续、kernel 为 0，不许用 T37 这类号把单元藏到没人注意的位置。
- * ③ 的含义：动了一条边就重算全表（node tests/gates/structure/layers.js --write 重算写回），
- * 让「这一层为什么抬高」留在 diff 里；不想重算就只能消掉那条边。
- * 只回执不判红的两类：纯转发边（只 pub use 再导出，不是真依赖）、扇出（不设预算，数字说明它在替多少个单元装配）。
- * 改表（合并 / 插入层）时用 node tests/gates/structure/layers.js 看当前表、边与重算结果。
+ * 结构审查·单元环门禁（H1 环方向、H2 纯层）：环是架构地位的唯一权威，写在 layers.yaml。
+ * 四环：0 kernel（地基）、1 纯（无 IO / 无状态 / 无端口 / 可穷举测试）、2 状态与机制、3 用例；
+ * 环 4 是适配器（presentation/、entry/），不入本表，由 entry-tiers.js 与 dependency.js 管。
+ * H1 硬判：跨单元边只能指向严格更低的环；同环只允许指向 rank 更低的单元——rank 由同环边算，
+ *          只回执、不设预算（同环先后是机制栈的真实顺序，不是需要消灭的耦合）。
+ * H2 硬判：环 1 的单元不得出现 IO（std::fs/net/process/env/thread、tokio、reqwest、sqlx）、
+ *          ports/ 目录、可变全局（static mut / Mutex / RwLock / OnceLock / lazy_static），也不得依赖 kernel。
+ * 只回执：同环 rank 序、扇出、纯转发边。H3（跨切片共用值应下沉环 1）与 N2 在 P3 接入。
  */
 "use strict";
 const fs = require("fs");
@@ -16,11 +14,13 @@ const path = require("path");
 const { stripTestModules } = require("./dependency.js");
 
 const TABLE = "layers.yaml";
+const RINGS = new Map([[0, "地基"], [1, "纯"], [2, "状态与机制"], [3, "用例"]]);
 
 const dirsOf = (root) => fs
   .readdirSync(path.join(root, "src", "units"), { withFileTypes: true })
   .filter((e) => e.isDirectory())
   .map((e) => e.name)
+  .filter((name) => name !== "pure")
   .sort();
 
 const rsFilesOf = (dir) => {
@@ -33,43 +33,51 @@ const rsFilesOf = (dir) => {
   return out;
 };
 
-/** 解析分层表：一行一条「名字: 层号」，井号之后是注释。返回 Map 与表自身的格式问题。 */
+/** 解析环表：一行一条「单元: 环号」，井号之后是注释。返回 Map 与表自身的格式问题。 */
 function parseLayers(root) {
   const tiers = new Map();
   const problems = [];
   const file = path.join(root, TABLE);
-  if (!fs.existsSync(file)) return { tiers, problems: ["分层：缺少 " + TABLE + "（能力分层的唯一权威）"] };
+  if (!fs.existsSync(file)) return { tiers, problems: ["环表：缺少 " + TABLE + "（单元分环的唯一权威）"] };
   let lineNo = 0;
   for (const raw of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
     lineNo++;
     const line = raw.replace(/#.*$/, "").trim();
     if (!line) continue;
     const m = line.match(/^([a-z_][a-z0-9_]*):\s*(\d+)$/);
-    if (!m) { problems.push("分层：" + TABLE + " 第 " + lineNo + " 行不是「名字: 层号」：" + raw.trim()); continue; }
-    if (tiers.has(m[1])) { problems.push("分层：" + TABLE + " 里 " + m[1] + " 归了两次层"); continue; }
+    if (!m) { problems.push("环表：" + TABLE + " 第 " + lineNo + " 行不是「单元: 环号」：" + raw.trim()); continue; }
+    if (tiers.has(m[1])) { problems.push("环表：" + TABLE + " 里 " + m[1] + " 归了两次环"); continue; }
     tiers.set(m[1], Number(m[2]));
   }
   return { tiers, problems };
 }
 
-/** 层号形状：kernel 必须 0；能力层从 1 起连续。 */
-function shapeProblems(tiers, dirs) {
+/** 环表形状：kernel 固定 0；每个环 1–3 非空；盘上与表双向全覆盖；环号只许 0–3。 */
+function shapeProblems(root, tiers, dirs) {
   const problems = [];
-  if (!tiers.has("kernel")) problems.push("分层：" + TABLE + " 必须给 kernel 归层 0");
-  else if (tiers.get("kernel") !== 0) problems.push("分层：kernel 必须是第 0 层，实际 " + tiers.get("kernel"));
-  const caps = [...tiers.keys()].filter((k) => k !== "kernel");
-  for (const d of dirs) if (!tiers.has(d)) problems.push("分层：src/units/" + d + "/ 没有在 " + TABLE + " 里归层");
-  for (const c of caps) if (!dirs.includes(c)) problems.push("分层：" + TABLE + " 里的 " + c + " 在 src/units/ 下没有目录");
-  const nums = caps.map((c) => tiers.get(c)).filter((n) => n > 0).sort((a, b) => a - b);
-  const max = nums.length ? nums[nums.length - 1] : 0;
-  for (let n = 1; n <= max; n++) if (!nums.includes(n)) problems.push("分层：能力层号必须从 1 起连续，缺第 " + n + " 层");
-  for (const c of caps) if (tiers.get(c) < 1) problems.push("分层：能力 " + c + " 的层号必须 ≥ 1，实际 " + tiers.get(c));
+  if (!tiers.has("kernel")) problems.push("环表：" + TABLE + " 必须给 kernel 归环 0");
+  else if (tiers.get("kernel") !== 0) problems.push("环表：kernel 必须是环 0，实际 " + tiers.get("kernel"));
+  for (const [name, ring] of tiers) {
+    if (!RINGS.has(ring)) problems.push("环表：" + name + " 的环号 " + ring + " 越界——环 4 是适配器（presentation/、entry/），不入本表");
+  }
+  for (const d of dirs) if (!tiers.has(d)) problems.push("环表：src/units/" + d + "/ 没有在 " + TABLE + " 里归环");
+  for (const [name, ring] of tiers) if (name !== "kernel" && !dirs.includes(name)) problems.push("环表：" + TABLE + " 里的 " + name + " 在 src/units/ 下没有目录");
+  for (const [ring, label] of RINGS) {
+    if (ring > 0 && ![...tiers.values()].includes(ring)) problems.push("环表：环 " + ring + "（" + label + "）没有任何单元——环是规则，空环说明这张表已经不描述架构");
+  }
+  const pure = path.join(root, "src", "units", "pure");
+  if (fs.existsSync(pure)) {
+    const real = fs.readdirSync(pure, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+    const want = [...tiers].filter(([, r]) => r === 1).map(([n]) => n).sort();
+    if (real.join(",") !== want.join(",")) {
+      problems.push("环表：环 1 必须正好是 src/units/pure/ 的子目录；现在盘上 [" + real.join("、") + "]，表里 [" + want.join("、") + "]");
+    }
+  }
   return problems;
 }
 
-/** 依赖边：能力 A 的文件引用了 crate::units::B（剔除注释与测试模块）。
- *  同一对边只记一处首个命中文件与引用处数（次数给结构图当粗细，判据不看它）；
- *  forward 记「这条边全是 pub use 再导出」——纯转发只回执，不当真依赖。 */
+/** 依赖边：单元 A 的文件引用了 crate::units::[pure::]B（剔除注释与测试模块）。
+ *  同一对边只记首个命中文件与引用处数；forward 记「这条边全是 pub use 再导出」。 */
 function edgesOf(root, dirs) {
   const edges = new Map();
   for (const cap of dirs) {
@@ -78,9 +86,9 @@ function edgesOf(root, dirs) {
       for (const raw of text.split(/\r?\n/)) {
         if (!raw.trim() || raw.trim().startsWith("//")) continue;
         const forward = /^\s*pub\s+use\b/.test(raw);
-        for (const m of raw.matchAll(/crate::units::([a-z_][a-z0-9_]*)/g)) {
+        for (const m of raw.matchAll(/crate::units::(?:pure::)?([a-z_][a-z0-9_]*)/g)) {
           const to = m[1];
-          if (to === cap) continue;
+          if (to === cap || to === "pure") continue;
           const key = cap + ">" + to;
           const hit = edges.get(key);
           if (hit) {
@@ -94,120 +102,115 @@ function edgesOf(root, dirs) {
   return edges;
 }
 
-/** 按当前依赖重算的最小层号：A 依赖 B 则 A 至少比 B 高一层。声明层号必须与它相等。 */
-function minimalLayers(tiers, edges) {
-  const deps = new Map();
+/** 同环 rank：只算同环边，rank(u) = 1 + max(rank(依赖))；返回 rank 序与环内成环的单元。 */
+function ranksOf(tiers, edges) {
+  const out = new Map();
   for (const key of edges.keys()) {
     const [from, to] = key.split(">");
-    if (!deps.has(from)) deps.set(from, []);
-    deps.get(from).push(to);
+    if (!tiers.has(from) || !tiers.has(to) || tiers.get(from) !== tiers.get(to)) continue;
+    if (!out.has(from)) out.set(from, []);
+    out.get(from).push(to);
   }
-  const memo = new Map();
+  const rank = new Map();
   const open = new Set();
-  const of = (cap) => {
-    if (memo.has(cap)) return memo.get(cap);
-    if (!tiers.has(cap) || cap === "kernel") return 0;
-    if (open.has(cap)) return 0;
-    open.add(cap);
+  const cycles = new Set();
+  const of = (u) => {
+    if (rank.has(u)) return rank.get(u);
+    if (open.has(u)) { cycles.add(u); return 0; }
+    open.add(u);
     let top = 0;
-    for (const d of deps.get(cap) || []) top = Math.max(top, of(d));
-    open.delete(cap);
-    memo.set(cap, top + 1);
+    for (const v of out.get(u) || []) top = Math.max(top, of(v));
+    open.delete(u);
+    rank.set(u, top + 1);
     return top + 1;
   };
-  const out = new Map();
-  for (const cap of tiers.keys()) if (cap !== "kernel") out.set(cap, of(cap));
-  return out;
+  for (const u of tiers.keys()) if (u !== "kernel") of(u);
+  return { rank, cycles: [...cycles].sort() };
 }
 
-/** 重算整表：给每个现有目录算最小可行层号（与表里写过什么无关）。 */
-function recompute(root) {
-  const dirs = dirsOf(root);
-  const seed = new Map([["kernel", 0]]);
-  for (const d of dirs) seed.set(d, 1);
-  return minimalLayers(seed, edgesOf(root, dirs));
+/** 单条边的 H1 判定：返回空串表示合法，否则返回问题措辞。 */
+function edgeProblem(tiers, rank, from, to) {
+  const a = tiers.get(from);
+  const b = tiers.get(to);
+  if (!RINGS.has(a) || !RINGS.has(b)) return "";
+  if (b < a) return "";
+  if (b > a) return "向上依赖（" + from + " 在环 " + a + "，依赖了环 " + b + " 的 " + to + "）";
+  const ra = rank.get(from) || 1;
+  const rb = rank.get(to) || 1;
+  if (rb < ra) return "";
+  return "同环逆序（" + from + " rank " + ra + " 依赖了 " + to + " rank " + rb + "，同环只能指向 rank 更低的单元）";
 }
 
-/** 把重算结果写回 layers.yaml：保留表头注释，按层号分组，每层一组 名字: 层号。 */
-function writeTable(root) {
-  const minimal = recompute(root);
-  const file = path.join(root, TABLE);
-  const head = fs.existsSync(file)
-    ? fs.readFileSync(file, "utf8").split(/\r?\n/).filter((l) => /^#/.test(l) && !/^#\s*第\s*\d+\s*层/.test(l))
-    : [];
-  const rows = [...minimal].sort((x, y) => x[1] - y[1] || x[0].localeCompare(y[0]));
-  const body = ["kernel: 0"];
-  let tier = 0;
-  for (const [cap, n] of rows) {
-    if (n !== tier) {
-      tier = n;
-      body.push("", "# 第 " + tier + " 层");
-    }
-    body.push(cap + ": " + n);
+/** H2：纯层不得有 IO、端口、可变全局与 kernel 依赖。 */
+function pureProblems(root, unit) {
+  const problems = [];
+  const dir = path.join(root, "src", "units", unit);
+  if (fs.existsSync(path.join(dir, "ports"))) problems.push("纯层：环 1 的 " + unit + " 不得有 ports/ 目录（端口是 IO 的门，纯层不设门）");
+  const bad = [
+    [/^\s*use\s+(std::(?:fs|net|process|env|thread)|tokio|reqwest|sqlx)\b/, "IO 依赖"],
+    [/^\s*use\s+crate::kernel\b/, "kernel 依赖"],
+    [/^\s*(?:pub\s+)?static\s+mut\b/, "可变全局"],
+    [/\blazy_static!?\s*\{/, "可变全局（lazy_static）"],
+    [/\b(?:Mutex|RwLock|OnceLock|OnceCell|Atomic[A-Z]\w*)\b/, "状态/同步原语"],
+  ];
+  for (const f of rsFilesOf(dir)) {
+    const text = stripTestModules(fs.readFileSync(f, "utf8"));
+    const rel = f.slice(root.length + 1).replace(/\\/g, "/");
+    text.split(/\r?\n/).forEach((line, i) => {
+      if (!line.trim() || line.trim().startsWith("//")) return;
+      for (const [re, why] of bad) if (re.test(line)) problems.push("纯层：环 1 的 " + unit + " 出现" + why + "，见 " + rel + ":" + (i + 1));
+    });
   }
-  fs.writeFileSync(file, head.concat(body).join("\n") + "\n");
-  return minimal;
+  return problems;
 }
 
-/** 分层判据：返回 problems（失败）与 notes（只报不拦）。 */
+/** 环判据：返回 problems（失败）与 notes（只报不拦）。 */
 function layers(root) {
   const { tiers, problems: tableProblems } = parseLayers(root);
   const dirs = dirsOf(root);
-  const problems = tableProblems.concat(shapeProblems(tiers, dirs));
+  const problems = tableProblems.concat(shapeProblems(root, tiers, dirs));
   if (problems.length) return { problems, notes: [] };
 
   const edges = edgesOf(root, dirs);
-  const minimal = minimalLayers(tiers, edges);
+  const { rank, cycles } = ranksOf(tiers, edges);
+  for (const u of cycles) problems.push("环表：同环成环，牵涉 " + u + "（同环边必须是有向无环的先后序）");
+
   const fanout = new Map();
   for (const [key, info] of [...edges].sort()) {
-    const file = info.file;
     const [from, to] = key.split(">");
     fanout.set(from, (fanout.get(from) || 0) + 1);
-    const a = tiers.get(from);
-    const b = tiers.get(to);
-    if (b >= a) {
-      const rel = b === a ? "同层互依赖" : "向上依赖";
-      problems.push("分层：能力 " + from + "（第 " + a + " 层）" + rel + " " + to + "（第 " + b + " 层），见 " + file.slice(root.length + 1).replace(/\\/g, "/"));
-    }
+    const why = edgeProblem(tiers, rank, from, to);
+    if (why) problems.push("环表：单元 " + from + "（环 " + tiers.get(from) + "）" + why + "，见 " + info.file.slice(root.length + 1).replace(/\\/g, "/"));
   }
-  // 声明层号必须等于重算层号：表是事实的缓存，写宽一层就等于让门禁放水。
-  for (const [cap, tier] of [...tiers].filter(([k]) => k !== "kernel").sort()) {
-    const need = minimal.get(cap);
-    if (need !== tier) {
-      problems.push(
-        "分层：" + cap + " 在 " + TABLE + " 声明第 " + tier + " 层，按现有依赖重算应为第 " + need + " 层" +
-          "——动过边就重算全表：node tests/gates/structure/layers.js --write；不想抬层就消掉那条边",
-      );
-    }
-  }
+  for (const unit of [...tiers].filter(([, r]) => r === 1).map(([n]) => n).sort()) problems.push(...pureProblems(root, unit));
 
   const notes = [];
+  for (const [ring, label] of RINGS) {
+    if (ring === 0) continue;
+    const members = [...rank].filter(([u]) => tiers.get(u) === ring).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]));
+    if (members.length) notes.push("环 " + ring + "（" + label + "）rank 序（只回执）：" + members.map(([u, r]) => u + " " + r).join("、"));
+  }
   const forward = [...edges].filter(([, info]) => info.forward).map(([key]) => key.replace(">", " → ")).sort();
-  if (forward.length) notes.push("分层：纯转发边（只 pub use 再导出，不当真依赖，只回执）：" + forward.join("、"));
+  if (forward.length) notes.push("环表：纯转发边（只 pub use 再导出，不当真依赖，只回执）：" + forward.join("、"));
   const rows = [...fanout].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]));
-  if (rows.length) notes.push("分层：扇出（只回执，不设预算）：" + rows.map(([c, n]) => c + " " + n).join("、"));
+  if (rows.length) notes.push("环表：扇出（只回执，不设预算）：" + rows.map(([c, n]) => c + " " + n).join("、"));
   return { problems, notes };
 }
 
-module.exports = { layers, minimalLayers, recompute, writeTable, parseLayers, edgesOf, dirsOf, rsFilesOf };
+module.exports = { layers, parseLayers, edgesOf, dirsOf, rsFilesOf, ranksOf, edgeProblem, RINGS };
 
-/** 命令行：打印当前分层表与按依赖重算的层号；--write 把重算结果写回 layers.yaml。 */
+/** 命令行：打印环表、同环 rank 与判据结果；环由人决定，没有 --write。 */
 if (require.main === module) {
   const root = path.resolve(__dirname, "..", "..", "..");
-  if (process.argv.includes("--write")) {
-    const minimal = writeTable(root);
-    console.log("已按现有依赖重算 " + TABLE + "：" + minimal.size + " 个单元，" + Math.max(...minimal.values()) + " 层");
-  }
   const { tiers } = parseLayers(root);
   const dirs = dirsOf(root);
   const edges = edgesOf(root, dirs);
-  const minimal = minimalLayers(tiers, edges);
+  const { rank } = ranksOf(tiers, edges);
   const rows = [...tiers].filter(([k]) => k !== "kernel").sort((x, y) => x[1] - y[1] || x[0].localeCompare(y[0]));
-  console.log("层号  单元          依赖数  重算层号");
+  console.log("环  单元          依赖数  rank");
   for (const [cap, tier] of rows) {
     const n = [...edges.keys()].filter((k) => k.startsWith(cap + ">")).length;
-    const need = minimal.get(cap);
-    console.log(String(tier).padEnd(6) + cap.padEnd(14) + String(n).padEnd(8) + need + (need !== tier ? "  ← 表与重算不一致" : ""));
+    console.log(String(tier).padEnd(5) + cap.padEnd(14) + String(n).padEnd(8) + (rank.get(cap) || 0));
   }
   const r = layers(root);
   for (const p of r.problems) console.log("失败：" + p);

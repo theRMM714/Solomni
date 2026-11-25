@@ -1,37 +1,31 @@
-# 能力分层表：唯一权威。数字越小越底层，能力只能依赖严格更低层（docs/architecture/boundaries.md 的「业务边界判据」）。
-# 层号由现有依赖的最长路径算出，门禁要求「声明 == 重算」：动过依赖就 node tests/gates/structure/layers.js --write 重算写回。
-# 门禁：tests/gates/structure/layers.js（T0 结构审查）。新增能力必须先在这里归层，否则失败。
+# 单元环表：架构地位的唯一权威。环是规则，不是可以写宽的意图。
+# 环 0 kernel（地基库）；环 1 纯（无 IO、无状态、无端口、可穷举测试）；
+# 环 2 状态与机制；环 3 用例；环 4 适配器（presentation/、entry/）不入本表，由 entry-tiers.js 与 dependency.js 管。
+# H1：跨单元边只能指向严格更低的环；同环只允许指向 rank 更低的单元（rank 由同环边算，只回执）。
+# H2：环 1 的单元不得出现 IO、ports/、可变全局，也不得依赖 kernel。
+# 改环 = 改架构地位：必须在 PR 说明理由，门禁不再接受「声明 == 按依赖重算」。
+# 门禁：tests/gates/structure/layers.js（T0 结构审查）。新增单元必须先在这里归环，否则失败。
 kernel: 0
 
-# 第 1 层
-llm: 1
+# 环 1 纯
 permission: 1
-prompt: 1
 taskchain: 1
 
-# 第 2 层
+# 环 2 状态与机制
+catalog: 2
+llm: 2
+prompt: 2
+provision: 2
+residents: 2
+tools: 2
+vm: 2
 workspace: 2
 
-# 第 3 层
-catalog: 3
-
-# 第 4 层
-residents: 4
-tools: 4
-vm: 4
-
-# 第 5 层
-conversation: 5
-provision: 5
-
-# 第 6 层
-maintenance: 6
-turn: 6
-
-# 第 7 层
-lifecycle: 7
-system: 7
-work: 7
-
-# 第 8 层
-runtime: 8
+# 环 3 用例
+conversation: 3
+lifecycle: 3
+maintenance: 3
+runtime: 3
+system: 3
+turn: 3
+work: 3

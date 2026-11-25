@@ -34,7 +34,7 @@ const NODE_H = 44;
 /** 视图顺序；tab 文案与 JS 里的切换逻辑共用这一份。 */
 const VIEWS = [
   { key: "overview", tab: "全景" },
-  { key: "caps", tab: "能力" },
+  { key: "caps", tab: "单元环" },
   { key: "mech", tab: "kernel 机制" },
   { key: "entry", tab: "入口" },
   { key: "pres", tab: "屏面" },
@@ -45,7 +45,7 @@ const HINTS = {
   overview:
     "<h2>怎么看 · 全景</h2><p class=hint>四层从上到下：entry 装配 → presentation 屏 → units 单元 → kernel 机制。带内数字是聚合事实，细边在各自的视图里。点任一带进入该视图；红边是门禁会拦的向上/同层依赖。</p>",
   caps:
-    "<h2>怎么看 · 能力层</h2><p class=hint>边是能力之间的引用（数字为引用处数，粗细按它放大）；红色边是门禁会拦的向上/同层依赖。虚线框是扇出最大的三个单元（只回执，不设预算）。点节点下钻，点文件看目的 / 管 / 不管 / 联动。</p>",
+    "<h2>怎么看 · 单元环</h2><p class=hint>边是单元之间的引用（数字为引用处数，粗细按它放大）；红色边是门禁会拦的向上依赖或同环逆序。环间只向内，同环只按 rank 先后（rank 只回执）。虚线框是扇出最大的三个单元（只回执，不设预算）。点节点下钻，点文件看目的 / 管 / 不管 / 联动。</p>",
   mech:
     "<h2>怎么看 · kernel 机制</h2><p class=hint>一个机制管一种机制，边是机制之间的引用；严格向下，同层与向上都是红色。层号以 docs/kernel/mechanisms.yaml 为准（它是按依赖重算的事实缓存）。虚线框是扇出前三。</p>",
   entry:
@@ -211,7 +211,7 @@ function edgesWithin(root, files, prefixes) {
   return [...out.values()].sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : a.to < b.to ? -1 : 1));
 }
 
-/** 能力层：层号与边取 layers.js，问题挂到能力与文件上。 */
+/** 单元环：环号、rank 与边取 layers.js，问题挂到单元与文件上。 */
 function capView(root, rows, problems) {
   const { tiers } = L.parseLayers(root);
   const dirs = L.dirsOf(root);
@@ -231,12 +231,11 @@ function capView(root, rows, problems) {
     return { name: name, layer: layer, out: 0, inn: 0, files: fileRows(rows, rels, fileHit), issues: byCap.get(name) || [] };
   });
   const byName = new Map(nodes.map((c) => [c.name, c]));
+  const ranks = L.ranksOf(tiers, capEdges);
   const edges = [];
   for (const [key, info] of [...capEdges].sort()) {
     const [from, to] = key.split(">");
-    const a = tiers.get(from);
-    const b = tiers.get(to);
-    edges.push({ from: from, to: to, refs: info.refs, file: relOf(root, info.file), violation: b >= a });
+    edges.push({ from: from, to: to, refs: info.refs, file: relOf(root, info.file), violation: !!L.edgeProblem(tiers, ranks.rank, from, to) });
     if (byName.has(from)) byName.get(from).out++;
     if (byName.has(to)) byName.get(to).inn++;
   }
@@ -579,7 +578,7 @@ function overviewSvg(meta, entry) {
   const entryLines = [...groups.keys()].sort((a, b) => b - a).map((k) => segNames[k] + "：" + groups.get(k).sort().join(" · "));
   const bands = [
     { view: "pres", y: 20, h: 100, title: "presentation · " + meta.screens + " 屏 / " + meta.screenFiles + " 个文件", lines: ["每屏只取清单里的能力单元：" + meta.unitCount + " 个单元、" + meta.cross.screenEdges + " 处屏→单元引用（docs/presentation/inbound.yaml）"], tag: "点这里看屏面入站面" },
-    { view: "caps", y: 164, h: 110, title: "units · " + meta.caps + " 单元 / " + meta.files + " 个文件", lines: ["单元之间 " + meta.edges + " 条依赖边，只许向下（docs/layers.yaml）", "对外只经 kernel 的 " + meta.cross.faces + " 个 api 面（" + meta.cross.capKernel + " 处取用）"], tag: "点这里看能力层" },
+    { view: "caps", y: 164, h: 110, title: "units · " + meta.caps + " 单元 / " + meta.files + " 个文件", lines: ["单元之间 " + meta.edges + " 条依赖边，环间只向内（layers.yaml）", "对外只经 kernel 的 " + meta.cross.faces + " 个 api 面（" + meta.cross.capKernel + " 处取用）"], tag: "点这里看单元环" },
     { view: "mech", y: 318, h: 110, title: "kernel · " + meta.mech + " 机制 / " + meta.mechLayers + " 层", lines: ["机制之间 " + meta.mechEdges + " 条边，严格下行、无环（docs/kernel/mechanisms.yaml）", "对外面按概念切成 " + meta.cross.faces + " 个，内核内部不绕道面"], tag: "点这里看机制分层" },
   ];
   const out = [];
@@ -623,7 +622,7 @@ function page(data) {
   const m = data.meta;
   const svg = {
     overview: overviewSvg(m, data.entry),
-    caps: bandSvg({ nodes: data.caps, edges: data.edges }, { nodeW: 150, nodeH: 44, wide: m.wide, bandLabel: (l) => "第 " + l + " 层" + (l === 0 ? "（最底层）" : ""), aria: "能力依赖图", id: "cap", view: "caps" }),
+    caps: bandSvg({ nodes: data.caps, edges: data.edges }, { nodeW: 150, nodeH: 44, wide: m.wide, bandLabel: (l) => (l === 0 ? "环 0 地基" : "环 " + l + (l === 1 ? " 纯" : l === 2 ? " 状态与机制" : " 用例")), aria: "单元环依赖图", id: "cap", view: "caps" }),
     mech: bandSvg({ nodes: data.mech.nodes, edges: data.mech.edges }, { nodeW: 165, nodeH: 44, wide: m.wideMech, bandLabel: (l) => "第 " + l + " 层", aria: "kernel 机制分层图", id: "mech", view: "mech" }),
     entry: bandSvg({ nodes: data.entry.nodes, edges: data.entry.edges }, { nodeW: 140, nodeH: 44, wide: m.wideEntry, bandLabel: (l) => "第 " + l + " 段", aria: "入口分段图", id: "entry", view: "entry" }),
     pres: presSvg(data.pres),
@@ -676,7 +675,7 @@ function page(data) {
   ].join("");
   const java = [
     "var D=JSON.parse(document.getElementById('graph-data').textContent),HINTS=D.hints;",
-    "var TAB={overview:'全景',caps:'能力',mech:'kernel 机制',entry:'入口',pres:'屏面'};",
+    "var TAB={overview:'全景',caps:'单元环',mech:'kernel 机制',entry:'入口',pres:'屏面'};",
     "var stage=document.getElementById('stage'),panel=document.getElementById('panel'),crumbs=document.getElementById('crumbs');",
     "var home=stage.innerHTML,cur={t:'home',v:'overview'},hist=[];",
     "var backBtn=document.getElementById('back');",
@@ -716,7 +715,7 @@ function page(data) {
     " var fe=(view==='caps'?D.fe[name]:view==='mech'?D.mech.fe[name]:view==='entry'?D.entry.fe[name]:null)||[];",
     " crumb([['全景',''],[TAB[view],'view:'+view],[view==='pres'?n.name:n.name,view==='pres'?'v:'+view+':'+n.file:'v:'+view+':'+name]]);",
     " stage.innerHTML=fileGraph(n.files,fe,prefix);",
-    " var tags=view==='entry'?'<span class=tag>第 '+n.layer+' 段</span>':view==='pres'?'<span class=tag>取 '+n.units.length+' 个单元</span>':'<span class=tag>第 '+n.layer+' 层</span>';",
+    " var tags=view==='entry'?'<span class=tag>第 '+n.layer+' 段</span>':view==='pres'?'<span class=tag>取 '+n.units.length+' 个单元</span>':'<span class=tag>环 '+n.layer+'</span>';",
     " panel.innerHTML='<h2>'+esc(view==='pres'?n.name:n.name)+'</h2>'+tags+'<span class=tag>'+n.files.length+' 个文件</span>'",
     "  +(view==='pres'?'<div class=path style=\"margin-top:8px\">'+esc(n.file)+'</div><h3>入站能力单元</h3><p class=hint>'+esc(n.units.join(' · '))+'</p>':'')",
     "  +'<h3>命中问题</h3>'+issues(n.issues)+'<h3>提示</h3><p class=hint>点文件看四槽；悬停文件高亮它的依赖。</p>';",
@@ -776,7 +775,7 @@ function previousMeta(file) {
 
 /** 计数摘要：变化量只在有上一版时给，避免把「首次生成」说成增长。 */
 function summary(meta, before) {
-  const base = "结构图：Structure.html " + (before ? "已刷新" : "已生成") + "（" + meta.caps + " 能力 / " + meta.mech + " 机制 / " + meta.entry + " 入口模块 / " + meta.screens + " 屏；依赖边 " + meta.edges + " / " + meta.mechEdges + " / " + meta.entryEdges + "；命中 " + meta.issues + "）";
+  const base = "结构图：Structure.html " + (before ? "已刷新" : "已生成") + "（" + meta.caps + " 单元 /" + meta.mech + " 机制 / " + meta.entry + " 入口模块 / " + meta.screens + " 屏；依赖边 " + meta.edges + " / " + meta.mechEdges + " / " + meta.entryEdges + "；命中 " + meta.issues + "）";
   if (!before) return base;
   const parts = [];
   for (const [key, label] of [["caps", "能力"], ["mech", "机制"], ["entry", "入口模块"], ["screens", "屏"], ["edges", "能力边"], ["mechEdges", "机制边"], ["entryEdges", "入口边"], ["issues", "命中"]]) {
