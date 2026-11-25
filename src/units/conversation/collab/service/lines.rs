@@ -9,7 +9,7 @@ use crate::units::conversation::collab::domain::events::{CheckView, CollabEvent}
 use crate::units::conversation::collab::domain::gates::Pending;
 use crate::units::conversation::collab::service::discussion::Discussion;
 use crate::units::conversation::collab::service::synthesis::Execution;
-use crate::units::conversation::session::api::{LineView, SessionEvent};
+use crate::units::transcript::api::{LineView, SessionEvent};
 /// 目的：代拟行里的一项（只给人看）：复用项标出来，组装项带上模块与模型。
 pub(crate) fn slate_item(a: &AgentMeta, why: &str) -> String {
     if a.transient {

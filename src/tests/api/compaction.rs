@@ -5,9 +5,9 @@
 
 use super::super::doubles::{model_draft, module_of};
 use super::super::single_work;
+use crate::presentation::faces::Faces;
 use crate::units::runtime::api::Output;
 use crate::units::runtime::api::{ActionCall, Caller, SessionEvent};
-use crate::presentation::faces::Faces;
 use std::sync::Arc;
 
 #[test]
@@ -88,11 +88,7 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
     // 再走一轮：发送视图里**只剩一份摘要**（第二次那份），上一份已被取代。
     faces
         .turn
-        .say(
-            &sid,
-            "继续",
-            crate::units::runtime::api::Output::Final,
-        )
+        .say(&sid, "继续", crate::units::runtime::api::Output::Final)
         .expect("压完再走一轮");
     let after = seen.lock().expect("锁").clone();
     let last = after.last().expect("至少问过一次").clone();
@@ -152,11 +148,7 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
         .expect("第一轮");
     faces
         .turn
-        .say(
-            &sid,
-            "接着做",
-            crate::units::runtime::api::Output::Final,
-        )
+        .say(&sid, "接着做", crate::units::runtime::api::Output::Final)
         .expect("第二轮（开头该自动压一次）");
 
     let all = seen.lock().expect("锁").clone();
@@ -213,19 +205,11 @@ fn compaction_keeps_the_recent_tail_and_the_new_user_line() {
         .sid;
     faces
         .turn
-        .say(
-            &sid,
-            "第一句话",
-            crate::units::runtime::api::Output::Final,
-        )
+        .say(&sid, "第一句话", crate::units::runtime::api::Output::Final)
         .expect("第一轮");
     faces
         .turn
-        .say(
-            &sid,
-            "第二句话",
-            crate::units::runtime::api::Output::Final,
-        )
+        .say(&sid, "第二句话", crate::units::runtime::api::Output::Final)
         .expect("第二轮（开头该压一次）");
 
     let all = seen.lock().expect("锁").clone();
@@ -275,11 +259,7 @@ fn manual_compaction_reports_when_there_is_nothing_to_compact() {
         .sid;
     faces
         .turn
-        .say(
-            &sid,
-            "你好",
-            crate::units::runtime::api::Output::Final,
-        )
+        .say(&sid, "你好", crate::units::runtime::api::Output::Final)
         .expect("第一轮");
     faces.turn.compact(&sid).expect("手动压缩");
     let (batches, _, _) = handle.events().snapshot(Some(&sid), 0);
@@ -332,11 +312,7 @@ fn slash_compact_message_runs_the_command_instead_of_the_model() {
         .sid;
     faces
         .turn
-        .say(
-            &sid,
-            "先说一句",
-            crate::units::runtime::api::Output::Final,
-        )
+        .say(&sid, "先说一句", crate::units::runtime::api::Output::Final)
         .expect("第一轮");
     let acted = faces
         .actions
@@ -399,11 +375,7 @@ fn compact_action_takes_only_session_id() {
         .sid;
     faces
         .turn
-        .say(
-            &sid,
-            "先说一句",
-            crate::units::runtime::api::Output::Final,
-        )
+        .say(&sid, "先说一句", crate::units::runtime::api::Output::Final)
         .expect("第一轮");
     faces
         .actions
@@ -455,11 +427,7 @@ fn lowering_keep_percent_applies_to_live_manual_compaction() {
         .sid;
     faces
         .turn
-        .say(
-            &sid,
-            "先说一句",
-            crate::units::runtime::api::Output::Final,
-        )
+        .say(&sid, "先说一句", crate::units::runtime::api::Output::Final)
         .expect("第一轮");
     // 活会话是在 keep=15 时建的；这里设为 0，手动压缩必须按新值重算。
     let mut st = faces.registry.settings().expect("读设置");
@@ -575,11 +543,7 @@ fn deleting_the_compaction_line_restores_the_full_send_view() {
         .sid;
     faces
         .turn
-        .say(
-            &sid,
-            "先说一句",
-            crate::units::runtime::api::Output::Final,
-        )
+        .say(&sid, "先说一句", crate::units::runtime::api::Output::Final)
         .expect("第一轮");
     faces.turn.compact(&sid).expect("手动压缩");
     let (batches, _, _) = handle.events().snapshot(Some(&sid), 0);
@@ -602,11 +566,7 @@ fn deleting_the_compaction_line_restores_the_full_send_view() {
         .expect("删除压缩记录行");
     faces
         .turn
-        .say(
-            &sid,
-            "继续",
-            crate::units::runtime::api::Output::Final,
-        )
+        .say(&sid, "继续", crate::units::runtime::api::Output::Final)
         .expect("删除后再问一轮");
 
     let all = seen.lock().expect("锁").clone();
@@ -658,19 +618,11 @@ fn auto_compaction_uses_provider_usage_when_it_is_available() {
         .sid;
     faces
         .turn
-        .say(
-            &sid,
-            "第一句",
-            crate::units::runtime::api::Output::Final,
-        )
+        .say(&sid, "第一句", crate::units::runtime::api::Output::Final)
         .expect("第一轮");
     faces
         .turn
-        .say(
-            &sid,
-            "第二句",
-            crate::units::runtime::api::Output::Final,
-        )
+        .say(&sid, "第二句", crate::units::runtime::api::Output::Final)
         .expect("第二轮该先压一次");
 
     let all = seen.lock().expect("锁").clone();

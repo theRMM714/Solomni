@@ -33,8 +33,7 @@ impl Work {
         };
         let cap = crate::units::vm::api::vm_capability(&inputs);
         let vm_available = cap.ready();
-        let vm_reason =
-            crate::units::vm::api::capability_refusal(&inputs).unwrap_or_default();
+        let vm_reason = crate::units::vm::api::capability_refusal(&inputs).unwrap_or_default();
         let vm_requirements = cap.requirements;
         // 会话级判据（机器能力 + 这条会话选的虚拟根）只算一次：两处读同一个结论，不各算一遍。
         let readiness = crate::units::vm::api::tier_readiness(
@@ -243,8 +242,7 @@ impl Work {
             .collect();
         // 入口按**目标环境**判：虚拟机档在 guest 里跑（guest 的 os），本机档在宿主；
         // 跨平台时还要看文件形式——宿主编出来的产物（如 Windows 的 .exe）在 linux guest 里跑不了。
-        let guest =
-            crate::units::vm::api::guest_os_of(&self.root, host, &spec).map(|g| g.as_str());
+        let guest = crate::units::vm::api::guest_os_of(&self.root, host, &spec).map(|g| g.as_str());
         let target_os = guest.unwrap_or(std::env::consts::OS);
         let missing: Vec<crate::units::vm::api::MissingEntry> =
             crate::units::vm::api::missing_entries_for(&session_modules, target_os, &|p| {

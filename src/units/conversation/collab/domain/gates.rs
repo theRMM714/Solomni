@@ -3,7 +3,7 @@
 //! 不管：排队、等待、落盘、重建（在会话能力）；谁在什么时候挂哪一关（在本能力的 `service/`）。
 //! 联动：`service/` 用 `Pending::gate` 挂卡；`Pending::from_gate` 把排队回来的一关还原成类型化形态。
 
-use crate::units::conversation::session::api::{
+use crate::units::transcript::api::{
     DecisionCard, DecisionEnvelope, DecisionMessage, Gate, OptionView,
 };
 

@@ -4,30 +4,26 @@
 //! 联动：`cli/view.rs`、`cli/term.rs`、`cli/theme.rs`、`docs/presentation/cli/unit-map.md`
 
 use super::*;
+use crate::presentation::faces::Faces;
 use crate::units::runtime::api::Handle;
 use crate::units::work::api::{
     AgentSuggestion, FilesView, RuntimeDiagnosis, RuntimeReport, SessionConfig, SessionEdit,
     SessionTypeView, SessionView, TierChoices, WorkOpened, WorkOps, WorkSpec,
 };
-use crate::presentation::faces::Faces;
 
-use crate::units::catalog::modules::api::{ModulesOps, Roster};
-use crate::units::catalog::packages::api::Problem;
-use crate::units::catalog::registry::api::{
-    AgentView, AppSettings, ModelDraft, RegistryOps,
-};
-use crate::units::catalog::registry::domain::agents::Agent;
-use crate::units::conversation::collab::api::{CheckView, CollabEvent};
-use crate::units::conversation::session::api::{ContextUsage, LineView, ToolCallView};
-use crate::units::conversation::session::domain::events::{
-    DecisionAnswer, DecisionEnvelope, DecisionMessage,
-};
-use crate::units::llm::api::{ProbeOutcome, ReplayReport};
-use crate::units::pure::taskchain::api::{NodeStatus, TaskChain, TaskNode};
 use crate::tests::doubles::{
     InMemorySettings, core_with_settings_modules, module_of, module_with_runtimes,
 };
 use crate::tests::ops_with;
+use crate::units::catalog::modules::api::{ModulesOps, Roster};
+use crate::units::catalog::packages::api::Problem;
+use crate::units::catalog::registry::api::{AgentView, AppSettings, ModelDraft, RegistryOps};
+use crate::units::catalog::registry::domain::agents::Agent;
+use crate::units::conversation::collab::api::{CheckView, CollabEvent};
+use crate::units::llm::api::{ProbeOutcome, ReplayReport};
+use crate::units::pure::taskchain::api::{NodeStatus, TaskChain, TaskNode};
+use crate::units::transcript::api::{ContextUsage, LineView, ToolCallView};
+use crate::units::transcript::api::{DecisionAnswer, DecisionEnvelope, DecisionMessage};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

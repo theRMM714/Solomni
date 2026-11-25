@@ -44,8 +44,7 @@ impl crate::units::conversation::session::api::CompactChatFactory for CompactRun
         &self,
         module: &str,
         session_model: Option<&str>,
-    ) -> Result<Option<crate::units::conversation::session::api::CompactChatSpec>, String>
-    {
+    ) -> Result<Option<crate::units::conversation::session::api::CompactChatSpec>, String> {
         let guard = self.choice.read().unwrap_or_else(|e| e.into_inner());
         match &*guard {
             CompactChoice::Session => Ok(None),

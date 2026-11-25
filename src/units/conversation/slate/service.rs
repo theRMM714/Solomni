@@ -4,12 +4,12 @@
 //! 联动：协议只有这一处——两个调用方（推荐 / 代拟）走同一条 slate 工具载荷；入口 slate::api::propose。
 
 use crate::units::catalog::registry::api::{RosterPick, model_listing, resolve_picks};
-use crate::units::conversation::session::api::SessionEvent;
 use crate::units::conversation::session::api::core_operation;
 use crate::units::conversation::slate::api::{Mode, Parties, Pick, Proposal, Request};
 use crate::units::conversation::slate::domain::proposal::collapse;
 use crate::units::llm::api::Msg;
 use crate::units::prompt::api::Segment;
+use crate::units::transcript::api::SessionEvent;
 
 /// 目的：拟一份可直接开工的名单——让核心按需求提候选，再按登记处与工作区现状核验。
 /// 约束：登记处有没有模型、核心默认设没设由调用方提示（怎么修），与名单合法性无关；

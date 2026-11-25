@@ -130,12 +130,7 @@ fn fs_modules_reads_the_userdata_fact() {
     std::fs::create_dir_all(dir.join("with").join("userdata")).expect("建 userdata");
     std::fs::write(dir.join("with").join("userdata").join("keep.txt"), "x").expect("放已有的状态");
 
-    let roster = FsModules::new(
-        dir.clone(),
-        crate::units::tools::api::names(),
-        Vec::new(),
-    )
-    .scan();
+    let roster = FsModules::new(dir.clone(), crate::units::tools::api::names(), Vec::new()).scan();
     let fact = |id: &str| {
         roster
             .modules

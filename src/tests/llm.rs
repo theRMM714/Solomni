@@ -24,8 +24,7 @@ pub(crate) fn envelope_degraded_keeps_raw() {
 
 #[test]
 pub(crate) fn envelope_wrapped_json_still_parses() {
-    let r =
-        crate::units::llm::api::parse("好的：{\"type\":\"agree\",\"text\":\"同意\"} 以上。");
+    let r = crate::units::llm::api::parse("好的：{\"type\":\"agree\",\"text\":\"同意\"} 以上。");
     assert!(matches!(r.verb, crate::units::llm::api::Verb::Agree));
     assert!(!r.degraded);
 }
@@ -47,10 +46,7 @@ pub(crate) fn envelope_text_may_be_omitted() {
     assert!(say.text.is_empty());
     // 缺 name 的工具信封仍是 malformed 信号，不被缺省 text 收编成发言。
     let bad = crate::units::llm::api::parse("{\"type\":\"tool\",\"args\":{}}");
-    assert!(matches!(
-        bad.verb,
-        crate::units::llm::api::Verb::Tool
-    ));
+    assert!(matches!(bad.verb, crate::units::llm::api::Verb::Tool));
     assert!(bad.tools.iter().any(|t| t.malformed.is_some()));
 }
 
@@ -390,9 +386,7 @@ pub(crate) fn envelope_tool_parses_name_and_args() {
     assert!(plain.degraded && plain.tools.is_empty() && plain.text == "没有信封的发言");
     // 信封之外的正文才进 text（永不把信封 JSON 当文本）；只剩信封时 text 为空串。
     assert!(
-        crate::units::llm::api::parse(TOOL_CALL)
-            .text
-            .is_empty(),
+        crate::units::llm::api::parse(TOOL_CALL).text.is_empty(),
         "只剩信封 → text 空"
     );
     let prose = crate::units::llm::api::parse(
@@ -546,7 +540,7 @@ pub(crate) fn an_aborted_generation_never_executes_a_repairable_envelope() {
             ask: None,
         };
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        let mut noop = |_e: crate::units::conversation::session::api::SessionEvent| {};
+        let mut noop = |_e: crate::units::transcript::api::SessionEvent| {};
         core.turn
             .single_say(
                 &sid,
@@ -587,7 +581,7 @@ pub(crate) fn a_cancelled_generation_never_executes_a_valid_tool_envelope() {
             ask: None,
         };
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        let mut noop = |_e: crate::units::conversation::session::api::SessionEvent| {};
+        let mut noop = |_e: crate::units::transcript::api::SessionEvent| {};
         core.turn
             .single_say(
                 &sid,
@@ -608,7 +602,7 @@ pub(crate) fn a_cancelled_generation_never_executes_a_valid_tool_envelope() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            crate::units::conversation::session::api::SessionEvent::Transcript(lines)
+            crate::units::transcript::api::SessionEvent::Transcript(lines)
                 if lines.iter().any(|l| l.kind == "notice" && l.line.contains("[停止]"))
         )),
         "取消要留下可回档的 [停止] 行：{:?}",
@@ -620,7 +614,7 @@ pub(crate) fn a_cancelled_generation_never_executes_a_valid_tool_envelope() {
 ///   但**不进对话**——点「继续」是从断点重开一轮，不是把这半句当发言续写。
 #[test]
 pub(crate) fn an_interrupted_generation_keeps_the_half_sentence_as_a_cut_line() {
-    use crate::units::conversation::session::api::SessionEvent;
+    use crate::units::transcript::api::SessionEvent;
     let io = Arc::new(InMemorySysIo::new());
     let mut core = core_with_io_gateway(
         vec![module_of("a")],
@@ -884,9 +878,7 @@ pub(crate) fn envelope_multi_call_runs_every_call_and_rebuilds_identically() {
     crate::tests::lifecycle::rewind(
         &mut core2,
         &sid,
-        crate::units::lifecycle::api::RewindTarget::Delete(
-            transcript_rows(&events).len() as u64
-        ),
+        crate::units::lifecycle::api::RewindTarget::Delete(transcript_rows(&events).len() as u64),
     )
     .unwrap();
     let rebuilt = core2.single_history(&sid).unwrap();

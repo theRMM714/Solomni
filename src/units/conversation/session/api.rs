@@ -10,11 +10,6 @@ pub(crate) use crate::units::conversation::session::service::engine::tools::run_
 pub use crate::units::conversation::session::domain::decisions::{
     Answered, Decisions, GateTicket, Gates, SlotWake, decisions, issued_in,
 };
-pub use crate::units::conversation::session::domain::events::{
-    ContextUsage, DecisionCard, DecisionEnvelope, DecisionMessage, DecisionQueue, DecisionWaiter,
-    Gate, LineView, OptionView, SessionEvent, ToolCallView, idle, interrupted_note,
-    last_compaction, qualify, stopped_note, tool_ask, working,
-};
 // 流程面：驱动只认这几个名字（推一步 / 让出一回合 / 交回后的处置 / 可派的活）。
 pub use crate::units::conversation::session::domain::flow::{
     Flow, Handback, MemberAsk, Settle, WorkPlan,
@@ -27,9 +22,7 @@ pub use crate::units::conversation::session::domain::mechanism::{
     Mechanism, SEATS, Seat, flow_ids, mechanism_of, problems as mechanism_problems, seat,
 };
 // 流程工厂面：组合根把实现注入 turn / work，装配点只按 id 取段。
-pub use crate::units::conversation::session::domain::flows::{
-    FlowSetup, Flows, sequence_of,
-};
+pub use crate::units::conversation::session::domain::flows::{FlowSetup, Flows, sequence_of};
 pub use crate::units::conversation::session::domain::history::{
     Delegation, HistoryView, RunState, SessionMeta, UsageTotals, WorkspaceBinding,
 };
@@ -39,14 +32,10 @@ pub use crate::units::conversation::session::domain::profile::{
 };
 // 只有测试知道产品自带类型的名字；生产代码按声明里的 auto / flows 分支，不认这些 id。
 #[cfg(test)]
-pub use crate::units::conversation::session::domain::profile::{
-    CUSTOM, MEETING, PROXY, SINGLE,
-};
+pub use crate::units::conversation::session::domain::profile::{CUSTOM, MEETING, PROXY, SINGLE};
 // 工具面：机制席位 → 实际可调的工具（档位只管网络，不再逐工具裁剪）。
 #[allow(unused_imports)]
-pub use crate::units::conversation::session::domain::assemble::{
-    face_tools, resolve, seat_face,
-};
+pub use crate::units::conversation::session::domain::assemble::{face_tools, resolve, seat_face};
 #[allow(unused_imports)]
 pub use crate::units::conversation::session::domain::persist::{
     PersistPolicy, SYSTEM_SID_SUGGEST, is_system_session, persist_policy_for,

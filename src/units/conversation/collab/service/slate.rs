@@ -8,11 +8,12 @@ use crate::units::catalog::modules::api::Modules;
 use crate::units::catalog::registry::api::Settings;
 use crate::units::conversation::collab::domain::gates::Pending;
 use crate::units::conversation::collab::service::discussion::Discussion;
+use crate::units::conversation::session::api::Gates;
 use crate::units::conversation::session::api::SessionMeta;
-use crate::units::conversation::session::api::{Gates, LineView, SessionEvent};
 use crate::units::llm::api::{CompleteOpts, Llm};
 use crate::units::prompt::api::{Prompt, Segment};
 use crate::units::tools::api::ToolExec;
+use crate::units::transcript::api::{LineView, SessionEvent};
 use crate::units::vm::api::Vm;
 use crate::units::workspace::api::Sandboxes;
 use std::sync::Arc;
@@ -22,9 +23,7 @@ impl CollabSession {
     /// 目的：委托代拟：核心拟发言名单（**拟名单业务**的用例，与「推荐模型」同一条 `slate` 协议），交用户确认。
     pub(crate) fn draft_slate(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
         let roster = self.modules.roster();
-        sink(crate::units::conversation::session::api::working(
-            "核心",
-        ));
+        sink(crate::units::transcript::api::working("核心"));
         let proposal = {
             let mut verify_box = self.verify_env("planner");
             let verify = verify_box.as_deref_mut();
@@ -49,7 +48,7 @@ impl CollabSession {
             )
         };
         // 核心这一次调用结束了：交回"谁在干活"——下一棒（泵的下一步 / 等用户）会再推。
-        sink(crate::units::conversation::session::api::idle());
+        sink(crate::units::transcript::api::idle());
         let Ok(proposal) = proposal else {
             self.notice(
                 "[错误] 代拟失败（模型无响应格式）。请直接点名 agent。",
@@ -262,8 +261,7 @@ impl CollabSession {
         door: Arc<dyn Gates>,
     ) -> Result<CollabSession, String> {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
-        let st =
-            crate::units::conversation::collab::domain::collab_state::derive(events, &names);
+        let st = crate::units::conversation::collab::domain::collab_state::derive(events, &names);
         // 全部已发出的转录行（按 id 顺序），连降级标记一起读回（样式靠它，不靠文案）。
         let mut all_lines: Vec<LineView> = Vec::new();
         for ev in events {

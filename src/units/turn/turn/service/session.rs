@@ -6,6 +6,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::kernel::api::types::SessionId;
+use crate::kernel::ports::Log;
 use crate::units::catalog::modules::api::Modules;
 use crate::units::catalog::packages::api::Packages;
 use crate::units::catalog::secrets::api::SecretOps;
@@ -20,8 +22,6 @@ use crate::units::turn::turn::api::Session;
 use crate::units::turn::turn::service::state::TurnState;
 use crate::units::vm::api::Vm;
 use crate::units::workspace::api::Workspace;
-use crate::kernel::api::types::SessionId;
-use crate::kernel::ports::Log;
 
 /// 目的：会话本体：在世表与运行态（`TurnState`）连同装配一席要用的能力面，一处持有。
 /// 约束：只在核心线程上读写；能力面只经 `api` 取。

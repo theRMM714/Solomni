@@ -36,5 +36,4 @@
 | `src/units/conversation/session/domain/flows.rs` | 流程工厂面：`Flows`（id → 造一段）、装配用的 `FlowSetup`（会话参数、成员、裁决队与可选的恢复事实）与按类型表串段的 `sequence_of`；不实现任何流程，实现由组合根注入 |
 | `src/units/conversation/session/domain/profile.rs` | 会话类型表：`Profiles` / `Profile` / `SessionSpec` 的形状与装配期校验（id 唯一且无空白、流程已注册且不重复、没有流程的类型要有静止机制且它不能是流程机制、有流程的类型不该再声明机制、每个流程核心席与成员席都不为空、成员席人数折成 `min_agents`）；机制与席位从 `mechanism.rs` 问，不另立一份；不解析 yaml，不实现流程 |
 | `src/units/conversation/session/detail/yaml_profiles.rs` | 会话类型表的磁盘实现：读 `systools/profiles.yaml`（缺文件 / 语法坏 / 规则不过都如实报），装载后交组合根 |
-| `src/units/conversation/session/domain/events.rs` | 呈现侧线格式词汇：通用事件与机制事件通道 `Push`（`SessionEvent`）、裁决卡信封、裁决关 `Gate` 与出队票；不解任何机制的关卡 |
 | `src/units/conversation/session/domain/rewind.rs` | 回档的行 / 事件算术（纯函数，不碰 IO） |

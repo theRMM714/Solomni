@@ -3,11 +3,11 @@
 //! 不管：参数表与分派（entry::args）、各适配器与能力的内部实现、装配后的业务行为（在能力与呈现层）。
 //! 联动：装配结果交给呈现层（presentation::cli / presentation::web），runtime 不知道后两者存在；测试构建外露启动门助手（entry::startup）。
 
-mod units;
 mod entry;
 mod guard;
 mod kernel;
 mod presentation;
+mod units;
 
 #[cfg(test)]
 mod tests;
@@ -22,10 +22,10 @@ pub(crate) use entry::startup::{
 
 use crate::kernel::api::layout;
 use crate::presentation::faces::Faces;
-use units::catalog::registry::api::Registry as _;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use units::catalog::registry::api::Registry as _;
 
 /// 目的：命令表投影成的 op 书——入口分派、自洽检查与模块保留名都读它，只解析一次。
 /// 约束：命令表非法或声明互相矛盾都是装配错误：就地退出，不留一个「跑起来但手册是错的」进程。
@@ -232,9 +232,8 @@ fn main() {
     );
     eprintln!("[围栏] {}", fence_cap.note);
     let store = entry::assembly::settings_store(&root);
-    let history = units::conversation::session::detail::fs_history::FsHistory::new(
-        root.join("session"),
-    );
+    let history =
+        units::conversation::session::detail::fs_history::FsHistory::new(root.join("session"));
     let workspace = units::workspace::detail::FsWorkspace::new(root.join("session"));
     let workstore = units::workspace::detail::FsWorkStore::new();
     // 运行包能力：依赖文件夹 runtimes/（一个包 = 一个文件夹 + package.yaml）。
@@ -276,9 +275,8 @@ fn main() {
     };
     // 依赖补齐后的**自动发现**：设置里没登记时，把装到项目内的可运行包直接当登记值（显式登记优先）。
     // 只填内存、不写用户的 settings.yaml；同进程内新装的包要下次启动才生效（Web 的 setup 作业即属此列）。
-    let installed =
-        units::provision::api::Provision::status(&entry::assembly::provision(&root))
-            .unwrap_or_default();
+    let installed = units::provision::api::Provision::status(&entry::assembly::provision(&root))
+        .unwrap_or_default();
     // 清单里的 probe 是**相对产品根**的写法：这里拼成绝对路径再当登记值用（否则只在 CWD = 产品根时才成立）。
     let picked = |prefix: &str| {
         installed
@@ -318,8 +316,7 @@ fn main() {
         fence_cap.net && (!kernel::api::platform::HAS_EXTERNAL_ACL_STEP || authorized),
         fence_cap.tree,
         true,
-        sandbox_cfg.policy.on_unavailable
-            == units::catalog::registry::api::SandboxUnavailable::Ask,
+        sandbox_cfg.policy.on_unavailable == units::catalog::registry::api::SandboxUnavailable::Ask,
     ));
     // 授权开关：工具进程与启动报告共用这一份（环境变量只在这里生效一次）。
     let write_allowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(authorized));
@@ -416,20 +413,18 @@ fn main() {
     }
     // **会话类型表**（systools/profiles.yaml）：一个会话类型就是一串流程与它的静止机制。
     // 它是会话类型的唯一声明处：提示词册子的会话类型、机制册的校验都以它为口径；装配期就校验。
-    let profiles =
-        match units::conversation::session::detail::yaml_profiles::YamlProfiles::new(
-            root.join("systools"),
-        )
-        .load()
-        {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("[装配失败] {}", e);
-                std::process::exit(1);
-            }
-        };
-    let prompt_source =
-        units::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
+    let profiles = match units::conversation::session::detail::yaml_profiles::YamlProfiles::new(
+        root.join("systools"),
+    )
+    .load()
+    {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[装配失败] {}", e);
+            std::process::exit(1);
+        }
+    };
+    let prompt_source = units::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
     // **提示词册能力**：册子只在这里装载一次、也只被它持有；runtime 与工具执行
     // （回执里的那些收尾标记）要的"段"都经它的能力面拿——不再各存一份拷贝。
     let prompt = match units::prompt::service::load(&prompt_source) {
@@ -521,14 +516,12 @@ fn main() {
     let order = units::vm::domain::exec::default_combos(std::env::consts::OS);
     let mut shares: Vec<Arc<dyn units::vm::ports::ShareBackend + Send + Sync>> = Vec::new();
     for combo in order.iter().filter(|c| c.engine == "qemu") {
-        let share: Arc<dyn units::vm::ports::ShareBackend + Send + Sync> = match combo.share
-        {
-            "smb" => Arc::new(
-                units::vm::detail::SmbShare::new().with_book(std::sync::Arc::clone(&book)),
-            ),
+        let share: Arc<dyn units::vm::ports::ShareBackend + Send + Sync> = match combo.share {
+            "smb" => {
+                Arc::new(units::vm::detail::SmbShare::new().with_book(std::sync::Arc::clone(&book)))
+            }
             "virtiofs" => Arc::new(
-                units::vm::detail::VirtioFsShare::new()
-                    .with_book(std::sync::Arc::clone(&book)),
+                units::vm::detail::VirtioFsShare::new().with_book(std::sync::Arc::clone(&book)),
             ),
             "9p" => Arc::new(units::vm::detail::NinePShare::new()),
             _ => continue,
@@ -550,21 +543,17 @@ fn main() {
     let vm: Arc<dyn units::vm::api::Vm + Send + Sync> =
         Arc::new(units::vm::service::VmService::new(
             Arc::new(
-                units::vm::detail::QemuEngine::with_overlay_dir(
-                    layout::vm(&root).join("overlays"),
-                )
-                .with_book(std::sync::Arc::clone(&book))
-                .with_log(log.clone()),
+                units::vm::detail::QemuEngine::with_overlay_dir(layout::vm(&root).join("overlays"))
+                    .with_book(std::sync::Arc::clone(&book))
+                    .with_log(log.clone()),
             ),
             shares,
         ));
 
     // **工作区能力**：目录布局与版本库两个出站端口只由它的 service 持有（R12）。
-    let workspace: Arc<dyn units::workspace::api::Workspace + Send + Sync> =
-        Arc::new(units::workspace::service::WorkspaceService::new(
-            Arc::new(workspace),
-            Arc::new(workstore),
-        ));
+    let workspace: Arc<dyn units::workspace::api::Workspace + Send + Sync> = Arc::new(
+        units::workspace::service::WorkspaceService::new(Arc::new(workspace), Arc::new(workstore)),
+    );
 
     // **隐秘字段能力**：值只落 .home/secrets.yaml；加载失败 = 装配失败（不静默空表）。
     let secrets = match entry::assembly::secrets(&root, Arc::clone(&modules)) {
@@ -612,9 +601,7 @@ fn main() {
     let storage_service = Arc::new(entry::assembly::storage(
         &root,
         Arc::clone(&provision),
-        units::maintenance::storage::api::StoragePolicy::from(
-            &registry.app_settings().storage,
-        ),
+        units::maintenance::storage::api::StoragePolicy::from(&registry.app_settings().storage),
         std::sync::Arc::clone(&log),
         active_log,
     ));
@@ -630,11 +617,10 @@ fn main() {
     // 项目内基础工具链的只读安装根：构建与 shell 共用同一份（不按 agent 重复注入）。
     let base_roots = entry::toolchains::active_roots(&root);
     // 构建的三个端口各一个适配器：源指纹与构建状态共用一份本机档（BuildStore），缓存卷落盘（CacheOnDisk）。
-    let build_store = Arc::new(
-        units::maintenance::builds::detail::fingerprint::BuildStore::new(root.clone()),
-    );
-    let builds: Arc<dyn units::maintenance::builds::api::Builds + Send + Sync> = Arc::new(
-        units::maintenance::builds::service::BuildsService::new(
+    let build_store =
+        Arc::new(units::maintenance::builds::detail::fingerprint::BuildStore::new(root.clone()));
+    let builds: Arc<dyn units::maintenance::builds::api::Builds + Send + Sync> =
+        Arc::new(units::maintenance::builds::service::BuildsService::new(
             root.clone(),
             Arc::clone(&packages),
             Arc::clone(&vm),
@@ -642,17 +628,16 @@ fn main() {
             Arc::clone(&storage),
             build_store.clone(),
             build_store.clone(),
-            Arc::new(
-                units::maintenance::builds::detail::cache::CacheOnDisk::new(root.clone()),
-            ),
+            Arc::new(units::maintenance::builds::detail::cache::CacheOnDisk::new(
+                root.clone(),
+            )),
             Arc::new(build_runner),
             Arc::new(units::tools::service::fence::ToolFenceGate),
             Arc::clone(&fence_host),
             Arc::new(kernel::detail::HostProbeAdapter),
             std::sync::Arc::clone(&log),
             base_roots.clone(),
-        ),
-    );
+        ));
     // **系统维护面**：启动相命令（`--doctor` / `--gc` / `--provision` …）在转录中心里也跑同一条执行路径——
     // 复用这里已经装好的端口：存储的后台作业状态在实例里，另装一套会让两边互相看不见。
     let system = match entry::assembly::system_with(
@@ -677,9 +662,9 @@ fn main() {
     let mut core = units::runtime::service::Core::new(
         root.clone(),
         Box::new(registry),
-        Arc::new(
-            units::conversation::session::service::SessionService::new(Arc::new(history)),
-        ),
+        Arc::new(units::conversation::session::service::SessionService::new(
+            Arc::new(history),
+        )),
         workspace,
         Arc::clone(&vm),
         Arc::clone(&packages),

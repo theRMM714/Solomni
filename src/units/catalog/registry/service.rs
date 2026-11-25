@@ -3,6 +3,7 @@
 //! 不管：yaml 解析与落盘（在 detail/yaml_settings.rs）；DTO 与校验规则（在 domain）；适配器装配（在组合根）。
 //! 联动：组合根 new 时注入 SettingsStore 与 llm::api::Llm；对外只经 registry::api::Registry。
 
+use crate::kernel::ports::Log;
 use crate::units::catalog::modules::api::Roster;
 use crate::units::catalog::registry::api::{AgentView, ModelView, ProviderView, Registry};
 use crate::units::catalog::registry::domain::agents;
@@ -11,7 +12,6 @@ use crate::units::catalog::registry::domain::providers::{
 };
 use crate::units::catalog::registry::ports::SettingsStore;
 use crate::units::llm::api::{Channel, Llm, ProbeOutcome, ReplayReport, ToolMode};
-use crate::kernel::ports::Log;
 use std::sync::Arc;
 
 /// 目的：只在目标为空时用发现值填上（已登记的一律保留）。
@@ -29,10 +29,8 @@ fn validate_app(
     app: &AppSettings,
     models: &std::collections::BTreeMap<String, ModelEntry>,
 ) -> Result<(), String> {
-    crate::units::catalog::registry::domain::providers::validate_sandbox_settings(
-        &app.sandbox,
-    )
-    .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+    crate::units::catalog::registry::domain::providers::validate_sandbox_settings(&app.sandbox)
+        .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
     providers::validate_compact_settings(app, models)
         .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
     providers::validate_storage_settings(app)

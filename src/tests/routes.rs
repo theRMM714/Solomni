@@ -3,6 +3,7 @@
 //! 不管：真实传输（L4 端到端）。
 //! 联动：web::route、路由目录、docs/、演示脚本、FakeFaces。
 
+use crate::presentation::faces::Faces;
 use crate::units::conversation::session::api::{
     HistoryOps, HistoryView, MEETING, SINGLE, SessionMeta, SessionSpec,
 };
@@ -16,15 +17,14 @@ use crate::units::work::api::{
     SessionConfig, SessionEdit, SessionTypeView, SessionView, TierChoices, WorkOpened, WorkOps,
     WorkSpec,
 };
-use crate::presentation::faces::Faces;
 
+use crate::presentation::web::routes::{self, ROUTES};
+use crate::presentation::web::{self, FenceInfo};
 use crate::units::catalog::modules::api::{ModulesOps, Roster};
 use crate::units::catalog::registry::api::AgentView;
 use crate::units::catalog::registry::api::RegistryOps;
 use crate::units::catalog::registry::api::{AppSettings, ModelView, ProviderView};
 use crate::units::pure::exec_model::api::Tier;
-use crate::presentation::web::routes::{self, ROUTES};
-use crate::presentation::web::{self, FenceInfo};
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -96,9 +96,7 @@ impl FakeStorage {
 }
 
 impl crate::units::maintenance::storage::api::Storage for FakeStorage {
-    fn report(
-        &self,
-    ) -> Result<crate::units::maintenance::storage::api::SpaceReport, String> {
+    fn report(&self) -> Result<crate::units::maintenance::storage::api::SpaceReport, String> {
         self.guard()?;
         Ok(crate::units::maintenance::storage::api::SpaceReport::default())
     }
@@ -760,10 +758,7 @@ impl RegistryOps for FakeFaces {
             ],
         })
     }
-    fn probe_model_tools(
-        &self,
-        _id: &str,
-    ) -> Result<crate::units::llm::api::ProbeOutcome, String> {
+    fn probe_model_tools(&self, _id: &str) -> Result<crate::units::llm::api::ProbeOutcome, String> {
         self.guard()?;
         Ok(crate::units::llm::api::ProbeOutcome::Supported {
             detail: "替身说支持".to_string(),
@@ -1484,7 +1479,7 @@ fn web_serve_returns_when_interrupted() {
 /// CLI 的选项选择：序号与选项 id 原文都认——两者都是那张卡上**用户看得见**的东西。
 #[test]
 fn cli_picks_an_option_by_index_or_id() {
-    use crate::units::conversation::session::api::DecisionCard;
+    use crate::units::transcript::api::DecisionCard;
     let card: DecisionCard = serde_json::from_value(json!({
         "id": "d1",
         "envelope": { "role": "tools", "name": "甲" },

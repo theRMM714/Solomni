@@ -3,7 +3,8 @@
 //! 不管：命令分发、协作泵、压缩。
 //! 联动：`turn::api::TurnHost`、`generation/collab.rs`、`service/{turn,flow}`
 
-use crate::units::conversation::session::api::{SessionEvent, TurnIo};
+use crate::units::conversation::session::api::TurnIo;
+use crate::units::transcript::api::SessionEvent;
 use crate::units::turn::turn::api::{Advance, CollabWork, Output, Prepared, TurnHost};
 
 /// 目的：单 agent 生成：**核心队列只占两步短命令**（取出会话 / 交回会话），生成本身在工作线程上跑。 为什么必须这样：生成要跑几十秒到几分钟，它若占着唯一的命令队列， 读接口（历史列表 / 状态）与其它会话的命令全排在它后面——界面因此"假死"。 不变量：会话状态只被一个线程碰——生成期间由工作线程独占，核心表里只留"生成中"这一态。

@@ -3,10 +3,10 @@
 //! 不管：进程拉起、围栏安装、guest 执行与输出截断（在 kernel 的 ProcessRunner / vm 的 guest）；围栏派生在 domain/fence.rs。
 //! 联动：由 collab 的成员循环在派发 `shell` 前调用；声明在 systools/tools.yaml，经 tools::api 导出。
 
-use crate::units::tools::domain::schema::ToolSchema;
-use crate::units::tools::domain::systool::{SHELL, arg_fault_text};
 use crate::kernel::api::note::Note;
 use crate::kernel::api::note::codes;
+use crate::units::tools::domain::schema::ToolSchema;
+use crate::units::tools::domain::systool::{SHELL, arg_fault_text};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 

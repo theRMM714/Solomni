@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use crate::kernel::ports::ToolHandler;
 use crate::units::catalog::modules::api::Module;
 use crate::units::conversation::session::domain::mechanism::{self, Seat};
 use crate::units::conversation::session::domain::tools::{
@@ -18,7 +19,6 @@ use crate::units::tools::api::{
     tool_notes,
 };
 use crate::units::workspace::api::{Sandbox, WORK_TOOLS, Workspace};
-use crate::kernel::ports::ToolHandler;
 
 /// 目的：席位面合成出的工具 id 再去掉总表里没有的（发放了却查不到，等于发了个空 id）。
 /// 参数：seat_face = 席位面合成的 id 清单；book = 工具总表。

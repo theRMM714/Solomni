@@ -5,11 +5,9 @@
 
 use super::super::prelude::*;
 
-use crate::units::catalog::packages::api::{BaseFacts, Library, PinPolicy, Problem};
-use crate::units::vm::api::{
-    MissingEntry, host_plan_for, plan_for_spec, unavailable_modules,
-};
 use crate::tests::doubles::FixedProbe;
+use crate::units::catalog::packages::api::{BaseFacts, Library, PinPolicy, Problem};
+use crate::units::vm::api::{MissingEntry, host_plan_for, plan_for_spec, unavailable_modules};
 use std::collections::BTreeMap;
 
 /// 目的：本机档的包计划把缺的能力按模块收口；入口不在场时 `plan_for_spec` 如实给出诊断（规则在 vm，不在会话层）。

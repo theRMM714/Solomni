@@ -3,13 +3,12 @@
 //! 不管：文件机制（在 `detail/fs_history.rs`）、状态派生与回档算术（在 `domain/`）、队列代理（在 runtime）。
 //! 联动：别的能力走 `api::History`；呈现层走 `api::HistoryOps`（由队列代理实现）；装配在组合根，这里只收注入的端口。
 
-use crate::units::conversation::session::api::{
-    History, HistoryView, SessionEvent, SessionMeta,
-};
+use crate::units::conversation::session::api::{History, HistoryView, SessionMeta};
 use crate::units::conversation::session::domain::assemble as face_asm;
 use crate::units::conversation::session::domain::mechanism;
 use crate::units::conversation::session::domain::persist::persist_policy_for;
 use crate::units::conversation::session::ports::HistoryStore;
+use crate::units::transcript::api::SessionEvent;
 use std::sync::Arc;
 
 pub mod assemble;
@@ -75,14 +74,14 @@ fn head_chars(s: &str, n: usize) -> String {
 /// 落不落盘由那个会话模块自己定（协作要留档，系统会话只推不留）。
 fn core_rows(
     tool: &str,
-    view: crate::units::conversation::session::api::ToolCallView,
+    view: crate::units::transcript::api::ToolCallView,
     raw: &str,
     reasoning: &str,
     text: &str,
-) -> Vec<crate::units::conversation::session::api::LineView> {
+) -> Vec<crate::units::transcript::api::LineView> {
     let mut rows = Vec::new();
     if !text.trim().is_empty() {
-        rows.push(crate::units::conversation::session::api::LineView {
+        rows.push(crate::units::transcript::api::LineView {
             speaker: "核心".to_string(),
             verb: String::new(),
             kind: "msg".to_string(),
@@ -90,7 +89,7 @@ fn core_rows(
             ..Default::default()
         });
     }
-    rows.push(crate::units::conversation::session::api::LineView {
+    rows.push(crate::units::transcript::api::LineView {
         speaker: "核心".to_string(),
         verb: tool.to_string(),
         kind: "tool".to_string(),
@@ -113,9 +112,7 @@ fn core_rows(
 
 /// 目的：一条工具结果消息的**正文**（回放与实时唯一来源；发送视图按它定位读过的那条消息）。
 /// 约束：模型通道固定用源语言渲染说明——模型看到的是稳定文本，与界面语言无关。
-pub fn tool_result_body(
-    c: &crate::units::conversation::session::api::ToolCallView,
-) -> String {
+pub fn tool_result_body(c: &crate::units::transcript::api::ToolCallView) -> String {
     let body = crate::kernel::api::i18n::render_receipt(
         crate::kernel::api::i18n::Lang::source(),
         &c.output,
@@ -134,7 +131,7 @@ pub fn tool_result_body(
 pub fn reply_msgs(
     mode: crate::units::llm::api::ToolMode,
     raw: &str,
-    calls: &[crate::units::conversation::session::api::ToolCallView],
+    calls: &[crate::units::transcript::api::ToolCallView],
 ) -> Vec<crate::units::llm::api::Msg> {
     let protocol = mode == crate::units::llm::api::ToolMode::Native
         && !calls.is_empty()
@@ -187,20 +184,18 @@ pub fn core_operation(
     msgs: &[crate::units::llm::api::Msg],
     opts: crate::units::llm::api::CompleteOpts<'static>,
     cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    verify: Option<
-        &mut (dyn crate::units::conversation::session::api::CoreVerify + 'static),
-    >,
+    verify: Option<&mut (dyn crate::units::conversation::session::api::CoreVerify + 'static)>,
     // 核心这一轮的**事实出口**（推；落盘与否由会话模块决定）。
-    sink: &mut dyn FnMut(crate::units::conversation::session::api::SessionEvent),
+    sink: &mut dyn FnMut(crate::units::transcript::api::SessionEvent),
 ) -> Result<serde_json::Value, String> {
     // 声明面按**通道形态**给：原生通道才声明（信封通道的模型看提示词里的工具说明）。
     // 席位面由机制声明按总表合成；席位没登记时退化成空面（装配期已由 `mechanism::problems` 拦下）。
     let book = systools.book();
-    let face_rows: Vec<(&str, &crate::units::tools::api::ToolSchema)> =
-        match mechanism::seat(seat) {
-            Some(seat) => face_asm::resolve(seat, &book).unwrap_or_default(),
-            None => Vec::new(),
-        };
+    let face_rows: Vec<(&str, &crate::units::tools::api::ToolSchema)> = match mechanism::seat(seat)
+    {
+        Some(seat) => face_asm::resolve(seat, &book).unwrap_or_default(),
+        None => Vec::new(),
+    };
     let face_ids: Vec<String> = face_rows.iter().map(|(id, _)| id.to_string()).collect();
     // 声明面先备好：它被 opts 借走，**必须先于 opts 声明**（否则借用活得比它长）。
     let decls: Vec<crate::units::llm::api::ToolDecl> =
@@ -211,9 +206,9 @@ pub fn core_operation(
         };
     let mut opts = opts;
     if let Some(c) = cancel {
-        opts.cancel = Some(crate::units::llm::api::cancel_flag(
-            std::sync::Arc::clone(c),
-        ));
+        opts.cancel = Some(crate::units::llm::api::cancel_flag(std::sync::Arc::clone(
+            c,
+        )));
     }
     if !decls.is_empty() {
         opts.tools = Some(&decls);
@@ -248,13 +243,11 @@ pub fn core_operation(
                 }
                 // 空片段不刷事件流（信封被抑制 / 重复快照合并掉的片都不外送）。
                 if crate::units::conversation::session::api::delta_visible(kind, &piece) {
-                    sink(
-                        crate::units::conversation::session::api::SessionEvent::Delta {
-                            speaker: "核心".to_string(),
-                            kind: kind.to_string(),
-                            text: piece,
-                        },
-                    );
+                    sink(crate::units::transcript::api::SessionEvent::Delta {
+                        speaker: "核心".to_string(),
+                        kind: kind.to_string(),
+                        text: piece,
+                    });
                 }
                 match cancel {
                     Some(c) => !c.load(std::sync::atomic::Ordering::Relaxed),
@@ -278,7 +271,7 @@ pub fn core_operation(
             // **推这一轮的事实**：它调了什么、带了什么参数、模型怎么想的。
             for row in core_rows(
                 tool,
-                crate::units::conversation::session::api::ToolCallView {
+                crate::units::transcript::api::ToolCallView {
                     speaker: "核心".to_string(),
                     module: String::new(),
                     name: tool.to_string(),
@@ -296,11 +289,9 @@ pub fn core_operation(
                 &done.reasoning,
                 &parsed.text,
             ) {
-                sink(
-                    crate::units::conversation::session::api::SessionEvent::Transcript(
-                        vec![row],
-                    ),
-                );
+                sink(crate::units::transcript::api::SessionEvent::Transcript(
+                    vec![row],
+                ));
             }
             return Ok(payload);
         }
@@ -310,7 +301,7 @@ pub fn core_operation(
                 .map_err(|e| format!("{} 的参数不是合法 JSON（{}）：{}", tool, e, t.args_json))?;
             for row in core_rows(
                 tool,
-                crate::units::conversation::session::api::ToolCallView {
+                crate::units::transcript::api::ToolCallView {
                     speaker: "核心".to_string(),
                     module: String::new(),
                     name: tool.to_string(),
@@ -328,11 +319,9 @@ pub fn core_operation(
                 &done.reasoning,
                 &parsed.text,
             ) {
-                sink(
-                    crate::units::conversation::session::api::SessionEvent::Transcript(
-                        vec![row],
-                    ),
-                );
+                sink(crate::units::transcript::api::SessionEvent::Transcript(
+                    vec![row],
+                ));
             }
             return Ok(payload);
         }
@@ -371,11 +360,10 @@ pub fn core_operation(
                 head_chars(&done.raw, 200)
             ));
         }
-        let mut views: Vec<crate::units::conversation::session::api::ToolCallView> =
-            Vec::new();
+        let mut views: Vec<crate::units::transcript::api::ToolCallView> = Vec::new();
         for (call_id, name, args) in readonly {
             let out = ctx.run_readonly(&name, &args);
-            let view = crate::units::conversation::session::api::ToolCallView {
+            let view = crate::units::transcript::api::ToolCallView {
                 speaker: "核心".to_string(),
                 module: String::new(),
                 name,
@@ -391,11 +379,9 @@ pub fn core_operation(
             };
             // 核心"先核实"这一步也如实推出去（用户看得到它在读什么、查什么）。
             for row in core_rows(&view.name, view.clone(), &done.raw, "", "") {
-                sink(
-                    crate::units::conversation::session::api::SessionEvent::Transcript(
-                        vec![row],
-                    ),
-                );
+                sink(crate::units::transcript::api::SessionEvent::Transcript(
+                    vec![row],
+                ));
             }
             views.push(view);
         }

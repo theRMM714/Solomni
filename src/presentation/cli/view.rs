@@ -4,8 +4,8 @@
 //! 联动：`cli.rs`、`cli/gate.rs`、`docs/presentation/contracts.md`
 
 use super::*;
-use crate::units::conversation::collab::api::CollabEvent;
 use crate::presentation::faces::Faces;
+use crate::units::conversation::collab::api::CollabEvent;
 
 /// 目的：启动页副行：终端转录中心、版本与根路径。
 pub(super) fn startup_tagline() -> String {
@@ -281,7 +281,7 @@ fn render_rich(events: &[SessionEvent]) {
 }
 
 /// 目的：协作机制的富文本渲染：整理 / 待审 / 节点派发 / 回报 / 验收 / 交付（讨论结束与总结不打：它们有自己的转录行）。
-/// 约束：这是**协作机制自己的呈现**，会话层不认识这些变体（见 session/domain/events.rs 的 Push 契约）。
+/// 约束：这是**协作机制自己的呈现**，会话层不认识这些变体（见 src/units/transcript/domain/events.rs 的 Push 契约）。
 fn render_collab_rich(ce: &CollabEvent) {
     match ce {
         CollabEvent::Plan(plan) => {
@@ -435,7 +435,7 @@ fn check_mark(status: &str) -> (&'static str, theme::Ink) {
     }
 }
 
-fn render_lines(lines: &[crate::units::conversation::session::api::LineView]) {
+fn render_lines(lines: &[crate::units::transcript::api::LineView]) {
     for l in lines {
         if l.kind == "compacted" {
             let up_to = l
@@ -502,7 +502,7 @@ fn render_lines(lines: &[crate::units::conversation::session::api::LineView]) {
     }
 }
 
-fn print_tool(t: &crate::units::conversation::session::api::ToolCallView) {
+fn print_tool(t: &crate::units::transcript::api::ToolCallView) {
     let (glyph, ink) = if t.ok {
         ("✓", theme::Ink::Green)
     } else {

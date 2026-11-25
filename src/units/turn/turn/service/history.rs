@@ -3,9 +3,8 @@
 //! 不管：历史列出 / 打开 / 删除与回档（在 lifecycle）；会话对象怎么建（在 assemble 与 rebuild）。
 //! 联动：回合推进的所有方法族的事件都经 `record_events` 落盘（见 docs/session/session-model.md）。
 
-use crate::units::conversation::session::api::{
-    Persister, RunState, SessionEvent, subtree_of,
-};
+use crate::units::conversation::session::api::{Persister, RunState, subtree_of};
+use crate::units::transcript::api::SessionEvent;
 
 use super::session::Turn;
 

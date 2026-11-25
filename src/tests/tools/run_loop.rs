@@ -445,20 +445,19 @@ pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
         Arc::clone(&io),
         Arc::new(NoFenceHost),
     );
-    let run =
-        |obs: &mut crate::units::tools::api::Observations, tool: &str, args: String| {
-            let done = exec.run_builtin(
-                &sb,
-                &test_systools().tools,
-                std::mem::take(obs),
-                None,
-                crate::units::tools::api::ResultBudget::full(),
-                tool,
-                &args,
-            );
-            *obs = done.observations;
-            done.outcome
-        };
+    let run = |obs: &mut crate::units::tools::api::Observations, tool: &str, args: String| {
+        let done = exec.run_builtin(
+            &sb,
+            &test_systools().tools,
+            std::mem::take(obs),
+            None,
+            crate::units::tools::api::ResultBudget::full(),
+            tool,
+            &args,
+        );
+        *obs = done.observations;
+        done.outcome
+    };
     let mut obs = crate::units::tools::api::Observations::default();
     // 新建文件：不需要"读过"什么
     let made = run(
@@ -762,7 +761,7 @@ pub(crate) fn read_in_the_same_batch_does_not_authorize_write() {
     }
     let exec = run_execution(std::slice::from_mut(&mut m), "任务", &test_prompts());
     let trace = exec.traces.get("a").expect("工具记录");
-    let writes: Vec<&crate::units::conversation::session::api::ToolCallView> =
+    let writes: Vec<&crate::units::transcript::api::ToolCallView> =
         trace.iter().filter(|v| v.name == "write").collect();
     assert_eq!(writes.len(), 2, "两批各写一次：{trace:?}");
     assert!(
@@ -814,17 +813,14 @@ pub(crate) fn work_commit_refuses_unobserved_tracked_changes() {
         sb.private = abs(&["w", "a"]);
         t.face.sandbox = sb.clone();
         t.face.fence = crate::kernel::api::fence::FencePlan::for_session(&sb, &[], false);
-        t.handlers = crate::units::workspace::api::work_handlers(
-            &ws,
-            &sb,
-            &["work_commit".to_string()],
-        );
+        t.handlers =
+            crate::units::workspace::api::work_handlers(&ws, &sb, &["work_commit".to_string()]);
         t.face.allowed.push("work_commit".to_string());
         t.workspace = Some(Arc::clone(&ws));
     }
     let exec = run_execution(std::slice::from_mut(&mut m), "任务", &test_prompts());
     let trace = exec.traces.get("a").expect("工具记录");
-    let commits: Vec<&crate::units::conversation::session::api::ToolCallView> =
+    let commits: Vec<&crate::units::transcript::api::ToolCallView> =
         trace.iter().filter(|v| v.name == "work_commit").collect();
     assert_eq!(commits.len(), 1, "一次提交：{trace:?}");
     assert!(

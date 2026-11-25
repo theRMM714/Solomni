@@ -341,10 +341,8 @@ fn catalog_renders_only_the_requested_scope() {
 /// （猜会替用户做主：围栏卡的第一项正是"无围栏跑一次"）。
 #[test]
 fn relay_reply_only_accepts_an_option_id_from_that_card() {
-    use crate::units::conversation::collab::api::{
-        OPT_ASK_REPLY, OPT_BEGIN, OPT_SLATE_CANCEL,
-    };
-    use crate::units::conversation::session::api::OptionView;
+    use crate::units::conversation::collab::api::{OPT_ASK_REPLY, OPT_BEGIN, OPT_SLATE_CANCEL};
+    use crate::units::transcript::api::OptionView;
     let o = |id: &str| OptionView {
         id: id.to_string(),
         label: id.to_string(),

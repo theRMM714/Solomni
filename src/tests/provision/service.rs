@@ -38,10 +38,7 @@ pub(super) fn adapters(root: &Path) -> ProvisionDeps {
         ledger: Arc::new(FileLedger::new(root)),
         installers: Arc::new(HostInstallers),
         images: Arc::new(
-            crate::units::provision::detail::guest_image::Ext4Images::new(
-                root,
-                Arc::clone(&fetch),
-            ),
+            crate::units::provision::detail::guest_image::Ext4Images::new(root, Arc::clone(&fetch)),
         ),
         procs: Arc::new(BookProcs::new(root)),
         fetch,

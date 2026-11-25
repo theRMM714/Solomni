@@ -3,12 +3,10 @@
 //! 不管：事件词汇与裁决队列（在 `events.rs` / `decisions.rs`）、历史落盘（在 `detail/`）。
 //! 联动：由 engine 驱动（`engine::converse_with`）；回档算术在 `rewind.rs`，历史视图在 `history.rs`。
 
-use crate::units::conversation::session::domain::events::{
-    LineView, SessionEvent, ToolCallView,
-};
 use crate::units::conversation::session::domain::history::UsageTotals;
 use crate::units::conversation::session::domain::tools::MemberTools;
 use crate::units::llm::api::{BoxedChat, Msg, TokenUsage};
+use crate::units::transcript::api::{LineView, SessionEvent, ToolCallView};
 
 /// 目的：把"保留前 keep 行"对齐到**回复边界**：keep 落在某次回复内部时，退到该回复的第一行之前。
 ///   为什么必须对齐：一次回复的消息是「一条助手消息 + N 条结果」，截在中间会留下孤儿结果
@@ -68,7 +66,7 @@ pub struct AgentSession {
     /// 目的：本会话当前模型的上下文窗口（状态栏百分比的分母）。
     pub(crate) context_window: u64,
     /// 目的：最近一次模型调用的用量；None = 还没调用过。
-    pub(crate) last_usage: Option<crate::units::conversation::session::api::ContextUsage>,
+    pub(crate) last_usage: Option<crate::units::transcript::api::ContextUsage>,
     /// 目的：本会话**这次生成里**精确报回的用量增量（核心线程交回会话时并进 meta 的累计）。
     /// 约束：只由 `note_usage` 累加、由 `take_usage_delta` 取走清零；它不参与上下文判定。
     usage_delta: UsageTotals,
@@ -447,10 +445,7 @@ impl AgentSession {
 
     /// 目的：按落盘转录回填观察账本（重启后的写门禁仍看得到活动窗口里的读）。
     /// 约束：只给重建路径；没有工具面的会话（核心压缩）无账本可填，因此是空操作。
-    pub fn restore_observations(
-        &mut self,
-        facts: Vec<crate::units::tools::api::ObservationFact>,
-    ) {
+    pub fn restore_observations(&mut self, facts: Vec<crate::units::tools::api::ObservationFact>) {
         if let Some(t) = self.tools.as_mut() {
             t.observations.restore_facts(facts);
         }
@@ -627,16 +622,14 @@ impl AgentSession {
     }
 
     /// 目的：最近一次调用的用量（状态栏与压缩判定读它）。
-    pub fn context_usage(
-        &self,
-    ) -> Option<crate::units::conversation::session::api::ContextUsage> {
+    pub fn context_usage(&self) -> Option<crate::units::transcript::api::ContextUsage> {
         self.last_usage
     }
 
     /// 目的：写入最近一次调用的用量；窗口以当前模型为准（模型改过也显示同一个窗口）。
     pub fn set_last_usage(
         &mut self,
-        mut usage: Option<crate::units::conversation::session::api::ContextUsage>,
+        mut usage: Option<crate::units::transcript::api::ContextUsage>,
     ) {
         if let Some(u) = usage.as_mut()
             && self.context_window > 0
@@ -671,8 +664,8 @@ impl AgentSession {
     }
 
     /// 目的：按当前发送视图估一份上下文用量（没有供应商 usage 时用；界面会标"估算"）。
-    pub fn estimate_usage(&self) -> crate::units::conversation::session::api::ContextUsage {
-        crate::units::conversation::session::api::ContextUsage::estimated(
+    pub fn estimate_usage(&self) -> crate::units::transcript::api::ContextUsage {
+        crate::units::transcript::api::ContextUsage::estimated(
             self.dialogue_chars(),
             self.context_window,
         )

@@ -89,11 +89,8 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
         "节点子会话不套预设类型：身份由流程的成员席给"
     );
     assert_eq!(
-        crate::units::conversation::session::api::work_root(
-            core.history_handle().as_ref(),
-            child
-        )
-        .expect("工作根"),
+        crate::units::conversation::session::api::work_root(core.history_handle().as_ref(), child)
+            .expect("工作根"),
         sid,
         "沙箱锚在顶层工作上（整棵树共用一个 work/）"
     );
@@ -107,9 +104,7 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
 #[test]
 pub(crate) fn collab_facts_land_as_replayable_transcript_rows() {
     // 从事件里读转录行（走线上同一条 to_json，再整行反序列化：判据读结构化字段）。
-    fn rows(
-        evs: &[SessionEvent],
-    ) -> Vec<crate::units::conversation::session::api::LineView> {
+    fn rows(evs: &[SessionEvent]) -> Vec<crate::units::transcript::api::LineView> {
         let mut out = Vec::new();
         for ev in evs {
             let v = ev.to_json();
@@ -117,9 +112,8 @@ pub(crate) fn collab_facts_land_as_replayable_transcript_rows() {
                 continue;
             };
             for l in ls {
-                if let Ok(line) = serde_json::from_value::<
-                    crate::units::conversation::session::api::LineView,
-                >(l.clone())
+                if let Ok(line) =
+                    serde_json::from_value::<crate::units::transcript::api::LineView>(l.clone())
                 {
                     out.push(line);
                 }
@@ -179,10 +173,8 @@ pub(crate) fn collab_facts_land_as_replayable_transcript_rows() {
             .and_then(|l| l.as_array())
             .is_some_and(|ls| {
                 ls.iter().any(|l| {
-                    serde_json::from_value::<
-                        crate::units::conversation::session::api::LineView,
-                    >(l.clone())
-                    .is_ok_and(|x| x.speaker == "核心整理")
+                    serde_json::from_value::<crate::units::transcript::api::LineView>(l.clone())
+                        .is_ok_and(|x| x.speaker == "核心整理")
                 })
             })
         {
@@ -220,15 +212,12 @@ pub(crate) fn collab_facts_land_as_replayable_transcript_rows() {
     );
     // 落盘可回放：刷新/回档后从历史里读得到同一批行（不是只活在这条事件流里）。
     let (_, hist) = core.lifecycle.history_open(&sid).unwrap();
-    let persisted: Vec<crate::units::conversation::session::api::LineView> = hist
+    let persisted: Vec<crate::units::transcript::api::LineView> = hist
         .iter()
         .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
         .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
         .flat_map(|ls| ls.to_vec())
-        .filter_map(|l| {
-            serde_json::from_value::<crate::units::conversation::session::api::LineView>(l)
-                .ok()
-        })
+        .filter_map(|l| serde_json::from_value::<crate::units::transcript::api::LineView>(l).ok())
         .collect();
     for who in ["核心整理", "验收清单", "交付"] {
         assert!(

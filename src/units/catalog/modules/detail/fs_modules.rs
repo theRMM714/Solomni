@@ -73,10 +73,9 @@ fn scan_dir(modules_dir: &Path, reserved: &[String], module_reserved: &[String])
                     rejected.push(format!("{}: id '{}' 与文件夹名不一致", dir_name, m.id));
                     continue;
                 }
-                if let Err(why) = crate::units::catalog::modules::api::check_module_id(
-                    &m.id,
-                    module_reserved,
-                ) {
+                if let Err(why) =
+                    crate::units::catalog::modules::api::check_module_id(&m.id, module_reserved)
+                {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }
@@ -92,9 +91,7 @@ fn scan_dir(modules_dir: &Path, reserved: &[String], module_reserved: &[String])
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }
-                if let Err(why) =
-                    crate::units::catalog::modules::api::check_tools(&m, reserved)
-                {
+                if let Err(why) = crate::units::catalog::modules::api::check_tools(&m, reserved) {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }

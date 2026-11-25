@@ -45,10 +45,10 @@
 | --- | --- | --- |
 | 0（地基） | `kernel` | 无 |
 | 1（纯） | `exec_model`、`permission`、`taskchain` | 0 |
-| 2（状态与机制） | `catalog`、`llm`、`prompt`、`provision`、`residents`、`tools`、`vm`、`workspace` | 0–1 |
+| 2（状态与机制） | `catalog`、`llm`、`prompt`、`provision`、`residents`、`tools`、`transcript`、`vm`、`workspace` | 0–1 |
 | 3（用例） | `conversation`、`lifecycle`、`maintenance`、`runtime`、`system`、`turn`、`work` | 0–2 |
 
-> 4 环、18 个单元 + `kernel`：本表由 `layers.yaml` 生成（`node tests/docs-sync.mjs --write`），不手写；环 4（`presentation/`、`entry/`）是适配器，不入表。
+> 4 环、19 个单元 + `kernel`：本表由 `layers.yaml` 生成（`node tests/docs-sync.mjs --write`），不手写；环 4（`presentation/`、`entry/`）是适配器，不入表。
 <!-- END:layer-table -->
 
 - **H1（硬判）**：跨单元边只能指向严格更低的环；同环只允许指向 rank 更低的单元（rank 由同环边现算，只回执）。向上依赖与同环逆序都判红（`tests/gates/structure/layers.js`）。

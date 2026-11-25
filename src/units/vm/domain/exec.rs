@@ -3,12 +3,12 @@
 //! 不管：包库与选包（packages）、目录遍历与 guest 启动（在 detail/ 与 guest 后端）、会话档案（session）、实际的工具进程执行（tools）。
 //! 联动：契约见 docs/vm/README.md 与 RUNTIME_SPEC.md；ExecSpec 是 kernel 的共享形状；被 runtime 与呈现层经 api.rs 消费。
 
+use crate::kernel::ports::HostProbe;
 use crate::units::catalog::modules::api::Module;
 use crate::units::catalog::packages::api::PlannedPackage;
-use crate::units::vm::domain::guest::{GuestAgent, GuestImage, GuestOs};
 use crate::units::pure::exec_model::api::ExecSpec;
 use crate::units::pure::exec_model::api::Tier;
-use crate::kernel::ports::HostProbe;
+use crate::units::vm::domain::guest::{GuestAgent, GuestImage, GuestOs};
 use serde::Serialize;
 use std::path::Path;
 
@@ -49,8 +49,7 @@ pub fn missing_entries_for(
     let mut out = Vec::new();
     for m in modules {
         for (tool, decl) in &m.manifest.tools {
-            let Some(entry) =
-                crate::units::catalog::modules::api::local_entry(&decl.command)
+            let Some(entry) = crate::units::catalog::modules::api::local_entry(&decl.command)
             else {
                 continue;
             };

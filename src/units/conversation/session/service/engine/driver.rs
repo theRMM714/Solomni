@@ -6,9 +6,10 @@
 use super::io::{CompactedTurn, MemberTurn, TurnIo};
 use super::round::{Round, RoundSink, assemble, build_round_lines, converse_with};
 use crate::units::conversation::session::api::{
-    AgentSession, LineView, SessionEvent, ToolCallView, TurnRun, delta_visible, stream_piece,
+    AgentSession, TurnRun, delta_visible, stream_piece,
 };
 use crate::units::llm::api::{Chunk, Msg};
+use crate::units::transcript::api::{LineView, SessionEvent, ToolCallView};
 use std::sync::atomic::AtomicBool;
 
 /// 目的：只把被总结的前缀发给模型、只声明 compact 工具，跑一次模型并返回摘要。
@@ -46,8 +47,7 @@ pub fn compact_turn(
             ));
         }
     }
-    let mut opts =
-        crate::units::llm::api::CompleteOpts::plain(false).with_thinking(thinking);
+    let mut opts = crate::units::llm::api::CompleteOpts::plain(false).with_thinking(thinking);
     if let Some(d) = decl.as_ref() {
         opts.tools = Some(std::slice::from_ref(d));
     }
@@ -393,12 +393,7 @@ fn run_rounds(
         let usage = s
             .chat
             .last_usage()
-            .map(|t| {
-                crate::units::conversation::session::api::ContextUsage::from_tokens(
-                    t,
-                    s.context_window,
-                )
-            })
+            .map(|t| crate::units::transcript::api::ContextUsage::from_tokens(t, s.context_window))
             .unwrap_or_else(|| s.estimate_usage());
         s.set_last_usage(Some(usage));
         sink(SessionEvent::Usage {
@@ -409,13 +404,11 @@ fn run_rounds(
     // 停止优先于同一次调用的错误：用户按了停止就是「我停的」，不再报成故障。
     let stopped = cancel.load(std::sync::atomic::Ordering::Relaxed);
     if stopped {
-        for ev in s.note_notice(&crate::units::conversation::session::api::stopped_note()) {
+        for ev in s.note_notice(&crate::units::transcript::api::stopped_note()) {
             sink(ev);
         }
     } else if let Some(err) = error.borrow().as_ref() {
-        for ev in
-            s.note_notice(&crate::units::conversation::session::api::interrupted_note(err))
-        {
+        for ev in s.note_notice(&crate::units::transcript::api::interrupted_note(err)) {
             sink(ev);
         }
     }
@@ -448,8 +441,7 @@ fn freshness_now(
     }
     let tools = s.tools.as_ref()?;
     let ws = tools.workspace.as_ref()?;
-    let reads: Vec<&crate::units::conversation::session::api::ReadAt> =
-        s.reads().iter().collect();
+    let reads: Vec<&crate::units::conversation::session::api::ReadAt> = s.reads().iter().collect();
     let queries: Vec<crate::units::workspace::api::ReadQuery> = reads
         .iter()
         .map(|r| crate::units::workspace::api::ReadQuery {
@@ -475,19 +467,14 @@ fn freshness_now(
         .into_iter()
         .map(|v| v.is_stale())
         .collect();
-    let judged: Vec<(
-        &crate::units::conversation::session::api::ReadAt,
-        bool,
-    )> = reads.into_iter().zip(stale).collect();
+    let judged: Vec<(&crate::units::conversation::session::api::ReadAt, bool)> =
+        reads.into_iter().zip(stale).collect();
     // 保底按**字符**算（与压缩估算同一口径：4 字符 ≈ 1 token）。
     let total_chars: usize = s.dialogue.iter().map(|m| m.content.chars().count()).sum();
     let keep_percent = s.freshness_keep_percent();
     let keep_chars = total_chars * keep_percent as usize / 100;
-    let (view, mut stats) = crate::units::conversation::session::api::freshness_view(
-        &s.dialogue,
-        &judged,
-        keep_chars,
-    );
+    let (view, mut stats) =
+        crate::units::conversation::session::api::freshness_view(&s.dialogue, &judged, keep_chars);
     stats.keep_percent = keep_percent;
     Some((view, stats))
 }

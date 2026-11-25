@@ -3,14 +3,14 @@
 //! 不管：平台真机验收（tests/<平台>/）；确认队列本身（见 src/tests/session/）。
 //! 联动：src/units/pure/permission/、src/units/workspace/domain/scope.rs、docs/permission/README.md。
 
+use crate::tests::doubles::{
+    InMemoryWorkStore, InMemoryWorkspace, abs, test_sandbox, test_workspace, test_workspace_store,
+};
 use crate::units::pure::permission::api::{
     PermissionDefaults, PermissionLayer, PermissionSet, ProfileId, SessionSandbox,
 };
 use crate::units::workspace::api::{ScopeMode, SharedEdit, SharedScope, validate_entry};
 use crate::units::workspace::domain::workspace::Place;
-use crate::tests::doubles::{
-    InMemoryWorkStore, InMemoryWorkspace, abs, test_sandbox, test_workspace, test_workspace_store,
-};
 
 fn paths(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
@@ -211,8 +211,8 @@ fn external_shared_root_is_not_a_shell_write_surface() {
 /// 目的：work_status 的路径清单按读归属过滤，显式越界路径直接拒绝。
 #[test]
 fn work_status_filters_paths_outside_read_scope() {
-    use crate::units::workspace::api::{CommitRequest, PushRequest, WorkHandler};
     use crate::kernel::ports::{ToolCtx, ToolHandler};
+    use crate::units::workspace::api::{CommitRequest, PushRequest, WorkHandler};
 
     let dirs = std::sync::Arc::new(InMemoryWorkspace::new());
     let store = std::sync::Arc::new(InMemoryWorkStore::new());
@@ -289,8 +289,8 @@ fn work_status_filters_paths_outside_read_scope() {
 /// 目的：work_lost 的清单与恢复也按读归属收口，不能拿备份绕过范围。
 #[test]
 fn work_lost_is_scoped_by_read_permission() {
-    use crate::units::workspace::api::WorkHandler;
     use crate::kernel::ports::{ToolCtx, ToolHandler};
+    use crate::units::workspace::api::WorkHandler;
 
     let dirs = std::sync::Arc::new(InMemoryWorkspace::new());
     let store = std::sync::Arc::new(InMemoryWorkStore::new());
@@ -340,8 +340,8 @@ fn work_lost_is_scoped_by_read_permission() {
 /// 目的：work_versions / work_resolve 也按读归属收口，不能拿它们绕过范围。
 #[test]
 fn work_versions_and_resolve_are_scoped_by_read_permission() {
-    use crate::units::workspace::api::WorkHandler;
     use crate::kernel::ports::{ToolCtx, ToolHandler};
+    use crate::units::workspace::api::WorkHandler;
     let ws = test_workspace(std::sync::Arc::new(InMemoryWorkspace::new()));
     let scope = SharedScope {
         read: ScopeMode::Paths(paths(&["docs"])),
@@ -375,8 +375,8 @@ fn work_versions_and_resolve_are_scoped_by_read_permission() {
 /// 目的：没有提交范围时，work_commit / work_push 直接拒绝——范围是准入门槛，不是提示。
 #[test]
 fn no_write_scope_refuses_commit_and_push() {
-    use crate::units::workspace::api::WorkHandler;
     use crate::kernel::ports::{ToolCtx, ToolHandler};
+    use crate::units::workspace::api::WorkHandler;
     let ws = test_workspace(std::sync::Arc::new(InMemoryWorkspace::new()));
     let scope = SharedScope {
         write: ScopeMode::None,
@@ -421,10 +421,7 @@ fn entries_must_be_clean_relative_paths() {
         &paths(&["docs"]),
         "docs/x"
     ));
-    assert!(crate::units::workspace::api::hit(
-        &paths(&["docs"]),
-        "docs"
-    ));
+    assert!(crate::units::workspace::api::hit(&paths(&["docs"]), "docs"));
     assert!(!crate::units::workspace::api::hit(
         &paths(&["docs"]),
         "docsx/y"

@@ -174,10 +174,7 @@ impl SessionParams {
     }
 
     /// 目的：把"这场会话跑在哪种 guest 里"接上（本机档传 None）——工作环境块与路径拼法按它选。
-    pub fn with_guest(
-        mut self,
-        guest: Option<crate::units::vm::api::GuestOs>,
-    ) -> SessionParams {
+    pub fn with_guest(mut self, guest: Option<crate::units::vm::api::GuestOs>) -> SessionParams {
         self.guest = guest;
         self
     }
@@ -248,10 +245,7 @@ pub(crate) fn env_path(
 }
 
 /// 目的：**工作环境块**：提示词册 env 渲染（真实根目录 + 路径规矩）。**不含任何工具清单**—— 能用哪些工具由核心按这一回合的身份现渲染后随回合注入（见 collab 的 `MemberTools::tools_block`）。  归属：它渲染的就是 `SessionParams`，所以随会话走（留在 `tools` 会让 `tools → session` 成环）。
-pub fn env_block(
-    prompt: &dyn crate::units::prompt::api::Prompt,
-    p: &SessionParams,
-) -> String {
+pub fn env_block(prompt: &dyn crate::units::prompt::api::Prompt, p: &SessionParams) -> String {
     use crate::units::prompt::api::Segment;
     // 路径按**这场会话的环境**渲染：本机档 = 视图盘打开时的视图写法（宿主路径由路径码翻译），否则宿主拼法；
     // 虚拟机档 = guest 拼法（与挂载、命令装配同一座桥）。

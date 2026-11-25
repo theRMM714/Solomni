@@ -59,7 +59,9 @@ pub(crate) fn test_workspace_store(
     dirs: Arc<dyn Workdirs + Send + Sync>,
     store: Arc<dyn WorkStore + Send + Sync>,
 ) -> Arc<dyn crate::units::workspace::api::Workspace + Send + Sync> {
-    Arc::new(crate::units::workspace::service::WorkspaceService::new(dirs, store))
+    Arc::new(crate::units::workspace::service::WorkspaceService::new(
+        dirs, store,
+    ))
 }
 
 /// 目的：用指定的单文件上限装配 workspace 面（测试超限分支时避免造 64 MiB 数据）。
@@ -69,9 +71,7 @@ pub(crate) fn test_workspace_store_with_max(
     max: u64,
 ) -> Arc<dyn crate::units::workspace::api::Workspace + Send + Sync> {
     Arc::new(
-        crate::units::workspace::service::WorkspaceService::with_max_asset_bytes(
-            dirs, store, max,
-        ),
+        crate::units::workspace::service::WorkspaceService::with_max_asset_bytes(dirs, store, max),
     )
 }
 
@@ -85,9 +85,7 @@ impl InMemoryModuleState {
 }
 
 impl crate::units::catalog::modules::ports::ModuleStateStore for InMemoryModuleState {
-    fn load(
-        &self,
-    ) -> Result<crate::units::catalog::modules::domain::state::EnabledState, String> {
+    fn load(&self) -> Result<crate::units::catalog::modules::domain::state::EnabledState, String> {
         Ok(self.state.lock().expect("锁").clone())
     }
     fn save(
@@ -151,8 +149,7 @@ pub(crate) fn core_with_services(
     residents: Arc<dyn crate::units::residents::api::ResidentOps + Send + Sync>,
     secrets: Arc<dyn crate::units::catalog::secrets::api::SecretOps + Send + Sync>,
 ) -> Core {
-    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> =
-        Arc::new(gateway);
+    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> = Arc::new(gateway);
     let llm = test_llm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
@@ -193,8 +190,7 @@ pub(crate) fn core_with_workspace(
     gateway: ScriptGateway,
     ws: Arc<InMemoryWorkspace>,
 ) -> Core {
-    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> =
-        Arc::new(gateway);
+    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> = Arc::new(gateway);
     let llm = test_llm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
@@ -232,8 +228,7 @@ pub(crate) fn core_with_workdirs(
     gateway: ScriptGateway,
     dirs: Arc<dyn Workdirs + Send + Sync>,
 ) -> Core {
-    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> =
-        Arc::new(gateway);
+    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> = Arc::new(gateway);
     let llm = test_llm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
@@ -288,8 +283,7 @@ pub(crate) fn core_with_workdirs_vm(
     dirs: Arc<dyn Workdirs + Send + Sync>,
     engine: FakeEngine,
 ) -> Core {
-    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> =
-        Arc::new(gateway);
+    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> = Arc::new(gateway);
     let llm = test_llm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
@@ -466,8 +460,7 @@ pub(crate) fn core_with_pkgs_probe(
     packages: Arc<InMemoryPackages>,
     probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
 ) -> Core {
-    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> =
-        Arc::new(gateway);
+    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> = Arc::new(gateway);
     let llm = test_llm(Arc::clone(&gateway), catalog);
     // 测试里的宿主回退：probe 说有的基础能力就当作"围栏可用"，与生产里组合根给的事实同形。
     let mut base = crate::units::catalog::packages::api::BaseFacts::default();
@@ -564,8 +557,7 @@ pub(crate) fn core_with_io_gateway(
     gateway: impl ChatGateway + Send + Sync + 'static,
     io: Arc<InMemorySysIo>,
 ) -> Core {
-    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> =
-        Arc::new(gateway);
+    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> = Arc::new(gateway);
     let llm = test_llm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
@@ -606,8 +598,7 @@ pub(crate) fn core_with_gateway_probe(
     gateway: impl ChatGateway + Send + Sync + 'static,
     probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
 ) -> Core {
-    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> =
-        Arc::new(gateway);
+    let gateway: Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> = Arc::new(gateway);
     let llm = test_llm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),

@@ -336,13 +336,7 @@ impl crate::units::vm::ports::GuestVm for FakeVm {
 pub(crate) struct RecordingVm {
     pub runs: Mutex<Vec<String>>,
     // fenced 执行的（脚本、超时、输出截断方式）；shell 契约断言用。
-    pub fenced_runs: Mutex<
-        Vec<(
-            String,
-            u64,
-            crate::units::vm::domain::guest::OutputLimit,
-        )>,
-    >,
+    pub fenced_runs: Mutex<Vec<(String, u64, crate::units::vm::domain::guest::OutputLimit)>>,
     // 已拉起的租约（`guest_leases` 的事实来源；`guest_start` 记、`guest_stop` 删）。
     pub leases: Mutex<Vec<String>>,
     // 每个租约启动时装载的运行包（判定新子会话要不要重建）。
@@ -352,10 +346,7 @@ pub(crate) struct RecordingVm {
 }
 
 impl crate::units::vm::api::Vm for RecordingVm {
-    fn guest_start(
-        &self,
-        spec: &crate::units::vm::domain::guest::GuestSpec,
-    ) -> Result<(), String> {
+    fn guest_start(&self, spec: &crate::units::vm::domain::guest::GuestSpec) -> Result<(), String> {
         self.leases.lock().expect("锁").push(spec.lease.clone());
         Ok(())
     }
@@ -467,9 +458,7 @@ pub(crate) fn test_packages_with_base(
     packages: Arc<dyn PackageSource + Send + Sync>,
     base: crate::units::catalog::packages::api::BaseFacts,
 ) -> Arc<dyn crate::units::catalog::packages::api::Packages + Send + Sync> {
-    Arc::new(
-        crate::units::catalog::packages::service::PackagesService::with_base(packages, base),
-    )
+    Arc::new(crate::units::catalog::packages::service::PackagesService::with_base(packages, base))
 }
 
 /// 目的：模块启停覆盖的内存存储（测试用；与 yaml 实现同一条端口）。

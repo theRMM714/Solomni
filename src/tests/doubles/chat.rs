@@ -110,20 +110,14 @@ impl ScriptGateway {
     }
 
     /// 目的：让这个脚本网关的每次调用都报同一份 usage（验状态栏 / 压缩阈值用）。
-    pub(crate) fn with_usage(
-        mut self,
-        usage: crate::units::llm::api::TokenUsage,
-    ) -> ScriptGateway {
+    pub(crate) fn with_usage(mut self, usage: crate::units::llm::api::TokenUsage) -> ScriptGateway {
         self.usage = Some(usage);
         self
     }
 }
 
 impl ChatGateway for ScriptGateway {
-    fn probe_tools(
-        &self,
-        _c: &Channel,
-    ) -> Result<crate::units::llm::api::ProbeOutcome, String> {
+    fn probe_tools(&self, _c: &Channel) -> Result<crate::units::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(&self, _c: &Channel, id: &str) -> BoxedChat {

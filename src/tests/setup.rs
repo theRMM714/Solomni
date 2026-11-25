@@ -3,6 +3,7 @@
 //! 不管：注册表与广播的真实行为（归 kernel 的 UserPath 适配器）；真实用户 PATH 与用户目录不被触碰。
 //! 联动：被测面 src/units/system/detail/setup/ 下的 mod.rs、path.rs、shim.rs、fence.rs；端口契约见 src/kernel/ports.rs 的 UserPath。
 
+use crate::kernel::ports::{PathValue, UserPath};
 use crate::units::system::api::{FencePolicy, SetupMode, SetupOps};
 use crate::units::system::detail::setup::SetupHost;
 #[cfg(not(windows))]
@@ -10,7 +11,6 @@ use crate::units::system::detail::setup::fence;
 use crate::units::system::detail::setup::path as p;
 #[cfg(windows)]
 use crate::units::system::detail::setup::shim;
-use crate::kernel::ports::{PathValue, UserPath};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -332,8 +332,8 @@ fn setup_modes_round_trip_through_their_ids() {
 /// 目的：启动期的围栏对账——两个档位（有/没有 ACL 一步）与三种结果（就绪、缺项、对账失败）都说对话。
 #[test]
 fn portable_fence_report_covers_every_branch() {
-    use crate::units::system::api::Fault;
     use crate::entry::portable::{ensure_grants, fence_report};
+    use crate::units::system::api::Fault;
 
     /// 目的：便携维护端口的替身：缺项与预授结果由字段决定，收到的进度行全记录。
     struct FakeHost {

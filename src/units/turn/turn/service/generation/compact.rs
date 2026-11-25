@@ -3,7 +3,7 @@
 //! 不管：自动压缩（在会话收尾里）、命令分发。
 //! 联动：`turn::api::TurnHost`、units/collab
 
-use crate::units::conversation::session::api::SessionEvent;
+use crate::units::transcript::api::SessionEvent;
 use crate::units::turn::turn::api::{Advance, TurnHost};
 
 /// 目的：手动压缩（`/compact`）：**让 AI 自己压**——核心只给 compact 工具，不是系统替它总结。 与单 agent 同一条 own-and-return：队列只占"取/交"，模型调用在工作线程上（界面不被阻塞）。 压不动就**如实说**（通知 + 继续用完整上下文），不静默降级、不假装压过。
@@ -50,12 +50,9 @@ pub(crate) fn compact<H: TurnHost>(host: &H, sid: &str) -> Result<Advance, Strin
                     Ok(())
                 }
             })?;
-            let note = SessionEvent::Notice(
-                crate::units::conversation::session::api::interrupted_note(&format!(
-                    "压缩没成功：{}",
-                    err
-                )),
-            );
+            let note = SessionEvent::Notice(crate::units::transcript::api::interrupted_note(
+                &format!("压缩没成功：{}", err),
+            ));
             let head = bus.push(sid, std::slice::from_ref(&note));
             return Ok(Advance { head });
         }

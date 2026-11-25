@@ -4,10 +4,11 @@
 //! 联动：走的是**同一条通道**（同一条队、同一张卡、同一条回答命令），契约见 docs/session/session-model.md 的
 //!   「请用户裁决」；队列本体在 `units/session/domain/decisions.rs`，本实现由宿主在生成线程上现造。
 
-use crate::units::conversation::session::api::{Gates, SessionEvent, SlotWake, tool_ask};
 use crate::kernel::api::types::Ask;
 use crate::kernel::api::types::AskOutcome;
 use crate::kernel::ports::AskUser;
+use crate::units::conversation::session::api::{Gates, SlotWake};
+use crate::units::transcript::api::{SessionEvent, tool_ask};
 use std::sync::Arc;
 
 /// 目的：工具执行层提问端口的实现：推一条卡给用户、**阻塞**等一个选项 id（不点不继续）。

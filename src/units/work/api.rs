@@ -5,13 +5,14 @@
 //! 不管：怎么建、怎么改、怎么报（在 service 里）；呈现层的 JSON 封装。
 //! 联动：runtime 与呈现层都从这里取类型；guest 任务的 `run()` 在调用方线程上跑。
 
+use crate::kernel::api::types::SessionId;
+use crate::kernel::ports::{HostProbe, Log};
 use crate::units::catalog::registry::api::AgentMeta;
-use crate::units::conversation::session::api::{HistoryView, OptionView, SessionEvent};
+use crate::units::conversation::session::api::HistoryView;
+use crate::units::pure::exec_model::api::Tier;
+use crate::units::transcript::api::{OptionView, SessionEvent};
 use crate::units::vm::api::{ExecPlan, GuestStop, Vm};
 use crate::units::workspace::api::Sandboxes;
-use crate::kernel::api::types::SessionId;
-use crate::units::pure::exec_model::api::Tier;
-use crate::kernel::ports::{HostProbe, Log};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -301,7 +302,7 @@ pub struct SessionView {
     /// 目的：最近一次模型调用的上下文用量（只对 `Session::Single` 有：single / proxy / agent 子会话）。
     /// 约束：协作主会话没有一条持续发给模型的对话，因此没有这个字段。
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub context: Option<crate::units::conversation::session::api::ContextUsage>,
+    pub context: Option<crate::units::transcript::api::ContextUsage>,
     /// 目的：这条会话**累计**的模型花费（跨回合、跨压缩；回档不清零）：面板显示累计输入 / 输出与缓存命中。
     /// 约束：总是出现（全零 = 还没调用过模型）；只累计供应商精确报回的调用，估算不进。
     pub usage_totals: crate::units::conversation::session::api::UsageTotals,

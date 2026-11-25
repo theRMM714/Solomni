@@ -119,8 +119,7 @@ impl Work {
         raw: Option<&std::path::Path>,
         tier: crate::units::pure::exec_model::api::Tier,
         parent: Option<&str>,
-    ) -> Result<Option<crate::units::conversation::session::api::WorkspaceBinding>, String>
-    {
+    ) -> Result<Option<crate::units::conversation::session::api::WorkspaceBinding>, String> {
         if let Some(p) = parent {
             if raw.is_some() {
                 return Err("子会话不能自选工作区：沿父会话继承".to_string());
@@ -279,8 +278,7 @@ impl Work {
         let mut taken: Vec<String> = self.subtree_agent_names(&root);
         let mut metas: Vec<AgentMeta> = Vec::new();
         for a in &spec.agents {
-            let name =
-                crate::units::catalog::registry::api::unique_instance_name(&a.name, &taken);
+            let name = crate::units::catalog::registry::api::unique_instance_name(&a.name, &taken);
             taken.push(name.clone());
             metas.push(AgentMeta::normalized(
                 name,
@@ -404,8 +402,8 @@ impl Work {
         }
         // 执行选型完整性（「开始」即冻结）：选型不成立或**缺包**都如实拒绝（没有工具，用户完不成工作）。
         // 入口**按目标环境**判：虚拟机档按 guest 的 os 解析名字，跨平台还看文件形式（宿主编的产物跑不了）。
-        let guest = crate::units::vm::api::guest_os_of(&self.root, host, &meta.exec)
-            .map(|g| g.as_str());
+        let guest =
+            crate::units::vm::api::guest_os_of(&self.root, host, &meta.exec).map(|g| g.as_str());
         let target_os = guest.unwrap_or(std::env::consts::OS);
         let missing: Vec<crate::units::vm::api::MissingEntry> =
             crate::units::vm::api::missing_entries_for(&session_modules, target_os, &|p| {
@@ -553,9 +551,9 @@ impl Work {
                     &meta.exec,
                     &chosen,
                 );
-                let guest =
-                    crate::units::vm::api::guest_os_of(&self.root, probe, &meta.exec);
-                let host_plan = if meta.exec.tier == crate::units::pure::exec_model::api::Tier::Host {
+                let guest = crate::units::vm::api::guest_os_of(&self.root, probe, &meta.exec);
+                let host_plan = if meta.exec.tier == crate::units::pure::exec_model::api::Tier::Host
+                {
                     crate::units::vm::api::host_plan_for(
                         &self.packages.library(),
                         &self.packages.base(),

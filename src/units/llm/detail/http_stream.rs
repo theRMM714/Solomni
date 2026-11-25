@@ -5,9 +5,7 @@
 
 use super::endpoint::{Attempt, retryable_status};
 use super::http_agent::redact;
-use crate::units::llm::api::{
-    Cancelled, Chunk, CompleteOpts, Completion, TokenUsage, ToolCall,
-};
+use crate::units::llm::api::{Cancelled, Chunk, CompleteOpts, Completion, TokenUsage, ToolCall};
 use futures_util::StreamExt;
 use std::time::Duration;
 

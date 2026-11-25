@@ -3,11 +3,11 @@
 //! 不管：版本库提交语义（在 service/domain）与会话 meta 的读写（在 session）。
 //! 联动：由 workspace 的 service.rs 持有（R12）；布局见 docs/session/session-model.md。
 
+use crate::kernel::api::layout;
 use crate::units::workspace::api::{
     AreaUsage, WORKIGNORE, WORKIGNORE_SEED, WorkFiles, WorkRoots, WorkUsage,
 };
 use crate::units::workspace::ports::Workdirs;
-use crate::kernel::api::layout;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

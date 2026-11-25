@@ -3,6 +3,7 @@
 //! 不管：任何用例的身体（在下层能力）；装配清单（组合根 main.rs）；呈现层的形状（api 与 presentation）。
 //! 联动：api 经 Handle 把命令交给这里；子模块一律 `use super::*` 取共用面。
 
+use crate::kernel::api::jobs::JobRegistry;
 use crate::units::catalog::modules::api::{Module, Modules, Roster};
 use crate::units::catalog::packages::api::Packages;
 use crate::units::catalog::registry::api::Registry;
@@ -12,7 +13,7 @@ use crate::units::catalog::registry::api::{
 use crate::units::conversation::proxy::api as d;
 use crate::units::conversation::session::api::subtree_of;
 use crate::units::conversation::session::api::{
-    Answered, DecisionQueue, History, HistoryView, RunState, SessionEvent, SessionMeta,
+    Answered, History, HistoryView, RunState, SessionMeta,
 };
 use crate::units::llm::api::Channel;
 #[cfg(test)]
@@ -21,11 +22,13 @@ use crate::units::llm::api::{Llm, ProbeOutcome, ToolMode};
 use crate::units::maintenance::builds::api::Builds;
 use crate::units::prompt::api::Prompt;
 use crate::units::provision::api::Provision;
+use crate::units::pure::exec_model::api::Tier;
 use crate::units::runtime::api::{
     Acted, ActionCall, ActionOps, ActionParamView, ActionView, Advance, Caller, CollabWork, Events,
     LogOps, Output, RebuildDeps, RewindOutcome, RewindTarget, RuntimeOps,
 };
 use crate::units::tools::api::{ToolExec, ToolSchema, Tools, arg_fault_text};
+use crate::units::transcript::api::{DecisionQueue, SessionEvent};
 use crate::units::turn::turn::api::{SPEAKER, TurnOps};
 use crate::units::vm::api::Vm;
 use crate::units::work::api::WorkOps;
@@ -35,8 +38,6 @@ use crate::units::work::api::{
     TierChoices, Work, WorkOpened, WorkSpec,
 };
 use crate::units::workspace::api::{MAX_ASSET_BYTES, Workspace};
-use crate::kernel::api::jobs::JobRegistry;
-use crate::units::pure::exec_model::api::Tier;
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 

@@ -3,11 +3,11 @@
 //! 不管：进程与围栏机制（在 kernel 的 SessionHost 实现里）；真实服务的端到端另有用例。
 //! 联动：适配器见 src/units/residents/detail/mcp.rs；替身见 src/tests/doubles/。
 
-use crate::units::residents::detail::McpAdapter;
-use crate::units::residents::ports::{LaunchSpec, ServiceAdapter};
 use crate::kernel::api::fence::FencePlan;
 use crate::kernel::ports::SessionHost;
 use crate::tests::doubles::{RecordingLog, ScriptedHost};
+use crate::units::residents::detail::McpAdapter;
+use crate::units::residents::ports::{LaunchSpec, ServiceAdapter};
 use serde_json::json;
 use std::sync::Arc;
 

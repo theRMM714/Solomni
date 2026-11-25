@@ -17,7 +17,7 @@ impl Core {
     fn proxy_lines(
         &self,
         sid: &str,
-    ) -> Result<Vec<crate::units::conversation::session::api::LineView>, String> {
+    ) -> Result<Vec<crate::units::transcript::api::LineView>, String> {
         let (_, events) = self.lifecycle.history_open(sid)?;
         let mut out = Vec::new();
         for ev in &events {
@@ -28,9 +28,8 @@ impl Core {
                 continue;
             };
             for l in arr {
-                if let Ok(v) = serde_json::from_value::<
-                    crate::units::conversation::session::api::LineView,
-                >(l.clone())
+                if let Ok(v) =
+                    serde_json::from_value::<crate::units::transcript::api::LineView>(l.clone())
                 {
                     out.push(v);
                 }
@@ -351,9 +350,7 @@ impl crate::units::conversation::proxy::api::ProxyHost for ProxyBridge {
         }
         // 单 agent：以"核心派的活"注入（派发行是核心自己的行，**不冒充用户原话**），
         // 并**脱离调用方点火**——代理不等它跑完，靠 observe / messages 回头看。
-        crate::units::turn::turn::api::spawn_detached_node(
-            &*handle, &target, &msg.text, None,
-        );
+        crate::units::turn::turn::api::spawn_detached_node(&*handle, &target, &msg.text, None);
         Ok(())
     }
 

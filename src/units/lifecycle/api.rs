@@ -3,8 +3,8 @@
 //! 不管：怎么回档、怎么删（在 service 里）；呈现层的 JSON 封装。
 //! 联动：runtime 与测试都从这里取类型；`SessionDelete::run()` 在调用方线程上跑。
 
-use crate::units::catalog::registry::api::Registry;
 use crate::kernel::ports::HostProbe;
+use crate::units::catalog::registry::api::Registry;
 
 /// 目的：回档目标：留档 / 删除按**行 id**，恢复按**留档标记 id**。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -6,9 +6,7 @@
 
 use super::MenuRow;
 use crate::units::catalog::modules::api::ParamType;
-use crate::units::tools::api::{
-    CommandBook, Executor, Op, OpBook, Phase, complete_op, op_usage,
-};
+use crate::units::tools::api::{CommandBook, Executor, Op, OpBook, Phase, complete_op, op_usage};
 use std::sync::OnceLock;
 
 /// 目的：产品内置的命令表；表非法是编译期就该发现的事，这里让它在第一次使用时炸出来。
@@ -170,10 +168,7 @@ pub(crate) fn detail(raw: &str) -> Option<String> {
 }
 
 /// 目的：一行旗语说明（名字、取值提示、说明），从参数声明派生。
-pub(crate) fn param_row(
-    name: &str,
-    p: &crate::units::catalog::modules::api::Param,
-) -> String {
+pub(crate) fn param_row(name: &str, p: &crate::units::catalog::modules::api::Param) -> String {
     let spec = if p.ty == ParamType::Boolean {
         format!("--{}", name)
     } else {

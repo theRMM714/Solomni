@@ -3,10 +3,10 @@
 //! 不管：渲染（在浏览器 `src/presentation/web/assets/app/main.js` 起的分层模块）；路由目录与匹配（`src/presentation/web/routes.rs`）。
 //! 联动：核心状态在核心自己的线程上——这里拿不到它、也拿不到任何核心锁，「停止」直接说给核心听；请求经 `Faces`（`src/units/*/api.rs`）进入。
 
+use crate::presentation::faces::Faces;
 use crate::units::runtime::api::Output;
 use crate::units::runtime::api::{Acted, ActionCall, Caller, SessionEvent};
 use crate::units::workspace::api::MAX_ASSET_BYTES;
-use crate::presentation::faces::Faces;
 pub(crate) mod assets;
 mod host_fs;
 pub mod routes;
@@ -464,9 +464,9 @@ pub(crate) fn route(
                 Ok(v) => v,
                 Err(e) => return complaint(400, e),
             };
-            let kind = match crate::units::maintenance::storage::api::CleanKind::parse(
-                &str_field(&req, "kind"),
-            ) {
+            let kind = match crate::units::maintenance::storage::api::CleanKind::parse(&str_field(
+                &req, "kind",
+            )) {
                 Ok(k) => k,
                 Err(e) => return complaint(400, e),
             };

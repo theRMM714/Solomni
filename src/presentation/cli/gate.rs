@@ -408,9 +408,7 @@ pub(crate) fn pick_agents(faces: &Faces, names: &[String]) -> Result<Vec<AgentMe
 }
 
 /// 目的：虚拟机档的虚拟根怎么选——本机只有一个装齐的就自动用它；多个（或一个都没装齐）返回 None，由调用方如实说明。
-pub(super) fn pick_guest(
-    guests: &[crate::units::provision::api::GuestBase],
-) -> Option<String> {
+pub(super) fn pick_guest(guests: &[crate::units::provision::api::GuestBase]) -> Option<String> {
     let ready: Vec<&crate::units::provision::api::GuestBase> =
         guests.iter().filter(|g| g.ready).collect();
     match ready.as_slice() {
@@ -518,9 +516,9 @@ pub(crate) fn create_session_action(faces: &Faces, ask: SessionAsk<'_>) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::units::conversation::collab::api::Pending;
-    use crate::units::conversation::session::api::tool_ask;
     use crate::kernel::api::types::Ask;
+    use crate::units::conversation::collab::api::Pending;
+    use crate::units::transcript::api::tool_ask;
 
     /// 目的：用生产那一条派生造卡（工具层那一类：三段话与选项原样来自发起方）。
     fn card(title: &str, body: &str, detail: &str, options: &[(&str, &str)]) -> DecisionCard {
@@ -691,9 +689,9 @@ mod tests {
     /// 目的：裁决卡上按 Ctrl+C = 撤回答（等同空行「先不答」）：卡还挂着、会话照等；只有真 EOF 才按停止收场。
     #[test]
     fn interrupt_skips_a_card_while_eof_stops_it() {
+        use crate::tests::doubles::{module_of, work};
         use crate::units::conversation::collab::api::Pending;
         use crate::units::conversation::session::api::{SINGLE, SlotWake};
-        use crate::tests::doubles::{module_of, work};
 
         let (handle, faces) = crate::tests::ops_with(vec![module_of("a")], Vec::new());
         let sid = "cli-ctrl-c-1";

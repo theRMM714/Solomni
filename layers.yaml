@@ -18,6 +18,7 @@ llm: 2
 prompt: 2
 provision: 2
 residents: 2
+transcript: 2
 tools: 2
 vm: 2
 workspace: 2

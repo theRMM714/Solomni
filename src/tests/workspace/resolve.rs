@@ -484,10 +484,7 @@ pub(crate) fn work_gc_keeps_index_and_commit_objects_and_removes_the_rest() {
     assert_eq!(dry.ignored_files, 1);
     assert!(
         store
-            .read_object(
-                &root,
-                &crate::units::workspace::api::content_hash(b"g1")
-            )
+            .read_object(&root, &crate::units::workspace::api::content_hash(b"g1"))
             .is_ok()
     );
 
@@ -497,19 +494,13 @@ pub(crate) fn work_gc_keeps_index_and_commit_objects_and_removes_the_rest() {
     assert_eq!(applied.removed_ignored, 1);
     assert!(
         store
-            .read_object(
-                &root,
-                &crate::units::workspace::api::content_hash(b"g1")
-            )
+            .read_object(&root, &crate::units::workspace::api::content_hash(b"g1"))
             .is_err(),
         "g1 应被回收"
     );
     assert!(
         store
-            .read_object(
-                &root,
-                &crate::units::workspace::api::content_hash(b"g2")
-            )
+            .read_object(&root, &crate::units::workspace::api::content_hash(b"g2"))
             .is_ok(),
         "基线引用的 g2 必须保留"
     );

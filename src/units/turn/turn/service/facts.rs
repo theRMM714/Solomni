@@ -6,23 +6,24 @@
 
 use std::collections::BTreeMap;
 
+use crate::kernel::ports::HostProbe;
 use crate::units::catalog::modules::api::{Module, Roster};
 use crate::units::catalog::packages::api::PackagePlan;
 use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::catalog::registry::api::Registry;
 use crate::units::conversation::session::api::{
-    AgentSession, MemberSpec, SessionEvent, SessionMeta, SingleSpec, work_root_of,
+    AgentSession, MemberSpec, SessionMeta, SingleSpec, work_root_of,
 };
 use crate::units::llm::api::Channel;
 #[cfg(test)]
 use crate::units::llm::api::ToolMode;
+use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::permission::api::PermissionSet;
+use crate::units::transcript::api::SessionEvent;
 use crate::units::turn::env::api::SeatAccess;
 use crate::units::turn::turn::service::session::Turn;
 use crate::units::vm::api::GuestOs;
 use crate::units::workspace::api::{Sandbox, Sandboxes, SharedScope};
-use crate::units::pure::exec_model::api::Tier;
-use crate::kernel::ports::HostProbe;
 
 /// 目的：一席事实的取用：沙箱、权限、工具面入参与上下文预算。
 impl Turn {
@@ -147,8 +148,8 @@ impl Turn {
             })
             .collect();
         let host_read_roots = crate::units::turn::env::api::host_read_roots(registry.app());
-        let menv = crate::units::turn::env::api::member(
-            &crate::units::turn::env::api::MemberFacts {
+        let menv =
+            crate::units::turn::env::api::member(&crate::units::turn::env::api::MemberFacts {
                 sandbox: sb,
                 host_read_roots: &host_read_roots,
                 net,
@@ -156,8 +157,7 @@ impl Turn {
                 base_roots: &self.base_roots,
                 plan: host_plan,
                 module_vars: &module_vars,
-            },
-        );
+            });
         crate::units::conversation::session::api::MemberEnvParts {
             fence: menv.fence,
             module_env: menv.module_env,
@@ -237,10 +237,7 @@ impl Turn {
             context: self.context_budget(registry, a.model.as_deref()),
             core_model: registry.core_model(),
         };
-        crate::units::conversation::session::api::single_session(
-            &self.session_ports(),
-            &spec,
-        )
+        crate::units::conversation::session::api::single_session(&self.session_ports(), &spec)
     }
 
     /// 目的：本会话的上下文预算：窗口按模型现算（缺省用核心默认），阈值与保留百分比来自全局设置。

@@ -10,8 +10,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::units::vm::domain::exec::VIRTIOFSD_BIN;
 use crate::kernel::detail::procs::{self, Entry, ProcessBook};
+use crate::units::vm::domain::exec::VIRTIOFSD_BIN;
 
 /// 目的：virtiofs 共享后端（QEMU 的 vhost-user-fs；Linux / macOS 宿主可用，Windows 宿主没有）。
 pub struct VirtioFsShare {

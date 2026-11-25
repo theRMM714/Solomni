@@ -7,14 +7,14 @@
 pub mod job;
 pub mod plan;
 
+use crate::kernel::api::host_probe::FileStamp;
+use crate::kernel::api::host_probe::file_stamp;
+use crate::kernel::api::types::ToolOutcome;
 use crate::units::vm::api::Vm;
 use crate::units::vm::domain::guest::{
     self as guest, GuestMount, GuestOs, GuestRun, GuestSpec, OutputLimit,
 };
 use crate::units::vm::ports::{GuestVm, ShareBackend, ShareGuard, VmEngine};
-use crate::kernel::api::host_probe::FileStamp;
-use crate::kernel::api::host_probe::file_stamp;
-use crate::kernel::api::types::ToolOutcome;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -92,8 +92,7 @@ impl VmService {
         // 全局表锁只用来取 entry；执行在该租约自己的锁下跑——跨租约因此真并行（同一租约仍串行）。
         let mut held = entry.lock().unwrap_or_else(|e| e.into_inner());
         let held = &mut *held;
-        let translated =
-            crate::units::vm::domain::guest::translate_run(run, held.os, &held.mounts);
+        let translated = crate::units::vm::domain::guest::translate_run(run, held.os, &held.mounts);
         if let Err(why) = held.share.sync_in(held.vm.channel(), &held.mounts) {
             return fail(&format!("共享同步（进去）失败：{}", why));
         }
@@ -309,10 +308,7 @@ impl Vm for VmService {
 
     /// 目的：一次 guest **只读诊断**——系统动作，走 helper 诊断模式（与 per-agent 围栏同一条通道）。
     /// 约束：不跑共享同步（诊断不进出文件）；失败如实区分原因，绝不返回空诊断。
-    fn guest_diagnose(
-        &self,
-        lease: &str,
-    ) -> Result<crate::units::vm::api::GuestDiagnosis, String> {
+    fn guest_diagnose(&self, lease: &str) -> Result<crate::units::vm::api::GuestDiagnosis, String> {
         use crate::units::vm::domain::diagnose as diag;
         let entry = self
             .guests

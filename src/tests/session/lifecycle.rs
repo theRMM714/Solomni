@@ -313,9 +313,8 @@ pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {
         )
         .unwrap();
     let history = core.history_handle();
-    let root_of = |sid: &str| {
-        crate::units::conversation::session::api::work_root(history.as_ref(), sid)
-    };
+    let root_of =
+        |sid: &str| crate::units::conversation::session::api::work_root(history.as_ref(), sid);
     assert_eq!(root_of(&top).unwrap(), top);
     assert_eq!(root_of(&mid).unwrap(), top, "第二层锚在顶");
     assert_eq!(root_of(&low).unwrap(), top, "第三层也锚在顶");

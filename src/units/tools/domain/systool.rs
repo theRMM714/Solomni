@@ -25,8 +25,7 @@ pub const SHELL: &str = "shell";
 /// 目的：单次读取回传的字符上限（超出如实截断，并在回执里给出接着读的 offset）。
 /// 约束：必须低于 budget::MAX_RESULT_CHARS，给文件头与“接着读”提示留余量——否则发送前还会被
 ///   cap_result 从中间截断，模型看到的就不是我们记成“全文”的那份内容了。
-pub const MAX_READ_CHARS: usize =
-    crate::units::tools::domain::budget::MAX_RESULT_CHARS - 2_000;
+pub const MAX_READ_CHARS: usize = crate::units::tools::domain::budget::MAX_RESULT_CHARS - 2_000;
 /// 目的：回执里单行的字符上限（长行截断，避免一行吃掉整个上下文）。
 pub const MAX_READ_LINE_CHARS: usize = 2_000;
 /// 目的：单次 read 最多返回的行数；也是 `limit` 的缺省值与上限（与 systools/tools.yaml 一致）。
@@ -45,8 +44,7 @@ pub const MAX_GREP_CONTEXT: usize = 10;
 /// 目的：一次目录递归最多扫多少个文件（再多就如实提示缩小范围）。
 pub const MAX_GREP_FILES: usize = 5_000;
 /// 目的：grep 回执正文的字符上限（`max` 条 × 单行上限之后仍要落在结果预算内）。
-pub const MAX_GREP_CHARS: usize =
-    crate::units::tools::domain::budget::MAX_RESULT_CHARS - 2_000;
+pub const MAX_GREP_CHARS: usize = crate::units::tools::domain::budget::MAX_RESULT_CHARS - 2_000;
 
 /// 目的：执行席的**回报**工具：不碰文件，只把"做完了什么"承载成一次工具调用。
 ///    为什么是工具而不是正文 JSON：回报会驱动核心（判节点完成），属于核心操作（见 tools-and-roles.md）。

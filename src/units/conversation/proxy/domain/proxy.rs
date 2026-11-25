@@ -219,7 +219,7 @@ impl ControlAction {
 /// 约束：代理**只认选项 id**，不给任何"从一句话猜选项"的规则——猜会替用户做主
 ///   （围栏卡的第一项正是"无围栏跑一次"，猜出来就是把用户的权限授出去）。
 pub fn relay_reply(
-    options: &[crate::units::conversation::session::api::OptionView],
+    options: &[crate::units::transcript::api::OptionView],
     reply: &str,
 ) -> Result<String, String> {
     let id = reply.trim();

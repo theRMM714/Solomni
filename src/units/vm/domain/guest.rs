@@ -3,12 +3,12 @@
 //! 不管：进程的启停与命令通道（detail/ 的引擎与通道）、引擎参数（detail/ 的适配器）。
 //! 联动：被 service.rs 与 detail/ 消费；契约见 docs/vm/README.md 与 RUNTIME_SPEC.md。
 
-use crate::units::catalog::packages::api::{KIND_SYSTEM, PlannedPackage};
-use crate::units::vm::domain::exec::ExecPlan;
-use crate::units::vm::domain::paths::{PathBridge, PathDialect};
 use crate::kernel::api::fence::{Access, FencePlan, Reach};
 use crate::kernel::api::layout;
 use crate::kernel::ports::HostProbe;
+use crate::units::catalog::packages::api::{KIND_SYSTEM, PlannedPackage};
+use crate::units::vm::domain::exec::ExecPlan;
+use crate::units::vm::domain::paths::{PathBridge, PathDialect};
 use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};

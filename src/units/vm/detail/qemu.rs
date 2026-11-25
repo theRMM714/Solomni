@@ -3,9 +3,9 @@
 //! 不管：共享后端的额外参数（detail/share_ninep.rs）、镜像判定与挂载清单（domain/guest.rs）。
 //! 联动：端口在 ports.rs；由组合根构造、service.rs 持有。
 
+use crate::kernel::detail::procs::{self, Entry, ProcessBook};
 use crate::units::vm::domain::guest::{GuestArch, GuestImage, GuestOs, GuestRun, GuestSpec};
 use crate::units::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
-use crate::kernel::detail::procs::{self, Entry, ProcessBook};
 use std::collections::VecDeque;
 use std::io::BufReader;
 use std::net::TcpListener;
@@ -592,8 +592,8 @@ use seed::SeedServer;
 mod tests {
     use super::qga::*;
     use super::*;
-    use crate::units::vm::domain::guest::{OutputLimit, SeedDocs};
     use crate::kernel::domain::receipt::{ShellEnd, shell_receipt};
+    use crate::units::vm::domain::guest::{OutputLimit, SeedDocs};
     use std::net::TcpStream;
 
     /// 目的：QGA 通道被 QEMU 重置（chardev 未就绪时连上的那条会被 RST）不是故障——`ping` 要自己重连一次再握手。

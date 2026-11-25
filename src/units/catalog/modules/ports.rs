@@ -13,9 +13,7 @@ pub trait ModuleSource {
 /// 目的：启停覆盖的落盘端口（`.home/modules.yaml`）。**只有 `service.rs` 持有它**（R12）。
 pub trait ModuleStateStore: Send + Sync {
     /// 目的：读一份覆盖；文件不存在 = 空。
-    fn load(
-        &self,
-    ) -> Result<crate::units::catalog::modules::domain::state::EnabledState, String>;
+    fn load(&self) -> Result<crate::units::catalog::modules::domain::state::EnabledState, String>;
     /// 目的：写一份覆盖。
     fn save(
         &self,

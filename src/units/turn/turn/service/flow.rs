@@ -4,15 +4,16 @@
 //! 联动：宿主的协作接口与工作线程转发到这里；登记处与主机探针按参数给（本层不持登记处）。
 //!   本方法族的取放与收尾判据都在 `Turn` 的会话表上。
 
+use crate::kernel::ports::HostProbe;
 use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::catalog::registry::api::Registry;
 use crate::units::conversation::session::api::{
-    Answered, DecisionQueue, Flow, Gate, GateTicket, Handback, RunState, SessionEvent, SessionMeta,
-    SessionSpec, TurnIo, UsageTotals, flat_modules, work_root,
+    Answered, Flow, GateTicket, Handback, RunState, SessionMeta, SessionSpec, TurnIo, UsageTotals,
+    flat_modules, work_root,
 };
 use crate::units::prompt::api::Segment;
+use crate::units::transcript::api::{DecisionQueue, Gate, SessionEvent};
 use crate::units::turn::turn::api::{Prepared, RestoreRequest, Session};
-use crate::kernel::ports::HostProbe;
 
 use super::session::Turn;
 
@@ -149,9 +150,9 @@ impl Turn {
                 Ok(t) => t,
                 Err(err) => {
                     let note = if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                        crate::units::conversation::session::api::stopped_note()
+                        crate::units::transcript::api::stopped_note()
                     } else {
-                        crate::units::conversation::session::api::interrupted_note(&err)
+                        crate::units::transcript::api::interrupted_note(&err)
                     };
                     out.extend(self.notice_row(sid, &note));
                     // 流程如实记下这次失败：下次推一步时由它交回中断，而不是当成功继续。
@@ -750,16 +751,13 @@ impl Turn {
             e2["lines"] = serde_json::Value::Array(lines);
             kept.push(e2);
         }
-        let mut line = crate::units::conversation::session::api::LineView::user(
+        let mut line = crate::units::transcript::api::LineView::user(
             "需求",
             format!("需求已修改，以下是新需求：{}", text),
         );
         line.id = next;
         line.reply = next;
-        kept.push(
-            crate::units::conversation::session::api::SessionEvent::Transcript(vec![line])
-                .to_json(),
-        );
+        kept.push(crate::units::transcript::api::SessionEvent::Transcript(vec![line]).to_json());
         self.history
             .replace(sid, &kept)
             .map_err(|e| format!("改需求落盘失败：{}", e))?;

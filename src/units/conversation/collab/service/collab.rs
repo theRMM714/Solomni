@@ -13,10 +13,11 @@ use crate::units::catalog::registry::api::Settings;
 use crate::units::conversation::collab::domain::gates::Pending;
 use crate::units::conversation::collab::service::discussion::Discussion;
 use crate::units::conversation::collab::service::synthesis::Execution;
-use crate::units::conversation::session::api::{Gates, LineView, SessionEvent};
+use crate::units::conversation::session::api::Gates;
 use crate::units::llm::api::{Channel, Chat, Llm, Msg};
 use crate::units::prompt::api::{Prompt, Segment};
 use crate::units::tools::api::ToolExec;
+use crate::units::transcript::api::{LineView, SessionEvent};
 use crate::units::vm::api::Vm;
 use crate::units::workspace::api::Sandboxes;
 use std::sync::Arc;
@@ -249,11 +250,11 @@ impl CollabSession {
     ///   两者都如实收尾并保持会话可继续，但用户看到的话不一样——混成一句会让用户以为出了故障。
     pub(crate) fn exec_note(&self, exec: &Execution) -> Option<String> {
         if exec.stopped || self.cancelled() {
-            return Some(crate::units::conversation::session::api::stopped_note());
+            return Some(crate::units::transcript::api::stopped_note());
         }
         exec.error
             .clone()
-            .map(|err| crate::units::conversation::session::api::interrupted_note(&err))
+            .map(|err| crate::units::transcript::api::interrupted_note(&err))
     }
 
     /// 目的：任务链（未整理 = None）。
@@ -288,9 +289,7 @@ impl CollabSession {
         opts: crate::units::llm::api::CompleteOpts<'static>,
         mode: crate::units::llm::api::ToolMode,
         core_chat: &mut dyn Chat,
-        verify: Option<
-            &mut (dyn crate::units::conversation::session::api::CoreVerify + 'static),
-        >,
+        verify: Option<&mut (dyn crate::units::conversation::session::api::CoreVerify + 'static)>,
         kind: &str,
         payload: &str,
         text: &str,
@@ -350,9 +349,7 @@ impl CollabSession {
         opts: crate::units::llm::api::CompleteOpts<'static>,
         mode: crate::units::llm::api::ToolMode,
         core_chat: &mut dyn Chat,
-        verify: Option<
-            &mut (dyn crate::units::conversation::session::api::CoreVerify + 'static),
-        >,
+        verify: Option<&mut (dyn crate::units::conversation::session::api::CoreVerify + 'static)>,
         // 上一次填错了要它重填的话（核心据此**一直重填**到合法，不设次数上限）。
         retry: Option<&str>,
         // 核心这一轮的行推给谁。

@@ -4,9 +4,7 @@
 //! 联动：实现 ports::ShareBackend；只有 `SOLOMNI_VM_SHARE=copy` 的进程会显式选它；不参与用户链。
 
 use crate::units::vm::domain::guest::{GuestImage, GuestMount, GuestRun, sh_quote};
-use crate::units::vm::ports::{
-    GuestChannel, NoShareGuard, ShareBackend, ShareGuard, SharePlan,
-};
+use crate::units::vm::ports::{GuestChannel, NoShareGuard, ShareBackend, ShareGuard, SharePlan};
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};

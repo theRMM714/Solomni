@@ -15,12 +15,12 @@ use crate::units::maintenance::storage::api::{
     CleanKind, CleanOutcome, CleanRequest, GcReport, Storage,
 };
 use crate::units::provision::api::Provision;
+use crate::units::pure::exec_model::api::JobState;
 use crate::units::system::api::{
     BuildRequest, EnsureRequest, Facts, Fault, FenceFacts, GcRequest, ResetRequest, SetupMode,
     SetupOps, System, WorkGcRequest,
 };
 use crate::units::workspace::api::{WorkGcReport, Workspace, safe_file_name};
-use crate::units::pure::exec_model::api::JobState;
 
 /// 目的：系统维护能力的依赖面——全部由组合根注入（能力自己不构造别的能力的适配器）。
 pub struct SystemDeps {

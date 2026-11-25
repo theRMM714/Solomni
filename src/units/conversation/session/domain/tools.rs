@@ -296,11 +296,7 @@ pub trait CoreVerify {
     /// 目的：这个名字是不是本席可用的只读核实工具（内置工具表里能力为 `fs-read`）。
     fn is_readonly(&self, name: &str) -> bool;
     /// 目的：跑一次只读核实工具，回执行回执（读到的东西进本席观察账本）。
-    fn run_readonly(
-        &mut self,
-        name: &str,
-        args: &str,
-    ) -> crate::units::tools::api::ToolOutcome;
+    fn run_readonly(&mut self, name: &str, args: &str) -> crate::units::tools::api::ToolOutcome;
 }
 
 impl CoreVerify for MemberTools {
@@ -312,11 +308,7 @@ impl CoreVerify for MemberTools {
             .unwrap_or(false)
     }
 
-    fn run_readonly(
-        &mut self,
-        name: &str,
-        args: &str,
-    ) -> crate::units::tools::api::ToolOutcome {
+    fn run_readonly(&mut self, name: &str, args: &str) -> crate::units::tools::api::ToolOutcome {
         let done = self.tools.run_builtin(
             &self.face.sandbox,
             &self.face.builtin_tools,
@@ -388,10 +380,7 @@ impl MemberTools {
             }
         }
         // patch 是自由格式工具：它不在参数清单里，写法跟一段补丁正文（只有拿到它的席位才给）。
-        if ids
-            .iter()
-            .any(|i| i == crate::units::tools::api::PATCH)
-        {
+        if ids.iter().any(|i| i == crate::units::tools::api::PATCH) {
             parts.push(self.face.notes.patch_guide.clone());
         }
         if with_modules && !native {

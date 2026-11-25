@@ -16,10 +16,7 @@ impl Core {
         if meta.exec.tier != crate::units::pure::exec_model::api::Tier::Vm {
             return Err("这条会话是本机档，没有 guest 可诊断".to_string());
         }
-        match crate::units::conversation::session::api::guest_scope(
-            self.history.as_ref(),
-            &meta,
-        )? {
+        match crate::units::conversation::session::api::guest_scope(self.history.as_ref(), &meta)? {
             Some((lease, _)) => Ok(crate::units::work::api::GuestDiagnose::new(
                 Arc::clone(&self.vm),
                 lease,

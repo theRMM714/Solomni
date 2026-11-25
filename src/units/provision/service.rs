@@ -10,16 +10,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::kernel::ports::HostProbe;
 use crate::units::provision::api::{DepStatus, GuestBase, HostTool, ProcInfo, Provision};
 use crate::units::provision::domain::{
     Dep, deps, for_host, install_identity, is_toolchain, links, pinned_sha256, source_url, under,
 };
-use crate::units::provision::ports::{
-    Fetcher, GuestImage, HostFs, Installers, Ledger, Procs,
-};
-use crate::units::vm::api::Vm;
+use crate::units::provision::ports::{Fetcher, GuestImage, HostFs, Installers, Ledger, Procs};
 use crate::units::pure::exec_model::api::JobState;
-use crate::kernel::ports::HostProbe;
+use crate::units::vm::api::Vm;
 
 /// 目的：一次补齐要用的端口组合——由 `ProvisionService` 借出，后台线程自己持有一份。
 pub(crate) struct Pipeline<'a> {

@@ -8,25 +8,23 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::kernel::api::fence::FencePlan;
+use crate::kernel::ports::Log;
 use crate::units::catalog::modules::api::Module;
 use crate::units::catalog::registry::api::AgentMeta;
 use crate::units::conversation::session::api::{
-    AgentSession, CompactChatFactory, ContextUsage, SessionEvent, SessionParams, ShellSlot,
-    ToolFace,
+    AgentSession, CompactChatFactory, SessionParams, ShellSlot, ToolFace,
 };
-use crate::units::conversation::session::domain::assemble::{
-    FaceInput, assemble as assemble_face,
-};
+use crate::units::conversation::session::domain::assemble::{FaceInput, assemble as assemble_face};
 use crate::units::conversation::session::domain::tools::MemberTools;
 use crate::units::llm::api::{Channel, Llm, Msg, ToolMode};
 use crate::units::prompt::api::{Prompt, Segment};
+use crate::units::pure::exec_model::api::Tier;
 use crate::units::residents::api::ResidentOps;
 use crate::units::tools::api::{ObservationFact, Observations, ToolExec, Tools};
+use crate::units::transcript::api::{ContextUsage, SessionEvent};
 use crate::units::vm::api::{GuestOs, Vm};
 use crate::units::workspace::api::{ReadFact, Sandbox, Workspace};
-use crate::kernel::api::fence::FencePlan;
-use crate::units::pure::exec_model::api::Tier;
-use crate::kernel::ports::Log;
 
 /// 目的：装配一场会话要用的能力面（组合根注入的同一批端口）。
 pub struct SessionPorts {

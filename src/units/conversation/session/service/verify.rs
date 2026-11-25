@@ -5,17 +5,17 @@
 
 use std::sync::Arc;
 
+use crate::kernel::api::fence::FencePlan;
+use crate::kernel::ports::Log;
 use crate::units::conversation::session::api::{CoreVerify, ToolFace};
 use crate::units::conversation::session::domain::assemble::{FaceInput, assemble};
 use crate::units::conversation::session::domain::tools::MemberTools;
 use crate::units::llm::api::{Llm, ToolMode};
 use crate::units::prompt::api::Prompt;
+use crate::units::pure::exec_model::api::Tier;
 use crate::units::tools::api::{Observations, ToolBook, ToolExec};
 use crate::units::vm::api::Vm;
 use crate::units::workspace::api::Sandbox;
-use crate::kernel::api::fence::FencePlan;
-use crate::units::pure::exec_model::api::Tier;
-use crate::kernel::ports::Log;
 
 /// 目的：装配核心核实环境所需的全部事实与端口：沙箱、席位、通道形态、网络、工具总表、说明块素材与四个端口。
 pub struct VerifySpec<'a> {
