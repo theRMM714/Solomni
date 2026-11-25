@@ -43,7 +43,7 @@
 | `GuestLiveness` | 有没有 guest 在跑（删除可写层与还原虚拟根的前置判据） |
 | `Fetcher` | 取数：按 URL 取文本、算文件 sha256、按候选源下载（测速选源 + 断点续传 + 逐行回执） |
 | `HostFs` | 依赖落盘的宿主侧原语：存在性、建目录、原子写、删除、执行位 |
-| `Ledger` | 依赖台账（`data/.vm/state/deps.json`）：快照、在场判定、guest 画像、装好登记与清旧、工具链生效登记 |
+| `Ledger` | 依赖台账（`data/.vm/state/deps.json`）：快照（身份 + 落点）、在场判定、guest 画像、装好登记与清旧、位置变了只搬家（`relocate`）、工具链生效登记 |
 | `Installers` | 按 `kind` 落盘：归档解包、单文件、AppImage、工具链包装、guest 磁盘与 `guest.yaml` 画像 |
 | `GuestImage` | `guest-rootfs` 的 ext4 镜像构造（选 deb、内核 / QGA / initrd、属性回填） |
 | `Procs` | 进程台账条目与 `guest` 是否在跑（安装期 `reset_guest` 的前置判据） |

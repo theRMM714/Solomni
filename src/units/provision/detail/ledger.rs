@@ -9,7 +9,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::units::provision::domain::{
-    Dep, GuestProfile, host_target, install_identity, is_toolchain, join_rel, under,
+    Dep, Entry, GuestProfile, Placement, host_target, install_identity, is_toolchain, join_rel,
+    placement_of, under,
 };
 use crate::units::provision::ports::Ledger;
 
@@ -76,7 +77,7 @@ pub(crate) fn ledger_path(root: &Path) -> PathBuf {
 }
 
 /// 目的：读台账；不在场或坏 JSON 都按空台账（首次安装的常态）。
-pub(crate) fn read_ledger(root: &Path) -> BTreeMap<String, String> {
+pub(crate) fn read_ledger(root: &Path) -> BTreeMap<String, Entry> {
     fs::read_to_string(ledger_path(root))
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
@@ -84,7 +85,7 @@ pub(crate) fn read_ledger(root: &Path) -> BTreeMap<String, String> {
 }
 
 /// 目的：写台账——临时文件再改名，中途被杀不会留下半份 JSON。
-pub(crate) fn write_ledger(root: &Path, ledger: &BTreeMap<String, String>) -> Result<(), String> {
+pub(crate) fn write_ledger(root: &Path, ledger: &BTreeMap<String, Entry>) -> Result<(), String> {
     let file = ledger_path(root);
     let dir = file.parent().ok_or_else(|| "台账没有父目录".to_string())?;
     fs::create_dir_all(dir).map_err(|e| format!("建 {} 失败：{}", dir.display(), e))?;
@@ -99,8 +100,79 @@ pub(crate) fn write_ledger(root: &Path, ledger: &BTreeMap<String, String>) -> Re
 /// 目的：登记「这条依赖按当前身份装好了」——每装好一条就落一次盘（后面某条失败时前面的成果不丢）。
 pub(crate) fn record_installed(root: &Path, dep: &Dep) -> Result<(), String> {
     let mut ledger = read_ledger(root);
-    ledger.insert(dep.id.clone(), install_identity(dep));
+    ledger.insert(
+        dep.id.clone(),
+        Entry {
+            identity: install_identity(dep),
+            placement: placement_of(dep),
+        },
+    );
     write_ledger(root, &ledger)
+}
+
+/// 目的：把旧落点的产物搬到清单现在写的位置——内容没变、只是位置变了，就不必重下。
+/// 参数：`from` 是台账里记的旧落点（相对产品根）。
+/// 返回：搬了给 true；旧位置没有东西 / 落点没变也给 false 之外的情形见下——
+///   落点没变时给 true（本来就在新位置），旧位置空着时给 false（交给重装）。
+/// 约束：先试改名（同卷即时）；跨卷改名失败才退化成复制 + 删源。共享安装目录只搬自己那份探针。
+pub(crate) fn relocate(root: &Path, dep: &Dep, from: &Placement) -> Result<bool, String> {
+    let to = placement_of(dep);
+    if &to == from {
+        return Ok(true);
+    }
+    let old_install = under(root, &from.install);
+    let new_install = under(root, &to.install);
+    let old_probe = under(root, &from.probe);
+    let new_probe = under(root, &to.probe);
+    let mut moved = false;
+    if old_install != new_install && old_install.is_dir() {
+        move_path(&old_install, &new_install)
+            .map_err(|e| format!("{}：搬安装目录失败：{}", dep.id, e))?;
+        moved = true;
+    } else if old_probe != new_probe && (old_probe.is_file() || old_probe.is_dir()) {
+        move_path(&old_probe, &new_probe).map_err(|e| format!("{}：搬探针失败：{}", dep.id, e))?;
+        moved = true;
+    }
+    Ok(moved)
+}
+
+/// 目的：把一个文件或目录整体挪过去；跨卷时退化成复制 + 删源。
+fn move_path(from: &Path, to: &Path) -> Result<(), String> {
+    if let Some(dir) = to.parent() {
+        fs::create_dir_all(dir).map_err(|e| format!("建 {} 失败：{}", dir.display(), e))?;
+    }
+    if from.is_dir() && to.exists() {
+        fs::remove_dir_all(to).map_err(|e| format!("清 {} 失败：{}", to.display(), e))?;
+    } else if from.is_file() && to.exists() {
+        fs::remove_file(to).map_err(|e| format!("清 {} 失败：{}", to.display(), e))?;
+    }
+    if fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    if from.is_dir() {
+        copy_dir(from, to)?;
+        fs::remove_dir_all(from).map_err(|e| format!("删 {} 失败：{}", from.display(), e))?;
+    } else {
+        fs::copy(from, to).map_err(|e| format!("复制 {} 失败：{}", from.display(), e))?;
+        fs::remove_file(from).map_err(|e| format!("删 {} 失败：{}", from.display(), e))?;
+    }
+    Ok(())
+}
+
+/// 目的：递归复制目录（跨卷搬家的兜底路径）。
+fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
+    fs::create_dir_all(to).map_err(|e| format!("建 {} 失败：{}", to.display(), e))?;
+    for entry in fs::read_dir(from).map_err(|e| format!("读 {} 失败：{}", from.display(), e))? {
+        let entry = entry.map_err(|e| format!("读 {} 失败：{}", from.display(), e))?;
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        if src.is_dir() {
+            copy_dir(&src, &dst)?;
+        } else {
+            fs::copy(&src, &dst).map_err(|e| format!("复制 {} 失败：{}", src.display(), e))?;
+        }
+    }
+    Ok(())
 }
 
 /// 目的：清掉这条依赖自己产出的那份东西——只有身份变了才调；共享同一安装目录的条目只动自己的探针。
@@ -184,7 +256,7 @@ pub(crate) fn sync_toolchain_active(root: &Path, all: &[Dep]) -> Result<(), Stri
 }
 
 impl Ledger for FileLedger {
-    fn snapshot(&self) -> BTreeMap<String, String> {
+    fn snapshot(&self) -> BTreeMap<String, Entry> {
         read_ledger(&self.root)
     }
 
@@ -212,5 +284,9 @@ impl Ledger for FileLedger {
 
     fn sync_active(&self, all: &[Dep]) -> Result<(), String> {
         sync_toolchain_active(&self.root, all)
+    }
+
+    fn relocate(&self, dep: &Dep, from: &Placement) -> Result<bool, String> {
+        relocate(&self.root, dep, from)
     }
 }

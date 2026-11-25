@@ -6,16 +6,16 @@
 
 ## 管什么 / 不管什么
 
-- 管：内嵌 `dependencies.yaml`（依赖清单）与 `links.yaml`（下载源台账）、本机状态（缺什么、装到哪、从哪来）、下载缓存（`data/.vm/cache`）、解包落盘（`kernel::detail::unpack`）、一次后台补齐作业（进度 / 取消），**本机有哪些长驻子进程在跑**（读 `kernel::detail::procs` 的账：用途、归属、起止），以及**宿主工具路径的取法**（`tool_path`：qemu / virtiofsd / smbd 的登记值优先、装好的兜底）。
+- 管：内嵌 `dependencies.yaml`（依赖清单）与 `links.yaml`（下载源台账）、本机状态（缺什么、装到哪、从哪来）、下载缓存（`data/.vm/cache`）、解包落盘（`kernel::detail::unpack`）、一次后台补齐作业（进度 / 取消），**本机有哪些长驻子进程在跑**（读 `kernel::detail::procs` 的账：用途、归属、起止），以及**宿主工具位置的取法**（`tool_location`：qemu / virtiofsd / smbd 的登记值优先、项目内补齐的那份兜底）。
 - 不管：虚拟机档的能力语义与档位判定（在 `vm`）。
 - 不管：构建期工具链的引导（本机档由 `env.js` 在宿主 `cc` 不可用时按同一清单装项目内 Zig；虚拟机档由 guest 的运行能力提供——都不是本单元）。
 - 不管：界面怎么展示（在 `presentation`）。
 
 ## 入站契约与状态归属
 
-- 入站契约：`src/units/provision/api.rs` 的 `Provision`（`status` / `guest_bases` / `job` / `start` / `cancel` / `tool_path`）。
+- 入站契约：`src/units/provision/api.rs` 的 `Provision`（`status` / `guest_bases` / `job` / `start` / `cancel` / `tool_location`），以及同文件的自由函数 `vm_tools`（按平台挑共享档 helper，给出一份 `VmTools`）与 `vm_tools_report`（界面与 `--doctor` 同读的现状报表）。
 - DTO：`DepStatus` / `GuestBase` / `HostTool`（`JobState` 是 `exec_model` 的共享形状）（要取哪件宿主工具：`Qemu` / `Virtiofsd` / `Smbd`，是工具 id 与台账前缀的唯一映射）；`NoProvision` 是未接入的默认实现（如实失败，不假装可用）。
-- **宿主工具路径**：`tool_path(tool, registered)` 是 `qemu_path` / `virtiofsd_path` / `smbd_path` 的唯一实现——`registered` 是设置里登记的值（trim 后非空即回它），否则按台账前缀 `vm.qemu.` / `vm.virtiofsd.` / `vm.smbd.` 找在场的那一条、回拼接产品根后的绝对路径；调用方（`runtime` 的 `src/units/work/service/host.rs`）只负责取登记值并 trim。
+- **宿主工具位置**：`tool_location(tool, registered)` 是位置解析的唯一实现，产出 `vm::api::ToolPath`（`registered` = 设置里登记的值，trim 后非空才算数；`provisioned` = 按台账前缀 `vm.qemu.` / `vm.virtiofsd.` / `vm.smbd.` 找在场的那一条、回拼接产品根后的绝对路径）。选哪份、算不算可用由 `vm` 的判定做，本单元只给位置事实；平台差异（Windows 用 smbd、其余用 virtiofsd）只在 `vm_tools` 一处。
 - **虚拟根清单**：`guest_bases` 把清单里带 `guest:` 的条目按虚拟根名归并（`ready` = 这一根的各条都按当前清单装好），一个虚拟根可由多条条目共同装；runtime 的创建向导与会话配置按它渲染下拉。
 - **虚拟根名**是 guest 的身份，按「发行版-大版本」取（`debian-13`），不按宿主平台取：两个宿主装的是同一个 Debian 13，目录同叫 `data/.vm/guest/debian-13`，布局差异由 `guest.yaml` 与镜像类型表达。
 - 状态归属：清单与台账的唯一真相在仓库根 `dependencies.yaml` / `links.yaml`，产品里**编译期内嵌**；作业状态是**进程内**的（不落盘，进程重启即清空）。
@@ -78,9 +78,10 @@
 ## 四、安装身份与台账
 
 - **装好 ≠ 探针在场**：每条依赖有一个安装身份，算自清单字段、pin 的 sha256 与工具链载荷（再加一个模式版本号，安装布局或判定口径变了就加一）。身份不同的旧产物是「旧安装」，不是「装好了」。
-- 台账在 `data/.vm/state/deps.json`：`{依赖 id: 身份}`，每装好一条就以临时文件 + rename 写一次（后面某条失败时，前面装好的不会白装）。
-- 身份变了（pin 升级、清单改布局、模式版本加一）就先清掉这条依赖自己产出的那份东西再重装：`guest-disk` / `guest-rootfs` / `archive` / `appimage` / `toolchain` 清整个 `install` 目录，`file` / `guest-runtime` 只清 `probe`；缓存按 pin 现验：旧 pin 下缓存的那份会在下次下载时被替换一次（校验仍不符才如实报错）。
-- 状态（`status` / `--provision` / 界面的「缺什么」）与 `--ensure=<kind>` 的缺项判定都走这套：`present` = 探针在场且身份一致；探针在场但身份不符时 `stale` 为真，界面与 CLI 能分清「没装」与「装的是旧版本」。
+- 台账在 `data/.vm/state/deps.json`：`{依赖 id: {identity, placement}}`——**装的是哪份内容**与**装在哪**分开记，`placement` 是清单的 `install` / `probe`（相对产品根）。每装好一条就以临时文件 + rename 写一次（后面某条失败时，前面装好的不会白装）。
+- **位置变了只搬家**：清单把同一条的 `install` / `probe` 改到别处、而身份没变时，把旧落点的产物 rename 到新落点（跨卷才退化成复制 + 删源），不下载也不重解；台账落点跟着更新。这正是安装目录不算进身份的理由——位置不是内容。
+- 身份变了（pin 升级、清单改内容或载荷、模式版本加一）就先清掉这条依赖自己产出的那份东西再重装：`guest-disk` / `guest-rootfs` / `archive` / `appimage` / `toolchain` 清整个 `install` 目录，`file` / `guest-runtime` 只清 `probe`；缓存按 pin 现验：旧 pin 下缓存的那份会在下次下载时被替换一次（校验仍不符才如实报错）。
+- 状态（`status` / `--provision` / 界面的「缺什么」）与 `--ensure=<kind>` 的缺项判定都走这套：`present` = 探针在**清单写的落点**在场且身份一致；探针在场但身份不符时 `stale` 为真，界面与 CLI 能分清「没装」与「装的是旧版本」。
 
 ## 五、缓存与完整性
 
@@ -101,7 +102,7 @@
 
 ## 七、补齐后的生效方式
 
-- 主程序**每次判据取用时**自动采用项目内补齐的可执行文件（`api::Provision::tool_path` 未登记时；显式登记优先，取到的是拼接产品根后的绝对路径）——装完即生效，不需要重启进程。
+- 主程序**每次判据取用时**自动采用项目内补齐的可执行文件（`api::Provision::tool_location` 的 `provisioned` 那份；显式登记优先，取到的是拼接产品根后的绝对路径）——装完即生效，不需要重启进程。
 - 共享后端全部在装配期持有，哪一档在起 guest 那一刻按候选挑（见 [docs/vm/README.md](../vm/README.md) 的「多平台组合」）。
 - 补齐面与会话面是**两份 vm 入站面**：补齐面只持内部 `none`（运行期编排只经 QGA，不挂载），会话面只持用户档；`none` 不进用户候选链——否则 `clients` 为空的 guest 会被静默当成无共享启动。
 
