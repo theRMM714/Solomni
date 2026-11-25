@@ -23,6 +23,7 @@ residents: 2
 transcript: 2
 session_model: 2
 tools: 2
+turn_state: 2
 vm: 2
 workspace: 2
 

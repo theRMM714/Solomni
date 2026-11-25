@@ -489,7 +489,7 @@ impl Work {
         let issued = self
             .history
             .load(sid)
-            .map(|(_, ev)| crate::units::conversation::session::api::issued_in(&ev))
+            .map(|(_, ev)| crate::units::turn_state::api::issued_in(&ev))
             .unwrap_or(0);
         turn.desk_for(sid, issued)
     }

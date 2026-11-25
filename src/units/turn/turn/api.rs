@@ -1,12 +1,18 @@
-//! 目的：turn 能力的入站契约：回合状态的类型与访问器、事件台、生成入口，以及宿主必须提供的入口（`TurnHost`）。
-//! 管：重导出 `service::state` 的 `Session`、`service::session` 的 `Turn`、事件台与生成入口（`service::generation`），
-//!   并定义宿主端口 `TurnHost`；会话装配（参数对象与整场入口）在 `session` 的面里，不在这里。
-//! 不管：状态实现（`service/state.rs`）、推进规则（`service/{turn,flow}`）、谁在什么时候放取会话（宿主）。
+//! 目的：turn 能力的入站契约：事件台、生成入口，以及宿主必须提供的入口（`TurnHost`）。
+//! 管：重导出事件台与生成入口（`service::generation`），并定义宿主端口 `TurnHost`。
+//! 不管：回合状态与会话本体（在 `turn_state`）、推进规则（`service/{turn,flow,rebuild}`）、谁在什么时候放取会话（宿主）。
 //! 联动：宿主（命令队列手柄）实现 `TurnHost`；呈现层与测试只经本模块取用。
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use crate::kernel::api::types::SessionId;
+use crate::kernel::ports::{AskUser, HostProbe};
+use crate::units::agentloop::api::AgentSession;
+use crate::units::catalog::registry::api::Registry;
+use crate::units::conversation::session::api::Persister;
+use crate::units::session_model::api::SessionMeta;
+use crate::units::transcript::api::{DecisionQueue, SessionEvent};
 /// 目的：生成入口（单 agent / 节点 / 协作 / 成员 / 压缩）与脱离调用方的点火器。
 pub(crate) use crate::units::turn::turn::service::generation::{
     collab_generation, compact, single_generation, spawn_detached_collab,
@@ -21,31 +27,7 @@ pub use crate::units::turn::turn::service::model::llm_opts;
 pub use crate::units::turn::turn::service::rebuild::replay_dialogue;
 /// 目的：代理会话的私有工作目录名与核心说话人名称（宿主建代理会话时要这两样）。
 pub use crate::units::turn::turn::service::rebuild::{PROXY_PRIVATE_DIR, SPEAKER};
-/// 目的：回合状态与会话本体的类型出口。
-pub use crate::units::turn::turn::service::session::Turn;
-
-/// 目的：造这个会话的**工具层提问端口**（登记一张卡、外送并落盘、停会话都走同一会话那条道）。
-/// 参数：`door` = 该会话的裁决通道；`sid` = 会话名；`emit` = 推一条事件；`stop` = 停这个会话。
-/// 返回：可跨线程用的提问端口。
-pub fn session_ask(
-    door: Arc<dyn Gates>,
-    sid: &str,
-    emit: Box<dyn Fn(SessionEvent) + Send + Sync>,
-    stop: Box<dyn Fn(&str) + Send + Sync>,
-) -> Arc<dyn AskUser> {
-    Arc::new(crate::units::turn::turn::service::ask_user::SessionAsk::new(door, sid, emit, stop))
-}
-/// 目的：在世会话形态（宿主与测试只经它取用）。
-///   回合状态本身（`TurnState`）是本能力的内部结构：它只被 `Turn` 持有，不出单元。
-pub use crate::units::turn::turn::service::state::Session;
-
-use crate::kernel::api::types::SessionId;
-use crate::kernel::ports::{AskUser, HostProbe};
-use crate::units::agentloop::api::AgentSession;
-use crate::units::catalog::registry::api::Registry;
-use crate::units::conversation::session::api::{Gates, Persister};
-use crate::units::session_model::api::SessionMeta;
-use crate::units::transcript::api::{DecisionQueue, SessionEvent};
+use crate::units::turn_state::api::{Gates, Turn};
 
 /// 目的：一次生成的输出方式：流式逐片，还是只要最终结果。
 ///   「怎么呈现」是呈现层的决定，所以由调用方显式给出，核心不替它猜。
@@ -116,7 +98,7 @@ pub fn event_bus() -> Arc<dyn Events> {
 ///   两者都不属于对外契约（前端只发"回答"，不问后端怎么推进）。
 pub(crate) enum CollabWork {
     /// 目的：处置一张已经出队的回答（队列给的处置票）。
-    Dispose(crate::units::conversation::session::api::GateTicket),
+    Dispose(crate::units::turn_state::api::GateTicket),
     Resume,
 }
 

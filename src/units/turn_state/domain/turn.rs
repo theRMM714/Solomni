@@ -12,53 +12,55 @@ use crate::units::agentloop::api::{CompactChatFactory, ShellLive, ShellSlot};
 use crate::units::catalog::modules::api::Modules;
 use crate::units::catalog::packages::api::Packages;
 use crate::units::catalog::secrets::api::SecretOps;
-use crate::units::conversation::session::api::{Gates, History};
 use crate::units::llm::api::Llm;
 use crate::units::prompt::api::Prompt;
 use crate::units::residents::api::ResidentOps;
 use crate::units::tools::api::{ToolExec, Tools};
-use crate::units::turn::turn::api::Session;
-use crate::units::turn::turn::service::state::TurnState;
+use crate::units::turn_state::api::{Flows, History};
+use crate::units::turn_state::domain::decisions::Gates;
+use crate::units::turn_state::domain::live::{Session, TurnState};
+use crate::units::turn_state::domain::ports::SessionPorts;
 use crate::units::vm::api::Vm;
 use crate::units::workspace::api::Workspace;
 
 /// 目的：会话本体：在世表与运行态（`TurnState`）连同装配一席要用的能力面，一处持有。
-/// 约束：只在核心线程上读写；能力面只经 `api` 取。
+/// 约束：只在核心线程上读写；能力面由 `session_ports` 交出——回合驱动与重建在本单元外（`turn`），
+///   故状态表与端口按 crate 可见，新的直取点必须同次说明理由。
 pub struct Turn {
     /// 目的：在世会话表、运行态与创建占位、裁决队、每会话的 shell 活进程槽。
-    pub(super) state: TurnState,
+    pub(crate) state: TurnState,
     /// 目的：工作区用例面：一席的 `work_*` 工具执行者按它造。
-    pub(super) workspace: Arc<dyn Workspace + Send + Sync>,
+    pub(crate) workspace: Arc<dyn Workspace + Send + Sync>,
     /// 目的：虚拟机用例面：一席的 guest 事实随工具面交给机制层。
-    pub(super) vm: Arc<dyn Vm + Send + Sync>,
+    pub(crate) vm: Arc<dyn Vm + Send + Sync>,
     /// 目的：常驻服务管理面：已就绪服务的操作并入一席的工具面。
-    pub(super) residents: Arc<dyn ResidentOps + Send + Sync>,
+    pub(crate) residents: Arc<dyn ResidentOps + Send + Sync>,
     /// 目的：隐秘字段管理面：装配期按模块解析注入项。
-    pub(super) secrets: Arc<dyn SecretOps + Send + Sync>,
+    pub(crate) secrets: Arc<dyn SecretOps + Send + Sync>,
     /// 目的：工具执行面：一席的工具环境要它跑外部 / 内置工具。
-    pub(super) tools: Arc<dyn ToolExec + Send + Sync>,
+    pub(crate) tools: Arc<dyn ToolExec + Send + Sync>,
     /// 目的：工具总表与机制席位：发放名单与内置工具表从它读。
-    pub(super) systools: Arc<dyn Tools>,
+    pub(crate) systools: Arc<dyn Tools>,
     /// 目的：提示词册：一席的工具说明与压缩提示从它取段。
-    pub(super) prompt: Arc<dyn Prompt>,
+    pub(crate) prompt: Arc<dyn Prompt>,
     /// 目的：llm 用例面：一席的收发句柄按它造。
-    pub(super) llm: Arc<dyn Llm + Send + Sync>,
+    pub(crate) llm: Arc<dyn Llm + Send + Sync>,
     /// 目的：日志面：装配时记一条「单 agent 工作」。
-    pub(super) log: Arc<dyn Log + Send + Sync>,
+    pub(crate) log: Arc<dyn Log + Send + Sync>,
     /// 目的：压缩通道工厂：新会话与重建会话共用同一份。
-    pub(super) compact: Arc<dyn CompactChatFactory>,
+    pub(crate) compact: Arc<dyn CompactChatFactory>,
     /// 目的：项目内基础工具链的只读安装根（python / node / cc），由组合根注入。
-    pub(super) base_roots: Vec<PathBuf>,
+    pub(crate) base_roots: Vec<PathBuf>,
     /// 目的：产品根：外部工作区绑定校验与 guest 宿主翻译都以它为锚。
-    pub(super) root: PathBuf,
+    pub(crate) root: PathBuf,
     /// 目的：会话落盘与名录：重建会话、准入与派发闸从它读元数据与事件。
-    pub(super) history: Arc<dyn History + Send + Sync>,
+    pub(crate) history: Arc<dyn History + Send + Sync>,
     /// 目的：模块登记：重建会话按清单复原一席的模块与目录。
-    pub(super) modules: Arc<dyn Modules + Send + Sync>,
+    pub(crate) modules: Arc<dyn Modules + Send + Sync>,
     /// 目的：包管理面：重建会话时按档位取库根与基础包根。
-    pub(super) packages: Arc<dyn Packages + Send + Sync>,
+    pub(crate) packages: Arc<dyn Packages + Send + Sync>,
     /// 目的：流程工厂（组合根注入）：重建会话按会话类型表里的流程序列逐段造，本层不认识任何具体流程。
-    pub(super) flows: Arc<dyn crate::units::conversation::session::api::Flows>,
+    pub(crate) flows: Arc<dyn Flows>,
 }
 
 /// 目的：`Turn` 的构造与取用。
@@ -83,7 +85,7 @@ impl Turn {
         history: Arc<dyn History + Send + Sync>,
         modules: Arc<dyn Modules + Send + Sync>,
         packages: Arc<dyn Packages + Send + Sync>,
-        flows: Arc<dyn crate::units::conversation::session::api::Flows>,
+        flows: Arc<dyn Flows>,
     ) -> Turn {
         Turn {
             state: TurnState::new(),
@@ -112,8 +114,8 @@ impl Turn {
     }
 
     /// 目的：装配一席要用的能力面（端口对象）——按 `Turn` 现持的那几份克隆出来，交 `session` 的装配入口。
-    pub fn session_ports(&self) -> crate::units::conversation::session::api::SessionPorts {
-        crate::units::conversation::session::api::SessionPorts {
+    pub fn session_ports(&self) -> SessionPorts {
+        SessionPorts {
             llm: Arc::clone(&self.llm),
             log: Arc::clone(&self.log),
             prompt: Arc::clone(&self.prompt),
@@ -197,7 +199,7 @@ impl Turn {
     }
 
     /// 目的：全会话的裁决通道表。
-    pub fn desk(&self) -> &Arc<dyn crate::units::conversation::session::api::Decisions> {
+    pub fn desk(&self) -> &Arc<dyn crate::units::turn_state::api::Decisions> {
         self.state.desk()
     }
 

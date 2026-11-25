@@ -8,16 +8,16 @@ use crate::kernel::ports::HostProbe;
 use crate::units::catalog::registry::api::Registry;
 
 use crate::units::agentloop::api::TurnIo;
-use crate::units::conversation::session::api::{
-    Answered, Flow, GateTicket, Handback, flat_modules, work_root,
-};
+use crate::units::conversation::session::api::{flat_modules, work_root};
 use crate::units::prompt::api::Segment;
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::session_model::api::{RunState, SessionMeta, SessionSpec, UsageTotals};
 use crate::units::transcript::api::{DecisionQueue, Gate, SessionEvent};
-use crate::units::turn::turn::api::{Prepared, RestoreRequest, Session};
+use crate::units::turn::turn::api::{Prepared, RestoreRequest};
+use crate::units::turn_state::api::Session;
+use crate::units::turn_state::api::{Answered, Flow, GateTicket, Handback};
 
-use super::session::Turn;
+use crate::units::turn_state::api::Turn;
 
 /// 目的：一个就绪节点要起的生成：节点名、子会话、这一回合的任务提示词、这一回合的席位。
 /// 约束：席位为 `None` 表示这套流程没给席位，生成按会话自己的席位跑。

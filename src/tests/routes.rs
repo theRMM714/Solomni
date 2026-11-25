@@ -5,13 +5,13 @@
 
 use crate::presentation::faces::Faces;
 
-use crate::units::conversation::session::api::HistoryOps;
 use crate::units::runtime::api::DecisionQueue;
 use crate::units::runtime::api::{
     Acted, ActionCall, ActionOps, ActionView, Advance, Caller, Output, RuntimeOps,
 };
 use crate::units::session_model::api::{HistoryView, MEETING, SINGLE, SessionMeta, SessionSpec};
 use crate::units::turn::turn::api::{Events, TurnOps};
+use crate::units::turn_state::api::HistoryOps;
 use crate::units::work::api::{
     AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, RuntimeReport,
     SessionConfig, SessionEdit, SessionTypeView, SessionView, TierChoices, WorkOpened, WorkOps,

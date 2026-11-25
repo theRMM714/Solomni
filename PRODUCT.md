@@ -94,7 +94,7 @@
 - ③ 文件系统围栏按平台接入（Linux Landlock、macOS seatbelt、Windows AppContainer）。
 - **全局沙箱策略是硬约束**（`sandbox.policy`）：默认 `require`，机制不可用时启动门按 `on_unavailable` 询问是否**本进程降级**（不落盘，重启再问）、重设或退出；自检确认机制有效却仍装不上 = 程序自己写错了，那一路**拒绝执行**。
 - **门不过就不起前端**：默认 CLI 与 `--web` 都先过环境检查；没有可回答的前端时直接退出，不会“先开 Web 再说”。
-- **必要落点授不上不静默降级**：经统一裁决通道问一次（本轮无围栏跑一次 / 放弃这次调用）；拒绝、没人答或没有可回答的前端一律不执行；**可选落点**授不上只记事实（`src/units/turn/turn/service/ask_user.rs`）。
+- **必要落点授不上不静默降级**：经统一裁决通道问一次（本轮无围栏跑一次 / 放弃这次调用）；拒绝、没人答或没有可回答的前端一律不执行；**可选落点**授不上只记事实（`src/units/turn_state/domain/ask.rs`）。
 - 机制细节见 [ARCHITECTURE.md](ARCHITECTURE.md)，三平台真机探针见 [TESTING.md](TESTING.md)。
 - **出站网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`（只公网出站，不授 private network / loopback）、macOS 放行 `network-outbound`、Linux 在 `network=false` 时由 seccomp 拒绝非 AF_UNIX / AF_NETLINK socket（TCP/UDP/raw 与回环都出不去）。Linux 的 `network=true` 不装网络过滤器，不限制入站/绑定（平台差异）。Windows 未授权 `windows.write_acl` 时容器不装，网络不生效。
 - **未授权不等于无围栏**：Windows 的容器围栏（路径级可达范围与断网）要授权才装得上；Linux / macOS 的围栏在守门进程里自足，不受授权影响。进程树与环境白名单两种时段都生效；启动报告把"本机能力"与"本次实际"分两行说清。

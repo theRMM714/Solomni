@@ -131,7 +131,7 @@ impl CollabSession {
     /// 错误：附言必填的那几关没给附言、选项不在这一关能分派的范围里，都如实拒绝。
     pub fn dispose(
         &mut self,
-        ticket: &crate::units::conversation::session::api::GateTicket,
+        ticket: &crate::units::turn_state::api::GateTicket,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<(bool, Option<Vec<AgentMeta>>), String> {
         let option = ticket.option.as_str();

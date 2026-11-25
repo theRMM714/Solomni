@@ -9,8 +9,8 @@ use crate::units::catalog::registry::api::Registry;
 use crate::units::agentloop::api::truncate_events;
 use crate::units::conversation::session::api::subtree_of;
 use crate::units::session_model::api::{RunState, SessionMeta};
-use crate::units::turn::turn::api::Session;
-use crate::units::turn::turn::service::session::Turn;
+use crate::units::turn_state::api::Session;
+use crate::units::turn_state::api::Turn;
 
 impl Turn {
     /// 目的：把一条已建好的会话说进在世表并落盘（建会话的尾巴只走这一条，免得两处各写一遍顺序）。

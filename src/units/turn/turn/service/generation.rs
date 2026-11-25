@@ -13,8 +13,8 @@ pub(crate) use compact::compact;
 pub(crate) use member::run_member_turn;
 pub(crate) use single::{node_generation, single_generation};
 
-use crate::units::conversation::session::api::GateTicket;
 use crate::units::turn::turn::api::{CollabWork, Output, TurnHost};
+use crate::units::turn_state::api::GateTicket;
 
 /// 目的：起一轮**脱离调用方**的节点执行：核心注入任务 + 不等它跑完。 完成后由叫醒逻辑推进父会话——所以这里只是"点火"。
 pub(crate) fn spawn_detached_node<H: TurnHost>(

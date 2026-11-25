@@ -76,7 +76,7 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
         .find(|(id, _)| id.as_str() == child)
         .map(|(_, s)| s)
         .expect("成员会话仍在世");
-    let crate::units::turn::turn::api::Session::Single(agent) = live else {
+    let crate::units::turn_state::api::Session::Single(agent) = live else {
         panic!("成员会话应是单 agent 会话");
     };
     let face = &agent.tools.as_ref().expect("成员会话有工具环境").face;

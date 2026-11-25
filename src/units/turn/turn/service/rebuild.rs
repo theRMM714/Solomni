@@ -14,8 +14,8 @@ use crate::units::agentloop::api::{AgentSession, SessionParams};
 use crate::units::conversation::session::api::{guest_lease_for, work_root, work_root_of};
 use crate::units::llm::api::{Channel, Msg};
 use crate::units::session_model::api::SessionMeta;
-use crate::units::turn::turn::api::Session;
-use crate::units::turn::turn::service::session::Turn;
+use crate::units::turn_state::api::Session;
+use crate::units::turn_state::api::Turn;
 use crate::units::workspace::api::{Sandbox, WORKIGNORE};
 
 /// 目的：代理会话的私有沙箱目录名（只有这一处）。
@@ -61,7 +61,7 @@ impl Turn {
         events: &[serde_json::Value],
         registry: &dyn Registry,
         probe: &dyn HostProbe,
-    ) -> Result<crate::units::turn::turn::api::Session, String> {
+    ) -> Result<crate::units::turn_state::api::Session, String> {
         let roster = self.modules.roster();
         // 打开 / 重建时按 meta 刷新布局投影（会话目录可能被复制或迁移；meta 是权威）。
         let work = work_root_of(self.history.as_ref(), meta)?;
@@ -87,14 +87,14 @@ impl Turn {
         }
         let sandboxes = self.sandboxes(registry, probe, meta, &roster)?;
         // 整队的权威是**转录**：重建之前先把队清空并按已发出的卡号续号（内存里那一份不作数）。
-        let issued = crate::units::conversation::session::api::issued_in(events);
+        let issued = crate::units::turn_state::api::issued_in(events);
         let desk = self.desk_for(&meta.name, issued);
         desk.rebuild(issued);
         let built = if meta.spec.driven() {
             {
                 // 按这条会话声明里的流程序列重建：本层不认识任何具体流程（工厂是组合根注入的）。
                 let ids = meta.spec.flow_ids();
-                let setup = crate::units::conversation::session::api::FlowSetup {
+                let setup = crate::units::turn_state::api::FlowSetup {
                     settings: registry.snapshot(),
                     core_channel: None,
                     roster: meta.agents.clone(),
@@ -104,11 +104,8 @@ impl Turn {
                     desk: Arc::clone(&desk),
                     restore: Some((meta, events)),
                 };
-                let pipeline = crate::units::conversation::session::api::sequence_of(
-                    &ids,
-                    &setup,
-                    &*self.flows,
-                )?;
+                let pipeline =
+                    crate::units::turn_state::api::sequence_of(&ids, &setup, &*self.flows)?;
                 Session::Flow(Box::new(pipeline))
             }
         } else if !meta.is_proxy() {

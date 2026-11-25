@@ -11,13 +11,15 @@ use crate::kernel::ports::HostProbe;
 use crate::units::catalog::registry::api::Registry;
 
 use crate::units::agentloop::api::AgentSession;
-use crate::units::conversation::session::api::{Flow, Gates, subtree_of};
+use crate::units::conversation::session::api::subtree_of;
 use crate::units::session_model::api::{RunState, seat as seat_of};
 use crate::units::transcript::api::SessionEvent;
-use crate::units::turn::turn::api::{Prepared, Session};
+use crate::units::turn::turn::api::Prepared;
+use crate::units::turn_state::api::Session;
+use crate::units::turn_state::api::{Flow, Gates};
 
 use super::flow::NodeSpawn;
-use super::session::Turn;
+use crate::units::turn_state::api::Turn;
 
 /// 目的：单 agent 会话轮不到用户发言时的提醒（"继续"与"发言"两个入口共用这一句）。
 pub(crate) const NEED_USER: &str =
@@ -356,7 +358,7 @@ impl Turn {
         let issued = self
             .history
             .load(sid)
-            .map(|(_, ev)| crate::units::conversation::session::api::issued_in(&ev))
+            .map(|(_, ev)| crate::units::turn_state::api::issued_in(&ev))
             .unwrap_or(0);
         self.desk_for(sid, issued)
     }

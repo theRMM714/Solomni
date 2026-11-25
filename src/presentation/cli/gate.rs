@@ -691,8 +691,8 @@ mod tests {
     fn interrupt_skips_a_card_while_eof_stops_it() {
         use crate::tests::doubles::{module_of, work};
         use crate::units::conversation::collab::api::Pending;
-        use crate::units::conversation::session::api::SlotWake;
         use crate::units::session_model::api::SINGLE;
+        use crate::units::turn_state::api::SlotWake;
 
         let (handle, faces) = crate::tests::ops_with(vec![module_of("a")], Vec::new());
         let sid = "cli-ctrl-c-1";

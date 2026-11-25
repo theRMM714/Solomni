@@ -11,7 +11,6 @@ use crate::units::catalog::registry::api::{AppSettings, RegistryOps};
 use crate::units::conversation::proxy::api as d;
 use crate::units::conversation::session::api::subtree_of;
 
-use crate::units::conversation::session::api::{Answered, History};
 use crate::units::llm::api::Channel;
 #[cfg(test)]
 use crate::units::llm::api::Msg;
@@ -33,6 +32,7 @@ use crate::units::session_model::api::{HistoryView, RunState, SessionMeta};
 use crate::units::tools::api::{ToolExec, ToolSchema, Tools, arg_fault_text};
 use crate::units::transcript::api::{DecisionQueue, SessionEvent};
 use crate::units::turn::turn::api::{SPEAKER, TurnOps};
+use crate::units::turn_state::api::{Answered, History};
 use crate::units::vm::api::Vm;
 use crate::units::work::api::WorkOps;
 use crate::units::work::api::{

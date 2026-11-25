@@ -5,10 +5,10 @@
 
 use crate::units::catalog::modules::api::ModulesOps;
 use crate::units::catalog::registry::api::RegistryOps;
-use crate::units::conversation::session::api::HistoryOps;
 use crate::units::runtime::api::{ActionOps, Handle, LogOps, RuntimeOps};
 use crate::units::turn::turn::api::EventFeed;
 use crate::units::turn::turn::api::TurnOps;
+use crate::units::turn_state::api::HistoryOps;
 use crate::units::work::api::WorkOps;
 use std::sync::Arc;
 

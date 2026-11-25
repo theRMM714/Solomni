@@ -1,16 +1,16 @@
 //! 目的：流程面——会话流程的插件契约：驱动只认「推一步 / 让出一回合 / 交回」这三件事，流程自己决定下一步问谁。
 //! 管：`Flow`（驱动一侧的接口）、`MemberAsk`（让出的那一步）与 `Handback`（交回后的处置）。
-//! 不管：流程内部的状态机；会话表、落盘与呈现（分别归 turn 的会话表、session 的历史与 presentation）。
+//! 不管：流程内部的状态机；会话表、落盘与呈现（分别归 `turn_state` 的在世表、会话单元的历史与 presentation）。
 //! 联动：`turn` 的驱动循环与 `turn::generation` 的工作线程按这套接口推进任何流程；协作的实现见 `collab`。
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use crate::units::agentloop::api::MemberTurn;
-use crate::units::conversation::session::api::GateTicket;
 use crate::units::llm::api::{CompleteOpts, Msg};
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::transcript::api::{Gate, SessionEvent};
+use crate::units::turn_state::domain::decisions::GateTicket;
 use crate::units::workspace::api::Sandboxes;
 
 /// 目的：流程让出的那一步——请驱动取某个成员会话跑一回合。

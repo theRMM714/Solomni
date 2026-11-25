@@ -3,11 +3,11 @@
 //! 不管：文件机制（在 `detail/fs_history.rs`）、会话运行时与回档算术（在 `agentloop`）、队列代理（在 runtime）。
 //! 联动：别的能力走 `api::History`；呈现层走 `api::HistoryOps`（由队列代理实现）；装配在组合根，这里只收注入的端口。
 
-use crate::units::conversation::session::api::History;
 use crate::units::conversation::session::ports::HistoryStore;
 use crate::units::session_model::api::persist_policy_for;
 use crate::units::session_model::api::{HistoryView, SessionMeta};
 use crate::units::transcript::api::SessionEvent;
+use crate::units::turn_state::api::History;
 use std::sync::Arc;
 
 pub mod assemble;

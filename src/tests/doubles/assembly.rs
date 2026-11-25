@@ -288,14 +288,13 @@ pub(crate) fn core_with_workdirs_vm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
-    let history: Arc<dyn crate::units::conversation::session::api::History + Send + Sync> =
-        Arc::new(
-            crate::units::conversation::session::service::SessionService::new(Arc::new(
-                crate::units::conversation::session::detail::fs_history::FsHistory::new(
-                    root.join("session"),
-                ),
-            )),
-        );
+    let history: Arc<dyn crate::units::turn_state::api::History + Send + Sync> = Arc::new(
+        crate::units::conversation::session::service::SessionService::new(Arc::new(
+            crate::units::conversation::session::detail::fs_history::FsHistory::new(
+                root.join("session"),
+            ),
+        )),
+    );
     Core::new(
         root,
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),

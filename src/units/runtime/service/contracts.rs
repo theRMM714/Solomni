@@ -450,7 +450,7 @@ impl RegistryOps for Handle {
     }
 }
 
-impl crate::units::conversation::session::api::HistoryOps for Handle {
+impl crate::units::turn_state::api::HistoryOps for Handle {
     fn list(&self) -> Result<Vec<HistoryView>, String> {
         self.call(|core| Ok(core.lifecycle.history_list()))
     }

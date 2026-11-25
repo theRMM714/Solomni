@@ -1,5 +1,5 @@
 //! 目的：一席工具面与单 agent 会话对象的装配——把能力面的事实拼成能跑的会话。
-//! 管：`SessionPorts` / `MemberEnvParts` / `MemberSpec` / `SingleSpec` 四个参数对象，
+//! 管：`MemberEnvParts` / `MemberSpec` / `SingleSpec` 三个参数对象（`SessionPorts` 在 `turn_state`），
 //!   `member_tools` / `single_session` 两个装配入口，以及重建与代理两场的整场装配（`rebuild_single` / `proxy_session`）。
 //! 不管：落盘（本能力的 `service.rs`）、生成驱动（`runtime`）、纯派生规则（在 `session::domain::assemble`）。
 //! 联动：`turn` 侧取事实、算 `env` 并组 spec 后经本文件装配；`MemberTools`（工具面的活对象）**只活在会话里**，不出本能力。
@@ -9,44 +9,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::kernel::api::fence::FencePlan;
-use crate::kernel::ports::Log;
 use crate::units::agentloop::api::{
     AgentSession, CompactChatFactory, FaceInput, MemberTools, SessionParams, ShellSlot, ToolFace,
     assemble as assemble_face,
 };
 use crate::units::catalog::modules::api::Module;
-use crate::units::llm::api::{Channel, Llm, Msg};
-use crate::units::prompt::api::{Prompt, Segment};
+use crate::units::llm::api::{Channel, Msg};
+use crate::units::prompt::api::Segment;
 use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::pure::registry_model::api::ToolMode;
-use crate::units::residents::api::ResidentOps;
-use crate::units::tools::api::{ObservationFact, Observations, ToolExec, Tools};
+use crate::units::tools::api::{ObservationFact, Observations};
 use crate::units::transcript::api::{ContextUsage, SessionEvent};
-use crate::units::vm::api::{GuestOs, Vm};
-use crate::units::workspace::api::{ReadFact, Sandbox, Workspace};
-
-/// 目的：装配一场会话要用的能力面（组合根注入的同一批端口）。
-pub struct SessionPorts {
-    /// 目的：llm 用例面：一席的收发句柄按它造。
-    pub llm: Arc<dyn Llm + Send + Sync>,
-    /// 目的：日志面：装配时记一条「单 agent 工作」。
-    pub log: Arc<dyn Log + Send + Sync>,
-    /// 目的：提示词册：工具说明与压缩提示从它取段。
-    pub prompt: Arc<dyn Prompt>,
-    /// 目的：工具总表：席位面合成与内置工具表都从它读。
-    pub systools: Arc<dyn Tools>,
-    /// 目的：工具执行面：一席的工具环境要它跑外部 / 内置工具。
-    pub tools: Arc<dyn ToolExec + Send + Sync>,
-    /// 目的：虚拟机用例面：一席的 guest 事实随工具面交给机制层。
-    pub vm: Arc<dyn Vm + Send + Sync>,
-    /// 目的：常驻服务管理面：已就绪服务的操作并入一席的工具面。
-    pub residents: Arc<dyn ResidentOps + Send + Sync>,
-    /// 目的：工作区用例面：一席的 `work_*` 工具执行者按它造。
-    pub workspace: Arc<dyn Workspace + Send + Sync>,
-    /// 目的：压缩通道工厂：新会话与重建会话共用同一份。
-    pub compact: Arc<dyn CompactChatFactory>,
-}
+use crate::units::turn_state::api::SessionPorts;
+use crate::units::vm::api::GuestOs;
+use crate::units::workspace::api::{ReadFact, Sandbox};
 
 /// 目的：一席的工具环境事实（围栏 / 模块注入项 / 运行路径 / 工具链根）——由 `env` 能力从
 ///   （沙箱、权限、运行包计划、模块隐私）派生后**逐字段拷进来**的值结构。
