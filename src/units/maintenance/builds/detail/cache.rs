@@ -20,8 +20,6 @@ pub(crate) const MOUNT: &str = "/var/lib/solomni/build";
 pub(crate) const DEVICE: &str = "/dev/vdb";
 /// 目的：等锁的上限：一次慢构建可能超过十分钟；等不到就如实拒绝（绝不并写同一块卷）。
 const LOCK_WAIT: Duration = Duration::from_secs(600);
-/// 目的：锁文件超过这么久没被释放，视为上一次构建没收尾留下的死锁（按修改时间判）。
-const LOCK_STALE: Duration = Duration::from_secs(3 * 3600);
 
 /// 目的：缓存卷落点——每个虚拟根一块（同一模块在不同虚拟根里的工具链不同，缓存不能混）。
 pub(crate) fn volume_path(root: &Path, guest: &str) -> PathBuf {
@@ -335,65 +333,6 @@ done"#,
     )
 }
 
-/// 目的：同一虚拟根的构建锁——占住它就独占这块缓存卷（获取失败如实拒绝，不并写）。
-#[derive(Debug)]
-pub(crate) struct VolumeLock {
-    path: PathBuf,
-}
-
-impl VolumeLock {
-    /// 目的：拿锁（有界等待）；上一把锁太旧视为死锁，清掉重来。
-    pub(crate) fn acquire(path: PathBuf) -> Result<VolumeLock, String> {
-        VolumeLock::acquire_with(path, LOCK_WAIT, LOCK_STALE)
-    }
-
-    /// 目的：拿锁的实现（等待与死锁阈值可注入，用例不必真等十分钟）。
-    fn acquire_with(path: PathBuf, wait: Duration, stale: Duration) -> Result<VolumeLock, String> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)
-                .map_err(|e| format!("建构建缓存目录失败（{}）：{}", dir.display(), e))?;
-        }
-        let deadline = std::time::Instant::now() + wait;
-        loop {
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-            {
-                Ok(mut f) => {
-                    use std::io::Write;
-                    let _ = write!(f, "pid {} at {:?}", std::process::id(), SystemTime::now());
-                    return Ok(VolumeLock { path });
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let dead = std::fs::metadata(&path)
-                        .and_then(|m| m.modified())
-                        .map(|t| SystemTime::now().duration_since(t).unwrap_or_default() > stale)
-                        .unwrap_or(false);
-                    if dead {
-                        let _ = std::fs::remove_file(&path);
-                        continue;
-                    }
-                    if std::time::Instant::now() >= deadline {
-                        return Err(format!(
-                            "同一虚拟根的另一个构建还占着缓存卷（{}）：等不到就如实拒绝；确无构建在跑时删掉这个锁文件",
-                            path.display()
-                        ));
-                    }
-                    std::thread::sleep(Duration::from_millis(500));
-                }
-                Err(e) => return Err(format!("建构建锁失败（{}）：{}", path.display(), e)),
-            }
-        }
-    }
-}
-
-impl Drop for VolumeLock {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
 /// 目的：把一段字面量安全地放进 guest 的 shell 脚本里（单引号包裹，内部单引号按 POSIX 拆合）。
 pub(crate) fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
@@ -413,7 +352,8 @@ impl CacheOnDisk {
     }
 }
 
-impl CacheGuard for VolumeLock {}
+/// 目的：锁的持有凭据就是内核锁句柄——Drop 即释放，崩溃时由操作系统释放。
+impl CacheGuard for std::fs::File {}
 
 impl BuildCache for CacheOnDisk {
     fn volume(&self, guest: &str) -> PathBuf {
@@ -421,7 +361,13 @@ impl BuildCache for CacheOnDisk {
     }
 
     fn lock(&self, guest: &str) -> Result<Box<dyn CacheGuard>, String> {
-        Ok(Box::new(VolumeLock::acquire(lock_path(&self.root, guest))?))
+        let path = lock_path(&self.root, guest);
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)
+                .map_err(|e| format!("建构建缓存目录失败（{}）：{}", dir.display(), e))?;
+        }
+        let file = crate::kernel::api::lock::lock_within(&path, LOCK_WAIT, "构建缓存卷")?;
+        Ok(Box::new(file))
     }
 
     fn pending_purge(&self, guest: &str) -> Vec<String> {
@@ -601,40 +547,28 @@ mod tests {
         assert!(s.contains("/tmp"), "{}", s);
     }
 
-    /// 目的：锁是独占的——第二把拿不到；上一把太旧视为死锁，清掉后能拿到。
+    /// 目的：锁是独占的——第二把拿不到、放掉后能再拿；残留的锁文件（崩溃留下的）不阻塞。
     #[test]
-    fn lock_is_exclusive_and_heals_stale_files() {
+    fn lock_is_exclusive_and_survives_leftover_files() {
         let root = crate::tests::scratch("build-lock");
         let path = root.join("v.lock");
-        let held = VolumeLock::acquire_with(
-            path.clone(),
-            Duration::from_millis(50),
-            Duration::from_secs(3600),
-        )
-        .expect("第一把要拿得到");
-        let err = VolumeLock::acquire_with(
-            path.clone(),
-            Duration::from_millis(50),
-            Duration::from_secs(3600),
-        )
-        .expect_err("第二把要拿不到");
-        assert!(err.contains("占着缓存卷"), "{}", err);
+        let held =
+            crate::kernel::api::lock::lock_within(&path, Duration::from_millis(50), "构建缓存卷")
+                .expect("第一把要拿得到");
+        let err =
+            crate::kernel::api::lock::lock_within(&path, Duration::from_millis(50), "构建缓存卷")
+                .expect_err("第二把要拿不到");
+        assert!(err.contains("构建缓存卷"), "{}", err);
         drop(held);
         assert!(
-            std::fs::OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(&path)
-                .is_ok(),
-            "放一个旧锁"
+            !crate::kernel::api::lock::held(&path, "构建缓存卷").expect("要能问"),
+            "句柄放掉后不该再算被持有"
         );
-        let healed = VolumeLock::acquire_with(
-            path.clone(),
-            Duration::from_millis(50),
-            Duration::from_secs(0),
-        );
-        assert!(healed.is_ok(), "过旧的锁要能自愈");
-        drop(healed);
+        std::fs::write(&path, "pid 999999 at dead").expect("写残锁");
+        let again =
+            crate::kernel::api::lock::lock_within(&path, Duration::from_millis(50), "构建缓存卷");
+        assert!(again.is_ok(), "残留的锁文件不该阻塞");
+        drop(again);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

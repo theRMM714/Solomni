@@ -1,5 +1,5 @@
 //! 目的：空间回收的真实实现——回收锁、删除、排队、压缩与上次回收的落盘。
-//! 管：.vm/storage.lock、各类落点的删除、构建卷保护、qemu-img 压缩、.vm/storage.json。
+//! 管：回收锁、各类落点的删除、构建卷保护（抢构建锁）、qemu-img 压缩、回收记要。
 //! 不管：哪些该删（domain）、什么时候删（service）、路径约定（paths）。
 //! 联动：service 经 SpaceReclaim 端口消费；删除用的路径与 survey 共用 detail/paths.rs。
 
@@ -22,7 +22,8 @@ impl DiskReclaim {
     }
 }
 
-impl ReclaimLease for lock::GcLock {}
+/// 目的：回收锁的持有凭据就是内核锁句柄——Drop 即释放，崩溃时由操作系统释放。
+impl ReclaimLease for std::fs::File {}
 
 impl SpaceReclaim for DiskReclaim {
     fn lock(&self) -> Result<Option<Box<dyn ReclaimLease>>, String> {
@@ -44,9 +45,8 @@ impl SpaceReclaim for DiskReclaim {
         if !safe_id(guest) {
             return Err(format!("虚拟根名不合法：{}", guest));
         }
-        if paths::build_locked(&self.root, guest) {
-            return Err(format!("虚拟根 {} 有构建在跑，不能标记清理", guest));
-        }
+        let _lease =
+            take_build_lock(&self.root, guest).map_err(|e| format!("{}，不能标记清理", e))?;
         std::fs::write(
             paths::build_purge(&self.root, guest),
             format!("{}\n", module),
@@ -58,9 +58,7 @@ impl SpaceReclaim for DiskReclaim {
         if !safe_id(guest) {
             return Err(format!("虚拟根名不合法：{}", guest));
         }
-        if paths::build_locked(&self.root, guest) {
-            return Err(format!("虚拟根 {} 有构建在跑，不能压缩", guest));
-        }
+        let _lease = take_build_lock(&self.root, guest).map_err(|e| format!("{}，不能压缩", e))?;
         let Some(q) = qemu::find(&self.root) else {
             return Err("项目内没有 qemu-img，不能压缩（先补齐虚拟机依赖）".to_string());
         };
@@ -86,24 +84,33 @@ impl SpaceReclaim for DiskReclaim {
     }
 }
 
-/// 目的：删掉一个虚拟根的构建缓存（卷、元数据、锁、待清理标记）。
+/// 目的：删掉一个虚拟根的构建缓存（卷、元数据、待清理标记）；锁文件留着，身份由它承担。
 fn remove_build_volume(root: &Path, guest: &str) -> Result<(), String> {
     if !safe_id(guest) {
         return Err(format!("虚拟根名不合法：{}", guest));
     }
-    if paths::build_locked(root, guest) {
-        return Err(format!("虚拟根 {} 有构建在跑，不能删缓存", guest));
-    }
+    let _lease = take_build_lock(root, guest).map_err(|e| format!("{}，不能删缓存", e))?;
     let dir = paths::build_dir(root);
     for name in [
         format!("{}.qcow2", guest),
         format!("{}.json", guest),
-        format!("{}.lock", guest),
         format!("{}.purge", guest),
     ] {
         remove_entry(&dir.join(name))?;
     }
     Ok(())
+}
+
+/// 目的：非阻塞抢同一虚拟根的构建锁并持到作用域结束——抢不到就是有构建在跑。
+/// 约束：与删卷 / 排队 / 压缩同作用域，判断与动手之间没有空档。
+fn take_build_lock(root: &Path, guest: &str) -> Result<std::fs::File, String> {
+    let path = paths::build_lock(root, guest);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("建构建缓存目录失败（{}）：{}", dir.display(), e))?;
+    }
+    crate::kernel::api::lock::try_lock(&path, "构建缓存卷")?
+        .ok_or_else(|| format!("虚拟根 {} 有构建在跑", guest))
 }
 
 /// 目的：删一个文件或目录；不存在视为已删。

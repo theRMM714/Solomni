@@ -29,6 +29,9 @@ pub trait HostFs: Send + Sync {
     fn remove_dir_all(&self, path: &Path) -> Result<(), String>;
     /// 目的：给已落盘的文件补执行位（unix 0644 → 0755；别的平台空操作）。
     fn make_executable(&self, path: &Path);
+    /// 目的：非阻塞独占一把按路径的跨进程锁；别人持着给 None，不等待。
+    /// 约束：守卫 drop 即释放，进程退出也释放；调用方只在真正要动手的那段时间持有。
+    fn try_lock(&self, path: &Path) -> Result<Option<Box<dyn Send>>, String>;
 }
 
 /// 目的：安装台账与在场的判定——编排只问"这条装好了吗 / 记下装好了 / 清掉它"，落盘格式在适配层。

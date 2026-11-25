@@ -19,3 +19,27 @@ fn a_held_lock_times_out_and_is_free_after_release() {
     drop(again);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// 目的：`try_lock` 不等——别人持着立刻拿 None；`held` 只问不拿，且不为缺席的锁建文件。
+#[test]
+fn try_lock_answers_at_once_and_held_leaves_no_trace() {
+    let dir = crate::tests::scratch("lock-try");
+    let path = dir.join("guard.lock");
+    assert!(
+        !held(&path, "构建缓存卷").expect("问缺席的锁"),
+        "锁文件不存在不算被持有"
+    );
+    assert!(!path.exists(), "只问不该建出锁文件");
+
+    let first = try_lock(&path, "构建缓存卷").expect("要能问").expect("首把锁");
+    assert!(held(&path, "构建缓存卷").expect("问在场的锁"), "有人持着");
+    assert!(try_lock(&path, "构建缓存卷").expect("要能问").is_none(), "第二把立刻拿不到，不等待");
+    drop(first);
+    assert!(!held(&path, "构建缓存卷").expect("问放掉的锁"), "放掉后没人持");
+    assert!(path.exists(), "问与拿都不删锁文件");
+
+    std::fs::write(&path, "pid 999999 at dead").expect("写残锁");
+    assert!(!held(&path, "构建缓存卷").expect("问残锁"), "残留的锁文件不算被持有");
+    drop(try_lock(&path, "构建缓存卷").expect("要能问").expect("残锁不该阻塞"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
