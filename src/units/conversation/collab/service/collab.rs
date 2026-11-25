@@ -117,7 +117,7 @@ pub struct CollabSession {
     /// 目的：已记录在案的执行方案（回档/重启后沿用，未整理则为 None）。
     pub(crate) plan: Option<String>,
     /// 目的：核心给出的**任务链**（与方案一起出；审查关卡把它交用户看）。
-    pub(crate) chain: Option<crate::units::taskchain::api::TaskChain>,
+    pub(crate) chain: Option<crate::units::pure::taskchain::api::TaskChain>,
     pub(crate) disc: Option<Discussion>,
     /// 目的：回合 id 计数器（整场工作单调递增）：agent 会话的回合标记用它。
     pub(crate) turns: u64,
@@ -257,7 +257,7 @@ impl CollabSession {
     }
 
     /// 目的：任务链（未整理 = None）。
-    pub fn chain(&self) -> Option<&crate::units::taskchain::api::TaskChain> {
+    pub fn chain(&self) -> Option<&crate::units::pure::taskchain::api::TaskChain> {
         self.chain.as_ref()
     }
 
@@ -272,7 +272,7 @@ impl CollabSession {
             && let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node)
         {
             n.sub_session = Some(sub.to_string());
-            n.status = crate::units::taskchain::api::NodeStatus::Running;
+            n.status = crate::units::pure::taskchain::api::NodeStatus::Running;
         }
     }
 
@@ -346,7 +346,7 @@ impl CollabSession {
         prompt: &dyn Prompt,
         systools: &dyn crate::units::tools::api::Tools,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-        chain: Option<&crate::units::taskchain::api::TaskChain>,
+        chain: Option<&crate::units::pure::taskchain::api::TaskChain>,
         opts: crate::units::llm::api::CompleteOpts<'static>,
         mode: crate::units::llm::api::ToolMode,
         core_chat: &mut dyn Chat,
@@ -421,7 +421,7 @@ impl CollabSession {
         if let Some(chain) = self.chain.as_mut()
             && let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node)
         {
-            n.status = crate::units::taskchain::api::NodeStatus::Done;
+            n.status = crate::units::pure::taskchain::api::NodeStatus::Done;
             n.report = Some(report.to_string());
         }
     }
@@ -431,7 +431,7 @@ impl CollabSession {
         if let Some(chain) = self.chain.as_mut()
             && let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node)
         {
-            n.acceptance = Some(crate::units::taskchain::api::Acceptance {
+            n.acceptance = Some(crate::units::pure::taskchain::api::Acceptance {
                 ok,
                 note: note.to_string(),
             });
@@ -511,7 +511,7 @@ impl CollabSession {
                 n.sub_session.as_deref() == Some(sub)
                     && matches!(
                         n.status,
-                        crate::units::taskchain::api::NodeStatus::Running
+                        crate::units::pure::taskchain::api::NodeStatus::Running
                     )
             })
             .map(|n| n.id.clone())
@@ -522,7 +522,7 @@ impl CollabSession {
         if let Some(chain) = self.chain.as_mut()
             && let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node)
         {
-            n.status = crate::units::taskchain::api::NodeStatus::Pending;
+            n.status = crate::units::pure::taskchain::api::NodeStatus::Pending;
             n.sub_session = None;
             n.report = None;
             n.acceptance = None;

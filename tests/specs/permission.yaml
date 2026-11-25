@@ -8,7 +8,7 @@ title: 权限合成与围栏
 mutation:
   schedule: weekly
   files:
-    - src/units/permission/domain/permission.rs
+    - src/units/pure/permission/domain/permission.rs
 cases:
   - id: cargo/tests::fence_reach
     tier: T1

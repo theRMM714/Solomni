@@ -49,7 +49,7 @@ session/<工作名>/
 - **外部工作区绑定**：根会话可在创建时把共享区主副本绑定到产品目录之外的绝对路径；绑定写进 `meta.yaml` 的 `workspace` 段，整棵子树只读继承，**创建后不可改**。CLI 启动的会话默认就把**启动目录**绑成外部工作区（在哪个目录启动就绑哪个；`ambient` 与 `resolve` 共用一条阶梯但不探可写，启动目录是产品根 / 不可达 / 不是目录时回退产品内 `work/` 并打印原因，`--no-workspace` 关闭这次启动的自动绑定）。`.work/` 与各 agent 沙箱永远留在会话目录内，外部目录里不出现本产品的状态；`.work-root` 只是布局投影，打开 / 重建时按 meta 刷新。
 - **虚拟机档的挂载布局**：起 guest 时把**会话树根**（`session/<工作名>`，各 agent 私沙与 `.work` 的父目录）与**外部工作区根**（仅外部绑定时）各挂一条稳定挂载，另加模块树根——三根互不包含，guest 内的路径写法由同一座路径桥给出；外部根是 UNC / 网络路径时只有虚拟机档支持（guest 内写成 `/solomni-host/unc/<server>/<share>/…`；本机档因容器围栏拒绝网络工作区）；挂载只表达可见范围，共享区主副本不进按次允许集（容器里的进程要读先 `work_pull`）。
 - **环境属于顶层工作**：`exec`（档位 / 虚拟根 / 定版）由人建主会话时决定，整棵子树只读继承；核心代理建子会话时不能自选环境。**同一 agent 全树只有一份名单**：子会话编辑模块 / 模型时写回这份名单，guest 装配按整棵树重新聚合；只改模型 / 权限不重建 guest，改模块 / 环境才重建。
-- 会话权限是**根 ceiling + 子会话逐层 narrowing**：根写 sandbox.ceiling，子写 sandbox.narrowing；子只能换更低档、只能收窄，父编辑只改 ceiling 并与子 narrowing 求交，不覆盖子收窄（`src/units/permission/domain/permission.rs`）。共享区归属单独一层：根写 `shared`、子只能更窄（`src/units/workspace/domain/scope.rs`）。
+- 会话权限是**根 ceiling + 子会话逐层 narrowing**：根写 sandbox.ceiling，子写 sandbox.narrowing；子只能换更低档、只能收窄，父编辑只改 ceiling 并与子 narrowing 求交，不覆盖子收窄（`src/units/pure/permission/domain/permission.rs`）。共享区归属单独一层：根写 `shared`、子只能更窄（`src/units/workspace/domain/scope.rs`）。
 - **共享区是版本化工作区**：共享区根（默认 `work/`，或外部工作区）与版本库 `.work/` 都锚在顶层工作上；agent 只写自己的沙箱，`work_pull` 拉取；写工具落地后由核心把整棵沙箱自动记进该 agent 的**存档线**（`refs/agents/<agent>/saves`，不动共享区，只服务回档 / 删除 / 留档 / 恢复）；shell / 模块工具这类不经过写工具的改动，在同一工具批次结束时由核心扫一遍沙箱采纳进同一条存档线（逐条点名没采纳的路径；Windows 本机档容器自己的运行缓存——`AppData/Local/Packages/<容器名>/` 与 `Packages/<容器名>/`，容器名以 `Solomni.Agent.` 开头——不是产物，扫描时跳过，`src/units/workspace/service/sync.rs`），要发布时先用 `work_commit` 把显式路径记进**工作线**（`refs/agents/<agent>`，本地提交、不判别人的基线），再用 `work_push` 与主线三方合并（干净则主线落一条提交并物化共享区，冲突整次拒绝并点名路径）；`work_versions` 看三方，`work_resolve` 显式选边，`work_status` 看状态。
 - 文本、图片、视频与其它二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限）；`work_versions` 给 hash、大小与扩展名媒体类型提示；文本可人工合并后用 `take=local`，图片 / 视频 / 二进制只能选边，不做自动合并（`src/units/workspace/service.rs`）。
 - **会话权限层**只有网络两档：meta.yaml 的 sandbox.ceiling（根）与 sandbox.narrowing（子）只写 profile（offline / online），缺省继承 settings.yaml 的 sandbox.defaults；共享区归属是三态（all / none / 路径数组）+ 黑名单，写在 meta.yaml 的 `shared`，缺省继承 settings.yaml 的 sandbox.scope，sandbox.policy.deny 是硬底线，会话只能追加、不能清空。语义见 [docs/permission/README.md](../permission/README.md) 与 [docs/workspace/README.md](../workspace/README.md)。
@@ -209,7 +209,7 @@ session/<工作名>/
 - **没人答时的收场**：由**发起方**在自己那张卡上声明一个**选项 id**（`Ask.on_unanswered`）——通道不解释它的含义，只在"没人答"时按它收场，并如实标为"不是用户答的"；不声明就按 fail-closed（这一趟不执行）。
 - **"没人答"与"用户停止"是两回事**：停止 = 拒绝，不套用默认项。"没有可选项 = 停会话 + 落警告"是另一件事，两个都要有。
 - **代理转达不替用户猜**：`send_session_message` 要代答就**显式给选项 id**（`reply`）；给不出就不作代答、如实记一条，那一步按发起方自己的声明收场——绝不"取第一个选项"（围栏卡的第一项正是"无围栏跑一次"）。
-- **不做跨会话的"记住这个决定"**：只保留"本轮不再问"（不落盘）。要"记住"另立设置项——否则裁决对象会变成策略载体，与 `units/permission/` 那套裁定重叠。
+- **不做跨会话的"记住这个决定"**：只保留"本轮不再问"（不落盘）。要"记住"另立设置项——否则裁决对象会变成策略载体，与 `units/pure/permission/` 那套裁定重叠。
 - **建议由核心写**（随产生这一关的 `plan` / `node_verdict` 调用一起产出，不另花调用），它是消息的一部分。
 
 - **回答怎么落进业务**（处理仍归发起方）：

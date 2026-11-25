@@ -3,7 +3,7 @@
 //! 不管：真实进程 / 平台围栏（在 kernel 的 process 测试）与 VM 引擎实现。
 //! 联动：systools/tools.yaml 的 shell 声明、tools/domain/shell.rs、session 的 engine/tools。
 use super::super::prelude::*;
-use crate::units::permission::api::{PermissionDefaults, ProfileId};
+use crate::units::pure::permission::api::{PermissionDefaults, ProfileId};
 use crate::units::tools::api::ToolBook;
 
 /// 目的：档位不再裁剪工具面——两档都给 shell，差别只在网络。
@@ -38,7 +38,7 @@ pub(crate) fn runtime_base_roots_are_only_put_on_host_member_tools() {
         false,
         crate::units::llm::api::ToolMode::Envelope,
         "solo",
-        crate::units::exec_model::api::Tier::Host,
+        crate::units::pure::exec_model::api::Tier::Host,
         String::new(),
         &plan,
     );
@@ -54,7 +54,7 @@ pub(crate) fn runtime_base_roots_are_only_put_on_host_member_tools() {
         false,
         crate::units::llm::api::ToolMode::Envelope,
         "solo",
-        crate::units::exec_model::api::Tier::Vm,
+        crate::units::pure::exec_model::api::Tier::Vm,
         "guest".to_string(),
         &plan,
     );

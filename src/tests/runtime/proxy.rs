@@ -785,7 +785,7 @@ pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
 /// 目的：代理也能从状态栏快速切档；不经过 edit_session（代理没有名单）。
 #[test]
 pub(crate) fn proxy_profile_can_be_quick_switched() {
-    use crate::units::permission::api::ProfileId;
+    use crate::units::pure::permission::api::ProfileId;
     let (handle, faces) = super::super::ops_with(vec![], vec!["好"]);
     let sid = handle
         .call(|core| core.create_proxy("w-switch", 1))

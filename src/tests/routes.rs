@@ -22,7 +22,7 @@ use crate::units::catalog::modules::api::{ModulesOps, Roster};
 use crate::units::catalog::registry::api::AgentView;
 use crate::units::catalog::registry::api::RegistryOps;
 use crate::units::catalog::registry::api::{AppSettings, ModelView, ProviderView};
-use crate::units::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::Tier;
 use crate::presentation::web::routes::{self, ROUTES};
 use crate::presentation::web::{self, FenceInfo};
 use serde_json::json;
@@ -127,7 +127,7 @@ impl crate::units::maintenance::storage::api::Storage for FakeStorage {
             ),
         )
     }
-    fn job(&self) -> crate::units::exec_model::api::JobState {
+    fn job(&self) -> crate::units::pure::exec_model::api::JobState {
         Default::default()
     }
     fn set_policy(&self, _policy: crate::units::maintenance::storage::api::StoragePolicy) {}
@@ -164,7 +164,7 @@ impl crate::units::provision::api::Provision for FakeProvision {
     fn processes(&self) -> Result<Vec<crate::units::provision::api::ProcInfo>, String> {
         self.guard().map(|_| Vec::new())
     }
-    fn job(&self) -> crate::units::exec_model::api::JobState {
+    fn job(&self) -> crate::units::pure::exec_model::api::JobState {
         Default::default()
     }
     fn start(&self, _ids: Vec<String>) -> Result<(), String> {
@@ -271,7 +271,7 @@ fn meta(name: &str) -> SessionMeta {
         task: None,
         ts: 1,
         agents: Vec::new(),
-        exec: crate::units::exec_model::api::ExecSpec::default(),
+        exec: crate::units::pure::exec_model::api::ExecSpec::default(),
         sandbox: Default::default(),
         shared: Default::default(),
         parent: None,
@@ -293,7 +293,7 @@ impl WorkOps for FakeFaces {
     fn ambient_workspace(
         &self,
         _: &std::path::Path,
-        _: crate::units::exec_model::api::Tier,
+        _: crate::units::pure::exec_model::api::Tier,
     ) -> Result<std::path::PathBuf, String> {
         Err("呈现层测试不定启动目录".into())
     }
@@ -337,7 +337,7 @@ impl WorkOps for FakeFaces {
                 note: String::new(),
             },
             permission: crate::units::work::api::PermissionView {
-                profile: crate::units::permission::api::ProfileId::Offline,
+                profile: crate::units::pure::permission::api::ProfileId::Offline,
                 label: "离线".to_string(),
                 summary: "测试".to_string(),
                 shared: crate::units::work::api::PermissionSharedView {

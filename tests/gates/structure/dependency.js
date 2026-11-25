@@ -8,6 +8,7 @@
 const fs = require("fs");
 const path = require("path");
 const { rel } = require("../../lib/fsutil.js");
+const { unitOfPath, unitOfModule } = require("./unitpath.js");
 
 // 模块级 #[cfg(test)] mod tests 不是生产依赖边，剔除；#[cfg(test)] 加在函数上的保留。
 // 只剔**内联块**（`mod tests { … }`）：`mod tests;` 是另一个文件，块尾在别的文件里，
@@ -116,8 +117,8 @@ function direction(root) {
       if (layer === "presentation" && !presOk && targetLayer !== "presentation") presentation.add(f + " -> " + t);
       // 业务之间只经对方的 api 交流（R1）；跨能力引用 ::ports / ::domain / ::detail 一律不许。
       if (layer === "units" && targetLayer === "units") {
-        const selfCap = f.split("/")[2];
-        const otherCap = t.split("::")[2];
+        const selfCap = unitOfPath(f);
+        const otherCap = unitOfModule(t);
         if (otherCap && otherCap !== selfCap && !t.endsWith("::api")) apiOnly.add(f + " -> " + t);
       }
       // domain 是纯逻辑：不得引用任何能力端口（自己的也不行，引了就不是纯的了）。
@@ -127,30 +128,30 @@ function direction(root) {
         layer !== "entry" &&
         t.startsWith("crate::units::") &&
         t.endsWith("::ports") &&
-        t.split("::")[2] !== (layer === "units" ? f.split("/")[2] : null)
+        unitOfModule(t) !== (layer === "units" ? unitOfPath(f) : null)
       ) {
         apiOnly.add(f + " -> " + t);
       }
       // api.rs 是入站用例面：不得把能力端口再导出去。
       if (f.endsWith("/api.rs") && t.startsWith("crate::units::") && t.endsWith("::ports")) apiPorts.add(f + " -> " + t);
       // ::detail 是实现：跨能力引用一律不许，只有入口层的组合根能构造它。
-      if (layer !== "entry" && t.startsWith("crate::units::") && t.endsWith("::detail") && t.split("::")[2] !== f.split("/")[2]) {
+      if (layer !== "entry" && t.startsWith("crate::units::") && t.endsWith("::detail") && unitOfModule(t) !== unitOfPath(f)) {
         apiOnly.add(f + " -> " + t);
       }
       // 环的节点：能力用 units/<名字>（协调业务与别的能力同处一张图）。
-      const selfNode = "units/" + f.split("/")[2];
-      const otherNode = targetLayer === "units" ? "units/" + t.split("::")[2] : null;
+      const selfNode = "units/" + unitOfPath(f);
+      const otherNode = targetLayer === "units" ? "units/" + unitOfModule(t) : null;
       if (otherNode && otherNode !== selfNode) {
         (coreGraph[selfNode] = coreGraph[selfNode] || new Set()).add(otherNode);
       }
     }
     // 不许给别的能力的类型写 impl（R1）：这是另一种"互相引入"，use 边看不见它。
     if (layer !== "entry") {
-      const selfCap = layer === "units" ? f.split("/")[2] : null;
+      const selfCap = layer === "units" ? unitOfPath(f) : null;
       const foreignPaths = (s) =>
         [...s.matchAll(/crate::([a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)*)/g)]
           .map((m) => normTarget(m[1]))
-          .filter((t2) => t2.startsWith("crate::units::") && t2.split("::")[2] !== selfCap);
+          .filter((t2) => t2.startsWith("crate::units::") && unitOfModule(t2) !== selfCap);
       for (const line of text.split("\n")) {
         if (!/^impl\b/.test(line)) continue;
         // impl Trait for Type → 只看 Type（实现别人的 api trait 是正当的队列代理）；impl Type → 看 Type。

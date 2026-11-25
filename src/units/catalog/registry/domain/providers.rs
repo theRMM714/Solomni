@@ -228,7 +228,7 @@ pub struct SandboxSettings {
     pub policy: SandboxPolicy,
     /// 目的：新建会话的默认网络档位（离线 / 联网）。
     #[serde(default)]
-    pub defaults: crate::units::permission::api::PermissionDefaults,
+    pub defaults: crate::units::pure::permission::api::PermissionDefaults,
     /// 目的：新建会话的默认共享区归属（读范围 / 写范围 / 黑名单）。
     #[serde(default)]
     pub scope: crate::units::workspace::api::SharedScope,
@@ -351,7 +351,7 @@ pub struct AppSettings {
     pub thinking: ThinkingCatalog,
     /// 目的：默认执行档位：新建会话未单独选定时用它（本机 = 在宿主上跑；虚拟机 = 整台 guest）。
     #[serde(default)]
-    pub tier: crate::units::exec_model::api::Tier,
+    pub tier: crate::units::pure::exec_model::api::Tier,
     /// 目的：全局沙箱策略与会话默认权限。
     #[serde(default)]
     pub sandbox: SandboxSettings,
@@ -437,7 +437,7 @@ impl Default for AppSettings {
             streaming: true,
             show_reasoning: true,
             thinking: ThinkingCatalog::default(),
-            tier: crate::units::exec_model::api::Tier::Host,
+            tier: crate::units::pure::exec_model::api::Tier::Host,
             sandbox: SandboxSettings::default(),
             qemu_path: String::new(),
             virtiofsd_path: String::new(),

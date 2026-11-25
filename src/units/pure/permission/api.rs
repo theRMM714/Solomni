@@ -4,6 +4,6 @@
 //! 联动：workspace、tools、runtime 都经这里消费权限。
 
 #[allow(unused_imports)] // 入站面：其它能力与测试都经这里取类型
-pub use crate::units::permission::domain::permission::{
+pub use crate::units::pure::permission::domain::permission::{
     PermissionDefaults, PermissionLayer, PermissionSet, ProfileId, ProfileSpec, SessionSandbox,
 };

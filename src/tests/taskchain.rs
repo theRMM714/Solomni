@@ -1,7 +1,7 @@
 //! 目的：钉任务链的纯数据与纯图算法不变式。
 //! 管：阶段沿依赖图铺开、id 由阶段派生、环/坏引用拒绝、完成需全部节点结算。
 //! 不管：派发与执行（collab）。
-//! 联动：src/units/taskchain/。
+//! 联动：src/units/pure/taskchain/。
 
 use super::builders::*;
 
@@ -9,7 +9,7 @@ use super::builders::*;
 ///   **阶段**由依赖图派生（最长路径分层）：串行链一个节点一阶段；并 + 混合的两条并行同阶段、汇合点下一阶段。
 #[test]
 pub(crate) fn chain_stages_lay_out_along_the_dependency_graph() {
-    let serial = crate::units::taskchain::api::TaskChain {
+    let serial = crate::units::pure::taskchain::api::TaskChain {
         nodes: vec![
             chain_node("a", &[]),
             chain_node("b", &["a"]),
@@ -19,7 +19,7 @@ pub(crate) fn chain_stages_lay_out_along_the_dependency_graph() {
     assert_eq!(serial.stages(), vec![1, 2, 3]);
     assert_eq!(serial.stage_nodes(1).len(), 1);
     assert_eq!(serial.current_stage(), Some(1));
-    let mut parallel = crate::units::taskchain::api::TaskChain {
+    let mut parallel = crate::units::pure::taskchain::api::TaskChain {
         nodes: vec![
             chain_node("a", &[]),
             chain_node("b", &[]),
@@ -38,8 +38,8 @@ pub(crate) fn chain_stages_lay_out_along_the_dependency_graph() {
     assert!(parallel.current_stage() == Some(1));
     // 阶段一的两个节点都结束并通过 → 阶段一过了，当前阶段前进到二。
     for i in [0, 1] {
-        parallel.nodes[i].status = crate::units::taskchain::api::NodeStatus::Done;
-        parallel.nodes[i].acceptance = Some(crate::units::taskchain::api::Acceptance {
+        parallel.nodes[i].status = crate::units::pure::taskchain::api::NodeStatus::Done;
+        parallel.nodes[i].acceptance = Some(crate::units::pure::taskchain::api::Acceptance {
             ok: true,
             note: String::new(),
         });
@@ -52,7 +52,7 @@ pub(crate) fn chain_stages_lay_out_along_the_dependency_graph() {
 /// 目的：序号**由核心按阶段派生**：n1-1 / n1-2（同阶段并行）→ n2-1（下一阶段），依赖整体重映射。
 #[test]
 pub(crate) fn chain_ids_are_derived_from_stages() {
-    let mut chain = crate::units::taskchain::api::TaskChain {
+    let mut chain = crate::units::pure::taskchain::api::TaskChain {
         nodes: vec![
             chain_node("x", &[]),
             chain_node("y", &[]),
@@ -70,7 +70,7 @@ pub(crate) fn chain_ids_are_derived_from_stages() {
 /// 目的：装配期自洽：环、悬空依赖、重复 id、空目标、未知负责人——逐条如实列出。
 #[test]
 pub(crate) fn chain_problems_reject_cycles_and_bad_refs() {
-    use crate::units::taskchain::api::TaskChain;
+    use crate::units::pure::taskchain::api::TaskChain;
     let good = TaskChain {
         nodes: vec![chain_node("a", &[]), chain_node("b", &["a"])],
     };
@@ -106,7 +106,7 @@ pub(crate) fn chain_problems_reject_cycles_and_bad_refs() {
 /// 目的：结束判定：链非空、且每个节点都落定（Done / Failed）——空链不算结束。
 #[test]
 pub(crate) fn chain_finished_needs_every_node_settled() {
-    use crate::units::taskchain::api::{NodeStatus, TaskChain};
+    use crate::units::pure::taskchain::api::{NodeStatus, TaskChain};
     let mut chain = TaskChain {
         nodes: vec![chain_node("a", &[]), chain_node("b", &["a"])],
     };

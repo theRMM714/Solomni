@@ -13,6 +13,7 @@
 const fs = require("fs");
 const path = require("path");
 const L = require("./layers.js");
+const U = require("./unitpath.js");
 const K = require("./kernel-mechanisms.js");
 const E = require("./entry-tiers.js");
 const P = require("./presentation-inbound.js");
@@ -59,7 +60,7 @@ const relOf = (root, f) => f.slice(root.length + 1).replace(/\\/g, "/");
 
 /** 路径所属能力；不在能力目录下返回空串。 */
 function capOf(rel) {
-  const m = /^src\/units\/([a-z_][a-z0-9_]*)\//.exec(rel);
+  const m = /^src\/units\/(?:pure\/)?([a-z_][a-z0-9_]*)\//.exec(rel);
   return m ? m[1] : "";
 }
 
@@ -227,7 +228,7 @@ function capView(root, rows, problems) {
   }
   const nodes = dirs.map((name) => {
     const layer = tiers.has(name) ? tiers.get(name) : 0;
-    const rels = L.rsFilesOf(path.join(root, "src", "units", name)).map((f) => relOf(root, f)).sort();
+    const rels = L.rsFilesOf(L.unitDir(root, name)).map((f) => relOf(root, f)).sort();
     return { name: name, layer: layer, out: 0, inn: 0, files: fileRows(rows, rels, fileHit), issues: byCap.get(name) || [] };
   });
   const byName = new Map(nodes.map((c) => [c.name, c]));
@@ -241,7 +242,7 @@ function capView(root, rows, problems) {
   }
   const fe = {};
   for (const node of nodes) {
-    fe[node.name] = edgesWithin(root, node.files.map((f) => f.path), [["crate", "units", node.name]]);
+    fe[node.name] = edgesWithin(root, node.files.map((f) => f.path), [U.unitPrefix(root, node.name)]);
   }
   return { nodes: nodes, edges: edges, fe: fe };
 }

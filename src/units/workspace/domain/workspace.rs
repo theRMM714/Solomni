@@ -6,7 +6,7 @@
 //!   网络与档位读 `permission` 的 `PermissionSet`，提示词的根读 `prompt` 的 `RefRoots`，路径组件用 kernel 的 `slash`。
 
 use super::scope::SharedScope;
-use crate::units::permission::api::PermissionSet;
+use crate::units::pure::permission::api::PermissionSet;
 use crate::units::prompt::api::RefRoots;
 use crate::kernel::api::path::slash;
 use serde::Serialize;

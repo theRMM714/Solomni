@@ -302,7 +302,7 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
             task: None,
             delegate: false,
             permission: None,
-            tier: crate::units::exec_model::api::Tier::Host,
+            tier: crate::units::pure::exec_model::api::Tier::Host,
             guest: None,
             workspace: None,
         })
@@ -587,7 +587,7 @@ fn host_session_uses_package_bin_path() {
 
 #[test]
 fn set_permission_profile_action_switches_the_session_profile() {
-    use crate::units::permission::api::ProfileId;
+    use crate::units::pure::permission::api::ProfileId;
     let handle = spawn(vec![module_of("a")], Vec::new());
     let faces = Faces::from_handle(&handle);
     let (opened, _) = faces

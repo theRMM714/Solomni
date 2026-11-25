@@ -25,9 +25,10 @@ const ROOTS = new Set([
 // 分区段：能力路径截到它为止才是「单元」——::api 之前那段才是子单元名。
 const PARTITIONS = ["api", "service", "domain", "detail", "ports"];
 
-/** 目的：把 use 路径折成入站面单元名（\`work\` / \`catalog/registry\`）。 */
+/** 目的：把 use 路径折成入站面单元名（\`work\` / \`catalog/registry\`）；环 1 的 pure:: 前缀不算单元名。 */
 function unitOf(rest) {
   const seg = rest.split("::");
+  if (seg[0] === "pure") seg.shift();
   if (seg.length >= 2 && !PARTITIONS.includes(seg[1])) return seg[0] + "/" + seg[1];
   return seg[0];
 }

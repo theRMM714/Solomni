@@ -270,7 +270,7 @@ impl Handle {
             permission: args
                 .get("permission")
                 .and_then(|v| v.as_str())
-                .map(crate::units::permission::api::ProfileId::parse)
+                .map(crate::units::pure::permission::api::ProfileId::parse)
                 .transpose()?,
             workspace: args
                 .get("workspace")

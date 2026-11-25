@@ -1,7 +1,7 @@
 //! 目的：执行档位与执行选型——「在哪跑、挂哪个虚拟根、定哪个版本」这三个共享事实。
 //! 管：`Tier`（本机 / 虚拟机）、`ExecSpec`（档位 + 虚拟根名 + 能力定版）与档位的对外解析。
 //! 不管：虚拟机怎么起、清单怎么解析（vm）；执行计划怎么排（provision / runtime）；落盘（会话 meta 的读写方）。
-//! 联动：登记处、vm、provision、runtime、turn 与呈现层都经 units::exec_model::api 取它；唯一家判据见 R6。
+//! 联动：登记处、vm、provision、runtime、turn 与呈现层都经 units::pure::exec_model::api 取它；唯一家判据见 R6。
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

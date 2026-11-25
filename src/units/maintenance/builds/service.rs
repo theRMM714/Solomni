@@ -18,7 +18,7 @@ use crate::units::vm::api::{
     self as vm, ExecPlan, GuestOs, GuestRun, GuestSpec, MissingEntry, Vm,
 };
 use crate::kernel::api::fence::FencePlan;
-use crate::units::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::Tier;
 use crate::kernel::ports::{FenceGate, FenceHost, HostProbe, Log, ProcessRunner};
 use std::collections::BTreeMap;
 use std::path::PathBuf;

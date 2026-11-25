@@ -14,7 +14,7 @@
   └──▶ 环 3 用例 ──▶ 环 2 状态与机制 ──▶ 环 1 纯 ──▶ 环 0 kernel
 ```
 
-- **环是架构地位，不是目录**。单元一律平铺在 `src/units/`，谁在哪个环只由 `layers.yaml` 决定；环 1 的纯层约束由门禁直接判 `src/units/<单元>/` 的代码，不靠路径。`src/units/pure/` 是环 1 的专用位置：它一旦存在，环 1 就必须正好是它的子目录、它也必须是环 1（判据：`tests/gates/structure/layers.js` 的 `shapeProblems`）。这样换环只改一行表，不会引发全量改名，也不会出现「路径与表两个权威」。
+- **环是架构地位，路径只编码一条不变量**。谁在哪个环只由 `layers.yaml` 决定；路径只编码「纯」：环 1 的单元住 `src/units/pure/<单元>/`，其余单元平铺 `src/units/<单元>/`。两者双向判：`src/units/pure/` 下的目录必须正好是环 1，环 1 的单元也必须住在这里（判据：`tests/gates/structure/layers.js` 的 `shapeProblems`）。环号不写进路径——换环只改一行表，不会引发全量改名，也不会出现「路径与表两个权威」。门禁认单元名一律走 `tests/gates/structure/unitpath.js`（`unitOfPath` / `unitOfModule` / `unitDir`），禁止位次假设。
 - **环 1 的判据是「无 IO、无状态、无端口、可穷举测试」**，不是「没有业务语义」。权限判定、任务链推演这类有领域词但全部可穷举的规则就该在环 1；否则它们无家可归，只能被各切片复制一遍（违反 R13）；纯层判据由 `tests/gates/structure/layers.js` 的 `pureProblems` 机器判定。按**概念**切（transcript、session-model、registry-model），不按类型切。
 - **环 2 与环 3 的区别是「有没有流程」**：环 2 持有状态或与外界打交道（存储、进程、通道、登记处）；环 3 是一个用例一条流程（work、lifecycle、turn-flow、collab…），流程、事务、补偿留在用例，适配器只做翻译与一行调用。
 - **同环有先后，但不是层**：机制栈天然有序（agentloop → tools → workspace；work → vm）。这个先后由同环边算成 rank，只回执、不设预算；门禁只要求同环边指向 rank 更低的单元，即同环无环。
@@ -53,14 +53,14 @@
 
 - **H1（硬判）**：跨单元边只能指向严格更低的环；同环只允许指向 rank 更低的单元（rank 由同环边现算，只回执）。向上依赖与同环逆序都判红（`tests/gates/structure/layers.js`）。
 - **H2（硬判）**：环 1 的单元不得出现 `std::fs/net/process/env/thread`、`tokio`、`reqwest`、`sqlx`，不得有 `ports/` 目录，不得有可变全局（`static mut`、`Mutex`、`RwLock`、`OnceLock`、`lazy_static`）。对 `kernel` 只准依赖**纯契约值**（`crate::kernel::contracts` 与 `crate::kernel::api::{types,note}`），禁 `kernel::ports`、`kernel::detail` 与函数式访问器：内核是环 0 的共享内核，`Note`/`Severity` 这类出站词汇若不许环 1 用，就会被各切片复制一份（违反 R15）；反过来 kernel 也不能依赖环 1。判据 `tests/gates/structure/layers.js` 的 `pureProblems`。
-- **H4（硬判）**：一个名字只属于一个契约面。`src/kernel/contracts/*.rs` 与 `src/units/<单元>/api*.rs` 里定义的 pub struct/enum/type，不得在两个契约面上各出现一次；呈现层与入口也不得再造同名类型（那是复制 DTO，不是防腐）。同义模型与翻译只准出现在三处：`src/units/<单元>/detail`、呈现层的屏幕装配、`src/entry`。判据 `tests/gates/structure/values.js` 的 `contractProblems`。
+- **H4（硬判）**：一个名字只属于一个契约面。`src/kernel/contracts/*.rs` 与 `src/units/[pure/]<单元>/api*.rs` 里定义的 pub struct/enum/type，不得在两个契约面上各出现一次；呈现层与入口也不得再造同名类型（那是复制 DTO，不是防腐）。同义模型与翻译只准出现在三处：`src/units/<单元>/detail`、呈现层的屏幕装配、`src/entry`。判据 `tests/gates/structure/values.js` 的 `contractProblems`。
 - **形状（硬判）**：`kernel` 固定环 0；环 1–3 都不许空；盘上每个单元都要归环，表里的单元都要有目录。
 - **改环 = 改架构地位**：写进 PR 说明理由即可，没有 `--write`，也不存在「声明不等于重算就失败」——环是人拍的架构决定，不按依赖深度自动推导。
 - 只回执不判红的三类：同环 rank 序、纯转发边（只 `pub use` 再导出，不算真依赖）、扇出（不设预算，数字说明这个单元在替多少个单元装配）。
 - **同环互用只有三种正当处置**：合并成一个单元、把被引的形状下沉到环 1、端口反转（内层声明、外层实现）。
 
 ## 四、单元与子业务的分工
-- 单元是**归环与门禁的单位**（`layers.yaml` 一行一个，rank 与扇出按它算，`src/units/<单元>/` 与 `src/units/<单元>.rs` 成对出现；环 1 由环号认定，不靠路径）。
+- 单元是**归环与门禁的单位**（`layers.yaml` 一行一个，rank 与扇出按它算，`src/units/[pure/]<单元>/` 与 `src/units/[pure/]<单元>.rs` 成对出现；环 1 的位置与环号必须一致，见上文 `shapeProblems`）。
 - 子业务是**业务功能的垂直切分**：`<单元>/<子业务>/`、`docs/<子业务>/`、`src/tests/<子业务>.rs` 都按它走（R10）。
 - 合并单元只搬目录、不改子业务内部的分区与 `super::` 语义；单元不写实现，只声明子业务。
 - **状态不参与归环**：环只回答「能依赖谁」，状态归谁见 [state.md](state.md)。

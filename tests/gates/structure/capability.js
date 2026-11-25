@@ -114,7 +114,6 @@ function scan(root) {
     if (!scope) continue;
     const raw = fs.readFileSync(path.join(root, f), "utf8");
     const prod = mask(stripTestModules(raw));
-    const cap = f.split("/")[2];
 
     if (scope !== "detail" && prod.includes("crate::kernel::detail")) {
       outsideDetailKernel.add(f + " -> crate::kernel::detail");

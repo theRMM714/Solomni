@@ -12,9 +12,14 @@ const SCHEDULES = ["weekly", "none"];
 /** 路径里出现这些字符说明写成了 glob：突变范围要具体文件，路径一搬走门禁才会判红。 */
 const GLOB = /[*?[\]]/;
 
-/** 单元管到哪棵子树：kernel 单元对 `src/kernel/`，其它单元对自己的能力目录。 */
+/** 单元管到哪棵子树：kernel 单元对 `src/kernel/`，其它单元对自己的单元目录（环 1 在 `src/units/pure/` 下）。 */
 function unitPrefix(unit) {
   return unit === "kernel" ? "src/kernel/" : "src/units/" + unit + "/";
+}
+
+/** 单元的全部合法子树：环 1 的单元搬家后路径多一层 pure/，两种前缀都认。 */
+function unitPrefixes(unit) {
+  return unit === "kernel" ? ["src/kernel/"] : ["src/units/" + unit + "/", "src/units/pure/" + unit + "/"];
 }
 
 /**
@@ -36,8 +41,8 @@ function validate(root) {
         out.push(name + "：mutation.files 不许写 glob —— `" + file + "`（列具体文件，路径漂移才会被判红）");
         continue;
       }
-      if (!file.startsWith(unitPrefix(spec.unit))) {
-        out.push(name + "：mutation.files 不在本单元范围（应为 " + unitPrefix(spec.unit) + "…）：`" + file + "`");
+      if (!unitPrefixes(spec.unit).some((p) => file.startsWith(p))) {
+        out.push(name + "：mutation.files 不在本单元范围（应为 " + unitPrefixes(spec.unit).join(" 或 ") + "…）：`" + file + "`");
       }
       if (file.startsWith("src/tests/")) {
         out.push(name + "：mutation.files 不许指向 src/tests/（测试不给自己做突变）：`" + file + "`");
@@ -92,4 +97,4 @@ function collect(root, opts) {
   return { problems: [], scope, unit, units, files };
 }
 
-module.exports = { SCHEDULES, unitPrefix, validate, collect };
+module.exports = { SCHEDULES, unitPrefix, unitPrefixes, validate, collect };

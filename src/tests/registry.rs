@@ -220,7 +220,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         task: None,
         delegate: false,
         permission: None,
-        tier: crate::units::exec_model::api::Tier::Host,
+        tier: crate::units::pure::exec_model::api::Tier::Host,
         guest: None,
         workspace: None,
     };
@@ -265,7 +265,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         task: Some("需求".to_string()),
         delegate: false,
         permission: None,
-        tier: crate::units::exec_model::api::Tier::Host,
+        tier: crate::units::pure::exec_model::api::Tier::Host,
         guest: None,
         workspace: None,
     };

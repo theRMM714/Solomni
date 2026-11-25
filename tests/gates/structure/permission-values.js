@@ -9,6 +9,7 @@ const fs = require("fs");
 const path = require("path");
 const { rel } = require("../../lib/fsutil.js");
 const { mask } = require("../../lib/rust-mask.js");
+const { unitDir } = require("./unitpath.js");
 
 // 外部唯一允许的形态：谓词（may_* / *_allowed / read_ok / write_ok / *_roots_listing / profile / offers）。
 const RAW_FIELD = /\.permissions\s*\.\s*(reach|decisions)\b/;
@@ -29,7 +30,7 @@ function permissionValues(root) {
   const problems = [];
   const base = path.join(root, "src");
   if (!fs.existsSync(base)) return problems;
-  const own = path.join(root, "src", "units", "permission") + path.sep;
+  const own = unitDir(root, "permission") + path.sep;
   for (const file of rsFilesOf(base)) {
     if (file.startsWith(own)) continue;
     const lines = mask(fs.readFileSync(file, "utf8")).split(/\r?\n/);

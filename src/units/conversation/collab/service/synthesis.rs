@@ -30,7 +30,7 @@ pub fn draft_plan(
 ) -> Result<
     (
         String,
-        crate::units::taskchain::api::TaskChain,
+        crate::units::pure::taskchain::api::TaskChain,
         String,
     ),
     String,
@@ -67,17 +67,17 @@ pub fn draft_plan(
     }
     let parsed: SynthReply =
         serde_json::from_value(payload).map_err(|e| format!("plan 工具的载荷不合法（{}）", e))?;
-    let chain = crate::units::taskchain::api::TaskChain {
+    let chain = crate::units::pure::taskchain::api::TaskChain {
         nodes: parsed
             .nodes
             .into_iter()
-            .map(|n| crate::units::taskchain::api::TaskNode {
+            .map(|n| crate::units::pure::taskchain::api::TaskNode {
                 id: n.id,
                 title: n.title,
                 objective: n.objective,
                 assignee: n.assignee,
                 deps: n.deps,
-                status: crate::units::taskchain::api::NodeStatus::Pending,
+                status: crate::units::pure::taskchain::api::NodeStatus::Pending,
                 sub_session: None,
                 report: None,
                 acceptance: None,

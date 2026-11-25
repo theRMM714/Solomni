@@ -4,7 +4,7 @@
 //! 联动：`service/` 造事件时用 `push`；呈现层与测试用 `of` 认回来（按 kind 解释，不认 Rust 枚举位置）。
 
 use crate::units::conversation::session::api::SessionEvent;
-use crate::units::taskchain::api::TaskChain;
+use crate::units::pure::taskchain::api::TaskChain;
 
 /// 目的：验收条目的呈现视图。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

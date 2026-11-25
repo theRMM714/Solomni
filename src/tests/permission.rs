@@ -1,9 +1,9 @@
 //! 目的：钉收敛后的权限模型——两档网络开关、共享区路径归属、固定授予的围栏，以及工作区提交工具的消费。
 //! 管：档位与父子收窄、共享区三态与覆盖/收窄/黑名单、沙箱落点、围栏规格、提交与读作用域过滤。
 //! 不管：平台真机验收（tests/<平台>/）；确认队列本身（见 src/tests/session/）。
-//! 联动：src/units/permission/、src/units/workspace/domain/scope.rs、docs/permission/README.md。
+//! 联动：src/units/pure/permission/、src/units/workspace/domain/scope.rs、docs/permission/README.md。
 
-use crate::units::permission::api::{
+use crate::units::pure::permission::api::{
     PermissionDefaults, PermissionLayer, PermissionSet, ProfileId, SessionSandbox,
 };
 use crate::units::workspace::api::{ScopeMode, SharedEdit, SharedScope, validate_entry};
