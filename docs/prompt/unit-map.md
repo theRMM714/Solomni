@@ -14,4 +14,4 @@
 | `src/units/prompt/ports.rs` | 出站端口：提示词册的加载 `PromptSource` |
 | `src/units/prompt/domain/prompt.rs` | 提示词册的纯数据与渲染层：`{{key}}` 占位替换、段选择、机制 / 工作环境匹配与册子合并（缺键缺变量如实报错） |
 | `src/units/prompt/domain/refs.rs` | 用户输入里 `@work:` / `@sandbox:` 引用到真实路径的改写（纯逻辑）：认前缀、按会话环境写法渲染，越界判定留给 workspace |
-| `src/units/prompt/detail/yaml_prompts.rs` | `PromptSource` 的磁盘实现：读 `prompts/` 下的 yaml 并合并成册子（缺目录 / 缺文件如实报装配错误） |
+| `src/units/prompt/detail/yaml_prompts.rs` | `PromptSource` 的装配输入：经 `Assets` 拿 `prompts/` 下的 yaml 并合并成册子（目录枚举与读盘在 `assets`，缺目录 / 缺文件如实报装配错误） |

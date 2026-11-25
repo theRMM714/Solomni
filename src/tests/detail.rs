@@ -13,6 +13,7 @@ mod prompt;
 mod yaml;
 
 use super::scratch;
+use crate::tests::doubles::assets_at;
 use crate::kernel::detail::file_log::FileLog;
 use crate::kernel::ports::{Log, NoopLog};
 use crate::units::catalog::modules::detail::fs_modules::FsModules;

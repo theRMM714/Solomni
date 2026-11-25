@@ -167,7 +167,7 @@ impl PromptSource for TestPrompts {
 pub(crate) fn test_profiles() -> crate::units::session_model::api::Profiles {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     crate::units::conversation::session::detail::yaml_profiles::YamlProfiles::new(
-        root.join("systools"),
+        crate::tests::doubles::assets_at(&root),
     )
     .load()
     .expect("内置会话类型表必须合法")
@@ -176,7 +176,9 @@ pub(crate) fn test_profiles() -> crate::units::session_model::api::Profiles {
 pub(crate) fn test_prompts() -> Prompts {
     // 走**与产品同一条**装配路径（目录 + 合并）：替身与真机装配出同一册子，测试才有意义。
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    crate::units::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"))
+    crate::units::prompt::detail::yaml_prompts::YamlPrompts::new(crate::tests::doubles::assets_at(
+        &root,
+    ))
         .load()
         .expect("内置提示词册必须合法")
 }
@@ -209,8 +211,9 @@ pub(crate) fn test_tools_svc_with(
     fence: Arc<dyn crate::kernel::ports::FenceHost + Send + Sync>,
 ) -> Arc<crate::units::tools::service::ToolsService> {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source =
-        crate::units::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"));
+    let source = crate::units::tools::detail::yaml_systools::YamlSystools::new(
+        crate::tests::doubles::assets_at(&root),
+    );
     Arc::new(
         crate::units::tools::service::ToolsService::new(&source, runner, io, fence)
             .expect("内置工具总表必须合法"),
@@ -219,8 +222,10 @@ pub(crate) fn test_tools_svc_with(
 
 pub(crate) fn test_systools() -> crate::units::tools::api::SystemTools {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    crate::units::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"))
-        .load()
+    crate::units::tools::detail::yaml_systools::YamlSystools::new(crate::tests::doubles::assets_at(
+        &root,
+    ))
+    .load()
         .expect("内置工具总表必须合法")
 }
 

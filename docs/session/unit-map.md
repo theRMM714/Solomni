@@ -15,4 +15,4 @@
 | `src/units/conversation/session/service/tree.rs` | 会话树派生：子树、工作根、配置归属、树级装配 meta、guest 作用域与租约、树序与扁平模块 |
 | `src/units/conversation/session/ports.rs` | 出站端口：`HistoryStore`（会话历史的读写与删除） |
 | `src/units/conversation/session/domain/seat_check.rs` | 席位面与工具总表的双向自洽断言（`problems`，工具面装配在 `agentloop`）：席位 id 唯一、提示词非空、核心席不授模块工具、能发布必须先能写、席位面工具都在总表里、机制与席位双向一致、`callers` 与席位面双向比对；声明本身在 `session_model` |
-| `src/units/conversation/session/detail/yaml_profiles.rs` | 会话类型表的磁盘实现：读 `systools/profiles.yaml`（缺文件 / 语法坏 / 规则不过都如实报），装载后交组合根 |
+| `src/units/conversation/session/detail/yaml_profiles.rs` | 会话类型表的装配输入：经 `Assets` 拿 `systools/profiles.yaml` 再解码校验（落点与读盘在 `assets`；缺文件 / 语法坏 / 规则不过都如实报），装载后交组合根 |

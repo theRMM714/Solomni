@@ -1,58 +1,28 @@
-//! 目的：提示词册的装配输入——prompts/ 目录加载成 Prompts（只有提示词文本）。
-//! 管：实现 ports::PromptSource；读目录与 yaml；缺目录 / 缺文件如实报装配错误。
-//! 不管：工具总表与机制席位（在 units/tools/detail）；渲染与 `@` 引用改写（在 domain）。
+//! 目的：提示词册的装配输入——`prompts/` 目录加载成 Prompts（只有提示词文本）。
+//! 管：实现 ports::PromptSource；经 `Assets` 收文档；缺目录 / 缺文件如实报装配错误。
+//! 不管：目录枚举与读盘（在 `assets`）；工具总表与机制席位（在 units/tools/detail）；渲染与 `@` 引用改写（在 domain）。
 //! 联动：实现 prompt/ports.rs 的 PromptSource，由组合根装配；加载结果交 service::load。
 
+use crate::units::assets::api::Assets;
 use crate::units::prompt::domain::prompt::{Prompts, merge_book};
 use crate::units::prompt::ports::PromptSource;
-use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 pub struct YamlPrompts {
-    prompts: PathBuf,
+    assets: Arc<dyn Assets>,
 }
 
 impl YamlPrompts {
-    /// 目的：prompts = 提示词册目录。
-    pub fn new(prompts: PathBuf) -> YamlPrompts {
-        YamlPrompts { prompts }
+    /// 目的：`assets` = 随包只读内容的入站面（`prompts/` 的落点、枚举与排序都归它）。
+    pub fn new(assets: Arc<dyn Assets>) -> YamlPrompts {
+        YamlPrompts { assets }
     }
 }
 
 impl PromptSource for YamlPrompts {
     fn load(&self) -> Result<Prompts, String> {
-        merge_book(&self.read_docs()?)
+        let docs = self.assets.prompt_docs()?;
+        let texts: Vec<String> = docs.into_iter().map(|d| d.text).collect();
+        merge_book(&texts)
     }
-}
-
-impl YamlPrompts {
-    /// 册子的各文件（按路径排序：装配必须确定——同一份代码在任何机器上装配出同一册子）。
-    fn read_docs(&self) -> Result<Vec<String>, String> {
-        let mut files: Vec<PathBuf> = Vec::new();
-        collect_yaml(&self.prompts, &mut files)
-            .map_err(|e| format!("提示词册目录读不了（prompts/）：{}", e))?;
-        if files.is_empty() {
-            return Err("提示词册目录里一个 .yaml 都没有（prompts/）".to_string());
-        }
-        files.sort();
-        let mut docs = Vec::new();
-        for file in &files {
-            let text = std::fs::read_to_string(file)
-                .map_err(|e| format!("提示词册文件读不了（{}）：{}", file.display(), e))?;
-            docs.push(text);
-        }
-        Ok(docs)
-    }
-}
-
-/// 递归收集 `.yaml`（不跟符号链接；子目录按路径排序后合并）。
-fn collect_yaml(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            collect_yaml(&path, out)?;
-        } else if path.extension().and_then(|e| e.to_str()) == Some("yaml") {
-            out.push(path);
-        }
-    }
-    Ok(())
 }
