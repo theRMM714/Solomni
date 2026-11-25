@@ -38,7 +38,7 @@
 ## 二、固定授予（不经权限判定）
 
 - **私有沙箱恒可读写**：这是 agent 的工作副本，写它不需要任何档位。
-- **模块目录恒只读**；模块自己的 `userdata` 只给模块工具进程写；模块工具写**调用方 agent 的沙箱**（契约见 [MODULE_SPEC.md](../../MODULE_SPEC.md)）。
+- **模块目录恒只读**；模块自己的私有区（`data/modules/<id>/userdata`）只给模块工具进程写；模块工具写**调用方 agent 的沙箱**（契约见 [MODULE_SPEC.md](../../MODULE_SPEC.md)）。
 - **主机只读根**（`sandbox.policy.host_read_roots`）恒只读挂进围栏。
 - **项目工具链与运行包**恒只读（可信执行基座，机器级一次性预授，与档位无关，见 [kernel/README.md](../kernel/README.md) 的「授权主体分两个」）。
 - 因此「读模块源码」「读写共享区」「执行落点在哪」都不是权限项：前者由席位面（工具面 / 模块声明）决定，后者恒为私有沙箱（见「四」）。
@@ -59,7 +59,7 @@
 
 ## 五、围栏派生
 
-- `FencePlan::for_call(sandbox, module, base)`：`home` = 私有沙箱（隐含一条写授予）；`grants` = 主机只读根（`Grant::read`）+ 全部模块目录（只读子树）+ 该模块 `userdata`（写子树，若模块有）；`net` = 全局开关与档位求交。不再有按 reach 的分支。
+- `FencePlan::for_call(sandbox, module, base)`：`home` = 私有沙箱（隐含一条写授予）；`grants` = 主机只读根（`Grant::read`）+ 全部模块目录（只读子树）+ 该模块私有区（`sb.module_data` 里的写子树，私有区建不出来时不授）；`net` = 全局开关与档位求交。不再有按 reach 的分支。
 - `FencePlan::for_session(sandbox, host_roots, global_net)`：同一套固定并集，只作会话 base；撤销走会话租约（`release_by_lease`）。
 - VM guest 的 per-call 断网由 guest helper 按策略里的 net 做 `unshare(CLONE_NEWNET)`；失败 fail-closed。
 - Windows 的容器身份 = `会话租约 + agent`（**不含可达根集合**）：同一 `(agent, shell)` 的调用复用 SID 与 ACL，档位切换不需要重写 DACL。
@@ -75,7 +75,7 @@
 
 - 只有两档，且两档只差网络（`profiles_are_two_tiers_that_differ_only_in_network`，`src/tests/permission.rs`）。
 - 根可换档、子只能收窄、空层不改生效态（`permission_set_root_and_narrowing_only_touch_the_tier`，`src/tests/permission.rs`）。
-- 围栏的固定并集：私有沙箱（`home`）+ 该模块 `userdata` 可写、模块目录只读子树、`net` 与全局开关求交（`fence_spec_grants_fixed_surfaces`）。
+- 围栏的固定并集：私有沙箱（`home`）+ 该模块私有区可写、模块目录只读子树、`net` 与全局开关求交（`fence_spec_grants_fixed_surfaces`）。
 - 共享区三态与黑名单：序列化、交集、收窄不放大（`shared_scope_narrowing_never_widens`、`shared_scope_serde_and_merge_edges`，`src/tests/permission.rs`）。
 - 工作工具的路径过滤跟着读范围走（`work_status_filters_paths_outside_read_scope`、`work_lost_is_scoped_by_read_permission`、`work_versions_and_resolve_are_scoped_by_read_permission`）；`write=none` 时提交 / 推送被拒（`no_write_scope_refuses_commit_and_push`）。
 - 工具面只由席位面决定，档位不裁剪（`profile_does_not_change_the_tool_face`，`src/tests/tools/shell.rs`）。

@@ -16,6 +16,7 @@ taskchain: 1
 # 环 2 状态与机制
 agentloop: 2
 catalog: 2
+content: 2
 home: 2
 sessions: 2
 vmstore: 2

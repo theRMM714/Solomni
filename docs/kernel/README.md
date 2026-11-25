@@ -40,7 +40,7 @@
 | 解释器安装目录 | 容器里连解释器都起不来 |
 | 模块目录 | 工具脚本与它的依赖在这里（只读子树）；命令的 cwd 落在私有沙箱或这个子树里，不再单列一条 cwd 授予 |
 | 私有沙箱 | `HOME` / `TEMP` 的落点，也是**容器临时目录**（`Packages/<容器名>/AC/Temp`）的父目录：进程连临时文件都落不下 |
-| 其余数据边界（共享主副本、模块 `userdata/`） | 这次执行要读写的根：读不到输入、写不进产物 |
+| 其余数据边界（共享主副本、模块私有区） | 这次执行要读写的根：读不到输入、写不进产物 |
 | 容器身份 / 授权台账 | 围栏本身的前提（派生不出 SID、台账落不下就先不动本机权限项） |
 | 落点的完整性标签 | 高于 Low 且带「不许向上写」时，DACL 授权再对容器也写不进：授权会报成功、命令却落不下产物 |
 
@@ -49,7 +49,7 @@
 - 可选（缺了命令照跑，只是可达范围小一点）：
   - 用户显式授权的主机只读根（`data/.home/settings.yaml` 的 `sandbox.policy.host_read_roots`）。
   - 数据边界父目录的只读属性（容器里判「这个目录在不在」用它；缺了会让模块自己的「父目录不存在就先建」走偏，那是**命令自己的报错**，不是围栏失守）。
-  - 不存在的落点（没有 `userdata/` 的模块、派生与执行之间的竞态）：跳过，不进结论。
+  - 不存在的落点（私有区建不出来的模块、派生与执行之间的竞态）：跳过，不进结论。
 - 行为（`prepare_fence` → `FencePrep` → `ProcTools`）：
   - **预检失败不写**：解释器根不可授权时 `prepare_fence` 直接给出必要落点缺失，不产生「写一半 / 回滚」的状态；回执只写真身路径。
   - **必要落点授不上：不许降级**。工具层的围栏裁决（`src/units/tools/service/fence.rs` 的 `ToolFenceGate`）经统一裁决通道（见 [session-model.md](../session/session-model.md) 的「请用户裁决」）推一条消息：哪一环、哪个目录、缺什么前提、怎么补。
@@ -63,7 +63,7 @@
   - **授权主体分两个（仅 Windows）**：我们自己写的 ACE 一律授给**本产品的能力 SID**（`solomni.fence.baseline`，经 `DeriveCapabilitySidsFromName` 派生成 `S-1-15-3-*`，见 `src/kernel/detail/container/windows.rs` 的 `CAPABILITY_NAME` / `product_capability_sid`）——profile（`CreateAppContainerProfile`）与令牌（`SECURITY_CAPABILITIES`）两处都声明它，只有声明了的容器才拿得到这条只读。**不用 `ALL APPLICATION PACKAGES`（`S-1-15-2-1`）当授权主体**：那等于把读权限下放给本机所有 AppContainer 应用。系统目录（`System32` 等）自带的 AAPP 只读 ACE 不是我们写的、也改不动，所以解释器预检**两个主体都认**（`interpreter_baseline_present`），但只有能力 SID 那条算「我们已授」（`system_baseline_sid` 只用于识别，不用于写入）。真机判据：`tests/windows/probes/capability.rs` 的 `capability_sid_is_grantable_and_not_blanket`——带能力的容器读得到只授给该能力的文件、不带能力的读不到，且两者都写得了自己的工作目录。
   - **机器级一次性预授（仅 Windows）**：`--setup=fence`（或首次授权成功后自动一次）把两类落点一次写掉——产品根上的一条 `(OI)(CI)` 读属性（授给本产品能力 SID，覆盖根下全部既有与新建子项，视图盘根因此可解析；产品根之外的祖先不写）、`.tools/` 与 `data/runtimes/` 的递归只读。预授成功后顺带把 `sandbox.policy.windows.write_acl` 记进设置（授权轴与机器级缺项轴各看各的事实，预授失败就不记）；之后 `prepare_fence` 对这些落点全部命中已有 ACE、零写入；机器级条目不随会话回收，撤除走 `--fence-clean` 或按条撤销。入口 `src/kernel/detail/confine/windows/machine.rs`（`machine_plan` / `machine_missing` / `machine_ensure`），门面在 `src/kernel/detail/confine/prep.rs`。
   - **旧全应用包授权的退役（仅 Windows）**：`--setup=fence` 预授成功后顺带退役台账里**我们自己发过的**机器级 AAPP 条目（`retire_legacy_machine_grants`）：只认 `scope=machine` 且 SID 为 `S-1-15-2-1` 的条目，**先授后撤**——同一路径上能力 SID 的 ACE 覆盖得住这条的权限位（继承来的也算）才撤，覆盖不住就保留（解释器目录、产品根之外的祖先因此留着，要撤用 `--fence-revoke <SID> <路径>`）。系统目录自带的 AAPP ACE 不进台账，一条都不碰；盘卷根不动。浅路径先撤：父目录那条可继承 ACE 一撤，子目录继承到的副本由系统一并收走，子条目只销账、不再各写一次整树 ACL；撤与撤后核对都只看对象**自己带着**的 ACE（继承来的投影属于祖先那条授权，不在这一条里撤）。逐条开台账事务（锁只罩读—改—写），撤后核对残留；任一条失败就保留条目、如实报，重跑可再撤。首次授权后的自动那一趟只走 `machine_ensure`，不做这件慢清理。真机判据：`src/kernel/detail/confine/windows/tests/grant.rs` 的 `legacy_aapp_machine_grants_retire_only_after_capability_is_in_place`。
-  - **三类根（仅 Windows）**：① **可信执行基座**——产品内工具链（`.tools/`）与运行包（`data/runtimes/<包>`）是只读二进制、不携带任何 scope 信息，一次性授给本产品能力 SID（与祖先链同路，不同于系统解释器目录自带的 AAPP），按**机器级**归属记台账（`scope=machine`、无归属，启动对账不回收、跨会话复用），**不进容器身份**；② **受保护数据 / 代码**——私有沙箱（`home`）、模块目录、模块 `userdata/`、用户授权只读根，按计划里的授予授给容器 SID；③ 系统基线（`C:\Windows` 等）。把工具链放进计划会让同一份 16k 文件按每个计划组合各授一次（本机实测 56s/次），属于类别错误。
+  - **三类根（仅 Windows）**：① **可信执行基座**——产品内工具链（`.tools/`）与运行包（`data/runtimes/<包>`）是只读二进制、不携带任何 scope 信息，一次性授给本产品能力 SID（与祖先链同路，不同于系统解释器目录自带的 AAPP），按**机器级**归属记台账（`scope=machine`、无归属，启动对账不回收、跨会话复用），**不进容器身份**；② **受保护数据 / 代码**——私有沙箱（`home`）、模块目录、模块私有区（`data/modules/<id>/userdata`）、用户授权只读根，按计划里的授予授给容器 SID；③ 系统基线（`C:\Windows` 等）。把工具链放进计划会让同一份 16k 文件按每个计划组合各授一次（本机实测 56s/次），属于类别错误。
   - **容器临时目录先建**（仅 Windows）：`prepare_fence` 在授权前建好 `<私有沙箱>/Packages/<容器名>/AC/Temp`——AppContainer 的 `GetTempPath2` **不读 TMP/TEMP**，编译器这类程序缺了它直接 abort（`Cannot create temporary file`）；目录在私有沙箱（`home`）之下，递归 ACE 覆盖它，不单列一条授权。`private` 为空时跳过并记一条事实。
   - **未授权档位不是这条路**（仅 Windows）：用户没开 `sandbox.policy.windows.write_acl` 时外层根本不写权限项，容器围栏不装；若策略要求强制则拒绝，否则按无围栏执行并在启动报告标出。Linux / macOS 没有外层授权这一步，围栏照常装。
   - **启动门（组合根）**：只有命令声明 `runtime: services` 的调用（默认 CLI、`--web`、会话、模块工具）先判 `require` vs 本次实际，`runtime: none` 的一次性命令不吃这道门；门把「未授权」与「本机能力缺失」分开报，非 TTY 时逐项列缺项与三条出路后以 1 退出；未满足时只能本次降级 / 重设 / 退出（`src/main.rs`）。没有可回答的前端、或 `on_unavailable=refuse` 且不重设 = 退出，不会启动前端。首次启动（没有 `data/.home/settings.yaml`）在 Windows 先问一次是否授权写 ACL；选否不写盘、进入启动门。授权后立刻跑机器级预授；后续启动只做 O(深度) 只读对账，缺项只提示 `--setup=fence`，不阻断。`require` + `write_acl=false` 的矛盾配置在加载 / 保存时即拒绝，不会进入门。
@@ -90,7 +90,7 @@
   - 守门进程用系统 shell 执行模块作者写的命令行（`sh -c` / `cmd /C`）——命令行是模块声明的一部分。shell 的启动命令由机制生成：Unix `sh -c "$(cat)"`；Windows PowerShell（pwsh 7 优先、5.1 回退，`-File` 临时 .ps1；脚本先设 `$ErrorActionPreference = 'Stop'`，未处理的 PowerShell 错误当场中止并以非 0 结束；脚本尾部 `if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }` 把**最后一次原生命令**的码变成回执退出码（PowerShell 自己不会传播它），显式 `exit N` 优先）。
   - **容器里的程序名先相对化**（仅 Windows）：AppContainer 下**绝对路径**的程序会被拒（真机：同一文件用 `D:\…\x.exe` 报 Access denied，用 `..\x.exe` 正常——相对路径走 cwd 的目录句柄，不遍历卷根；非系统盘的卷根 DACL 要管理员才写得动）。执行前把首 token 的程序名解析成绝对路径、再改写成相对 cwd 的路径（同卷才改；裸名按容器里生效的 PATH / PATHEXT 解析；跨卷或解析不出则原样）。参数里的路径不动。
   - 环境白名单：外层 `env_clear`，只注入 `fence_env`（PATH / PATHEXT / 系统根 / LANG / TZ 等，`HOME` 与 `TEMP` 指向该 agent 私有沙箱）与模块隐秘字段；其它环境与凭据不进工具进程。
-  - **围栏是固定并集，没有按权限项的分支**（派生在 `src/units/tools/domain/fence.rs`）：`FencePlan::for_call` 一律把私有沙箱（`home`，隐含一条写授予）+ 该模块 `userdata`（写）与全部模块目录（只读子树）写进 `grants`，主机只读根是 `Grant::read`，`net` = 全局开关与档位求交；共享区主副本永不进围栏（只由宿主内的文件工具直读，容器里的进程要读先 `work_pull`）。`for_session` 用同一套并集作**会话 base**，撤权走会话租约，不用于按次派生。
+  - **围栏是固定并集，没有按权限项的分支**（派生在 `src/units/tools/domain/fence.rs`）：`FencePlan::for_call` 一律把私有沙箱（`home`，隐含一条写授予）+ 该模块私有区（写）与全部模块目录（只读子树）写进 `grants`，主机只读根是 `Grant::read`，`net` = 全局开关与档位求交；共享区主副本永不进围栏（只由宿主内的文件工具直读，容器里的进程要读先 `work_pull`）。`for_session` 用同一套并集作**会话 base**，撤权走会话租约，不用于按次派生。
   - **shell 的一次执行**：`run_shell` 走同一个守门进程；`timeout_secs` 是本次的（不沿用模块工具的 30 秒），到点或取消旗置位都杀整棵树；输出原样交回（模型可见的截断由工具层的回执预算统一施加），落点与本次耗时由工具层补成说明（码 `shell.place` / `shell.place.prep`；没跑成的调用不加落点行，但结构化事实仍记下落点与耗时）；每次调用都 `require_fs + require_net + allow_degraded=false`，装不上拒绝；Windows 的容器身份按 `会话租约 + agent + 计划指纹` 派生（同一计划复用 SID 与 ACL），授权按会话持有、会话改配 / 删除时回收；工具链与运行包是基础工具链基线，不参与按次授权。
   - **VM guest 的 per-call 断网**：guest helper 读策略里的 `net`，false 时在子进程前 `unshare(CLONE_NEWNET)`；失败以 111 fail-closed，不静默降级。helper 同时读 `timeout_secs` 并按它杀树；guest 输出按 `GuestRun.output_limit` 只留开头或开头 + 结尾。
   - **本机回环的一次性放行（仅 Windows）**：`net = Local { ports }` 时容器里 bind 的是 `127.0.0.2:<端口>`（容器与宿主共用一个回环栈，同端口同地址会撞 `WSAEADDRINUSE`），宿主按端口清单 dial `127.0.0.1:<端口>`，两侧用继承的匿名管道传帧、不走网络；端口清单与「产品自己的端口」都在**宿主侧**判，后者按「监听者 pid 落在本产品进程树里，或它跑的就是本产品这个可执行文件」判（`src/kernel/detail/container/windows/relay.rs`）。中继进程就是产品自己的可执行文件，它进容器要一条单文件只读授权（`FencePart::Relay`）。本档不许降级：中继起不来即以 `FENCE_FAILED` 拒绝，否则等于把回环全通给容器（`src/kernel/detail/confine/job.rs` 的 `local_relay` 判定）。

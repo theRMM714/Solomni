@@ -21,7 +21,7 @@ fn launch() -> LaunchSpec {
         options: Default::default(),
         env: vec![("TOKEN".to_string(), "s3cr3t".to_string())],
         path: None,
-        fence: FencePlan::standalone(std::path::Path::new("."), None, false),
+        fence: FencePlan::standalone(std::path::Path::new("."), None, None),
     }
 }
 

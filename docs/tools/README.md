@@ -33,8 +33,8 @@
 - 围栏机制的同步细则（平台探针、台账、ACE、解释器基线）与围栏落点（必要 / 可选、授不上的行为、平台差异）都在 [kernel](../kernel/README.md) 的「一、围栏落点：必要与可选」与「二、工具进程与守门协议」。
 - `FencePlan.net` 的平台落点以 kernel 的「二、工具进程与守门协议」为准；tools 只派生**计划**，不解释平台能力。
 - 授权面按**注入的事实**派生：
-  - `<module>/userdata/` 由 modules 在**扫描载入时确保存在**（产品唯一的自动写盘，幂等）；建不了如实标注、不阻断加载。
-  - domain 不读盘：`has_userdata` 作为事实随沙箱注入。
+  - 模块私有区（`data/modules/<id>/userdata`）由 `content` 在**模块载入时确保存在**（产品唯一的自动写盘，幂等）；建不了如实标注、不阻断加载。
+  - domain 不读盘：私有区落点作为事实随沙箱注入（`Sandbox.module_data`）。
   - 事实为否（建不了）时不进 `rw`；`standalone` 的缺省工作目录退回模块根。
   - `prepare_fence` 跳过不存在的落点，不判整次失败。
 - 新增 / 修改系统工具 → 改 `systools/tools.yaml` 与（需要时）`src/units/session_model/domain/mechanism.rs` 的席位声明；尚未实现的方向记在 `systool_gaps.yaml`（仓库根；不替代测试缺口账）。

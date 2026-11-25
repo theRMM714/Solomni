@@ -275,15 +275,16 @@ fn sessions(root: &Path) -> SpaceCategory {
 }
 
 fn module_outputs(root: &Path) -> SpaceCategory {
-    let items = scan::children(&layout::modules_data(root))
+    let content = crate::units::content::api::paths(root);
+    let items = scan::children(&content.modules_data())
         .into_iter()
         .filter(|p| p.is_dir())
         .filter_map(|p| {
-            let build = p.join("build");
+            let name = scan::name_of(&p);
+            let build = content.area(&name).build();
             if !build.is_dir() {
                 return None;
             }
-            let name = scan::name_of(&p);
             Some(SpaceItem {
                 id: name.clone(),
                 label: format!("模块产物 · {}", name),

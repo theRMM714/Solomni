@@ -521,7 +521,7 @@ impl Turn {
             shared: roots.shared.clone(),
             private,
             modules: BTreeMap::new(),
-            modules_with_userdata: std::collections::BTreeSet::new(),
+            module_data: std::collections::BTreeMap::new(),
             permissions: self.permissions_for(registry, meta)?,
             scope: self.shared_scope_for(registry, meta)?,
             // 代理发言席自己住在宿主上（文件工具也跑在宿主），不需要 guest 翻译；

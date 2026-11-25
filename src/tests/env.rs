@@ -60,7 +60,7 @@ fn sandbox() -> Sandbox {
         shared: PathBuf::from("shared"),
         private: PathBuf::from("work/a"),
         modules: BTreeMap::new(),
-        modules_with_userdata: Default::default(),
+        module_data: Default::default(),
         permissions: PermissionDefaults::default().to_permission_set(),
         scope: SharedScope::default(),
         path_codec: None,
@@ -229,7 +229,7 @@ fn network_switch_and_host_read_roots_come_from_the_policy() {
 #[test]
 fn sandboxes_give_each_agent_only_its_own_modules() {
     let mut m2 = module_of("m2");
-    m2.has_userdata = true;
+    m2.private = Some(PathBuf::from("data/modules/m2/userdata"));
     let roster = Roster {
         modules: vec![module_of("m1"), m2],
         rejected: Vec::new(),
@@ -264,14 +264,18 @@ fn sandboxes_give_each_agent_only_its_own_modules() {
     assert_eq!(a.agent, "a");
     assert_eq!(a.private, PathBuf::from("work/a"));
     assert_eq!(a.modules.keys().cloned().collect::<Vec<_>>(), vec!["m1"]);
-    assert!(a.modules_with_userdata.is_empty());
+    assert!(a.module_data.is_empty());
     let b = &out.list[1];
     assert_eq!(b.agent, "b");
     assert_eq!(b.private, PathBuf::from("work/b"));
     assert_eq!(b.modules.keys().cloned().collect::<Vec<_>>(), vec!["m2"]);
     assert_eq!(
-        b.modules_with_userdata.iter().cloned().collect::<Vec<_>>(),
+        b.module_data.keys().cloned().collect::<Vec<_>>(),
         vec!["m2"]
+    );
+    assert_eq!(
+        b.module_data.get("m2").map(|p| p.as_path()),
+        Some(std::path::Path::new("data/modules/m2/userdata"))
     );
     assert_eq!(out.shared, PathBuf::from("shared"));
     assert_eq!(out.session_root, PathBuf::from("sessions/w"));

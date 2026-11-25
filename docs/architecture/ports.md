@@ -26,7 +26,10 @@
 | `SettingsStore` | 登记处持久化（providers / models / settings / agents 四个 yaml；文件机制走 `Home`） |
 | `Sessions` | 会话盘（`data/session`）的入站面：会话根（只交给组合根构造两个文件适配器）与会话目录存在性；内部布局不在这里 |
 | `SessionDirs` | 会话盘的目录事实：某个会话目录存不存在；只由 `sessions` 的 service 持有 |
-| `ModuleSource` | 模块清单来源（扫描安装根的 `modules/`，模块私有区在 `data/modules/`） |
+| `ModuleSource` | 模块清单来源（扫描安装根的 `modules/`；私有区落点问 `Content`，不在源码树里建） |
+| `Content` | `data/modules`（模块私有区）与 `data/runtimes` 的入站面：落点、私有区的确保存在、运行包根；清理解释不在这里 |
+| `ContentInstall` | 运行包的安装 / 卸载面：列已装、装前检查、卸载；**本期只有形状**，实现是缺口 `content-install` / `content-remove` |
+| `ContentFs` | 内容盘的文件机制：目录的确保存在（幂等）；只由 `content` 的 service 持有 |
 | `ModuleStateStore` | 模块与服务的启停覆盖落盘（`data/.home/modules.yaml`） |
 | `PackageSource` | 运行包库来源（扫描依赖文件夹 `data/runtimes/`） |
 | `SourceDigest` | 模块源指纹：构建命令、构建期能力、网络开关与全部源文件内容 → 一段稳定指纹（缓存命中的判据） |

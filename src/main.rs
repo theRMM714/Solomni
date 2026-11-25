@@ -241,7 +241,7 @@ fn main() {
     let packages: Arc<dyn units::catalog::packages::api::Packages + Send + Sync> = Arc::new(
         units::catalog::packages::service::PackagesService::with_base(
             Arc::new(units::catalog::packages::detail::FsPackages::new(
-                layout::runtimes(&root),
+                entry::assembly::content(&root).runtimes(),
             )),
             base.clone(),
         ),
@@ -497,6 +497,7 @@ fn main() {
         layout::modules_src(&root),
         units::tools::api::names(),
         module_reserved,
+        entry::assembly::content(&root),
     );
     // **模块子业务**：清单来源与启停覆盖落盘只由它的 service 持有（R12）；它是模块事实的唯一上游。
     let module_state = units::catalog::modules::detail::YamlModuleState::new(

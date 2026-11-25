@@ -270,3 +270,61 @@
   blocked_by: |
     用户范围决定（英文放到之后统一做；本次只交付可切换形状与中文目录）
 
+- id: content-install
+  scope: global
+  level: T3
+  why: |
+    运行包库（`data/runtimes/<包>`）目前只能被读取：`catalog` 的 `PackageSource` 扫描它，
+    `content` 只给出根（`Content::runtimes()`）。安装 / 列已装 / 装前检查的形状已在
+    `content` 的 `ContentInstall` 上（`installed` / `plan_install`），但实现一律返回
+    「还没做」——没有任何指令能把一个运行包装进来，也没有落盘布局（版本目录、清单、校验和）。
+  how: |
+    1) 定落盘布局：`data/runtimes/<包>/<版本>/` + 一份清单（来源、sha256、装入时间）与「当前版本」指向；
+    2) 装入路径走 `ContentInstall::plan_install` → 下载/解包（复用 `provision` 的 `Fetcher` 与归档解包，
+       不另造机制）→ 原子换入（临时目录 + rename），失败不留半份；
+    3) 已装列表从盘上扫清单得出，不信台账；与 `catalog` 的 `PackageSource` 同一口径；
+    4) 用例：装 → 列 → 模块用到该能力 → 卸载（见 `content-remove`）；重复装同版本幂等。
+  accept: |
+    能用一个指令把运行包装进 `data/runtimes` 并立刻被模块发现；同一版本重装幂等；
+    `ContentInstall` 不再返回「还没做」；`node run-tests.js` 全绿。
+  blocked_by: 缺少实现（本期只留形状）
+
+- id: content-remove
+  scope: global
+  level: T3
+  why: |
+    运行包装进来就没有卸载路径：`ContentInstall::remove` 只返回「还没做」。装与卸是一对，
+    只做装会让 `data/runtimes` 只增不减；而删之前必须先判定「有没有模块正在用」，
+    否则正在跑的会话会因为运行包被抽走而失败。
+  how: |
+    1) 判据：按 `catalog` 的模块清单求「谁声明了这个能力」，有活会话或常驻服务在用时如实拒绝并点名；
+    2) 删除粒度是「一个包的一个版本」，当前版本被删时把指向回退或标空，不静默换实现；
+    3) 走 `content` 的端口做文件机制，不直接 `std::fs`（R12）；删完写回清单；
+    4) 用例：装两个版本 → 删一个版本不影响另一个 → 被占用时拒绝并说明。
+  accept: |
+    能卸载指定版本；被模块或会话占用时如实拒绝；`ContentInstall::remove` 不再返回「还没做」；
+    `node run-tests.js` 全绿。
+  blocked_by: 缺少实现（本期只留形状）
+
+- id: content-build-landing
+  scope: global
+  level: T2
+  why: |
+    模块构建产物（`build/`）的落点还没搬进数据根：`content` 已声明落点是
+    `data/modules/<id>/build`（`ModuleArea::build`，`storage` 的模块产物盘点也按它算），
+    但 `builds` 执行时把模块目录本身（安装根的 `modules/<id>`）挂成可写、cwd 就在里面，
+    构建产物因此回写到**源码树**（`src/units/maintenance/builds/service.rs` 的 `cwd: module.root.clone()`
+    与 `grants_of(vec![module.root.clone(), place.state], …)`）。安装根按契约是随包只读内容
+    （打包产物里可能根本不可写），两边现在是矛盾的：源码树会被构建污染，
+    `data/modules/<id>/build` 的占用却是空的。
+  how: |
+    1) 构建的工作目录与回写目标改成模块的**数据区**（`data/modules/<id>`）：源从安装根同步进来
+       （`builds` 的源同步脚本已在做镜像，复用同一套），产物只落数据区；
+    2) 围栏授予同步改：安装根的模块目录退成只读源码，数据区的 `build/` 是唯一可写落点；
+    3) 指纹跳过规则不变（`build/` 与 `userdata/` 不是源）；`storage` 的模块产物盘点自动对上；
+    4) 用例：构建一次后源码树里没有 `build/`，`data/modules/<id>/build` 有产物且能直接跑。
+  accept: |
+    构建后源码树保持不变、产物在 `data/modules/<id>/build`；模块工具仍能直接用产物起进程；
+    `.gitignore` 不再需要为源码树的 `build/` 开洞；`node run-tests.js` 全绿。
+  blocked_by: |
+    本轮范围决定（P2.4 只做路径所有权与私有区，不改编排行为；改落点会动构建挂载与回写）

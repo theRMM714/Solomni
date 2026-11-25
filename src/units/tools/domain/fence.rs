@@ -29,10 +29,9 @@ impl FencePlan {
         plan.grants
             .extend(sb.modules.values().map(Grant::read_tree));
         if let Some(id) = module
-            && sb.modules_with_userdata.contains(id)
-            && let Some(root) = sb.modules.get(id)
+            && let Some(private) = sb.module_data.get(id)
         {
-            plan.grants.push(Grant::write_tree(root.join("userdata")));
+            plan.grants.push(Grant::write_tree(private));
         }
         plan.normalize();
         plan
@@ -50,28 +49,24 @@ impl FencePlan {
         };
         plan.grants
             .extend(sb.modules.values().map(Grant::read_tree));
-        plan.grants.extend(
-            sb.modules_with_userdata
-                .iter()
-                .filter_map(|id| sb.modules.get(id))
-                .map(|root| Grant::write_tree(root.join("userdata"))),
-        );
+        plan.grants
+            .extend(sb.module_data.values().map(Grant::write_tree));
         plan.normalize();
         plan
     }
 
-    /// 目的：**无会话**（人直接跑一个模块工具 / 常驻服务）的围栏——模块目录递归只读 + 它自己的 userdata 可写。
-    /// 约束：这是模块自身进程的口径；agent 的内置文件工具对模块目录（含 userdata）只读。
+    /// 目的：**无会话**（人直接跑一个模块工具 / 常驻服务）的围栏——模块源码递归只读 + 它的私有区可写。
+    /// 参数：`module_root` = 模块源码根（`modules/<id>`）；`private` = 私有区根
+    ///   （`data/modules/<id>/userdata`，由 `content` 单元给）；`work_root` = 替代 HOME 的工作根。
+    /// 约束：这是模块自身进程的口径；agent 的内置文件工具对模块目录（含私有区）只读。
     pub fn standalone(
         module_root: &Path,
+        private: Option<&Path>,
         work_root: Option<&Path>,
-        has_userdata: bool,
     ) -> FencePlan {
-        let userdata = module_root.join("userdata");
         let home = match work_root {
             Some(p) => p.to_path_buf(),
-            None if has_userdata => userdata.clone(),
-            None => PathBuf::new(),
+            None => private.map(|p| p.to_path_buf()).unwrap_or_default(),
         };
         let mut plan = FencePlan {
             agent: "user".to_string(),
@@ -81,9 +76,11 @@ impl FencePlan {
             net: NetPolicy::Off,
             grants: vec![Grant::read_tree(module_root)],
         };
-        // 有自己的 userdata 且它没被 `home` 覆盖时，单独授一份写（模块自己的数据目录）。
-        if has_userdata && plan.home != userdata {
-            plan.grants.push(Grant::write_tree(userdata));
+        // 有私有区且它没被 `home` 覆盖时，单独授一份写（模块自己的数据目录）。
+        if let Some(private) = private
+            && plan.home != private
+        {
+            plan.grants.push(Grant::write_tree(private));
         }
         plan.normalize();
         plan

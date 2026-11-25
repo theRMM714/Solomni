@@ -117,7 +117,7 @@ pub(crate) fn module_of(id: &str) -> Module {
             secrets: Default::default(),
         },
         root: abs(&[id]),
-        has_userdata: false,
+        private: None,
     }
 }
 

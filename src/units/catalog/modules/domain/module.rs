@@ -304,13 +304,15 @@ pub fn check_secrets(m: &ModuleManifest) -> Result<(), String> {
     Ok(())
 }
 
-/// 目的：一个已发现的模块 = 文件夹 + 清单。
+/// 目的：一个已发现的模块 = 源码文件夹 + 清单 + 私有区。
 #[derive(Debug, Clone)]
 pub struct Module {
     pub manifest: ModuleManifest,
+    /// 目的：源码根（`modules/<id>`，随包只读内容）。
     pub root: PathBuf,
-    /// 目的：模块根下有没有 userdata/ 目录（工作区扫描读出的事实；策略层据此决定派不派它）。
-    pub has_userdata: bool,
+    /// 目的：私有区（`data/modules/<id>/userdata`，模块进程的 HOME）。
+    /// 约束：`Some` = 现在可用；`None` = 建不出来（只读挂载、权限不足），策略层据此不派它；形状归 `content` 的 `area`。
+    pub private: Option<PathBuf>,
 }
 
 /// 目的：工具命令的首个 token 若是**模块内的产物入口**（相对路径）就给出它；裸名与绝对路径给 None。

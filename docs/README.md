@@ -43,6 +43,7 @@
 | `vmstore`（虚拟机盘资源，`data/.vm`） | [README.md](vmstore/README.md)、[unit-map.md](vmstore/unit-map.md) |
 | `sessions`（会话盘资源，`data/session`） | [README.md](sessions/README.md)、[unit-map.md](sessions/unit-map.md) |
 | `home`（登记处资源，`data/.home`） | [README.md](home/README.md)、[unit-map.md](home/unit-map.md) |
+| `content`（内容盘资源，`data/modules` 与 `data/runtimes`） | [README.md](content/README.md)、[unit-map.md](content/unit-map.md) |
 | `kernel`（地基库，环 0） | [README.md](kernel/README.md)、[unit-map.md](kernel/unit-map.md) |
 | 根（启动 / 组合根 / 探针 / 守门进程） | [README.md](entry/README.md)、[unit-map.md](entry/unit-map.md) |
 | 前端 / 交付机制（`cli` 与 `web`） | [README.md](presentation/README.md)、[contracts.md](presentation/contracts.md)、[cli/README.md](presentation/cli/README.md)、[web/README.md](presentation/web/README.md) |
