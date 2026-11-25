@@ -19,6 +19,18 @@ pub enum Phase {
     Core,
 }
 
+/// 目的：这条命令要不要常驻运行时（存储自动任务、常驻服务、视图盘与围栏授权）。
+/// 约束：只改一次性命令的启动路径，不改命令语义；判据只有这一处，不另立名单。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Runtime {
+    /// 跑完即回：不占视图盘、不起后台任务、不拉起常驻服务、免围栏授权（只读或只动产品自己的 .home）。
+    #[default]
+    None,
+    /// 要常驻运行时：进会话/生成、Web、常驻服务、模块工具调用。
+    Services,
+}
+
 /// 目的：一条命令的声明。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -45,6 +57,9 @@ pub struct Command {
     /// 目的：最后一步落在哪（core / system / ui）：声明与解析共用，只有执行入口不同。
     #[serde(default)]
     pub executor: super::op::Executor,
+    /// 目的：要不要常驻运行时（缺省 none）：分派点据此决定占不占视图盘、起不起后台任务与常驻服务。
+    #[serde(default)]
+    pub runtime: Runtime,
 }
 
 /// 目的：整张命令表（文件顺序即手册顺序；分组按首次出现排）。

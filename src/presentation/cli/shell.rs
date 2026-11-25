@@ -8,7 +8,7 @@ use crate::capabilities::catalog::modules::api::{Module, Roster, ToolDecl};
 use crate::capabilities::runtime::api::{ActionCall, Caller, Output};
 use crate::capabilities::system::api::System;
 use crate::capabilities::tools::api::{
-    Executor, Op, Phase, ToolSchema, arg_fault_text, parse_op, usage_named,
+    Executor, Op, Phase, Runtime, ToolSchema, arg_fault_text, parse_op, usage_named,
 };
 use serde_json::{Value, json};
 
@@ -597,6 +597,8 @@ pub(crate) fn tool_op(module: &Module, name: &str, decl: &ToolDecl) -> Op {
         phase: Phase::Core,
         executor: Executor::Core,
         confirm: false,
+        // 模块工具真要起被围栏的进程：一律按需要常驻运行时处理。
+        runtime: Runtime::Services,
         schema: ToolSchema {
             desc: decl.desc.clone(),
             params: decl.params.clone(),

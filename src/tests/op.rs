@@ -5,7 +5,7 @@
 
 use crate::capabilities::catalog::modules::api::{Param, ParamType};
 use crate::capabilities::tools::api::{
-    CommandBook, Executor, Op, OpBook, Phase, ToolSchema, complete_op, op_usage, parse_op,
+    CommandBook, Executor, Op, OpBook, Phase, Runtime, ToolSchema, complete_op, op_usage, parse_op,
 };
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -295,6 +295,7 @@ fn broken_declarations_are_reported() {
         phase: Phase::Core,
         executor: Executor::Core,
         confirm: false,
+        runtime: Runtime::None,
         schema: ToolSchema {
             desc: String::new(),
             params: Some(params),
@@ -309,6 +310,15 @@ fn broken_declarations_are_reported() {
     let all = problems.join("；");
     assert!(all.contains("位置序号 1 给了两个参数"), "{all}");
     assert!(all.contains("可选值清单"), "{all}");
+}
+
+/// 自洽检查：启动相在核心装配之前跑完，不许声明需要常驻运行时。
+#[test]
+fn boot_commands_cannot_ask_for_services() {
+    let mut boot = op("setup");
+    boot.runtime = Runtime::Services;
+    let all = OpBook::new(vec![boot]).problems().join("；");
+    assert!(all.contains("不能声明 runtime: services"), "{all}");
 }
 /// 写法：必填的具名旗语不打方括号（缺了就是用法错误，不是可选项）。
 #[test]
@@ -340,6 +350,7 @@ fn required_named_flags_lose_their_brackets() {
         phase: Phase::Core,
         executor: Executor::Core,
         confirm: false,
+        runtime: Runtime::None,
         schema: ToolSchema {
             desc: String::new(),
             params: Some(params),

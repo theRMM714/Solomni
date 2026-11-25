@@ -3,7 +3,7 @@
 //! 不管：手册排版（`src/tests/cli.rs`）与命令行为（各业务测试）。
 //! 联动：`systools/commands.yaml`、`src/capabilities/tools/domain/op.rs`、`src/presentation/cli/boot.rs`、`src/presentation/cli.rs`。
 
-use crate::capabilities::tools::api::{CommandBook, Op, OpBook, Phase};
+use crate::capabilities::tools::api::{CommandBook, Op, OpBook, Phase, Runtime};
 use crate::presentation::cli::catalog;
 use std::sync::OnceLock;
 
@@ -103,6 +103,30 @@ fn table_is_self_consistent() {
     let core = groups(Phase::Core);
     assert_eq!(core.first().map(String::as_str), Some("会话"));
     assert_eq!(core.last().map(String::as_str), Some("系统"));
+}
+
+/// 运行需求：只有真要常驻运行时的命令声明 services；启动相永远走轻量路径。
+#[test]
+fn only_runtime_commands_ask_for_services() {
+    let mut services: Vec<&str> = ops()
+        .ops()
+        .iter()
+        .filter(|op| op.runtime == Runtime::Services)
+        .map(|op| op.id.as_str())
+        .collect();
+    services.sort_unstable();
+    assert_eq!(
+        services,
+        vec!["collab", "diagnose", "proxy", "resident", "single", "web"],
+        "services 只给进会话/生成、Web、常驻服务与模块工具调用"
+    );
+    for op in phase(Phase::Boot) {
+        assert!(
+            op.runtime == Runtime::None,
+            "{} 是启动相命令，不能声明 runtime: services",
+            op.id
+        );
+    }
 }
 
 /// 相位与执行者自洽：启动相只可能是系统能力，转录相不许挂系统能力。
