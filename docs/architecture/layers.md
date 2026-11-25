@@ -52,7 +52,8 @@
 <!-- END:layer-table -->
 
 - **H1（硬判）**：跨单元边只能指向严格更低的环；同环只允许指向 rank 更低的单元（rank 由同环边现算，只回执）。向上依赖与同环逆序都判红（`tests/gates/structure/layers.js`）。
-- **H2（硬判）**：环 1 的单元不得出现 `std::fs/net/process/env/thread`、`tokio`、`reqwest`、`sqlx`，不得有 `ports/` 目录，不得有可变全局（`static mut`、`Mutex`、`RwLock`、`OnceLock`、`lazy_static`），也不得依赖 `kernel`。
+- **H2（硬判）**：环 1 的单元不得出现 `std::fs/net/process/env/thread`、`tokio`、`reqwest`、`sqlx`，不得有 `ports/` 目录，不得有可变全局（`static mut`、`Mutex`、`RwLock`、`OnceLock`、`lazy_static`）。对 `kernel` 只准依赖**纯契约值**（`crate::kernel::contracts` 与 `crate::kernel::api::{types,note}`），禁 `kernel::ports`、`kernel::detail` 与函数式访问器：内核是环 0 的共享内核，`Note`/`Severity` 这类出站词汇若不许环 1 用，就会被各切片复制一份（违反 R15）；反过来 kernel 也不能依赖环 1。判据 `tests/gates/structure/layers.js` 的 `pureProblems`。
+- **H4（硬判）**：一个名字只属于一个契约面。`src/kernel/contracts/*.rs` 与 `src/units/<单元>/api*.rs` 里定义的 pub struct/enum/type，不得在两个契约面上各出现一次；呈现层与入口也不得再造同名类型（那是复制 DTO，不是防腐）。同义模型与翻译只准出现在三处：`src/units/<单元>/detail`、呈现层的屏幕装配、`src/entry`。判据 `tests/gates/structure/values.js` 的 `contractProblems`。
 - **形状（硬判）**：`kernel` 固定环 0；环 1–3 都不许空；盘上每个单元都要归环，表里的单元都要有目录。
 - **改环 = 改架构地位**：写进 PR 说明理由即可，没有 `--write`，也不存在「声明不等于重算就失败」——环是人拍的架构决定，不按依赖深度自动推导。
 - 只回执不判红的三类：同环 rank 序、纯转发边（只 `pub use` 再导出，不算真依赖）、扇出（不设预算，数字说明这个单元在替多少个单元装配）。
@@ -81,6 +82,7 @@
 - 依赖方向 → T0 结构审查的 apiOnly / apiPorts / domainPorts / foreignImpl / coreCycles / reverse / presentation / layers 判据（`tests/gates/structure/dependency.js`、`tests/gates/structure/layers.js`；清单 `node run-tests.js --list`）。
 - 呈现层「每屏许取哪几个单元的 ::api」→ `structure/presentation-inbound`（`tests/gates/structure/presentation-inbound.js`，权威清单 `docs/presentation/inbound.yaml`）：清单外的取用报外溢、清单里没用到的报过期，呈现层内部只许取根、兄弟文件不得互相引用。
 - 环方向、同环 rank、纯层 H2、环表形状与目录全覆盖 → `node tests/gates/structure/layers.js`。
+- 契约唯一家与适配层镜像 DTO（H4）→ `node tests/gates/structure/values.js`。
 - kernel 机制：登记双向对账、同层互依赖、声明层号 == 重算层号、机制成环、内核内部绕道 `api` 面 → `node tests/gates/structure/kernel-mechanisms.js`。
 - 入口分段：登记双向对账、同段互依赖、向上依赖、压不住依赖、成环、`src/entry.rs` 只放 mod 声明 → `node tests/gates/structure/entry-tiers.js`。
 - 结构图与环表渲染 → `node tests/gates/structure/graph.js`：每次跑门禁把四张登记表画成仓库根 `Structure.html`（全景 + 单元环 / kernel 机制 / 入口 / 屏面四视图；点节点下钻到文件、点文件看四槽，左上「返回」或 Esc 逐级回退；永远 pass 只回执），以及 `node tests/docs-sync.mjs`。
