@@ -40,11 +40,11 @@
 
 - `PromptSource` 端口（`units/prompt/ports.rs`，实现在 `detail/yaml_prompts.rs`）按文件装配成
   `Prompts`：各文件的**顶层键合并**成 `core:` 的内容（键在两份文件里重复 = 装配错误，不静默覆盖）；
-- **册子只由提示词能力持有一次**（`units/prompt/service.rs`）：组合根 `prompt::service::load()` 得到
+- **册子只由 `prompt` 单元持有一次**（`units/prompt/service.rs`）：组合根 `prompt::service::load()` 得到
   `Arc<dyn Prompt>`，协调业务持它、协作会话与它**共享同一份**；
-- **别的能力不点字段路径**，取用只有一条路：**按名字取一段**——`Prompt::text(Segment::…)`（原文）
+- **别的单元不点字段路径**，取用只有一条路：**按名字取一段**——`Prompt::text(Segment::…)`（原文）
   或 `Prompt::render(Segment::…, vars)`（渲染）；名字表是 `units/prompt/domain/prompt.rs` 的 `Segment`——
-  **加一段提示词 = 册子加键 + 这里加变体**（缺了编译不过）。运行时回执不由本能力返回。
+  **加一段提示词 = 册子加键 + 这里加变体**（缺了编译不过）。运行时回执不由本单元返回。
 - 渲染（`{{key}}` 替换、缺键 / 缺变量即报错）在 `units/prompt/domain/prompt.rs`（纯逻辑，不读文件）；
 - **工具总表与机制席位不在这份册子里**：`systools/tools.yaml`（工具是什么）与 `src/units/session_model/domain/mechanism.rs` 的 `SEATS`（身份有什么）
   由 `units/tools/detail/yaml_systools.rs` 的 `YamlSystools` 装配成 `SystemTools`，**与册子分开注入**——
@@ -56,6 +56,6 @@
 
 - **只写册子，不写代码**：所有发给 LLM 的指令、身份、协议、环境提示词一律写入本目录，禁止硬编码；运行时回执不在此列。
 - **缺了就报错**：缺文件 / 缺键 / 缺变量都让装配或渲染失败，禁止静默兜底文案；占位符写作 `{{key}}`（渲染器见「二、怎么被装载、怎么被取用」）。
-- **一份册子，一个持有者**：只由提示词能力持有一次并以 `Arc` 共享；别的能力按名字取段，不点字段路径（`Prompt::text` / `render` + `Segment`）。
+- **一份册子，一个持有者**：只由 `prompt` 单元持有一次并以 `Arc` 共享；别的单元按名字取段，不点字段路径（`Prompt::text` / `render` + `Segment`）。
 - **按"谁做决定"分归属**：说话人身份这类结构化字段、只给用户看的呈现文案、运行时回执都不进册子——回执由产生它的模块返回（路径 / 权限拒绝归 workspace，工具回执归 tools，信封与围栏标注归 llm / kernel，清单行归 registry / modules / tools）。
 - **仓库里没有机器路径**：路径占位符由协调业务在运行时替换成真实根目录后才交给 agent。

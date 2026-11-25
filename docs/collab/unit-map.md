@@ -1,7 +1,7 @@
 # 单元地图 · collab
 
 > 定位：collab（协作会话）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-23｜依据：`src/units/collab/api.rs`
+> 效力：契约｜核对：2026-11-25｜依据：`src/units/collab/api.rs`
 
 > 本文是 **collab** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -9,7 +9,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/units/collab/api.rs` | 入站能力面：`CollabSession`（讨论与执行引擎、回合与验收词汇、状态派生的对外名字） |
+| `src/units/collab/api.rs` | 入站面：`CollabSession`（讨论与执行引擎、回合与验收词汇、状态派生的对外名字） |
 | `src/units/collab/service/collab.rs` | 协作会话状态机：名单 / 讨论 / 链 / 裁决队句柄与各关卡登记、处置、快照；`Phase` 说明这一段跑讨论还是执行 |
 | `src/units/collab/service/pump.rs` | 流程泵：按相位推进（讨论段 `pump_discuss`、执行段 `pump_execute`）、收敛后由核心代理写总结（`summarize`）、装配成员（泵不自己调模型） |
 | `src/units/collab/service/lines.rs` | 行外送与待裁决关的派生：行 → 带稳定 id 的事件、状态 → 整队待答的关、增量与审查事件 |

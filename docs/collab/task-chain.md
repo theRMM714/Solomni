@@ -1,7 +1,7 @@
 # 任务链与子会话
 
 > 定位：协作会话如何从讨论走到交付的唯一权威：审查关卡、任务链、子会话、验收与边界语义。
-> 效力：规范｜核对：2026-11-04｜依据：`src/units/pure/taskchain/domain/chain.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/pure/taskchain/domain/chain.rs`
 
 ## 适用与判据
 - 协作会话的建链、派发与验收以本文为准（`docs/collab/task-chain.md`）。

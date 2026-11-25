@@ -16,4 +16,4 @@
 | `src/units/turn_state/domain/flows.rs` | 流程工厂面：`Flows`（id → 造一段）、装配用的 `FlowSetup`、按类型表串段的 `sequence_of`；实现由组合根注入 |
 | `src/units/turn_state/domain/live.rs` | 在世表与运行态：`Session` 两种形态（单 agent / 一个流程槽）、`TurnState`（运行态、创建占位、裁决通道表、shell 活进程槽） |
 | `src/units/turn_state/domain/sequence.rs` | 复合流程：按会话类型表把多个流程串成一条，前一段收尾就把产物交给下一段（`intake`），行号接上；驱动仍只认 `Flow` |
-| `src/units/turn_state/domain/turn.rs` | 会话本体 `Turn`：持状态与能力面，转发全部状态访问器，交出 `session_ports`，给 `running_refusal` 的唯一实现 |
+| `src/units/turn_state/domain/turn.rs` | 会话本体 `Turn`：持状态与端口，转发全部状态访问器，交出 `session_ports`，给 `running_refusal` 的唯一实现 |

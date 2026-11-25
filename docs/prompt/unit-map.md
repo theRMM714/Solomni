@@ -1,7 +1,7 @@
 # 单元地图 · prompt
 
 > 定位：prompt（提示词册）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-04｜依据：`src/units/prompt/api.rs`
+> 效力：契约｜核对：2026-11-25｜依据：`src/units/prompt/api.rs`
 
 > 本文是 **prompt** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -9,8 +9,8 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/units/prompt/api.rs` | 入站能力面：`Prompt` 能力面（按名字取段 / 渲染、机制与环境块）与 `Segment` / `Vars` 词汇 |
-| `src/units/prompt/service.rs` | `Prompt` 能力面的实现与装配入口：把 `api::Prompt` 挂到纯数据的 `Prompts` 上（全进程只有这一处持有者） |
+| `src/units/prompt/api.rs` | 入站面：`Prompt` 入站对象（按名字取段 / 渲染、机制与环境块）与 `Segment` / `Vars` 词汇 |
+| `src/units/prompt/service.rs` | `Prompt` 入站对象的实现与装配入口：把 `api::Prompt` 挂到纯数据的 `Prompts` 上（全进程只有这一处持有者） |
 | `src/units/prompt/ports.rs` | 出站端口：提示词册的加载 `PromptSource` |
 | `src/units/prompt/domain/prompt.rs` | 提示词册的纯数据与渲染层：`{{key}}` 占位替换、段选择、机制 / 工作环境匹配与册子合并（缺键缺变量如实报错） |
 | `src/units/prompt/domain/refs.rs` | 用户输入里 `@work:` / `@sandbox:` 引用到真实路径的改写（纯逻辑）：认前缀、按会话环境写法渲染，越界判定留给 workspace |

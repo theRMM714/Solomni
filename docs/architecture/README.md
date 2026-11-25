@@ -18,8 +18,8 @@
 
 | 要找什么 | 读哪一份 |
 | --- | --- |
-| 新增一个能力、判断它该不该独立 | [boundaries.md](boundaries.md) 的「业务边界判据」→「单元与子业务的分工」（[layers.md](layers.md)） |
-| 动依赖边、给能力归层 | [layers.md](layers.md)：动过边就重算全表 |
+| 新增一个单元、判断它该不该独立 | [boundaries.md](boundaries.md) 的「业务边界判据」→「单元与子业务的分工」（[layers.md](layers.md)） |
+| 动依赖边、给单元归环 | [layers.md](layers.md)：环是人拍板的架构决定 |
 | 给某处 IO 加端口或换适配器 | [ports.md](ports.md) |
 | 新增落盘目录、改布局、加日志埋点、加提示词段 | [state.md](state.md) |
 | 拆文件、判断多大算过大 | [boundaries.md](boundaries.md) 的「粒度上限」 |

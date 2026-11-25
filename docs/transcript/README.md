@@ -18,8 +18,8 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`llm`（`TokenUsage`：`ContextUsage::from_tokens` 的入参）、`tools`（`ObservationFact` / `ShellFacts`：工具调用行的载荷）、`kernel::api::types` 的 `Ask`（`tool_ask` 把端口载荷折成裁决关）。
-- 谁在用我：`conversation`、`turn`、`work`、`runtime`、`presentation` 与测试。
+- 经 `::api` 用到：`kernel`（`api::note` 的 `Note` / `Severity`、`api::types` 的 `Ask`）、`llm`（`TokenUsage`：`ContextUsage::from_tokens` 的入参）、`tools`（`ObservationFact` / `ShellFacts`：工具调用行的载荷）
+- 谁在用我：`agentloop`、`collab`、`conversation`、`presentation`、`proxy`、`runtime`、`session_model`、`turn`、`turn_state`、`work`
 
 ## 一、为什么是独立单元
 

@@ -19,8 +19,8 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：无（环 1，只依赖标准库与 serde）。
-- 谁在用我：`vm`、`provision`、`maintenance`、`system`、`runtime`、`turn`、`work`、`workspace`、`conversation`、`presentation`。
+- 经 `::api` 用到：无（环 1，只依赖标准库与 `serde`）
+- 谁在用我：`agentloop`、`catalog`、`conversation`、`maintenance`、`presentation`、`provision`、`residents`、`runtime`、`session_model`、`system`、`turn`、`vm`、`work`、`workspace`
 
 ## 一、为什么是独立单元
 

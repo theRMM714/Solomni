@@ -1,7 +1,7 @@
 # 单元地图 · workspace
 
 > 定位：workspace（工作区）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-04｜依据：`src/units/workspace/api.rs`
+> 效力：契约｜核对：2026-11-25｜依据：`src/units/workspace/api.rs`
 
 > 本文是 **workspace** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -9,7 +9,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/units/workspace/api.rs` | 入站能力面：寻址 / 文件视图 / 共享区版本化 / 备份恢复的契约与共享类型，以及外部工作区根策略（`product_root` / `policy` / `resolve` / `ambient` / `recheck`）的导出（其它能力只准用这里） |
+| `src/units/workspace/api.rs` | 入站面：寻址 / 文件视图 / 共享区版本化 / 备份恢复的契约与共享类型，以及外部工作区根策略（`product_root` / `policy` / `resolve` / `ambient` / `recheck`）的导出（其它能力只准用这里） |
 | `src/units/workspace/service.rs` | 门面与底座：`Workdirs` / `WorkStore` 只在这里（R12）；`WorkspaceService` 的构造、实例级 gate、树回溯、恢复事务、提交号预留、待恢复事务与外部工作区冲突核校；`work_gate_info` 的受管判定与当前 / 基线版本快照 |
 | `src/units/workspace/service/roots.rs` | 外部工作区根的策略：按档位判网络路径 / 共享根 / 文件系统根 / UTF-8 与产品根的互包含（文本 + 落点身份），并做目录与可写探测；创建走 `resolve`，CLI 启动目录走 `ambient`（同一条阶梯、不探可写），加载复检走 `recheck`，三种用法共用同一份 `policy` 与 `check_bounds` |
 | `src/units/workspace/service/commit.rs` | 提交族：`commit_locked` 的两条线分派与对象落盘、`refs/agents/<agent>`（发布线）与 `refs/agents/<agent>/saves`（存档线）的读写、归档点、树铺设、归档清理、存档提交与用户提交 |

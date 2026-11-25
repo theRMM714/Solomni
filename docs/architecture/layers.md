@@ -79,7 +79,7 @@
 - 与前两张表的一个刻意差别：段号表达**启动阶段职责**，不是按依赖重算的最小层。`startup` 在入口内没有依赖，声明第 1 段是为了让它排在值层之后、装配之前；这类「比依赖深度松」的声明不算错（只有压不住依赖才失败）。
 
 ## 检查
-- 依赖方向 → T0 结构审查的 apiOnly / apiPorts / domainPorts / foreignImpl / coreCycles / reverse / presentation / layers 判据（`tests/gates/structure/dependency.js`、`tests/gates/structure/layers.js`；清单 `node run-tests.js --list`）。
+- 依赖方向 → T0 结构审查的 apiOnly / foreignImpl / coreCycles / reverse / presentation / layers / internal 判据（`tests/gates/structure/dependency.js`、`tests/gates/structure/capability.js`、`tests/gates/structure/layers.js`；清单 `node run-tests.js --list`）。
 - 呈现层「每屏许取哪几个单元的 ::api」→ `structure/presentation-inbound`（`tests/gates/structure/presentation-inbound.js`，权威清单 `docs/presentation/inbound.yaml`）：清单外的取用报外溢、清单里没用到的报过期，呈现层内部只许取根、兄弟文件不得互相引用。
 - 环方向、同环 rank、纯层 H2、环表形状与目录全覆盖 → `node tests/gates/structure/layers.js`。
 - 契约唯一家与适配层镜像 DTO（H4）→ `node tests/gates/structure/values.js`。

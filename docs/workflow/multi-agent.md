@@ -1,7 +1,7 @@
 # 多 agent 工作流
 
 > 定位：多个 agent 并行调查或实施：Lead 开工、派发、逐片集成与收口细则。
-> 效力：规范｜核对：2026-11-14｜依据：`AGENTS.md`
+> 效力：规范｜核对：2026-11-25｜依据：`AGENTS.md`
 
 ## 适用与判据
 
@@ -121,7 +121,7 @@
 
 ## 八、完整示例：task/export-csv
 
-- 分片：A 核心导出（`src/units/export/`）；B CLI 接入，依赖 A；C 文档，依赖 A。
+- 分片：A 核心导出（在 `src/units/` 下新建单元）；B CLI 接入，依赖 A；C 文档，依赖 A。
 - Lead 按 [AGENTS.md](../../AGENTS.md) 的「六、请求受理」建 `task/export-csv` 分支与 Draft PR，然后建 A 的 worktree 并派发：
 
   ```sh

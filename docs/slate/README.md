@@ -1,7 +1,7 @@
 # slate（名单）
 
 > 定位：按需求提出名单并收束；无状态、无端口。
-> 效力：规范｜核对：2026-11-04｜依据：`src/units/conversation/slate/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/conversation/slate/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -15,9 +15,9 @@
 - 状态归属：不持有状态；名单与参与方事实都由调用方传入、调用方持有。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
-
-- 经 `::api` 用到：`llm`、`modules`、`prompt`、`registry`、`session`、`tools`
-- 谁在用我：`collab`、`runtime`
+- 所属单元：`conversation`（环 3）；本页的子业务同单元的 `session` 子业务直接调用，不经 `api`。
+- 本子业务经 `::api` 用到：`agentloop`、`catalog`（`modules` / `registry`）、`llm`、`prompt`、`registry_model`、`tools`、`transcript`
+- 谁在用本子业务：`collab`、`work`
 
 ## 改动本单元时必须同步
 

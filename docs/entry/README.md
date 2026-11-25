@@ -1,21 +1,21 @@
 # entry（根：启动、组合根与探针）
 
 > 定位：根——启动程序、组合根、内部协议探针、围栏守门进程与长驻子进程守门进程；依赖图最外层，不是业务层。
-> 效力：规范｜核对：2026-11-21｜依据：`src/main.rs`、`docs/entry/layers.yaml`
+> 效力：规范｜核对：2026-11-25｜依据：`src/main.rs`、`docs/entry/layers.yaml`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
 - 管：根共用机制——产品根规范化（`src/entry/root.rs`）与启动期基础工具链 PATH（`src/entry/toolchains.rs`）。
-- 管：组合根（`src/main.rs`）——跑启动对账、把入站能力面交给 CLI 或 Web；适配器与能力面统一在 `src/entry/assembly.rs` 装配。
+- 管：组合根（`src/main.rs`）——跑启动对账、把入站面交给 CLI 或 Web；适配器与入站面统一在 `src/entry/assembly.rs` 装配。
 - 管：内部协议探针与隐藏模式（`src/entry/probes/`：围栏环境与机制验证、出站 HTTPS、解归档、路由目录）。
 - 管：两个守门模式（`src/guard.rs`）——围栏 `--fence-run`、长驻子进程 `--proc-watchdog`，以及围栏台账的按条处置。
-- 不管：没有业务语义；产品命令（`--doctor` / `--provision` / `--gc` / `--storage` / `--work-gc` / `--build`）归启动相命令面，语义在 `system` 能力（见 [docs/system](../system/README.md)）。
-- 不管：任何能力都不许依赖本单元（`run-tests.js` 的依赖方向门禁）。
+- 不管：没有业务语义；产品命令（`--doctor` / `--provision` / `--gc` / `--storage` / `--work-gc` / `--build`）归启动相命令面，语义在 `system` 单元（见 [docs/system](../system/README.md)）。
+- 不管：任何单元都不许依赖本单元（`run-tests.js` 的依赖方向门禁）。
 
 ## 入站契约与状态归属
 
-- 入站面：本单元不对外提供能力 API；`src/main.rs` 装配核心后把面袋 `presentation::faces::Faces` 交给呈现层。
+- 入站面：本单元对单元不提供入站契约；`src/main.rs` 装配核心后把面袋 `presentation::faces::Faces` 交给呈现层。
 - 状态归属：本单元不持有业务状态；启动期读写的围栏台账与进程账分别归 `kernel` 的 `confine` 与 `procs`。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
@@ -28,10 +28,10 @@
 - 先处理**不需要装配核心**的模式：`--proc-watchdog`、`--fence-run`、`--https-check`、`--unpack`、`--print-fence-env`、`--fence-verify`、`--print-routes`。
 - 再解析全局旗语（`src/presentation/cli/argv.rs`）：`--root <路径>` / `--web` / `--port <n>` / `--plain` / `--no-anim` / `--no-workspace` / `-h, --help` / `-v, --version`；写错直接报错退出 2，`--help` 与 `--version` 不装配核心。`--setup [模式]` 不在这里——它是启动相命令，与其它维护命令一样由命令表识别、由启动相执行。
 - 产品根：`--root <路径>`，缺省 `.`；相对路径与当前目录做纯词法拼接，取不到当前目录才退回 `canonicalize`（Windows 上剥掉 `\\?\` 前缀）。
-- **便携维护**（`--setup [模式]`）是启动相命令，命令行与转录中心提示符两条入口一个实现：工具链就位后由 `src/presentation/cli/boot.rs` 把模式名翻成 `SetupMode` 交 `system` 能力，写入实现（注册表、shim、ACL）在 `src/units/system/detail/setup.rs`，启动期的只读对账在 `src/entry/portable.rs`（只经 `SetupOps` 端口取缺项与预授，见 [docs/system](../system/README.md)）。模式：`path` 生成 `bin/solomni.cmd` 并把产品根的 `bin` 追加进用户 PATH，`unset` / `undo` 摘除或按备份还原，`status` 打印 JSON（缺省模式），`fence` 做围栏机器级预授并退役旧的全应用包机器级授权，预授成功后把授权记进设置（`sandbox.policy.windows.write_acl: true`，经登记处校验后落盘；写失败只把回执降级成一行 `[便携] 未写 …：原因`，预授本身仍算成功），`all` = path + fence。这些模式不读登记处；**启动期的诊断（工具链 / 围栏 / 进程 / 便携 / 沙箱授权）一律走 stderr**，stdout 只留给命令结果——所以 `--setup status --json` 与转录相的一次性命令（`--json modules`、模块手册与工具、`work` …）的 stdout 都能整段进管道与 `JSON.parse`。`--setup=path` 写出的 `bin/solomni.cmd` 把 `--root` 固定到**安装根**（shim 自身所在目录的上一级），所以经 shim 调用时产品根不再取决于当前目录；直接运行 `solomni.exe` 且未给 `--root` 时，根仍按上一条取当前目录。
+- **便携维护**（`--setup [模式]`）是启动相命令，命令行与转录中心提示符两条入口一个实现：工具链就位后由 `src/presentation/cli/boot.rs` 把模式名翻成 `SetupMode` 交 `system` 单元，写入实现（注册表、shim、ACL）在 `src/units/system/detail/setup.rs`，启动期的只读对账在 `src/entry/portable.rs`（只经 `SetupOps` 端口取缺项与预授，见 [docs/system](../system/README.md)）。模式：`path` 生成 `bin/solomni.cmd` 并把产品根的 `bin` 追加进用户 PATH，`unset` / `undo` 摘除或按备份还原，`status` 打印 JSON（缺省模式），`fence` 做围栏机器级预授并退役旧的全应用包机器级授权，预授成功后把授权记进设置（`sandbox.policy.windows.write_acl: true`，经登记处校验后落盘；写失败只把回执降级成一行 `[便携] 未写 …：原因`，预授本身仍算成功），`all` = path + fence。这些模式不读登记处；**启动期的诊断（工具链 / 围栏 / 进程 / 便携 / 沙箱授权）一律走 stderr**，stdout 只留给命令结果——所以 `--setup status --json` 与转录相的一次性命令（`--json modules`、模块手册与工具、`work` …）的 stdout 都能整段进管道与 `JSON.parse`。`--setup=path` 写出的 `bin/solomni.cmd` 把 `--root` 固定到**安装根**（shim 自身所在目录的上一级），所以经 shim 调用时产品根不再取决于当前目录；直接运行 `solomni.exe` 且未给 `--root` 时，根仍按上一条取当前目录。
 - 建成核心、进主循环之前分配**视图盘**（仅 Windows）：产品根映射成本实例独占的盘符并登记当前 pid 与进程创建时刻（pid 会被系统复用，创建时刻对不上就不算自己的），shell 这类 cwd == 私有沙箱的调用里，容器 cwd 与模型看到的路径用视图写法（模块工具沿用宿主 cwd，不参与视图盘收敛），宿主真实路径由路径码翻译；正常退出释放映射与登记；Ctrl+C / 关窗 / 注销 / 关机这类控制台终止由分配时装上的控制台钩子先撤（映射与登记一起，进程随后照常终止）；崩溃 / 被强杀来不及跑的残留——盘符映射是登录会话级的，进程死了也还在——由**每次启动**的清扫把记录与映射一起摘掉，扫完没有条目就连记录文件一起删，不留空数组。**只有真正跑会话/服务/工具的主流程才分配**——一次性命令（命令表里 `runtime: none`：`modules`、手册、`work` …）、启动相命令、维护旗与探针都是早退路径（`std::process::exit` 不走 Drop），分配了必然泄漏盘符，它们只调用「只清扫不分配」的入口。`SOLOMNI_VIEW_DRIVE=0` 是排障用的逃生口（关闭后行为与旧版一致）；分配失败只打一行 `[围栏]` 回退真实路径，不阻断启动。
 - 根解析后立即应用**基础工具链**：读 `.tools/toolchains/active.json`（由 provision 的 `kind: toolchain` 写入），把项目内 `bin` 前置到 PATH；目标不符 / 路径不安全 / bin 不在场只报告，不阻断启动。**每次启动**都打印基础 profile 的项目内 / 宿主回退（Windows 探围栏能否授权）/ 缺失与补全指令；之后 `--doctor`、`--build`、会话工具与常驻服务都看这份生效 PATH。
-- 产品维护命令不由入口分派：工具链就位后，`flags.command` 交给启动相（`src/presentation/cli/boot.rs`，经 `system` 能力执行）。围栏台账系列（`--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke <SID> <路径>` / `--fence-profile-rm` / `--fence-clean`）仍留在入口：只需要产品根，不装配核心；撤授权按 SID + 路径两个参数，其它 arity 打用法退 2。
+- 产品维护命令不由入口分派：工具链就位后，`flags.command` 交给启动相（`src/presentation/cli/boot.rs`，经 `system` 单元执行）。围栏台账系列（`--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke <SID> <路径>` / `--fence-profile-rm` / `--fence-clean`）仍留在入口：只需要产品根，不装配核心；撤授权按 SID + 路径两个参数，其它 arity 打用法退 2。
 - 装配期失败一律打印 `[装配失败]` 并以 1 退出（`src/main.rs`）：登记处四份 yaml 读不了、提示词册缺文件 / 缺键、工具总表与机制面不自洽、模块清单装配失败、隐秘字段加载失败、核心执行线程起不来；日志文件起不来只降级到 stderr（进程继续）。
 - **启动对账**在会话开工前跑两份：围栏授权台账（`confine::reconcile`）与长驻子进程账（`ProcessBook::reconcile`，`.home/processes.json`）。
   - 围栏台账只回收归属明确已死的授权。
@@ -80,22 +80,22 @@
 ## 三、入口内部分层（`layers.yaml`）
 
 - 唯一权威：[`layers.yaml`](layers.yaml)，一行一条「模块: 层号」；模块名＝`src/entry` 下的文件名/目录名（目录算一个模块），编排根单列成 `main`（`src/main.rs`）。`src/entry.rs` 只是 mod 声明，不参与分层——混进代码就失败。
-- 四段（数字大＝更靠上、更晚接进流程）：**值层**（`root` / `toolchains` / `probes`：只读事实与纯值）→ **判定层**（`startup` / `portable`：只决定能不能开工）→ **装配层**（`assembly` / `web` / `args`：把端口接成能力面、把面袋交给呈现层）→ **编排层**（`main`：只串流程）。
+- 四段（数字大＝更靠上、更晚接进流程）：**值层**（`root` / `toolchains` / `probes`：只读事实与纯值）→ **判定层**（`startup` / `portable`：只决定能不能开工）→ **装配层**（`assembly` / `web` / `args`：把端口接成入站面、把面袋交给呈现层）→ **编排层**（`main`：只串流程）。
 - 判据（T0 的 `structure/entry-tiers`，与 [kernel 机制表](../kernel/README.md) 同构）：① 盘上的模块必须在表里、表里的模块必须在盘上；② 依赖边的目标段必须**严格更低**——同段互相依赖与向上依赖都失败，因此不可能成环；③ 声明段号必须压住它的全部依赖（压不住失败）。
 - 段是**启动阶段职责**，不是依赖深度的副作用：比依赖深度松不算错（例如 `startup` 没有入口内依赖，声明第 1 段是为了让它排在值层之后、装配之前）。这一点与 kernel 机制表不同——那张表的层号是按依赖重算的事实缓存，写宽就失败。
-- 不在本表：`src/guard/`（围栏守门与长驻子进程守门进程）——它们是入口拉起的**独立子进程**，不是启动流程的一段，依赖方向由 `tests/gates/structure/dependency.js` 的跨单元规则管。
+- 不在本表：`src/guard.rs`（围栏守门 `--fence-run` 与长驻子进程守门 `--proc-watchdog` 的第二个程序入口，由 `src/main.rs` 分发）——它们是入口拉起的**独立子进程**，不是启动流程的一段，依赖方向由 `tests/gates/structure/dependency.js` 的跨单元规则管。
 - 只回执不判红：扇出（数字说明一处装配了多少模块）。
 - 检查与重算提示：`node dev.js run -- node tests/gates/structure/entry-tiers.js`。
 
 ## 改动本单元时必须同步
 
-- 便携维护（`--setup`）的行为一改 → 同步 `docs/system/`（实现在 system 能力）、本页的启动期对账说明（`src/entry/portable.rs`）、[docs/permission/README.md](../permission/README.md) 与 `tests/gaps.yaml` 的平台缺口。
+- 便携维护（`--setup`）的行为一改 → 同步 `docs/system/`（实现在 `system` 单元）、本页的启动期对账说明（`src/entry/portable.rs`）、[docs/permission/README.md](../permission/README.md) 与 `tests/gaps.yaml` 的平台缺口。
 - 新增端口 / 适配器 → 改 `src/entry/assembly.rs` 装配；新增探针或隐藏模式 → 同步本页、`docs/entry/unit-map.md` 与 [docs/testing/execution-ci.md](../testing/execution-ci.md)。
 - 新增或改产品命令 → 改 `systools/commands.yaml`；操作数解析在 `src/units/tools/domain/op.rs`（声明派生），执行分派在 `src/presentation/cli/boot.rs`（启动相，经 `system` 能力）与 `src/presentation/cli.rs`（转录相），一致性由 `src/tests/commands.rs` 锁死。
 - 路由目录的机器比对在 `src/tests/routes.rs` ↔ [docs/presentation/contracts.md](../presentation/contracts.md)。
 - 启动对账或进程账字段一改 → 同步 [kernel 的「长驻子进程的账与回收」](../kernel/README.md) 与本页的呈现说明。
 - 新增 / 删除 / 移动 `src/entry/` 下的文件或改内部依赖 → 同步 [`layers.yaml`](layers.yaml) 与 [`unit-map.md`](unit-map.md)：前者按模块归段（同段不许互相依赖），后者逐文件对账。
-- 测试缺口：本单元**不是业务能力**，没有独立的缺口账；缺口记在 `tests/gaps.yaml`；格式见 [docs/testing/gaps-acceptance.md](../testing/gaps-acceptance.md) 的「缺口账」。
+- 测试缺口：本单元是组合根、不是业务单元，没有独立的缺口账；缺口记在 `tests/gaps.yaml`；格式见 [docs/testing/gaps-acceptance.md](../testing/gaps-acceptance.md) 的「缺口账」。
 
 ## 本目录
 

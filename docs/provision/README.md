@@ -1,14 +1,14 @@
 # provision（依赖补齐）
 
 > 定位：把「不预置、不分发」的依赖按清单下载、解包进产品内，并管一次补齐作业。
-> 效力：规范｜核对：2026-11-04｜依据：`src/units/provision/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/provision/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
 - 管：内嵌 `dependencies.yaml`（依赖清单）与 `links.yaml`（下载源台账）、本机状态（缺什么、装到哪、从哪来）、下载缓存（`.vm/cache`）、解包落盘（`kernel::detail::unpack`）、一次后台补齐作业（进度 / 取消），**本机有哪些长驻子进程在跑**（读 `kernel::detail::procs` 的账：用途、归属、起止），以及**宿主工具路径的取法**（`tool_path`：qemu / virtiofsd / smbd 的登记值优先、装好的兜底）。
 - 不管：虚拟机档的能力语义与档位判定（在 `vm`）。
-- 不管：构建期工具链的引导（本机档由 `env.js` 在宿主 `cc` 不可用时按同一清单装项目内 Zig；虚拟机档由 guest 的运行能力提供——都不是本能力）。
+- 不管：构建期工具链的引导（本机档由 `env.js` 在宿主 `cc` 不可用时按同一清单装项目内 Zig；虚拟机档由 guest 的运行能力提供——都不是本单元）。
 - 不管：界面怎么展示（在 `presentation`）。
 
 ## 入站契约与状态归属
@@ -22,8 +22,8 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`vm`（`guest-runtime` 的运行期编排要起 guest：`guest_start` / `guest_wait_agent` / `guest_run` / `guest_stop`）；另经 kernel 的机制 `outbound` / `unpack`。
-- 谁在用我：`runtime`（`Faces` 的 `provision` 字段与 `GuestBase` 等类型；宿主工具路径经 `tool_path` 取）、`presentation`（setup 路由）、`system`（`--provision`）。
+- 经 `::api` 用到：`exec_model`、`kernel`、`vm`、`workspace`
+- 谁在用我：`entry`、`maintenance`、`presentation`、`runtime`、`system`、`work`
 
 ## 一、安装方式（清单 `kind`）
 
@@ -103,7 +103,7 @@
 
 - 主程序**每次判据取用时**自动采用项目内补齐的可执行文件（`api::Provision::tool_path` 未登记时；显式登记优先，取到的是拼接产品根后的绝对路径）——装完即生效，不需要重启进程。
 - 共享后端全部在装配期持有，哪一档在起 guest 那一刻按候选挑（见 [docs/vm/README.md](../vm/README.md) 的「多平台组合」）。
-- 补齐面与会话面是**两份 vm 能力面**：补齐面只持内部 `none`（运行期编排只经 QGA，不挂载），会话面只持用户档；`none` 不进用户候选链——否则 `clients` 为空的 guest 会被静默当成无共享启动。
+- 补齐面与会话面是**两份 vm 入站面**：补齐面只持内部 `none`（运行期编排只经 QGA，不挂载），会话面只持用户档；`none` 不进用户候选链——否则 `clients` 为空的 guest 会被静默当成无共享启动。
 
 ## 八、作业与进度
 

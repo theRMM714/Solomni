@@ -1,6 +1,6 @@
 # 模块契约（MODULE_SPEC）
 > 定位：模块作者与核心之间的全部约定：一个模块长什么样、`module.yaml` 怎么写、字段与拒收条件。
-> 效力：契约｜核对：2026-11-04｜依据：`src/units/catalog/modules/domain/module.rs`
+> 效力：契约｜核对：2026-11-25｜依据：`src/units/catalog/modules/domain/module.rs`
 
 ## 结构
 ```text

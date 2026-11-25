@@ -1,7 +1,7 @@
 # Rust 开发规范
 
 > 定位：Rust 源码的模块布局、格式与静态检查、unsafe 边界、跨平台机制、依赖与测试入口的唯一规范。
-> 效力：规范｜核对：2026-11-17｜依据：`Cargo.toml`、`tests/gates/structure/cfg-boundaries.js`
+> 效力：规范｜核对：2026-11-25｜依据：`Cargo.toml`、`tests/gates/structure/cfg-boundaries.js`
 
 ## 适用与判据
 - 写或改 `.rs`、`Cargo.toml`、`deny.toml` 与模块目录结构时以本文为准；违反由 `node run-tests.js` 的结构审查、`node dev.js fmt` 与 `node dev.js clippy` 判定。
@@ -12,8 +12,8 @@
 - 入口与子模块目录并列，入口只做子模块声明与重导出，实现留在子模块里（`src/units/maintenance/builds.rs`）：
 
 ```text
-units/
-├── builds.rs            # 模块入口：声明 api / ports / service / detail
+units/maintenance/
+├── builds.rs            # 子业务入口：声明 api / ports / service / detail
 ├── builds/
 │   ├── api.rs
 │   ├── ports.rs

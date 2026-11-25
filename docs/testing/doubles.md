@@ -1,7 +1,7 @@
 # 测试替身与 Fake 专项验收
 
 > 定位：替身语义的唯一权威：Stub / Fake / Mock / Spy / Fixture 的规范与端口测试矩阵。
-> 效力：规范｜核对：2026-11-06｜依据：`src/tests/doubles/`
+> 效力：规范｜核对：2026-11-25｜依据：`src/tests/doubles/`
 
 ## 适用与判据
 - 写或验收测试替身、新增端口时以本文为准（`docs/testing/doubles.md`）。
@@ -51,14 +51,14 @@
 | `src/tests/doubles/:RecordingFence` | 围栏释放记录型 Spy | 已钉住"按会话释放"与"一次性调用按次释放"两类请求 |
 | `src/kernel/ports.rs:NoopLog` | 无声日志 Stub | 已存在；不用于验证日志内容 |
 | `src/tests/doubles/:FixedProbe` / `TestHostProbe` | 宿主探测 Fake（按声明回答路径 / 可执行文件 / 虚拟化）；`TestHostProbe` 用真实路径事实，但把平台共享工具视为在场 | `FixedProbe` 用于 T2 契约用例；Core 级装配用 `TestHostProbe`（要 scratch 目录的真实存在性，又不让测试依赖机器是否装了 smbd/virtiofsd） |
-| `src/tests/doubles/:NoopLogOps` | 日志能力 Stub（入站能力面） | 已用于路由契约测试（呈现层不需要它做判定） |
+| `src/tests/doubles/:NoopLogOps` | 日志单元 Stub（入站面） | 已用于路由契约测试（呈现层不需要它做判定） |
 | `src/tests/doubles/:StandIn` | 流程面替身：与协作无关的最小流程（让出一步 → 吸收 → 收工 → 处置自己的关卡），只发自己的 `Push` 事件 | 已用于 `src/tests/flow.rs`：钉住"驱动只认 `session::api::Flow`，加流程不必改 turn / work / runtime / lifecycle / presentation / session"；第二例钉住关卡处置也走流程面（`settle` / `settles_inline`） |
 | `tests/cross-platform/e2e/mock.js` | 本地假供应商服务 | 已用于 T5；应覆盖协议错误、断开、延迟等场景 |
 
 ### 1.3 Mock
 
 - **Mock 只写在边界**：模拟网络、第三方 API、不可控的外部服务（HTTP / 进程 / 协议）。那里的请求形状与错误回执是必须钉死的外部契约——`src/tests/detail/http.rs` 的本地假供应商与 `tests/cross-platform/e2e/mock.js` 就是这一类。
-- **内部协作不用 Mock**：能力之间、能力与端口之间一律用 fake 的内存实现（`src/tests/doubles/`），不断言内部调用次数、调用顺序或私有方法。耦合实现的期望在重构时只会制造假失败，也正是「实现耦合测试」的来源（门禁 `structure/tests-api`）。
+- **内部协作不用 Mock**：单元之间、单元与端口之间一律用 fake 的内存实现（`src/tests/doubles/`），不断言内部调用次数、调用顺序或私有方法。耦合实现的期望在重构时只会制造假失败，也正是「实现耦合测试」的来源（门禁 `structure/tests-api`）。
 - 本项目不要求引入第三方 mocking 框架：边界假供应商用手写的最小 HTTP / 进程服务即可，减少依赖与跨平台不确定性。
 
 ### 1.4 Spy
@@ -162,16 +162,16 @@
 | `Log` | `NoopLog`（Stub）、`RecordingLog`（记录 `(级别, 位置, 文案)`，供"事实被记进日志"的断言） | `RecordingLog` 可查 | 不适用 | 不适用 | `FileLog`（三个级别都落盘） | 已验收 |
 | `HostProbe` | `FixedProbe`（只按声明回答）、`TestHostProbe`（真实事实 + 平台共享工具视为在场） | 不适用 | 不适用 | 不适用 | `HostProbeAdapter`（真实路径事实；PATH 上不存在的名字如实说没有） | 已验收 |
 
-- **持有者（R12）**：`ModuleSource` / `ModuleStateStore` 只由 `modules::service.rs` 持有（别的能力经 `modules::api::ModulesOps` 要清单与启停有效值）；`PackageSource` 只由 `packages::service.rs` 持有（别的能力经 `packages::api::Packages` 要运行包库）；`Workdirs` / `WorkStore` 只由 `workspace::service.rs` 持有（别的能力经 `workspace::api::Workspace` 要目录与版本库用例）；`SourceDigest` / `BuildStates` / `BuildCache` 只由 `builds::service.rs` 持有（别的能力经 `builds::api::Builds` 要"确保产物可用"）；`SpaceSurvey` / `SpaceReclaim` / `GuestLiveness` 只由 `storage::service.rs` 持有（别的能力经 `storage::api::Storage` 要空间报告、headroom 与清理）；`Fetcher` / `HostFs` / `Ledger` / `Installers` / `GuestImage` / `Procs` 只由 `provision::service.rs` 持有（别的能力经 `provision::api::Provision` 要状态、装依赖、起取消）。
+- **持有者（R12）**：`ModuleSource` / `ModuleStateStore` 只由 `modules::service.rs` 持有（别的单元经 `modules::api::ModulesOps` 要清单与启停有效值）；`PackageSource` 只由 `packages::service.rs` 持有（别的能力经 `packages::api::Packages` 要运行包库）；`Workdirs` / `WorkStore` 只由 `workspace::service.rs` 持有（别的能力经 `workspace::api::Workspace` 要目录与版本库用例）；`SourceDigest` / `BuildStates` / `BuildCache` 只由 `builds::service.rs` 持有（别的能力经 `builds::api::Builds` 要"确保产物可用"）；`SpaceSurvey` / `SpaceReclaim` / `GuestLiveness` 只由 `storage::service.rs` 持有（别的能力经 `storage::api::Storage` 要空间报告、headroom 与清理）；`Fetcher` / `HostFs` / `Ledger` / `Installers` / `GuestImage` / `Procs` 只由 `provision::service.rs` 持有（别的能力经 `provision::api::Provision` 要状态、装依赖、起取消）。
 
-- `Log`、`PathCodec`、`ToolHandler`、`HostProbe`、`AskUser`、`ProcessRunner`、`SessionHost` / `Session` 与 `FenceHost` 是**不在某个能力 `ports.rs`** 的端口：它们在 `src/kernel/ports.rs`（地基库单元 `kernel`，无领域语义，R12 的例外）。
+- `Log`、`PathCodec`、`ToolHandler`、`HostProbe`、`AskUser`、`ProcessRunner`、`SessionHost` / `Session` 与 `FenceHost` 是**不在某个单元 `ports.rs`** 的端口：它们在 `src/kernel/ports.rs`（地基库单元 `kernel`，无领域语义，R12 的例外）。
 - 见 [../kernel/unit-map.md](../kernel/unit-map.md)。
 
 - "已验收"指该端口在 `src/tests/` 的契约测试里有成功、失败、空 / 边界与交互记录的断言；真实实现另见 `detail.rs`、`tests/<平台>/` 与 `tests/cross-platform/e2e/`。
 
 ## 检查
 - 替身契约 → `src/tests/ports.rs` 与 `src/tests/fakes.rs`。
-- 端口矩阵 → `src/tests/doubles/` 与各能力契约用例。
+- 端口矩阵 → `src/tests/doubles/` 与各单元契约用例。
 
 ## 路由
 - 测试层级与判定：[levels.md](levels.md)

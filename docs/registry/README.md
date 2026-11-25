@@ -1,6 +1,6 @@
 # registry（登记处）
 > 定位：供应商 / 模型 / agent / 设置四份 yaml 的内存形态、解析链、写面与探测行为（值形态——agent、供应商、模型与思考档位——在环 1 的 [`registry_model`](../registry-model/README.md)）。
-> 效力：规范｜核对：2026-11-04｜依据：`src/units/catalog/registry/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/catalog/registry/api.rs`
 
 ## 管什么 / 不管什么
 - 管：四份 yaml 的内存形态与用例、解析链（含思考强度目录与模型映射）、agent 登记处的写用例与代拟名单落地、密钥回显边界。
@@ -8,14 +8,15 @@
 
 ## 入站契约与状态归属
 - 呈现层队列面：`api::RegistryOps`（登记 / 移除 / 设核心默认 / 探测 / 改设置）。
-- 能力面：`api::Registry`（读 `&self`、写 `&mut self`；`probe_replay_shape` 只读）。
+- 入站面：`api::Registry`（读 `&self`、写 `&mut self`；`probe_replay_shape` 只读）。
 - 状态住在协调业务的执行线程上，靠单线程命令队列互斥，不额外上锁。
 - 出站端口 `SettingsStore` 只由 `service.rs` 持有。
 - 落盘形态归本单元：`.home/` 下四份 yaml，读写与解析在 `src/units/catalog/registry/detail/yaml_settings.rs`。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
-- 经 `::api` 用到：`kernel`、`llm`、`modules`、`permission`、`prompt`、`session`、`registry_model`
-- 谁在用我：`cli`、`collab`、`runtime`、`slate`；`web` 经 `Faces.registry`（`RegistryOps`）调用
+- 所属单元：`catalog`（环 2）；本页的子业务同单元的 `modules` / `packages` / `secrets` 子业务直接调用，不经 `api`。
+- 本子业务经 `::api` 用到：`catalog`（`modules`）、`exec_model`、`kernel`、`llm`、`permission`、`registry_model`、`workspace`
+- 谁在用本子业务：`collab`、`conversation`（`slate`）、`entry`、`lifecycle`、`presentation`（`Faces.registry` 的 `RegistryOps`）、`runtime`、`turn`（`env` / `turn`）、`turn_state`、`work`
 
 ## 一、工具调用探测（`--probe-tools`）
 - 把"支不支持 function calling"变成事实，而不是靠猜：命令行跑 `solomni --probe-tools <模型 id>`。

@@ -1,7 +1,7 @@
 # modules（模块公地）
 
 > 定位：模块的发现、`module.yaml` 契约与启停状态——**所有需要模块的人的上游**。
-> 效力：规范｜核对：2026-11-04｜依据：`src/units/catalog/modules/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/catalog/modules/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -14,13 +14,13 @@
 - 入站面：`api::ModulesOps`（只读面：`roster` / `module_enabled` / `service_enabled`）+ `api::Modules`（用例面：再加 `set_module_enabled` / `set_service_enabled`）。
 - 出站端口：`ModuleSource` 与 `ModuleStateStore` **只由 `service.rs` 持有**（R12）。
 - 启停语义：有效值 = 用户覆盖（`.home/` 的 `modules.yaml`）?? 作者默认（`module.yaml` 顶层 `enabled` 与 `services.<名>.enabled`）；**模块停用 ⇒ 它的服务一律有效地停用**（`src/units/catalog/modules/domain/state.rs`）。
-- 契约类型：`Module` / `ModuleManifest` / `Roster` / `ToolDecl` / `ServiceDecl` / `SecretDecl` / `Param` / `ParamType` 由本能力拥有，其它能力只经 `api` 引用。
+- 契约类型：`Module` / `ModuleManifest` / `Roster` / `ToolDecl` / `ServiceDecl` / `SecretDecl` / `Param` / `ParamType` 由本单元拥有，其它单元只经 `api` 引用。
 - 状态归属：模块清单与启停状态由本单元持有；落盘的用户覆盖在 `.home/` 的 `modules.yaml`，作者默认在 `module.yaml`。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
-
-- 经 `::api` 用到：`kernel`（能力名文法 / 机制）、`prompt`（清单文本）
-- 谁在用我：`collab`、`runtime`、`registry`、`residents`、`secrets`、`session`、`slate`、`tools`、`vm`
+- 所属单元：`catalog`（环 2）；本页的子业务同单元的 `packages` / `registry` / `secrets` 子业务直接调用，不经 `api`。
+- 本子业务经 `::api` 用到：`kernel`（名字文法）
+- 谁在用本子业务：`agentloop`、`catalog`（`packages` / `registry` / `secrets`）、`collab`、`conversation`（`slate`）、`entry`、`maintenance`（`builds`）、`presentation`、`residents`、`runtime`、`system`、`tools`、`turn`（`env` / `turn`）、`turn_state`、`vm`、`work`
 
 ## 改动本单元时必须同步
 

@@ -1,12 +1,12 @@
 # 单元地图 · runtime
 
 > 定位：runtime（顶层编排）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-16｜依据：`src/units/runtime/api.rs`
+> 效力：契约｜核对：2026-11-25｜依据：`src/units/runtime/api.rs`
 
 > 本文是 **runtime** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**（表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
 > 分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)；单元划分与文档路由见 [AGENTS.md](../../AGENTS.md)。
 
-> 它与别的能力**平级**：只经各能力的 `api` 编排，**不持任何别人的端口**（R12）。
+> 它与别的单元**平级**：只经各单元的 `api` 编排，**不持任何别人的端口**（R12）。
 > 它拥有的是**没有任何参与方拥有**的那部分不变式：命令队列、门面与动作分发、跨会话编排；会话在世表、运行态、回合推进、事件台与落盘归 `turn`。
 > 「工作是什么样」的用例（建工作两段、改配、视图、运行报告、guest 生命周期、建议与激活）在 `work`（见 [../work/unit-map.md](../work/unit-map.md)），本单元只留应用编排与同名薄转发。
 > 「历史生命周期」的用例（回档三模式、历史列表与只读打开、删除的报账与收尾）在 `lifecycle`（见 [../lifecycle/unit-map.md](../lifecycle/unit-map.md)），本单元只给时机。
@@ -14,9 +14,9 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/units/runtime.rs` | 能力入口与公开面 |
+| `src/units/runtime.rs` | 单元入口与公开面 |
 | `src/units/runtime/api.rs` | 入站契约：`RuntimeOps`（启用 / 改需求 / 回档 / 停止）、`ActionOps`（动作目录与分发）、`LogOps` 与动作词汇（`Caller` / `ActionCall` / `ActionView` / `Acted`）；另有内核词汇 `i18n` / `Note` / `Severity` 的转出（呈现层因此不必依赖 kernel）；别处单元的形状不再经这里转出 |
-| `src/units/runtime/service.rs` | 子模块声明与共用 import（各能力 `api` 的类型、压缩工厂、动作词汇）；不含任何用例身体 |
+| `src/units/runtime/service.rs` | 子模块声明与共用 import（各单元 `api` 的类型、压缩工厂、动作词汇）；不含任何用例身体 |
 | `src/units/runtime/service/core.rs` | 核心本体 `Core`：注入面字段、17 参构造 `Core::new`、访问器（`registry` / `registry_mut` / `log_handle` / `tools_handle` / …）、`registry_write`、`sync_compact_choice`，以及一批同名薄转发（含 `ambient_workspace`） |
 | `src/units/runtime/service/handle.rs` | 核心手柄 `Handle`：`spawn` 把 `Core` 搬进 `kernel` 的 `Actor`（线程名 `solomni-core`）、`call` / `publish` / `record_notice` / `events` / `allow_tool_cards`，以及 `TurnHost` 的宿主侧实现 |
 | `src/units/runtime/service/contracts.rs` | 各入站契约在 `Handle` 上的实现：`WorkOps` / `TurnOps` / `RuntimeOps` / `RegistryOps` / `HistoryOps` / `ModulesOps` / `LogOps`，每方法一行 `self.call(...)` 或一行转发 |

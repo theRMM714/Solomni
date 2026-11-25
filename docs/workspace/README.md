@@ -1,14 +1,14 @@
 # workspace（工作区）
 
 > 定位：沙箱寻址、共享区版本化与成员侧工作工具的处理器。
-> 效力：规范｜核对：2026-11-16｜依据：`src/units/workspace/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/workspace/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
 - 管：工作区与沙箱寻址（含越界判定）、按会话铺局（`ensure_layout` / `discard_layout`）、上传、文件视图、根会话的外部工作区绑定投影，以及**共享区版本化工作区**（内容寻址的提交记录、三条线（存档线自动快照 + 各 agent 的工作线 + 主线）、推送时的文件级三方合并、三方视图与显式冲突解决、按提交点还原）。
 - 管：**成员侧工作工具处理器**——`work_pull` / `work_commit` / `work_push` / `work_sync` / `work_status` / `work_ignore` / `work_versions` / `work_diff` / `work_resolve` / `work_reset` / `work_lost` 十一个工具名由 `src/units/workspace/service/work_tools.rs` 的 `WorkHandler` 认领，回执文本由 `src/units/workspace/domain/work_tools.rs` 渲染；`work_handlers` 按席位面发放的名单现取执行者。
-- 不管：**建工作**——工作名、通道、guest 与两段事务都在 `work`（`prepare_work` / `commit_work` / `abort_work`），本能力只按已有会话把目录铺出来，不产生会话也不决定工作名；不管模块清单与 `module.yaml`（在 `modules`，本能力只消费它给的模块事实）、不执行工具（`tools`）、不写会话流水（`session`）、不决定谁能用哪些工具（`tools` 的总表与会话能力的机制席位）。
+- 不管：**建工作**——工作名、通道、guest 与两段事务都在 `work`（`prepare_work` / `commit_work` / `abort_work`），本单元只按已有会话把目录铺出来，不产生会话也不决定工作名；不管模块清单与 `module.yaml`（在 `modules`，本单元只消费它给的模块事实）、不执行工具（`tools`）、不写会话流水（`session`）、不决定谁能用哪些工具（`tools` 的总表与会话能力的机制席位）。
 
 ## 入站契约与状态归属
 
@@ -51,8 +51,8 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`kernel`、`permission`、`prompt`
-- 谁在用我：`collab`、`runtime`、`provision`（`guest-runtime` 的沙箱清单）、`session`、`tools`、`turn`（一席工具面装配时取 `work_handlers`）
+- 经 `::api` 用到：`exec_model`、`kernel`、`permission`、`prompt`
+- 谁在用我：`agentloop`、`catalog`、`collab`、`entry`、`lifecycle`、`maintenance`、`presentation`、`provision`、`runtime`、`session_model`、`system`、`tools`、`turn`、`turn_state`、`work`
 
 ## 改动本单元时必须同步
 

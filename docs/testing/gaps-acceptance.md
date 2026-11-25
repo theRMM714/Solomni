@@ -1,7 +1,7 @@
 # 目录、缺口账与验收
 
 > 定位：测试目录与命名、缺口账格式、工作方法与验收清单的唯一权威。
-> 效力：规范｜核对：2026-11-04｜依据：`tests/gaps.yaml`
+> 效力：规范｜核对：2026-11-25｜依据：`tests/gaps.yaml`
 
 ## 适用与判据
 - 记缺口、定目录与命名、按验收清单收口时以本文为准（`docs/testing/gaps-acceptance.md`）。
@@ -15,11 +15,11 @@
   - `tests/lib/`：入口与门禁的共享实现；`tests/gates/`：门禁清单与判据实现。
   - 根 `tests/*.mjs`：CI / 文档 / 工具自检脚本；逐文件清单以目录与 `node run-tests.js --list` 为准，文档不复述。
 
-- 单元层与 `units/` **同构**：T1 用例按业务分文件——`taskchain.rs` / `prompt.rs` / `registry.rs` / `llm.rs` / `workspace.rs` / `session.rs` / `slate.rs` / `modules.rs` / `packages.rs` / `vm.rs` / `permission.rs` / `residents.rs` / `secrets.rs`，加**协调业务**自己的 `runtime.rs` 与 `runtime/`（`ask_user` / `proxy`）。
-- 用例多的能力按域分目录（`tools/` 与 `collab/` 各五个子模块）；契约测试 `ports.rs` / `fakes.rs` / `detail.rs` / `mcp.rs` / `api.rs` / `cli.rs` / `routes.rs`；横向用例 `diagnostics.rs`（隐藏模式契约）/ `fence_reach.rs`（模块可达范围）。
+- 单元层与 `units/` **同构**：T1 用例按业务分文件——`taskchain.rs` / `prompt.rs` / `registry.rs` / `llm.rs` / `workspace.rs` / `session.rs` / `slate.rs` / `modules.rs` / `packages.rs` / `vm.rs` / `permission.rs` / `residents.rs` / `secrets.rs`，加**协调业务**自己的 `runtime.rs` 与 `runtime/`（`proxy.rs`）。
+- 用例多的单元按域分目录（如 `tools/`、`session/`、`workspace/`）；契约测试 `ports.rs` / `fakes.rs` / `detail.rs` / `mcp.rs` / `api.rs` / `cli.rs` / `routes.rs`；横向用例 `diagnostics.rs`（隐藏模式契约）/ `fence_reach.rs`（模块可达范围）。
 - 共享支撑 `doubles/`（端口替身，按端口族一个文件）/ `builders/`（测试装配脚手架，按用途一个文件）/ `prelude.rs`（公共前置重导出）/ `tests.rs`。
 - 文件粒度（判据 `tests/gates/structure/size.js`）：用例文件 ≤ 2000 行（软线 1500）、支撑文件 ≤ 1200 行（软线 800）；超线就按"用例族 / 端口族"拆子目录，拆分只搬代码，不改用例名与断言。
-- **判据**：用例落到"它钉住的那个不变式"所属的文件；顺手经过别的能力只是路径，不是归属。
+- **判据**：用例落到"它钉住的那个不变式"所属的文件；顺手经过别的单元只是路径，不是归属。
 
 - 四个平台目标在 `Cargo.toml` 中显式登记。新增测试目标、Fixture 或脚本必须能从入口追溯到执行位置，否则属于结构质量问题。
 

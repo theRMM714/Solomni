@@ -18,8 +18,8 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`agentloop`、`session_model`、`transcript`、`kernel`、`llm`、`catalog`（`modules`）、`permission`、`prompt`、`residents`、`taskchain`、`tools`、`vm`、`workspace`、`pure::registry_model`
-- 谁在用我：`collab`、`runtime`、`registry`、`slate`、`turn`、`work`、`presentation`
+- 经 `::api` 用到：`agentloop`、`catalog`、`exec_model`、`kernel`、`llm`、`prompt`、`registry_model`、`session_model`、`tools`、`transcript`、`turn_state`
+- 谁在用我：`collab`、`lifecycle`、`runtime`、`turn`、`work`
 
 ## 改动本单元时必须同步
 
