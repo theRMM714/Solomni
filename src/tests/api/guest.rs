@@ -7,9 +7,9 @@ use super::super::builders::{agent_meta, seed_session, vm_spec};
 use super::super::doubles::InMemoryHistory;
 use super::super::doubles::module_of;
 use super::super::{ops_with, ops_with_vm};
-use crate::units::conversation::session::api::{PROXY, SINGLE};
 use crate::units::runtime::api::Output;
 use crate::units::runtime::api::{Acted, ActionCall, Caller};
+use crate::units::session_model::api::{PROXY, SINGLE};
 use std::sync::Arc;
 
 struct DiagnosingVm {

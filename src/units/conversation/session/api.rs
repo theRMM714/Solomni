@@ -1,11 +1,13 @@
 //! 目的：会话能力的入站面——其它能力与呈现层只准用这里（不许碰 `domain` / `ports`）。
-//! 管：重导出会话事实（元信息与视图、回档算术、工具面、裁决队列、事件词汇、落盘策略）、会话装配（参数对象与整场入口）、核心核实环境与核心操作回路；定义 `History` / `HistoryOps` 两个面。
+//! 管：重导出会话运行事实（回档算术、工具面、裁决队列、流程面）、会话装配（参数对象与整场入口）、核心核实环境与核心操作回路、席位与工具总表的自洽断言；定义 `History` / `HistoryOps` 两个面。
 //! 不管：`domain` / `ports` 的内部实现；`HistoryOps` 的队列代理实现（在 `runtime`）。
 //! 联动：呈现层经 runtime 的队列代理调 `HistoryOps`；别的能力经 `History` 造会话、追流水、读元信息、删会话。
 
 /// 目的：测试直调工具批执行器；生产路径只经会话引擎，不从这里取。
 #[cfg(test)]
 pub(crate) use crate::units::conversation::session::service::engine::tools::run_batch;
+
+use crate::units::session_model::api::{HistoryView, SessionMeta};
 
 pub use crate::units::conversation::session::domain::decisions::{
     Answered, Decisions, GateTicket, Gates, SlotWake, decisions, issued_in,
@@ -14,32 +16,14 @@ pub use crate::units::conversation::session::domain::decisions::{
 pub use crate::units::conversation::session::domain::flow::{
     Flow, Handback, MemberAsk, Settle, WorkPlan,
 };
-// 机制与席位：身份与工具面**只从这一处取**（流程登记、席位声明、按席位合成面、自洽断言）。
-#[cfg(test)]
-pub use crate::units::conversation::session::domain::mechanism::PROXY_SEAT;
+// 席位与机制声明在 `session_model`；这里只留自洽断言（它要同时读工具总表与工具面，读不了环 2 的纯值单元）。
 #[allow(unused_imports)]
-pub use crate::units::conversation::session::domain::mechanism::{
-    Mechanism, SEATS, Seat, flow_ids, mechanism_of, problems as mechanism_problems, seat,
-};
+pub use crate::units::conversation::session::domain::seat_check::problems as mechanism_problems;
 // 流程工厂面：组合根把实现注入 turn / work，装配点只按 id 取段。
 pub use crate::units::conversation::session::domain::flows::{FlowSetup, Flows, sequence_of};
-pub use crate::units::conversation::session::domain::history::{
-    Delegation, HistoryView, RunState, SessionMeta, UsageTotals, WorkspaceBinding,
-};
-// 会话类型表与解析后声明：组合根装载它，装配期用它校验机制与流程；meta 落 `SessionSpec`。
-pub use crate::units::conversation::session::domain::profile::{
-    Profiles, SessionSpec, inline_spec,
-};
-// 只有测试知道产品自带类型的名字；生产代码按声明里的 auto / flows 分支，不认这些 id。
-#[cfg(test)]
-pub use crate::units::conversation::session::domain::profile::{CUSTOM, MEETING, PROXY, SINGLE};
 // 工具面：机制席位 → 实际可调的工具（档位只管网络，不再逐工具裁剪）。
 #[allow(unused_imports)]
 pub use crate::units::conversation::session::domain::assemble::{face_tools, resolve, seat_face};
-#[allow(unused_imports)]
-pub use crate::units::conversation::session::domain::persist::{
-    PersistPolicy, SYSTEM_SID_SUGGEST, is_system_session, persist_policy_for,
-};
 pub use crate::units::conversation::session::domain::rewind::{
     align_keep, archive_label, cut_before_line, last_line_within, last_usage, max_reply,
     next_line_id, rewind_marks, truncate_events, turn_of_line,

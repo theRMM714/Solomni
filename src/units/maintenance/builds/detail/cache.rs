@@ -137,11 +137,11 @@ if [ -d "$MNT/modules" ]; then
   for d in "$MNT"/modules/*; do
     [ -d "$d" ] || continue
     n=$(basename "$d")
-    case "$PURGE" in *" $n "*) rm -rf "$d"; continue;; esac
+    case "$PURGE" in *" $n "*) rm -rf "$d"; continue; esac
     [ "$CUTOFF" -gt 0 ] || continue
     u=$(cat "$d/USED" 2>/dev/null || echo 0)
     if [ "$u" -gt 0 ] && [ "$u" -lt "$CUTOFF" ]; then
-      case "$KEEP" in *" $n "*) ;; *) rm -rf "$d";; esac
+      case "$KEEP" in *" $n "*) ; *) rm -rf "$d"; esac
     fi
   done
 fi

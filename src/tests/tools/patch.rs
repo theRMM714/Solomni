@@ -5,7 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::conversation::session::api::SINGLE;
+use crate::units::session_model::api::SINGLE;
 #[test]
 pub(crate) fn patch_channel_writes_files_without_json_escaping() {
     // 自由格式：信封之后原样跟补丁文本（含中文与换行，完全不转义）；一次两块、落在两个文件。

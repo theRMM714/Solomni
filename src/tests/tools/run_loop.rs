@@ -5,8 +5,8 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::conversation::session::api::SINGLE;
 use crate::units::conversation::session::api::run_batch;
+use crate::units::session_model::api::SINGLE;
 #[test]
 pub(crate) fn tool_loop_rejects_undeclared_tool() {
     let runner = Arc::new(RecordingRunner {

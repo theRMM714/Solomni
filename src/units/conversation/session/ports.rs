@@ -2,8 +2,7 @@
 //! 管：`HistoryStore` 的契约：建 / 存元信息 / 追加 / 整体替换 / 列 / 读元信息 / 载入 / 删。
 //! 不管：目录布局与原子写（在适配层）；会话状态派生（在 `domain/`）。
 //! 联动：由 `service.rs` 的 `SessionService` 持有（R12），组合根注入具体实现。
-
-use crate::units::conversation::session::domain::history::{HistoryView, SessionMeta};
+use crate::units::session_model::api::{HistoryView, SessionMeta};
 
 /// 目的：会话历史端口：一个会话一个目录（meta + 事件流水）。
 ///   流水只追加；留档只在流水追加一条 rewind 记录，删除 / 恢复会整体重写（会话状态 = 按标记回放的活动窗口）。

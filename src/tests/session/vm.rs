@@ -5,7 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::conversation::session::api::{MEETING, PROXY, SINGLE, SessionSpec};
+use crate::units::session_model::api::{MEETING, PROXY, SINGLE, SessionSpec};
 
 /// 目的：核心重启后启用一条 VM 历史会话——必须真的准备并拉起共享 guest，且不跑模型。
 #[test]

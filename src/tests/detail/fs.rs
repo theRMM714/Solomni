@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::tests::doubles::test_workspace_store;
-use crate::units::conversation::session::api::{MEETING, SINGLE, SessionSpec};
+use crate::units::session_model::api::{MEETING, SINGLE, SessionSpec};
 use crate::units::workspace::api::{ChangeKind, CommitAnchor, WORKIGNORE, WORKIGNORE_SEED};
 
 fn meta(name: &str) -> SessionMeta {
@@ -33,7 +33,7 @@ fn meta(name: &str) -> SessionMeta {
         node: None,
         delegation: None,
         thinking: None,
-        run: crate::units::conversation::session::api::RunState::Active,
+        run: crate::units::session_model::api::RunState::Active,
         workspace: None,
     }
 }

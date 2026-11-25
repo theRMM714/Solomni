@@ -22,12 +22,11 @@ pub use crate::units::prompt::api::{Prompt, Segment};
 pub use crate::units::prompt::domain::prompt::render;
 
 pub use crate::units::catalog::registry::api::Settings;
+pub use crate::units::pure::registry_model::api::AgentMeta;
 pub use crate::units::pure::registry_model::api::ModelDraft;
 pub use crate::units::pure::registry_model::api::ModelEntry;
 pub use crate::units::pure::registry_model::api::Provider;
-
-pub use crate::units::conversation::session::api::{RunState, SessionMeta};
-pub use crate::units::pure::registry_model::api::AgentMeta;
+pub use crate::units::session_model::api::{RunState, SessionMeta};
 
 pub use crate::units::conversation::session::domain::tools::MemberTools;
 pub use crate::units::conversation::session::domain::tools::ModuleTools;

@@ -8,12 +8,12 @@ use std::sync::Arc;
 
 use crate::kernel::ports::ToolHandler;
 use crate::units::catalog::modules::api::Module;
-use crate::units::conversation::session::domain::mechanism::{self, Seat};
 use crate::units::conversation::session::domain::tools::{
     ModuleTools, ServiceOp, service_ops_for_modules, tool_table,
 };
 use crate::units::prompt::api::Prompt;
 use crate::units::residents::api::{ResidentOps, ServiceState, ServiceView};
+use crate::units::session_model::api::{Seat, seat};
 use crate::units::tools::api::{
     DELETE, EDIT, GREP, LIST, PATCH, READ, SHELL, ToolBook, ToolNotes, ToolSchema, WRITE,
     tool_notes,
@@ -163,7 +163,7 @@ pub struct SeatFace {
 /// 目的：**会话唯一的工具面装配机**：席位声明 → 发放名单 → 发布工具执行者 → 模块工具表与已就绪服务 → 说明块。
 /// 约束：别的路径（核心操作、核心核实、回合换席）都调这里，不得各写一份；`install_seat` 也用它现拼一席。
 pub fn assemble(input: FaceInput<'_>) -> SeatFace {
-    let seat = mechanism::seat(input.seat);
+    let seat = seat(input.seat);
     let allowed = match seat {
         Some(seat) => match resolve(seat, input.book) {
             Ok(items) => face_tools(

@@ -5,7 +5,7 @@
 
 use super::builders::*;
 use super::prelude::*;
-use crate::units::conversation::session::api::{MEETING, SINGLE};
+use crate::units::session_model::api::{MEETING, SINGLE};
 
 #[test]
 pub(crate) fn settings_resolves_model_to_channel() {

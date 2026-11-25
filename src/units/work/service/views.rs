@@ -42,11 +42,11 @@ impl Work {
             if out.contains(id) {
                 return Err(format!("临时拼装里同一个流程出现了两次：{}", id));
             }
-            if crate::units::conversation::session::api::mechanism_of(id).is_none() {
+            if crate::units::session_model::api::mechanism_of(id).is_none() {
                 return Err(format!(
                     "会话类型表里没有这个流程：{}（已注册的流程：{}）",
                     id,
-                    crate::units::conversation::session::api::flow_ids().join(" / ")
+                    crate::units::session_model::api::flow_ids().join(" / ")
                 ));
             }
             out.push(id.clone());

@@ -164,7 +164,7 @@ impl PromptSource for TestPrompts {
 
 /// 目的：测试用的**会话类型表**：走与产品同一条装配路径（读产品自带的 `systools/profiles.yaml`）。
 /// 约束：表改了这里跟着变——测试断言的是产品怎么被装配，不是另写一份类型表。
-pub(crate) fn test_profiles() -> crate::units::conversation::session::api::Profiles {
+pub(crate) fn test_profiles() -> crate::units::session_model::api::Profiles {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     crate::units::conversation::session::detail::yaml_profiles::YamlProfiles::new(
         root.join("systools"),

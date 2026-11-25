@@ -5,7 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::conversation::session::api::{MEETING, PROXY, SINGLE, SessionSpec};
+use crate::units::session_model::api::{MEETING, PROXY, SINGLE, SessionSpec};
 
 /// 目的：共享 guest 的子会话也能改配置；写回该 agent 的唯一名单，而不是留一份会漂的副本。
 #[test]

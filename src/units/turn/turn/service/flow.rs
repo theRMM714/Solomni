@@ -6,12 +6,13 @@
 
 use crate::kernel::ports::HostProbe;
 use crate::units::catalog::registry::api::Registry;
+
 use crate::units::conversation::session::api::{
-    Answered, Flow, GateTicket, Handback, RunState, SessionMeta, SessionSpec, TurnIo, UsageTotals,
-    flat_modules, work_root,
+    Answered, Flow, GateTicket, Handback, TurnIo, flat_modules, work_root,
 };
 use crate::units::prompt::api::Segment;
 use crate::units::pure::registry_model::api::AgentMeta;
+use crate::units::session_model::api::{RunState, SessionMeta, SessionSpec, UsageTotals};
 use crate::units::transcript::api::{DecisionQueue, Gate, SessionEvent};
 use crate::units::turn::turn::api::{Prepared, RestoreRequest, Session};
 
@@ -126,7 +127,7 @@ impl Turn {
                 };
                 let mut emit = |e: SessionEvent| notes.borrow_mut().push(e);
                 let mut sink = |e: SessionEvent| notes.borrow_mut().push(e);
-                if crate::units::conversation::session::api::seat(&ask.seat).is_none() {
+                if crate::units::session_model::api::seat(&ask.seat).is_none() {
                     return Err(format!("会话 {} 的席位没登记：{}", child, ask.seat));
                 }
                 let t = s.discussion_turn(

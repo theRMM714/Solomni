@@ -119,7 +119,7 @@ impl Work {
         raw: Option<&std::path::Path>,
         tier: crate::units::pure::exec_model::api::Tier,
         parent: Option<&str>,
-    ) -> Result<Option<crate::units::conversation::session::api::WorkspaceBinding>, String> {
+    ) -> Result<Option<crate::units::session_model::api::WorkspaceBinding>, String> {
         if let Some(p) = parent {
             if raw.is_some() {
                 return Err("子会话不能自选工作区：沿父会话继承".to_string());
@@ -132,9 +132,9 @@ impl Work {
         };
         let product = crate::units::workspace::api::product_root(&self.root, probe);
         let root = crate::units::workspace::api::resolve(raw, tier, &product, probe)?;
-        Ok(Some(
-            crate::units::conversation::session::api::WorkspaceBinding { root },
-        ))
+        Ok(Some(crate::units::session_model::api::WorkspaceBinding {
+            root,
+        }))
     }
 
     /// 目的：创建的第一段（核心，毫秒级）——校验 / 占名 / 建工作区 / 出计划；要起 guest 时把那一段交出去。
@@ -155,7 +155,7 @@ impl Work {
         let decl = match spec.flows.as_ref() {
             Some(flows) => {
                 self.flows.book().check_inline(flows)?;
-                crate::units::conversation::session::api::inline_spec(flows.clone())
+                crate::units::session_model::api::inline_spec(flows.clone())
             }
             None => self.flows.book().spec_of(&spec.kind).ok_or_else(|| {
                 format!(
@@ -746,7 +746,7 @@ impl Work {
         } = seed;
         validate_work_name(name)?;
         // 落盘声明要的是**席位**（装配按席位发工具面）：调用方给的就是解析后的席位 id。
-        if crate::units::conversation::session::api::seat(seat).is_none() {
+        if crate::units::session_model::api::seat(seat).is_none() {
             return Err(format!("代理会话的席位没登记：{}", seat));
         }
         if turn.holds(name) || self.history.load(name).is_ok() {
@@ -777,7 +777,7 @@ impl Work {
             context_freshness: freshness_on,
             freshness_keep_percent: freshness_keep,
             name: name.to_string(),
-            spec: crate::units::conversation::session::api::SessionSpec::automatic(
+            spec: crate::units::session_model::api::SessionSpec::automatic(
                 kind,
                 &self.flows.book().label_of(kind),
                 seat,

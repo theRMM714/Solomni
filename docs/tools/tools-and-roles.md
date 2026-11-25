@@ -1,7 +1,7 @@
 # 工具与机制席位
 
 > 定位：系统工具、机制与席位（身份）与"谁能用哪些工具"的唯一权威。
-> 效力：规范｜核对：2026-11-24｜依据：`systools/tools.yaml`、`src/units/conversation/session/domain/mechanism.rs`
+> 效力：规范｜核对：2026-11-24｜依据：`systools/tools.yaml`、`src/units/session_model/domain/mechanism.rs`
 
 ## 适用与判据
 - 声明系统工具、机制席位与越权校验时以本文为准（`docs/tools/tools-and-roles.md`）。
@@ -10,7 +10,7 @@
 
 ## 一、两张表与字段
 
-- 工具**是什么**在 `systools/tools.yaml`；这个**身份有什么**在 `src/units/conversation/session/domain/mechanism.rs` 的机制与席位声明（席位记着发哪些工具、能不能写、能不能发布、带哪段提示词）。
+- 工具**是什么**在 `systools/tools.yaml`；这个**身份有什么**在 `src/units/session_model/domain/mechanism.rs` 的机制与席位声明（席位记着发哪些工具、能不能写、能不能发布、带哪段提示词）。
 - 授权只有这两处；`systools/names.yaml` 是布局的第三份（`session/<工作>/` 的保留目录名），不是工具或席位授权。
 - 代码里**不得**出现"哪个席位能调哪个工具"的名单：只有三个动作——**机制只声明需求**（`Seat` 记着发哪些工具、能不能写、能不能发布、带哪段提示词）、**会话的装配机现拼这一席的面**（`src/units/conversation/session/domain/assemble.rs` 的 `assemble`，唯一实现）、**按面校验调用**（`src/units/conversation/session/service/engine/tools.rs` 的 `face_has`）。
 
@@ -38,7 +38,7 @@ tools:
 - 参数不合法 → **如实拒绝并落工具行**。
 
 ```rust
-// 席位：机制里的具体身份组（声明在 session/domain/mechanism.rs）
+// 席位：机制里的具体身份组（声明在 src/units/session_model/domain/mechanism.rs）
 Seat { id: "discussant", prompt: "roles/discussant", min: 2,
        core: false, write: false, publish: false, module_tools: false,
        tools: &["say", "agree", "leave", "ask"] }

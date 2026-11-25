@@ -28,6 +28,7 @@
 | `permission`（权限） | [README.md](permission/README.md)、[unit-map.md](permission/unit-map.md) |
 | `exec_model`（执行与作业模型） | [README.md](exec-model/README.md)、[unit-map.md](exec-model/unit-map.md) |
 | `registry_model`（登记处读模型） | [README.md](registry-model/README.md)、[unit-map.md](registry-model/unit-map.md) |
+| `session_model`（会话身份与声明） | [README.md](session-model/README.md)、[unit-map.md](session-model/unit-map.md) |
 | `transcript`（转录线格式） | [README.md](transcript/README.md)、[unit-map.md](transcript/unit-map.md) |
 | `llm`（模型通道与协议） | [README.md](llm/README.md)、[unit-map.md](llm/unit-map.md) |
 | `vm`（虚拟机档） | [README.md](vm/README.md)、[unit-map.md](vm/unit-map.md) |

@@ -11,15 +11,15 @@ pub use crate::kernel::api::i18n;
 /// 目的：回执说明的稳定码、类型化参数与轻重：呈现层按它上色与渲染，不解析回执正文。
 pub use crate::kernel::api::note::Note;
 pub use crate::kernel::api::note::Severity;
-/// 目的：落盘历史的只读视图（会话列表是「在世会话 × 历史」的并集）。
-#[allow(unused_imports)]
-pub use crate::units::conversation::session::api::HistoryView;
 /// 目的：回档目标与结果（层 9 的词汇）：这里只取用，不定义。
 pub(crate) use crate::units::lifecycle::api::{RebuildDeps, RewindOutcome, RewindTarget};
 /// 目的：工具通道探测的三态结论。
 pub use crate::units::llm::api::ProbeOutcome;
 /// 目的：运行档（本机档 / 虚拟机档）的词汇。
 pub use crate::units::pure::exec_model::api::Tier;
+/// 目的：落盘历史的只读视图（会话列表是「在世会话 × 历史」的并集）。
+#[allow(unused_imports)]
+pub use crate::units::session_model::api::HistoryView;
 /// 目的：会话事件（开场事实 / 回合事件 / 通知）的线格式。
 pub use crate::units::transcript::api::SessionEvent;
 /// 目的：裁决卡、裁决队与等待者：界面与 CLI 按它们渲染「等你定的事」。

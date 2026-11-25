@@ -5,7 +5,7 @@
 
 use super::builders::*;
 use super::prelude::*;
-use crate::units::conversation::session::api::SINGLE;
+use crate::units::session_model::api::SINGLE;
 
 #[test]
 pub(crate) fn envelope_parse_clean() {

@@ -4,7 +4,7 @@
 //! 联动：与 `src/units/conversation/proxy/domain/proxy.rs` 同模块，`#[cfg(test)] mod tests;` 指到这里。
 
 use super::*;
-use crate::units::conversation::session::api::SINGLE;
+use crate::units::session_model::api::SINGLE;
 
 fn facts() -> Catalog {
     Catalog {

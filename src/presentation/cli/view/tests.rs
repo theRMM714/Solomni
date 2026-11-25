@@ -333,7 +333,7 @@ impl WorkOps for FakeCore {
     }
     fn session_views(
         &self,
-        _: &[crate::units::conversation::session::api::HistoryView],
+        _: &[crate::units::session_model::api::HistoryView],
     ) -> Result<Vec<SessionView>, String> {
         Err("没装会话总览".into())
     }

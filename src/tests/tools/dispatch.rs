@@ -5,7 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::conversation::session::api::{MEETING, SINGLE};
+use crate::units::session_model::api::{MEETING, SINGLE};
 #[test]
 pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
     let mut a = module_of("a");

@@ -5,7 +5,7 @@
 
 use super::super::prelude::*;
 use super::support::*;
-use crate::units::conversation::session::api::SINGLE;
+use crate::units::session_model::api::SINGLE;
 
 /// 目的：两边都改时，人工合并后用 take=local 推进基线，提交成功且主副本拿到合并结果。
 #[test]

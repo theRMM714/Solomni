@@ -72,7 +72,7 @@ impl Core {
         probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
         residents: Arc<dyn crate::units::residents::api::ResidentOps + Send + Sync>,
         secrets: Arc<dyn crate::units::catalog::secrets::api::SecretOps + Send + Sync>,
-        profiles: crate::units::conversation::session::api::Profiles,
+        profiles: crate::units::session_model::api::Profiles,
     ) -> Core {
         let compact = Arc::new(CompactRuntime::new(Arc::clone(&llm)));
         // 流程工厂在这里注入：turn / work 只认 `session::api::Flows`，具体流程的类型只出现在协作能力里。

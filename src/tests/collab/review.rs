@@ -5,7 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::conversation::session::api::{MEETING, PROXY, SINGLE};
+use crate::units::session_model::api::{MEETING, PROXY, SINGLE};
 // ---------- Core 门面：会话中心（内存组合根） ----------
 #[test]
 pub(crate) fn mode_vocabulary_is_single_or_collab_only() {

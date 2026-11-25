@@ -9,9 +9,9 @@ use std::sync::Arc;
 
 use crate::kernel::ports::HostProbe;
 use crate::units::catalog::registry::api::Registry;
-use crate::units::conversation::session::api::{
-    AgentSession, Flow, Gates, RunState, seat as seat_of, subtree_of,
-};
+
+use crate::units::conversation::session::api::{AgentSession, Flow, Gates, subtree_of};
+use crate::units::session_model::api::{RunState, seat as seat_of};
 use crate::units::transcript::api::SessionEvent;
 use crate::units::turn::turn::api::{Prepared, Session};
 
@@ -315,7 +315,7 @@ impl Turn {
     pub(crate) fn session_spec(
         &self,
         sid: &str,
-    ) -> Option<crate::units::conversation::session::api::SessionSpec> {
+    ) -> Option<crate::units::session_model::api::SessionSpec> {
         self.history.load(sid).ok().map(|(m, _)| m.spec)
     }
 

@@ -8,7 +8,7 @@ use crate::presentation::faces::Faces;
 
 use crate::units::conversation::proxy::api as d;
 use crate::units::conversation::proxy::api::ProxyTools;
-use crate::units::conversation::session::api::{PROXY, SINGLE};
+use crate::units::session_model::api::{PROXY, SINGLE};
 
 fn rig() -> (Arc<FakeProxyHost>, ProxyTools) {
     let host = Arc::new(FakeProxyHost::new());
@@ -58,7 +58,7 @@ pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
         assert!(!schema.desc.trim().is_empty(), "{} 缺说明", name);
         assert!(schema.params.is_some(), "{} 缺参数契约", name);
     }
-    let seat = crate::units::conversation::session::api::seat("core_proxy").expect("代理席在册");
+    let seat = crate::units::session_model::api::seat("core_proxy").expect("代理席在册");
     let face: Vec<String> = crate::units::conversation::session::api::seat_face(seat)
         .into_iter()
         .map(|s| s.to_string())
@@ -86,7 +86,7 @@ pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
         "core_proxy 是席位，不是工具"
     );
     for role in ["discussant", "solo", "executor", "planner", "orchestrator"] {
-        let seat = crate::units::conversation::session::api::seat(role).expect("席位在册");
+        let seat = crate::units::session_model::api::seat(role).expect("席位在册");
         let rface: Vec<String> = crate::units::conversation::session::api::seat_face(seat)
             .into_iter()
             .map(|s| s.to_string())

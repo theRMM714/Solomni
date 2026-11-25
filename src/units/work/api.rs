@@ -7,9 +7,9 @@
 
 use crate::kernel::api::types::SessionId;
 use crate::kernel::ports::{HostProbe, Log};
-use crate::units::conversation::session::api::HistoryView;
 use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::registry_model::api::AgentMeta;
+use crate::units::session_model::api::HistoryView;
 use crate::units::transcript::api::{OptionView, SessionEvent};
 use crate::units::vm::api::{ExecPlan, GuestStop, Vm};
 use crate::units::workspace::api::Sandboxes;
@@ -305,7 +305,7 @@ pub struct SessionView {
     pub context: Option<crate::units::transcript::api::ContextUsage>,
     /// 目的：这条会话**累计**的模型花费（跨回合、跨压缩；回档不清零）：面板显示累计输入 / 输出与缓存命中。
     /// 约束：总是出现（全零 = 还没调用过模型）；只累计供应商精确报回的调用，估算不进。
-    pub usage_totals: crate::units::conversation::session::api::UsageTotals,
+    pub usage_totals: crate::units::session_model::api::UsageTotals,
     /// 目的：最近一次 shell 的运行状态（状态栏卡片）；没跑过 shell 就是 null。
     /// 约束：总是出现（null = 没有）——前端据此清掉回档已经截掉的旧快照。
     pub shell: Option<crate::units::conversation::session::api::ShellLive>,
@@ -439,7 +439,7 @@ pub(crate) struct ProxySeed<'a> {
     /// 目的：权威档的权限档位。
     pub(crate) profile: crate::units::pure::permission::api::ProfileId,
     /// 目的：外部工作区绑定（已解析，不是原始路径）。
-    pub(crate) workspace: Option<crate::units::conversation::session::api::WorkspaceBinding>,
+    pub(crate) workspace: Option<crate::units::session_model::api::WorkspaceBinding>,
     /// 目的：创建时定的过期内容替换（None = 关）：`(开, 保底百分比)`，写进新会话的工作根 meta。
     pub(crate) freshness: Option<(bool, u8)>,
 }

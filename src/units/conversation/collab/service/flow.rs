@@ -10,11 +10,13 @@ use crate::units::conversation::collab::domain::events::CollabEvent;
 use crate::units::conversation::collab::domain::gates::{OPT_BEGIN_ALLOW, Pending};
 use crate::units::conversation::collab::service::collab::{CollabSession, Phase};
 use crate::units::conversation::collab::service::discussion::AfterTurn;
+
 use crate::units::conversation::session::api::{
-    Flow, GateTicket, Handback, MemberAsk, MemberTurn, Settle, WorkPlan, mechanism_of, seat,
+    Flow, GateTicket, Handback, MemberAsk, MemberTurn, Settle, WorkPlan,
 };
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::pure::taskchain::api::NodeStatus;
+use crate::units::session_model::api::{mechanism_of, seat};
 use crate::units::transcript::api::{Gate, SessionEvent};
 use crate::units::workspace::api::Sandboxes;
 

@@ -2,9 +2,8 @@
 //! 管：目录布局（顶层 `session/<名字>/`，子会话嵌在 `children/<名字>/`，任意深度）与文件格式；流水只追加，留档追加一条 rewind 记录，删除 / 恢复整体重写。
 //! 不管：名字校验与队列调度（在 `runtime`）；会话状态派生（在 `domain/`）。
 //! 联动：组合根构造后经 `ports::HistoryStore` 注入 `service.rs`；会话中心经同一端口读列表与元信息。
-
-use crate::units::conversation::session::api::{HistoryView, SessionMeta};
 use crate::units::conversation::session::ports::HistoryStore;
+use crate::units::session_model::api::{HistoryView, SessionMeta};
 use std::io::Write;
 use std::path::PathBuf;
 

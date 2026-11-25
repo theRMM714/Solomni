@@ -7,13 +7,13 @@ use crate::tests::doubles::module_of;
 use crate::units::catalog::modules::api::Roster;
 use crate::units::catalog::packages::api::PackagePlan;
 use crate::units::catalog::registry::api::AppSettings;
-use crate::units::conversation::session::api::{MEETING, RunState, SINGLE, SessionMeta};
 use crate::units::pure::exec_model::api::ExecSpec;
 use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::permission::api::{
     PermissionDefaults, PermissionLayer, ProfileId, SessionSandbox,
 };
 use crate::units::pure::registry_model::api::AgentMeta;
+use crate::units::session_model::api::{MEETING, RunState, SINGLE, SessionMeta};
 use crate::units::turn::env::api::{
     MemberFacts, SandboxesFacts, SeatAccess, host_read_roots, member, network_allowed, permissions,
     sandboxes, shared_scope,

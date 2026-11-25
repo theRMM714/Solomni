@@ -13,6 +13,7 @@ pub mod provision;
 pub mod pure;
 pub mod residents;
 pub mod runtime;
+pub mod session_model;
 pub mod system;
 pub mod tools;
 pub mod transcript;

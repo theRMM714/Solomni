@@ -3,9 +3,8 @@
 //! 不管：表的形状与规则（在 `domain/profile.rs`）。
 //! 联动：只有入口层的组合根构造它；`ids()` 交给提示词册子，`check_roles` 吃工具能力的机制席位。
 
+use crate::units::session_model::api::Profiles;
 use std::path::PathBuf;
-
-use crate::units::conversation::session::api::Profiles;
 
 /// 目的：会话类型表的位置（`systools/profiles.yaml`）。
 pub struct YamlProfiles {

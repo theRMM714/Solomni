@@ -9,9 +9,9 @@ use crate::units::catalog::registry::api::Settings;
 use crate::units::conversation::collab::domain::gates::Pending;
 use crate::units::conversation::collab::service::discussion::Discussion;
 use crate::units::conversation::session::api::Gates;
-use crate::units::conversation::session::api::SessionMeta;
 use crate::units::llm::api::{CompleteOpts, Llm};
 use crate::units::prompt::api::{Prompt, Segment};
+use crate::units::session_model::api::SessionMeta;
 use crate::units::tools::api::ToolExec;
 use crate::units::transcript::api::{LineView, SessionEvent};
 use crate::units::vm::api::Vm;
@@ -117,11 +117,11 @@ impl CollabSession {
             return;
         }
         // 代拟的名单到这一步才定下来：人数不够就不开聊（席位是机制报的，见 session 的 mechanism_of）。
-        let need = crate::units::conversation::session::api::mechanism_of("discuss")
+        let need = crate::units::session_model::api::mechanism_of("discuss")
             .map(|m| {
                 m.seats
                     .iter()
-                    .filter_map(|id| crate::units::conversation::session::api::seat(id))
+                    .filter_map(|id| crate::units::session_model::api::seat(id))
                     .filter(|s| !s.core)
                     .map(|s| s.min)
                     .sum::<usize>()
