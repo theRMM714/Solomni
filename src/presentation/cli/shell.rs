@@ -135,8 +135,7 @@ fn split_words<'a>(
     Ok(cut)
 }
 
-/// 目的：这一次调用要不要常驻运行时（视图盘、存储自动任务、常驻服务、围栏授权）。
-/// 判据只认命令声明里的 `runtime`，不另立名单：手册与版本永远不要，模块工具调用要。
+/// 目的：这一次调用要不要常驻运行时（视图盘、存储自动任务、常驻服务、围栏授权）；判据只认命令声明里的 `runtime`，不另立名单：手册与版本永远不要，模块工具调用要。
 /// 约束：不查模块清单——非命令词的无尾词只可能是模块手册或拼错的命令，两者都只打印，不执行任何东西。
 pub(crate) fn needs_runtime(words: &[&str], help: bool, version: bool) -> bool {
     let Ok(cut) = split_words(words, false, help, version) else {

@@ -10,14 +10,14 @@
 - 管：存储报告的对外形状与回收命令的语义分派（有类别按类别、无类别整体回收）。
 - 管：依赖补齐的状态查询、补齐执行与虚拟根还原的确认门槛。
 - 管：工作区回收与模块构建在维护视角下的前置校验（名字合法、工作存在、模块存在、目标与出网开关）。
-- 管：便携维护（`--setup`）——用户 PATH 的 shim 追加 / 摘除 / 还原、只读状态视图、围栏机器级预授；写入结果按一句话回执交呈现层排版。
+- 管：便携维护（`--setup`）——用户 PATH 的 shim 追加 / 摘除 / 还原、只读状态视图、围栏机器级预授（预授成功顺手把授权记进设置）；写入结果按一句话回执交呈现层排版。
 - 不管：回收与补齐的实现（归 `storage` / `provision`）、构建编排（归 `builds`）、工作区对象图（归 `workspace`）、模块清单（归 `modules`）、工具链条目解析（归 `src/entry/toolchains.rs`）。
 - 不管：命令名、别名、分组与手册排版（归 `systools/commands.yaml` 与 `src/presentation/cli/catalog.rs`）；也不解析 argv（归 `src/presentation/cli/boot.rs`）。
 
 ## 入站契约与状态归属
 
 - 入站面：`api::System` 的十个方法（自检 / 存储 / 回收 / 补齐状态 / 补齐 / 还原 / 工作区回收 / 构建 / 作业进度 / 便携维护）与 `api::Fault`——`code` 是退出码，`message` 是给人看的一句话，呈现层只打印它、按 `code` 退出。
-- 便携维护另有 `api::SetupOps` 端口（`apply` / `fence_missing` / `fence_ensure`）与 `api::SetupMode` 的模式表：写入实现（注册表、shim、ACL）在 `src/capabilities/system/detail/setup.rs`，`service` 只持端口；启动期对账（`src/entry/portable.rs`）也只经这个端口取缺项与预授。
+- 便携维护另有 `api::SetupOps` 端口（`apply` / `fence_missing` / `fence_ensure`）与 `api::SetupMode` 的模式表：写入实现（注册表、shim、ACL）在 `src/capabilities/system/detail/setup.rs`，`service` 只持端口；`api::FencePolicy` 是「预授成功后把授权记进设置」这一个动作的端口（`fence`/`all` 成功后才调，失败只降级成一行回执、不改退出码）；启动期对账（`src/entry/portable.rs`）也只经这些端口取缺项与预授。
 - 出站端口：`storage` / `provision` / `builds` / `workspace` / `modules` 的 `::api`，加上装配期注入的基础工具链事实与出网开关，全部经 `SystemDeps` 注入。
 - 状态归属：本单元不持有状态；自检是只读快照，回收 / 补齐 / 构建的状态归各自的 owner（`storage` 的作业与上次回收摘要、`provision` 的补齐进度、`builds` 的构建状态）。
 

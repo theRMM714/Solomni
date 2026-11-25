@@ -299,19 +299,46 @@ function reclaimFixtureViewDrive() {
   return true;
 }
 
+/** 围栏台账（ACL 预授）里有多少条：一次性命令不该动它，跑前跑后必须相等。
+ *  非 Windows 没有这份机器级台账，返回 null 表示"不比对"。 */
+function fenceLedgerCount() {
+  if (process.platform !== "win32") return null;
+  const { spawnSync } = require("child_process");
+  const r = spawnSync(BIN, ["--root", FIXTURE, "--fence-ledger"], {
+    cwd: PRODUCT_ROOT,
+    encoding: "utf8",
+    timeout: 60000,
+  });
+  if (r.status !== 0) {
+    console.error("[e2e] --fence-ledger 退出码 " + r.status + "：" + ((r.stderr || "").trim()));
+    return null;
+  }
+  try {
+    const view = JSON.parse((r.stdout || "").trim());
+    return Array.isArray(view.entries) ? view.entries.length : null;
+  } catch (e) {
+    console.error("[e2e] --fence-ledger 的 stdout 不是 JSON：" + e.message);
+    return null;
+  }
+}
+
 /** 一次性命令的 stdout 契约：--json 的转录相命令只写结果，启动期诊断一律走 stderr。
- *  这里在夹具上真跑一次 `--json modules`：解析整段 stdout 就是判据（多了任何一行诊断，JSON.parse 必失败）。 */
+ *  同一次运行还要证明它**不装常驻运行时**：不占视图盘（.home/view-drive.json 不出现）、
+ *  不拉常驻服务、不碰围栏（ACL 台账条数不变）。夹具根已授权，所以这里不注入任何降级覆盖——
+ *  一次性命令本来就不该被围栏授权拦住。 */
 function oneShotJsonIsPipeable() {
   const { spawnSync } = require("child_process");
+  const env = Object.assign({}, process.env);
+  delete env.SOLOMNI_SANDBOX_DEGRADED;
+  delete env.SOLOMNI_FENCE_WRITE;
+  const driveRecord = path.join(FIXTURE, ".home", "view-drive.json");
+  fs.rmSync(driveRecord, { force: true });
+  const ledgerBefore = fenceLedgerCount();
   const r = spawnSync(BIN, ["--root", FIXTURE, "--json", "modules"], {
     cwd: PRODUCT_ROOT,
     encoding: "utf8",
     timeout: 120000,
-    env: Object.assign({}, process.env, {
-      // 安全模式：不写本机 ACL，只验 stdout 与 stderr 的分工。
-      SOLOMNI_SANDBOX_DEGRADED: "1",
-      SOLOMNI_FENCE_WRITE: "0",
-    }),
+    env,
   });
   const out = (r.stdout || "").trim();
   const first = out.split(/\r?\n/, 1)[0] || "";
@@ -330,8 +357,97 @@ function oneShotJsonIsPipeable() {
     console.error("[e2e] --json modules 没给出模块清单");
     return false;
   }
-  console.log("[e2e] --json modules 的 stdout 是纯 JSON（" + got.modules.length + " 个模块）：管道可用");
+  const err = r.stderr || "";
+  for (const mark of ["已写权限", "[常驻服务] 已拉起"]) {
+    if (err.includes(mark)) {
+      console.error("[e2e] 一次性命令装上了常驻运行时（stderr 出现「" + mark + "」）：" + err.trim());
+      return false;
+    }
+  }
+  if (fs.existsSync(driveRecord)) {
+    console.error("[e2e] 一次性命令占了视图盘：.home/view-drive.json 不该出现");
+    return false;
+  }
+  const ledgerAfter = fenceLedgerCount();
+  if (ledgerBefore !== null && ledgerAfter !== null && ledgerAfter !== ledgerBefore) {
+    console.error("[e2e] 一次性命令动了围栏台账：" + ledgerBefore + " 条 → " + ledgerAfter + " 条");
+    return false;
+  }
+  console.log("[e2e] --json modules 的 stdout 是纯 JSON（" + got.modules.length + " 个模块）：管道可用；未装常驻运行时");
   return true;
+}
+
+/** 未授权根上的启动门：没有 ACL 授权、也没有可回答的前端时必须 fail-closed，并把"缺几项 + 每条出路"
+ *  写成能整行复制的形状；同一个根上一次性命令照常通过（它不吃这道门）。
+ *  只有 Windows 有 ACL 这一步（HAS_EXTERNAL_ACL_STEP），其它平台没有可断言的门。
+ *  做法是临时把夹具的 settings.yaml 挪走（夹具根就是"万事齐备、只是没授权"的样子），跑完原样放回。
+ *  不用空目录：装配要读 systools/ prompts/ 等产品数据，空根会先在装配阶段失败，验不到门。 */
+function unauthorizedRootGateExplainsItsWaysOut() {
+  if (process.platform !== "win32") {
+    console.log("[e2e] 未授权根的启动门：本平台没有 ACL 一步，跳过");
+    return true;
+  }
+  const { spawnSync } = require("child_process");
+  const settings = path.join(FIXTURE, ".home", "settings.yaml");
+  const keep = fs.existsSync(settings) ? fs.readFileSync(settings) : null;
+  const env = Object.assign({}, process.env);
+  delete env.SOLOMNI_SANDBOX_DEGRADED;
+  delete env.SOLOMNI_FENCE_WRITE;
+  fs.rmSync(settings, { force: true });
+  try {
+    // 进会话的命令（runtime: services）在未授权根上必须被门拦下：退出 1，不进入会话。
+    const r = spawnSync(BIN, ["--root", FIXTURE, "--json", "single"], {
+      cwd: PRODUCT_ROOT,
+      encoding: "utf8",
+      timeout: 120000,
+      env,
+    });
+    const err = r.stderr || "";
+    if (r.status !== 1) {
+      console.error("[e2e] 未授权根上的 single 应被启动门拦下（退出码 " + r.status + "）：" + err.trim());
+      return false;
+    }
+    if (!/缺 \d+ 项强制围栏/.test(err)) {
+      console.error("[e2e] 启动门没写出缺几项：" + err.trim());
+      return false;
+    }
+    const wants = [
+      "没有可回答的前端",
+      "SOLOMNI_FENCE_WRITE=1",
+      "sandbox.policy.windows",
+      "write_acl: true",
+      "sandbox.policy.enforce",
+      "best_effort",
+    ];
+    for (const want of wants) {
+      if (!err.includes(want)) {
+        console.error("[e2e] 启动门缺了「" + want + "」：" + err.trim());
+        return false;
+      }
+    }
+    // 同一个未授权根上的转录相命令不吃这道门：退出 0，stdout 只有 JSON。
+    const q = spawnSync(BIN, ["--root", FIXTURE, "--json", "modules"], {
+      cwd: PRODUCT_ROOT,
+      encoding: "utf8",
+      timeout: 120000,
+      env,
+    });
+    if (q.status !== 0) {
+      console.error("[e2e] 未授权根上的 --json modules 不该被启动门拦下（退出码 " + q.status + "）：" + ((q.stderr || "").trim()));
+      return false;
+    }
+    try {
+      JSON.parse((q.stdout || "").trim());
+    } catch (e) {
+      console.error("[e2e] 未授权根上的 --json modules 的 stdout 不是纯 JSON：" + e.message);
+      return false;
+    }
+    console.log("[e2e] 未授权根启动门：缺项逐条给路，一次性命令照常通过");
+    return true;
+  } finally {
+    if (keep !== null) fs.writeFileSync(settings, keep);
+    else fs.rmSync(settings, { force: true });
+  }
 }
 
 /** 启动器的参数拼装：它给二进制塞的只能是旗语——位置参数在命令表里是命令词，
@@ -428,6 +544,10 @@ async function main() {
   }
   // 一次性命令也要能被脚本消费：stdout 只有 JSON，启动期诊断全在 stderr。
   if (!oneShotJsonIsPipeable()) {
+    return 1;
+  }
+  // 未授权根上的启动门要说清缺什么、每条出路怎么写；那门只管进会话的命令。
+  if (!unauthorizedRootGateExplainsItsWaysOut()) {
     return 1;
   }
   // 启动器（start.js / start.bat / start.sh 的共同入口）也要真跑一次：它是用户唯一的那条路。

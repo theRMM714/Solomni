@@ -365,7 +365,7 @@ commands:
     group: 维护
     phase: boot
     executor: system
-    brief: 便携 PATH 与围栏预授（省略值 = status）
+    brief: 便携 PATH 与围栏预授（fence 顺手记授权；省略值 = status）
     json: '状态 {"platform","root","path","fence"}；写入类模式 {"mode","lines"}'
     params:
       mode:
