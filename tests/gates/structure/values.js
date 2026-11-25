@@ -26,7 +26,7 @@ const rsFilesOf = (dir) => {
 
 const capOf = (file) => {
   const parts = file.split(path.sep);
-  const at = parts.indexOf("capabilities");
+  const at = parts.indexOf("units");
   return at >= 0 ? parts[at + 1] : "";
 };
 const rel = (root, file) => path.relative(root, file).split(path.sep).join("/");
@@ -162,7 +162,7 @@ function borrowedProblems(root, file) {
 
 /** 值边界（api 面）与同形重复（全能力面）：返回 {problems, notes}。 */
 function values(root) {
-  const dir = path.join(root, "src", "capabilities");
+  const dir = path.join(root, "src", "units");
   const files = rsFilesOf(dir).filter((f) => !f.includes(path.sep + "tests" + path.sep));
   const api = files.filter((f) => /(api\.rs|api\/.*\.rs)$/.test(f));
   const index = structIndex(files);

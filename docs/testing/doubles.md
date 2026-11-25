@@ -32,8 +32,8 @@
 
 | 实现 | 当前角色 | 当前状态 |
 | --- | --- | --- |
-| `src/capabilities/llm/detail/fake_chat.rs:FakeChat` | 脚本模型，同时记录 `calls`，兼具 Fake + Spy | 契约已就位（成功 / 空 / 流式 / 中止 / 记录） |
-| `src/capabilities/llm/detail/fake_chat.rs:DemoGateway` | 测试专用网关 | 契约已就位（两类通道 / 无网络、不需要隐秘字段；生产不装配） |
+| `src/units/llm/detail/fake_chat.rs:FakeChat` | 脚本模型，同时记录 `calls`，兼具 Fake + Spy | 契约已就位（成功 / 空 / 流式 / 中止 / 记录） |
+| `src/units/llm/detail/fake_chat.rs:DemoGateway` | 测试专用网关 | 契约已就位（两类通道 / 无网络、不需要隐秘字段；生产不装配） |
 | `src/tests/doubles/:InMemorySettings`、`InMemoryHistory`、`InMemoryWorkspace`、`InMemorySysIo`、`InMemoryWorkStore`、`InMemoryModuleState` | 内存 Fake | 已被核心测试装配使用；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/doubles/:InMemoryPackages` | 包库 Fake | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/doubles/:FakeEngine`、`FakeShare`、`RecordingVm` | VM 引擎 Fake（记录 start / run / stop）、共享后端 Fake（空共享计划）、vm 用例面替身（记录 guest_run） | 已被 vm 契约测试使用；端口矩阵已登记（见 §三） |

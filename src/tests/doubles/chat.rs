@@ -1,7 +1,7 @@
 //! 目的：通道脚本与提示词来源替身——按剧本回话、记录请求。
 //! 管：文本与原生调用两条回放路径、令牌用量、提示词装载。
 //! 不管：模型目录（`history.rs`）、登记处（`registry.rs`）。
-//! 联动：`src/capabilities/llm/ports.rs` 的 `ChatGateway` 与 `src/capabilities/prompt/ports.rs`。
+//! 联动：`src/units/llm/ports.rs` 的 `ChatGateway` 与 `src/units/prompt/ports.rs`。
 
 use super::*;
 
@@ -23,7 +23,7 @@ impl Chat for SharedScript {
         done
     }
 
-    fn last_usage(&self) -> Option<crate::capabilities::llm::api::TokenUsage> {
+    fn last_usage(&self) -> Option<crate::units::llm::api::TokenUsage> {
         self.usage
     }
 }
@@ -52,7 +52,7 @@ impl Chat for NativeCallChat {
             raw: self.raw.clone(),
             reasoning: String::new(),
             finish: self.finish.clone(),
-            calls: vec![crate::capabilities::llm::api::ToolCall {
+            calls: vec![crate::units::llm::api::ToolCall {
                 id: "call-native-1".to_string(),
                 name: self.name.clone(),
                 args_json: self.args_json.clone(),
@@ -87,7 +87,7 @@ impl ChatGateway for NativeCallGateway {
     fn probe_tools(
         &self,
         _channel: &Channel,
-    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
+    ) -> Result<crate::units::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
 }
@@ -97,7 +97,7 @@ pub(crate) struct ScriptGateway {
     pub(crate) member: BTreeMap<String, Vec<String>>,
     pub(crate) core: Arc<Mutex<Vec<String>>>,
     // 需要验“精确上下文用量”时注入；None = 这条通道拿不到 usage。
-    pub(crate) usage: Option<crate::capabilities::llm::api::TokenUsage>,
+    pub(crate) usage: Option<crate::units::llm::api::TokenUsage>,
 }
 
 impl ScriptGateway {
@@ -112,7 +112,7 @@ impl ScriptGateway {
     /// 目的：让这个脚本网关的每次调用都报同一份 usage（验状态栏 / 压缩阈值用）。
     pub(crate) fn with_usage(
         mut self,
-        usage: crate::capabilities::llm::api::TokenUsage,
+        usage: crate::units::llm::api::TokenUsage,
     ) -> ScriptGateway {
         self.usage = Some(usage);
         self
@@ -123,7 +123,7 @@ impl ChatGateway for ScriptGateway {
     fn probe_tools(
         &self,
         _c: &Channel,
-    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
+    ) -> Result<crate::units::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(&self, _c: &Channel, id: &str) -> BoxedChat {
@@ -170,9 +170,9 @@ impl PromptSource for TestPrompts {
 
 /// 目的：测试用的**会话类型表**：走与产品同一条装配路径（读产品自带的 `systools/profiles.yaml`）。
 /// 约束：表改了这里跟着变——测试断言的是产品怎么被装配，不是另写一份类型表。
-pub(crate) fn test_profiles() -> crate::capabilities::conversation::session::api::Profiles {
+pub(crate) fn test_profiles() -> crate::units::conversation::session::api::Profiles {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    crate::capabilities::conversation::session::detail::yaml_profiles::YamlProfiles::new(
+    crate::units::conversation::session::detail::yaml_profiles::YamlProfiles::new(
         root.join("systools"),
     )
     .load()
@@ -182,26 +182,26 @@ pub(crate) fn test_profiles() -> crate::capabilities::conversation::session::api
 pub(crate) fn test_prompts() -> Prompts {
     // 走**与产品同一条**装配路径（目录 + 合并）：替身与真机装配出同一册子，测试才有意义。
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    crate::capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"))
+    crate::units::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"))
         .load()
         .expect("内置提示词册必须合法")
 }
 
-/// 目的：测试用工具总表与机制席位（走**与产品同一条**装配路径）。它与提示词册**分开**装配：两者互不依赖（见 capabilities/prompt 的 Prompts）。测试用的**会话历史面**（与生产同一条路：端口装进 `SessionService`）。
+/// 目的：测试用工具总表与机制席位（走**与产品同一条**装配路径）。它与提示词册**分开**装配：两者互不依赖（见 units/prompt 的 Prompts）。测试用的**会话历史面**（与生产同一条路：端口装进 `SessionService`）。
 pub(crate) fn test_history()
--> Arc<dyn crate::capabilities::conversation::session::api::History + Send + Sync> {
+-> Arc<dyn crate::units::conversation::session::api::History + Send + Sync> {
     test_history_of(Arc::new(InMemoryHistory::new()))
 }
 
 /// 目的：同上，但用调用方给的替身（要在断言里看落盘内容的用例用它——同一份状态）。
 pub(crate) fn test_history_of(
     store: Arc<InMemoryHistory>,
-) -> Arc<dyn crate::capabilities::conversation::session::api::History + Send + Sync> {
-    Arc::new(crate::capabilities::conversation::session::service::SessionService::new(store))
+) -> Arc<dyn crate::units::conversation::session::api::History + Send + Sync> {
+    Arc::new(crate::units::conversation::session::service::SessionService::new(store))
 }
 
 /// 目的：测试用的 **tools 能力**：三张表 + 三个替身端口（与生产同一条路，R12）。两个面都从这里出：`Arc<dyn Tools>`（表）与 `Arc<dyn ToolExec>`（执行）。
-pub(crate) fn test_tools_svc() -> Arc<crate::capabilities::tools::service::ToolsService> {
+pub(crate) fn test_tools_svc() -> Arc<crate::units::tools::service::ToolsService> {
     test_tools_svc_with(
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
@@ -214,19 +214,19 @@ pub(crate) fn test_tools_svc_with(
     runner: Arc<dyn crate::kernel::ports::ProcessRunner>,
     io: Arc<InMemorySysIo>,
     fence: Arc<dyn crate::kernel::ports::FenceHost + Send + Sync>,
-) -> Arc<crate::capabilities::tools::service::ToolsService> {
+) -> Arc<crate::units::tools::service::ToolsService> {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let source =
-        crate::capabilities::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"));
+        crate::units::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"));
     Arc::new(
-        crate::capabilities::tools::service::ToolsService::new(&source, runner, io, fence)
+        crate::units::tools::service::ToolsService::new(&source, runner, io, fence)
             .expect("内置工具总表必须合法"),
     )
 }
 
-pub(crate) fn test_systools() -> crate::capabilities::tools::api::SystemTools {
+pub(crate) fn test_systools() -> crate::units::tools::api::SystemTools {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    crate::capabilities::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"))
+    crate::units::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"))
         .load()
         .expect("内置工具总表必须合法")
 }

@@ -8,7 +8,7 @@
 #   executor 决定最后一步落在哪：core（走能力面 act）/ system（装配核心前就能跑）/ ui（纯界面动作）。
 #   runtime 决定要不要常驻运行时：none（缺省，跑完即回——不占视图盘、不起存储自动任务、不拉起常驻服务、免围栏授权）
 #   或 services（进会话/生成、Web、常驻服务、模块工具调用）；启动相命令不得声明 services。
-# 联动：解析与校验在 src/capabilities/tools/domain/{commands,op}.rs；覆盖门禁在 src/tests/commands.rs。
+# 联动：解析与校验在 src/units/tools/domain/{commands,op}.rs；覆盖门禁在 src/tests/commands.rs。
 
 commands:
   # —— 转录相：在转录中心里输入 ——

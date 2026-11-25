@@ -1,12 +1,12 @@
 //! 目的：命令目录的**投影**——手册、菜单、补全与「未知命令」建议都从同一条声明（`Op`）渲染。
 //! 管：帮助正文、单条说明、补全候选与编辑距离建议的排版。
-//! 不管：命令有哪些（在 `systools/commands.yaml`，投影见 `capabilities/tools/domain/op.rs`）；
+//! 不管：命令有哪些（在 `systools/commands.yaml`，投影见 `units/tools/domain/op.rs`）；
 //!   命令怎么执行（转录相在 `cli.rs`，启动相在 `boot.rs`）；终端与配色怎么画（`term.rs`、`view.rs`）。
 //! 联动：`cli.rs` 渲染 help 与提示；`term.rs` 的 Tab 补全取 `complete`；旗语正文取 `argv`。
 
 use super::MenuRow;
-use crate::capabilities::catalog::modules::api::ParamType;
-use crate::capabilities::tools::api::{
+use crate::units::catalog::modules::api::ParamType;
+use crate::units::tools::api::{
     CommandBook, Executor, Op, OpBook, Phase, complete_op, op_usage,
 };
 use std::sync::OnceLock;
@@ -172,7 +172,7 @@ pub(crate) fn detail(raw: &str) -> Option<String> {
 /// 目的：一行旗语说明（名字、取值提示、说明），从参数声明派生。
 pub(crate) fn param_row(
     name: &str,
-    p: &crate::capabilities::catalog::modules::api::Param,
+    p: &crate::units::catalog::modules::api::Param,
 ) -> String {
     let spec = if p.ty == ParamType::Boolean {
         format!("--{}", name)

@@ -29,7 +29,7 @@ function permissionValues(root) {
   const problems = [];
   const base = path.join(root, "src");
   if (!fs.existsSync(base)) return problems;
-  const own = path.join(root, "src", "capabilities", "permission") + path.sep;
+  const own = path.join(root, "src", "units", "permission") + path.sep;
   for (const file of rsFilesOf(base)) {
     if (file.startsWith(own)) continue;
     const lines = mask(fs.readFileSync(file, "utf8")).split(/\r?\n/);

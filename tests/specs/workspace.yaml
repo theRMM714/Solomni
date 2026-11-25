@@ -8,9 +8,9 @@ title: 工作区与虚拟根
 mutation:
   schedule: weekly
   files:
-    - src/capabilities/workspace/domain/workstore.rs
-    - src/capabilities/workspace/domain/workspace.rs
-    - src/capabilities/workspace/service/commit.rs
+    - src/units/workspace/domain/workstore.rs
+    - src/units/workspace/domain/workspace.rs
+    - src/units/workspace/service/commit.rs
 cases:
   - id: cargo/tests::detail::fs
     tier: T1

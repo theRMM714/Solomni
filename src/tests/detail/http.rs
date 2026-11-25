@@ -416,7 +416,7 @@ fn http_stream_stop_cancels_without_waiting_for_the_next_chunk() {
             &[Msg::user("想很久")],
             CompleteOpts::plain(true)
                 .with_timeout(30)
-                .with_cancel(crate::capabilities::llm::api::cancel_flag(cancel_for_call)),
+                .with_cancel(crate::units::llm::api::cancel_flag(cancel_for_call)),
             &mut |_| true,
         )
     });
@@ -532,7 +532,7 @@ fn http_chat_reads_native_tool_calls() {
     assert_eq!(out.finish, "tool_calls");
     assert_eq!(
         out.calls,
-        vec![crate::capabilities::llm::api::ToolCall {
+        vec![crate::units::llm::api::ToolCall {
             id: "call_1".to_string(),
             name: "read".to_string(),
             args_json: "{\"path\":\"/x\"}".to_string(),
@@ -588,7 +588,7 @@ fn native_history_goes_out_in_protocol_shape() {
         Msg::user("读一下"),
         Msg::assistant_calls(
             "我看看这个文件。",
-            vec![crate::capabilities::llm::api::ToolCall {
+            vec![crate::units::llm::api::ToolCall {
                 id: "call_1".to_string(),
                 name: "read".to_string(),
                 args_json: "{\"path\":\"/x\"}".to_string(),

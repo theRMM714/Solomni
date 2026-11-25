@@ -1,7 +1,7 @@
 <!-- docs-template: spec -->
 # 业务边界与硬要求
 > 定位：什么该独立成一个业务、状态归谁、文件多大算过大，以及所有业务必须守的硬要求 R1–R20。
-> 效力：规范｜核对：2026-11-17｜依据：`tests/gates/structure/`、`src/capabilities/`
+> 效力：规范｜核对：2026-11-17｜依据：`tests/gates/structure/`、`src/units/`
 
 ## 适用与判据
 - 新能力要不要独立、状态放哪、文件拆不拆、硬要求守没守之前读本文；本文件回答「什么该独立成一个业务」与「所有业务必须守的硬要求」，全部由 T0 结构审查机器判定（`tests/gates/registry.js`），零豁免。
@@ -15,8 +15,8 @@
 
 - **归层是必填身份**：能力必须在 `layers.yaml` 里有一行，只能依赖**严格更低层**，**同层零引用**（`tests/gates/structure/layers.js`）。层号不回答「是不是业务」，它只回答「能依赖谁」。
 - **机制不因调用方多而升格**：日志、路径、进程、围栏、平台差异归一化这类没有领域词、没有用户可见后果的机制，留在 `kernel` 或所属能力的 `detail/`，不按第 2 条算作业务；第 2 条只用来判断「已有自己用例」的能力是否值得独立。
-- **已判例（代理工具族 → `proxy`）**：判据 1 成立——六工具有自有协议（`src/capabilities/conversation/proxy/domain/proxy.rs` 的载荷、授权判据与回执形状）与用户可见后果（代用户建会话、转达、控会话）。判据 2 目前只有 `runtime` 一个能力调用方，它成立的方式是**端口反转**：`proxy` 声明宿主契约 `ProxyHost`（`src/capabilities/conversation/proxy/api.rs`），由 `runtime` 的 `ProxyBridge` 实现（`src/capabilities/runtime/service/bridge.rs`）、只在 `src/capabilities/runtime/service/handle.rs` 的 `inject_proxy_handler` 装配——`runtime` 对它的依赖因此止于 `::api`，真实会话状态仍在 `runtime` / `turn` 一侧。
-- **已判例（顶层编排 → `runtime`）**：判据 1 成立——编排有自己的领域词（启用工作、改需求、回档、停止、动作分发）、自有协议（`src/capabilities/runtime/api.rs` 的 `RuntimeOps` / `ActionOps` / `ActionCall` / `Acted`）与用户可见后果（一条命令把几个下层用例按序跑完）；判据 2 成立——入口（`src/main.rs` 的 `Handle::spawn`）与呈现层（`src/presentation/faces.rs` 的 `Faces`）是两个调用方，两个渠道共用同一份编排。它**不搬**下层用例的身体：方法体只是「按序调几个下层用例 + 状态聚合」。
+- **已判例（代理工具族 → `proxy`）**：判据 1 成立——六工具有自有协议（`src/units/conversation/proxy/domain/proxy.rs` 的载荷、授权判据与回执形状）与用户可见后果（代用户建会话、转达、控会话）。判据 2 目前只有 `runtime` 一个能力调用方，它成立的方式是**端口反转**：`proxy` 声明宿主契约 `ProxyHost`（`src/units/conversation/proxy/api.rs`），由 `runtime` 的 `ProxyBridge` 实现（`src/units/runtime/service/bridge.rs`）、只在 `src/units/runtime/service/handle.rs` 的 `inject_proxy_handler` 装配——`runtime` 对它的依赖因此止于 `::api`，真实会话状态仍在 `runtime` / `turn` 一侧。
+- **已判例（顶层编排 → `runtime`）**：判据 1 成立——编排有自己的领域词（启用工作、改需求、回档、停止、动作分发）、自有协议（`src/units/runtime/api.rs` 的 `RuntimeOps` / `ActionOps` / `ActionCall` / `Acted`）与用户可见后果（一条命令把几个下层用例按序跑完）；判据 2 成立——入口（`src/main.rs` 的 `Handle::spawn`）与呈现层（`src/presentation/faces.rs` 的 `Faces`）是两个调用方，两个渠道共用同一份编排。它**不搬**下层用例的身体：方法体只是「按序调几个下层用例 + 状态聚合」。
 - **状态不参与这条判据**——它只在本文件第二节回答「这块状态归谁」。
 
 ## 二、状态归谁
@@ -25,7 +25,7 @@
 - 没有参与方拥有、且 ≥2 个参与方共同依赖 → 归**依赖图上最高的那个使用方**（`turn` 的会话在世表、运行态、创建占位与裁决队，`runtime` 的作业登记）：由它持有、只经自己的 `api` 暴露，不许为这块状态另造一个横跨所有层的单元；命令队列本身是机制，在 `src/kernel/domain/actor.rs`；
 - 只被一个参与方用、自己又没有不变式 → 它是**派生值**，留在 owner 的 `domain/`，现算。
 
-- **持状态的能力只能写自己的状态**；别人的状态只经 `api` 拿（R4）（`src/capabilities/runtime/service/core.rs` 只聚合 `turn` / `work` / `lifecycle` 与各能力的 `api`，不代写它们的状态）。
+- **持状态的能力只能写自己的状态**；别人的状态只经 `api` 拿（R4）（`src/units/runtime/service/core.rs` 只聚合 `turn` / `work` / `lifecycle` 与各能力的 `api`，不代写它们的状态）。
 
 ## 三、三分法（正交：只决定它持有什么、依赖谁）
 
@@ -44,10 +44,10 @@
 - **纯交付**（HTTP 路由、终端渲染）→ `presentation/{cli,web}/`，**不是能力**；
 - **只服务单一调用方的脚本 / 编排** → 它自己的 `service.rs`；
 - **DTO 中转站**（把两个能力的类型拼一起的适配业务）→ 新的水平层，禁止（`node run-tests.js` 的 T0 结构审查）。
-- **动作表不等于分发器**：`runtime` 的 `ActionOps::act` 是**入口分发**（查表 → 校验 → 授权 → 审计，`src/capabilities/runtime/service/action.rs`），执行体仍在各能力的用例里；把它写成什么都干的「万能分发器」等于把下层用例搬进顶层。
+- **动作表不等于分发器**：`runtime` 的 `ActionOps::act` 是**入口分发**（查表 → 校验 → 授权 → 审计，`src/units/runtime/service/action.rs`），执行体仍在各能力的用例里；把它写成什么都干的「万能分发器」等于把下层用例搬进顶层。
 - **聚合面不是业务**：`Faces`（`src/presentation/faces.rs`）只做装配——回答「这块屏幕取哪几个面」，不得长判定；判定与编排留在 `runtime`，机制留在各能力的 `detail/`。
-- **把可变借用当参数传**：账本这类纯值按值进出——交一份、拿回更新后的那份，不借别人的 `&mut`（`src/capabilities/tools/api.rs` 的 `Recorded`；R16）。
-- **把环境包当参数传**：把端口、状态与值拼成一个结构递给别的能力，等于传活对象；改成只传值 + 少量窄端口（`src/capabilities/conversation/session/domain/tools.rs`、R16）：该文件里的 `ToolFace` 是抽出来的值面，端口与活状态仍留在 `MemberTools`；核实用例只借一个窄端口 `CoreVerify`，不把 `MemberTools` 写进 api 签名。`session` 的 `api` 不转出 `MemberTools`：装配入口（`src/capabilities/conversation/session/service/assemble.rs` 的 `single_session` / `rebuild_single` / `proxy_session`）只收端口与值，核实环境经 `verify_tools(&VerifySpec)`（`src/capabilities/conversation/session/service/verify.rs`）取。
+- **把可变借用当参数传**：账本这类纯值按值进出——交一份、拿回更新后的那份，不借别人的 `&mut`（`src/units/tools/api.rs` 的 `Recorded`；R16）。
+- **把环境包当参数传**：把端口、状态与值拼成一个结构递给别的能力，等于传活对象；改成只传值 + 少量窄端口（`src/units/conversation/session/domain/tools.rs`、R16）：该文件里的 `ToolFace` 是抽出来的值面，端口与活状态仍留在 `MemberTools`；核实用例只借一个窄端口 `CoreVerify`，不把 `MemberTools` 写进 api 签名。`session` 的 `api` 不转出 `MemberTools`：装配入口（`src/units/conversation/session/service/assemble.rs` 的 `single_session` / `rebuild_single` / `proxy_session`）只收端口与值，核实环境经 `verify_tools(&VerifySpec)`（`src/units/conversation/session/service/verify.rs`）取。
 
 ## 五、粒度上限
 
@@ -77,7 +77,7 @@
 - **R7**：**不留兼容层**：项目是 GREEN FIELD，**只维护当前唯一实现**——旧实现直接删，不留转发壳或历史说明 <!-- hygiene-ignore -->
 - **R8**：**文档同步**：改结构必须同一次改 `docs/architecture/` 对应细则 / `docs/<单元>/unit-map.md` / 相关细则 / `AGENTS.md` 路由表
 - **R9**：**跨平台与路径**：一律 `PathBuf` 组件拼接；对外用 `/`；不假设平台
-- **R10**：**测试跟着业务分区走**：`capabilities/<单元>/<子业务>/` ↔ `src/tests/<子业务>.rs`（用例多的按域分成子目录，一域一个文件），单文件 ≤ 2000 行；用例只经 `::api` / `::ports` / 组合根 `crate::entry::assembly`，出现 `::service
+- **R10**：**测试跟着业务分区走**：`units/<单元>/<子业务>/` ↔ `src/tests/<子业务>.rs`（用例多的按域分成子目录，一域一个文件），单文件 ≤ 2000 行；用例只经 `::api` / `::ports` / 组合根 `crate::entry::assembly`，出现 `::service
 - **R11**：**测试入口 = 生产入口**：禁止 `#[cfg(test)]` 专用语义入口（门禁 `structure/cfg-boundaries`）
 - **R12**：**端口只有一个持有者**：定义它的那个能力的 `service.rs`；别人只拿 `api` 面。**例外**：`kernel` 的机制端口是全项目共享的机制接口
 - **R13**：**跨能力的同形重复不许存在**：要么收进唯一所有者，要么独立成一个业务（见「判据」第 2 条）

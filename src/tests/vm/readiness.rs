@@ -1,14 +1,14 @@
 //! 目的：承载判定与就绪说明同源——能不能选、缺什么，用一把尺子。
 //! 管：tier_readiness、vm_capability、已验平台表。
 //! 不管：共享后端在场（`share.rs`）。
-//! 联动：`src/capabilities/vm/domain/tier.rs`。
+//! 联动：`src/units/vm/domain/tier.rs`。
 
 use super::super::prelude::*;
 
 /// 目的：机器能力与会话选型分开——vm_capability 不问 base；tier_readiness（保存/开始）才要求 base。
 #[test]
 pub(crate) fn vm_capability_is_machine_only_while_session_readiness_needs_base() {
-    use crate::capabilities::vm::api::{VmInputs, vm_capability};
+    use crate::units::vm::api::{VmInputs, vm_capability};
     use crate::tests::doubles::FixedProbe;
     let qemu = std::path::PathBuf::from("/opt/qemu-system-x86_64");
     let mut probe = FixedProbe {

@@ -1,7 +1,7 @@
 //! 目的：交互回合：跟随事件流、投降裁决卡、等安静与动作回显。
 //! 管：跟读游标、裁决卡的问与答、动作后的续读。
 //! 不管：生成本身（在 `runtime`）、渲染原语（`view`）。
-//! 联动：`cli/view.rs`、`cli/flows.rs`、`capabilities/runtime`
+//! 联动：`cli/view.rs`、`cli/flows.rs`、`units/runtime`
 
 use super::*;
 use crate::presentation::faces::Faces;
@@ -403,15 +403,15 @@ pub(crate) fn pick_agents(faces: &Faces, names: &[String]) -> Result<Vec<AgentMe
     let views = faces.registry.pick_agents(names)?;
     Ok(views
         .iter()
-        .map(crate::capabilities::catalog::registry::api::agent_meta)
+        .map(crate::units::catalog::registry::api::agent_meta)
         .collect())
 }
 
 /// 目的：虚拟机档的虚拟根怎么选——本机只有一个装齐的就自动用它；多个（或一个都没装齐）返回 None，由调用方如实说明。
 pub(super) fn pick_guest(
-    guests: &[crate::capabilities::provision::api::GuestBase],
+    guests: &[crate::units::provision::api::GuestBase],
 ) -> Option<String> {
-    let ready: Vec<&crate::capabilities::provision::api::GuestBase> =
+    let ready: Vec<&crate::units::provision::api::GuestBase> =
         guests.iter().filter(|g| g.ready).collect();
     match ready.as_slice() {
         [one] => Some(one.guest.clone()),
@@ -518,8 +518,8 @@ pub(crate) fn create_session_action(faces: &Faces, ask: SessionAsk<'_>) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capabilities::conversation::collab::api::Pending;
-    use crate::capabilities::conversation::session::api::tool_ask;
+    use crate::units::conversation::collab::api::Pending;
+    use crate::units::conversation::session::api::tool_ask;
     use crate::kernel::api::types::Ask;
 
     /// 目的：用生产那一条派生造卡（工具层那一类：三段话与选项原样来自发起方）。
@@ -691,8 +691,8 @@ mod tests {
     /// 目的：裁决卡上按 Ctrl+C = 撤回答（等同空行「先不答」）：卡还挂着、会话照等；只有真 EOF 才按停止收场。
     #[test]
     fn interrupt_skips_a_card_while_eof_stops_it() {
-        use crate::capabilities::conversation::collab::api::Pending;
-        use crate::capabilities::conversation::session::api::{SINGLE, SlotWake};
+        use crate::units::conversation::collab::api::Pending;
+        use crate::units::conversation::session::api::{SINGLE, SlotWake};
         use crate::tests::doubles::{module_of, work};
 
         let (handle, faces) = crate::tests::ops_with(vec![module_of("a")], Vec::new());
@@ -759,7 +759,7 @@ mod tests {
     /// 目的：本机有多个装齐的虚拟根时先取第一个并如实说明；只一个就自动用，一个都没就绪交调用方说明。
     #[test]
     fn pick_guest_names_the_options_and_takes_the_first() {
-        let guest = |name: &str, ready: bool| crate::capabilities::provision::api::GuestBase {
+        let guest = |name: &str, ready: bool| crate::units::provision::api::GuestBase {
             guest: name.to_string(),
             label: name.to_string(),
             os: "linux".to_string(),

@@ -1,7 +1,7 @@
 //! 目的：端到端钉协作五阶段：整理派发、代拟确认、执行与验收、工具模块。
 //! 管：五阶段演示、代拟名单、名册回写重建、讨论逐片外送、工具模块执行、核心操作必须 tool_call、正文 JSON 如实报错。
 //! 不管：单元级讨论/审查细目（discussion.rs、review.rs）。
-//! 联动：src/capabilities/collab/、runtime 创建/继续、tests/doubles。
+//! 联动：src/units/collab/、runtime 创建/继续、tests/doubles。
 
 use super::super::builders::*;
 use super::super::prelude::*;
@@ -76,7 +76,7 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
         .find(|(id, _)| id.as_str() == child)
         .map(|(_, s)| s)
         .expect("成员会话仍在世");
-    let crate::capabilities::turn::turn::api::Session::Single(agent) = live else {
+    let crate::units::turn::turn::api::Session::Single(agent) = live else {
         panic!("成员会话应是单 agent 会话");
     };
     let face = &agent.tools.as_ref().expect("成员会话有工具环境").face;
@@ -238,7 +238,7 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
     crate::tests::lifecycle::rewind(
         &mut core,
         &sid,
-        crate::capabilities::lifecycle::api::RewindTarget::Delete(1),
+        crate::units::lifecycle::api::RewindTarget::Delete(1),
     )
     .unwrap();
     assert!(
@@ -330,8 +330,8 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     let systools = test_systools();
     // 机制声明把核心操作发给对应的核心席位（越权校验与工具面的判据都是它）。
     let face = |id: &str| -> Vec<String> {
-        let seat = crate::capabilities::conversation::session::api::seat(id).expect("席位在册");
-        crate::capabilities::conversation::session::api::seat_face(seat)
+        let seat = crate::units::conversation::session::api::seat(id).expect("席位在册");
+        crate::units::conversation::session::api::seat_face(seat)
             .into_iter()
             .map(|s| s.to_string())
             .collect()
@@ -354,7 +354,7 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     assert!(!face("executor").iter().any(|t| t == "checklist"));
     // 谁能用"自己模块的工具"也由机制声明说了算：只有干活的那一席发（讨论席列出来等于请它去撞墙）。
     let modules = |id: &str| {
-        crate::capabilities::conversation::session::api::seat(id)
+        crate::units::conversation::session::api::seat(id)
             .expect("席位在册")
             .module_tools
     };
@@ -365,7 +365,7 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     let schema = systools.tools.get("plan").expect("plan 该在工具总表里");
     assert_eq!(
         schema.params.as_ref().expect("有参数")["nodes"].ty,
-        crate::capabilities::catalog::modules::api::ParamType::Array,
+        crate::units::catalog::modules::api::ParamType::Array,
         "任务链节点表是数组载荷"
     );
 }
@@ -380,15 +380,15 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     io.seed(&["demo", "work", "note.txt"], "现场：一切正常\n");
     let sb = test_sandbox("核心", &[]);
     let mut verify = MemberTools {
-        face: crate::capabilities::conversation::session::api::ToolFace {
-            mode: crate::capabilities::llm::api::ToolMode::Envelope,
+        face: crate::units::conversation::session::api::ToolFace {
+            mode: crate::units::llm::api::ToolMode::Envelope,
             seat: "orchestrator".to_string(),
             modules: BTreeMap::new(),
             tier: crate::kernel::api::types::Tier::Host,
             guest_lease: String::new(),
             sandbox: sb.clone(),
             tools_this_turn: test_prompts()
-                .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+                .text(crate::units::prompt::api::Segment::ToolsThisTurn)
                 .to_string(),
             builtin_tools: test_systools().tools,
             unavailable: BTreeMap::new(),
@@ -398,16 +398,16 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
             runtime_roots: Vec::new(),
             allowed: vec!["read".to_string(), "plan".to_string()],
             with_modules: false,
-            notes: crate::capabilities::tools::api::ToolNotes::default(),
+            notes: crate::units::tools::api::ToolNotes::default(),
         },
         llm: test_llm_demo(),
         log: Arc::new(crate::kernel::ports::NoopLog),
         tools: test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
         vm: test_vm(),
-        residents: Arc::new(crate::capabilities::residents::api::NoResidents),
+        residents: Arc::new(crate::units::residents::api::NoResidents),
         // 核实工具面只读：没有共享区提交这回事。
         workspace: None,
-        observations: crate::capabilities::tools::api::Observations::default(),
+        observations: crate::units::tools::api::Observations::default(),
         shell_live: None,
         reply_seq: 0,
         line: Default::default(),
@@ -429,17 +429,17 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         ]),
         seen: Arc::clone(&seen),
     };
-    let out = crate::capabilities::conversation::session::api::core_operation(
+    let out = crate::units::conversation::session::api::core_operation(
         &*test_tools_svc(),
         "planner",
         "plan",
-        crate::capabilities::llm::api::ToolMode::Envelope,
+        crate::units::llm::api::ToolMode::Envelope,
         &mut chat,
-        &[crate::capabilities::llm::api::Msg::user("出方案")],
-        crate::capabilities::llm::api::CompleteOpts::plain(false),
+        &[crate::units::llm::api::Msg::user("出方案")],
+        crate::units::llm::api::CompleteOpts::plain(false),
         None,
-        Some(&mut verify as &mut dyn crate::capabilities::conversation::session::api::CoreVerify),
-        &mut |_e: crate::capabilities::conversation::session::api::SessionEvent| {},
+        Some(&mut verify as &mut dyn crate::units::conversation::session::api::CoreVerify),
+        &mut |_e: crate::units::conversation::session::api::SessionEvent| {},
     )
     .expect("核实之后要能交出方案");
     assert_eq!(out["plan"], "方案");
@@ -464,17 +464,17 @@ pub(crate) fn body_json_is_not_a_core_operation() {
         "{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}"
             .to_string(),
     ]);
-    let out = crate::capabilities::conversation::session::api::core_operation(
+    let out = crate::units::conversation::session::api::core_operation(
         &*test_tools_svc(),
         "planner",
         "plan",
-        crate::capabilities::llm::api::ToolMode::Envelope,
+        crate::units::llm::api::ToolMode::Envelope,
         chat.as_mut(),
-        &[crate::capabilities::llm::api::Msg::user("出方案")],
-        crate::capabilities::llm::api::CompleteOpts::plain(false),
+        &[crate::units::llm::api::Msg::user("出方案")],
+        crate::units::llm::api::CompleteOpts::plain(false),
         None,
         None,
-        &mut |_e: crate::capabilities::conversation::session::api::SessionEvent| {},
+        &mut |_e: crate::units::conversation::session::api::SessionEvent| {},
     );
     let err = out.expect_err("正文 JSON 不是工具调用，该如实报错");
     assert!(err.contains("没有调用 plan"), "{}", err);
@@ -482,17 +482,17 @@ pub(crate) fn body_json_is_not_a_core_operation() {
 
 /// 目的：原生通道替身：不管消息，只回结构化槽位里的调用（正文为空）。
 struct StructuredCallChat {
-    calls: Vec<crate::capabilities::llm::api::ToolCall>,
+    calls: Vec<crate::units::llm::api::ToolCall>,
 }
 
-impl crate::capabilities::llm::api::Chat for StructuredCallChat {
+impl crate::units::llm::api::Chat for StructuredCallChat {
     fn complete(
         &mut self,
-        _m: &[crate::capabilities::llm::api::Msg],
-        _o: crate::capabilities::llm::api::CompleteOpts<'_>,
-        _on: &mut dyn FnMut(crate::capabilities::llm::api::Chunk) -> bool,
-    ) -> crate::capabilities::llm::api::Completion {
-        let mut done = crate::capabilities::llm::api::Completion::text("");
+        _m: &[crate::units::llm::api::Msg],
+        _o: crate::units::llm::api::CompleteOpts<'_>,
+        _on: &mut dyn FnMut(crate::units::llm::api::Chunk) -> bool,
+    ) -> crate::units::llm::api::Completion {
+        let mut done = crate::units::llm::api::Completion::text("");
         done.calls = self.calls.clone();
         done
     }
@@ -502,7 +502,7 @@ impl crate::capabilities::llm::api::Chat for StructuredCallChat {
 #[test]
 pub(crate) fn core_operation_takes_a_native_structured_call() {
     let mut chat = StructuredCallChat {
-        calls: vec![crate::capabilities::llm::api::ToolCall {
+        calls: vec![crate::units::llm::api::ToolCall {
             id: "call-1".to_string(),
             name: "plan".to_string(),
             args_json: "{\"plan\":\"方案\",\"nodes\":[]}".to_string(),
@@ -510,17 +510,17 @@ pub(crate) fn core_operation_takes_a_native_structured_call() {
     };
     let rows = Arc::new(Mutex::new(Vec::new()));
     let seen = Arc::clone(&rows);
-    let out = crate::capabilities::conversation::session::api::core_operation(
+    let out = crate::units::conversation::session::api::core_operation(
         &*test_tools_svc(),
         "planner",
         "plan",
-        crate::capabilities::llm::api::ToolMode::Native,
+        crate::units::llm::api::ToolMode::Native,
         &mut chat,
-        &[crate::capabilities::llm::api::Msg::user("出方案")],
-        crate::capabilities::llm::api::CompleteOpts::plain(false),
+        &[crate::units::llm::api::Msg::user("出方案")],
+        crate::units::llm::api::CompleteOpts::plain(false),
         None,
         None,
-        &mut |e: crate::capabilities::conversation::session::api::SessionEvent| {
+        &mut |e: crate::units::conversation::session::api::SessionEvent| {
             seen.lock().expect("锁").push(e);
         },
     )
@@ -530,7 +530,7 @@ pub(crate) fn core_operation_takes_a_native_structured_call() {
     assert!(
         rows.iter().any(|e| matches!(
             e,
-            crate::capabilities::conversation::session::api::SessionEvent::Transcript(_)
+            crate::units::conversation::session::api::SessionEvent::Transcript(_)
         )),
         "这一轮的事实要推出去"
     );

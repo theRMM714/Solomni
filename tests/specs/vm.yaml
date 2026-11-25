@@ -8,9 +8,9 @@ title: 虚拟机档
 mutation:
   schedule: weekly
   files:
-    - src/capabilities/vm/domain/guest.rs
-    - src/capabilities/vm/domain/exec.rs
-    - src/capabilities/vm/service.rs
+    - src/units/vm/domain/guest.rs
+    - src/units/vm/domain/exec.rs
+    - src/units/vm/service.rs
 cases:
   - id: cargo/tests::api::guest
     tier: T3

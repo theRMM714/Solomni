@@ -1,24 +1,24 @@
 //! 目的：动作目录与分发——模块工具、登记处动作、模型保存的人机边界。
 //! 管：调用者校验、目录可见性、两种结果形状、原生与信封模型保存。
 //! 不管：会话动作的字段（`session.rs`）、guest 诊断（`guest.rs`）。
-//! 联动：`src/capabilities/runtime/api/action.rs` 与 `src/capabilities/registry/api`。
+//! 联动：`src/units/runtime/api/action.rs` 与 `src/units/registry/api`。
 
 use super::super::doubles::InMemoryHistory;
 use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work};
 use super::support::spawn;
-use crate::capabilities::runtime::api::{Acted, ActionCall, Caller, SessionEvent};
+use crate::units::runtime::api::{Acted, ActionCall, Caller, SessionEvent};
 use crate::presentation::faces::Faces;
 
-use crate::capabilities::conversation::session::api::MEETING;
-use crate::capabilities::runtime::api::{Handle, Output};
+use crate::units::conversation::session::api::MEETING;
+use crate::units::runtime::api::{Handle, Output};
 use std::sync::Arc;
 
 #[test]
 fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
     let handle = spawn(vec![module_of("a")], Vec::new());
     let faces = Faces::from_handle(&handle);
-    let draft = |id: &str, tools| crate::capabilities::catalog::registry::api::ModelDraft {
+    let draft = |id: &str, tools| crate::units::catalog::registry::api::ModelDraft {
         tools,
         ..model_draft(id, id, id, "p", "", 0)
     };
@@ -27,7 +27,7 @@ fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
         .registry
         .upsert_model(draft(
             "env-model",
-            crate::capabilities::llm::api::ToolMode::Envelope,
+            crate::units::llm::api::ToolMode::Envelope,
         ))
         .expect("信封形态不需要实测");
     assert!(
@@ -43,7 +43,7 @@ fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
         .registry
         .upsert_model(draft(
             "native-model",
-            crate::capabilities::llm::api::ToolMode::Native,
+            crate::units::llm::api::ToolMode::Native,
         ))
         .unwrap_err();
     assert!(!err.is_empty(), "实测没结论要如实报错");
@@ -72,7 +72,7 @@ fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
         .registry
         .upsert_model(draft(
             "native-ok",
-            crate::capabilities::llm::api::ToolMode::Native,
+            crate::units::llm::api::ToolMode::Native,
         ))
         .expect("实测明确通过应允许保存");
     assert_eq!(
@@ -83,7 +83,7 @@ fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
             .iter()
             .find(|m| m.id == "native-ok")
             .map(|m| m.tools),
-        Some(crate::capabilities::llm::api::ToolMode::Native),
+        Some(crate::units::llm::api::ToolMode::Native),
         "保存的就是实测通过的原生形态"
     );
 }
@@ -103,7 +103,7 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
         .expect("核心推荐");
     assert_eq!(agents.len(), 1, "回包只给名单（渲染那一步的契约不变）");
     let (batches, _head, _oldest) = handle.events().snapshot(
-        Some(crate::capabilities::conversation::session::api::SYSTEM_SID_SUGGEST),
+        Some(crate::units::conversation::session::api::SYSTEM_SID_SUGGEST),
         0,
     );
     assert!(
@@ -121,7 +121,7 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
             .session_views(&[])
             .expect("会话视图")
             .iter()
-            .any(|v| v.sid == crate::capabilities::conversation::session::api::SYSTEM_SID_SUGGEST),
+            .any(|v| v.sid == crate::units::conversation::session::api::SYSTEM_SID_SUGGEST),
         "系统会话不进会话列表（前端因此不会为它建标签页）"
     );
 }
@@ -149,7 +149,7 @@ fn pick_agents_names_the_unknown_and_lists_the_rest() {
     assert_eq!(
         views
             .iter()
-            .map(crate::capabilities::catalog::registry::api::agent_meta)
+            .map(crate::units::catalog::registry::api::agent_meta)
             .count(),
         1,
         "视图 → 实例不丢项"

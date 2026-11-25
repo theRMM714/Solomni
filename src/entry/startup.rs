@@ -135,7 +135,7 @@ pub(crate) fn ask_yes_no<R: BufRead, W: Write>(
 
 /// 目的：把 Windows 的写 ACL 授权落进设置；调用方负责在成功后整体重启。
 pub(crate) fn write_acl_setting(
-    registry: &mut dyn crate::capabilities::catalog::registry::api::Registry,
+    registry: &mut dyn crate::units::catalog::registry::api::Registry,
     value: bool,
 ) -> Result<(), String> {
     let mut app = registry.app_settings();
@@ -145,9 +145,9 @@ pub(crate) fn write_acl_setting(
 
 /// 目的：能力缺失时的持久收口——把四项强制等级都降为 best_effort。 只降“要求等级”，不关闭已有的机制：装得上时仍照常强制，只是缺了不再拒绝启动。
 pub(crate) fn lower_enforce_to_best_effort(
-    registry: &mut dyn crate::capabilities::catalog::registry::api::Registry,
+    registry: &mut dyn crate::units::catalog::registry::api::Registry,
 ) -> Result<(), String> {
-    use crate::capabilities::catalog::registry::api::SandboxEnforceLevel::BestEffort;
+    use crate::units::catalog::registry::api::SandboxEnforceLevel::BestEffort;
     let mut app = registry.app_settings();
     app.sandbox.policy.enforce.filesystem = BestEffort;
     app.sandbox.policy.enforce.network = BestEffort;
@@ -165,7 +165,7 @@ pub(crate) fn maybe_onboard_windows<R: BufRead, W: Write>(
     fence_write_env: Option<&str>,
     forced_degraded: Option<&str>,
     cap: &crate::kernel::detail::confine::Capability,
-    registry: &mut dyn crate::capabilities::catalog::registry::api::Registry,
+    registry: &mut dyn crate::units::catalog::registry::api::Registry,
     reader: &mut R,
     writer: &mut W,
 ) -> Result<bool, String> {
@@ -216,7 +216,7 @@ pub(crate) fn run_gate<R: BufRead, W: Write>(
     tty: bool,
     forced_degraded: Option<&str>,
     fence_write_env: Option<&str>,
-    registry: &mut dyn crate::capabilities::catalog::registry::api::Registry,
+    registry: &mut dyn crate::units::catalog::registry::api::Registry,
     reader: &mut R,
     writer: &mut W,
 ) -> GateOutcome {

@@ -1,4 +1,4 @@
-# 机制说明册：**按适用席位分发**（席位在 src/capabilities/conversation/session/domain/mechanism.rs 的 SEATS）。
+# 机制说明册：**按适用席位分发**（席位在 src/units/conversation/session/domain/mechanism.rs 的 SEATS）。
 # - seats：适用席位（必须是已登记的席位——悬空引用由测试门禁挡下）；
 # - text：这一条要说的话。
 #

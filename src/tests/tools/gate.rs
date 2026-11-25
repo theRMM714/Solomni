@@ -5,10 +5,10 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::capabilities::tools::api::{
+use crate::units::tools::api::{
     Coverage, GateFault, LineRange, Need, Observations, WriteGate,
 };
-use crate::capabilities::workspace::api::{GateFile, content_hash};
+use crate::units::workspace::api::{GateFile, content_hash};
 use std::sync::Mutex;
 
 #[test]
@@ -56,7 +56,7 @@ pub(crate) fn coverage_union_requires_every_line() {
 /// 目的：读事实的派生——整份读一条，分段读每段一条；越界段、空文件与非读来源不产生。
 #[test]
 pub(crate) fn read_facts_cover_full_reads_and_every_segment() {
-    use crate::capabilities::tools::api::{OBSERVATION_FORMAT, ObservationFact, ObservationSource};
+    use crate::units::tools::api::{OBSERVATION_FORMAT, ObservationFact, ObservationSource};
     let fact = |coverage: Coverage, total: u32| ObservationFact {
         schema: OBSERVATION_FORMAT,
         reply: 7,
@@ -215,7 +215,7 @@ fn run(
         &test_systools().tools,
         std::mem::take(obs),
         Some(gate),
-        crate::capabilities::tools::api::ResultBudget::full(),
+        crate::units::tools::api::ResultBudget::full(),
         tool,
         &args,
     );

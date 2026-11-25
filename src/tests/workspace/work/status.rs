@@ -10,8 +10,8 @@ use crate::tests::workspace::support::*;
 /// 目的：work_status 按「工作线 / 主线 / 沙箱」报五态：未提交新增 → 未推送 → 已提交 → 提交后又改 → 未提交删除；主线有、没拉取单独标。
 #[test]
 pub(crate) fn work_status_reports_the_work_line_five_states() {
-    use crate::capabilities::workspace::api::{StatusReport, WorkState};
-    use crate::capabilities::workspace::ports::WorkStore;
+    use crate::units::workspace::api::{StatusReport, WorkState};
+    use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -148,7 +148,7 @@ pub(crate) fn work_versions_reports_media_type_and_marks_oversize_metadata_only(
 /// 目的：媒体资产的冲突也只能显式选边；三方视图按媒体类型给元数据，不做内容合并。
 #[test]
 pub(crate) fn work_media_conflict_requires_explicit_side() {
-    use crate::capabilities::workspace::api::{ResolveAction, ResolveTake};
+    use crate::units::workspace::api::{ResolveAction, ResolveTake};
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -187,7 +187,7 @@ pub(crate) fn work_media_conflict_requires_explicit_side() {
 /// 目的：资产路径（pull / status / versions / commit / resolve / restore）不走整文件读取。
 #[test]
 pub(crate) fn work_asset_paths_do_not_use_whole_file_reads() {
-    use crate::capabilities::workspace::api::ResolveTake;
+    use crate::units::workspace::api::ResolveTake;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
@@ -214,7 +214,7 @@ pub(crate) fn work_asset_paths_do_not_use_whole_file_reads() {
 /// 约束：只有根提交带整棵树，增量只记 changes。
 #[test]
 pub(crate) fn work_commits_store_roots_and_deltas_but_read_full_tree() {
-    use crate::capabilities::workspace::ports::WorkStore;
+    use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "a.md", b"1", 1, 0).unwrap();
@@ -244,7 +244,7 @@ pub(crate) fn work_commits_store_roots_and_deltas_but_read_full_tree() {
 /// 目的：验成员侧工作工具执行者按席位面发放的名单现取——没发任何 `work_*` 就一个都不装。
 #[test]
 pub(crate) fn work_handlers_are_taken_only_when_the_seat_face_allows_them() {
-    use crate::capabilities::workspace::api::work_handlers;
+    use crate::units::workspace::api::work_handlers;
 
     let (ws, _dirs, _store) = work_ws();
     let sb = test_sandbox("a", &[]);
@@ -267,7 +267,7 @@ pub(crate) fn work_handlers_are_taken_only_when_the_seat_face_allows_them() {
 /// 约束：领先的空提交条数仍如实报出（辅助信息），但它不再冒充待推送。
 #[test]
 pub(crate) fn work_status_counts_content_not_pending_commits() {
-    use crate::capabilities::workspace::api::{render_push, render_status};
+    use crate::units::workspace::api::{render_push, render_status};
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
@@ -331,7 +331,7 @@ pub(crate) fn work_status_counts_content_not_pending_commits() {
 /// 约束：只在工作线与主线不一致时列；推送后工作线快进到主线，不重复列主线「最近提交」。
 #[test]
 pub(crate) fn work_status_lists_the_work_line_with_parents() {
-    use crate::capabilities::workspace::api::{ResetRequest, render_status};
+    use crate::units::workspace::api::{ResetRequest, render_status};
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");

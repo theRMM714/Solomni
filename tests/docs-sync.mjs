@@ -2,7 +2,7 @@
 /**
  * 生成段同步：把机器可读事实生成到文档标记之间（文档不手写这些内容）。
  * 来源（唯一）：
- * - platform-status：src/capabilities/vm/domain/exec.rs 的 VERIFIED_HOSTS + tests/<平台>/gaps.yaml 的条目数；
+ * - platform-status：src/units/vm/domain/exec.rs 的 VERIFIED_HOSTS + tests/<平台>/gaps.yaml 的条目数；
  * - gate-steps：tests/gates/steps.js 的 listModel()（与 `node run-tests.js --list --json` 同源），取 "T0 " 前缀步骤；
  * - success-markers：tests/lib/markers.js 的 MARKERS（标记的唯一声明）；
  * - layer-table：layers.yaml 的分层表（能力分层的唯一权威，文档里的表不手写）；
@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const HOSTS_FILE = path.join(ROOT, "src", "capabilities", "vm", "domain", "exec.rs");
+const HOSTS_FILE = path.join(ROOT, "src", "units", "vm", "domain", "exec.rs");
 const PLATFORMS = ["linux", "windows", "macos"];
 const NAMES = { linux: "Linux", windows: "Windows", macos: "macOS" };
 const NAMES_EN = { linux: "Linux", windows: "Windows", macos: "macOS" };

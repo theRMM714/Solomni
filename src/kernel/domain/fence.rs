@@ -1,7 +1,7 @@
 //! 目的：kernel 自己的纯机制——按次租约与全局沙箱要求；不含围栏描述符，也不含裁决与文案。
 //! 管：`call_lease`、`SandboxRequirements`、`SandboxMode`。
 //! 不管：围栏描述符（在 `kernel/contracts/fence.rs`）；从 `Sandbox` / 模块权限**派生**围栏
-//!   （在 `capabilities/tools/domain/fence.rs`）；平台机制（Landlock / seatbelt / AppContainer）在 `detail/confine`。
+//!   （在 `units/tools/domain/fence.rs`）；平台机制（Landlock / seatbelt / AppContainer）在 `detail/confine`。
 //! 联动：由 `src/kernel/api.rs` 重导出；启动期能力探测与工具执行层消费它。
 
 use crate::kernel::contracts::fence::FencePlan;

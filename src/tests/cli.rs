@@ -6,7 +6,7 @@
 use super::doubles::module_of;
 use super::ops_with;
 use super::prelude::*;
-use crate::capabilities::conversation::session::api::SINGLE;
+use crate::units::conversation::session::api::SINGLE;
 use crate::kernel::api::types::Tier;
 use crate::presentation::cli;
 
@@ -160,8 +160,8 @@ fn waiting_list_is_built_line_by_line() {
 /// 约束：停止不套用发起方声明的默认项；等待方被解开、会话随后不再被派发。
 #[test]
 fn eof_answers_a_pending_card_by_stopping_instead_of_hanging() {
-    use crate::capabilities::conversation::collab::api::Pending;
-    use crate::capabilities::conversation::session::api::SlotWake;
+    use crate::units::conversation::collab::api::Pending;
+    use crate::units::conversation::session::api::SlotWake;
 
     let (handle, faces) = ops_with(vec![module_of("a")], Vec::new());
     let sid = "cli-eof-1";

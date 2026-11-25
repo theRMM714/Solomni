@@ -14,7 +14,7 @@ const GLOB = /[*?[\]]/;
 
 /** 单元管到哪棵子树：kernel 单元对 `src/kernel/`，其它单元对自己的能力目录。 */
 function unitPrefix(unit) {
-  return unit === "kernel" ? "src/kernel/" : "src/capabilities/" + unit + "/";
+  return unit === "kernel" ? "src/kernel/" : "src/units/" + unit + "/";
 }
 
 /**

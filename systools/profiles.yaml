@@ -1,5 +1,5 @@
 # 会话类型表：一个会话类型就是一串要跑的流程；每个流程要哪些席位、要几个人，由机制自己报
-# （src/capabilities/conversation/session/domain/mechanism.rs 的 MECHANISMS）。
+# （src/units/conversation/session/domain/mechanism.rs 的 MECHANISMS）。
 # id = 命令与落盘用（只写 ASCII，CLI 里好敲）；name = 界面渲染用（侧栏、向导直接显示它）。
 # 装配期会校验：id 唯一且无空白、流程已注册且不重复、没有流程的类型要有静止机制。
 # flows 为空 = 没有流程，直接轮循环（单机与代理就是这样），这时 mechanism 是它的静止机制。

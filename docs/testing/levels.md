@@ -78,7 +78,7 @@ cargo deny check
 
 - 位置：`src/tests/` 下**按业务分文件**的用例（一个子业务一个文件，用例多的按域分子目录，见 [gaps-acceptance.md](gaps-acceptance.md) 的目录与命名），以及实现文件内部的 `#[cfg(test)] mod tests`。用例清单声明在 `tests/specs/<单元>.yaml`（一条用例一行：`id` / `tier` / `note`），`src/tests` 下每个带 `#[test]` 的模块都必须被声明（门禁 `structure/specs`）——搬运文件只改这一行，删掉的用例不会静默消失。同一目录里还有真实适配器契约（`detail/` / `mcp.rs`）与入口 / 围栏契约用例（`diagnostics.rs` / `fence_reach.rs`）：前者按 T2 判定，后者按真实进程边界判定。
 
-- **只测能力面与内核**：T1 的被测对象是能力面入站对象（`capabilities/<单元>/<子业务>/api.rs`）、端口契约与内核真实实例。`service` / `domain` / `detail` 的自由函数、内部结构与状态机不单独写用例——实现会频繁搬迁，钉住它的用例最先腐烂；这些行为经能力面用例或 T5 旅程覆盖（判据见 [../../TESTING.md](../../TESTING.md) 的「测试只钉可观察行为」与「不做内部实现测试」）。机器判据：`src/tests/**` 出现 `::service` / `::domain` / `::detail` 即失败（门禁 `structure/tests-api`，豁免只有替身与装配层）。
+- **只测能力面与内核**：T1 的被测对象是能力面入站对象（`units/<单元>/<子业务>/api.rs`）、端口契约与内核真实实例。`service` / `domain` / `detail` 的自由函数、内部结构与状态机不单独写用例——实现会频繁搬迁，钉住它的用例最先腐烂；这些行为经能力面用例或 T5 旅程覆盖（判据见 [../../TESTING.md](../../TESTING.md) 的「测试只钉可观察行为」与「不做内部实现测试」）。机器判据：`src/tests/**` 出现 `::service` / `::domain` / `::detail` 即失败（门禁 `structure/tests-api`，豁免只有替身与装配层）。
 
 - 内联测试的准入（判据 `tests/gates/structure/size.js`）：只钉**纯函数与状态转换**，只做**全内存断言**，不碰真实进程 / 文件系统 / 网络；单块 ≤ 200 行（软）/ 400 行（硬）。例外：`src/kernel/**` 的内核测试用**真实实例**（临时目录、真实进程、真文件系统），且不得引用 `crate::tests` 的业务替身（门禁 `structure/kernel-tests`）——内核稳定，替身会把"替身的行为"当成内核的事实。碰真实边界的用例一律写进 `src/tests/`，否则实现文件会长成第二个测试文件、而门禁数不到它。实现文件的实现按生产行计数，正是为了让"测试搬出去"成为首选解法。
 
@@ -96,7 +96,7 @@ cargo deny check
 - 回档成功后事件台推 `rewound` 并推进重置水印；`history.open` 的 live 不取水印前批次（刷新/多端不会把旧消息拼回）；
 - 连续删除回档不 panic，`line_reply` / `marks` / 工具行锚一起回退；
 - 工具并发**按声明**调度（`parallel`：系统工具在册子、模块工具在 `module.yaml`）：连续的可并发调用真的并发（记录型替身断言"同时在跑"的峰值），未声明的一律串行、写入类是批次之间的屏障（`src/tests/builders/`）。
-- 工具行与结果**一律按原始调用顺序**回填，观察账本按原序合并（并发批次与串行结果相同）（`src/capabilities/conversation/session/domain/session.rs`）；
+- 工具行与结果**一律按原始调用顺序**回填，观察账本按原序合并（并发批次与串行结果相同）（`src/units/conversation/session/domain/session.rs`）；
 - 系统工具的行为与边界：读取区间与分页、精确替换（唯一命中 / 只差空白）、**自由格式补丁的解析与原子应用**（缺 `*** End File`、SEARCH 找不到 / 多处命中、CRLF 保持、任何一块失败即整体不写盘）。
 - 能力面对象在边界与错误路径上的行为；
 - 使用内存测试替身装配、经能力面驱动的协调业务行为。

@@ -1,24 +1,24 @@
 //! 目的：会话视图与动作——会话创建、设置、权限档、思考档、工作名与配置快照。
 //! 管：动作入参校验、视图字段、会话编辑在生成中的拒绝、档位切换的落盘。
 //! 不管：压缩（`compaction.rs`）、动作目录本身（`tools.rs`）。
-//! 联动：`src/capabilities/runtime/api/action.rs` 与 `src/capabilities/session/api`。
+//! 联动：`src/units/runtime/api/action.rs` 与 `src/units/session/api`。
 
 use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work, slow_ops};
 use super::support::spawn;
-use crate::capabilities::catalog::registry::api::AgentMeta;
-use crate::capabilities::runtime::api::{Acted, ActionCall, Caller};
-use crate::capabilities::work::api::{ConfigAgent, SessionEdit, WorkSpec};
+use crate::units::catalog::registry::api::AgentMeta;
+use crate::units::runtime::api::{Acted, ActionCall, Caller};
+use crate::units::work::api::{ConfigAgent, SessionEdit, WorkSpec};
 use crate::presentation::faces::Faces;
 
-use crate::capabilities::conversation::session::api::{CUSTOM, SINGLE};
-use crate::capabilities::runtime::api::Output;
+use crate::units::conversation::session::api::{CUSTOM, SINGLE};
+use crate::units::runtime::api::Output;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[test]
 fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
-    use crate::capabilities::lifecycle::api::RewindTarget;
+    use crate::units::lifecycle::api::RewindTarget;
     let mut member = std::collections::BTreeMap::new();
     member.insert(
         "a".to_string(),
@@ -29,7 +29,7 @@ fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
         ],
     );
     let handle =
-        crate::capabilities::runtime::api::Handle::spawn(super::super::doubles::core_with_gateway(
+        crate::units::runtime::api::Handle::spawn(super::super::doubles::core_with_gateway(
             vec![module_of("a")],
             super::super::doubles::ScriptGateway::new(member, vec![]),
         ))
@@ -50,7 +50,7 @@ fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
         .say(
             &sid,
             "先说一句",
-            crate::capabilities::runtime::api::Output::Final,
+            crate::units::runtime::api::Output::Final,
         )
         .expect("第一轮");
     faces
@@ -62,7 +62,7 @@ fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
         .say(
             &sid,
             "留档之后再说",
-            crate::capabilities::runtime::api::Output::Final,
+            crate::units::runtime::api::Output::Final,
         )
         .expect("第二轮");
 
@@ -81,14 +81,14 @@ fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
         .say(
             &sid,
             "删完继续",
-            crate::capabilities::runtime::api::Output::Final,
+            crate::units::runtime::api::Output::Final,
         )
         .expect("删除后还能继续");
 }
 
 #[test]
 fn provider_usage_is_exposed_in_session_view_and_persisted() {
-    use crate::capabilities::llm::api::TokenUsage;
+    use crate::units::llm::api::TokenUsage;
     let mut member = std::collections::BTreeMap::new();
     member.insert(
         "a".to_string(),
@@ -96,7 +96,7 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
     );
     let gateway = super::super::doubles::ScriptGateway::new(member, vec![])
         .with_usage(TokenUsage::new(900, 120, Some(1020)));
-    let handle = crate::capabilities::runtime::api::Handle::spawn(
+    let handle = crate::units::runtime::api::Handle::spawn(
         super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
     )
     .expect("起核心线程");
@@ -112,7 +112,7 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
         .say(
             &sid,
             "做一下",
-            crate::capabilities::runtime::api::Output::Final,
+            crate::units::runtime::api::Output::Final,
         )
         .expect("一轮");
 
@@ -142,7 +142,7 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
         "流水里要有 usage 事件"
     );
     let last =
-        crate::capabilities::conversation::session::api::last_usage(&events).expect("读回用量");
+        crate::units::conversation::session::api::last_usage(&events).expect("读回用量");
     assert_eq!(last.total_tokens, 1020);
 
     // 跨回合累加：第二轮的用量叠在 meta 的同一本账上，不覆盖也不清零。
@@ -151,7 +151,7 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
         .say(
             &sid,
             "再做一件",
-            crate::capabilities::runtime::api::Output::Final,
+            crate::units::runtime::api::Output::Final,
         )
         .expect("第二轮");
     let views = faces
@@ -256,7 +256,7 @@ fn restore_work_commit_is_non_destructive_and_records_a_notice() {
 
 #[test]
 fn unique_work_name_falls_back_and_appends_a_suffix() {
-    use crate::capabilities::conversation::session::api::unique_work_name;
+    use crate::units::conversation::session::api::unique_work_name;
     let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
     let exists = |n: &str| faces.work.exists(n).expect("查占用");
     assert_eq!(unique_work_name("", "single", exists), "single");
@@ -289,7 +289,7 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
         .agents()
         .expect("读登记处")
         .iter()
-        .map(crate::capabilities::catalog::registry::api::agent_meta)
+        .map(crate::units::catalog::registry::api::agent_meta)
         .collect();
     let (opened, _) = faces
         .work
@@ -587,7 +587,7 @@ fn host_session_uses_package_bin_path() {
 
 #[test]
 fn set_permission_profile_action_switches_the_session_profile() {
-    use crate::capabilities::permission::api::ProfileId;
+    use crate::units::permission::api::ProfileId;
     let handle = spawn(vec![module_of("a")], Vec::new());
     let faces = Faces::from_handle(&handle);
     let (opened, _) = faces
@@ -624,13 +624,13 @@ fn set_permission_profile_action_switches_the_session_profile() {
 
 #[test]
 fn set_thinking_action_switches_the_work_level_and_rejects_unmapped_levels() {
-    use crate::capabilities::catalog::registry::api::ThinkingSpec;
+    use crate::units::catalog::registry::api::ThinkingSpec;
     use std::collections::BTreeMap;
     let handle = spawn(vec![module_of("a")], Vec::new());
     let faces = Faces::from_handle(&handle);
     faces
         .registry
-        .upsert_model(crate::capabilities::catalog::registry::api::ModelDraft {
+        .upsert_model(crate::units::catalog::registry::api::ModelDraft {
             thinking: ThinkingSpec {
                 default: None,
                 levels: BTreeMap::from([
@@ -789,13 +789,13 @@ fn create_work_takes_the_context_freshness_chosen_in_the_wizard() {
 
 #[test]
 fn thinking_view_uses_the_common_default_and_hides_unmapped_levels() {
-    use crate::capabilities::catalog::registry::api::ThinkingSpec;
+    use crate::units::catalog::registry::api::ThinkingSpec;
     use std::collections::BTreeMap;
     let handle = spawn(vec![module_of("a")], Vec::new());
     let faces = Faces::from_handle(&handle);
     faces
         .registry
-        .upsert_model(crate::capabilities::catalog::registry::api::ModelDraft {
+        .upsert_model(crate::units::catalog::registry::api::ModelDraft {
             thinking: ThinkingSpec {
                 default: Some("high".to_string()),
                 levels: BTreeMap::from([

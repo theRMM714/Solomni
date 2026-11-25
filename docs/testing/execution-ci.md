@@ -221,27 +221,27 @@ node run-tests.js --coverage
 <!-- BEGIN:mutation-scope -->
 | 单元 | 文件 | 调度 |
 | --- | --- | --- |
-| `catalog` | `src/capabilities/catalog/registry/detail/yaml_settings.rs` | weekly |
-| `conversation` | `src/capabilities/conversation/slate/service.rs` | weekly |
+| `catalog` | `src/units/catalog/registry/detail/yaml_settings.rs` | weekly |
+| `conversation` | `src/units/conversation/slate/service.rs` | weekly |
 | `kernel` | `src/kernel/detail/launch.rs` | weekly |
 | `kernel` | `src/kernel/detail/ledger.rs` | weekly |
 | `kernel` | `src/kernel/detail/unpack.rs` | weekly |
 | `kernel` | `src/kernel/domain/path.rs` | weekly |
-| `lifecycle` | `src/capabilities/lifecycle/service/rewind.rs` | none |
-| `llm` | `src/capabilities/llm/detail/repair.rs` | weekly |
-| `permission` | `src/capabilities/permission/domain/permission.rs` | weekly |
-| `tools` | `src/capabilities/tools/domain/patch.rs` | none |
-| `vm` | `src/capabilities/vm/domain/guest.rs` | weekly |
-| `vm` | `src/capabilities/vm/domain/exec.rs` | weekly |
-| `vm` | `src/capabilities/vm/service.rs` | weekly |
-| `workspace` | `src/capabilities/workspace/domain/workstore.rs` | weekly |
-| `workspace` | `src/capabilities/workspace/domain/workspace.rs` | weekly |
-| `workspace` | `src/capabilities/workspace/service/commit.rs` | weekly |
+| `lifecycle` | `src/units/lifecycle/service/rewind.rs` | none |
+| `llm` | `src/units/llm/detail/repair.rs` | weekly |
+| `permission` | `src/units/permission/domain/permission.rs` | weekly |
+| `tools` | `src/units/tools/domain/patch.rs` | none |
+| `vm` | `src/units/vm/domain/guest.rs` | weekly |
+| `vm` | `src/units/vm/domain/exec.rs` | weekly |
+| `vm` | `src/units/vm/service.rs` | weekly |
+| `workspace` | `src/units/workspace/domain/workstore.rs` | weekly |
+| `workspace` | `src/units/workspace/domain/workspace.rs` | weekly |
+| `workspace` | `src/units/workspace/service/commit.rs` | weekly |
 
 > 7 个单元、周检 14 个文件；本表由 `tests/specs/*.yaml` 的 `mutation` 块生成（`node tests/docs-sync.mjs --write`），不手写。
 <!-- END:mutation-scope -->
 
-- 安全纯逻辑必须在 `weekly` 里（`src/capabilities/permission/domain/permission.rs`、`src/kernel/detail/launch.rs`）；安全面的突变存活率目标 **≥90%**，在阶段出口人工审计，不接 CI 门禁。
+- 安全纯逻辑必须在 `weekly` 里（`src/units/permission/domain/permission.rs`、`src/kernel/detail/launch.rs`）；安全面的突变存活率目标 **≥90%**，在阶段出口人工审计，不接 CI 门禁。
 - 定时：`.github/workflows/mutants.yml` 的 `schedule: cron "0 4 * * 1"`（UTC 04:00 = 北京时间周一 12:00）。GitHub 只在**默认分支最新提交**上跑定时；同一提交若已有 `weekly` 结论（`all-caught` 或 `missed`），preflight 读 ci-mutation 分支上一次 weekly 的 meta.json 后跳过；`404`、坏 JSON、`timeout`、`baseline-failed`、`error` 都照常重跑。手动派发永远执行。
 - 分片并行：`plan` job 先跑 `node tests/mutation-plan.mjs`（`cargo mutants --list --json` 数变异体，约 350 个/片、单个约 29s → 3h 量级），把 n 现算后喂给 `mutation` 的矩阵（`matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}`），每片 `timeout-minutes: 240`、`fail-fast: false` 各自给结论。数不出来时退回固定 4 片并在日志告警。手动与定时共用 `ci-mutation-run` 并发组，不取消正在跑的那次。
 - 分片报告由 `tests/ci-mutation-merge.mjs` 合并成一份（最坏状态优先：`baseline-failed` > `error` > `missed` > `timeout` > `all-caught`），跑在独立的 `merge` job，缺片（超时被取消）也照发并如实打印。

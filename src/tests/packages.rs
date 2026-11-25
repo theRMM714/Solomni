@@ -1,12 +1,12 @@
 //! 目的：packages 能力的用例测试——包契约、包库、目标筛选、选包计划与诊断。
 //! 管：清单校验、版本/去重、冲突预检、平台分包、计划顺序与诊断说法。
 //! 不管：guest 挂载与叠写（`src/tests/vm/`）、构建编排（`src/tests/diagnostics.rs`）。
-//! 联动：契约见 RUNTIME_SPEC.md；被测实现见 `src/capabilities/packages/`。
+//! 联动：契约见 RUNTIME_SPEC.md；被测实现见 `src/units/packages/`。
 
 use super::builders::*;
 use super::prelude::*;
-use crate::capabilities::catalog::packages::api as pkgs;
-use crate::capabilities::catalog::packages::api::{Facts, Library, PinPolicy, Problem};
+use crate::units::catalog::packages::api as pkgs;
+use crate::units::catalog::packages::api::{Facts, Library, PinPolicy, Problem};
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};

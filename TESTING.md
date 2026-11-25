@@ -13,8 +13,8 @@
 - 覆盖率只报不拦：不达标打印回执，不使 CI 变红、不阻塞合并（`tests/coverage-policy.json` 的 `reportOnly`；要卡线用 `--strict`）。项目频繁重构，阈值是观察指标，不是合并闸门。
 - 风险区按代码划分，不按测试层：产品代码 80%、平台/进程适配 60%、安全策略 100%；PR 新增 Rust 行 90%、安全变更行 100%（`tests/coverage-policy.json`、`tests/coverage.mjs`）；这些数字只用于报告回执，不是合并判据。安全的行为矩阵必须 100%（`src/tests/permission.rs`、`src/kernel/detail/confine/tests.rs`）；OS 强制后端归平台桶，由三平台真机探针（`tests/<平台>/`）与定期突变审计调查覆盖；两者都不参与验收判定。E2E 不设行覆盖率，旅程清单必须全过（`tests/cross-platform/e2e/browser.cjs`）。
 
-- 测试只钉**可观察行为**：能力面（`capabilities/<单元>/<子业务>/api.rs` 的入站对象）、端口契约、内核真实实例与 E2E 旅程。`service` / `domain` / `detail` 的自由函数、内部结构与状态机**不单独写用例**——实现会频繁搬迁，钉住它的用例最先腐烂；这些行为改由驱动能力面或旅程的用例覆盖。
-- **不做内部实现测试**：`src/tests/**` 只能经 `capabilities/<单元>/<子业务>::api`、`::ports` 或组合根 `crate::entry::assembly` 取实现，出现 `::service` / `::domain` / `::detail` 即失败（门禁 `structure/tests-api`，豁免只有替身层 `doubles` / `fakes` / `prelude` / `builders` / `detail` / `helpers`）。这条用机器判，不靠评审记忆。
+- 测试只钉**可观察行为**：能力面（`units/<单元>/<子业务>/api.rs` 的入站对象）、端口契约、内核真实实例与 E2E 旅程。`service` / `domain` / `detail` 的自由函数、内部结构与状态机**不单独写用例**——实现会频繁搬迁，钉住它的用例最先腐烂；这些行为改由驱动能力面或旅程的用例覆盖。
+- **不做内部实现测试**：`src/tests/**` 只能经 `units/<单元>/<子业务>::api`、`::ports` 或组合根 `crate::entry::assembly` 取实现，出现 `::service` / `::domain` / `::detail` 即失败（门禁 `structure/tests-api`，豁免只有替身层 `doubles` / `fakes` / `prelude` / `builders` / `detail` / `helpers`）。这条用机器判，不靠评审记忆。
 - 测试清单只有一处声明：`tests/specs/<单元>.yaml`（一条用例一行：`id` / `tier` / `note`；突变范围也用同一个文件的 `mutation` 块声明 `schedule` 与 `files`，由门禁 `structure/mutation` 判路径存在与归属）。`src/tests` 下每个带 `#[test]` 的模块、`tests/journeys/index.js` 的每段旅程都必须被声明，反向声明也必须落到实现——任一处对不上即失败（门禁 `structure/specs`）。`node run-tests.js --plan` 看会跑什么，`--unit` / `--tier` / `--journey` 选子集。
 
 - 内核（`src/kernel/**`）的内联测试用**真实实例**（临时目录、真实进程、真文件系统），不引用 `crate::tests` 的业务替身（门禁 `structure/kernel-tests`）：底层稳定，替身只会把"替身的行为"当成内核的事实。
@@ -34,7 +34,7 @@
 
 ## 二、当前状态
 
-- 测试分区：`src/tests/` 与 `capabilities/` 的子业务同构（一个子业务一个文件，用例多的按域分子模块；`doubles.rs` 端口替身、`builders.rs` 装配脚手架），**只收能力面、端口契约与内核用例**；具体实现的用例已移除，行为由能力面用例与 E2E 旅程覆盖，跨平台集成与 L4 在 `tests/cross-platform/`，平台探针 `tests/<平台>/`，前端冒烟 `src/presentation/web/assets/*.smoke.cjs` 与前端类型检查（`frontend-typecheck` 步骤，根 `tsconfig.json` + `package-lock.json` 固定 TypeScript）（索引见 [docs/testing/README.md](docs/testing/README.md)）。
+- 测试分区：`src/tests/` 与 `units/` 的子业务同构（一个子业务一个文件，用例多的按域分子模块；`doubles.rs` 端口替身、`builders.rs` 装配脚手架），**只收能力面、端口契约与内核用例**；具体实现的用例已移除，行为由能力面用例与 E2E 旅程覆盖，跨平台集成与 L4 在 `tests/cross-platform/`，平台探针 `tests/<平台>/`，前端冒烟 `src/presentation/web/assets/*.smoke.cjs` 与前端类型检查（`frontend-typecheck` 步骤，根 `tsconfig.json` + `package-lock.json` 固定 TypeScript）（索引见 [docs/testing/README.md](docs/testing/README.md)）。
 - 入口：`node run-tests.js`（`node start.js -test` 是备好环境后的同一入口；`--plan` 打印测试计划，`--unit` / `--tier` / `--journey` 跑子集）；纯叙述型文档改动用 `--docs`；`--coverage`、突变工作流、真机 `--fence-live` 等手动模式见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)；机器契约 `docs/presentation/contracts.md`（ROUTES 表由 Rust 测试消费）仍走全量。
 - T0 九项已并入同一入口（`run-tests.js`）：步骤、可行状态与环境跳过口径以 [docs/testing/levels.md](docs/testing/levels.md) 的 T0 生成段为准（`env-skip` 不算通过）；查清单用 `node run-tests.js --list`。
 - 缺口账：全局 `tests/gaps.yaml`、跨平台 `tests/cross-platform/gaps.yaml`、平台 `tests/<平台>/gaps.yaml`；条目、数量与状态一律以账本为准（门户不复述，也不保留完成历史），`TEST-REPORT-ACCEPTED` 只看平台与跨平台账（`run-tests.js`）；格式与验收见 [docs/testing/gaps-acceptance.md](docs/testing/gaps-acceptance.md)。

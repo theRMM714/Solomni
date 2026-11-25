@@ -1,11 +1,11 @@
 //! 目的：钉补丁通道、回档后的读账本与内置工具的错误边界。
 //! 管：补丁不 JSON 转义、失败块不写、缺 end 拒绝并报行、回档清读账本、内置 read/list/delete/edit 的错误如实与范围。
-//! 不管：补丁解析实现（capabilities/tools/）。
-//! 联动：src/capabilities/tools/、session 回档。
+//! 不管：补丁解析实现（units/tools/）。
+//! 联动：src/units/tools/、session 回档。
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::capabilities::conversation::session::api::SINGLE;
+use crate::units::conversation::session::api::SINGLE;
 #[test]
 pub(crate) fn patch_channel_writes_files_without_json_escaping() {
     // 自由格式：信封之后原样跟补丁文本（含中文与换行，完全不转义）；一次两块、落在两个文件。
@@ -258,7 +258,7 @@ pub(crate) fn rewind_leaves_the_file_untracked_so_overwrite_is_allowed() {
     crate::tests::lifecycle::rewind(
         &mut core,
         &sid,
-        crate::capabilities::lifecycle::api::RewindTarget::Delete(0),
+        crate::units::lifecycle::api::RewindTarget::Delete(0),
     )
     .unwrap();
     // 第二轮：路径已存在但未追踪 → 放行（覆盖的是 scratch 内容，不是受管版本）

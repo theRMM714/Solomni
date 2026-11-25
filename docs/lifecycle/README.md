@@ -1,7 +1,7 @@
 # lifecycle（会话历史生命周期）
 
 > 定位：会话历史做什么——历史列表与只读打开、删除的报账与收尾、回档三模式（留档 / 删除 / 还原）。
-> 效力：规范｜核对：2026-11-16｜依据：`src/capabilities/lifecycle/api.rs`
+> 效力：规范｜核对：2026-11-16｜依据：`src/units/lifecycle/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -41,10 +41,10 @@
 
 ## 改动本单元时必须同步
 
-- `src/capabilities/lifecycle/api.rs` 的 `RewindTarget` / `RewindOutcome` → `runtime` 的 `api.rs`（`RuntimeOps::rewind`、`rewind_with_reset`）与 `src/tests/api/session.rs` 一起改。
-- `src/capabilities/lifecycle/service/rewind.rs` → 回档的行 id、标记顺序、拒绝文案与提示文案是行为契约：改一处必须同改 `src/tests/session/rewind.rs`、`src/tests/runtime.rs` 的断言。
-- `src/capabilities/lifecycle/service/history.rs` → 删除的顺序、日志 key（`lifecycle::history_delete` / `lifecycle::release_fences`）与拒绝文案是行为契约：同改 `src/tests/session/lifecycle.rs`。
-- `src/capabilities/turn/turn/service/rebuild.rs` 的 `rebuild_session` → 本单元重建的唯一入口：改签名必须同改 `src/capabilities/lifecycle/api.rs` 的 `RebuildDeps` 与两处调用点。
+- `src/units/lifecycle/api.rs` 的 `RewindTarget` / `RewindOutcome` → `runtime` 的 `api.rs`（`RuntimeOps::rewind`、`rewind_with_reset`）与 `src/tests/api/session.rs` 一起改。
+- `src/units/lifecycle/service/rewind.rs` → 回档的行 id、标记顺序、拒绝文案与提示文案是行为契约：改一处必须同改 `src/tests/session/rewind.rs`、`src/tests/runtime.rs` 的断言。
+- `src/units/lifecycle/service/history.rs` → 删除的顺序、日志 key（`lifecycle::history_delete` / `lifecycle::release_fences`）与拒绝文案是行为契约：同改 `src/tests/session/lifecycle.rs`。
+- `src/units/turn/turn/service/rebuild.rs` 的 `rebuild_session` → 本单元重建的唯一入口：改签名必须同改 `src/units/lifecycle/api.rs` 的 `RebuildDeps` 与两处调用点。
 
 ## 本目录
 

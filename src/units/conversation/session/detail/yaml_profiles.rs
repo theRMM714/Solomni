@@ -1,0 +1,33 @@
+//! 目的：会话类型表的装配输入——`systools/profiles.yaml`。
+//! 管：读文件、反序列化成 `Profiles`、做装配期校验；缺目录 / 缺文件 / 非法如实报错。
+//! 不管：表的形状与规则（在 `domain/profile.rs`）。
+//! 联动：只有入口层的组合根构造它；`ids()` 交给提示词册子，`check_roles` 吃工具能力的机制席位。
+
+use std::path::PathBuf;
+
+use crate::units::conversation::session::api::Profiles;
+
+/// 目的：会话类型表的位置（`systools/profiles.yaml`）。
+pub struct YamlProfiles {
+    dir: PathBuf,
+}
+
+impl YamlProfiles {
+    /// 目的：记住 `systools` 目录。
+    pub fn new(dir: PathBuf) -> YamlProfiles {
+        YamlProfiles { dir }
+    }
+
+    /// 目的：读出全部会话类型并校验。
+    /// 返回：校验通过的 `Profiles`。
+    /// 错误：读不了 / 语法非法 / 规则不过，文案都点名 `systools/profiles.yaml`。
+    pub fn load(&self) -> Result<Profiles, String> {
+        let path = self.dir.join("profiles.yaml");
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| format!("会话类型表读不了（systools/profiles.yaml）：{}", e))?;
+        let profiles: Profiles = yaml_serde::from_str(&text)
+            .map_err(|e| format!("会话类型表非法（systools/profiles.yaml）：{}", e))?;
+        profiles.validate()?;
+        Ok(profiles)
+    }
+}

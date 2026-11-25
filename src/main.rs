@@ -3,7 +3,7 @@
 //! 不管：参数表与分派（entry::args）、各适配器与能力的内部实现、装配后的业务行为（在能力与呈现层）。
 //! 联动：装配结果交给呈现层（presentation::cli / presentation::web），runtime 不知道后两者存在；测试构建外露启动门助手（entry::startup）。
 
-mod capabilities;
+mod units;
 mod entry;
 mod guard;
 mod kernel;
@@ -22,24 +22,24 @@ pub(crate) use entry::startup::{
 
 use crate::kernel::api::layout;
 use crate::presentation::faces::Faces;
-use capabilities::catalog::registry::api::Registry as _;
+use units::catalog::registry::api::Registry as _;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// 目的：命令表投影成的 op 书——入口分派、自洽检查与模块保留名都读它，只解析一次。
 /// 约束：命令表非法或声明互相矛盾都是装配错误：就地退出，不留一个「跑起来但手册是错的」进程。
-fn command_ops() -> &'static capabilities::tools::api::OpBook {
-    static OPS: std::sync::OnceLock<capabilities::tools::api::OpBook> = std::sync::OnceLock::new();
+fn command_ops() -> &'static units::tools::api::OpBook {
+    static OPS: std::sync::OnceLock<units::tools::api::OpBook> = std::sync::OnceLock::new();
     OPS.get_or_init(|| {
-        let book = match capabilities::tools::api::CommandBook::builtin() {
+        let book = match units::tools::api::CommandBook::builtin() {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("[装配失败] 命令表非法（systools/commands.yaml）：{}", e);
                 std::process::exit(1);
             }
         };
-        let ops = capabilities::tools::api::OpBook::from_commands(book);
+        let ops = units::tools::api::OpBook::from_commands(book);
         let problems = ops.problems();
         if !problems.is_empty() {
             for problem in &problems {
@@ -122,7 +122,7 @@ fn main() {
     // 启动期的人读事实（工具链 / 围栏 / 进程 / 便携 / 沙箱授权）一律走 stderr；stdout 只留给命令结果（--json 可整段进管道）。
     // 基础 profile 缺失时**每次启动**都报：项目内 / 宿主回退 / 宿主也没有，并给补全命令。
     let base = entry::toolchains::base_facts(&root);
-    for line in capabilities::system::api::toolchain_lines(&base) {
+    for line in units::system::api::toolchain_lines(&base) {
         eprintln!("[工具链] {}", line);
     }
     for w in &toolchains.warnings {
@@ -133,7 +133,7 @@ fn main() {
     if let Some(command) = flags.command.as_deref() {
         let Some(op) = command_ops()
             .find(command)
-            .filter(|op| op.phase == capabilities::tools::api::Phase::Boot)
+            .filter(|op| op.phase == units::tools::api::Phase::Boot)
         else {
             eprintln!(
                 "[错误] 没有这个启动命令：{}（solomni --help 看全部）",
@@ -232,38 +232,38 @@ fn main() {
     );
     eprintln!("[围栏] {}", fence_cap.note);
     let store = entry::assembly::settings_store(&root);
-    let history = capabilities::conversation::session::detail::fs_history::FsHistory::new(
+    let history = units::conversation::session::detail::fs_history::FsHistory::new(
         root.join("session"),
     );
-    let workspace = capabilities::workspace::detail::FsWorkspace::new(root.join("session"));
-    let workstore = capabilities::workspace::detail::FsWorkStore::new();
+    let workspace = units::workspace::detail::FsWorkspace::new(root.join("session"));
+    let workstore = units::workspace::detail::FsWorkStore::new();
     // 运行包能力：依赖文件夹 runtimes/（一个包 = 一个文件夹 + package.yaml）。
-    let packages: Arc<dyn capabilities::catalog::packages::api::Packages + Send + Sync> = Arc::new(
-        capabilities::catalog::packages::service::PackagesService::with_base(
-            Arc::new(capabilities::catalog::packages::detail::FsPackages::new(
+    let packages: Arc<dyn units::catalog::packages::api::Packages + Send + Sync> = Arc::new(
+        units::catalog::packages::service::PackagesService::with_base(
+            Arc::new(units::catalog::packages::detail::FsPackages::new(
                 layout::runtimes(&root),
             )),
             base.clone(),
         ),
     );
     // 端点记忆：谁先通了就固定谁，后续会话不再反复探测候选。
-    let memo = capabilities::llm::detail::endpoint::memo_new();
+    let memo = units::llm::detail::endpoint::memo_new();
     // **llm 能力**：三个出站端口（通道工厂 / 模型目录 / 信封修复）只由它的 service 持有（R12）；
     // 别人（登记处、协调业务、协作会话）只拿它的 `api::Llm` 面。
-    let gateway: Arc<dyn capabilities::llm::ports::ChatGateway + Send + Sync> = Arc::new(
-        capabilities::llm::detail::HttpGateway::with_log(Arc::clone(&log), Arc::clone(&memo)),
+    let gateway: Arc<dyn units::llm::ports::ChatGateway + Send + Sync> = Arc::new(
+        units::llm::detail::HttpGateway::with_log(Arc::clone(&log), Arc::clone(&memo)),
     );
-    let catalog: Arc<dyn capabilities::llm::ports::ModelCatalog + Send + Sync> = Arc::new(
-        capabilities::llm::detail::HttpModelCatalog::with_log(Arc::clone(&log), Arc::clone(&memo)),
+    let catalog: Arc<dyn units::llm::ports::ModelCatalog + Send + Sync> = Arc::new(
+        units::llm::detail::HttpModelCatalog::with_log(Arc::clone(&log), Arc::clone(&memo)),
     );
-    let llm: Arc<dyn capabilities::llm::api::Llm + Send + Sync> =
-        Arc::new(capabilities::llm::service::LlmService::new(
+    let llm: Arc<dyn units::llm::api::Llm + Send + Sync> =
+        Arc::new(units::llm::service::LlmService::new(
             gateway,
             catalog,
-            Arc::new(capabilities::llm::detail::UnambiguousRepair),
+            Arc::new(units::llm::detail::UnambiguousRepair),
         ));
     // **登记处能力**：四份 yaml 的状态与用例都在它里面（runtime 只按 `Registry` 用它，看不见字段）。
-    let mut registry = match capabilities::catalog::registry::service::RegistryService::new(
+    let mut registry = match units::catalog::registry::service::RegistryService::new(
         Arc::new(store),
         Arc::clone(&llm),
         Arc::clone(&log),
@@ -277,7 +277,7 @@ fn main() {
     // 依赖补齐后的**自动发现**：设置里没登记时，把装到项目内的可运行包直接当登记值（显式登记优先）。
     // 只填内存、不写用户的 settings.yaml；同进程内新装的包要下次启动才生效（Web 的 setup 作业即属此列）。
     let installed =
-        capabilities::provision::api::Provision::status(&entry::assembly::provision(&root))
+        units::provision::api::Provision::status(&entry::assembly::provision(&root))
             .unwrap_or_default();
     // 清单里的 probe 是**相对产品根**的写法：这里拼成绝对路径再当登记值用（否则只在 CWD = 产品根时才成立）。
     let picked = |prefix: &str| {
@@ -303,14 +303,14 @@ fn main() {
     );
     let requirements = kernel::api::fence::SandboxRequirements {
         filesystem: sandbox_cfg.policy.enforce.filesystem
-            == capabilities::catalog::registry::api::SandboxEnforceLevel::Require,
+            == units::catalog::registry::api::SandboxEnforceLevel::Require,
         network: sandbox_cfg.policy.enforce.network
-            == capabilities::catalog::registry::api::SandboxEnforceLevel::Require
+            == units::catalog::registry::api::SandboxEnforceLevel::Require
             && !sandbox_cfg.policy.network,
         process_tree: sandbox_cfg.policy.enforce.process_tree
-            == capabilities::catalog::registry::api::SandboxEnforceLevel::Require,
+            == units::catalog::registry::api::SandboxEnforceLevel::Require,
         env_whitelist: sandbox_cfg.policy.enforce.env_whitelist
-            == capabilities::catalog::registry::api::SandboxEnforceLevel::Require,
+            == units::catalog::registry::api::SandboxEnforceLevel::Require,
     };
     let sandbox_mode = Arc::new(kernel::api::fence::SandboxMode::new(
         requirements,
@@ -319,7 +319,7 @@ fn main() {
         fence_cap.tree,
         true,
         sandbox_cfg.policy.on_unavailable
-            == capabilities::catalog::registry::api::SandboxUnavailable::Ask,
+            == units::catalog::registry::api::SandboxUnavailable::Ask,
     ));
     // 授权开关：工具进程与启动报告共用这一份（环境变量只在这里生效一次）。
     let write_allowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(authorized));
@@ -417,7 +417,7 @@ fn main() {
     // **会话类型表**（systools/profiles.yaml）：一个会话类型就是一串流程与它的静止机制。
     // 它是会话类型的唯一声明处：提示词册子的会话类型、机制册的校验都以它为口径；装配期就校验。
     let profiles =
-        match capabilities::conversation::session::detail::yaml_profiles::YamlProfiles::new(
+        match units::conversation::session::detail::yaml_profiles::YamlProfiles::new(
             root.join("systools"),
         )
         .load()
@@ -429,10 +429,10 @@ fn main() {
             }
         };
     let prompt_source =
-        capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
+        units::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
     // **提示词册能力**：册子只在这里装载一次、也只被它持有；runtime 与工具执行
     // （回执里的那些收尾标记）要的"段"都经它的能力面拿——不再各存一份拷贝。
-    let prompt = match capabilities::prompt::service::load(&prompt_source) {
+    let prompt = match units::prompt::service::load(&prompt_source) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("[装配失败] {}", e);
@@ -442,7 +442,7 @@ fn main() {
     // 工具总表与机制席位必须自洽（悬空引用 / 缺能力都是装配错误）：装配期就挡下，不拖到运行期。
     // 三张表归**工具能力**（加载器在它自己的 detail 里；装载后由它的 service 持有）。
     let systools_source =
-        capabilities::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"));
+        units::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"));
 
     // 工具执行：外层拉起的守门进程就是本程序自己（围栏在它里面装）。
     let tools = kernel::detail::process::ProcTools::new(
@@ -452,22 +452,22 @@ fn main() {
     )
     .with_mode(std::sync::Arc::clone(&sandbox_mode));
     // 内置文件工具：纯 Rust 直接读写，不经过外部进程（编码问题不进本程序）。
-    let io = capabilities::tools::detail::FsSysIo::with_lock_dir(home.join("locks"));
+    let io = units::tools::detail::FsSysIo::with_lock_dir(home.join("locks"));
     // **工具能力**：三张表由加载器读进来，三个出站端口（外部执行 / 内置读写 / 围栏释放）
     // 只由它的 service 持有（R12）。装配期就挡下"悬空引用 / 缺能力"。
     let fence_host: Arc<dyn kernel::ports::FenceHost + Send + Sync> =
         Arc::new(kernel::detail::confine::FenceHostAdapter::new(home.clone()));
-    let tools_svc = match capabilities::tools::service::ToolsService::new(
+    let tools_svc = match units::tools::service::ToolsService::new(
         &systools_source,
         Arc::new(tools),
         Arc::new(io),
         Arc::clone(&fence_host),
     ) {
-        Ok(svc) if capabilities::tools::api::Tools::problems(&svc).is_empty() => Arc::new(svc),
+        Ok(svc) if units::tools::api::Tools::problems(&svc).is_empty() => Arc::new(svc),
         Ok(svc) => {
             eprintln!(
                 "[装配失败] 系统工具总表不自洽：{}",
-                capabilities::tools::api::Tools::problems(&svc).join("；")
+                units::tools::api::Tools::problems(&svc).join("；")
             );
             std::process::exit(1);
         }
@@ -476,13 +476,13 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let toolexec: Arc<dyn capabilities::tools::api::ToolExec + Send + Sync> = tools_svc.clone();
-    let systools: Arc<dyn capabilities::tools::api::Tools + Send + Sync> = tools_svc;
+    let toolexec: Arc<dyn units::tools::api::ToolExec + Send + Sync> = tools_svc.clone();
+    let systools: Arc<dyn units::tools::api::Tools + Send + Sync> = tools_svc;
 
     // 机制席位与工具总表必须双向自洽（席位面里的工具都在总表、callers 与席位面一一对应）：
     // 悬空引用是装配错误，与上面的工具总表自检同一条时机。
-    let mechanism_problems = capabilities::conversation::session::api::mechanism_problems(
-        &capabilities::tools::api::Tools::book(&*systools),
+    let mechanism_problems = units::conversation::session::api::mechanism_problems(
+        &units::tools::api::Tools::book(&*systools),
     );
     if !mechanism_problems.is_empty() {
         eprintln!(
@@ -494,18 +494,18 @@ fn main() {
 
     // 保留名表（内置工具名）由**组合根**问一次工具能力后交进去：清单校验归 modules，名字空间归 tools，
     // 两边不互相依赖。模块 id 还与产品命令词互斥（它是动作 id 前缀），命令词在这里并进同一份保留名。
-    let mut module_reserved = capabilities::tools::api::Tools::reserved_modules(&*systools);
+    let mut module_reserved = units::tools::api::Tools::reserved_modules(&*systools);
     module_reserved.extend(command_ops().ids());
-    let source = capabilities::catalog::modules::detail::FsModules::new(
+    let source = units::catalog::modules::detail::FsModules::new(
         root.join("modules"),
-        capabilities::tools::api::names(),
+        units::tools::api::names(),
         module_reserved,
     );
     // **模块能力**：清单来源与启停覆盖落盘只由它的 service 持有（R12）；它是模块事实的唯一上游。
     let module_state =
-        capabilities::catalog::modules::detail::YamlModuleState::new(home.join("modules.yaml"));
-    let modules: Arc<dyn capabilities::catalog::modules::api::Modules + Send + Sync> =
-        match capabilities::catalog::modules::service::ModulesService::new(
+        units::catalog::modules::detail::YamlModuleState::new(home.join("modules.yaml"));
+    let modules: Arc<dyn units::catalog::modules::api::Modules + Send + Sync> =
+        match units::catalog::modules::service::ModulesService::new(
             Arc::new(source),
             Arc::new(module_state),
         ) {
@@ -518,39 +518,39 @@ fn main() {
 
     // **虚拟机档能力**：运行包库来源、VM 引擎与共享后端这些出站端口只由它的 service 持有（R12）；用户共享后端按平台用户链装配，起 guest 时选。
     // copy 不在用户链；只有进程级开发/应急开关才补进持有列表（仍要显式候选）。
-    let order = capabilities::vm::domain::exec::default_combos(std::env::consts::OS);
-    let mut shares: Vec<Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync>> = Vec::new();
+    let order = units::vm::domain::exec::default_combos(std::env::consts::OS);
+    let mut shares: Vec<Arc<dyn units::vm::ports::ShareBackend + Send + Sync>> = Vec::new();
     for combo in order.iter().filter(|c| c.engine == "qemu") {
-        let share: Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync> = match combo.share
+        let share: Arc<dyn units::vm::ports::ShareBackend + Send + Sync> = match combo.share
         {
             "smb" => Arc::new(
-                capabilities::vm::detail::SmbShare::new().with_book(std::sync::Arc::clone(&book)),
+                units::vm::detail::SmbShare::new().with_book(std::sync::Arc::clone(&book)),
             ),
             "virtiofs" => Arc::new(
-                capabilities::vm::detail::VirtioFsShare::new()
+                units::vm::detail::VirtioFsShare::new()
                     .with_book(std::sync::Arc::clone(&book)),
             ),
-            "9p" => Arc::new(capabilities::vm::detail::NinePShare::new()),
+            "9p" => Arc::new(units::vm::detail::NinePShare::new()),
             _ => continue,
         };
         if !shares.iter().any(|s| s.id() == share.id()) {
             shares.push(share);
         }
     }
-    if capabilities::vm::api::copy_share_enabled() {
-        shares.push(Arc::new(capabilities::vm::detail::CopyShare::new()));
+    if units::vm::api::copy_share_enabled() {
+        shares.push(Arc::new(units::vm::detail::CopyShare::new()));
         let note = format!(
             "{}={}：copy 共享仅用于开发/应急，性能不可用；本进程的 VM 会话会强制走它",
-            capabilities::vm::api::COPY_SHARE_ENV,
+            units::vm::api::COPY_SHARE_ENV,
             "copy"
         );
         log.warn("main::vm_share", &note);
         eprintln!("[虚拟机] {}", note);
     }
-    let vm: Arc<dyn capabilities::vm::api::Vm + Send + Sync> =
-        Arc::new(capabilities::vm::service::VmService::new(
+    let vm: Arc<dyn units::vm::api::Vm + Send + Sync> =
+        Arc::new(units::vm::service::VmService::new(
             Arc::new(
-                capabilities::vm::detail::QemuEngine::with_overlay_dir(
+                units::vm::detail::QemuEngine::with_overlay_dir(
                     layout::vm(&root).join("overlays"),
                 )
                 .with_book(std::sync::Arc::clone(&book))
@@ -560,8 +560,8 @@ fn main() {
         ));
 
     // **工作区能力**：目录布局与版本库两个出站端口只由它的 service 持有（R12）。
-    let workspace: Arc<dyn capabilities::workspace::api::Workspace + Send + Sync> =
-        Arc::new(capabilities::workspace::service::WorkspaceService::new(
+    let workspace: Arc<dyn units::workspace::api::Workspace + Send + Sync> =
+        Arc::new(units::workspace::service::WorkspaceService::new(
             Arc::new(workspace),
             Arc::new(workstore),
         ));
@@ -576,9 +576,9 @@ fn main() {
     };
 
     // **常驻服务能力**：真实协议适配器（MCP stdio 走守门进程的长驻会话）+ 模块能力面 + 隐秘字段面。
-    let residents: Arc<dyn capabilities::residents::api::ResidentOps + Send + Sync> = Arc::new(
+    let residents: Arc<dyn units::residents::api::ResidentOps + Send + Sync> = Arc::new(
         entry::assembly::residents(
-            vec![Arc::new(capabilities::residents::detail::McpAdapter::new(
+            vec![Arc::new(units::residents::detail::McpAdapter::new(
                 Arc::new(
                     kernel::detail::ProcessSessions::new(
                         std::env::current_exe().unwrap_or_default(),
@@ -591,7 +591,7 @@ fn main() {
                 std::sync::Arc::clone(&log),
             ))
                 as Arc<
-                    dyn capabilities::residents::ports::ServiceAdapter + Send + Sync,
+                    dyn units::residents::ports::ServiceAdapter + Send + Sync,
                 >],
             Arc::clone(&modules),
             Arc::clone(&secrets),
@@ -605,20 +605,20 @@ fn main() {
 
     // 依赖补齐面先建出来：runtime 的核心（选虚拟根要读清单）与呈现层（setup 路由）各持同一份。
     // vm 用**补齐面专用**的那份：运行期编排显式点名内部 none，不能拿会话 vm 顶替（那边只有用户档）。
-    let provision: Arc<dyn capabilities::provision::api::Provision + Send + Sync> =
+    let provision: Arc<dyn units::provision::api::Provision + Send + Sync> =
         Arc::new(entry::assembly::provision_with_guest_vm(&root));
     // **存储空间**：回收策略来自 settings；构建与呈现层共用同一份。
     // 装配与探针同一份（entry::assembly），真日志端口与正在写的日志由这里注入。
     let storage_service = Arc::new(entry::assembly::storage(
         &root,
         Arc::clone(&provision),
-        capabilities::maintenance::storage::api::StoragePolicy::from(
+        units::maintenance::storage::api::StoragePolicy::from(
             &registry.app_settings().storage,
         ),
         std::sync::Arc::clone(&log),
         active_log,
     ));
-    let storage: Arc<dyn capabilities::maintenance::storage::api::Storage + Send + Sync> =
+    let storage: Arc<dyn units::maintenance::storage::api::Storage + Send + Sync> =
         storage_service.clone();
     // **构建能力**：创建会话前补编模块产物（本机档宿主、虚拟机档 guest）；执行器与 `--build` 同一条路——
     // **不申请容器身份**（构建是系统动作）：AppContainer 的临时目录写不了文件；可达范围仍由围栏规格给出。
@@ -631,10 +631,10 @@ fn main() {
     let base_roots = entry::toolchains::active_roots(&root);
     // 构建的三个端口各一个适配器：源指纹与构建状态共用一份本机档（BuildStore），缓存卷落盘（CacheOnDisk）。
     let build_store = Arc::new(
-        capabilities::maintenance::builds::detail::fingerprint::BuildStore::new(root.clone()),
+        units::maintenance::builds::detail::fingerprint::BuildStore::new(root.clone()),
     );
-    let builds: Arc<dyn capabilities::maintenance::builds::api::Builds + Send + Sync> = Arc::new(
-        capabilities::maintenance::builds::service::BuildsService::new(
+    let builds: Arc<dyn units::maintenance::builds::api::Builds + Send + Sync> = Arc::new(
+        units::maintenance::builds::service::BuildsService::new(
             root.clone(),
             Arc::clone(&packages),
             Arc::clone(&vm),
@@ -643,10 +643,10 @@ fn main() {
             build_store.clone(),
             build_store.clone(),
             Arc::new(
-                capabilities::maintenance::builds::detail::cache::CacheOnDisk::new(root.clone()),
+                units::maintenance::builds::detail::cache::CacheOnDisk::new(root.clone()),
             ),
             Arc::new(build_runner),
-            Arc::new(capabilities::tools::service::fence::ToolFenceGate),
+            Arc::new(units::tools::service::fence::ToolFenceGate),
             Arc::clone(&fence_host),
             Arc::new(kernel::detail::HostProbeAdapter),
             std::sync::Arc::clone(&log),
@@ -674,11 +674,11 @@ fn main() {
     };
     // 启动时要按有效启停拉起常驻服务：留一份手柄（进程级租约，不属于任何会话）。
     let residents_boot = Arc::clone(&residents);
-    let mut core = capabilities::runtime::service::Core::new(
+    let mut core = units::runtime::service::Core::new(
         root.clone(),
         Box::new(registry),
         Arc::new(
-            capabilities::conversation::session::service::SessionService::new(Arc::new(history)),
+            units::conversation::session::service::SessionService::new(Arc::new(history)),
         ),
         workspace,
         Arc::clone(&vm),
@@ -705,19 +705,19 @@ fn main() {
             std::process::exit(2);
         };
         match core.registry_mut().probe_model_tools(id) {
-            Ok(capabilities::runtime::api::ProbeOutcome::Supported { detail }) => {
+            Ok(units::runtime::api::ProbeOutcome::Supported { detail }) => {
                 println!("[探测] 模型 {}：支持原生工具调用（{}）", id, detail);
                 println!("[探测] 已把 models.yaml 的 tools 写成 native");
                 std::process::exit(0);
             }
-            Ok(capabilities::runtime::api::ProbeOutcome::Unsupported { detail }) => {
+            Ok(units::runtime::api::ProbeOutcome::Unsupported { detail }) => {
                 println!("[探测] 模型 {}：**不支持**原生工具调用（{}）", id, detail);
                 println!(
                     "[探测] 已把 models.yaml 的 tools 写成 envelope（手写信封照旧可用，能力没有任何损失）"
                 );
                 std::process::exit(0);
             }
-            Ok(capabilities::runtime::api::ProbeOutcome::Unknown { detail }) => {
+            Ok(units::runtime::api::ProbeOutcome::Unknown { detail }) => {
                 println!("[探测] 模型 {}：无法判定（{}）", id, detail);
                 println!("[探测] 登记处**没有改动**：请自行决定填 native 还是 envelope");
                 std::process::exit(0);
@@ -749,7 +749,7 @@ fn main() {
                     };
                     println!("  {}  {:<16} {}", verdict, s.name, s.detail);
                 }
-                let names = |want: fn(&capabilities::llm::api::ReplayShape) -> bool| -> String {
+                let names = |want: fn(&units::llm::api::ReplayShape) -> bool| -> String {
                     let got: Vec<&str> = report
                         .shapes
                         .iter()
@@ -783,7 +783,7 @@ fn main() {
     // 一次性命令（`runtime: none`）不分配（跑完就退）；细节与逃生口见 `view_drive_begin`。
     let view_drive = runtime_needed && view_drive_begin(&root, &home);
     // 核心搬到它自己的执行线程：此后呈现层只持有**入站能力面**——拿不到核心本体，也拿不到任何核心锁。
-    let handle = match capabilities::runtime::api::Handle::spawn(core) {
+    let handle = match units::runtime::api::Handle::spawn(core) {
         Ok(h) => h,
         Err(e) => {
             eprintln!("[装配失败] {}", e);
@@ -802,7 +802,7 @@ fn main() {
         storage_service.start_auto();
     }
     // 基础工具链事实：Web 端横幅与 CLI 启动报告读同一份。
-    faces.toolchains = capabilities::system::api::toolchain_json(&base);
+    faces.toolchains = units::system::api::toolchain_json(&base);
 
     // 启动拉起：把所有**已启用**的常驻服务拉起来（进程级租约，不属于任何会话）。
     // 一次性命令不拉：它们不提供常驻服务，也不该在退出时留下任何进程。

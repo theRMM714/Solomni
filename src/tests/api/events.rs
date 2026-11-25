@@ -1,13 +1,13 @@
 //! 目的：事实总线与历史——生成把事实推上总线，历史合并是转录加总线尾巴。
 //! 管：序号、去重、回档后的重置事实、停止在生成中生效。
 //! 不管：压缩（`compaction.rs`）、协作讨论（`collab.rs`）。
-//! 联动：`src/capabilities/runtime/api/handle.rs` 与 `src/capabilities/session/api`。
+//! 联动：`src/units/runtime/api/handle.rs` 与 `src/units/session/api`。
 
 use super::super::doubles::module_of;
 use super::super::{single_work, slow_ops};
 use super::support::spawn;
-use crate::capabilities::runtime::api::Output;
-use crate::capabilities::runtime::api::SessionEvent;
+use crate::units::runtime::api::Output;
+use crate::units::runtime::api::SessionEvent;
 use crate::presentation::faces::Faces;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -126,7 +126,7 @@ fn rewind_pushes_a_reset_fact_and_history_merge_ignores_superseded_batches() {
         .runtime
         .rewind(
             &sid,
-            crate::capabilities::lifecycle::api::RewindTarget::Delete(0),
+            crate::units::lifecycle::api::RewindTarget::Delete(0),
         )
         .expect("回档到第 0 行");
     assert!(replayed.is_empty(), "删除到 0 的活动视图应为空");
@@ -184,7 +184,7 @@ fn rewind_pushes_a_reset_fact_and_history_merge_ignores_superseded_batches() {
         .runtime
         .rewind(
             &sid2,
-            crate::capabilities::lifecycle::api::RewindTarget::Archive(0),
+            crate::units::lifecycle::api::RewindTarget::Archive(0),
         )
         .expect("留档");
     assert!(
@@ -274,7 +274,7 @@ fn stop_takes_effect_while_generation_is_still_running() {
 
 #[test]
 fn archive_stops_a_running_turn_before_rewinding() {
-    use crate::capabilities::lifecycle::api::RewindTarget;
+    use crate::units::lifecycle::api::RewindTarget;
     let (_handle, faces, ticks) = slow_ops(vec![module_of("a")]);
     let sid = faces
         .work

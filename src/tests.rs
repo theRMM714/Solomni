@@ -94,10 +94,10 @@ pub(crate) fn fence_acl_guard() -> std::sync::MutexGuard<'static, ()> {
 /// 目的：起一个内存装配的核心手柄并把能力面拆成 `Faces`（契约测试共用）。
 ///   返回手柄是为了能观察事件台与测试注入；只用能力面的用例可以忽略它。
 pub(crate) fn ops_with(
-    modules: Vec<crate::capabilities::catalog::modules::api::Module>,
+    modules: Vec<crate::units::catalog::modules::api::Module>,
     core_script: Vec<&str>,
 ) -> (
-    crate::capabilities::runtime::api::Handle,
+    crate::units::runtime::api::Handle,
     crate::presentation::faces::Faces,
 ) {
     let mut member = std::collections::BTreeMap::new();
@@ -106,7 +106,7 @@ pub(crate) fn ops_with(
         vec!["{\"type\":\"say\",\"text\":\"好\"}".to_string()],
     );
     let gateway = doubles::gw(member, core_script.into_iter().map(String::from).collect());
-    let handle = crate::capabilities::runtime::api::Handle::spawn(doubles::core_with_gateway(
+    let handle = crate::units::runtime::api::Handle::spawn(doubles::core_with_gateway(
         modules, gateway,
     ))
     .expect("起核心线程");
@@ -117,20 +117,20 @@ pub(crate) fn ops_with(
 /// 目的：注入**指定 vm 能力面与会话历史**的内存装配（guest 诊断动作要断言"回包就是 guest 报的事实"）。
 /// 约束：与 `core_with_gateway` 同形，只把 vm 与历史换成本次用例给的替身。
 pub(crate) fn ops_with_vm(
-    modules: Vec<crate::capabilities::catalog::modules::api::Module>,
+    modules: Vec<crate::units::catalog::modules::api::Module>,
     history: std::sync::Arc<doubles::InMemoryHistory>,
-    vm: std::sync::Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync>,
+    vm: std::sync::Arc<dyn crate::units::vm::api::Vm + Send + Sync>,
 ) -> (
-    crate::capabilities::runtime::api::Handle,
+    crate::units::runtime::api::Handle,
     crate::presentation::faces::Faces,
 ) {
-    let gateway: std::sync::Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+    let gateway: std::sync::Arc<dyn crate::units::llm::ports::ChatGateway + Send + Sync> =
         std::sync::Arc::new(doubles::gw(std::collections::BTreeMap::new(), Vec::new()));
     let llm = doubles::test_llm(
         std::sync::Arc::clone(&gateway),
         std::sync::Arc::new(doubles::FakeCatalog::new(vec!["m".to_string()])),
     );
-    let core = crate::capabilities::runtime::service::Core::new(
+    let core = crate::units::runtime::service::Core::new(
         root_dir(),
         doubles::registry_service(
             doubles::InMemorySettings::new(),
@@ -142,7 +142,7 @@ pub(crate) fn ops_with_vm(
         doubles::test_packages(std::sync::Arc::new(doubles::InMemoryPackages::empty())),
         doubles::test_provision(),
         doubles::test_modules(std::sync::Arc::new(doubles::VecSource(modules))),
-        std::sync::Arc::new(crate::capabilities::maintenance::builds::api::NoBuilds),
+        std::sync::Arc::new(crate::units::maintenance::builds::api::NoBuilds),
         llm,
         doubles::test_tools_svc_with(
             std::sync::Arc::new(builders::SilentRunner),
@@ -153,11 +153,11 @@ pub(crate) fn ops_with_vm(
         doubles::test_tools_svc(),
         std::sync::Arc::new(crate::kernel::ports::NoopLog),
         doubles::test_host_probe(),
-        std::sync::Arc::new(crate::capabilities::residents::api::NoResidents),
-        std::sync::Arc::new(crate::capabilities::catalog::secrets::api::NoSecrets),
+        std::sync::Arc::new(crate::units::residents::api::NoResidents),
+        std::sync::Arc::new(crate::units::catalog::secrets::api::NoSecrets),
         doubles::test_profiles(),
     );
-    let handle = crate::capabilities::runtime::api::Handle::spawn(core).expect("起核心线程");
+    let handle = crate::units::runtime::api::Handle::spawn(core).expect("起核心线程");
     let faces = crate::presentation::faces::Faces::from_handle(&handle);
     (handle, faces)
 }
@@ -166,13 +166,13 @@ pub(crate) fn ops_with_vm(
 pub(crate) fn single_work(
     name: &str,
     modules: &[&str],
-) -> crate::capabilities::work::api::WorkSpec {
-    crate::capabilities::work::api::WorkSpec {
+) -> crate::units::work::api::WorkSpec {
+    crate::units::work::api::WorkSpec {
         flows: None,
         freshness: None,
         name: name.to_string(),
-        kind: crate::capabilities::conversation::session::api::SINGLE.to_string(),
-        agents: vec![crate::capabilities::catalog::registry::api::AgentMeta {
+        kind: crate::units::conversation::session::api::SINGLE.to_string(),
+        agents: vec![crate::units::catalog::registry::api::AgentMeta {
             name: modules[0].to_string(),
             transient: true,
             modules: modules.iter().map(|s| s.to_string()).collect(),
@@ -194,25 +194,25 @@ pub(crate) struct SlowChat {
     pub ticks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
-impl crate::capabilities::llm::api::Chat for SlowChat {
+impl crate::units::llm::api::Chat for SlowChat {
     fn complete(
         &mut self,
-        _m: &[crate::capabilities::llm::api::Msg],
-        _opts: crate::capabilities::llm::api::CompleteOpts<'_>,
-        on: &mut dyn FnMut(crate::capabilities::llm::api::Chunk) -> bool,
-    ) -> crate::capabilities::llm::api::Completion {
+        _m: &[crate::units::llm::api::Msg],
+        _opts: crate::units::llm::api::CompleteOpts<'_>,
+        on: &mut dyn FnMut(crate::units::llm::api::Chunk) -> bool,
+    ) -> crate::units::llm::api::Completion {
         use std::sync::atomic::Ordering;
-        if !on(crate::capabilities::llm::api::Chunk::Start) {
-            return crate::capabilities::llm::api::Completion::text("");
+        if !on(crate::units::llm::api::Chunk::Start) {
+            return crate::units::llm::api::Completion::text("");
         }
         for _ in 0..6_000 {
             self.ticks.fetch_add(1, Ordering::Relaxed);
-            if !on(crate::capabilities::llm::api::Chunk::Text("·".to_string())) {
+            if !on(crate::units::llm::api::Chunk::Text("·".to_string())) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        crate::capabilities::llm::api::Completion::text(
+        crate::units::llm::api::Completion::text(
             "{\"type\":\"say\",\"text\":\"（慢通道）收到停止\"}",
         )
     }
@@ -226,33 +226,33 @@ pub(crate) struct GatedChat {
     pub release: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
-impl crate::capabilities::llm::api::Chat for GatedChat {
+impl crate::units::llm::api::Chat for GatedChat {
     fn complete(
         &mut self,
-        _m: &[crate::capabilities::llm::api::Msg],
-        _opts: crate::capabilities::llm::api::CompleteOpts<'_>,
-        on: &mut dyn FnMut(crate::capabilities::llm::api::Chunk) -> bool,
-    ) -> crate::capabilities::llm::api::Completion {
+        _m: &[crate::units::llm::api::Msg],
+        _opts: crate::units::llm::api::CompleteOpts<'_>,
+        on: &mut dyn FnMut(crate::units::llm::api::Chunk) -> bool,
+    ) -> crate::units::llm::api::Completion {
         use std::sync::atomic::Ordering;
         let n = self.started.fetch_add(1, Ordering::Relaxed);
-        if !on(crate::capabilities::llm::api::Chunk::Start) {
-            return crate::capabilities::llm::api::Completion::text("");
+        if !on(crate::units::llm::api::Chunk::Start) {
+            return crate::units::llm::api::Completion::text("");
         }
         // 第一次调用立刻返回（让"已产生的行"真的落下来），之后才阻塞：
         // 这样既能观察"生成中途"的状态，又能靠放行结束。
         if n == 0 {
-            return crate::capabilities::llm::api::Completion::text(
+            return crate::units::llm::api::Completion::text(
                 "{\"type\":\"say\",\"text\":\"我先说\"}",
             );
         }
         // 等放行；但**也要尊重分片回调**——「停止」正是靠 on 返回 false 在调用中途生效的。
         while !self.release.load(Ordering::Relaxed) {
-            if !on(crate::capabilities::llm::api::Chunk::Text("…".to_string())) {
+            if !on(crate::units::llm::api::Chunk::Text("…".to_string())) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        crate::capabilities::llm::api::Completion::text("{\"type\":\"agree\",\"text\":\"同意\"}")
+        crate::units::llm::api::Completion::text("{\"type\":\"agree\",\"text\":\"同意\"}")
     }
 }
 
@@ -264,17 +264,17 @@ pub(crate) struct GatedGateway {
 
 /// 目的：记录每次问询收到的消息，再转发给内层通道。
 pub(crate) struct RecordingChat {
-    pub inner: crate::capabilities::llm::api::BoxedChat,
+    pub inner: crate::units::llm::api::BoxedChat,
     pub seen: std::sync::Arc<std::sync::Mutex<Vec<Vec<String>>>>,
 }
 
-impl crate::capabilities::llm::api::Chat for RecordingChat {
+impl crate::units::llm::api::Chat for RecordingChat {
     fn complete(
         &mut self,
-        m: &[crate::capabilities::llm::api::Msg],
-        o: crate::capabilities::llm::api::CompleteOpts<'_>,
-        on: &mut dyn FnMut(crate::capabilities::llm::api::Chunk) -> bool,
-    ) -> crate::capabilities::llm::api::Completion {
+        m: &[crate::units::llm::api::Msg],
+        o: crate::units::llm::api::CompleteOpts<'_>,
+        on: &mut dyn FnMut(crate::units::llm::api::Chunk) -> bool,
+    ) -> crate::units::llm::api::Completion {
         self.seen
             .lock()
             .expect("锁")
@@ -282,7 +282,7 @@ impl crate::capabilities::llm::api::Chat for RecordingChat {
         self.inner.complete(m, o, on)
     }
 
-    fn last_usage(&self) -> Option<crate::capabilities::llm::api::TokenUsage> {
+    fn last_usage(&self) -> Option<crate::units::llm::api::TokenUsage> {
         self.inner.last_usage()
     }
 }
@@ -293,18 +293,18 @@ pub(crate) struct RecordingGateway {
     pub seen: std::sync::Arc<std::sync::Mutex<Vec<Vec<String>>>>,
 }
 
-impl crate::capabilities::llm::ports::ChatGateway for RecordingGateway {
+impl crate::units::llm::ports::ChatGateway for RecordingGateway {
     fn probe_tools(
         &self,
-        c: &crate::capabilities::llm::api::Channel,
-    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
+        c: &crate::units::llm::api::Channel,
+    ) -> Result<crate::units::llm::api::ProbeOutcome, String> {
         self.inner.probe_tools(c)
     }
     fn member_channel(
         &self,
-        c: &crate::capabilities::llm::api::Channel,
+        c: &crate::units::llm::api::Channel,
         id: &str,
-    ) -> crate::capabilities::llm::api::BoxedChat {
+    ) -> crate::units::llm::api::BoxedChat {
         let chat = self.inner.member_channel(c, id);
         Box::new(RecordingChat {
             inner: chat,
@@ -313,24 +313,24 @@ impl crate::capabilities::llm::ports::ChatGateway for RecordingGateway {
     }
     fn core_channel(
         &self,
-        c: &crate::capabilities::llm::api::Channel,
-    ) -> crate::capabilities::llm::api::BoxedChat {
+        c: &crate::units::llm::api::Channel,
+    ) -> crate::units::llm::api::BoxedChat {
         self.inner.core_channel(c)
     }
 }
 
-impl crate::capabilities::llm::ports::ChatGateway for GatedGateway {
+impl crate::units::llm::ports::ChatGateway for GatedGateway {
     fn probe_tools(
         &self,
-        _c: &crate::capabilities::llm::api::Channel,
-    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
+        _c: &crate::units::llm::api::Channel,
+    ) -> Result<crate::units::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(
         &self,
-        _c: &crate::capabilities::llm::api::Channel,
+        _c: &crate::units::llm::api::Channel,
         _id: &str,
-    ) -> crate::capabilities::llm::api::BoxedChat {
+    ) -> crate::units::llm::api::BoxedChat {
         Box::new(GatedChat {
             started: std::sync::Arc::clone(&self.started),
             release: std::sync::Arc::clone(&self.release),
@@ -338,8 +338,8 @@ impl crate::capabilities::llm::ports::ChatGateway for GatedGateway {
     }
     fn core_channel(
         &self,
-        _c: &crate::capabilities::llm::api::Channel,
-    ) -> crate::capabilities::llm::api::BoxedChat {
+        _c: &crate::units::llm::api::Channel,
+    ) -> crate::units::llm::api::BoxedChat {
         Box::new(GatedChat {
             started: std::sync::Arc::clone(&self.started),
             release: std::sync::Arc::clone(&self.release),
@@ -349,9 +349,9 @@ impl crate::capabilities::llm::ports::ChatGateway for GatedGateway {
 
 /// 目的：装配一个「生成阻塞到放行」的核心（观察"生成期间读接口不排队"）。
 pub(crate) fn gated_ops(
-    modules: Vec<crate::capabilities::catalog::modules::api::Module>,
+    modules: Vec<crate::units::catalog::modules::api::Module>,
 ) -> (
-    crate::capabilities::runtime::api::Handle,
+    crate::units::runtime::api::Handle,
     crate::presentation::faces::Faces,
     std::sync::Arc<std::sync::atomic::AtomicUsize>,
     std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -362,7 +362,7 @@ pub(crate) fn gated_ops(
     };
     let started = std::sync::Arc::clone(&gateway.started);
     let release = std::sync::Arc::clone(&gateway.release);
-    let handle = crate::capabilities::runtime::api::Handle::spawn(doubles::core_with_gateway(
+    let handle = crate::units::runtime::api::Handle::spawn(doubles::core_with_gateway(
         modules, gateway,
     ))
     .expect("起核心线程");
@@ -375,26 +375,26 @@ pub(crate) struct SlowGateway {
     pub ticks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
-impl crate::capabilities::llm::ports::ChatGateway for SlowGateway {
+impl crate::units::llm::ports::ChatGateway for SlowGateway {
     fn probe_tools(
         &self,
-        _c: &crate::capabilities::llm::api::Channel,
-    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
+        _c: &crate::units::llm::api::Channel,
+    ) -> Result<crate::units::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(
         &self,
-        _c: &crate::capabilities::llm::api::Channel,
+        _c: &crate::units::llm::api::Channel,
         _id: &str,
-    ) -> crate::capabilities::llm::api::BoxedChat {
+    ) -> crate::units::llm::api::BoxedChat {
         Box::new(SlowChat {
             ticks: std::sync::Arc::clone(&self.ticks),
         })
     }
     fn core_channel(
         &self,
-        _c: &crate::capabilities::llm::api::Channel,
-    ) -> crate::capabilities::llm::api::BoxedChat {
+        _c: &crate::units::llm::api::Channel,
+    ) -> crate::units::llm::api::BoxedChat {
         Box::new(SlowChat {
             ticks: std::sync::Arc::clone(&self.ticks),
         })
@@ -403,9 +403,9 @@ impl crate::capabilities::llm::ports::ChatGateway for SlowGateway {
 
 /// 目的：装配一个「生成会一直跑到被停止」的核心（观察 is_running / stop / 编辑禁令）。
 pub(crate) fn slow_ops(
-    modules: Vec<crate::capabilities::catalog::modules::api::Module>,
+    modules: Vec<crate::units::catalog::modules::api::Module>,
 ) -> (
-    crate::capabilities::runtime::api::Handle,
+    crate::units::runtime::api::Handle,
     crate::presentation::faces::Faces,
     std::sync::Arc<std::sync::atomic::AtomicUsize>,
 ) {
@@ -413,7 +413,7 @@ pub(crate) fn slow_ops(
         ticks: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
     };
     let ticks = std::sync::Arc::clone(&gateway.ticks);
-    let handle = crate::capabilities::runtime::api::Handle::spawn(doubles::core_with_gateway(
+    let handle = crate::units::runtime::api::Handle::spawn(doubles::core_with_gateway(
         modules, gateway,
     ))
     .expect("起核心线程");

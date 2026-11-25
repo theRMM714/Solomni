@@ -289,7 +289,7 @@ fn row(spec: &str, desc: &str) -> String {
 }
 
 /// 目的：这条长旗是不是一个**启动相命令**（声明在 `systools/commands.yaml`）：是就返回它的声明。
-fn boot_command(name: &str) -> Option<&'static crate::capabilities::tools::api::Op> {
+fn boot_command(name: &str) -> Option<&'static crate::units::tools::api::Op> {
     super::catalog::boot(name)
 }
 

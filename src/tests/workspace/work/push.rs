@@ -9,7 +9,7 @@ use crate::tests::workspace::support::*;
 /// 约束：存档线是 `refs/agents/<agent>/saves`；要进共享区仍得显式 work_commit。
 #[test]
 pub(crate) fn work_commit_auto_saves_the_sandbox_without_touching_the_shared_area() {
-    use crate::capabilities::workspace::ports::WorkStore;
+    use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "base.md", b"b", 1, 0).unwrap();
@@ -57,7 +57,7 @@ pub(crate) fn work_commit_auto_saves_the_sandbox_without_touching_the_shared_are
 /// 约束：沙箱里没提交的改动不随推送前进；主线历史只多一条发布提交。
 #[test]
 pub(crate) fn work_push_squashes_local_commits_and_fast_forwards_the_sandbox() {
-    use crate::capabilities::workspace::ports::WorkStore;
+    use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     let base = ws.work_commit_user("w", "base.md", b"b", 1, 0).unwrap();
@@ -103,7 +103,7 @@ pub(crate) fn work_push_squashes_local_commits_and_fast_forwards_the_sandbox() {
 /// 约束：推送不删主线上我没动过的路径，也不需要我先提交它。
 #[test]
 pub(crate) fn work_push_keeps_main_paths_it_never_committed() {
-    use crate::capabilities::workspace::ports::WorkStore;
+    use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     let sd = ws.roots("w", &[]).unwrap().store;
@@ -137,8 +137,8 @@ pub(crate) fn work_push_keeps_main_paths_it_never_committed() {
 /// 约束：删除判定用分叉点（它有）对比我的工作线（它没有），基线不参与。
 #[test]
 pub(crate) fn work_push_publishes_a_delete_both_sides_had() {
-    use crate::capabilities::workspace::api::ChangeKind;
-    use crate::capabilities::workspace::ports::WorkStore;
+    use crate::units::workspace::api::ChangeKind;
+    use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     let shared = shared_of(&ws, "w");
@@ -169,7 +169,7 @@ pub(crate) fn work_push_publishes_a_delete_both_sides_had() {
 /// 约束：分类不影响落盘——本地内容一律不被覆盖。
 #[test]
 pub(crate) fn work_pull_separates_local_changes_from_no_change() {
-    use crate::capabilities::workspace::ports::WorkStore;
+    use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
@@ -199,8 +199,8 @@ pub(crate) fn work_pull_separates_local_changes_from_no_change() {
 /// 约束：expect_current 双向生效（不符就拒绝），恢复不写到带前缀的字面路径。
 #[test]
 pub(crate) fn work_lost_restores_a_reset_backup_to_the_original_path() {
-    use crate::capabilities::workspace::api::{ResetRequest, content_hash};
-    use crate::capabilities::workspace::ports::WorkStore;
+    use crate::units::workspace::api::{ResetRequest, content_hash};
+    use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
@@ -265,7 +265,7 @@ pub(crate) fn work_lost_restores_a_reset_backup_to_the_original_path() {
 /// 约束：只有一份时按原路径直取（见上一条用例）。
 #[test]
 pub(crate) fn work_lost_asks_to_name_one_when_a_path_has_several_backups() {
-    use crate::capabilities::workspace::api::{ResetRequest, content_hash};
+    use crate::units::workspace::api::{ResetRequest, content_hash};
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
@@ -338,7 +338,7 @@ pub(crate) fn work_lost_asks_to_name_one_when_a_path_has_several_backups() {
 /// 约束：只读；显式 from/to 与路径过滤都生效。
 #[test]
 pub(crate) fn work_diff_shows_line_changes_and_never_pretends_binary_is_text() {
-    use crate::capabilities::workspace::api::{ChangeKind, DiffRequest, DiffSign};
+    use crate::units::workspace::api::{ChangeKind, DiffRequest, DiffSign};
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");

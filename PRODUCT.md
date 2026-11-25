@@ -58,7 +58,7 @@
 - 建会话时把 agent 的组合（名字 / 模块 / 模型 / 人设）取一份 **copy** 落进会话；之后改登记处不影响已开会话，会话配置里改的也只是这份 copy。
 - `note` 是给人看的一句话说明；`chara` 是给模型看的人设 / 身份，进这个 agent 的身份提示词（空 = 不产生人设块）。
 - 同一个模块可以在一次工作里被多个 agent 共用（各自独立沙箱、各自调用）；agent 重名时核心自动加 `-2` / `-3` 尾号，并先让用户裁决是否改名。
-- 核心可以按需求**推荐 agent 草案**：先复用登记处里合适的（模块 / 模型 / 人设照它自己的，核心不拟模型），没有才组装一个，组装项可以带一个人设草案；确认必须由用户点（`src/capabilities/conversation/slate/service.rs`）。
+- 核心可以按需求**推荐 agent 草案**：先复用登记处里合适的（模块 / 模型 / 人设照它自己的，核心不拟模型），没有才组装一个，组装项可以带一个人设草案；确认必须由用户点（`src/units/conversation/slate/service.rs`）。
 
 ## 六、工作的落盘与沙箱
 
@@ -66,13 +66,13 @@
 - agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml`）。
 
 - **构建 / 测试 / 跑脚本用 shell**（执行类系统工具）：cwd 固定私有沙箱，授予也是固定的——私有沙箱读写、模块目录与基础 / 项目工具链、主机只读根只读，网络按会话档位（离线不放行）；调用参数里没有范围旋钮。共享区主副本不进容器（读 / 改先 `work_pull`，发布走 `work_commit` + `work_push`），模块 userdata 不可写，不注入模块 secrets。
-- **文件读写用内置工具**（`read` / `list` / `write` / `edit` / `patch` / `delete` / `grep`；`patch` 用自由格式补丁，大段内容不必塞进 JSON；`delete` 默认只删沙箱里的文件）：核心把占位符替换成**本环境写法的根**（本机档 = 宿主路径，虚拟机档 = guest 路径）；越出这些根（相对路径、`..`）一律拒绝（`src/capabilities/tools/service.rs`），虚拟机档下的 guest 写法在寻址前译回宿主路径再校验。
+- **文件读写用内置工具**（`read` / `list` / `write` / `edit` / `patch` / `delete` / `grep`；`patch` 用自由格式补丁，大段内容不必塞进 JSON；`delete` 默认只删沙箱里的文件）：核心把占位符替换成**本环境写法的根**（本机档 = 宿主路径，虚拟机档 = guest 路径）；越出这些根（相对路径、`..`）一律拒绝（`src/units/tools/service.rs`），虚拟机档下的 guest 写法在寻址前译回宿主路径再校验。
 - **一 agent 一格目录**：读不到别人的私有区、也写不进去；产物有归属，返工找得到人。模块目录不被任何 agent 拥有：agent 只有使用权，agent 的文件工具对模块目录（含 `userdata/`）只读，模块数据由模块自己的工具 / 服务进程维护。
 - 跨 agent 流动只有 `work/`、共用模块的调用与进入上下文的转录这些明路。
 - **共享区是版本化工作区**：`work/` 是**主副本**、对 agent 只读；agent 的沙箱就是它的**工作副本**。
 - 要用的内容先 `work_pull` 拉进沙箱（同一相对路径），改完先用 `work_commit` 记进自己的工作线、再用 `work_push` 发布到共享区；`work_status` 看当前提交、逐条状态与未跟踪文件，`work_versions` 看基线 / 主副本 / 沙箱三方（带主副本提交 id）。
 - 提交按**文件级三方比较**（拉取基线 / 沙箱 / 主副本）判定：两边都改了同一文件且结果不同 = **冲突**，整个提交拒绝并逐条点名，绝不静默覆盖；不同文件天然可合并。冲突后用 `work_resolve` 显式选边（`take=upstream` 取主副本覆盖本地，`take=local` 保留本地并把基线推进到主副本）；不做自动合并。
-- 文本可人工合并后用 `take=local`；图片 / 视频 / 二进制不能合并，只能选边（`src/capabilities/workspace/service.rs`）。
+- 文本可人工合并后用 `take=local`；图片 / 视频 / 二进制不能合并，只能选边（`src/units/workspace/service.rs`）。
 - **冲突解决不是盲选**：`take=local` 要带 `head=<主副本提交 id>`，主副本在你查看后又前进会拒绝；本地根本没改过也会拒绝，避免用旧内容静默覆盖上游。`take=upstream` 覆盖 / 删除本地文件前会先把本地版本备份到版本库 `lost/`，用 `work_lost` 可列出并按当前 hash 恢复。`work_pull` 中途失败保留已完成部分的基线；`work_versions` 的预览截断时会明确警告“不能据此合并，需读全文”。
 - 文本、图片、视频与其它二进制都按字节处理；`work_versions` 给 hash、大小与扩展名媒体类型提示，文本预览最多 16 KiB，二进制只给元数据；内容按块流式读写、不整份进上下文。单文件进入共享区的上限是 64 MiB，提交 / 上传超限会整次拒绝并给出替代路径；既有超限文件仍可看元数据，存储级分块另见缺口账。
 - 内置 `read` / `write` 是文本通道，图片 / 视频 / 其它二进制由模块工具或用户投喂产出，再用 `work_commit` + `work_push` 提交。
@@ -94,7 +94,7 @@
 - ③ 文件系统围栏按平台接入（Linux Landlock、macOS seatbelt、Windows AppContainer）。
 - **全局沙箱策略是硬约束**（`sandbox.policy`）：默认 `require`，机制不可用时启动门按 `on_unavailable` 询问是否**本进程降级**（不落盘，重启再问）、重设或退出；自检确认机制有效却仍装不上 = 程序自己写错了，那一路**拒绝执行**。
 - **门不过就不起前端**：默认 CLI 与 `--web` 都先过环境检查；没有可回答的前端时直接退出，不会“先开 Web 再说”。
-- **必要落点授不上不静默降级**：经统一裁决通道问一次（本轮无围栏跑一次 / 放弃这次调用）；拒绝、没人答或没有可回答的前端一律不执行；**可选落点**授不上只记事实（`src/capabilities/turn/turn/service/ask_user.rs`）。
+- **必要落点授不上不静默降级**：经统一裁决通道问一次（本轮无围栏跑一次 / 放弃这次调用）；拒绝、没人答或没有可回答的前端一律不执行；**可选落点**授不上只记事实（`src/units/turn/turn/service/ask_user.rs`）。
 - 机制细节见 [ARCHITECTURE.md](ARCHITECTURE.md)，三平台真机探针见 [TESTING.md](TESTING.md)。
 - **出站网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`（只公网出站，不授 private network / loopback）、macOS 放行 `network-outbound`、Linux 在 `network=false` 时由 seccomp 拒绝非 AF_UNIX / AF_NETLINK socket（TCP/UDP/raw 与回环都出不去）。Linux 的 `network=true` 不装网络过滤器，不限制入站/绑定（平台差异）。Windows 未授权 `windows.write_acl` 时容器不装，网络不生效。
 - **未授权不等于无围栏**：Windows 的容器围栏（路径级可达范围与断网）要授权才装得上；Linux / macOS 的围栏在守门进程里自足，不受授权影响。进程树与环境白名单两种时段都生效；启动报告把"本机能力"与"本次实际"分两行说清。

@@ -19,10 +19,10 @@ const IO_CALLS = ["std::fs", "std::process::Command", "ureq", "reqwest", "std::n
 const CANONICALIZE = /canonicalize\s*\(/;
 
 /** 能力内的实现分区：api / service / domain / detail；其余（能力根 X.rs、guest.rs 这类）不归这些判据管。
- *  单元与子业务之间可以多一层目录（如 capabilities/conversation/session/domain），判据取路径里第一个分区段。 */
+ *  单元与子业务之间可以多一层目录（如 units/conversation/session/domain），判据取路径里第一个分区段。 */
 function scopeOf(f) {
   const parts = f.split("/");
-  if (parts[0] !== "src" || parts[1] !== "capabilities" || parts.length < 4) return null;
+  if (parts[0] !== "src" || parts[1] !== "units" || parts.length < 4) return null;
   for (let i = 3; i < parts.length; i += 1) {
     const seg = parts[i].replace(/\.rs$/, "");
     if (["api", "service", "domain", "detail"].includes(seg)) return seg;
@@ -30,9 +30,9 @@ function scopeOf(f) {
   return null;
 }
 
-/** 一个 service 文件的模块路径：`capabilities/<单元>/<子业务…>/service/<rest>`（rest 不含 .rs，可含子目录）。 */
+/** 一个 service 文件的模块路径：`units/<单元>/<子业务…>/service/<rest>`（rest 不含 .rs，可含子目录）。 */
 function modulePathOf(f) {
-  return "capabilities/" + f.split("/").slice(2).join("/").replace(/\.rs$/, "");
+  return "units/" + f.split("/").slice(2).join("/").replace(/\.rs$/, "");
 }
 
 /** 同能力 service 下的方法族：它引用的兄弟模块（只看生产代码边，只留真实存在的模块）。 */
@@ -49,7 +49,7 @@ function siblingEdges(mod, text, nodes) {
   const at = mod.indexOf("/service/");
   if (at < 0) return out;
   const base = mod.slice(0, at + "/service/".length);
-  for (const m of text.matchAll(/crate::capabilities::(?:[a-z_][a-z0-9_]*::)+service::([A-Za-z0-9_:]+)/g)) {
+  for (const m of text.matchAll(/crate::units::(?:[a-z_][a-z0-9_]*::)+service::([A-Za-z0-9_:]+)/g)) {
     const segs = m[1].split("::").filter((s) => s !== "self" && s !== "super");
     let best = null;
     for (let i = 1; i <= segs.length; i += 1) {
@@ -94,7 +94,7 @@ function walk(root) {
       else if (e.name.endsWith(".rs")) files.push(rel(root, p));
     }
   };
-  walkDir(path.join(root, "src", "capabilities"));
+  walkDir(path.join(root, "src", "units"));
   return files;
 }
 
@@ -121,7 +121,7 @@ function scan(root) {
     }
 
     if (scope === "service") {
-      if (/crate::capabilities::(?:[a-z_][a-z0-9_]*::)*detail\b/.test(prod)) {
+      if (/crate::units::(?:[a-z_][a-z0-9_]*::)*detail\b/.test(prod)) {
         serviceToDetail.add(f + " -> ::detail");
       }
       if (prod.includes("crate::kernel::detail")) serviceToDetail.add(f + " -> crate::kernel::detail");

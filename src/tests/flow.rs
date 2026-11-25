@@ -4,10 +4,10 @@
 //! 联动：doubles/standin.rs 实现流程面；本文件不改 turn / work / runtime / lifecycle / presentation / session。
 
 use super::prelude::*;
-use crate::capabilities::conversation::session::api::{
+use crate::units::conversation::session::api::{
     DecisionCard, DecisionEnvelope, DecisionMessage, Gate, GateTicket, OptionView,
 };
-use crate::capabilities::turn::turn::api::Session;
+use crate::units::turn::turn::api::Session;
 use crate::tests::doubles::StandIn;
 
 #[test]

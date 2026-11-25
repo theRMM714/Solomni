@@ -1,7 +1,7 @@
 //! 目的：事件流视图助手——把 Core 吐出的事件流还原成「用户看到的那几行」。
 //! 管：裁决卡回答、转录行/工具行的视图与文本、某段文字的在场与否。
 //! 不管：造会话与名单（`session.rs`）、通道替身（`chat.rs`）。
-//! 联动：`src/capabilities/runtime/api.rs` 的 `SessionEvent` 与呈现层的 `LineView`。
+//! 联动：`src/units/runtime/api.rs` 的 `SessionEvent` 与呈现层的 `LineView`。
 
 use super::*;
 
@@ -53,7 +53,7 @@ pub(crate) fn replay_lines(events: &[serde_json::Value]) -> Vec<String> {
                 .unwrap_or_default()
         })
         .map(|l| {
-            serde_json::from_value::<crate::capabilities::conversation::session::api::LineView>(l)
+            serde_json::from_value::<crate::units::conversation::session::api::LineView>(l)
                 .map(|v| v.render())
         })
         .filter_map(Result::ok)
@@ -104,7 +104,7 @@ pub(crate) fn transcript_rows(events: &[SessionEvent]) -> Vec<(u64, String, bool
 /// 目的：事件流里的工具调用视图（tool 行携带的那个）。
 pub(crate) fn tool_views(
     events: &[SessionEvent],
-) -> Vec<crate::capabilities::conversation::session::api::ToolCallView> {
+) -> Vec<crate::units::conversation::session::api::ToolCallView> {
     events
         .iter()
         .flat_map(|e| match e {

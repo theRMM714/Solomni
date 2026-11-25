@@ -22,7 +22,7 @@ const SCAFFOLD = [
   "src/tests/helpers/",
 ];
 
-const IMPL_USE = /crate::capabilities::[a-z_]+::[a-z_]+::(service|domain|detail)\b/;
+const IMPL_USE = /crate::units::[a-z_]+::[a-z_]+::(service|domain|detail)\b/;
 
 function testsApiOnly(root) {
   const problems = [];

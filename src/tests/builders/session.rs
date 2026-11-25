@@ -1,19 +1,19 @@
 //! 目的：会话与名单的测试脚手架——造成员、造名单、造会话与一次编辑提交。
 //! 管：工具声明样本、坏信封、成员装配、名单与 meta 落盘、编辑提交。
 //! 不管：事件视图（`events.rs`）、通道（`chat.rs`）。
-//! 联动：`src/capabilities/runtime/api.rs` 与 `src/capabilities/modules/api.rs`。
+//! 联动：`src/units/runtime/api.rs` 与 `src/units/modules/api.rs`。
 
 use super::*;
-use crate::capabilities::conversation::session::api::SessionSpec;
+use crate::units::conversation::session::api::SessionSpec;
 
-pub(crate) fn chain_node(id: &str, deps: &[&str]) -> crate::capabilities::taskchain::api::TaskNode {
-    crate::capabilities::taskchain::api::TaskNode {
+pub(crate) fn chain_node(id: &str, deps: &[&str]) -> crate::units::taskchain::api::TaskNode {
+    crate::units::taskchain::api::TaskNode {
         id: id.to_string(),
         title: format!("节点{}", id),
         objective: format!("把 {} 做完", id),
         assignee: "甲".to_string(),
         deps: deps.iter().map(|d| d.to_string()).collect(),
-        status: crate::capabilities::taskchain::api::NodeStatus::Pending,
+        status: crate::units::taskchain::api::NodeStatus::Pending,
         sub_session: None,
         report: None,
         acceptance: None,
@@ -56,22 +56,22 @@ pub(crate) fn member_with_tools(
     let m = Member::new(
         id,
         crate::tests::doubles::test_params(id),
-        crate::capabilities::llm::api::ToolMode::Envelope,
+        crate::units::llm::api::ToolMode::Envelope,
         scripted(script),
     );
     // 该路径走模块声明的外部命令（scan）：空沙箱 + 内存 IO，内置工具不参与。
     WithTools {
         member: m,
         tools: Some(MemberTools {
-            face: crate::capabilities::conversation::session::api::ToolFace {
-                mode: crate::capabilities::llm::api::ToolMode::Envelope,
+            face: crate::units::conversation::session::api::ToolFace {
+                mode: crate::units::llm::api::ToolMode::Envelope,
                 seat: "solo".to_string(),
                 modules,
                 tier: crate::kernel::api::types::Tier::Host,
                 guest_lease: String::new(),
                 sandbox: test_sandbox("m0", &[]),
                 tools_this_turn: test_prompts()
-                    .text(crate::capabilities::prompt::api::Segment::ToolsThisTurn)
+                    .text(crate::units::prompt::api::Segment::ToolsThisTurn)
                     .to_string(),
                 builtin_tools: test_systools().tools,
                 unavailable: BTreeMap::new(),
@@ -84,7 +84,7 @@ pub(crate) fn member_with_tools(
                 runtime_path: None,
                 runtime_roots: Vec::new(),
                 // 测试替身按"执行席"发放全部内置工具（机制席位的越权校验另有专门用例）。
-                allowed: crate::capabilities::tools::api::names(),
+                allowed: crate::units::tools::api::names(),
                 with_modules: true,
                 notes: crate::tests::doubles::test_notes(&test_sandbox("m0", &[]), &[]),
             },
@@ -96,10 +96,10 @@ pub(crate) fn member_with_tools(
                 Arc::new(NoFenceHost),
             ),
             vm: test_vm(),
-            residents: Arc::new(crate::capabilities::residents::api::NoResidents),
+            residents: Arc::new(crate::units::residents::api::NoResidents),
             // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
             workspace: None,
-            observations: crate::capabilities::tools::api::Observations::default(),
+            observations: crate::units::tools::api::Observations::default(),
             shell_live: None,
             reply_seq: 0,
             line: Default::default(),

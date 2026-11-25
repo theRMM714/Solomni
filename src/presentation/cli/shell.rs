@@ -4,10 +4,10 @@
 //! 联动：`src/main.rs` 在核心装配后调一次；`cli.rs` 的提示符每读一行就调 `run_line`。
 
 use super::*;
-use crate::capabilities::catalog::modules::api::{Module, Roster, ToolDecl};
-use crate::capabilities::runtime::api::{ActionCall, Caller, Output};
-use crate::capabilities::system::api::System;
-use crate::capabilities::tools::api::{
+use crate::units::catalog::modules::api::{Module, Roster, ToolDecl};
+use crate::units::runtime::api::{ActionCall, Caller, Output};
+use crate::units::system::api::System;
+use crate::units::tools::api::{
     Executor, Op, Phase, Runtime, ToolSchema, arg_fault_text, parse_op, usage_named,
 };
 use serde_json::{Value, json};

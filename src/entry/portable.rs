@@ -1,12 +1,12 @@
 //! 目的：启动期的便携对账——围栏机器级预授的缺项提示与首次授权后的一次性预授。
 //! 管：两个启动钩子（缺项提示、授权后预授）与它们的输出前缀；对账判定的两档 ACL 能力。
-//! 不管：`--setup` 的模式分派与状态回执（在 capabilities::system 的 SetupOps 与 presentation/cli/boot.rs）；设置校验、写盘与授权落盘适配器（在登记处与组合根）。
+//! 不管：`--setup` 的模式分派与状态回执（在 units::system 的 SetupOps 与 presentation/cli/boot.rs）；设置校验、写盘与授权落盘适配器（在登记处与组合根）。
 //! 联动：main.rs 在启动授权后调 ensure_after_authorize、在启动报告里调 fence_hint。
 
 use std::path::Path;
 
-use crate::capabilities::system::api::SetupOps;
-use crate::capabilities::system::detail::setup::SetupHost;
+use crate::units::system::api::SetupOps;
+use crate::units::system::detail::setup::SetupHost;
 
 /// 目的：启动期只读对账：机器级预授缺项时打一条提示（不静默慢写、不阻断启动）。
 /// 返回：true = 已就绪；false = 有缺项（调用方只提示一次）。

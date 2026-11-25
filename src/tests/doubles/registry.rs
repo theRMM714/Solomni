@@ -1,7 +1,7 @@
 //! 目的：内存登记处替身——预置供应商、模型与核心默认模型，让会话都拿到真实通道。
 //! 管：设置的读写与保存失败注入；供应商与模型的预置。
 //! 不管：历史（`history.rs`）、工作区（`workspace.rs`）。
-//! 联动：`src/capabilities/registry/ports.rs` 的 `SettingsStore`。
+//! 联动：`src/units/registry/ports.rs` 的 `SettingsStore`。
 
 use super::*;
 
@@ -28,7 +28,7 @@ impl InMemorySettings {
                 api_model: "m".to_string(),
                 provider: "p".to_string(),
                 note: String::new(),
-                tools: crate::capabilities::llm::api::ToolMode::Envelope,
+                tools: crate::units::llm::api::ToolMode::Envelope,
                 context: 32_000,
                 thinking: Default::default(),
             },

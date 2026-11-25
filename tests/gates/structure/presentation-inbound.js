@@ -74,7 +74,7 @@ function presentationInbound(root) {
     if (testOnly.has(f)) continue;
     const text = stripTestModules(fs.readFileSync(path.join(root, f), "utf8"));
     const units = new Set();
-    for (const m of text.matchAll(/crate::capabilities::([a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)*)/g)) {
+    for (const m of text.matchAll(/crate::units::([a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)*)/g)) {
       units.add(unitOf(m[1]));
     }
     if (/crate::kernel::api/.test(text)) units.add("kernel");

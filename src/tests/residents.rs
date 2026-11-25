@@ -1,11 +1,11 @@
-//! 目的：常驻服务能力的行为用例——只经 `capabilities/residents/api.rs` 的面。
+//! 目的：常驻服务能力的行为用例——只经 `units/residents/api.rs` 的面。
 //! 管：清单与状态、起停、调用回执（含隐秘字段注入与脱敏）、崩溃标记、按租约回收。
-//! 不管：真实协议进程（在 `src/capabilities/residents/detail/`）；MCP 协议细节（由 T5 旅程 `mcp` 覆盖）。
-//! 联动：src/capabilities/residents/api.rs；装配见 src/entry/assembly.rs。
+//! 不管：真实协议进程（在 `src/units/residents/detail/`）；MCP 协议细节（由 T5 旅程 `mcp` 覆盖）。
+//! 联动：src/units/residents/api.rs；装配见 src/entry/assembly.rs。
 
 use super::prelude::*;
-use crate::capabilities::catalog::modules::api::{SecretDecl, ServiceDecl};
-use crate::capabilities::residents::api::{ResidentOps, ServiceState, ServiceView};
+use crate::units::catalog::modules::api::{SecretDecl, ServiceDecl};
+use crate::units::residents::api::{ResidentOps, ServiceState, ServiceView};
 
 /// 目的：一个带两个常驻服务（回显 / 一调就死）与一个未知适配器服务、一个停用服务的模块。
 fn demo_modules() -> Vec<Module> {
@@ -43,7 +43,7 @@ fn demo_modules() -> Vec<Module> {
 struct Harness {
     residents: Arc<dyn ResidentOps + Send + Sync>,
     fake: Arc<FakeServiceAdapter>,
-    secrets: Arc<dyn crate::capabilities::catalog::secrets::api::SecretOps + Send + Sync>,
+    secrets: Arc<dyn crate::units::catalog::secrets::api::SecretOps + Send + Sync>,
 }
 
 fn harness() -> Harness {
@@ -54,12 +54,12 @@ fn harness() -> Harness {
         Arc::new(InMemorySecretStore::new()),
     )
     .expect("装隐秘字段能力面");
-    let dying: Arc<dyn crate::capabilities::residents::ports::ServiceAdapter + Send + Sync> =
+    let dying: Arc<dyn crate::units::residents::ports::ServiceAdapter + Send + Sync> =
         Arc::new(DyingServiceAdapter);
     let residents = crate::entry::assembly::residents(
         vec![
             Arc::clone(&fake)
-                as Arc<dyn crate::capabilities::residents::ports::ServiceAdapter + Send + Sync>,
+                as Arc<dyn crate::units::residents::ports::ServiceAdapter + Send + Sync>,
             dying,
         ],
         modules,

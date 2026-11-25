@@ -8,7 +8,7 @@ title: 供应商与模型
 mutation:
   schedule: weekly
   files:
-    - src/capabilities/llm/detail/repair.rs
+    - src/units/llm/detail/repair.rs
 cases:
   - id: cargo/tests::detail::http
     tier: T2

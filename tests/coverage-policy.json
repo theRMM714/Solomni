@@ -53,13 +53,13 @@
       "reason": "正常退出的视图盘释放：main 组合根不在测试里执行；由生命周期冒烟验收"
     },
     {
-      "file": "src/capabilities/system/detail/setup/fence.rs",
+      "file": "src/units/system/detail/setup/fence.rs",
       "from": 15,
       "to": 21,
       "reason": "Windows 专有的机器级 ACL 真写：非 Windows 在上面的护栏就返回，守卫之后的路径在 Linux 覆盖率作业里永远执行不到；由 --setup=fence 真机冒烟与三平台探针验收"
     },
     {
-      "file": "src/capabilities/lifecycle/service/history.rs",
+      "file": "src/units/lifecycle/service/history.rs",
       "from": 47,
       "to": 60,
       "reason": "后台撤权线程创建失败时的同步兜底：线程创建失败是环境性防御分支，测试进程无法稳定构造；成功路径与撤权失败日志都有用例覆盖"
@@ -91,7 +91,7 @@
       "title": "安全策略与围栏路径判定",
       "min": 100,
       "globs": [
-        "src/capabilities/permission/**",
+        "src/units/permission/**",
         "src/kernel/detail/launch.rs",
         "src/kernel/detail/ledger.rs",
         "src/kernel/detail/confine/prep.rs",

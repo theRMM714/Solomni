@@ -1,19 +1,19 @@
 //! 目的：模块能力的测试——清单、契约校验与启停有效值。
 //! 管：模块清单与启停的用例。
 //! 不管：清单来源机制（FsModules）的契约（在 `detail.rs`）；常驻服务的运行态（在 `residents.rs`）。
-//! 联动：替身见 `doubles.rs`；被测实现在 `src/capabilities/modules/`。
+//! 联动：替身见 `doubles.rs`；被测实现在 `src/units/modules/`。
 use super::prelude::*;
 
 #[test]
 pub(crate) fn entry_candidates_follow_the_shell_resolution_of_the_target() {
     // unix：没有扩展名解析，只有字面那个。
     assert_eq!(
-        crate::capabilities::catalog::modules::api::entry_candidates("build/indexer", "linux"),
+        crate::units::catalog::modules::api::entry_candidates("build/indexer", "linux"),
         vec!["build/indexer".to_string()]
     );
     // Windows：cmd 按 PATHEXT 补扩展名（清单只写不带扩展名的那个）。
     assert_eq!(
-        crate::capabilities::catalog::modules::api::entry_candidates("build/indexer", "windows"),
+        crate::units::catalog::modules::api::entry_candidates("build/indexer", "windows"),
         vec![
             "build/indexer".to_string(),
             "build/indexer.exe".to_string(),
@@ -25,7 +25,7 @@ pub(crate) fn entry_candidates_follow_the_shell_resolution_of_the_target() {
 }
 #[test]
 pub(crate) fn build_decl_is_validated_and_survives_the_scan() {
-    use crate::capabilities::catalog::modules::api::{BuildDecl, check_build};
+    use crate::units::catalog::modules::api::{BuildDecl, check_build};
     let mut m = module_of("idx").manifest;
     assert!(check_build(&m).is_ok(), "没写 build 段是合法的");
     m.build = Some(BuildDecl {
@@ -56,7 +56,7 @@ pub(crate) fn build_decl_is_validated_and_survives_the_scan() {
 
 #[test]
 pub(crate) fn local_entry_only_accepts_relative_paths() {
-    use crate::capabilities::catalog::modules::api::local_entry;
+    use crate::units::catalog::modules::api::local_entry;
     assert_eq!(local_entry("build/indexer build"), Some("build/indexer"));
     assert_eq!(local_entry("./tools/run.sh"), Some("./tools/run.sh"));
     // Windows 写法也认（相对路径用反斜杠）。
@@ -93,15 +93,15 @@ pub(crate) fn roster_lists_modules() {
 pub(crate) fn module_runtimes_are_validated() {
     let mut m = module_of("a");
     m.manifest.runtimes = vec!["python".to_string(), "cc".to_string()];
-    assert!(crate::capabilities::catalog::modules::api::check_runtimes(&m.manifest).is_ok());
+    assert!(crate::units::catalog::modules::api::check_runtimes(&m.manifest).is_ok());
     m.manifest.runtimes = vec!["Python".to_string()];
     assert!(
-        crate::capabilities::catalog::modules::api::check_runtimes(&m.manifest).is_err(),
+        crate::units::catalog::modules::api::check_runtimes(&m.manifest).is_err(),
         "大写不合法"
     );
     m.manifest.runtimes = vec!["python".to_string(), "python".to_string()];
     assert!(
-        crate::capabilities::catalog::modules::api::check_runtimes(&m.manifest)
+        crate::units::catalog::modules::api::check_runtimes(&m.manifest)
             .unwrap_err()
             .contains("重复"),
         "重复声明要拒收"
@@ -115,9 +115,9 @@ pub(crate) fn module_tools_may_not_take_builtin_names() {
         .tools
         .insert("read_txt".to_string(), decl("python tools/read_txt.py"));
     assert!(
-        crate::capabilities::catalog::modules::api::check_tools(
+        crate::units::catalog::modules::api::check_tools(
             &m.manifest,
-            &crate::capabilities::tools::api::names(),
+            &crate::units::tools::api::names(),
         )
         .is_ok(),
         "普通工具名可用"
@@ -126,9 +126,9 @@ pub(crate) fn module_tools_may_not_take_builtin_names() {
         m.manifest
             .tools
             .insert(name.to_string(), decl("python tools/x.py"));
-        let why = crate::capabilities::catalog::modules::api::check_tools(
+        let why = crate::units::catalog::modules::api::check_tools(
             &m.manifest,
-            &crate::capabilities::tools::api::names(),
+            &crate::units::tools::api::names(),
         )
         .unwrap_err();
         assert!(why.contains("保留名"), "内置工具名要拒收：{}", why);
@@ -140,7 +140,7 @@ pub(crate) fn effective_enablement_is_override_then_author_default() {
     let mut m = module_of("a");
     m.manifest.services.insert(
         "s".to_string(),
-        crate::capabilities::catalog::modules::api::ServiceDecl {
+        crate::units::catalog::modules::api::ServiceDecl {
             adapter: "fake".to_string(),
             command: "run".to_string(),
             desc: String::new(),
@@ -192,7 +192,7 @@ pub(crate) fn overrides_survive_a_reload() {
         Arc::clone(&source) as Arc<dyn ModuleSource + Send + Sync>,
         Arc::clone(&store)
             as Arc<
-                dyn crate::capabilities::catalog::modules::ports::ModuleStateStore + Send + Sync,
+                dyn crate::units::catalog::modules::ports::ModuleStateStore + Send + Sync,
             >,
     );
     first.set_module_enabled("a", false).expect("停用");
@@ -200,7 +200,7 @@ pub(crate) fn overrides_survive_a_reload() {
         source,
         store
             as Arc<
-                dyn crate::capabilities::catalog::modules::ports::ModuleStateStore + Send + Sync,
+                dyn crate::units::catalog::modules::ports::ModuleStateStore + Send + Sync,
             >,
     );
     assert!(!second.module_enabled("a"), "覆盖要落盘并在下次装配时载入");

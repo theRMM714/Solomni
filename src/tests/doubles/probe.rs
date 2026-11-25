@@ -110,13 +110,13 @@ pub(crate) fn vm_capable_host_probe()
 
 /// 目的：日志能力替身：什么都不做（呈现层的埋点不参与任何判定）。
 pub(crate) struct NoopLogOps;
-impl crate::capabilities::runtime::api::LogOps for NoopLogOps {
+impl crate::units::runtime::api::LogOps for NoopLogOps {
     fn info(&self, _at: &str, _msg: &str) {}
     fn warn(&self, _at: &str, _msg: &str) {}
     fn error(&self, _at: &str, _msg: &str) {}
 }
 
 /// 目的：测试用的提示词册能力：替身装载器 → 真实册子 → 能力面（与生产同一条路）。
-pub(crate) fn test_prompt() -> std::sync::Arc<dyn crate::capabilities::prompt::api::Prompt> {
-    crate::capabilities::prompt::service::load(&TestPrompts::ok()).expect("内置提示词册必须合法")
+pub(crate) fn test_prompt() -> std::sync::Arc<dyn crate::units::prompt::api::Prompt> {
+    crate::units::prompt::service::load(&TestPrompts::ok()).expect("内置提示词册必须合法")
 }

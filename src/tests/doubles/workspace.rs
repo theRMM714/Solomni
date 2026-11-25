@@ -1,7 +1,7 @@
 //! 目的：内存工作区与版本库替身——目录布局与内容寻址对象树都不碰盘。
 //! 管：共享区/私有区根、写入与清单、版本库的文件原语与提交记录。
-//! 不管：文件系统替身（`io.rs`）、真实适配器（`src/capabilities/workspace/detail/`）。
-//! 联动：`src/capabilities/workspace/ports.rs` 的 `Workdirs` 与 `WorkStore`。
+//! 不管：文件系统替身（`io.rs`）、真实适配器（`src/units/workspace/detail/`）。
+//! 联动：`src/units/workspace/ports.rs` 的 `Workdirs` 与 `WorkStore`。
 
 use super::*;
 
@@ -63,7 +63,7 @@ impl Workdirs for InMemoryWorkspace {
         &self,
         session: &str,
         agents: &[String],
-    ) -> Result<crate::capabilities::workspace::api::WorkRoots, String> {
+    ) -> Result<crate::units::workspace::api::WorkRoots, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -72,7 +72,7 @@ impl Workdirs for InMemoryWorkspace {
         for a in agents {
             map.insert(a.clone(), abs(&[session, a]));
         }
-        Ok(crate::capabilities::workspace::api::WorkRoots {
+        Ok(crate::units::workspace::api::WorkRoots {
             shared: abs(&[session, "work"]),
             session_root: abs(&[session]),
             agents: map,
@@ -99,7 +99,7 @@ impl Workdirs for InMemoryWorkspace {
         &self,
         session: &str,
         agents: &[String],
-    ) -> Result<crate::capabilities::workspace::api::WorkFiles, String> {
+    ) -> Result<crate::units::workspace::api::WorkFiles, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -119,18 +119,18 @@ impl Workdirs for InMemoryWorkspace {
             got.sort();
             map.insert(a.clone(), got);
         }
-        Ok(crate::capabilities::workspace::api::WorkFiles { work, agents: map })
+        Ok(crate::units::workspace::api::WorkFiles { work, agents: map })
     }
 
     fn usage(
         &self,
         session: &str,
         agents: &[String],
-    ) -> Result<crate::capabilities::workspace::api::WorkUsage, String> {
+    ) -> Result<crate::units::workspace::api::WorkUsage, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
-        use crate::capabilities::workspace::api::AreaUsage;
+        use crate::units::workspace::api::AreaUsage;
         let files = self.files.lock().expect("锁");
         let area = |prefix: &str| -> AreaUsage {
             let mut out = AreaUsage::default();
@@ -147,7 +147,7 @@ impl Workdirs for InMemoryWorkspace {
         for a in agents {
             map.insert(a.clone(), area(&format!("{}/{}/", session, a)));
         }
-        Ok(crate::capabilities::workspace::api::WorkUsage::total(
+        Ok(crate::units::workspace::api::WorkUsage::total(
             work, map,
         ))
     }
@@ -159,13 +159,13 @@ pub(crate) struct InMemoryWorkStore {
     pub(crate) files: Mutex<BTreeMap<String, Vec<u8>>>,
     pub(crate) objects: Mutex<BTreeMap<String, Vec<u8>>>,
     pub(crate) commits:
-        Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Commit>>,
+        Mutex<BTreeMap<String, crate::units::workspace::domain::workstore::Commit>>,
     pub(crate) refs:
-        Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Ref>>,
+        Mutex<BTreeMap<String, crate::units::workspace::domain::workstore::Ref>>,
     pub(crate) index:
-        Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Index>>,
+        Mutex<BTreeMap<String, crate::units::workspace::domain::workstore::Index>>,
     pub(crate) pending:
-        Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Pending>>,
+        Mutex<BTreeMap<String, crate::units::workspace::domain::workstore::Pending>>,
     pub(crate) next_ids: Mutex<BTreeMap<String, u64>>,
     pub(crate) fail: Option<String>,
     pub(crate) fail_times: Mutex<BTreeMap<String, usize>>,
@@ -322,7 +322,7 @@ impl WorkStore for InMemoryWorkStore {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
-        let rules = crate::capabilities::workspace::api::Rules::compile(root, rules.unwrap_or(""))?;
+        let rules = crate::units::workspace::api::Rules::compile(root, rules.unwrap_or(""))?;
         let mut out = self.list(root)?;
         out.retain(|rel| !rules.is_ignored(rel, false));
         Ok(out)
@@ -519,8 +519,8 @@ impl WorkStore for InMemoryWorkStore {
         }
         self.enter("set_head")?;
         let mut r = self.read_ref(store, "main")?.unwrap_or(
-            crate::capabilities::workspace::domain::workstore::Ref {
-                kind: crate::capabilities::workspace::domain::workstore::RefKind::Main,
+            crate::units::workspace::domain::workstore::Ref {
+                kind: crate::units::workspace::domain::workstore::RefKind::Main,
                 target: None,
                 heads: BTreeMap::new(),
                 saves: BTreeMap::new(),
@@ -539,7 +539,7 @@ impl WorkStore for InMemoryWorkStore {
         &self,
         store: &std::path::Path,
         name: &str,
-    ) -> Result<Option<crate::capabilities::workspace::domain::workstore::Ref>, String> {
+    ) -> Result<Option<crate::units::workspace::domain::workstore::Ref>, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -555,7 +555,7 @@ impl WorkStore for InMemoryWorkStore {
         &self,
         store: &std::path::Path,
         name: &str,
-        r: &crate::capabilities::workspace::domain::workstore::Ref,
+        r: &crate::units::workspace::domain::workstore::Ref,
     ) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
@@ -571,7 +571,7 @@ impl WorkStore for InMemoryWorkStore {
     fn list_refs(
         &self,
         store: &std::path::Path,
-    ) -> Result<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Ref>, String>
+    ) -> Result<BTreeMap<String, crate::units::workspace::domain::workstore::Ref>, String>
     {
         if let Some(m) = &self.fail {
             return Err(m.clone());
@@ -599,7 +599,7 @@ impl WorkStore for InMemoryWorkStore {
         &self,
         store: &std::path::Path,
         id: u64,
-    ) -> Result<Option<crate::capabilities::workspace::domain::workstore::Commit>, String> {
+    ) -> Result<Option<crate::units::workspace::domain::workstore::Commit>, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -614,7 +614,7 @@ impl WorkStore for InMemoryWorkStore {
     fn write_commit(
         &self,
         store: &std::path::Path,
-        commit: &crate::capabilities::workspace::domain::workstore::Commit,
+        commit: &crate::units::workspace::domain::workstore::Commit,
     ) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
@@ -657,7 +657,7 @@ impl WorkStore for InMemoryWorkStore {
         &self,
         store: &std::path::Path,
         agent: &str,
-    ) -> Result<crate::capabilities::workspace::domain::workstore::Index, String> {
+    ) -> Result<crate::units::workspace::domain::workstore::Index, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -674,7 +674,7 @@ impl WorkStore for InMemoryWorkStore {
         &self,
         store: &std::path::Path,
         agent: &str,
-        index: &crate::capabilities::workspace::domain::workstore::Index,
+        index: &crate::units::workspace::domain::workstore::Index,
     ) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
@@ -726,7 +726,7 @@ impl WorkStore for InMemoryWorkStore {
     fn read_pending(
         &self,
         store: &std::path::Path,
-    ) -> Result<Option<crate::capabilities::workspace::domain::workstore::Pending>, String> {
+    ) -> Result<Option<crate::units::workspace::domain::workstore::Pending>, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -741,7 +741,7 @@ impl WorkStore for InMemoryWorkStore {
     fn write_pending(
         &self,
         store: &std::path::Path,
-        pending: &crate::capabilities::workspace::domain::workstore::Pending,
+        pending: &crate::units::workspace::domain::workstore::Pending,
     ) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
@@ -793,7 +793,7 @@ impl WorkStore for InMemoryWorkStore {
     fn list_indexes(
         &self,
         store: &std::path::Path,
-    ) -> Result<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Index>, String>
+    ) -> Result<BTreeMap<String, crate::units::workspace::domain::workstore::Index>, String>
     {
         if let Some(m) = &self.fail {
             return Err(m.clone());
@@ -812,7 +812,7 @@ impl WorkStore for InMemoryWorkStore {
     fn list_objects(
         &self,
         store: &std::path::Path,
-    ) -> Result<Vec<crate::capabilities::workspace::domain::workstore::ObjectInfo>, String> {
+    ) -> Result<Vec<crate::units::workspace::domain::workstore::ObjectInfo>, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -822,7 +822,7 @@ impl WorkStore for InMemoryWorkStore {
         for (k, v) in objects.iter() {
             if let Some(hash) = k.strip_prefix(&prefix) {
                 out.push(
-                    crate::capabilities::workspace::domain::workstore::ObjectInfo {
+                    crate::units::workspace::domain::workstore::ObjectInfo {
                         hash: hash.to_string(),
                         size: v.len() as u64,
                     },

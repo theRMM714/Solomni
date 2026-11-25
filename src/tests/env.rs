@@ -1,21 +1,21 @@
 //! 目的：钉环境事实的派生——权限链、guest 租约、一席的工具环境与沙箱清单、全局策略（网络开关与宿主只读根）。
 //! 管：`env::api` 六个派生函数的行为与错误文案；纯内存，不碰端口、不落盘。
 //! 不管：取事实（`runtime` 的 history / workspace / registry）、机制侧怎么用围栏。
-//! 联动：`src/capabilities/env/domain/env.rs`；`runtime/service/env.rs` 取事实后转调。
+//! 联动：`src/units/env/domain/env.rs`；`runtime/service/env.rs` 取事实后转调。
 
-use crate::capabilities::catalog::modules::api::Roster;
-use crate::capabilities::catalog::packages::api::PackagePlan;
-use crate::capabilities::catalog::registry::api::AgentMeta;
-use crate::capabilities::catalog::registry::api::AppSettings;
-use crate::capabilities::conversation::session::api::{MEETING, RunState, SINGLE, SessionMeta};
-use crate::capabilities::permission::api::{
+use crate::units::catalog::modules::api::Roster;
+use crate::units::catalog::packages::api::PackagePlan;
+use crate::units::catalog::registry::api::AgentMeta;
+use crate::units::catalog::registry::api::AppSettings;
+use crate::units::conversation::session::api::{MEETING, RunState, SINGLE, SessionMeta};
+use crate::units::permission::api::{
     PermissionDefaults, PermissionLayer, ProfileId, SessionSandbox,
 };
-use crate::capabilities::turn::env::api::{
+use crate::units::turn::env::api::{
     MemberFacts, SandboxesFacts, SeatAccess, host_read_roots, member, network_allowed, permissions,
     sandboxes, shared_scope,
 };
-use crate::capabilities::workspace::api::{Sandbox, ScopeMode, SharedEdit, SharedScope, WorkRoots};
+use crate::units::workspace::api::{Sandbox, ScopeMode, SharedEdit, SharedScope, WorkRoots};
 use crate::kernel::api::types::ExecSpec;
 use crate::kernel::api::types::Tier;
 use crate::tests::doubles::module_of;

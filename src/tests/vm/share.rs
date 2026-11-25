@@ -1,12 +1,12 @@
 //! 目的：共享后端的落地判据与候选挑选。
 //! 管：9p/smb/virtiofs/copy 的在场、候选顺序、guest 客户端要求。
 //! 不管：引擎参数（`engine.rs`）。
-//! 联动：`src/capabilities/vm/detail/share_ninep.rs`、`share_smb.rs`、`share_virtiofs.rs`、`share_none.rs`。
+//! 联动：`src/units/vm/detail/share_ninep.rs`、`share_smb.rs`、`share_virtiofs.rs`、`share_none.rs`。
 
 /// 目的：自定义 guest 没声明任何可用客户端时，起 guest 前就拒绝，不等到挂载失败。
 #[test]
 pub(crate) fn a_guest_without_supported_clients_is_rejected_before_boot() {
-    use crate::capabilities::vm::api::tier_readiness;
+    use crate::units::vm::api::tier_readiness;
     use crate::kernel::api::types::ExecSpec as VmSpec;
     use crate::kernel::api::types::Tier;
     let root = crate::tests::scratch("vm-guest-share-readiness");

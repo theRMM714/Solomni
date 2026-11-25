@@ -40,7 +40,7 @@ fn fs_modules_accepts_valid_folders_and_rejects_each_illegal_form_with_a_reason(
 
     let roster = FsModules::new(
         dir,
-        crate::capabilities::tools::api::names(),
+        crate::units::tools::api::names(),
         vec!["taken".to_string()],
     )
     .scan();
@@ -98,7 +98,7 @@ fn fs_modules_validates_service_and_secret_declarations() {
         "id: noenv\nversion: 0.1.0\nbrief: b\nsystem: s\nsecrets:\n  token:\n    desc: 缺 env\n",
     );
 
-    let roster = FsModules::new(dir, crate::capabilities::tools::api::names(), Vec::new()).scan();
+    let roster = FsModules::new(dir, crate::units::tools::api::names(), Vec::new()).scan();
     let ids: Vec<&str> = roster
         .modules
         .iter()
@@ -132,7 +132,7 @@ fn fs_modules_reads_the_userdata_fact() {
 
     let roster = FsModules::new(
         dir.clone(),
-        crate::capabilities::tools::api::names(),
+        crate::units::tools::api::names(),
         Vec::new(),
     )
     .scan();

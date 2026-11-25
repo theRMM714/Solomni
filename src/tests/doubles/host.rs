@@ -1,10 +1,10 @@
 //! 目的：围栏、包、依赖与日志的宿主替身——记下每次调用，供断言“有没有碰宿主”。
 //! 管：围栏释放记录、包清单、依赖状态与任务、空日志。
 //! 不管：宿主探测（`probe.rs`）、常驻服务（`residents.rs`）。
-//! 联动：`src/kernel/ports.rs` 与 `src/capabilities/packages/ports.rs`。
+//! 联动：`src/kernel/ports.rs` 与 `src/units/packages/ports.rs`。
 
 use super::*;
-use crate::capabilities::conversation::session::api::MEETING;
+use crate::units::conversation::session::api::MEETING;
 
 /// 目的：记录型围栏端口：记录按会话（`lease_releases`）与按次（`released` / `leases`）两类释放请求。
 pub(crate) struct RecordingFence {
@@ -190,36 +190,36 @@ pub(crate) fn work(name: &str, kind: &str, modules: &[&str]) -> WorkSpec {
 
 /// 目的：假依赖补齐面——清单为空、动作不能真跑（runtime 只读它的虚拟根清单；测试不碰网络与下载）。
 pub(crate) fn test_provision()
--> Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> {
+-> Arc<dyn crate::units::provision::api::Provision + Send + Sync> {
     test_provision_with(Vec::new())
 }
 
 /// 目的：同上，但报一份给定的清单（不解析产品根：兜底路径原样回清单里的 probe）。
 pub(crate) fn test_provision_with(
-    deps: Vec<crate::capabilities::provision::api::DepStatus>,
-) -> Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> {
+    deps: Vec<crate::units::provision::api::DepStatus>,
+) -> Arc<dyn crate::units::provision::api::Provision + Send + Sync> {
     test_provision_with_root(deps, None)
 }
 
 /// 目的：同上，并给出产品根——验"设置里没登记时采用项目内已装的那一个"要把 probe 落成绝对路径。
 pub(crate) fn test_provision_with_root(
-    deps: Vec<crate::capabilities::provision::api::DepStatus>,
+    deps: Vec<crate::units::provision::api::DepStatus>,
     root: Option<&std::path::Path>,
-) -> Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> {
+) -> Arc<dyn crate::units::provision::api::Provision + Send + Sync> {
     struct FixedProvision(
-        Vec<crate::capabilities::provision::api::DepStatus>,
+        Vec<crate::units::provision::api::DepStatus>,
         Option<std::path::PathBuf>,
     );
-    impl crate::capabilities::provision::api::Provision for FixedProvision {
-        fn status(&self) -> Result<Vec<crate::capabilities::provision::api::DepStatus>, String> {
+    impl crate::units::provision::api::Provision for FixedProvision {
+        fn status(&self) -> Result<Vec<crate::units::provision::api::DepStatus>, String> {
             Ok(self.0.clone())
         }
         fn guest_bases(
             &self,
-        ) -> Result<Vec<crate::capabilities::provision::api::GuestBase>, String> {
+        ) -> Result<Vec<crate::units::provision::api::GuestBase>, String> {
             Ok(Vec::new())
         }
-        fn processes(&self) -> Result<Vec<crate::capabilities::provision::api::ProcInfo>, String> {
+        fn processes(&self) -> Result<Vec<crate::units::provision::api::ProcInfo>, String> {
             Ok(Vec::new())
         }
         fn job(&self) -> crate::kernel::api::types::JobState {
@@ -240,7 +240,7 @@ pub(crate) fn test_provision_with_root(
         }
         fn tool_path(
             &self,
-            tool: crate::capabilities::provision::api::HostTool,
+            tool: crate::units::provision::api::HostTool,
             registered: &str,
         ) -> Option<String> {
             let registered = registered.trim();
@@ -248,9 +248,9 @@ pub(crate) fn test_provision_with_root(
                 return Some(registered.to_string());
             }
             let prefix = match tool {
-                crate::capabilities::provision::api::HostTool::Qemu => "vm.qemu.",
-                crate::capabilities::provision::api::HostTool::Virtiofsd => "vm.virtiofsd.",
-                crate::capabilities::provision::api::HostTool::Smbd => "vm.smbd.",
+                crate::units::provision::api::HostTool::Qemu => "vm.qemu.",
+                crate::units::provision::api::HostTool::Virtiofsd => "vm.virtiofsd.",
+                crate::units::provision::api::HostTool::Smbd => "vm.smbd.",
             };
             let dep = self
                 .0
@@ -269,8 +269,8 @@ pub(crate) fn test_provision_with_root(
 pub(crate) fn installed_dep(
     id: &str,
     probe: &str,
-) -> crate::capabilities::provision::api::DepStatus {
-    crate::capabilities::provision::api::DepStatus {
+) -> crate::units::provision::api::DepStatus {
+    crate::units::provision::api::DepStatus {
         id: id.to_string(),
         guest: None,
         present: true,
@@ -310,5 +310,5 @@ pub(crate) fn scripted(s: Vec<String>) -> BoxedChat {
 pub(crate) struct SharedScript {
     pub(crate) q: Arc<Mutex<Vec<String>>>,
     // 需要验“精确上下文用量”时注入；None = 这条通道拿不到 usage。
-    pub(crate) usage: Option<crate::capabilities::llm::api::TokenUsage>,
+    pub(crate) usage: Option<crate::units::llm::api::TokenUsage>,
 }
