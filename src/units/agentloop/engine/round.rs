@@ -6,8 +6,8 @@
 use super::decls::ToolDecls;
 use super::tools::*;
 use crate::kernel::api::types::ToolOutcome;
-use crate::units::conversation::session::api::reply_msgs;
-use crate::units::conversation::session::domain::tools::MemberTools;
+use crate::units::agentloop::api::reply_msgs;
+use crate::units::agentloop::domain::member_tools::MemberTools;
 use crate::units::llm::api::{self as envelope, Verb};
 use crate::units::llm::api::{Chat, Chunk, CompleteOpts, Msg};
 use crate::units::tools::api::{ResultBudget, cap_result_with, continuation_for};
@@ -172,7 +172,7 @@ pub fn converse_with(
     verbs: bool,
 ) -> Vec<Round> {
     // 身份 + 本回合工具 + 对话 + 本回合提示：**唯一的装配点**。
-    // 工具面取自这一席位（执行席的表现 + 它自己模块的工具）；讨论席的动词面也在这里（见 crate::units::conversation::session::api::TurnRun）。
+    // 工具面取自这一席位（执行席的表现 + 它自己模块的工具）；讨论席的动词面也在这里（见 crate::units::agentloop::api::TurnRun）。
     let (ids, with_modules) = match tools.as_ref() {
         Some(ctx) => (ctx.face.allowed.clone(), ctx.face.with_modules),
         None => (Vec::new(), false),

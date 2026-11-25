@@ -128,7 +128,7 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
         }),
         "流水里要有 usage 事件"
     );
-    let last = crate::units::conversation::session::api::last_usage(&events).expect("读回用量");
+    let last = crate::units::agentloop::api::last_usage(&events).expect("读回用量");
     assert_eq!(last.total_tokens, 1020);
 
     // 跨回合累加：第二轮的用量叠在 meta 的同一本账上，不覆盖也不清零。
@@ -238,7 +238,7 @@ fn restore_work_commit_is_non_destructive_and_records_a_notice() {
 
 #[test]
 fn unique_work_name_falls_back_and_appends_a_suffix() {
-    use crate::units::conversation::session::api::unique_work_name;
+    use crate::units::agentloop::api::unique_work_name;
     let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
     let exists = |n: &str| faces.work.exists(n).expect("查占用");
     assert_eq!(unique_work_name("", "single", exists), "single");

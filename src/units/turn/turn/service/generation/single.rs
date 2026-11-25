@@ -3,7 +3,7 @@
 //! 不管：命令分发、协作泵、压缩。
 //! 联动：`turn::api::TurnHost`、`generation/collab.rs`、`service/{turn,flow}`
 
-use crate::units::conversation::session::api::TurnIo;
+use crate::units::agentloop::api::TurnIo;
 use crate::units::transcript::api::SessionEvent;
 use crate::units::turn::turn::api::{Advance, CollabWork, Output, Prepared, TurnHost};
 

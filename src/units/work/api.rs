@@ -276,7 +276,7 @@ pub struct SessionView {
     /// 目的：最近一次发送视图的替换统计（判了几条、换了几条、省多少 token）。
     /// 约束：只活在活会话里——重建后为 None，面板就不显示这一行。
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub freshness_stats: Option<crate::units::conversation::session::api::FreshnessStats>,
+    pub freshness_stats: Option<crate::units::agentloop::api::FreshnessStats>,
     /// 目的：这条会话是不是带收窄层（子会话）。
     pub permission_narrowed: bool,
     /// 目的：子会话的父档位（根为空）；权限快速切换据此禁用更高档。
@@ -308,7 +308,7 @@ pub struct SessionView {
     pub usage_totals: crate::units::session_model::api::UsageTotals,
     /// 目的：最近一次 shell 的运行状态（状态栏卡片）；没跑过 shell 就是 null。
     /// 约束：总是出现（null = 没有）——前端据此清掉回档已经截掉的旧快照。
-    pub shell: Option<crate::units::conversation::session::api::ShellLive>,
+    pub shell: Option<crate::units::agentloop::api::ShellLive>,
     /// 目的：外部工作区根；None = 产品内布局。界面据此显示“删除只删记录”、工作区标记。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,

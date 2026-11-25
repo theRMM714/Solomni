@@ -477,10 +477,7 @@ impl Work {
         sid: &str,
     ) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
         let (meta, events) = self.history.load(sid)?;
-        Ok((
-            meta,
-            crate::units::conversation::session::api::truncate_events(&events),
-        ))
+        Ok((meta, crate::units::agentloop::api::truncate_events(&events)))
     }
 
     /// 目的：取这个会话的**裁决队**（核心各关卡与工具级确认共用同一条）。

@@ -28,8 +28,8 @@ pub use crate::units::pure::registry_model::api::ModelEntry;
 pub use crate::units::pure::registry_model::api::Provider;
 pub use crate::units::session_model::api::{RunState, SessionMeta};
 
-pub use crate::units::conversation::session::domain::tools::MemberTools;
-pub use crate::units::conversation::session::domain::tools::ModuleTools;
+pub use crate::units::agentloop::api::MemberTools;
+pub use crate::units::agentloop::api::ModuleTools;
 
 pub use crate::units::conversation::session::ports::HistoryStore;
 

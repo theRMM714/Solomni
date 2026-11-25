@@ -6,9 +6,8 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use crate::units::conversation::session::api::{
-    Flow, GateTicket, Handback, MemberAsk, MemberTurn, Settle,
-};
+use crate::units::agentloop::api::MemberTurn;
+use crate::units::conversation::session::api::{Flow, GateTicket, Handback, MemberAsk, Settle};
 use crate::units::llm::api::{CompleteOpts, Msg};
 use crate::units::tools::api::Tools;
 use crate::units::transcript::api::{Gate, SessionEvent};

@@ -26,7 +26,7 @@
 ## 改动本单元时必须同步
 
 - 核实环境的规格（`VerifySpec` 的字段与构造）只有 `src/units/conversation/session/service/verify.rs` 一处：改字段必须同改 `src/units/conversation/collab/service/turn_io.rs` 的 `verify_env` 与 `src/tests/collab/` 的核实用例。
-- 状态派生（`src/units/conversation/collab/domain/`）与驱动（`src/units/conversation/session/service/engine/driver.rs`）必须同改；同步 `src/tests/collab/` 五份用例、`docs/collab/task-chain.md`、`docs/session/session-model.md`、`docs/tools/tools-and-roles.md`。
+- 状态派生（`src/units/conversation/collab/domain/`）与驱动（`src/units/agentloop/engine/driver.rs`）必须同改；同步 `src/tests/collab/` 五份用例、`docs/collab/task-chain.md`、`docs/session/session-model.md`、`docs/tools/tools-and-roles.md`。
 
 ## 本目录
 

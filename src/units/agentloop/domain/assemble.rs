@@ -7,10 +7,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::kernel::ports::ToolHandler;
-use crate::units::catalog::modules::api::Module;
-use crate::units::conversation::session::domain::tools::{
+use crate::units::agentloop::domain::member_tools::{
     ModuleTools, ServiceOp, service_ops_for_modules, tool_table,
 };
+use crate::units::catalog::modules::api::Module;
 use crate::units::prompt::api::Prompt;
 use crate::units::residents::api::{ResidentOps, ServiceState, ServiceView};
 use crate::units::session_model::api::{Seat, seat};

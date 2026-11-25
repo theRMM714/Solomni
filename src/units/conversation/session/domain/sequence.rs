@@ -6,8 +6,9 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use crate::units::agentloop::api::MemberTurn;
 use crate::units::conversation::session::api::{
-    Flow, GateTicket, Handback, MemberAsk, MemberTurn, Settle, WorkPlan,
+    Flow, GateTicket, Handback, MemberAsk, Settle, WorkPlan,
 };
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::transcript::api::{Gate, SessionEvent};

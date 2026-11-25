@@ -690,7 +690,7 @@ pub(crate) fn work_versioning_tools_are_granted_to_the_working_roles_only() {
     }
     let face = |id: &str| -> Vec<String> {
         let seat = crate::units::session_model::api::seat(id).expect("席位在册");
-        crate::units::conversation::session::api::seat_face(seat)
+        crate::units::agentloop::api::seat_face(seat)
             .into_iter()
             .map(|s| s.to_string())
             .collect()

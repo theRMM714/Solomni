@@ -10,9 +10,8 @@ use crate::kernel::ports::HostProbe;
 use crate::units::catalog::modules::api::Module;
 use crate::units::catalog::registry::api::Registry;
 
-use crate::units::conversation::session::api::{
-    AgentSession, SessionParams, guest_lease_for, work_root, work_root_of,
-};
+use crate::units::agentloop::api::{AgentSession, SessionParams};
+use crate::units::conversation::session::api::{guest_lease_for, work_root, work_root_of};
 use crate::units::llm::api::{Channel, Msg};
 use crate::units::session_model::api::SessionMeta;
 use crate::units::turn::turn::api::Session;
@@ -142,17 +141,16 @@ impl Turn {
                 // 重建时同样按登记处派生形态：系统提示与实际协议必须一致（回放才与实时一致）
                 let mode = registry.tool_mode(a.model.as_deref());
                 // **会话参数**：与建立时同一个口径（身份块每回合现渲染，不进消息列表）。
-                let params =
-                    crate::units::conversation::session::api::SessionParams::from_workspace(
-                        &a.name,
-                        &sb,
-                        &modules,
-                        &meta.spec.seat,
-                    )
-                    .with_chara(a.chara.clone())
-                    .with_guest(crate::units::vm::api::guest_os_of(
-                        &self.root, probe, &meta.exec,
-                    ));
+                let params = crate::units::agentloop::api::SessionParams::from_workspace(
+                    &a.name,
+                    &sb,
+                    &modules,
+                    &meta.spec.seat,
+                )
+                .with_chara(a.chara.clone())
+                .with_guest(crate::units::vm::api::guest_os_of(
+                    &self.root, probe, &meta.exec,
+                ));
                 let (history, marks, line_reply, line_ids, compacted_upto, compacted_line) =
                     replay_dialogue(events, mode);
                 let unavailable = crate::units::vm::api::unavailable_modules(
@@ -213,14 +211,14 @@ impl Turn {
                     line_ids,
                     compacted_upto,
                     compacted_line,
-                    reply_seq: crate::units::conversation::session::api::max_reply(events),
+                    reply_seq: crate::units::agentloop::api::max_reply(events),
                     context: (window, percent, keep_percent),
                     model: a.model.clone().or_else(|| registry.core_model()),
                     freshness: freshness.0,
                     freshness_keep_percent: freshness.1,
                     reads,
                     observations,
-                    usage: crate::units::conversation::session::api::last_usage(events),
+                    usage: crate::units::agentloop::api::last_usage(events),
                 };
                 Session::Single(crate::units::conversation::session::api::rebuild_single(
                     &self.session_ports(),
@@ -240,7 +238,7 @@ impl Turn {
                 s.compacted_upto = compacted_upto;
                 s.compacted_line = compacted_line;
                 s.next_line = s.marks.len() as u64;
-                s.set_reply_seq(crate::units::conversation::session::api::max_reply(events));
+                s.set_reply_seq(crate::units::agentloop::api::max_reply(events));
                 s.set_context_freshness(freshness.0);
                 s.set_freshness_keep_percent(freshness.1);
                 let (observations, reads) = replay_ledgers(events, compacted_upto);
@@ -248,13 +246,13 @@ impl Turn {
                 for (reply, body, fact) in reads {
                     s.note_read_at(body, reply, fact);
                 }
-                s.set_last_usage(crate::units::conversation::session::api::last_usage(events));
+                s.set_last_usage(crate::units::agentloop::api::last_usage(events));
                 Session::Single(s)
             }
         };
         // 状态栏的 shell 快照同样按转录派生：重启 / 启用 / 回档重建后不再"失忆"。
         self.shell_slot(&meta.name)
-            .set(crate::units::conversation::session::api::last_shell(events));
+            .set(crate::units::agentloop::api::last_shell(events));
         Ok(built)
     }
 }
@@ -289,7 +287,7 @@ fn replay_ledgers(
             else {
                 continue;
             };
-            let body = crate::units::conversation::session::api::tool_result_body(&c);
+            let body = crate::units::agentloop::api::tool_result_body(&c);
             for f in c.observations {
                 if f.schema != crate::units::tools::api::OBSERVATION_FORMAT
                     || f.reply < compacted_upto
@@ -337,7 +335,7 @@ pub fn replay_dialogue(
     // 对话里**只有**真正发生过的事；身份与环境由 params 现渲染。
     let mut history: Vec<Msg> = compacted
         .as_ref()
-        .map(|(_, summary, _)| crate::units::conversation::session::api::summary_message(summary))
+        .map(|(_, summary, _)| crate::units::agentloop::api::summary_message(summary))
         .into_iter()
         .collect();
     let mut marks: Vec<usize> = Vec::new();
@@ -444,7 +442,7 @@ pub fn replay_dialogue(
                 .filter_map(|t| t.get("tool").cloned())
                 .filter_map(|t| serde_json::from_value(t).ok())
                 .collect();
-            for m in crate::units::conversation::session::api::reply_msgs(mode, &raw, &views) {
+            for m in crate::units::agentloop::api::reply_msgs(mode, &raw, &views) {
                 history.push(m);
             }
             for row in &group {

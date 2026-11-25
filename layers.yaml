@@ -14,6 +14,7 @@ registry_model: 1
 taskchain: 1
 
 # 环 2 状态与机制
+agentloop: 2
 catalog: 2
 llm: 2
 prompt: 2

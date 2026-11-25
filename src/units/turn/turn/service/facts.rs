@@ -11,9 +11,8 @@ use crate::units::catalog::modules::api::{Module, Roster};
 use crate::units::catalog::packages::api::PackagePlan;
 use crate::units::catalog::registry::api::Registry;
 
-use crate::units::conversation::session::api::{
-    AgentSession, MemberSpec, SingleSpec, work_root_of,
-};
+use crate::units::agentloop::api::AgentSession;
+use crate::units::conversation::session::api::{MemberSpec, SingleSpec, work_root_of};
 use crate::units::llm::api::Channel;
 use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::permission::api::PermissionSet;
@@ -185,7 +184,7 @@ impl Turn {
         tier: Tier,
         guest_lease: String,
         host_plan: &PackagePlan,
-    ) -> crate::units::conversation::session::api::ToolFace {
+    ) -> crate::units::agentloop::api::ToolFace {
         let spec = crate::units::conversation::session::api::MemberSpec {
             modules,
             sandbox: sb,

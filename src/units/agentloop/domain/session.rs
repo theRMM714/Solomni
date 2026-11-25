@@ -2,7 +2,7 @@
 //! 管：发言席（只有 agent，id = agent 实例名）、工具循环、转录行与会话内稳定 id、每行对应的历史长度（供回档精确回退）、压缩点。
 //! 不管：事件词汇与裁决队列（在 `events.rs` / `decisions.rs`）、历史落盘（在 `detail/`）。
 //! 联动：由 engine 驱动（`engine::converse_with`）；回档算术在 `rewind.rs`，历史视图在 `history.rs`。
-use crate::units::conversation::session::domain::tools::MemberTools;
+use crate::units::agentloop::domain::member_tools::MemberTools;
 use crate::units::llm::api::{BoxedChat, Msg, TokenUsage};
 use crate::units::session_model::api::{UsageTotals, default_freshness_keep_percent};
 use crate::units::transcript::api::{LineView, SessionEvent, ToolCallView};

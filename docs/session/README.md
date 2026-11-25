@@ -1,28 +1,29 @@
 # session（会话）
 
-> 定位：会话状态、回合簿记与会话历史的唯一持有者。
-> 效力：规范｜核对：2026-11-23｜依据：`src/units/conversation/session/api.rs`
+> 定位：会话用例与编排——历史落盘、会话树、裁决队、流程面与一席的装配（单会话运行时在 `agentloop`）。
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/conversation/session/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
-- 管：会话状态与簿记（行 / 回合 / 回复）、成员工具面与工具表、回档的纯行算术、呈现侧事件契约（`SessionEvent` / `LineView` / 裁决关 `Gate`；机制专有事件走 `Push`，词汇归各自能力）、**流程面**（`Flow` 与可派的活 `WorkPlan`：驱动只认「推一步 / 让出一回合 / 交回处置 / 该派哪些节点」，具体流程自己实现）、核心操作回路（声明工具面 → 跑一次模型 → 取载荷 → 只读核实）。
-- 不管：不编排跨会话（`runtime`）、不决定讨论流程（`collab`）、不实现工具机制（`tools`）、不声明会话身份（元信息 / 类型表 / 机制席位在 `session_model`，本单元只按声明装配）。
+- 管：会话历史的落盘与读写（`History` / `HistoryOps` 的用例实现）、会话树派生（子树 / 工作根 / 配置归属 / guest 租约）、裁决队列与关卡通道、**流程面**（`Flow` 与可派的活 `WorkPlan`：驱动只认「推一步 / 让出一回合 / 交回处置 / 该派哪些节点」，具体流程自己实现）、席位面与工具总表的自洽断言，以及一席装配的用例入口（`single_session` / `rebuild_single` / `proxy_session`）。
+- 不管：不实现单会话运行时（会话对象、回合引擎、工具面、核心操作回路在 `agentloop`）、不编排跨会话（`runtime`）、不决定讨论流程（`collab`）、不实现工具机制（`tools`）、不声明会话身份（元信息 / 类型表 / 机制席位在 `session_model`，本单元只按声明装配）。
 
 ## 入站契约与状态归属
 
 - 入站面：`api::HistoryOps`（呈现层队列面）+ `api::History`（别的能力的直连面：造会话 / 写元信息 / **只读元信息** / 追流水 / 读回 / 删除）。
 - 事件与运行态：行与事件词汇；**运行态** `RunState`（`active` / `stopped` / `archived`）落盘在 `meta.run`。
 - 出站端口：`HistoryStore` **只由 `service.rs` 持有**（R12）。
-- 状态归属：会话状态、回合簿记与会话历史由本单元唯一持有。
+- 状态归属：会话历史由本单元唯一持有；**一条会话的运行态**（上下文、行 id、回合与回复簿记）由 `agentloop` 的会话对象持有，本单元只持有它的入口。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`kernel`、`llm`、`modules`、`permission`、`prompt`、`residents`、`taskchain`、`tools`、`vm`、`workspace`
-- 谁在用我：`collab`、`runtime`、`registry`、`slate`
+- 经 `::api` 用到：`agentloop`、`session_model`、`transcript`、`kernel`、`llm`、`catalog`（`modules`）、`permission`、`prompt`、`residents`、`taskchain`、`tools`、`vm`、`workspace`、`pure::registry_model`
+- 谁在用我：`collab`、`runtime`、`registry`、`slate`、`turn`、`work`、`presentation`
 
 ## 改动本单元时必须同步
 
+- 一条会话的运行时（`src/units/agentloop/domain/session.rs`）或回合引擎（`src/units/agentloop/engine/`）一改 → 本单元的装配入口（`src/units/conversation/session/service/assemble.rs`）与驱动（`src/units/turn/`）同跟。
 - 行与事件词汇（`src/units/transcript/domain/events.rs`、`LineView` 字段）一改 → `collab` 的状态派生、`runtime` 的视图、`cli` / `web` 渲染、`src/tests/session/` 全跟。
 - 机制自己的事件与关卡（`Push` 的 `kind` / `payload`、`Gate`）改 → 对应机制的词汇文件（协作在 `src/units/conversation/collab/domain/events.rs` 与 `src/units/conversation/collab/domain/gates.rs`）与它的渲染；会话侧不跟着改。
 - 流程面（`src/units/conversation/session/domain/flow.rs` 的 `Flow` / `MemberAsk` / `Handback` / `WorkPlan`）一改 → 每个流程的实现（协作在 `src/units/conversation/collab/service/flow.rs`）与驱动（`src/units/turn/turn/service/flow.rs`、`src/units/turn/turn/service/generation/collab.rs`）一起改。

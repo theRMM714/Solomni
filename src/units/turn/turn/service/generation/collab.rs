@@ -42,9 +42,8 @@ pub(crate) fn collab_generation<H: TurnHost>(
     let handle = host.clone();
     // 握手通道：泵 → 主线程（要一个成员回合）；主线程 → 泵（回合结果）。
     let (ask_tx, ask_rx) = std::sync::mpsc::channel::<AskReq>();
-    let (turn_tx, turn_rx) = std::sync::mpsc::channel::<
-        Result<crate::units::conversation::session::api::MemberTurn, String>,
-    >();
+    let (turn_tx, turn_rx) =
+        std::sync::mpsc::channel::<Result<crate::units::agentloop::api::MemberTurn, String>>();
     let worker = {
         let sid = sid.to_string();
         let bus = std::sync::Arc::clone(&bus);

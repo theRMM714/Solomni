@@ -3,7 +3,7 @@
 //! 不管：机制与席位声明本身（在 `session_model/domain/mechanism.rs`）；工具总表（在 `tools`）；工具面怎么合成（在 `assemble`）。
 //! 联动：`main.rs` 装配期调它把启动失败挡在最前面；测试门禁按它判席位与动作表是否同步（经会话单元的 `api::mechanism_problems`）。
 
-use crate::units::conversation::session::domain::assemble::seat_face;
+use crate::units::agentloop::api::seat_face;
 use crate::units::session_model::api::{MECHANISMS, SEATS, seat};
 use crate::units::tools::api::ToolBook;
 

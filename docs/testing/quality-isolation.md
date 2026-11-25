@@ -59,8 +59,8 @@
 
 | lint | 位置 | 为什么是取舍而不是缺陷 |
 | --- | --- | --- |
-| `too_many_arguments` | `src/units/conversation/collab/service/collab.rs` 的 `start`、`src/units/conversation/collab/service/slate.rs` 的 `restore`、`src/units/conversation/session/domain/session.rs` 的 `new` / `restore`、`src/units/runtime/service/core.rs` 的 `Core::new`、`src/units/work/service/guest_job.rs` 的 `new` | 全是**组合根注入的构造函数**：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读 |
-| `too_many_arguments` | `src/units/conversation/session/service.rs` 的 `core_operation`、`src/units/conversation/session/service/engine/round.rs` 的 `converse_with`、`src/units/conversation/collab/service/discussion.rs` 的 `turn_with`、`src/units/conversation/collab/service/synthesis.rs` 的 `Execution::review`、`src/units/conversation/session/service/engine/driver.rs` 的 `discussion_turn`、`src/units/conversation/collab/service/collab.rs` 的 `judge_clear` / `review_nodes` | 同一组参数（身份 / 工具面 / 通道 / 消息 / 出口 / 对照表 / 重填说明）：它们必须一路透传，收口成参数对象只是把参数挪个地方（`turn_with` 只服务内存测试通道） |
+| `too_many_arguments` | `src/units/conversation/collab/service/collab.rs` 的 `start`、`src/units/conversation/collab/service/slate.rs` 的 `restore`、`src/units/agentloop/domain/session.rs` 的 `new` / `restore`、`src/units/runtime/service/core.rs` 的 `Core::new`、`src/units/work/service/guest_job.rs` 的 `new` | 全是**组合根注入的构造函数**：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读 |
+| `too_many_arguments` | `src/units/conversation/session/service.rs` 的 `core_operation`、`src/units/agentloop/engine/round.rs` 的 `converse_with`、`src/units/conversation/collab/service/discussion.rs` 的 `turn_with`、`src/units/conversation/collab/service/synthesis.rs` 的 `Execution::review`、`src/units/agentloop/engine/driver.rs` 的 `discussion_turn`、`src/units/conversation/collab/service/collab.rs` 的 `judge_clear` / `review_nodes` | 同一组参数（身份 / 工具面 / 通道 / 消息 / 出口 / 对照表 / 重填说明）：它们必须一路透传，收口成参数对象只是把参数挪个地方（`turn_with` 只服务内存测试通道） |
 | `dead_code` | `src/units/runtime/api.rs` 的 `WorkOps::create_work` / `exists` 与 `TurnOps::is_running` 与 `LogOps::warn` | **入站契约是发布给前端的接口面**：二进制 crate 里暂时没有生产调用点的接口方法会被 `dead_code` 误报（`is_running` 是运行态的**权威查询**——`SessionView.running` 只是事件台对账副本，最终一致；`warn` 供呈现层降级提示） |
 | `dead_code` | `src/units/transcript/domain/events.rs` 的 `enum SessionEvent` | 事件词汇里的字段**不全在 bin 的生产路径被读**（例如 `Push` 的 `kind` / `payload`、`Usage` 的用量与 `Rewound` 的行只被呈现层与状态派生读）；词汇就是线格式，字段随契约保留，删掉会让呈现侧拿不到事实 |
 | `dead_code` | `src/kernel/ports.rs` 的 `FenceCase` / `FenceVerdict` / `FenceGate::decide`，`src/units/tools/service/fence.rs` 的 `ToolFenceGate::decide` / `strict_refusal` / `unfenced_note`，`src/units/conversation/collab/domain/gates.rs` 的 `Pending::ToolAsk` | 围栏裁决只在 Windows 生效；非 Windows 保留同一执行端口形状（`ProcessRunner::run` 的 `gate` 参数），调用方才不用处处按平台分叉。这些项在 Windows 生产路径使用，只在非 Windows 的 bin 目标没有调用点，`dead_code` 是误报 |
@@ -80,12 +80,12 @@
 
 | 位置 | 处数 | 为什么必然成立 |
 | --- | --- | --- |
-| `src/units/conversation/collab/service/{collab,pump,turn_io}.rs`、`src/units/conversation/session/service/engine/round.rs`、`src/units/lifecycle/service/rewind.rs` | 14 | 协作状态机的 `disc` / 任务链 / 工具上下文：进入这段之前刚判过存在，`expect("disc 已确认存在")` 与其后的 `expect("上臂已判存在")` 是同一判断的延续；`rewind.rs` 的两处（`l.get("tool")` 与其后跳过被总结行的同一判断）同理 |
+| `src/units/conversation/collab/service/{collab,pump,turn_io}.rs`、`src/units/agentloop/engine/round.rs`、`src/units/lifecycle/service/rewind.rs` | 14 | 协作状态机的 `disc` / 任务链 / 工具上下文：进入这段之前刚判过存在，`expect("disc 已确认存在")` 与其后的 `expect("上臂已判存在")` 是同一判断的延续；`rewind.rs` 的两处（`l.get("tool")` 与其后跳过被总结行的同一判断）同理 |
 | `src/units/prompt/{domain/prompt.rs,domain/refs.rs,service.rs}` | 4 | 模板变量缺失 = **装配错误**（`prompts/` 或调用方写错），不在用户输入路径上；启动即炸好过渲染出半截文案 |
 | `src/kernel/detail/process.rs` | 3 | `Command` 已声明 `Stdio::piped()`，`child.stdin` / `stdout` / `stderr` 的 `take()` 必为 `Some` |
 | `src/kernel/detail/confine/macos.rs` | 2 | `CString::new` 的两个入参是不含 NUL 的字面量与临时路径 |
 | `src/units/tools/service/systool.rs` | 1 | `pending.get(path)` 的键由上一行同一函数算出 |
-| `src/units/conversation/session/service/engine/tools.rs` | 2 | 每个工具调用在上一行都被配对写入了执行结果 |
+| `src/units/agentloop/engine/tools.rs` | 2 | 每个工具调用在上一行都被配对写入了执行结果 |
 | `src/units/residents/service.rs` | 1 | `running.get_mut(&k)` 的键在同一函数内刚查过存在 |
 | `src/units/provision/service.rs` | 3 | 三个待写路径都由同一函数 `join` 出来，必带父目录 |
 | `src/units/conversation/session/domain/decisions.rs` | 1 | `queue.pop_front()` 前刚取过队首 |

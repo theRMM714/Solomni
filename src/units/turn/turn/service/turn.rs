@@ -10,7 +10,8 @@ use std::sync::Arc;
 use crate::kernel::ports::HostProbe;
 use crate::units::catalog::registry::api::Registry;
 
-use crate::units::conversation::session::api::{AgentSession, Flow, Gates, subtree_of};
+use crate::units::agentloop::api::AgentSession;
+use crate::units::conversation::session::api::{Flow, Gates, subtree_of};
 use crate::units::session_model::api::{RunState, seat as seat_of};
 use crate::units::transcript::api::SessionEvent;
 use crate::units::turn::turn::api::{Prepared, Session};
@@ -176,7 +177,7 @@ impl Turn {
         &mut self,
         sid: &str,
         text: &str,
-        io: &crate::units::conversation::session::api::TurnIo,
+        io: &crate::units::agentloop::api::TurnIo,
         cancel: &std::sync::atomic::AtomicBool,
         emit: &mut dyn FnMut(SessionEvent),
         registry: &dyn Registry,
@@ -213,7 +214,7 @@ impl Turn {
     pub fn continue_flow(
         &mut self,
         sid: &str,
-        io: &crate::units::conversation::session::api::TurnIo,
+        io: &crate::units::agentloop::api::TurnIo,
         cancel: &std::sync::atomic::AtomicBool,
         emit: &mut dyn FnMut(SessionEvent),
         registry: &dyn Registry,

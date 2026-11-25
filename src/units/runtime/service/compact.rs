@@ -39,12 +39,12 @@ impl CompactRuntime {
     }
 }
 
-impl crate::units::conversation::session::api::CompactChatFactory for CompactRuntime {
+impl crate::units::agentloop::api::CompactChatFactory for CompactRuntime {
     fn build(
         &self,
         module: &str,
         session_model: Option<&str>,
-    ) -> Result<Option<crate::units::conversation::session::api::CompactChatSpec>, String> {
+    ) -> Result<Option<crate::units::agentloop::api::CompactChatSpec>, String> {
         let guard = self.choice.read().unwrap_or_else(|e| e.into_inner());
         match &*guard {
             CompactChoice::Session => Ok(None),
@@ -57,13 +57,11 @@ impl crate::units::conversation::session::api::CompactChatFactory for CompactRun
                 if session_model == Some(id.as_str()) {
                     return Ok(None);
                 }
-                Ok(Some(
-                    crate::units::conversation::session::api::CompactChatSpec {
-                        chat: self.llm.member_channel(channel, module),
-                        model: id.clone(),
-                        window: *window,
-                    },
-                ))
+                Ok(Some(crate::units::agentloop::api::CompactChatSpec {
+                    chat: self.llm.member_channel(channel, module),
+                    model: id.clone(),
+                    window: *window,
+                }))
             }
         }
     }

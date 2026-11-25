@@ -7,9 +7,7 @@ use std::sync::Arc;
 
 use crate::kernel::api::fence::FencePlan;
 use crate::kernel::ports::Log;
-use crate::units::conversation::session::api::{CoreVerify, ToolFace};
-use crate::units::conversation::session::domain::assemble::{FaceInput, assemble};
-use crate::units::conversation::session::domain::tools::MemberTools;
+use crate::units::agentloop::api::{CoreVerify, FaceInput, MemberTools, ToolFace, assemble};
 use crate::units::llm::api::Llm;
 use crate::units::prompt::api::Prompt;
 use crate::units::pure::exec_model::api::Tier;

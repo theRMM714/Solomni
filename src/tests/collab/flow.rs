@@ -331,7 +331,7 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     // 机制声明把核心操作发给对应的核心席位（越权校验与工具面的判据都是它）。
     let face = |id: &str| -> Vec<String> {
         let seat = crate::units::session_model::api::seat(id).expect("席位在册");
-        crate::units::conversation::session::api::seat_face(seat)
+        crate::units::agentloop::api::seat_face(seat)
             .into_iter()
             .map(|s| s.to_string())
             .collect()
@@ -380,7 +380,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     io.seed(&["demo", "work", "note.txt"], "现场：一切正常\n");
     let sb = test_sandbox("核心", &[]);
     let mut verify = MemberTools {
-        face: crate::units::conversation::session::api::ToolFace {
+        face: crate::units::agentloop::api::ToolFace {
             mode: crate::units::pure::registry_model::api::ToolMode::Envelope,
             seat: "orchestrator".to_string(),
             modules: BTreeMap::new(),
@@ -429,7 +429,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         ]),
         seen: Arc::clone(&seen),
     };
-    let out = crate::units::conversation::session::api::core_operation(
+    let out = crate::units::agentloop::api::core_operation(
         &*test_tools_svc(),
         "planner",
         "plan",
@@ -438,7 +438,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         &[crate::units::llm::api::Msg::user("出方案")],
         crate::units::llm::api::CompleteOpts::plain(false),
         None,
-        Some(&mut verify as &mut dyn crate::units::conversation::session::api::CoreVerify),
+        Some(&mut verify as &mut dyn crate::units::agentloop::api::CoreVerify),
         &mut |_e: crate::units::transcript::api::SessionEvent| {},
     )
     .expect("核实之后要能交出方案");
@@ -464,7 +464,7 @@ pub(crate) fn body_json_is_not_a_core_operation() {
         "{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}"
             .to_string(),
     ]);
-    let out = crate::units::conversation::session::api::core_operation(
+    let out = crate::units::agentloop::api::core_operation(
         &*test_tools_svc(),
         "planner",
         "plan",
@@ -510,7 +510,7 @@ pub(crate) fn core_operation_takes_a_native_structured_call() {
     };
     let rows = Arc::new(Mutex::new(Vec::new()));
     let seen = Arc::clone(&rows);
-    let out = crate::units::conversation::session::api::core_operation(
+    let out = crate::units::agentloop::api::core_operation(
         &*test_tools_svc(),
         "planner",
         "plan",

@@ -6,8 +6,8 @@
 use super::decls::ToolDecls;
 pub(crate) use super::fence::CallDone;
 use crate::kernel::api::types::ToolOutcome;
-use crate::units::conversation::session::api::ToolFace;
-use crate::units::conversation::session::domain::tools::MemberTools;
+use crate::units::agentloop::api::ToolFace;
+use crate::units::agentloop::domain::member_tools::MemberTools;
 use crate::units::llm::api::ToolInvoke;
 use crate::units::tools::api::{Observations, SessionWriteGate, ShellFacts, ToolSchema};
 use crate::units::transcript::api::SessionEvent;

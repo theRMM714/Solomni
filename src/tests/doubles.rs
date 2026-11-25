@@ -11,13 +11,13 @@ use crate::units::runtime::api::SessionEvent;
 use crate::units::work::api::WorkSpec;
 
 use crate::kernel::ports::ProcessRunner;
+use crate::units::agentloop::api::TurnIo;
 use crate::units::catalog::modules::api::{Module, ModuleManifest};
 use crate::units::catalog::modules::ports::ModuleSource;
 use crate::units::catalog::packages::domain::manifest::{Library, PackageManifest};
 use crate::units::catalog::packages::ports::PackageSource;
 use crate::units::catalog::registry::api::Settings;
 use crate::units::catalog::registry::ports::SettingsStore;
-use crate::units::conversation::session::api::TurnIo;
 use crate::units::conversation::session::ports::HistoryStore;
 use crate::units::llm::api::Channel;
 use crate::units::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};

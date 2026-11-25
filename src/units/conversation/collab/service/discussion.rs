@@ -2,9 +2,9 @@
 //! 管：Discussion 的推进步骤与回合处置（Adv / TurnOut / AfterTurn）；成员工具面与并发调度策略；讨论转录行外送。
 //! 不管：模型调用与工具执行机制（在 llm / tools 的端口后）；整理与验收（synthesis.rs）；会话状态机与关卡（collab.rs）；泵的装配（pump.rs）。
 //! 联动：工具循环联动 envelope::Verb::Tool 与 kernel::ports::ProcessRunner；文案经 units/prompt 渲染自提示词册；约定见 docs/session/session-model.md。
-use crate::units::conversation::session::api::{LineSink, MemberTurn, verb_tag};
+use crate::units::agentloop::api::{LineSink, MemberTurn, verb_tag};
 #[cfg(test)]
-use crate::units::conversation::session::api::{Round, build_round_lines, converse_with};
+use crate::units::agentloop::api::{Round, build_round_lines, converse_with};
 #[cfg(test)]
 use crate::units::llm::api::BoxedChat;
 use crate::units::llm::api::Msg;
@@ -36,7 +36,7 @@ pub enum AfterTurn {
 pub struct Member {
     pub id: String,
     /// 目的：会话参数：身份块由它**每回合现渲染**（不给成员存一份渲染好的文本）。
-    pub params: crate::units::conversation::session::api::SessionParams,
+    pub params: crate::units::agentloop::api::SessionParams,
     /// 目的：该席位的通道形态（登记处派生）：身份块里的调用约定按它渲染。
     pub mode: crate::units::pure::registry_model::api::ToolMode,
     /// 目的：内存通道：**只有测试用**（生产里回合跑在各自的 agent 会话里，见 session-model.md 二之二）。
@@ -50,7 +50,7 @@ impl Member {
     /// 目的：生产构造：成员不持有通道（驱动权在核心，回合在各自的会话里跑）。
     pub fn plain(
         id: &str,
-        params: crate::units::conversation::session::api::SessionParams,
+        params: crate::units::agentloop::api::SessionParams,
         mode: crate::units::pure::registry_model::api::ToolMode,
     ) -> Member {
         Member {
@@ -68,7 +68,7 @@ impl Member {
     #[cfg(test)]
     pub fn new(
         id: &str,
-        params: crate::units::conversation::session::api::SessionParams,
+        params: crate::units::agentloop::api::SessionParams,
         mode: crate::units::pure::registry_model::api::ToolMode,
         chat: BoxedChat,
     ) -> Member {
@@ -185,7 +185,7 @@ impl Discussion {
 
     /// 目的：一个成员回合（**关联函数**：只借用调用方的通道）：**薄适配**——把本席位自己的通道交给
     ///   单 agent / 节点 / 讨论席**共用的那一条轮循环**（engine::converse_with），跑完从末轮取表态。
-    ///   生产里成员回合跑在各自的 agent 会话里（crate::units::conversation::session::api::AgentSession::discussion_turn）——两条路同一条循环；
+    ///   生产里成员回合跑在各自的 agent 会话里（crate::units::agentloop::api::AgentSession::discussion_turn）——两条路同一条循环；
     ///   工具面属会话（本函数不装、也不还原）。
     ///   允许**先核实**（只读工具），最后用**动词**表态；其余工具一律**如实拒绝**（讨论回合拿不到干活的手段）。
     #[cfg(test)]
@@ -222,7 +222,7 @@ impl Discussion {
             }
             lines.extend(build_round_lines(speaker, round, &next_line, None));
         };
-        // **逐片外送**：讨论席的发言也要能看到"正在生成"（信封不能当正文流上屏，见 crate::units::conversation::session::api::stream_piece）。
+        // **逐片外送**：讨论席的发言也要能看到"正在生成"（信封不能当正文流上屏，见 crate::units::agentloop::api::stream_piece）。
         let mut acc = String::new();
         let mut on_chunk = |chunk: Chunk| {
             let mut kind = "text";
@@ -233,8 +233,7 @@ impl Discussion {
                     kind = "start";
                 }
                 Chunk::Text(t) => {
-                    let (send, next) =
-                        crate::units::conversation::session::api::stream_piece(&acc, t);
+                    let (send, next) = crate::units::agentloop::api::stream_piece(&acc, t);
                     piece = send;
                     acc = next;
                 }
@@ -244,7 +243,7 @@ impl Discussion {
                 }
             }
             // 空片段不刷事件流（同 driver：信封被抑制 / 重复快照合并掉的片都不外送）。
-            if crate::units::conversation::session::api::delta_visible(kind, &piece) {
+            if crate::units::agentloop::api::delta_visible(kind, &piece) {
                 (sink_cell.borrow_mut())(SessionEvent::Delta {
                     speaker: speaker.to_string(),
                     kind: kind.to_string(),

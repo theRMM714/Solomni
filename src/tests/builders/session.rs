@@ -63,7 +63,7 @@ pub(crate) fn member_with_tools(
     WithTools {
         member: m,
         tools: Some(MemberTools {
-            face: crate::units::conversation::session::api::ToolFace {
+            face: crate::units::agentloop::api::ToolFace {
                 mode: crate::units::pure::registry_model::api::ToolMode::Envelope,
                 seat: "solo".to_string(),
                 modules,

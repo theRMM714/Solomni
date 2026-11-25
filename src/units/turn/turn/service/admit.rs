@@ -6,7 +6,8 @@
 use crate::kernel::ports::HostProbe;
 use crate::units::catalog::registry::api::Registry;
 
-use crate::units::conversation::session::api::{subtree_of, truncate_events};
+use crate::units::agentloop::api::truncate_events;
+use crate::units::conversation::session::api::subtree_of;
 use crate::units::session_model::api::{RunState, SessionMeta};
 use crate::units::turn::turn::api::Session;
 use crate::units::turn::turn::service::session::Turn;

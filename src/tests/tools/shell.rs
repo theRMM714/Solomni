@@ -12,7 +12,7 @@ pub(crate) fn profile_does_not_change_the_tool_face() {
     let book: ToolBook = crate::tests::doubles::test_systools().tools;
     assert!(book.contains_key("shell"), "shell 要在工具书里");
     let face = vec!["shell".to_string()];
-    let ids = crate::units::conversation::session::api::face_tools(face, &book);
+    let ids = crate::units::agentloop::api::face_tools(face, &book);
     assert_eq!(ids, vec!["shell".to_string()], "席位面就是授权面");
     let net = |profile: ProfileId| {
         PermissionDefaults { profile }

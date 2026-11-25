@@ -10,7 +10,7 @@
 - 管：会话类型表 `Profiles` / `Profile` / `SessionSpec` 与装配期校验、内置类型的 id 与 `inline_spec`。
 - 管：机制与席位**声明**——`Seat` / `Mechanism` 两种形状、`SEATS` / `MECHANISMS` 两张表、`mechanism_of` / `flow_ids` / `seat`。
 - 管：留档策略 `PersistPolicy` / `persist_policy_for` / `is_system_session` / `SYSTEM_SID_SUGGEST`。
-- 不管：会话对象与回合引擎（`src/units/conversation/session/domain/session.rs` 与服务层）；席位面与工具总表的自洽断言（`src/units/conversation/session/domain/seat_check.rs`）；落盘 IO（`src/units/conversation/session/detail/`）；流程调度与回合推进（`collab` / `turn`）。
+- 不管：会话对象与回合引擎（`src/units/agentloop/domain/session.rs` 与服务层）；席位面与工具总表的自洽断言（`src/units/conversation/session/domain/seat_check.rs`）；落盘 IO（`src/units/conversation/session/detail/`）；流程调度与回合推进（`collab` / `turn`）。
 
 ## 入站契约与状态归属
 
@@ -34,7 +34,7 @@
 
 - 改 `SessionMeta` 字段 → `docs/session/session-model.md`、会话 `meta.yaml` 读写、`src/tests/session/`。
 - 改 `Profiles` / `SessionSpec` → `systools/profiles.yaml` 的读取与校验、`docs/session/`、`src/tests/session/lifecycle.rs`。
-- 改 `SEATS` / `MECHANISMS` → `src/units/conversation/session/domain/seat_check.rs`（自洽断言）、`src/units/conversation/session/domain/assemble.rs`（工具面合成）、`docs/session/`。
+- 改 `SEATS` / `MECHANISMS` → `src/units/conversation/session/domain/seat_check.rs`（自洽断言）、`src/units/agentloop/domain/assemble.rs`（工具面合成）、`docs/session/`。
 - 改 `PersistPolicy` → 会话落盘判定与 `src/tests/session/`。
 
 ## 本目录

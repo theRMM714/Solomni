@@ -334,7 +334,7 @@ pub(crate) fn discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_di
     );
     assert_eq!(tool_turn, said_turn, "同一个回合的行带同一个回合号");
     // ② 实时与重建同口径：把会话从表里丢掉，再取一次 = 按落盘转录重建。
-    let shown = |s: &crate::units::conversation::session::api::AgentSession| {
+    let shown = |s: &crate::units::agentloop::api::AgentSession| {
         s.dialogue()
             .iter()
             .map(|m| format!("{}:{}", m.role, m.content))

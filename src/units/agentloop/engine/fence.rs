@@ -4,7 +4,7 @@
 //! 联动：调用方是 engine::tools 的 run_branch / run_batch；观察事实形状见 tools::api::ObservationFact。
 
 use crate::kernel::api::types::ToolOutcome;
-use crate::units::conversation::session::domain::tools::MemberTools;
+use crate::units::agentloop::domain::member_tools::MemberTools;
 use crate::units::tools::api::{ObservationFact, SessionWriteGate, ShellFacts, WriteGate};
 
 /// 目的：一次调用的结果形态（标签，结果，观察事实，shell 结构化事实），只为把签名读短。

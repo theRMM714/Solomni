@@ -20,7 +20,7 @@ impl CollabSession {
     pub fn feed_with(
         &mut self,
         i: usize,
-        turn: crate::units::conversation::session::api::MemberTurn,
+        turn: crate::units::agentloop::api::MemberTurn,
         turn_id: u64,
         sink: &mut dyn FnMut(SessionEvent),
     ) {
@@ -78,7 +78,7 @@ impl CollabSession {
     pub(crate) fn verify_env(
         &self,
         seat: &str,
-    ) -> Option<Box<dyn crate::units::conversation::session::api::CoreVerify>> {
+    ) -> Option<Box<dyn crate::units::agentloop::api::CoreVerify>> {
         let sb = self.sandboxes.list.first()?;
         crate::units::conversation::session::api::verify_tools(
             &crate::units::conversation::session::api::VerifySpec {
