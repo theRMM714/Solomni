@@ -215,6 +215,7 @@ fn fake_ops_on(fail: Option<&str>, bus: Arc<dyn Events>) -> Faces {
         provision: Arc::new(FakeProvision::new(fail)),
         storage: Arc::new(FakeStorage::new(fail)),
         toolchains: serde_json::Value::Null,
+        vm_tools: Arc::new(Vec::new),
     }
 }
 

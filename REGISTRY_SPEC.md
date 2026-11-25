@@ -96,7 +96,7 @@ data/.home/
 | `sandbox.scope.read` | 字符串／数组 | 否 | `all` | 默认共享区读范围三态：`all` / `none` / 路径数组 |
 | `sandbox.scope.write` | 字符串／数组 | 否 | `all` | 默认共享区写范围三态 |
 | `sandbox.scope.deny` | 字符串数组 | 否 | `[]` | 默认追加黑名单；全局 `policy.deny` 仍是硬底线 |
-| `qemu_path` | 字符串 | 否 | 空 | 虚拟机档 QEMU 可执行文件路径；登记值优先，空 = 自动发现（项目内补齐 → PATH） |
+| `qemu_path` | 字符串 | 否 | 空 | 虚拟机档 QEMU 可执行文件路径（绝对路径或相对安装根）；可在配置界面的「外部工具」登记，登记值优先，写空 = 清空登记、回到自动发现（项目内补齐 → PATH） |
 | `virtiofsd_path` | 字符串 | 否 | 空 | 虚拟机档共享后端的外部程序路径；口径同 `qemu_path` |
 | `smbd_path` | 字符串 | 否 | 空 | 虚拟机档 smb 共享档的 helper 路径；口径同 `qemu_path` |
 | `max_guests` | 整数 | 否 | `2` | 虚拟机档同时最多几台 guest（0 = 不限制；每台固定 `-m 2048 -smp 2`） |

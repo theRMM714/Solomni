@@ -322,6 +322,35 @@ if (!loadErrors.length) {
     const log = nodes.find((n) => n.className === "cfg-log");
     return nums.length >= 1 && !!title && !!log;
   });
+  // ⑥之二 外部工具的登记值与现状同页：三个登记值随保存提交，现状行由后端算（这里读不到也要如实说）。
+  check("设置中心：外部工具登记值与现状", () => {
+    const original = sandbox.fetch;
+    let captured = null;
+    sandbox.fetch = async (url, opts) => {
+      if (String(url).indexOf("/api/actions/set_settings") >= 0) {
+        captured = JSON.parse(opts.body);
+        return { ok: true, json: async () => ({}) };
+      }
+      return original(url, opts);
+    };
+    try {
+      vm.runInNewContext("openSettingsHub('generate')", sandbox);
+      const page = openPage("resources");
+      const nodes = walk(page, []);
+      const box = nodes.find((n) => String(n.className).indexOf("tool-status") >= 0);
+      const inputs = inputsIn(page).filter((i) => String(i.placeholder || "").indexOf("项目内补齐") >= 0);
+      if (!box || inputs.length !== 3) return false;
+      inputs[0].value = " C:/tools/qemu.exe ";
+      const save = walk(hubBody(), []).find((n) => n.tagName === "BUTTON" && n.textContent === "保存");
+      if (!save) return false;
+      save.onclick();
+      if (!captured) return false;
+      return captured.qemu_path === "C:/tools/qemu.exe"
+        && captured.virtiofsd_path === "" && captured.smbd_path === "";
+    } finally {
+      sandbox.fetch = original;
+    }
+  });
   check("设置中心：存储页含预算、回收与还原入口", () => {
     vm.runInNewContext("openSettingsHub('generate')", sandbox);
     const page = openPage("storage");

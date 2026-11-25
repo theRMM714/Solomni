@@ -7,10 +7,10 @@ pub use crate::units::vm::detail::qemu::create_disk;
 pub use crate::units::vm::domain::diagnose::GuestDiagnosis;
 pub use crate::units::vm::domain::exec::resolve_guest;
 pub use crate::units::vm::domain::exec::{
-    COPY_SHARE_ENV, ExecPlan, MissingEntry, VmInputs, VmRequirement, admit_guest,
-    capability_refusal, copy_share_enabled, diagnose_text_for, guest_platform, missing_entries_for,
-    plan, plan_summary, runs_on_target, share_chain, tier_readiness, tier_refusal, vm_capability,
-    vm_requirements,
+    COPY_SHARE_ENV, ExecPlan, MissingEntry, QEMU_BIN, SMBD_BIN, VIRTIOFSD_BIN, VmInputs,
+    VmRequirement, admit_guest, capability_refusal, copy_share_enabled, diagnose_text_for,
+    guest_platform, missing_entries_for, plan, plan_summary, runs_on_target, share_chain,
+    tier_readiness, tier_refusal, vm_capability, vm_requirements,
 };
 pub use crate::units::vm::domain::guest::{GuestArch, GuestClients, GuestOs};
 pub use crate::units::vm::domain::guest::{
@@ -18,7 +18,7 @@ pub use crate::units::vm::domain::guest::{
     package_setup_scripts,
 };
 pub use crate::units::vm::domain::paths::PathBridge;
-pub use crate::units::vm::domain::tool::{ToolPath, VmTools};
+pub use crate::units::vm::domain::tool::{ToolPath, ToolReport, VmTools};
 pub use crate::units::vm::service::job::GuestStop;
 #[allow(unused_imports)] // 入站面：运行计划派生的唯一出口（能力外只经这里取用）
 pub use crate::units::vm::service::plan::{

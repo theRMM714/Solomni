@@ -141,8 +141,8 @@ pub struct VmInputs<'a> {
     pub probe: &'a dyn HostProbe,
 }
 
-/// QEMU 可执行文件名（各平台同名；平台扩展名由适配层的探测实现处理）。
-const QEMU_BIN: &str = "qemu-system-x86_64";
+/// 目的：QEMU 可执行文件名（各平台同名；平台扩展名由适配层的探测实现处理）。
+pub const QEMU_BIN: &str = "qemu-system-x86_64";
 
 /// 目的：虚拟机档的**机器能力**清单（**只读事实，不起任何虚拟机**）——与某条会话无关。
 /// 约束：为什么做成清单：用户看到的必须是"缺哪几项、每项怎么补"，而不是一句笼统的"前置条件不具备"。

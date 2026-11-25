@@ -1,5 +1,5 @@
 //! 目的：登记处的状态与用例——四份 yaml 的内存形态只由这里写。
-//! 管：实现 api::Registry 与 RegistryOps（视图 / 只读事实 / 写三类方法）；注入端口与 llm 入站面；应用模型发现结果。
+//! 管：实现 api::Registry 与 RegistryOps（视图 / 只读事实 / 写三类方法）；注入端口与 llm 入站面；采纳模型通道的实测结论。
 //! 不管：yaml 解析与落盘（在 detail/yaml_settings.rs）；DTO 与校验规则（在 domain）；适配器装配（在组合根）。
 //! 联动：组合根 new 时注入 SettingsStore 与 llm::api::Llm；对外只经 registry::api::Registry。
 
@@ -15,15 +15,6 @@ use crate::units::pure::registry_model::api::{
     ModelDraft, ModelEntry, ModelView, Provider, ProviderView, ToolMode, validate_thinking_catalog,
 };
 use std::sync::Arc;
-
-/// 目的：只在目标为空时用发现值填上（已登记的一律保留）。
-fn fill_if_empty(target: &mut String, found: Option<String>) {
-    if target.trim().is_empty()
-        && let Some(p) = found
-    {
-        *target = p;
-    }
-}
 
 /// 目的：一份 app 设置必须与现有模型登记自洽才能落盘（整份设置与单项授权两个写入口共用）。
 /// 约束：不合法就如实拒绝，不把坏的策略（绝对路径 / .. / 未知字段 / 悬空思考档）落进登记处。
@@ -123,19 +114,6 @@ impl RegistryService {
             llm,
             log,
         })
-    }
-
-    /// 目的：**未登记**时采用依赖补齐装到项目内的可运行包（显式登记优先）。
-    /// 约束：只填内存、不落盘——用户显式登记的路径永远优先，且这里不改用户的 `settings.yaml`。
-    pub fn apply_discovered(
-        &mut self,
-        qemu: Option<String>,
-        virtiofsd: Option<String>,
-        smbd: Option<String>,
-    ) {
-        fill_if_empty(&mut self.settings.app.qemu_path, qemu);
-        fill_if_empty(&mut self.settings.app.virtiofsd_path, virtiofsd);
-        fill_if_empty(&mut self.settings.app.smbd_path, smbd);
     }
 
     /// 落盘并把失败如实记进日志（写方法共用这一句）。
@@ -495,24 +473,5 @@ impl Registry for RegistryService {
             ),
         }
         outcome
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::fill_if_empty;
-
-    /// 目的：显式登记优先；只在空（未登记）时才采用发现值；没有发现值不动。
-    #[test]
-    fn discovered_fills_only_when_unset() {
-        let mut explicit = "/opt/qemu".to_string();
-        fill_if_empty(&mut explicit, Some("/project/.vm/qemu".to_string()));
-        assert_eq!(explicit, "/opt/qemu", "显式登记优先");
-        let mut empty = String::new();
-        fill_if_empty(&mut empty, Some("/project/.vm/qemu".to_string()));
-        assert_eq!(empty, "/project/.vm/qemu");
-        let mut blank = "  ".to_string();
-        fill_if_empty(&mut blank, None);
-        assert_eq!(blank, "  ", "没有发现值就不动");
     }
 }

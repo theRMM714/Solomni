@@ -349,6 +349,44 @@ pub(crate) fn write_acl_policy(root: &Path) -> Arc<dyn FencePolicy> {
     })
 }
 
+/// 目的：虚拟机档两件外部工具的位置事实——设置里那几个登记值 + 项目内补齐的那份，每次现算。
+/// 约束：自检与界面都经这里取，不各自读设置、不各自拼路径（补完立刻可见，没有"装完还得重启"）。
+pub(crate) fn vm_tools_reader(
+    root: &Path,
+    provision: Arc<dyn Provision + Send + Sync>,
+) -> Arc<dyn Fn() -> crate::units::vm::api::VmTools + Send + Sync> {
+    let root = root.to_path_buf();
+    Arc::new(move || {
+        let app = read_settings(&root).unwrap_or_default();
+        crate::units::provision::api::vm_tools(
+            provision.as_ref(),
+            std::env::consts::OS,
+            &app.qemu_path,
+            &app.virtiofsd_path,
+            &app.smbd_path,
+        )
+    })
+}
+
+/// 目的：外部工具的现状报表（界面"外部工具"一节读它）：与 `vm_tools_reader` 同一份位置事实，再加上可用性。
+pub(crate) fn vm_tools_report_reader(
+    root: &Path,
+    provision: Arc<dyn Provision + Send + Sync>,
+) -> Arc<dyn Fn() -> Vec<crate::units::vm::api::ToolReport> + Send + Sync> {
+    let root = root.to_path_buf();
+    Arc::new(move || {
+        let app = read_settings(&root).unwrap_or_default();
+        crate::units::provision::api::vm_tools_report(
+            provision.as_ref(),
+            std::env::consts::OS,
+            &app.qemu_path,
+            &app.virtiofsd_path,
+            &app.smbd_path,
+            &crate::kernel::detail::HostProbeAdapter,
+        )
+    })
+}
+
 /// 目的：用调用方已经装好的端口拼出系统维护入站面（主程序复用同一份存储 / 补齐 / 构建 / 工作区 / 模块）。
 pub(crate) fn system_with(
     root: &Path,
@@ -366,19 +404,7 @@ pub(crate) fn system_with(
         ),
     );
     // 目的：虚拟机档外部工具的位置事实——与界面同一份口径（设置登记 + 项目内补齐），自检每次现算。
-    let tools_provision = ports.provision.clone();
-    let tools_root = root.to_path_buf();
-    let vm_tools: Arc<dyn Fn() -> crate::units::vm::api::VmTools + Send + Sync> =
-        Arc::new(move || {
-            let app = read_settings(&tools_root).unwrap_or_default();
-            crate::units::provision::api::vm_tools(
-                tools_provision.as_ref(),
-                std::env::consts::OS,
-                &app.qemu_path,
-                &app.virtiofsd_path,
-                &app.smbd_path,
-            )
-        });
+    let vm_tools = vm_tools_reader(root, ports.provision.clone());
     Ok(SystemService::with_facts(
         SystemDeps {
             root: root.to_path_buf(),

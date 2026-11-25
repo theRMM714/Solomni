@@ -128,6 +128,13 @@ impl Handle {
     pub(super) fn apply_settings(&self, args: &serde_json::Value) -> Result<(), String> {
         let current = self.settings()?;
         let num = |k: &str| args.get(k).and_then(|v| v.as_u64());
+        // 外部工具的登记值：提交了就按提交的写（空串 = 清空登记，回到按项目内补齐自动发现）。
+        let text = |k: &str, now: &str| {
+            args.get(k)
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|| now.to_string())
+        };
         let sandbox = match args.get("sandbox") {
             Some(v) => serde_json::from_value(v.clone())
                 .map_err(|e| format!("settings.sandbox 配置非法：{}", e))?,
@@ -155,9 +162,9 @@ impl Handle {
             thinking,
             tier: current.tier,
             sandbox,
-            qemu_path: current.qemu_path.clone(),
-            virtiofsd_path: current.virtiofsd_path.clone(),
-            smbd_path: current.smbd_path.clone(),
+            qemu_path: text("qemu_path", &current.qemu_path),
+            virtiofsd_path: text("virtiofsd_path", &current.virtiofsd_path),
+            smbd_path: text("smbd_path", &current.smbd_path),
             max_guests: num("max_guests")
                 .map(|v| v as u32)
                 .unwrap_or(current.max_guests),

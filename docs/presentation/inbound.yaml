@@ -6,7 +6,7 @@
 # 兄弟文件之间不得互相引用。详细判据见 docs/presentation/README.md。
 
 # 根级：面袋与两个渠道入口
-src/presentation/faces.rs: catalog/modules catalog/registry catalog/secrets maintenance/storage provision residents runtime turn/turn turn_state work
+src/presentation/faces.rs: catalog/modules catalog/registry catalog/secrets maintenance/storage provision residents runtime turn/turn turn_state vm work
 src/presentation/cli.rs: exec_model registry_model runtime system tools transcript turn/turn
 src/presentation/web.rs: agentloop maintenance/storage runtime transcript turn/turn workspace
 

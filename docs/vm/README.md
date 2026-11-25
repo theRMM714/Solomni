@@ -94,7 +94,7 @@
 ## 六、依赖、虚拟根与运行期自证
 - 依赖由 `provision` 单元按清单（`dependencies.yaml` + `links.yaml`，需用户同意、只写项目内）装进 `data/.vm/`。
 - 依赖（QEMU / `virtiofsd` / SMB helper / 镜像）不预置、不分发（解归档的入口程序装完补可执行位——便携包里的 zip 常常不带 unix 权限位），由 `provision` 单元在 Linux / Windows 上按 `dependencies.yaml` + `links.yaml` 下载并解包进项目内 `data/.vm/`（需用户同意；入口 `solomni --provision --ensure --yes`；下载后按台账核对 sha256——自托管资产在清单条目里（`release:<tag>/<资产>` + `sha256:`）、链接类在 `links.yaml` 里成对，不 pin 的源如实不校验）。
-- 产品检测、指路并给出补齐入口；`qemu_path` / `virtiofsd_path` / `smbd_path` 可登记（登记值优先，空 = 自动发现）。
+- 产品检测、指路并给出补齐入口；`qemu_path` / `virtiofsd_path` / `smbd_path` 可登记（配置界面的「外部工具」写这三项，登记值优先，写空 = 回自动发现）。
 - Linux：QEMU（pkgforge Anylinux AppImage）、virtiofsd 与默认虚拟根 `debian-13`（cloud 镜像 rootfs → `rootfs.ext4` 磁盘镜像 + 通用内核 + initrd + qemu-guest-agent，装进 `data/.vm/guest/debian-13/`；会话的可写层叠在镜像上）；构造配方按清单 `family: debian` 取，当前只有 Debian 一份。
 - Windows：官方源码在 MSYS2（mingw-w64）下自建的 QEMU 11.1.1 便携包（`--enable-slirp`，固件按真实文件打包）、Debian cloud qcow2（与 Linux 同一个虚拟根 `debian-13`，装进 `data/.vm/guest/debian-13/`）与 `guest.yaml`。
 - 虚拟根里真有什么由 `kind: guest-runtime` 的运行期编排（Rust 侧，不依赖仓库脚本）起一次 guest 逐个自证后写进画像。
@@ -126,6 +126,7 @@
 - 补齐入口是界面里的一个动作：虚拟机档不可用、或选中的虚拟根未装齐时，配置面板与创建向导给出「补齐虚拟机依赖」（先看清单与体积、再确认下载、按进度长轮询）；CLI `solomni --provision --ensure --yes` 是没有界面时的等价路径。
 - 两件外部工具（QEMU + 本平台共享 helper）的位置只有一个解析器：`provision::api::vm_tools` 把设置登记值与项目内补齐那份收成一份 `VmTools`，判据、启动装配与 `--doctor` 都读它，界面不另算一套。
 - 三条路与优先序：登记值 → 项目内补齐 → PATH。登记了就以登记的为准（登记值不在场判否，不偷偷改用项目内那份；文案会说清项目内那份在哪、清空登记即可改用）。每次判据取用时现算，装完即生效，不必重启。
+- 现状报表：`provision::api::vm_tools_report` 把两件工具收成 `ToolReport`（登记值 / 项目内那份 / 这次实际用哪份 / 来源 / 状态），界面的「外部工具」小节与 `--doctor` 读同一份，不各自拼路径。
 - 共享后端也在此列：用户档在装配期持有，哪一档在起 guest 那一刻按 `share_chain` 的候选挑——装完 virtiofsd / smbd，下一次启动就用上。
 - 开发 / 应急 copy：进程启动时设 `SOLOMNI_VM_SHARE=copy`，该进程的 VM 会话强制走 copy（QGA 复制），日志打警告；它不在用户链、不进用户界面；只在开发 / 运维细则里出现，普通进程不装配它。
 

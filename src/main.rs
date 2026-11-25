@@ -273,22 +273,6 @@ fn main() {
             std::process::exit(1);
         }
     };
-    // 依赖补齐后的**自动发现**：设置里没登记时，把装到项目内的可运行包直接当登记值（显式登记优先）。
-    // 只填内存、不写用户的 settings.yaml；同进程内新装的包要下次启动才生效（Web 的 setup 作业即属此列）。
-    let installed = units::provision::api::Provision::status(&entry::assembly::provision(&root))
-        .unwrap_or_default();
-    // 清单里的 probe 是**相对产品根**的写法：这里拼成绝对路径再当登记值用（否则只在 CWD = 产品根时才成立）。
-    let picked = |prefix: &str| {
-        installed
-            .iter()
-            .find(|d| d.present && d.id.starts_with(prefix))
-            .map(|d| root.join(&d.probe).to_string_lossy().into_owned())
-    };
-    registry.apply_discovered(
-        picked("vm.qemu."),
-        picked("vm.virtiofsd."),
-        picked("vm.smbd."),
-    );
     // 全局沙箱模式：要求 vs 本机能力 vs 本机授权。授权只影响 Windows 的容器围栏；
     // 环境变量优先于设置，且只读一次——预检、启动报告与工具进程必须用同一个值。
     let sandbox_cfg = registry.app_settings().sandbox.clone();
@@ -797,6 +781,8 @@ fn main() {
     }
     // 基础工具链事实：Web 端横幅与 CLI 启动报告读同一份。
     faces.toolchains = units::system::api::toolchain_json(&base);
+    // 外部工具现状：与自检同一份解析（设置登记 + 项目内补齐），配置页只读这一份。
+    faces.vm_tools = entry::assembly::vm_tools_report_reader(&root, Arc::clone(&provision));
 
     // 启动拉起：把所有**已启用**的常驻服务拉起来（进程级租约，不属于任何会话）。
     // 一次性命令不拉：它们不提供常驻服务，也不该在退出时留下任何进程。
