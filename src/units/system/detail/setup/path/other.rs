@@ -23,7 +23,7 @@ pub(crate) fn info(root: &Path) -> PathInfo {
 fn guidance(root: &Path) -> String {
     format!(
         "本平台暂不自动改 PATH（已登记缺口）：请把 {} 加进 shell 的 PATH 即可",
-        root.join("bin").display()
+        layout::bin(root).display()
     )
 }
 

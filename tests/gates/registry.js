@@ -27,6 +27,7 @@ const S = {
   graph: require("./structure/graph.js"),
   values: require("./structure/values.js"),
   capability: require("./structure/capability.js"),
+  resourceNames: require("./structure/resource-names.js"),
   webLayers: require("./structure/webLayers.js"),
   size: require("./structure/size.js"),
   moduleFiles: require("./structure/module-files.js"),
@@ -114,6 +115,18 @@ const GATES = [
     inputs: ["docs/entry/layers.yaml", "src/entry/**/*.rs", "src/entry.rs", "src/main.rs"],
     run: (root, ctx) => {
       const r = S.entryTiers.entryTiers(root);
+      ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
+      return r.problems;
+    },
+  },
+  {
+    id: "structure/resource-names",
+    lane: "structure",
+    step: "T0 结构审查",
+    kind: "text",
+    inputs: ["src/kernel/domain/layout.rs", "src/**/*.rs"],
+    run: (root, ctx) => {
+      const r = S.resourceNames.resourceNames(root);
       ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
       return r.problems;
     },

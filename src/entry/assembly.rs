@@ -271,16 +271,16 @@ pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, Str
     let workspace: Arc<dyn crate::units::workspace::api::Workspace + Send + Sync> =
         Arc::new(crate::units::workspace::service::WorkspaceService::new(
             Arc::new(
-                crate::units::workspace::detail::fs_workspace::FsWorkspace::new(
-                    root.join("session"),
-                ),
+                crate::units::workspace::detail::fs_workspace::FsWorkspace::new(layout::session(
+                    root,
+                )),
             ),
             Arc::new(crate::units::workspace::detail::fs_workstore::FsWorkStore::new()),
         ));
     let modules: Arc<dyn crate::units::catalog::modules::api::Modules + Send + Sync> = Arc::new(
         crate::units::catalog::modules::service::ModulesService::new(
             Arc::new(crate::units::catalog::modules::detail::FsModules::new(
-                root.join("modules"),
+                layout::modules_src(root),
                 crate::units::tools::api::names(),
                 // 启动相没有工具单元可问：命令词直接取编译进来的命令表投影；
                 // 名字表的 modules 块由核心装配在装载工具单元后再并入（启动相不派发模块动作）。

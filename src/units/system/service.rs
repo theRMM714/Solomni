@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use crate::kernel::api::layout;
 use crate::units::catalog::modules::api::Modules;
 use crate::units::catalog::packages::api::BaseFacts;
 use crate::units::maintenance::builds::api::{Builds, Built, Target};
@@ -165,7 +166,7 @@ impl System for SystemService {
 
     fn work_gc(&self, req: WorkGcRequest) -> Result<WorkGcReport, Fault> {
         let work = safe_file_name(&req.work).map_err(Fault::usage)?;
-        if !self.deps.root.join("session").join(&work).is_dir() {
+        if !layout::session(&self.deps.root).join(&work).is_dir() {
             return Err(Fault::usage(format!("没有这个工作：{}", work)));
         }
         self.deps

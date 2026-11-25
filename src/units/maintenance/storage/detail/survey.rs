@@ -250,7 +250,7 @@ fn guest_bases(root: &Path) -> SpaceCategory {
 }
 
 fn sessions(root: &Path) -> SpaceCategory {
-    let items = scan::children(&root.join("session"))
+    let items = scan::children(&layout::session(root))
         .into_iter()
         .filter(|p| p.is_dir())
         .map(|p| SpaceItem {
@@ -275,7 +275,7 @@ fn sessions(root: &Path) -> SpaceCategory {
 }
 
 fn module_outputs(root: &Path) -> SpaceCategory {
-    let items = scan::children(&root.join("modules"))
+    let items = scan::children(&layout::modules_data(root))
         .into_iter()
         .filter(|p| p.is_dir())
         .filter_map(|p| {

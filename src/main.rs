@@ -233,8 +233,8 @@ fn main() {
     eprintln!("[围栏] {}", fence_cap.note);
     let store = entry::assembly::settings_store(&root);
     let history =
-        units::conversation::session::detail::fs_history::FsHistory::new(root.join("session"));
-    let workspace = units::workspace::detail::FsWorkspace::new(root.join("session"));
+        units::conversation::session::detail::fs_history::FsHistory::new(layout::session(&root));
+    let workspace = units::workspace::detail::FsWorkspace::new(layout::session(&root));
     let workstore = units::workspace::detail::FsWorkStore::new();
     // 运行包能力：依赖文件夹 runtimes/（一个包 = 一个文件夹 + package.yaml）。
     let packages: Arc<dyn units::catalog::packages::api::Packages + Send + Sync> = Arc::new(
@@ -414,7 +414,7 @@ fn main() {
     // **会话类型表**（systools/profiles.yaml）：一个会话类型就是一串流程与它的静止机制。
     // 它是会话类型的唯一声明处：提示词册子的会话类型、机制册的校验都以它为口径；装配期就校验。
     let profiles = match units::conversation::session::detail::yaml_profiles::YamlProfiles::new(
-        root.join("systools"),
+        layout::systools(&root),
     )
     .load()
     {
@@ -424,7 +424,8 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let prompt_source = units::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
+    let prompt_source =
+        units::prompt::detail::yaml_prompts::YamlPrompts::new(layout::prompts(&root));
     // **提示词单元**：册子只在这里装载一次、也只被它持有；runtime 与工具执行
     // （回执里的那些收尾标记）要的"段"都经它的入站面拿——不再各存一份拷贝。
     let prompt = match units::prompt::service::load(&prompt_source) {
@@ -437,7 +438,7 @@ fn main() {
     // 工具总表与机制席位必须自洽（悬空引用 / 缺能力都是装配错误）：装配期就挡下，不拖到运行期。
     // 三张表归**工具单元**（加载器在它自己的 detail 里；装载后由它的 service 持有）。
     let systools_source =
-        units::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"));
+        units::tools::detail::yaml_systools::YamlSystools::new(layout::systools(&root));
 
     // 工具执行：外层拉起的守门进程就是本程序自己（围栏在它里面装）。
     let tools = kernel::detail::process::ProcTools::new(
@@ -492,7 +493,7 @@ fn main() {
     let mut module_reserved = units::tools::api::Tools::reserved_modules(&*systools);
     module_reserved.extend(command_ops().ids());
     let source = units::catalog::modules::detail::FsModules::new(
-        root.join("modules"),
+        layout::modules_src(&root),
         units::tools::api::names(),
         module_reserved,
     );
