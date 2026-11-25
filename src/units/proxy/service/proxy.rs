@@ -3,8 +3,8 @@
 //! 不管：工具逻辑的纯规则（`domain/proxy.rs`）；会话机制本身（经 `ProxyHost` 落到宿主实现）。
 //! 联动：宿主契约在 `api.rs`；工具名单在 `systools/tools.yaml`。
 
-use crate::units::conversation::proxy::api::ProxyHost;
-use crate::units::conversation::proxy::domain::proxy as d;
+use crate::units::proxy::api::ProxyHost;
+use crate::units::proxy::domain::proxy as d;
 use crate::units::tools::api::{ToolBook, ToolOutcome, arg_fault_text};
 use std::collections::BTreeMap;
 use std::sync::Arc;

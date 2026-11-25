@@ -1,7 +1,7 @@
 //! 目的：核心代理六个工具的纯逻辑 的测试：入参解析、授权判据与载荷规整。
 //! 管：只覆盖本模块的公开契约与拒绝文案；夹具在本文件内。
 //! 不管：执行面与幂等账（在 `src/tests/runtime/proxy.rs`）、其它能力。
-//! 联动：与 `src/units/conversation/proxy/domain/proxy.rs` 同模块，`#[cfg(test)] mod tests;` 指到这里。
+//! 联动：与 `src/units/proxy/domain/proxy.rs` 同模块，`#[cfg(test)] mod tests;` 指到这里。
 
 use super::*;
 use crate::units::session_model::api::SINGLE;
@@ -341,7 +341,7 @@ fn catalog_renders_only_the_requested_scope() {
 /// （猜会替用户做主：围栏卡的第一项正是"无围栏跑一次"）。
 #[test]
 fn relay_reply_only_accepts_an_option_id_from_that_card() {
-    use crate::units::conversation::collab::api::{OPT_ASK_REPLY, OPT_BEGIN, OPT_SLATE_CANCEL};
+    use crate::units::collab::api::{OPT_ASK_REPLY, OPT_BEGIN, OPT_SLATE_CANCEL};
     use crate::units::transcript::api::OptionView;
     let o = |id: &str| OptionView {
         id: id.to_string(),

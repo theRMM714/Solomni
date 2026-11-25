@@ -1,15 +1,15 @@
 //! 目的：流程泵——按相位推进（讨论段 pump_discuss、执行段 pump_execute）并装配成员（assemble_members）。
 //! 管：该问谁与上下文装配；讨论收敛后由核心代理写总结（summarize）；行外送与增量（emit_new_lines / push_delta / review_event / derive_gate）。
 //! 不管：模型调用（泵不自己调模型，把「该问谁、带什么上下文」交回协调业务）；状态机步骤的判定（discussion.rs）。
-//! 联动：由 CollabSession 驱动；两段由 `session::domain::sequence::Sequence` 串起来；约定见 docs/session/session-model.md。
+//! 联动：由 CollabSession 驱动；两段由 `turn_state::domain::sequence::Sequence` 串起来；约定见 docs/session/session-model.md。
 
 use super::collab::{CollabSession, Phase};
 use super::lines::*;
 use crate::units::catalog::modules::api::Module;
-use crate::units::conversation::collab::domain::events::CollabEvent;
-use crate::units::conversation::collab::domain::gates::Pending;
-use crate::units::conversation::collab::service::discussion::{MAX_ROUNDS, Member, TurnOut};
-use crate::units::conversation::collab::service::synthesis::{Execution, draft_plan};
+use crate::units::collab::domain::events::CollabEvent;
+use crate::units::collab::domain::gates::Pending;
+use crate::units::collab::service::discussion::{MAX_ROUNDS, Member, TurnOut};
+use crate::units::collab::service::synthesis::{Execution, draft_plan};
 use crate::units::llm::api::Msg;
 use crate::units::prompt::api::Segment;
 use crate::units::transcript::api::{LineView, SessionEvent};
@@ -46,7 +46,7 @@ impl CollabSession {
                 } else {
                     // 泵只推**一步**：该问谁就存下并让出——驱动权在核心（它同时看得到协作会话与各 agent 的会话）。
                     match self.disc.as_mut().expect("disc 已确认存在").advance() {
-                        crate::units::conversation::collab::service::discussion::Adv::Ask {
+                        crate::units::collab::service::discussion::Adv::Ask {
                             i,
                             identity,
                             turn,
@@ -55,10 +55,10 @@ impl CollabSession {
                             return;
                         }
                         // 开场刚问完：接着进轮次。
-                        crate::units::conversation::collab::service::discussion::Adv::Opened => {
+                        crate::units::collab::service::discussion::Adv::Opened => {
                             continue;
                         }
-                        crate::units::conversation::collab::service::discussion::Adv::Out(out) => {
+                        crate::units::collab::service::discussion::Adv::Out(out) => {
                             out
                         }
                     }

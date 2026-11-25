@@ -77,7 +77,7 @@ impl Core {
         let compact = Arc::new(CompactRuntime::new(Arc::clone(&llm)));
         // 流程工厂在这里注入：turn / work 只认 `session::api::Flows`，具体流程的类型只出现在协作能力里。
         let flows: Arc<dyn crate::units::turn_state::api::Flows> =
-            Arc::new(crate::units::conversation::collab::api::CollabFlows::new(
+            Arc::new(crate::units::collab::api::CollabFlows::new(
                 Arc::clone(&llm),
                 Arc::clone(&vm),
                 Arc::clone(&modules),

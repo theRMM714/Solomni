@@ -12,7 +12,7 @@
 - 管：提问桥 `session_ask`——工具层的 `AskUser` 端口实现：登记卡、外送并落盘、停会话都走该会话同一条道。
 - 管：两个端口面 `History`（直连面，由会话单元实现）与 `HistoryOps`（队列面，由 runtime 的队列代理实现），以及在世会话的状态与流程契约。
 - 不管：回合驱动与生成（准入、重建、生成线程在 `src/units/turn/`）。
-- 不管：任何具体流程的状态机（协作在 `src/units/conversation/collab/`）。
+- 不管：任何具体流程的状态机（协作在 `src/units/collab/`）。
 - 不管：落盘实现（`src/units/conversation/session/service.rs` 与 `detail/`）、会话身份与声明（`src/units/session_model/`）、呈现与命令队列（`presentation` / `runtime`）。
 
 ## 入站契约与状态归属
@@ -36,7 +36,7 @@
 ## 改动本单元时必须同步
 
 - 改 `Turn` 的字段或访问器 → `src/units/turn/turn/service/{facts,admit,rebuild,turn,flow}.rs`（直取点）、`src/units/runtime/service/core.rs`、`docs/turn/README.md`。
-- 改 `Flow` 契约 → 协作各流程实现（`src/units/conversation/collab/service/`）、`src/units/turn/turn/service/flow.rs`、`docs/collab/README.md`。
+- 改 `Flow` 契约 → 协作各流程实现（`src/units/collab/service/`）、`src/units/turn/turn/service/flow.rs`、`docs/collab/README.md`。
 - 改裁决队 → `src/units/runtime/service/handle.rs`、`src/presentation/cli/gate.rs`、`docs/session/session-model.md` 的「请用户裁决」。
 - 改 `History` / `HistoryOps` → 会话单元的实现（`src/units/conversation/session/service.rs`）、`src/units/runtime/service/contracts.rs`、`src/presentation/faces.rs`。
 

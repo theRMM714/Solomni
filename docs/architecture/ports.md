@@ -7,7 +7,7 @@
 - 新增或改造端口前读本文；判据只有一条：**这里有 IO，或者这里有可替换的实现**（`tests/gates/structure/capability.js`）。
 
 ## 一、判据与归属
-- 端口 = 各能力 `ports.rs` 与 `src/kernel/ports.rs` 里的 trait（`Chat` 的定义在 `src/units/llm/api.rs`、`ProxyHost` 的定义在 `src/units/conversation/proxy/api.rs`，因为它们同时是能力的入站面）。
+- 端口 = 各能力 `ports.rs` 与 `src/kernel/ports.rs` 里的 trait（`Chat` 的定义在 `src/units/llm/api.rs`、`ProxyHost` 的定义在 `src/units/proxy/api.rs`，因为它们同时是能力的入站面）。
 - 纯逻辑（信封解析、引擎循环、协作状态派生、提示词渲染）**刻意不抽象**：不是 IO、没有可替换实现，就不加 trait。
 - 端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `FenceHost` / `PathCodec` / `SessionHost`）全项目共享；`TurnHost` 由 `turn` 声明（`src/units/turn/turn/api.rs`）、由 `runtime` 实现（`src/units/runtime/service/handle.rs`）——业务声明它需要宿主代做什么，最顶层（`runtime`）来实现。
 - 新增端口前先问一句：**这是 IO 或可替换点吗**？不是就别加 trait（`tests/gates/structure/capability.js`）。

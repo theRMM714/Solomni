@@ -1,7 +1,7 @@
 //! 目的：会话装配的纯派生与**唯一的工具面装配机**——席位面合成、已就绪服务操作的归组、模块工具行与服务参数行。
 //! 管：`seat_face` / `resolve`（席位面合成）与 `assemble`（一席工具面的整装），以及 `face_tools` / `service_ops_of` / `serviced_tools` 这几个纯函数。
-//! 不管：端口本身的实现（`tools` / `residents` / `workspace`）；工具总表与机制席位声明（在 `session::domain::mechanism`）；会话对象的拼装（在 `session::service::assemble`）。
-//! 联动：`session::service::assemble`、核心操作回路、核心核实、回合换席（`MemberTools::install_seat`）都调 `assemble`，不得各写一份。
+//! 不管：端口本身的实现（`tools` / `residents` / `workspace`）；工具总表与机制席位声明（在 `session_model::domain::mechanism`）；会话对象的拼装（在 `super::assembly`）。
+//! 联动：`super::assembly`、核心操作回路、核心核实、回合换席（`MemberTools::install_seat`）都调 `assemble`，不得各写一份。
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

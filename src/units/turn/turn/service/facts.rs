@@ -1,7 +1,7 @@
 //! 目的：turn 侧取「一席事实」的地方——沙箱清单、权限链与生效权限、工具环境事实（含 `env::api::member`）、上下文预算，都从这里从端口读齐。
 //! 管：`sandboxes` / `permission_chain` / `permissions_for` / `shared_scope_for` / `access_for_agent` 的取数与派生，
 //!   `member_env` 的入参收口与逐字段拷贝、`member_face` 的薄入口、`build_single` 的整场装配，`context_budget` 的窗口与阈值。
-//! 不管：装配规则（在 `session::service::assemble`）、登记处里有什么（`registry`）、会话怎么落盘（`service/admit.rs`）。
+//! 不管：装配规则（在 `agentloop::api`）、登记处里有什么（`registry`）、会话怎么落盘（`service/admit.rs`）。
 //! 联动：`runtime/service/env.rs` 的薄入口转调这里；`service/rebuild.rs` 重建会话时也取这里的事实。
 
 use std::collections::BTreeMap;

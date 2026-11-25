@@ -5,7 +5,7 @@
 
 pub(crate) use super::doubles::*;
 
-pub use crate::units::conversation::collab::service::discussion::{
+pub use crate::units::collab::service::discussion::{
     Discussion, MAX_ROUNDS, Member, TurnOut,
 };
 
@@ -48,10 +48,10 @@ pub use crate::units::workspace::ports::Workdirs;
 pub use crate::units::transcript::api::SessionEvent;
 pub use crate::units::work::api::{ConfigAgent, SessionEdit, WorkSpec};
 
-pub use crate::units::conversation::collab::api::{CollabEvent, Pending};
+pub use crate::units::collab::api::{CollabEvent, Pending};
 
 /// 目的：裁决卡的选项 id（契约）：测试按它作答，不按文案。
-pub use crate::units::conversation::collab::api::{OPT_BEGIN, OPT_PLAN_SAY, OPT_SLATE_CONFIRM};
+pub use crate::units::collab::api::{OPT_BEGIN, OPT_PLAN_SAY, OPT_SLATE_CONFIRM};
 
 pub(crate) use crate::units::runtime::service::Core;
 

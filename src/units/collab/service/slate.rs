@@ -6,8 +6,8 @@
 use super::collab::*;
 use crate::units::catalog::modules::api::Modules;
 use crate::units::catalog::registry::api::Settings;
-use crate::units::conversation::collab::domain::gates::Pending;
-use crate::units::conversation::collab::service::discussion::Discussion;
+use crate::units::collab::domain::gates::Pending;
+use crate::units::collab::service::discussion::Discussion;
 use crate::units::llm::api::{CompleteOpts, Llm};
 use crate::units::prompt::api::{Prompt, Segment};
 use crate::units::session_model::api::SessionMeta;
@@ -261,7 +261,7 @@ impl CollabSession {
         door: Arc<dyn Gates>,
     ) -> Result<CollabSession, String> {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
-        let st = crate::units::conversation::collab::domain::collab_state::derive(events, &names);
+        let st = crate::units::collab::domain::collab_state::derive(events, &names);
         // 全部已发出的转录行（按 id 顺序），连降级标记一起读回（样式靠它，不靠文案）。
         let mut all_lines: Vec<LineView> = Vec::new();
         for ev in events {

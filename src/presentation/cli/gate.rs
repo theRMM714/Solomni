@@ -517,7 +517,7 @@ pub(crate) fn create_session_action(faces: &Faces, ask: SessionAsk<'_>) -> Resul
 mod tests {
     use super::*;
     use crate::kernel::api::types::Ask;
-    use crate::units::conversation::collab::api::Pending;
+    use crate::units::collab::api::Pending;
     use crate::units::transcript::api::tool_ask;
 
     /// 目的：用生产那一条派生造卡（工具层那一类：三段话与选项原样来自发起方）。
@@ -690,7 +690,7 @@ mod tests {
     #[test]
     fn interrupt_skips_a_card_while_eof_stops_it() {
         use crate::tests::doubles::{module_of, work};
-        use crate::units::conversation::collab::api::Pending;
+        use crate::units::collab::api::Pending;
         use crate::units::session_model::api::SINGLE;
         use crate::units::turn_state::api::SlotWake;
 

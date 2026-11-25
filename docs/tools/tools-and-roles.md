@@ -84,7 +84,7 @@ Mechanism { id: "discuss", flow: true, seats: &["core_proxy", "discussant"] }
 | 核心代理回合 | `core_proxy` | 读面 + 六项代理动作，**不含模块工具**（它代用户决定，不替 agent 干活） |
 
 - 发放与校验是**同一份判据**：列出来的就是这一刻真能调的；没拿到的既不在提示词里、也不在声明槽里，真去调会被如实拒绝。
-- 发放只有一处：`session::domain::assemble`（按席位从总表取 schema、过滤、配模块表与说明块、取发布工具执行者；席位或工具没声明在装配期就如实报错）。机制声明里不再合成名单，也不再知道读面/写面/发布面各是哪些 id。
+- 发放只有一处：`src/units/agentloop/domain/assemble.rs`（按席位从总表取 schema、过滤、配模块表与说明块、取发布工具执行者；席位或工具没声明在装配期就如实报错）。机制声明里不再合成名单，也不再知道读面/写面/发布面各是哪些 id。
 - 回合只携带**席位**（`session::TurnRun.seat`）：驱动换席时由会话现拼这一席的面（`AgentSession::enter_seat` → `MemberTools::install_seat`），跑完一并还原——同一个会话因此能用两种身份干活（讨论席说话 / 执行席干活）。节点 / 单 agent 回合在准备段就把席位装进会话，不靠会话出生时的面。
 
 - **两条硬口径**（`systools/tools.yaml` 是唯一真相）：
@@ -120,7 +120,7 @@ Mechanism { id: "discuss", flow: true, seats: &["core_proxy", "discussant"] }
 
 ## 四、动作与分发（一张表，两条执行路径）
 
-- **动作表是参数契约与授权的唯一真相**：每条动作声明参数契约与 `callers`，校验按声明做、授权按 `callers` 判——这两步只有一套规则，不随调用方变。**执行**有两条实现，各在自己的能力里：呈现侧（人）走 `runtime` 的 `ActionOps::act`（`src/units/runtime/service/action.rs`，校验 → 授权 → 执行 → 审计四步在一处），模型代理侧走 `ProxyTools::call`（`src/units/conversation/proxy/service/proxy.rs`，同样是查表 → 校验 → 授权 → 交宿主，另有幂等账）。两条路径共用同一张表与同一份授权规则，但**不共用同一段执行代码**——把它们写成一处需要呈现层与模型回环互相依赖，会成环。
+- **动作表是参数契约与授权的唯一真相**：每条动作声明参数契约与 `callers`，校验按声明做、授权按 `callers` 判——这两步只有一套规则，不随调用方变。**执行**有两条实现，各在自己的能力里：呈现侧（人）走 `runtime` 的 `ActionOps::act`（`src/units/runtime/service/action.rs`，校验 → 授权 → 执行 → 审计四步在一处），模型代理侧走 `ProxyTools::call`（`src/units/proxy/service/proxy.rs`，同样是查表 → 校验 → 授权 → 交宿主，另有幂等账）。两条路径共用同一张表与同一份授权规则，但**不共用同一段执行代码**——把它们写成一处需要呈现层与模型回环互相依赖，会成环。
 
 - **两个适配器**：模型侧（`ToolHandler`，按名字认领）与呈现侧（`POST /api/actions/{id}`、`GET /api/actions` 动作目录）都只负责造一次 `ActionCall`（动作 id + 参数 + 调用者身份）并各按自己的媒介呈现结果——模型侧拿文本回执，呈现侧拿结构化结果。**同一份声明，两种呈现。**
 - **读取与视图不进动作表**：会话列表 / 配置 / 文件清单 / 历史是读接口，事实仍只有**事件台**一条来路。

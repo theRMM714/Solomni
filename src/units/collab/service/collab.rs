@@ -9,9 +9,9 @@
 use super::lines::push_delta;
 use crate::units::catalog::modules::api::Modules;
 use crate::units::catalog::registry::api::Settings;
-use crate::units::conversation::collab::domain::gates::Pending;
-use crate::units::conversation::collab::service::discussion::Discussion;
-use crate::units::conversation::collab::service::synthesis::Execution;
+use crate::units::collab::domain::gates::Pending;
+use crate::units::collab::service::discussion::Discussion;
+use crate::units::collab::service::synthesis::Execution;
 use crate::units::llm::api::{Channel, Chat, Llm, Msg};
 use crate::units::prompt::api::{Prompt, Segment};
 use crate::units::pure::registry_model::api::AgentMeta;
@@ -55,7 +55,7 @@ impl CollabSession {
         has_verb: bool,
         user_stopped: bool,
         remind_cap: u32,
-    ) -> crate::units::conversation::collab::service::discussion::AfterTurn {
+    ) -> crate::units::collab::service::discussion::AfterTurn {
         self.disc.as_mut().expect("disc 已确认存在").after_turn(
             i,
             has_verb,

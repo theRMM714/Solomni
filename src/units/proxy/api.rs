@@ -3,10 +3,10 @@
 //! 不管：真实会话动作（宿主动手）；工具声明与席位面（`systools/` 与 `session::domain::mechanism`）。
 //! 联动：runtime 只经这里取用；宿主实现在 runtime 的 `ProxyBridge`。
 
-pub use crate::units::conversation::proxy::domain::proxy::*;
+pub use crate::units::proxy::domain::proxy::*;
 /// 目的：成员侧执行面——`ProxyHandler` 挂进代理会话那一回合的工具表，`ProxyTools` 由测试直接驱动（不在生产路径上按名取）。
 #[allow(unused_imports)]
-pub(crate) use crate::units::conversation::proxy::service::proxy::{ProxyHandler, ProxyTools};
+pub(crate) use crate::units::proxy::service::proxy::{ProxyHandler, ProxyTools};
 
 /// 目的：代理工具的宿主——把工具层的动作落到真实会话上。失败一律如实回报（不静默降级）。
 pub trait ProxyHost: Send + Sync {

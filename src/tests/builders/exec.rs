@@ -18,16 +18,16 @@ pub(crate) trait Seat {
     fn parts_mut(
         &mut self,
     ) -> (
-        &mut crate::units::conversation::collab::service::discussion::Member,
+        &mut crate::units::collab::service::discussion::Member,
         Option<&mut MemberTools>,
     );
 }
 
-impl Seat for crate::units::conversation::collab::service::discussion::Member {
+impl Seat for crate::units::collab::service::discussion::Member {
     fn parts_mut(
         &mut self,
     ) -> (
-        &mut crate::units::conversation::collab::service::discussion::Member,
+        &mut crate::units::collab::service::discussion::Member,
         Option<&mut MemberTools>,
     ) {
         (self, None)
@@ -38,7 +38,7 @@ impl Seat for WithTools {
     fn parts_mut(
         &mut self,
     ) -> (
-        &mut crate::units::conversation::collab::service::discussion::Member,
+        &mut crate::units::collab::service::discussion::Member,
         Option<&mut MemberTools>,
     ) {
         (&mut self.member, self.tools.as_mut())

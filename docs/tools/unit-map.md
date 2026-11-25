@@ -22,7 +22,7 @@
 | `src/units/tools/domain/module_tools.rs` | 模块清单 → 工具面：把 `module.yaml` 声明的工具与参数契约转成工具能力认识的形态，并把静态模块工具与已就绪服务操作的参数合并渲染成**一段** |
 | `src/units/tools/domain/commands.rs` | 产品命令面的纯数据形态（`Command` / `CommandBook` / `Phase`）：读 `systools/commands.yaml`、做骨架校验并投影成 `Op`；只管声明，不管执行 |
 | `src/units/tools/domain/op.rs` | 命令与动作的统一形状 `Op`（分组、相位、执行者、确认门槛、参数 schema、回执）与文本入口的全部派生：`parse` 把词法转成参数 JSON、`usage` 出写法、`complete` 出补全、`problems` 判自洽；一份声明供 CLI 手册、TUI 命令、Web 表单与模型工具声明共用 |
-| `src/units/tools/domain/table.rs` | 工具总表的纯数据形态（`SystemTools`）：总表自检与动作审计格式化；席位面由会话能力的唯一装配机（session/domain/assemble.rs 的 `assemble`）按席位现拼 |
+| `src/units/tools/domain/table.rs` | 工具总表的纯数据形态（`SystemTools`）：总表自检与动作审计格式化；席位面由会话能力的唯一装配机（src/units/agentloop/domain/assemble.rs 的 `assemble`）按席位现拼 |
 | `src/units/tools/domain/fence.rs` | 围栏描述符的派生策略与裁决卡材料（`fence_ask` / 选项 id；描述符与落点判据在 `src/kernel/contracts/fence.rs`） |
 | `src/units/tools/domain/shell.rs` | 执行类系统工具 shell 的纯规则：参数 / timeout 解析、命令长度、共享区执行位提示、回执解析（退出码 / 状态 / cwd·耗时） |
 | `src/units/tools/detail/sys_io.rs` | `SysIo` 端口的磁盘实现：纯 Rust 直接读写（严格 UTF-8、非法字节如实标注、写时建父目录）；按行窗口读流式扫完整份算行数与哈希；目录遍历走 `ignore::WalkBuilder`（不跟链接、按路径排序、规则剪枝），流式按行扫用 `BufReader` 且不受整份读上限约束；写盘在跨进程路径锁内做版本 CAS（锁目录由组合根注入，缺省退回进程内锁），临时文件 + 原子替换发布，`transact` 先校验/暂存再发布并在失败时回滚已发布文件 |

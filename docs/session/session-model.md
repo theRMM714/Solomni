@@ -138,7 +138,7 @@ session/<工作名>/
 
 - 理由是会话归属：生成期间协作会话被**移出核心表**（own-and-return），它碰不到表里的 agent 会话；而 agent 会话必须留在表里，用户才能随时进去发言。所以**驱动权归核心**（它同时看得到两边）（`src/units/turn/turn/service/flow.rs`）。
 
-- **驱动只认流程面**：核心驱动（`src/units/turn/turn/service/flow.rs` 与 `src/units/turn/turn/service/generation/collab.rs`）与具体流程之间只隔一层 `session::api::Flow`——开场 / 推进一步（`start` / `step`）、取走让出的一步（`take_ask` 交出 `MemberAsk`）、交回处置（`handback` 判为 `Handback`，再由 `feed` / `pass_over` 落地）、处置自己发的关卡（`settle` 把出队的票交回流程，`settles_inline` 决定这一关要不要就地收尾）。可派的活（`WorkPlan`：哪些节点该派、谁在跑、节点的提示词与返工提示、开跑与收工的记账、开工事件）也走这层面，节点派发与改需求不再下行认具体流程；其余通用动作（撤回同意、改需求的沙箱改写、行号、子会话的默认作答）同样是流程面的默认方法。协作的实现只有 `src/units/conversation/collab/service/flow.rs` 一处；换一套流程只换一个实现，驱动不动。
+- **驱动只认流程面**：核心驱动（`src/units/turn/turn/service/flow.rs` 与 `src/units/turn/turn/service/generation/collab.rs`）与具体流程之间只隔一层 `session::api::Flow`——开场 / 推进一步（`start` / `step`）、取走让出的一步（`take_ask` 交出 `MemberAsk`）、交回处置（`handback` 判为 `Handback`，再由 `feed` / `pass_over` 落地）、处置自己发的关卡（`settle` 把出队的票交回流程，`settles_inline` 决定这一关要不要就地收尾）。可派的活（`WorkPlan`：哪些节点该派、谁在跑、节点的提示词与返工提示、开跑与收工的记账、开工事件）也走这层面，节点派发与改需求不再下行认具体流程；其余通用动作（撤回同意、改需求的沙箱改写、行号、子会话的默认作答）同样是流程面的默认方法。协作的实现只有 `src/units/collab/service/flow.rs` 一处；换一套流程只换一个实现，驱动不动。
 - **流程可以串起来**：会话类型表里的 `flows` 是一串，装配期用 `turn_state::api::sequence_of`（`src/units/turn_state/domain/sequence.rs` 的 `Sequence`）串成一条——前一段 `is_done` 就把自己的 `output` 交给下一段的 `intake`（行号一路传下去），驱动仍只认一条 `Flow`。业务面（`part` / `part_mut`）指向**当前这一段**，所以派节点、改需求这类动作不必知道自己是第几段。会话级事实由驱动同时通知每一段（`adopt_roster`：代拟的名单一确认，后面那一段也要认得出谁能出演）。协作就是这样拆成两段的：`discuss` 交出的总结成为 `execute` 的需求。
 - **装配按类型表点菜**：新建与重建都只问类型表要 `flows` 的 id，经组合根注入的流程工厂（`turn_state::api::Flows` + `FlowSetup`，`src/units/turn_state/domain/flows.rs`）逐段造出来再串起来；`work` 与 `turn` 因此不出现任何具体流程的类型（`src/units/work/service/create.rs`、`src/units/turn/turn/service/rebuild.rs`）。
 - **关卡归发起它的流程**：队列只认卡、卡号与选项（`Gate`），不解释 `kind` 是哪一关；回答出队后驱动把 `GateTicket` 交回流程面的 `settle`，由流程自己落定并说要不要接着推进（`Settle`）。所以 `runtime` 与 `turn` 里不再有「这是代拟名单那一关」这类判断。
@@ -204,7 +204,7 @@ session/<工作名>/
 - **已答过的不得重问**；作废过的也不复活（那一关还挂在状态上时，`继续` 才**续一张新卡**接着问）（`src/units/turn_state/domain/ask.rs`）。
 - 工具层那一类（`tool_ask`）与工具级确认一样**不重建**：它等在工作线程上，重启后那个等待方已经不在。
 - 会话被删除时整条队随会话一起没了——等待方与转录都不复存在，没有"留着作废记录"的地方。
-- **落地的形状**（线格式）：卡是 `{id, envelope{role,name}, message{title,body,detail}, options[{id,label}]}`；推的事件与快照的 `pending` 是**同一份 JSON**（多一个 `type: "decision_card"`、`gate`、机制载荷与 `waiting[{id,envelope,title,gate,payload}]`），回答是 `{type:"decision_answer", card, by, option, note}`，整队作废是 `{type:"decision_void", cards[], reason}`。选项 id 是契约（改文案不改行为）；协作机制的关卡声明与九个选项 id 在 `src/units/conversation/collab/domain/gates.rs`，别的机制另立自己的表。
+- **落地的形状**（线格式）：卡是 `{id, envelope{role,name}, message{title,body,detail}, options[{id,label}]}`；推的事件与快照的 `pending` 是**同一份 JSON**（多一个 `type: "decision_card"`、`gate`、机制载荷与 `waiting[{id,envelope,title,gate,payload}]`），回答是 `{type:"decision_answer", card, by, option, note}`，整队作废是 `{type:"decision_void", cards[], reason}`。选项 id 是契约（改文案不改行为）；协作机制的关卡声明与九个选项 id 在 `src/units/collab/domain/gates.rs`，别的机制另立自己的表。
 
 - **没人答时的收场**：由**发起方**在自己那张卡上声明一个**选项 id**（`Ask.on_unanswered`）——通道不解释它的含义，只在"没人答"时按它收场，并如实标为"不是用户答的"；不声明就按 fail-closed（这一趟不执行）。
 - **"没人答"与"用户停止"是两回事**：停止 = 拒绝，不套用默认项。"没有可选项 = 停会话 + 落警告"是另一件事，两个都要有。
@@ -307,7 +307,7 @@ session/<工作名>/
 
 - **模块工具只在执行回合给**：讨论回合拿不到"干活"的手段——不是"被拒绝"，是**没有**。
 - **这一份工具面是随回合注入的**：核心查"这一回合的身份能用的工具"。信封通道把那一份（说明 + 参数）作为一条系统消息放进该回合的上下文；原生通道由**声明槽**下发名字 / 说明 / JSON Schema，不再重复文字清单（只保留 patch 这类声明表达不了的写法）。**整本工具总表不进提示词**——列了必然被拒的工具等于请模型去撞墙（细则见 [tools-and-roles.md](../tools/tools-and-roles.md) 二）。
-- 机制席位（src/units/session_model/domain/mechanism.rs 的 SEATS）**只声明需求**（发哪些工具、能不能写、能不能发布、带哪段提示词）；这一席的面由会话的**唯一装配机**现拼（session/domain/assemble.rs 的 `assemble` → `FaceInput` / `SeatFace`）：发放（提示词块与原生声明槽）与越权校验同出一份清单，代码里不另写名单。回合只携带**席位**（`TurnRun.seat`）：每回合驱动换席时由会话现拼这一席的面并还原（AgentSession::enter_seat → MemberTools::install_seat）；节点 / 单 agent 回合在准备段就把席位装进会话，不沿用会话出生时的面（见 [tools-and-roles.md](../tools/tools-and-roles.md) 三）。
+- 机制席位（src/units/session_model/domain/mechanism.rs 的 SEATS）**只声明需求**（发哪些工具、能不能写、能不能发布、带哪段提示词）；这一席的面由会话的**唯一装配机**现拼（src/units/agentloop/domain/assemble.rs 的 `assemble` → `FaceInput` / `SeatFace`）：发放（提示词块与原生声明槽）与越权校验同出一份清单，代码里不另写名单。回合只携带**席位**（`TurnRun.seat`）：每回合驱动换席时由会话现拼这一席的面并还原（AgentSession::enter_seat → MemberTools::install_seat）；节点 / 单 agent 回合在准备段就把席位装进会话，不沿用会话出生时的面（见 [tools-and-roles.md](../tools/tools-and-roles.md) 三）。
 - **派发三类来源同一条路径**：这一回合的工具面里，系统工具走 `ToolExec::run_builtin`，模块工具走 `dispatch_external`，**核心自有工具**（代理工具等）问注入的 `ToolHandler` 谁认领它——三类同一条路径（`src/kernel/ports.rs` 的 `ToolHandler`，见 [architecture/README.md](../architecture/README.md) §二）。加一类工具只注册一个 handler，不改循环。
 
 ### 四之一、会话参数与对话分开

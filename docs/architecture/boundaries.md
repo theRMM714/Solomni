@@ -15,7 +15,7 @@
 
 - **归环是必填身份**：单元必须在 `layers.yaml` 里有一行，跨单元边只能指向**严格更低的环**，同环只按 rank 先后（`tests/gates/structure/layers.js`）。环号不回答「是不是业务」，它只回答「能依赖谁」。
 - **机制不因调用方多而升格**：日志、路径、进程、围栏、平台差异归一化这类没有领域词、没有用户可见后果的机制，留在 `kernel` 或所属能力的 `detail/`，不按第 2 条算作业务；第 2 条只用来判断「已有自己用例」的能力是否值得独立。
-- **已判例（代理工具族 → `proxy`）**：判据 1 成立——六工具有自有协议（`src/units/conversation/proxy/domain/proxy.rs` 的载荷、授权判据与回执形状）与用户可见后果（代用户建会话、转达、控会话）。判据 2 目前只有 `runtime` 一个能力调用方，它成立的方式是**端口反转**：`proxy` 声明宿主契约 `ProxyHost`（`src/units/conversation/proxy/api.rs`），由 `runtime` 的 `ProxyBridge` 实现（`src/units/runtime/service/bridge.rs`）、只在 `src/units/runtime/service/handle.rs` 的 `inject_proxy_handler` 装配——`runtime` 对它的依赖因此止于 `::api`，真实会话状态仍在 `runtime` / `turn` 一侧。
+- **已判例（代理工具族 → `proxy`）**：判据 1 成立——六工具有自有协议（`src/units/proxy/domain/proxy.rs` 的载荷、授权判据与回执形状）与用户可见后果（代用户建会话、转达、控会话）。判据 2 目前只有 `runtime` 一个能力调用方，它成立的方式是**端口反转**：`proxy` 声明宿主契约 `ProxyHost`（`src/units/proxy/api.rs`），由 `runtime` 的 `ProxyBridge` 实现（`src/units/runtime/service/bridge.rs`）、只在 `src/units/runtime/service/handle.rs` 的 `inject_proxy_handler` 装配——`runtime` 对它的依赖因此止于 `::api`，真实会话状态仍在 `runtime` / `turn` 一侧。
 - **已判例（顶层编排 → `runtime`）**：判据 1 成立——编排有自己的领域词（启用工作、改需求、回档、停止、动作分发）、自有协议（`src/units/runtime/api.rs` 的 `RuntimeOps` / `ActionOps` / `ActionCall` / `Acted`）与用户可见后果（一条命令把几个下层用例按序跑完）；判据 2 成立——入口（`src/main.rs` 的 `Handle::spawn`）与呈现层（`src/presentation/faces.rs` 的 `Faces`）是两个调用方，两个渠道共用同一份编排。它**不搬**下层用例的身体：方法体只是「按序调几个下层用例 + 状态聚合」。
 - **状态不参与这条判据**——它只在本文件第二节回答「这块状态归谁」。
 
