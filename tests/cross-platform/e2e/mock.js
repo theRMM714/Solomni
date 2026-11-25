@@ -328,7 +328,7 @@ http.createServer((req, res) => {
         });
       } else if (/read_txt/.test(sys)) {
         // 该 agent 的某个模块声明了外部工具（夹具 toolbox）：用**相对路径**调用，专门验证 cwd = 它自己的模块目录。
-        const env = { type: 'tool', module: 'toolbox', name: 'read_txt', args: { path: 'userdata/e2e.txt' } };
+        const env = { type: 'tool', module: 'toolbox', name: 'read_txt', args: { path: 'e2e.txt' } };
         if (user.includes('不要写模块')) {
           delete env.module; // 故意漏 module：验证核心如实报错而不猜
           content = JSON.stringify(env);

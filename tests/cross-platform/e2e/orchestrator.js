@@ -19,9 +19,9 @@ const BIN = process.env.SOLOMNI_BIN || path.join(PRODUCT_ROOT, "target", "debug"
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** 清掉夹具根的 .vm：**链接只删链本身**（含 Windows junction）——绝不顺着链接删仓库那份（缓存 3GB 且是真机验收要用的）。 */
+/** 清掉夹具根的 data/.vm：**链接只删链本身**（含 Windows junction）——绝不顺着链接删仓库那份（缓存 3GB 且是真机验收要用的）。 */
 function dropFixtureVm() {
-  const p = path.join(FIXTURE, ".vm");
+  const p = path.join(FIXTURE, "data", ".vm");
   let st;
   try {
     st = fs.lstatSync(p);
@@ -116,13 +116,13 @@ function writeToolbox(py) {
 
 /** MCP 夹具模块：声明一个 MCP 常驻服务，命令用本机探到的解释器名；服务本体就是仓库里那个 server.py。
  * 为什么重写清单而不是直接复制真模块：真模块的命令写死 `python`，Linux / macOS 上通常只有 `python3`。
- * 夹具副本的 server.py 开头多几行：把服务进程的 pid 记进模块 userdata/（围栏里"恒可写"的那一块），
- * 驱动最后靠它断言"核心被强杀后服务进程跟着没"。 */
+ * 夹具副本的 server.py 开头多几行：把服务进程的 pid 记进模块私有区（数据根下的 data/modules/<id>/userdata，
+ * 模块进程的 HOME，围栏里"恒可写"的那一块），驱动最后靠它断言"核心被强杀后服务进程跟着没"。 */
 function writeMcpModule(py) {
   const dir = path.join(FIXTURE, "modules", "mcp-toolbox");
   fs.mkdirSync(path.join(dir, "tools"), { recursive: true });
-  // pid 落在模块的 userdata/（沙箱外的路径服务写不进去）；写在服务进程自己开头，pid 就是它自己。
-  const pidfile = path.join(dir, "userdata", "mcp-service.pid");
+  // pid 落在模块私有区（沙箱外的路径服务写不进去）；写在服务进程自己开头，pid 就是它自己。
+  const pidfile = path.join(FIXTURE, "data", "modules", "mcp-toolbox", "userdata", "mcp-service.pid");
   fs.rmSync(pidfile, { force: true });
   const source = fs.readFileSync(path.join(PRODUCT_ROOT, "modules", "mcp-toolbox", "tools", "server.py"), "utf8");
   const prelude = [
@@ -281,7 +281,7 @@ function reclaimFixtureViewDrive() {
   const after = list();
   const remaining = after ? mine(after) : mine(before);
   // 登记只删映射已撤掉的条目；撤不掉的留着，让下次启动清扫还有证据可循。
-  const record = path.join(FIXTURE, ".home", "view-drive.json");
+  const record = path.join(FIXTURE, "data", "state", "view-drive.json");
   try {
     const entries = JSON.parse(fs.readFileSync(record, "utf8"));
     const kept = entries.filter((e) => remaining.some((m) => m.letter === String(e.letter).toUpperCase()));
@@ -331,7 +331,7 @@ function oneShotJsonIsPipeable() {
   const env = Object.assign({}, process.env);
   delete env.SOLOMNI_SANDBOX_DEGRADED;
   delete env.SOLOMNI_FENCE_WRITE;
-  const driveRecord = path.join(FIXTURE, ".home", "view-drive.json");
+  const driveRecord = path.join(FIXTURE, "data", "state", "view-drive.json");
   fs.rmSync(driveRecord, { force: true });
   const ledgerBefore = fenceLedgerCount();
   const r = spawnSync(BIN, ["--root", FIXTURE, "--json", "modules"], {
@@ -365,7 +365,7 @@ function oneShotJsonIsPipeable() {
     }
   }
   if (fs.existsSync(driveRecord)) {
-    console.error("[e2e] 一次性命令占了视图盘：.home/view-drive.json 不该出现");
+    console.error("[e2e] 一次性命令占了视图盘：data/state/view-drive.json 不该出现");
     return false;
   }
   const ledgerAfter = fenceLedgerCount();
@@ -388,7 +388,7 @@ function unauthorizedRootGateExplainsItsWaysOut() {
     return true;
   }
   const { spawnSync } = require("child_process");
-  const settings = path.join(FIXTURE, ".home", "settings.yaml");
+  const settings = path.join(FIXTURE, "data", ".home", "settings.yaml");
   const keep = fs.existsSync(settings) ? fs.readFileSync(settings) : null;
   const env = Object.assign({}, process.env);
   delete env.SOLOMNI_SANDBOX_DEGRADED;
@@ -499,25 +499,28 @@ async function main() {
   const py = interpreter();
   writeToolbox(py);
   writeMcpModule(py);
-  // 清运行期痕迹（夹具本身不动）。
-  fs.rmSync(path.join(FIXTURE, "session"), { recursive: true, force: true });
-  fs.rmSync(path.join(FIXTURE, "logs"), { recursive: true, force: true });
-  // 登记处也是运行期状态（驱动每次用 API 重新登记）：必须清空，
-  // 否则上一次跑出来的结论会漏进这一次（例如原生探测把 tools 写回 native，后面的信封场景就全变了）。
-  const home = path.join(FIXTURE, ".home");
-  fs.rmSync(home, { recursive: true, force: true });
+  // 数据根整块是运行期状态（会话、日志、登记处、台账、运行包）：每次从零重建，夹具的源不混进真跑出来的盘面。
+  // 先摘掉 data/.vm 的链接（链接只删链本身），否则整块删会顺着 junction 删到仓库那份缓存。
+  dropFixtureVm();
+  fs.rmSync(path.join(FIXTURE, "data"), { recursive: true, force: true });
+  // 运行包是产品数据（安装根下的 data/runtimes）：夹具里那份（root/runtimes）是源，每次复制进去。
+  fs.cpSync(path.join(FIXTURE, "runtimes"), path.join(FIXTURE, "data", "runtimes"), {
+    recursive: true,
+  });
+  // 登记处归零：驱动每次用 API 重新登记，否则上一次的结论会漏进这一次
+  // （例如原生探测把 tools 写回 native，后面的信封场景就全变了）。
+  const home = path.join(FIXTURE, "data", ".home");
   fs.mkdirSync(home, { recursive: true });
   // 虚拟机档真机验收：夹具根也要看得到**真虚拟根**——仓库的 .vm 挂进夹具（真机跑完删掉，别把 3GB 缓存留在夹具里）。
   // Windows 用 junction（不需要管理员/开发者模式）；其它平台用目录符号链接。
-  const vmLink = path.join(FIXTURE, ".vm");
-  dropFixtureVm();
+  const vmLink = path.join(FIXTURE, "data", ".vm");
   if (process.env.SOLOMNI_VM_LIVE === "1" || process.env.SOLOMNI_VM_QEMU) {
     fs.symlinkSync(
-      path.join(PRODUCT_ROOT, ".vm"),
+      path.join(PRODUCT_ROOT, "data", ".vm"),
       vmLink,
       process.platform === "win32" ? "junction" : "dir"
     );
-    console.log("[e2e] 夹具 .vm → 仓库 .vm（真机跑用）");
+    console.log("[e2e] 夹具 data/.vm → 仓库 data/.vm（真机跑用）");
   }
   // 夹具的 settings.yaml 要**自洽**：Windows 上 require 文件系统/网络围栏必须授权写 ACL。
   // 驱动后面只改 streaming 这类字段，部分更新会保留这份沙箱，所以它必须是合法组合。
@@ -530,7 +533,6 @@ async function main() {
   fs.writeFileSync(path.join(home, "settings.yaml"), settingsLines.join("\n") + "\n");
   if (vmQemu) console.log("[e2e] 已登记 qemu_path：" + vmQemu);
   if (vmVirtiofsd) console.log("[e2e] 已登记 virtiofsd_path：" + vmVirtiofsd);
-  fs.rmSync(path.join(FIXTURE, "modules", "toolbox", "userdata"), { recursive: true, force: true });
 
   // 三个真模块（python / node / C++）按需复制进夹具：**每次跑都从仓库源码重新复制**，
   // 所以不存在"副本与真模块漂移"（副本是生成的，不是入库的第二个真相）。

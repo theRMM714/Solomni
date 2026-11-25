@@ -253,6 +253,8 @@ jobs:
           node-version: "24"
 
       # 工具链缓存：Rust / cc / python / node / 供应链工具（探针在场即跳过安装）。
+      # cargo/bin 里的 rustup 代理与 rustup 里的工具链是**一个整体**：只恢复代理、没有工具链时
+      # 项目内 cargo 能打印版本却选不出 toolchain，env.js 会当场停下（缓存版本一变就撞上）。
       # 缓存身份 = 清单 + 链接台账 + 开发工具清单的哈希：任一版本变动整体失效；
       # 不给 restore-keys——半套工具链比全新安装更坏（身份不符的缓存宁可不要）。
       - name: 恢复项目内工具链缓存（inputs.clean 时跳过）
@@ -261,12 +263,14 @@ jobs:
         with:
           path: |
             platform/${{ env.OS_KEY }}/rustup
+            platform/${{ env.OS_KEY }}/cargo/bin
             .tools/toolchains
             .tools/mingw64
             .tools/bin
           key: ${{ runner.os }}-${{ runner.arch }}-toolchains-${{ hashFiles('dependencies.yaml', 'links.yaml', 'dev-tools.js') }}
 
-      # 只缓存依赖与 debug 产物。不缓存 target/ 根：报告与日志来自本次运行，不能被上一次的缓存顶替。
+      # 只缓存依赖（registry / git）与 debug 产物：cargo/bin 归工具链缓存（代理与工具链同进同出），
+      # 不缓存 target/ 根——报告与日志来自本次运行，不能被上一次的缓存顶替。
       - name: 建项目内 CARGO_HOME（缓存要求目录先存在）
         if: ${{ !inputs.clean }}
         shell: bash
@@ -279,7 +283,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            platform/${{ env.OS_KEY }}/cargo
+            platform/${{ env.OS_KEY }}/cargo/registry
+            platform/${{ env.OS_KEY }}/cargo/git
             target/debug
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
@@ -346,6 +351,7 @@ jobs:
         with:
           path: |
             platform/${{ env.OS_KEY }}/rustup
+            platform/${{ env.OS_KEY }}/cargo/bin
             .tools/toolchains
             .tools/mingw64
             .tools/bin
@@ -357,7 +363,8 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            platform/${{ env.OS_KEY }}/cargo
+            platform/${{ env.OS_KEY }}/cargo/registry
+            platform/${{ env.OS_KEY }}/cargo/git
             target/debug
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
 
@@ -401,6 +408,7 @@ jobs:
         with:
           path: |
             platform/${{ env.OS_KEY }}/rustup
+            platform/${{ env.OS_KEY }}/cargo/bin
             .tools/toolchains
             .tools/mingw64
             .tools/bin
@@ -422,7 +430,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            platform/${{ env.OS_KEY }}/cargo
+            platform/${{ env.OS_KEY }}/cargo/registry
+            platform/${{ env.OS_KEY }}/cargo/git
             target/debug
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
@@ -477,7 +486,8 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            platform/${{ env.OS_KEY }}/cargo
+            platform/${{ env.OS_KEY }}/cargo/registry
+            platform/${{ env.OS_KEY }}/cargo/git
             target/debug
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
 
@@ -517,13 +527,14 @@ jobs:
         with:
           node-version: "24"
 
-      # 工具链缓存：与 quality 同一 key（只恢复不保存——保存由 quality 统一做，见那里的注释）。
+      # 工具链缓存：与 quality 同一 key、同一批路径（只恢复不保存——保存由 quality 统一做，见那里的注释）。
       - name: 恢复项目内工具链缓存（inputs.clean 时跳过）
         if: ${{ !inputs.clean }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             platform/${{ env.OS_KEY }}/rustup
+            platform/${{ env.OS_KEY }}/cargo/bin
             .tools/toolchains
             .tools/mingw64
             .tools/bin
@@ -539,7 +550,9 @@ jobs:
         if: ${{ !inputs.clean }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: platform/${{ env.OS_KEY }}/cargo
+          path: |
+            platform/${{ env.OS_KEY }}/cargo/registry
+            platform/${{ env.OS_KEY }}/cargo/git
           key: ${{ runner.os }}-${{ runner.arch }}-coverage-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-coverage-cargo-
@@ -573,7 +586,9 @@ jobs:
         continue-on-error: true
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: platform/${{ env.OS_KEY }}/cargo
+          path: |
+            platform/${{ env.OS_KEY }}/cargo/registry
+            platform/${{ env.OS_KEY }}/cargo/git
           key: ${{ runner.os }}-${{ runner.arch }}-coverage-cargo-${{ hashFiles('Cargo.lock') }}
 
   gate:
@@ -750,7 +765,7 @@ jobs:
           done
 
   # push 到 main（合并 PR）时唯一跑的 job：把项目内工具链装进 main 的缓存，供后续 PR 恢复。
-  # 只播工具链、不播 cargo / target：播种 run 里没有源码依赖图，存下去的是空 target，
+  # 只播工具链（含 cargo/bin 的 rustup 代理）、不播 cargo 依赖与 target：播种 run 里没有源码依赖图，存下去的是空 target，
   # 而缓存键不可覆盖——那会把后续 PR 的编译缓存永久毒化。依赖与编译产物缓存仍由手动派发到 main 的 quality 刷新。
   # 先 lookup-only 查一次：缓存已经在就只花几秒，不必为了「保存」再跑一遍安装。
   cache-seed:
@@ -791,6 +806,7 @@ jobs:
         with:
           path: |
             platform/${{ env.OS_KEY }}/rustup
+            platform/${{ env.OS_KEY }}/cargo/bin
             .tools/toolchains
             .tools/mingw64
             .tools/bin
@@ -812,6 +828,7 @@ jobs:
         with:
           path: |
             platform/${{ env.OS_KEY }}/rustup
+            platform/${{ env.OS_KEY }}/cargo/bin
             .tools/toolchains
             .tools/mingw64
             .tools/bin
