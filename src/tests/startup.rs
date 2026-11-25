@@ -212,6 +212,73 @@ fn gate_without_frontend_exits_instead_of_starting() {
     );
 }
 
+/// 目的：没有前端时的退出要把"缺几项"与三条出路写在同一段里——用户照着改设置就能过门。
+#[test]
+fn gate_without_frontend_names_missing_parts_and_ways_out() {
+    let mut core = core();
+    let missing = vec![
+        MissingPart {
+            name: "文件系统围栏",
+            cause: MissingCause::Unauthorized,
+        },
+        MissingPart {
+            name: "进程树围栏",
+            cause: MissingCause::Unsupported,
+        },
+    ];
+    let mut reader = Cursor::new(Vec::new());
+    let mut writer = Vec::new();
+    let out = crate::run_gate(
+        &missing,
+        true,
+        false,
+        None,
+        None,
+        core.registry_mut(),
+        &mut reader,
+        &mut writer,
+    );
+    assert!(matches!(out, GateOutcome::Exit(1)));
+    let text = String::from_utf8(writer).expect("UTF-8");
+    assert!(text.contains("缺 2 项强制围栏"), "{text}");
+    assert!(text.contains("SOLOMNI_FENCE_WRITE=1 <原命令>"), "{text}");
+    assert!(text.contains("sandbox.policy.windows"), "{text}");
+    assert!(text.contains("write_acl: true"), "{text}");
+    assert!(
+        text.contains("进程树围栏"),
+        "能力缺失的项要单独点名，别让读者以为授权能修：{text}"
+    );
+    assert!(text.contains("best_effort"), "{text}");
+}
+
+/// 目的：缺的全是本机能力时，A / B（授权）根本修不了：只给出路 C，不诱导白试。
+#[test]
+fn gate_without_frontend_unsupported_only_skips_authorization_ways() {
+    let mut core = core();
+    let missing = vec![MissingPart {
+        name: "文件系统围栏",
+        cause: MissingCause::Unsupported,
+    }];
+    let mut reader = Cursor::new(Vec::new());
+    let mut writer = Vec::new();
+    let out = crate::run_gate(
+        &missing,
+        true,
+        false,
+        None,
+        None,
+        core.registry_mut(),
+        &mut reader,
+        &mut writer,
+    );
+    assert!(matches!(out, GateOutcome::Exit(1)));
+    let text = String::from_utf8(writer).expect("UTF-8");
+    assert!(text.contains("缺 1 项强制围栏"), "{text}");
+    assert!(!text.contains("SOLOMNI_FENCE_WRITE=1"), "{text}");
+    assert!(!text.contains("write_acl: true"), "{text}");
+    assert!(text.contains("best_effort"), "{text}");
+}
+
 #[test]
 fn gate_degrade_is_per_process_and_does_not_write_settings() {
     let mut core = core();
