@@ -468,6 +468,35 @@ fn set_settings_action_accepts_compact_options() {
 }
 
 #[test]
+fn set_settings_action_accepts_external_tool_registrations() {
+    let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
+    let mut st = faces.registry.settings().expect("读设置");
+    st.sandbox.policy.windows.write_acl = true;
+    faces
+        .registry
+        .set_settings(st)
+        .expect("准备 Windows 合法的沙箱策略");
+    // 设置页保存时三个登记值一起提交；动作声明漏一个就整次保存被拒，界面只看到"没保存"。
+    faces
+        .actions
+        .act(ActionCall {
+            id: "set_settings".to_string(),
+            args: serde_json::json!({
+                "qemu_path": " C:/tools/qemu.exe ",
+                "virtiofsd_path": "C:/tools/virtiofsd.exe",
+                "smbd_path": ""
+            }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("set_settings 应接受三个外部工具登记值");
+    let got = faces.registry.settings().expect("读设置");
+    assert_eq!(got.qemu_path, "C:/tools/qemu.exe");
+    assert_eq!(got.virtiofsd_path, "C:/tools/virtiofsd.exe");
+    assert_eq!(got.smbd_path, "", "空串 = 清空登记");
+}
+
+#[test]
 fn create_session_and_config_carry_chara_as_a_snapshot() {
     let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
     let done = faces

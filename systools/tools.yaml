@@ -927,3 +927,6 @@ tools:
       max_guests: { type: integer, min: 0, desc: 虚拟机档同时最多几台 guest（0 = 不限制） }
       storage: { type: object, desc: "存储与回收策略（缓存预算、周期回收、保留天数；未提交字段保留现值）" }
       sandbox: { type: object, desc: 全局沙箱策略（整段替换；保存后整体重启） }
+      qemu_path: { type: string, desc: QEMU 可执行文件的登记值（绝对路径或相对安装根）；空串 = 清空登记，按项目内补齐的那份自动发现 }
+      virtiofsd_path: { type: string, desc: 共享档 helper virtiofsd 的登记值（Linux / macOS）；空串 = 自动发现 }
+      smbd_path: { type: string, desc: 共享档 helper smbd 的登记值（Windows）；空串 = 自动发现 }
