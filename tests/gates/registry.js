@@ -30,6 +30,7 @@ const S = {
   resourceNames: require("./structure/resource-names.js"),
   rootEntries: require("./structure/root-entries.js"),
   diskOwners: require("./structure/disk-owners.js"),
+  toolPaths: require("./structure/tool-paths.js"),
   webLayers: require("./structure/webLayers.js"),
   size: require("./structure/size.js"),
   moduleFiles: require("./structure/module-files.js"),
@@ -153,6 +154,18 @@ const GATES = [
     inputs: ["src/kernel/domain/layout.rs", "src/**/*.rs"],
     run: (root, ctx) => {
       const r = S.diskOwners.diskOwners(root);
+      ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
+      return r.problems;
+    },
+  },
+  {
+    id: "structure/tool-paths",
+    lane: "structure",
+    step: "T0 结构审查",
+    kind: "text",
+    inputs: ["src/**/*.rs"],
+    run: (root, ctx) => {
+      const r = S.toolPaths.toolPaths(root);
       ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
       return r.problems;
     },
@@ -285,6 +298,7 @@ const LANE_ORDER = {
     "structure/capability-internal",
     "structure/root-entries",
     "structure/disk-owners",
+  "structure/tool-paths",
     "structure/permission-values",
     "structure/import-names",
     "structure/dead-params",

@@ -42,6 +42,8 @@ pub struct Faces {
     pub storage: Arc<dyn crate::units::maintenance::storage::api::Storage + Send + Sync>,
     /// 目的：基础工具链的启动事实（组合根注入；测试替身为 null）。
     pub toolchains: serde_json::Value,
+    /// 目的：虚拟机档外部工具的现状（登记值 / 项目内那份 / 这次用哪份 / 能不能用）；组合根注入，测试替身为空表。
+    pub vm_tools: Arc<dyn Fn() -> Vec<crate::units::vm::api::ToolReport> + Send + Sync>,
 }
 
 impl Faces {
@@ -62,6 +64,7 @@ impl Faces {
             provision: Arc::new(crate::units::provision::api::NoProvision),
             storage: Arc::new(crate::units::maintenance::storage::api::NoStorage),
             toolchains: serde_json::Value::Null,
+            vm_tools: Arc::new(Vec::new),
         }
     }
 }

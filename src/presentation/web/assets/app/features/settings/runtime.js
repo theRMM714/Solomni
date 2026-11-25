@@ -5,11 +5,11 @@
  */
 import { settingsCopy } from './copy.js';
 
-let doc, api, ui;
+let doc, api, ui, state;
 let field;
 /** 挂载：把本功能的入口登记到 app；跨功能调用一律经 app 晚绑定。 */
 export function mount(root, deps) {
-  ({ doc, api, ui } = deps);
+  ({ doc, api, ui, state } = deps);
   ({ field } = ui);
   Object.assign(root, { buildGeneratePage, buildSandboxPage, buildPermissionsPage, buildResourcesPage });
 }
@@ -63,10 +63,34 @@ function buildPermissionsPage(c, f) {
   c.body.appendChild(f.defDeny.f);
 }
 
+/// 外部工具现状：一行一件——登记值 / 项目内那份 / 这次用哪份 / 能不能用（后端同一个解析器算出来）。
+function toolStatusBox() {
+  const box = doc.createElement('div');
+  box.className = 'cfg-log tool-status';
+  const rows = state.vm_tools || [];
+  if (!rows.length) { box.textContent = '读不到外部工具现状（后端未给出）。'; return box; }
+  const word = { ok: '可用', path: '仅在 PATH 上', missing: '不可用' };
+  const from = { registered: '设置登记', provisioned: '项目内补齐', path: 'PATH' };
+  box.textContent = rows.map((t) => {
+    const parts = [t.label + '：' + (word[t.state] || t.state)];
+    if (t.using) parts.push('使用 ' + t.using);
+    if (t.source) parts.push('来源 ' + (from[t.source] || t.source));
+    if (t.provisioned && t.source !== 'provisioned') parts.push('项目内已补齐 ' + t.provisioned);
+    if (!t.registered && !t.provisioned) parts.push('未登记、项目内也没补');
+    return parts.join(' · ');
+  }).join('\n');
+  return box;
+}
+
 /// 4 页：资源与进程。
 function buildResourcesPage(c, f) {
   c.body.appendChild(secTitle('并发'));
   c.body.appendChild(ui.attachHelp(f.guests.wrap, settingsCopy.guestLimits));
+  c.body.appendChild(secTitle('外部工具'));
+  c.body.appendChild(f.qemuPath.wrap);
+  c.body.appendChild(f.virtiofsdPath.wrap);
+  c.body.appendChild(f.smbdPath.wrap);
+  c.body.appendChild(toolStatusBox());
   c.body.appendChild(secTitle('进程'));
   const title = doc.createElement('div');
   title.className = 'wf-label';

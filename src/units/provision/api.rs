@@ -1,5 +1,5 @@
 //! 目的：依赖补齐单元的入站契约——状态、虚拟根清单、作业快照与两条动作；DTO 是呈现层序列化的形状。
-//! 管：Provision trait 与 DepStatus / GuestBase DTO、宿主工具取法的 HostTool 词表与 `vm_tools`（设置值→位置事实）、未接入的 NoProvision；作业快照 `JobState` 是共享形状，家在 `src/units/pure/exec_model/`。
+//! 管：Provision trait 与 DepStatus / GuestBase DTO、宿主工具取法的 HostTool 词表与 `vm_tools` / `vm_tools_report`（设置值→位置事实→现状报表）、未接入的 NoProvision；作业快照 `JobState` 是共享形状，家在 `src/units/pure/exec_model/`。
 //! 不管：清单怎么解析、怎么下载（在 service）。
 //! 联动：`presentation::faces::Faces.provision` 持它；Web 的 setup 路由与 CLI 探针都经它；runtime 的"选虚拟机"经 `guest_bases` 取候选。
 
@@ -126,6 +126,30 @@ pub fn vm_tools(
         qemu: provision.tool_location(HostTool::Qemu, qemu),
         share: provision.tool_location(share.0, share.1),
     }
+}
+
+/// 目的：两件外部工具的现状报表（界面与自检同读一份）：登记了什么、项目内有没有、这次用哪份、能不能用。
+/// 参数：与 `vm_tools` 同一组；`probe` 是宿主探针（判在场与可执行）。
+/// 约束：平台差异（共享档用哪件、叫什么叫）仍只在 `vm_tools` 与这里各判一次，别处不再挑字段。
+pub fn vm_tools_report(
+    provision: &dyn Provision,
+    host_os: &str,
+    qemu: &str,
+    virtiofsd: &str,
+    smbd: &str,
+    probe: &dyn crate::kernel::ports::HostProbe,
+) -> Vec<crate::units::vm::api::ToolReport> {
+    use crate::units::vm::api::{QEMU_BIN, SMBD_BIN, ToolReport, VIRTIOFSD_BIN};
+    let tools = vm_tools(provision, host_os, qemu, virtiofsd, smbd);
+    let share = if host_os == "windows" {
+        ("共享档 helper（SMB）", SMBD_BIN)
+    } else {
+        ("共享档 helper（virtiofs）", VIRTIOFSD_BIN)
+    };
+    vec![
+        ToolReport::inspect("qemu", "QEMU 可执行文件", QEMU_BIN, &tools.qemu, probe),
+        ToolReport::inspect("share", share.0, share.1, &tools.share, probe),
+    ]
 }
 
 /// 目的：未接入的补齐面——组合根未注入时的默认值；调用如实失败，不假装可用。

@@ -581,6 +581,15 @@ function settingsForm() {
   }
   const compactModel = selectInput(compactModels, state.settings.compact_model || '');
   const guests = numberInput('虚拟机档同时最多几台', state.settings.max_guests, 0, 64);
+  // 外部工具：登记值可写、留空 = 按项目内补齐的那份自动发现（与自检同一份解析，界面不另算）。
+  const toolPath = (label, value) => {
+    const input = textInput('留空 = 用项目内补齐的那份（自动发现）');
+    input.value = value || '';
+    return { input, wrap: field(label, input, settingsCopy.externalTools) };
+  };
+  const qemuPath = toolPath('QEMU 可执行文件（绝对路径，或相对安装根）', state.settings.qemu_path);
+  const virtiofsdPath = toolPath('共享档 helper：virtiofsd（Linux / macOS）', state.settings.virtiofsd_path);
+  const smbdPath = toolPath('共享档 helper：smbd（Windows）', state.settings.smbd_path);
   const sb = state.settings.sandbox || {};
   const sp = sb.policy || {};
   const en = sp.enforce || {};
@@ -646,7 +655,7 @@ function settingsForm() {
   const stVolume = numberInput('新构建缓存卷大小（GiB）', st.build_volume_gib == null ? 16 : st.build_volume_gib, 1, 1024);
   const stFree = numberInput('宿主最低剩余空间（GiB）', st.min_free_gib == null ? 2 : st.min_free_gib, 0, 1024);
   const stLog = numberInput('日志保留天数（0 = 不按龄）', st.log_keep_days == null ? 14 : st.log_keep_days, 0, 3650);
-  return { stream, cot, to, remind, pct, keep, compactModel, guests, thinkLevels, network, writeAcl, enFs, enNet, enTree, enEnv, onUnavailable, hostRoots, hardDeny, defProfile, defSharedRead, defSharedWrite, defDeny, stPeriodic, stInterval, stCap, stKeep, stVolume, stFree, stLog };
+  return { stream, cot, to, remind, pct, keep, compactModel, guests, qemuPath, virtiofsdPath, smbdPath, thinkLevels, network, writeAcl, enFs, enNet, enTree, enEnv, onUnavailable, hostRoots, hardDeny, defProfile, defSharedRead, defSharedWrite, defDeny, stPeriodic, stInterval, stCap, stKeep, stVolume, stFree, stLog };
 }
 
 function parseSettingLines(text) {
@@ -665,6 +674,10 @@ function collectSettings(f) {
     compact_keep_percent: Number(f.keep.input.value) || 0,
     compact_model: f.compactModel.value || '',
     max_guests: Number(f.guests.input.value) || 0,
+    // 登记值：提交即写盘；清空（空串）就是回到按项目内补齐自动发现。
+    qemu_path: String(f.qemuPath.input.value || '').trim(),
+    virtiofsd_path: String(f.virtiofsdPath.input.value || '').trim(),
+    smbd_path: String(f.smbdPath.input.value || '').trim(),
     storage: {
       periodic_gc: f.stPeriodic.box.checked,
       gc_interval_minutes: Number(f.stInterval.input.value) || 15,

@@ -686,6 +686,8 @@ fn state_json(faces: &Faces, fence: &FenceInfo) -> Result<serde_json::Value, Str
         "fence": fence,
         // 基础工具链的启动事实：项目内 / 宿主回退 / 缺失；Web 横幅与 CLI 启动报告同一份。
         "toolchains": faces.toolchains,
+        // 虚拟机档外部工具：登记了什么、项目内有没有、这次用哪份、能不能用（配置页只读这一份）。
+        "vm_tools": (faces.vm_tools)(),
         "providers": faces.registry.providers()?,
         "models": faces.registry.models()?,
         "core": faces.registry.core_model()?,
