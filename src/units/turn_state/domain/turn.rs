@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use crate::kernel::api::types::SessionId;
 use crate::kernel::ports::Log;
+use crate::units::agentloop::api::SessionPorts;
 use crate::units::agentloop::api::{CompactChatFactory, ShellLive, ShellSlot};
 use crate::units::catalog::modules::api::Modules;
 use crate::units::catalog::packages::api::Packages;
@@ -19,7 +20,6 @@ use crate::units::tools::api::{ToolExec, Tools};
 use crate::units::turn_state::api::{Flows, History};
 use crate::units::turn_state::domain::decisions::Gates;
 use crate::units::turn_state::domain::live::{Session, TurnState};
-use crate::units::agentloop::api::SessionPorts;
 use crate::units::vm::api::Vm;
 use crate::units::workspace::api::Workspace;
 

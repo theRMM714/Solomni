@@ -58,9 +58,7 @@ impl CollabSession {
                         crate::units::collab::service::discussion::Adv::Opened => {
                             continue;
                         }
-                        crate::units::collab::service::discussion::Adv::Out(out) => {
-                            out
-                        }
+                        crate::units::collab::service::discussion::Adv::Out(out) => out,
                     }
                 };
                 match outcome {

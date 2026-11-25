@@ -8,8 +8,8 @@ use crate::units::catalog::modules::api::{Module, Modules, Roster};
 use crate::units::catalog::packages::api::Packages;
 use crate::units::catalog::registry::api::Registry;
 use crate::units::catalog::registry::api::{AppSettings, RegistryOps};
-use crate::units::proxy::api as d;
 use crate::units::conversation::session::api::subtree_of;
+use crate::units::proxy::api as d;
 
 use crate::units::lifecycle::api::{RebuildDeps, RewindOutcome, RewindTarget};
 use crate::units::llm::api::Channel;
