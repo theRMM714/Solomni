@@ -11,7 +11,7 @@ use crate::tests::workspace::support::*;
 pub(crate) fn work_commit_auto_saves_the_sandbox_without_touching_the_shared_area() {
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "base.md", b"b", 1, 0).unwrap();
     let shared = shared_of(&ws, "w");
     let sd = ws.roots("w", &[]).unwrap().store;
@@ -59,7 +59,7 @@ pub(crate) fn work_commit_auto_saves_the_sandbox_without_touching_the_shared_are
 pub(crate) fn work_push_squashes_local_commits_and_fast_forwards_the_sandbox() {
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let base = ws.work_commit_user("w", "base.md", b"b", 1, 0).unwrap();
     let sd = ws.roots("w", &[]).unwrap().store;
 
@@ -105,7 +105,7 @@ pub(crate) fn work_push_squashes_local_commits_and_fast_forwards_the_sandbox() {
 pub(crate) fn work_push_keeps_main_paths_it_never_committed() {
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let sd = ws.roots("w", &[]).unwrap().store;
     // 用户投喂一份数据：只进主线，不经过任何 agent 的沙箱。
     ws.work_commit_user("w", "data.csv", b"1,2\n", 1, 0)
@@ -140,7 +140,7 @@ pub(crate) fn work_push_publishes_a_delete_both_sides_had() {
     use crate::units::workspace::api::ChangeKind;
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let shared = shared_of(&ws, "w");
     let sb = sandbox_of(&ws, "w", "a");
     store.write_under(&sb, "note.md", b"v1").unwrap();
@@ -171,7 +171,7 @@ pub(crate) fn work_push_publishes_a_delete_both_sides_had() {
 pub(crate) fn work_pull_separates_local_changes_from_no_change() {
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
     ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
@@ -202,7 +202,7 @@ pub(crate) fn work_lost_restores_a_reset_backup_to_the_original_path() {
     use crate::units::workspace::api::{ResetRequest, content_hash};
     use crate::units::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
     store.write_under(&sb, "docs/b.txt", b"v1").unwrap();
     ws.work_commit("w", "a", "w--a", &commit_req(&["docs/b.txt"], &[], "v1", 1))
@@ -267,7 +267,7 @@ pub(crate) fn work_lost_restores_a_reset_backup_to_the_original_path() {
 pub(crate) fn work_lost_asks_to_name_one_when_a_path_has_several_backups() {
     use crate::units::workspace::api::{ResetRequest, content_hash};
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
     store.write_under(&sb, "note.md", b"v1").unwrap();
     let id1 = ws
@@ -340,7 +340,7 @@ pub(crate) fn work_lost_asks_to_name_one_when_a_path_has_several_backups() {
 pub(crate) fn work_diff_shows_line_changes_and_never_pretends_binary_is_text() {
     use crate::units::workspace::api::{ChangeKind, DiffRequest, DiffSign};
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
     store
         .write_under(&sb, "note.md", b"one\ntwo\nthree\n")

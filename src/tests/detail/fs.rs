@@ -43,7 +43,7 @@ fn fs_workspace_builds_the_real_layout_and_lists_only_files() {
     let root = scratch("fs-workspace");
     let sessions = root.join("session");
     let ws = FsWorkspace::new(sessions.clone());
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
+    ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .expect("建目录成功");
     assert!(
         sessions.join("w").join("work").is_dir(),
@@ -101,7 +101,7 @@ fn fs_workspace_reports_usage_by_area() {
     let root = scratch("fs-workspace-usage");
     let sessions = root.join("session");
     let ws = FsWorkspace::new(sessions.clone());
-    ws.prepare("w", &["a".to_string()]).expect("建目录");
+    ws.ensure_layout("w", &["a".to_string()]).expect("建目录");
     ws.write_work("w", "note.txt", "你好".as_bytes())
         .expect("投喂");
     std::fs::write(sessions.join("w").join("a").join("out.bin"), [0u8; 5]).expect("写产物");
@@ -755,7 +755,7 @@ fn fs_workspace_prepare_seeds_workignore_once() {
     let root = scratch("fs-workignore-seed");
     let sessions = root.join("session");
     let ws = FsWorkspace::new(sessions.clone());
-    ws.prepare("w", &["a".to_string()]).expect("建目录");
+    ws.ensure_layout("w", &["a".to_string()]).expect("建目录");
 
     let rules = sessions.join("w").join(".work").join(WORKIGNORE);
     assert_eq!(
@@ -769,7 +769,7 @@ fn fs_workspace_prepare_seeds_workignore_once() {
     );
 
     std::fs::write(&rules, "*.log\n").expect("用户改规则");
-    ws.prepare("w", &["a".to_string()]).expect("再次准备");
+    ws.ensure_layout("w", &["a".to_string()]).expect("再次准备");
     assert_eq!(
         std::fs::read_to_string(&rules).expect("读回"),
         "*.log\n",
@@ -839,7 +839,7 @@ fn work_import_root_respects_workignore_and_still_takes_explicit_paths() {
         Arc::new(FsWorkStore::new()),
     );
     ws.bind("w", Some(&external)).expect("绑定外部工作区");
-    ws.prepare("w", &["a".to_string()]).expect("准备");
+    ws.ensure_layout("w", &["a".to_string()]).expect("准备");
     ws.work_import_root("w", 7).expect("初始导入");
 
     let mut tree = ws.work_status("w", "a", &[]).expect("读状态").tree;

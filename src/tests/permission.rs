@@ -217,7 +217,7 @@ fn work_status_filters_paths_outside_read_scope() {
     let dirs = std::sync::Arc::new(InMemoryWorkspace::new());
     let store = std::sync::Arc::new(InMemoryWorkStore::new());
     let ws = test_workspace_store(dirs, store.clone());
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
+    ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
     let sb_b = ws
         .roots("w", &["b".to_string()])
@@ -295,7 +295,7 @@ fn work_lost_is_scoped_by_read_permission() {
     let dirs = std::sync::Arc::new(InMemoryWorkspace::new());
     let store = std::sync::Arc::new(InMemoryWorkStore::new());
     let ws = test_workspace_store(dirs, store.clone());
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let root = ws.roots("w", &[]).unwrap().store.join("lost").join("a");
     store
         .write_under(&root, "public/lost.txt", b"public-lost")

@@ -12,7 +12,7 @@ pub(crate) fn gate_refusal_is_audited_without_file_content() {
     use crate::units::tools::api::{GateFault, Need, WriteGate};
 
     let (ws, _dirs, _store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "base.md", b"one\ntwo\n", 1, 0)
         .unwrap();
     let log = crate::tests::doubles::RecordingLog::new();
@@ -51,7 +51,7 @@ pub(crate) fn batch_gate_returns_the_first_failed_item() {
     use crate::units::tools::api::{GateFault, GateItem, Need, WriteGate};
 
     let (ws, _dirs, _store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "base.md", b"one\ntwo\n", 1, 0)
         .unwrap();
     let gate = SessionWriteGate {

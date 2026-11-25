@@ -363,7 +363,7 @@ impl Work {
         // 先把绑定刷成布局投影，再建沙箱；失败即失败，不假装已建。
         self.workspace
             .bind(&root, workspace.as_ref().map(|w| w.root.as_path()))?;
-        self.workspace.prepare(&root, &agent_names)?;
+        self.workspace.ensure_layout(&root, &agent_names)?;
         if workspace.is_some() {
             // 首次绑定：把工作区现有文件导入成初始提交，agent 立刻就能 pull；失败不挡建会话。
             if let Err(e) = self
@@ -613,7 +613,7 @@ impl Work {
         // 会话身份落盘：失败即失败（名字即目录，这是承诺，不假装已保存）。
         if let Err(e) = turn.admit(&meta, session) {
             if let Some((session, agents)) = discard {
-                let _ = self.workspace.discard(&session, &agents);
+                let _ = self.workspace.discard_layout(&session, &agents);
             }
             return Err(e);
         }
@@ -631,7 +631,7 @@ impl Work {
         if let PreparedWork::Pending(p) = prepared {
             turn.unmark_starting(&p.name);
             if let Some((session, agents)) = p.discard {
-                let _ = self.workspace.discard(&session, &agents);
+                let _ = self.workspace.discard_layout(&session, &agents);
             }
         }
     }
@@ -800,7 +800,7 @@ impl Work {
         self.workspace
             .bind(name, workspace.as_ref().map(|w| w.root.as_path()))?;
         self.workspace
-            .prepare(name, &[PROXY_PRIVATE_DIR.to_string()])?;
+            .ensure_layout(name, &[PROXY_PRIVATE_DIR.to_string()])?;
         if workspace.is_some()
             && let Err(e) = self
                 .workspace

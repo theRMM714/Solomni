@@ -166,7 +166,7 @@ impl Workdirs for FsWorkspace {
         }
     }
 
-    fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String> {
+    fn ensure_layout(&self, session: &str, agents: &[String]) -> Result<(), String> {
         let dir = self.session_dir(session);
         std::fs::create_dir_all(&dir).map_err(|e| format!("建会话目录失败：{}", e))?;
         // 过滤规则要早于首次导入落地：规则只有一处（版本库目录里），导入与检索面看到同一份名单。
@@ -188,8 +188,8 @@ impl Workdirs for FsWorkspace {
         Ok(())
     }
 
-    fn discard(&self, session: &str, agents: &[String]) -> Result<(), String> {
-        // 撤销一次**失败的准备**：只删本产品建出的空沙箱 / 空 work/、布局投影与版本库 .work。
+    fn discard_layout(&self, session: &str, agents: &[String]) -> Result<(), String> {
+        // 撤销一次**失败的铺布局**：只删本产品建出的空沙箱 / 空 work/、布局投影与版本库 .work。
         // 调用方只在会话**从未落盘**时调用；.work 不清会留下"有 head 但没有会话"的残档（同名重建会跳过初始导入），用户文件绝不删。
         let dir = self.session_dir(session);
         for a in agents {

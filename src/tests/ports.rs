@@ -266,7 +266,7 @@ fn package_source_double_builds_a_library_and_reports_its_dir() {
 #[test]
 fn workspace_double_prepares_writes_lists_and_propagates_failure() {
     let ws = InMemoryWorkspace::new();
-    ws.prepare("w", &["a".to_string()]).expect("准备成功");
+    ws.ensure_layout("w", &["a".to_string()]).expect("准备成功");
     let roots = ws.roots("w", &["a".to_string()]).expect("取根");
     assert!(
         roots.shared.is_absolute(),
@@ -282,7 +282,7 @@ fn workspace_double_prepares_writes_lists_and_propagates_failure() {
     );
 
     let bad = InMemoryWorkspace::new().fail_with("工作区不可用");
-    assert_eq!(bad.prepare("w", &[]).unwrap_err(), "工作区不可用");
+    assert_eq!(bad.ensure_layout("w", &[]).unwrap_err(), "工作区不可用");
     assert_eq!(bad.roots("w", &[]).unwrap_err(), "工作区不可用");
     assert_eq!(bad.write_work("w", "x", b"").unwrap_err(), "工作区不可用");
     assert_eq!(bad.list("w", &[]).unwrap_err(), "工作区不可用");

@@ -206,11 +206,12 @@ pub trait Workspace: Send + Sync {
     /// 目的：把根会话的工作区绑定落成布局投影（`Some` = 外部工作区根；`None` = 产品内布局）。
     /// 约束：会话 meta 是绑定的唯一真相；本调用只刷新会话目录里的布局投影，不碰工作区文件。
     fn bind(&self, session: &str, root: Option<&std::path::Path>) -> Result<(), String>;
-    /// 准备工作区：建 session/<工作名>/work 与每个 agent 的沙箱目录。
-    fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String>;
-    /// 撤销一次失败的准备：只删本产品建出的空沙箱 / 空 work/、布局投影与版本库 `.work`。
+    /// 按会话铺布局：建 session/<工作名>/work 与每个 agent 的沙箱目录。
+    /// 约束：只落目录与版本库种子，不产生会话 / 工作名 / 通道 / guest——建工作的唯一入口在 work。
+    fn ensure_layout(&self, session: &str, agents: &[String]) -> Result<(), String>;
+    /// 撤销一次失败的铺布局：只删本产品建出的空沙箱 / 空 work/、布局投影与版本库 `.work`。
     /// 约束：调用方只在会话**从未落盘**时调用；用户文件绝不因为一次失败的创建被删。
-    fn discard(&self, session: &str, agents: &[String]) -> Result<(), String>;
+    fn discard_layout(&self, session: &str, agents: &[String]) -> Result<(), String>;
     /// work/ 下是否已有同名文件（上传同名冲突判定）。
     fn work_has(&self, session: &str, name: &str) -> bool;
     /// 列出本工作可引用的文件（work/ 与各 agent 沙箱；相对路径、/ 分隔、排序稳定）。

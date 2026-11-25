@@ -11,7 +11,7 @@ use crate::tests::workspace::support::*;
 pub(crate) fn work_reset_restores_paths_and_moves_the_work_line() {
     use crate::units::workspace::api::ResetRequest;
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string(), "b".to_string()])
+    ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
     let sb = sandbox_of(&ws, "w", "a");
     store.write_under(&sb, "note.md", b"v1\n").unwrap();
@@ -108,7 +108,7 @@ pub(crate) fn work_reset_restores_paths_and_moves_the_work_line() {
 pub(crate) fn work_reset_receipts_name_the_form_that_ran() {
     use crate::units::workspace::api::{ResetRequest, render_reset};
     let (ws, _dirs, store) = work_ws();
-    ws.prepare("w", &["a".to_string()]).unwrap();
+    ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
     store.write_under(&sb, "note.md", b"v1\n").unwrap();
     let id1 = ws

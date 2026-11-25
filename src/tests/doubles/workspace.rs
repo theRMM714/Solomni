@@ -13,7 +13,7 @@ impl InMemoryWorkspace {
         }
     }
 
-    /// 目的：注入失败：prepare / roots / write_work / list 一律返回该原因（work_has 是布尔查询，不受影响）。
+    /// 目的：注入失败：ensure_layout / roots / write_work / list 一律返回该原因（work_has 是布尔查询，不受影响）。
     pub(crate) fn fail_with(mut self, msg: &str) -> InMemoryWorkspace {
         self.fail = Some(msg.to_string());
         self
@@ -48,13 +48,13 @@ impl Workdirs for InMemoryWorkspace {
         // 内存实现不做布局投影；外部工作区用例走真实 FsWorkspace。
         Ok(())
     }
-    fn prepare(&self, _session: &str, _agents: &[String]) -> Result<(), String> {
+    fn ensure_layout(&self, _session: &str, _agents: &[String]) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
         Ok(())
     }
-    fn discard(&self, _session: &str, _agents: &[String]) -> Result<(), String> {
+    fn discard_layout(&self, _session: &str, _agents: &[String]) -> Result<(), String> {
         // 内存实现里没有目录可删。
         Ok(())
     }

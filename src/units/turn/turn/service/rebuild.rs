@@ -505,7 +505,7 @@ impl Turn {
         registry: &dyn Registry,
     ) -> Result<AgentSession, String> {
         self.workspace
-            .prepare(&meta.name, &[PROXY_PRIVATE_DIR.to_string()])?;
+            .ensure_layout(&meta.name, &[PROXY_PRIVATE_DIR.to_string()])?;
         let roots = self
             .workspace
             .roots(&meta.name, &[PROXY_PRIVATE_DIR.to_string()])?;
