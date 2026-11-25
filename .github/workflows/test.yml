@@ -463,7 +463,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p target/e2e-logs
-          if [ -d tests/cross-platform/e2e/root/logs ]; then cp -R tests/cross-platform/e2e/root/logs/. target/e2e-logs/; fi
+          if [ -d tests/cross-platform/e2e/root/data/logs ]; then cp -R tests/cross-platform/e2e/root/data/logs/. target/e2e-logs/; fi
 
       - name: 留产物（e2e 报告与日志；无论成败）
         if: always()

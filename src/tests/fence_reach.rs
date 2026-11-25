@@ -55,7 +55,7 @@ fn fence_reach_for_external_harness() {
     .expect("写读取脚本");
 
     let runner = ProcTools::new(exe, root.join("home"), Arc::new(AtomicBool::new(false)));
-    let fence = FencePlan::standalone(&module, None, false);
+    let fence = FencePlan::standalone(&module, None, None);
 
     // 1) 命令里按 PATH 名的程序（python）目录被放行：模块工具跑通一次完整往返。
     let a = runner.run(
