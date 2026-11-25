@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::units::conversation::session::domain::mechanism::{flow_ids, mechanism_of, seat};
+use crate::units::session_model::domain::mechanism::{flow_ids, mechanism_of, seat};
 
 /// 目的：产品自带的单机类型 id（一个 agent、没有流程）。
 /// 约束：只有产品自带的会话类型表与测试知道它——代码按声明分支，不按 id 分支。

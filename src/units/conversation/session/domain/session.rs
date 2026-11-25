@@ -2,10 +2,9 @@
 //! 管：发言席（只有 agent，id = agent 实例名）、工具循环、转录行与会话内稳定 id、每行对应的历史长度（供回档精确回退）、压缩点。
 //! 不管：事件词汇与裁决队列（在 `events.rs` / `decisions.rs`）、历史落盘（在 `detail/`）。
 //! 联动：由 engine 驱动（`engine::converse_with`）；回档算术在 `rewind.rs`，历史视图在 `history.rs`。
-
-use crate::units::conversation::session::domain::history::UsageTotals;
 use crate::units::conversation::session::domain::tools::MemberTools;
 use crate::units::llm::api::{BoxedChat, Msg, TokenUsage};
+use crate::units::session_model::api::{UsageTotals, default_freshness_keep_percent};
 use crate::units::transcript::api::{LineView, SessionEvent, ToolCallView};
 
 /// 目的：把"保留前 keep 行"对齐到**回复边界**：keep 落在某次回复内部时，退到该回复的第一行之前。
@@ -331,7 +330,7 @@ impl AgentSession {
             model: None,
             thinking: None,
             context_freshness: false,
-            freshness_keep_percent: super::history::default_freshness_keep_percent(),
+            freshness_keep_percent: default_freshness_keep_percent(),
             freshness_stats: None,
             reads: Vec::new(),
             id: id.to_string(),
@@ -383,7 +382,7 @@ impl AgentSession {
             model: None,
             thinking: None,
             context_freshness: false,
-            freshness_keep_percent: super::history::default_freshness_keep_percent(),
+            freshness_keep_percent: default_freshness_keep_percent(),
             freshness_stats: None,
             reads: Vec::new(),
             id: id.to_string(),

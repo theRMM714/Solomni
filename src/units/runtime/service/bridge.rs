@@ -182,7 +182,7 @@ impl Core {
     pub(crate) fn session_spec(
         &self,
         sid: &str,
-    ) -> Option<crate::units::conversation::session::api::SessionSpec> {
+    ) -> Option<crate::units::session_model::api::SessionSpec> {
         self.lifecycle.history_open(sid).ok().map(|(m, _)| m.spec)
     }
 
@@ -251,8 +251,8 @@ impl Core {
                 self.probe.as_ref(),
                 crate::units::work::api::ProxySeed {
                     name,
-                    kind: crate::units::conversation::session::api::PROXY,
-                    seat: crate::units::conversation::session::api::PROXY_SEAT,
+                    kind: crate::units::session_model::api::PROXY,
+                    seat: crate::units::session_model::api::PROXY_SEAT,
                     granted_at,
                     tier: crate::units::pure::exec_model::api::Tier::Host,
                     guest: None,

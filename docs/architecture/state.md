@@ -1,7 +1,7 @@
 <!-- docs-template: spec -->
 # 状态、落盘与运行时契约
 > 定位：状态归谁、什么落盘、日志与提示词册的契约；改布局与改状态前先读本文。
-> 效力：规范｜核对：2026-11-17｜依据：`src/units/conversation/session/domain/history.rs`、`src/kernel/detail/file_log.rs`
+> 效力：规范｜核对：2026-11-17｜依据：`src/units/session_model/domain/history.rs`、`src/kernel/detail/file_log.rs`
 
 ## 适用与判据
 - 动状态归属、落盘布局、日志埋点或提示词册前读本文；违反由 T0 结构审查（状态归属）与文档审查判定。

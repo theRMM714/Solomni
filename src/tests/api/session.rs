@@ -8,11 +8,10 @@ use super::super::{ops_with, single_work, slow_ops};
 use super::support::spawn;
 use crate::presentation::faces::Faces;
 use crate::units::pure::registry_model::api::AgentMeta;
-use crate::units::runtime::api::{Acted, ActionCall, Caller};
-use crate::units::work::api::{ConfigAgent, SessionEdit, WorkSpec};
-
-use crate::units::conversation::session::api::{CUSTOM, SINGLE};
 use crate::units::runtime::api::Output;
+use crate::units::runtime::api::{Acted, ActionCall, Caller};
+use crate::units::session_model::api::{CUSTOM, SINGLE};
+use crate::units::work::api::{ConfigAgent, SessionEdit, WorkSpec};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

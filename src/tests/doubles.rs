@@ -17,7 +17,7 @@ use crate::units::catalog::packages::domain::manifest::{Library, PackageManifest
 use crate::units::catalog::packages::ports::PackageSource;
 use crate::units::catalog::registry::api::Settings;
 use crate::units::catalog::registry::ports::SettingsStore;
-use crate::units::conversation::session::api::{HistoryView, SessionMeta, TurnIo};
+use crate::units::conversation::session::api::TurnIo;
 use crate::units::conversation::session::ports::HistoryStore;
 use crate::units::llm::api::Channel;
 use crate::units::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
@@ -30,6 +30,7 @@ use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::registry_model::api::ModelEntry;
 use crate::units::pure::registry_model::api::Provider;
 use crate::units::runtime::service::Core;
+use crate::units::session_model::api::{HistoryView, SessionMeta};
 use crate::units::tools::ports::SystoolsSource;
 use crate::units::tools::ports::{FileRead, SysIo};
 use crate::units::workspace::domain::asset::{AssetScanner, FileVersion};

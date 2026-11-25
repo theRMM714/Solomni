@@ -4,7 +4,7 @@
 //! 联动：src/units/slate/、Core::suggest_models、tests/doubles。
 
 use super::prelude::*;
-use crate::units::conversation::session::api::{MEETING, SINGLE};
+use crate::units::session_model::api::{MEETING, SINGLE};
 
 #[test]
 pub(crate) fn suggest_models_recommends_agents() {

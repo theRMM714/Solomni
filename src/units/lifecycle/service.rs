@@ -11,10 +11,10 @@ mod rewind;
 pub(crate) use history::{ReleaseByLease, SessionDelete};
 
 use crate::kernel::ports::Log;
-use crate::units::conversation::session::api::{
-    History, HistoryView, SessionMeta, guest_scope, subtree_of, tree_order,
-};
+
+use crate::units::conversation::session::api::{History, guest_scope, subtree_of, tree_order};
 use crate::units::residents::api::ResidentOps;
+use crate::units::session_model::api::{HistoryView, SessionMeta};
 use crate::units::tools::api::ToolExec;
 use crate::units::turn::turn::api::{Session, Turn};
 use crate::units::vm::api::Vm;

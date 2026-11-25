@@ -4,7 +4,7 @@
 //! 联动：`src/units/runtime/api.rs` 与 `src/units/modules/api.rs`。
 
 use super::*;
-use crate::units::conversation::session::api::SessionSpec;
+use crate::units::session_model::api::SessionSpec;
 
 pub(crate) fn chain_node(id: &str, deps: &[&str]) -> crate::units::pure::taskchain::api::TaskNode {
     crate::units::pure::taskchain::api::TaskNode {

@@ -42,7 +42,8 @@ pub use crate::units::turn::turn::service::state::Session;
 use crate::kernel::api::types::SessionId;
 use crate::kernel::ports::{AskUser, HostProbe};
 use crate::units::catalog::registry::api::Registry;
-use crate::units::conversation::session::api::{AgentSession, Gates, Persister, SessionMeta};
+use crate::units::conversation::session::api::{AgentSession, Gates, Persister};
+use crate::units::session_model::api::SessionMeta;
 use crate::units::transcript::api::{DecisionQueue, SessionEvent};
 
 /// 目的：一次生成的输出方式：流式逐片，还是只要最终结果。

@@ -5,7 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::conversation::session::api::SINGLE;
+use crate::units::session_model::api::SINGLE;
 
 #[test]
 pub(crate) fn create_work_persists_and_history_replays() {

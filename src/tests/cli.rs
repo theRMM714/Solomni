@@ -7,8 +7,8 @@ use super::doubles::module_of;
 use super::ops_with;
 use super::prelude::*;
 use crate::presentation::cli;
-use crate::units::conversation::session::api::SINGLE;
 use crate::units::pure::exec_model::api::Tier;
+use crate::units::session_model::api::SINGLE;
 
 /// 建会话在 CLI 上走**动作表**：同一份声明、同一处授权（未知形态在分发处被拒）。
 #[test]

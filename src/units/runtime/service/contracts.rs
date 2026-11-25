@@ -122,10 +122,8 @@ impl WorkOps for Handle {
         // 核心的行**照推**（推是底层收发消息的统一定律，一次推荐也不例外），推到系统会话：
         // 它不在任何会话表里，前端因此不会为它建标签页；落盘策略是 Drop（只推不留）。
         if !rows.is_empty() {
-            self.bus.push(
-                crate::units::conversation::session::api::SYSTEM_SID_SUGGEST,
-                &rows,
-            );
+            self.bus
+                .push(crate::units::session_model::api::SYSTEM_SID_SUGGEST, &rows);
         }
         Ok(agents)
     }

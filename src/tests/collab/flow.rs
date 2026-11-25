@@ -330,7 +330,7 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     let systools = test_systools();
     // 机制声明把核心操作发给对应的核心席位（越权校验与工具面的判据都是它）。
     let face = |id: &str| -> Vec<String> {
-        let seat = crate::units::conversation::session::api::seat(id).expect("席位在册");
+        let seat = crate::units::session_model::api::seat(id).expect("席位在册");
         crate::units::conversation::session::api::seat_face(seat)
             .into_iter()
             .map(|s| s.to_string())
@@ -354,7 +354,7 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     assert!(!face("executor").iter().any(|t| t == "checklist"));
     // 谁能用"自己模块的工具"也由机制声明说了算：只有干活的那一席发（讨论席列出来等于请它去撞墙）。
     let modules = |id: &str| {
-        crate::units::conversation::session::api::seat(id)
+        crate::units::session_model::api::seat(id)
             .expect("席位在册")
             .module_tools
     };

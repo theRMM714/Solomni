@@ -9,10 +9,12 @@ use std::sync::Arc;
 use crate::kernel::ports::HostProbe;
 use crate::units::catalog::modules::api::Module;
 use crate::units::catalog::registry::api::Registry;
+
 use crate::units::conversation::session::api::{
-    AgentSession, SessionMeta, SessionParams, guest_lease_for, work_root, work_root_of,
+    AgentSession, SessionParams, guest_lease_for, work_root, work_root_of,
 };
 use crate::units::llm::api::{Channel, Msg};
+use crate::units::session_model::api::SessionMeta;
 use crate::units::turn::turn::api::Session;
 use crate::units::turn::turn::service::session::Turn;
 use crate::units::workspace::api::{Sandbox, WORKIGNORE};

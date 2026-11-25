@@ -5,7 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::conversation::session::api::{MEETING, SINGLE};
+use crate::units::session_model::api::{MEETING, SINGLE};
 
 #[test]
 pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
@@ -686,8 +686,8 @@ pub(crate) fn rewind_never_splits_a_reply() {
 /// 目的：侧栏顺序 = **树序**：父会话紧跟它的子会话（顺序与缩进同源，不会再错位）。
 #[test]
 pub(crate) fn history_list_is_ordered_as_a_tree() {
-    let hv = |name: &str, parent: Option<&str>, ts: i64| {
-        crate::units::conversation::session::api::HistoryView {
+    let hv =
+        |name: &str, parent: Option<&str>, ts: i64| crate::units::session_model::api::HistoryView {
             name: name.to_string(),
             kind: MEETING.to_string(),
             flows: true,
@@ -699,8 +699,7 @@ pub(crate) fn history_list_is_ordered_as_a_tree() {
             workspace: None,
             workspace_missing: false,
             run: RunState::Active,
-        }
-    };
+        };
     // 顶层 A(10) 比 B(5) 新；A 下两个子会话（甲=9 比 乙=8 新）。
     let got = crate::units::conversation::session::api::tree_order(vec![
         hv("A", None, 10),

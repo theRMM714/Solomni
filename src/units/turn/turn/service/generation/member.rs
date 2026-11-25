@@ -48,7 +48,7 @@ pub(crate) fn run_member_turn<H: TurnHost>(
     let turn_id = req.turn_id;
     // 这一回合坐的席位：**席位是回合的值**，工具面由会话在换席时现拼（讨论席：机制动词 + 沙箱面）。
     let seat_in = req.seat.clone();
-    if crate::units::conversation::session::api::seat(&seat_in).is_none() {
+    if crate::units::session_model::api::seat(&seat_in).is_none() {
         return Err(format!("席位没登记：{}", seat_in));
     }
     // 子会话自己的**权威行**（逐轮）与**运行态收尾**都走它自己的事件台，

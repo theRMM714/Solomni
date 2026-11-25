@@ -16,7 +16,6 @@ use crate::units::catalog::modules::ports::ModuleSource;
 use crate::units::catalog::packages::ports::PackageSource;
 use crate::units::catalog::registry::api::Settings;
 use crate::units::catalog::registry::ports::SettingsStore;
-use crate::units::conversation::session::api::{MEETING, SINGLE, SessionMeta, SessionSpec};
 use crate::units::conversation::session::ports::HistoryStore;
 use crate::units::llm::api::{Channel, Chat, CompleteOpts, Msg};
 use crate::units::llm::ports::{ChatGateway, ModelCatalog};
@@ -24,6 +23,7 @@ use crate::units::prompt::ports::PromptSource;
 use crate::units::pure::exec_model::api::ExecSpec;
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::pure::registry_model::api::Provider;
+use crate::units::session_model::api::{MEETING, SINGLE, SessionMeta, SessionSpec};
 use crate::units::tools::ports::SysIo;
 use crate::units::workspace::ports::Workdirs;
 use std::collections::BTreeMap;
@@ -73,7 +73,7 @@ fn meta(name: &str) -> SessionMeta {
         node: None,
         delegation: None,
         thinking: None,
-        run: crate::units::conversation::session::api::RunState::Active,
+        run: crate::units::session_model::api::RunState::Active,
         workspace: None,
     }
 }

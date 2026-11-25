@@ -5,7 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::conversation::session::api::SINGLE;
+use crate::units::session_model::api::SINGLE;
 /// 目的：**改形态不必重建会话**：会话里存的是**参数**（`SessionParams`），身份块每次调用现渲染。
 ///   判据：同一个会话（没被重建）在建好之后，把登记处里的形态探测成 native——
 ///   下一回合的请求已经换了一套调用约定，而对话（此前说过的话）一条没丢。
@@ -689,7 +689,7 @@ pub(crate) fn work_versioning_tools_are_granted_to_the_working_roles_only() {
         assert!(book.contains_key(id), "{} 必须在工具总表里", id);
     }
     let face = |id: &str| -> Vec<String> {
-        let seat = crate::units::conversation::session::api::seat(id).expect("席位在册");
+        let seat = crate::units::session_model::api::seat(id).expect("席位在册");
         crate::units::conversation::session::api::seat_face(seat)
             .into_iter()
             .map(|s| s.to_string())

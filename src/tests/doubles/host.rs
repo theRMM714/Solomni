@@ -4,7 +4,7 @@
 //! 联动：`src/kernel/ports.rs` 与 `src/units/packages/ports.rs`。
 
 use super::*;
-use crate::units::conversation::session::api::MEETING;
+use crate::units::session_model::api::MEETING;
 
 /// 目的：记录型围栏端口：记录按会话（`lease_releases`）与按次（`released` / `leases`）两类释放请求。
 pub(crate) struct RecordingFence {

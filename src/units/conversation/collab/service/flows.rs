@@ -7,9 +7,10 @@ use std::sync::Arc;
 
 use crate::kernel::ports::Log;
 use crate::units::catalog::modules::api::Modules;
-use crate::units::conversation::session::api::{Flow, FlowSetup, Flows, Profiles};
+use crate::units::conversation::session::api::{Flow, FlowSetup, Flows};
 use crate::units::llm::api::Llm;
 use crate::units::prompt::api::Prompt;
+use crate::units::session_model::api::Profiles;
 use crate::units::tools::api::{ToolExec, Tools};
 use crate::units::vm::api::Vm;
 

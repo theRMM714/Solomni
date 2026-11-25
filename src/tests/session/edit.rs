@@ -5,7 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::conversation::session::api::{MEETING, SINGLE, SessionSpec};
+use crate::units::session_model::api::{MEETING, SINGLE, SessionSpec};
 
 #[test]
 pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {

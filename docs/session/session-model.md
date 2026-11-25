@@ -10,8 +10,8 @@
 ## 一、形态
 - **执行席按 agent 一会话**（含同 agent 串行）、**讨论回合开工具循环**（能只读核实、拿不到模块工具）、**讨论由核心驱动**（泵只决定"该问谁"，成员回合在它自己的会话里跑，核实行与回合标记都落进那个会话；主会话只留"谁说了什么"）。
 - **会话类型是落盘的声明，不是分支**：建会话时把类型表里那一条解析成 `SessionSpec`（`kind` / `name` / `role` / `flows` / `auto`）写进 `meta.yaml`，之后装配只看这份声明——有流程就按流程装配，没有就一个 agent 直接轮循环（`spec.driven()`）；代码里没有「形态枚举」，也不按 id 分支（「整块交给核心」看 `auto`，不看名字）。类型 id 同时是命令与落盘用的词（ASCII），`name` 只给界面显示，`hint` 是选类型时的一句说明。
-- **会话类型是数据**：一个会话类型就是一串流程 id，声明在 `systools/profiles.yaml`（自带 single / collab / proxy 三条；`flows` 为空 = 没有流程、直接轮循环）。每条写清 `id`（命令与落盘用）、`name`（界面显示）、`hint`（一句说明）、`flows`、`auto`（这个类型整块交给核心：没有名单也没有需求），以及**没有流程时**坐的静止机制 `mechanism`（如 `standard` / `proxy`，解析成它唯一那一席）。**席位不在这里报**：一个机制由哪些席位出演（`core: true` = 核心通道，不进成员表；其余是成员席，各报 `min` 员）是机制自己的声明，在 `session/domain/mechanism.rs` 的 `MECHANISMS`（新增机制在那里加一条，`flow: true` 的才能当流程）。装配期校验：id 唯一且不含空白、流程已注册且不重复出现、没有流程的类型要有静止机制且它不能是流程机制、有流程的类型不该再声明机制、每个流程至少各有一个核心席与成员席；各流程成员席人数取最大折成 `min_agents`：建会话时人数不够就直接拒绝，代拟名单由流程在建组时判（`session::domain::profile::Profiles`，加载在 `session/detail/yaml_profiles.rs`）。
-- **临时拼装**：流程也可以在请求里当场拼一条类型——`create_session` 省略 `kind`、给 `flows`（内联流程 id 数组；CLI 的 `collab` 命令用 `flows` 参数，写流程 id、逗号分隔）。它与预设走同一份白名单：只收已注册（`mechanism.rs` 的 `MECHANISMS`）的流程（`Profiles::check_inline`）；`inline_spec` 折成 `SessionSpec`，落盘 `kind` 记作 `custom`（显示名「临时组合」），装配与回档只看折出来的那份声明（`src/units/conversation/session/domain/profile.rs`）。
+- **会话类型是数据**：一个会话类型就是一串流程 id，声明在 `systools/profiles.yaml`（自带 single / collab / proxy 三条；`flows` 为空 = 没有流程、直接轮循环）。每条写清 `id`（命令与落盘用）、`name`（界面显示）、`hint`（一句说明）、`flows`、`auto`（这个类型整块交给核心：没有名单也没有需求），以及**没有流程时**坐的静止机制 `mechanism`（如 `standard` / `proxy`，解析成它唯一那一席）。**席位不在这里报**：一个机制由哪些席位出演（`core: true` = 核心通道，不进成员表；其余是成员席，各报 `min` 员）是机制自己的声明，在 `src/units/session_model/domain/mechanism.rs` 的 `MECHANISMS`（新增机制在那里加一条，`flow: true` 的才能当流程）。装配期校验：id 唯一且不含空白、流程已注册且不重复出现、没有流程的类型要有静止机制且它不能是流程机制、有流程的类型不该再声明机制、每个流程至少各有一个核心席与成员席；各流程成员席人数取最大折成 `min_agents`：建会话时人数不够就直接拒绝，代拟名单由流程在建组时判（`session::domain::profile::Profiles`，加载在 `session/detail/yaml_profiles.rs`）。
+- **临时拼装**：流程也可以在请求里当场拼一条类型——`create_session` 省略 `kind`、给 `flows`（内联流程 id 数组；CLI 的 `collab` 命令用 `flows` 参数，写流程 id、逗号分隔）。它与预设走同一份白名单：只收已注册（`mechanism.rs` 的 `MECHANISMS`）的流程（`Profiles::check_inline`）；`inline_spec` 折成 `SessionSpec`，落盘 `kind` 记作 `custom`（显示名「临时组合」），装配与回档只看折出来的那份声明（`src/units/session_model/domain/profile.rs`）。
 - **agent 会话在第一个回合按需建**。
 - 主会话投影行带 `turn`（回档按回合同步截断）；工具面由机制席位合成（工具面、身份与越权校验同出一份声明）；压缩：`compact` 工具 + `compacted` 转录行 + 发送视图，按模型窗口百分比自动触发。
 
@@ -161,7 +161,7 @@ session/<工作名>/
 
 - **`stopped`**：已停止（**历史态**）。此后的**派发与唤醒一律被拒**（"取会话去生成"那道闸 `Core::dispatch_gate` 两者都拦）；正在跑的那次会被**级联停掉**。界面按历史态渲染它：输入区收起，只留「启用会话」——启用是显式的恢复动作，只恢复会话（含虚拟机 guest），**不产生模型调用**。停着的时候**不给「继续」**：派发会被拒，那个按钮只会是假入口。
 - 真正"接着走"由上下文继续负责（见下），它只在会话**活跃**且有真实断点时出现：单 agent 上一轮被打断时给「继续」，协作泵没走完时给「恢复协作」；没有断点、正在跑、代理、`stopped` 与 `archived` 都不显示（`Work::continue_action`，`src/units/work/service/views.rs`）。
-- **`archived`**：已归档。从会话列表收起，**派发与唤醒一律被拒**；归档那一下整棵子树里还有在生成的就先**中断**再归档，不留半个状态。它不是终态：「恢复归档」把整棵子树翻回 `active`，**不唤醒、不产生模型调用**；彻底收尾只有删除（拒绝在 `SessionMeta::dispatch_refusal`，`src/units/conversation/session/domain/history.rs`；归档 / 恢复走 `control_session` 的 `archive` / `restore`，`src/units/runtime/service/bridge.rs`）。
+- **`archived`**：已归档。从会话列表收起，**派发与唤醒一律被拒**；归档那一下整棵子树里还有在生成的就先**中断**再归档，不留半个状态。它不是终态：「恢复归档」把整棵子树翻回 `active`，**不唤醒、不产生模型调用**；彻底收尾只有删除（拒绝在 `SessionMeta::dispatch_refusal`，`src/units/session_model/domain/history.rs`；归档 / 恢复走 `control_session` 的 `archive` / `restore`，`src/units/runtime/service/bridge.rs`）。
 - 判据只有一处（`SessionMeta::dispatch_refusal`）：转达、观察、控制与叫醒都问它，不各写一份。
 - 重启 / 回档后照样成立（它就是 meta 的一部分，不属于"这一刻"的短暂态）。
 - **启用 / 继续分开**：历史回放只读，已停止的活动视图同样收起输入区，这两种状态都只有「启用会话」；它由 `activate_session` 走两段式（核心准备 → 调用方线程起 guest → 核心提交），不跑模型、不写转录。启用后 `SessionView.continue` 才决定是否显示上下文继续；前端不自己判断末条或协作泵。
@@ -307,7 +307,7 @@ session/<工作名>/
 
 - **模块工具只在执行回合给**：讨论回合拿不到"干活"的手段——不是"被拒绝"，是**没有**。
 - **这一份工具面是随回合注入的**：核心查"这一回合的身份能用的工具"。信封通道把那一份（说明 + 参数）作为一条系统消息放进该回合的上下文；原生通道由**声明槽**下发名字 / 说明 / JSON Schema，不再重复文字清单（只保留 patch 这类声明表达不了的写法）。**整本工具总表不进提示词**——列了必然被拒的工具等于请模型去撞墙（细则见 [tools-and-roles.md](../tools/tools-and-roles.md) 二）。
-- 机制席位（session/domain/mechanism.rs 的 SEATS）**只声明需求**（发哪些工具、能不能写、能不能发布、带哪段提示词）；这一席的面由会话的**唯一装配机**现拼（session/domain/assemble.rs 的 `assemble` → `FaceInput` / `SeatFace`）：发放（提示词块与原生声明槽）与越权校验同出一份清单，代码里不另写名单。回合只携带**席位**（`TurnRun.seat`）：每回合驱动换席时由会话现拼这一席的面并还原（AgentSession::enter_seat → MemberTools::install_seat）；节点 / 单 agent 回合在准备段就把席位装进会话，不沿用会话出生时的面（见 [tools-and-roles.md](../tools/tools-and-roles.md) 三）。
+- 机制席位（src/units/session_model/domain/mechanism.rs 的 SEATS）**只声明需求**（发哪些工具、能不能写、能不能发布、带哪段提示词）；这一席的面由会话的**唯一装配机**现拼（session/domain/assemble.rs 的 `assemble` → `FaceInput` / `SeatFace`）：发放（提示词块与原生声明槽）与越权校验同出一份清单，代码里不另写名单。回合只携带**席位**（`TurnRun.seat`）：每回合驱动换席时由会话现拼这一席的面并还原（AgentSession::enter_seat → MemberTools::install_seat）；节点 / 单 agent 回合在准备段就把席位装进会话，不沿用会话出生时的面（见 [tools-and-roles.md](../tools/tools-and-roles.md) 三）。
 - **派发三类来源同一条路径**：这一回合的工具面里，系统工具走 `ToolExec::run_builtin`，模块工具走 `dispatch_external`，**核心自有工具**（代理工具等）问注入的 `ToolHandler` 谁认领它——三类同一条路径（`src/kernel/ports.rs` 的 `ToolHandler`，见 [architecture/README.md](../architecture/README.md) §二）。加一类工具只注册一个 handler，不改循环。
 
 ### 四之一、会话参数与对话分开

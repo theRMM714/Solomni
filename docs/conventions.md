@@ -43,7 +43,7 @@
 | 业务边界（`src/units/<单元>/<子业务>/`；独立业务的判据见 `docs/architecture/boundaries.md`） | **子业务**（能力 / capability） | 业务模块、模块 |
 | 一次任务里"用谁、怎么组合、谁拍板" | **形态**（single / collab / proxy） | 模式、架构、拓扑 |
 | 一个会话类型的组成（id 与显示名、流程序列、是否整块交给核心、没有流程时的静止机制） | **会话类型**（`Profiles`；数据在 `systools/profiles.yaml`；落盘是 `SessionSpec`） | 会话模板、流程模板 |
-| 回合身份的来源：一组席位（核心席与成员席各要几员）加上它发哪些工具；`flow: true` 的能当流程串进会话，其余是静止机制 | **机制**（`Mechanism`；声明在 `src/units/conversation/session/domain/mechanism.rs` 的 `MECHANISMS`） | 角色组、流程模板 |
+| 回合身份的来源：一组席位（核心席与成员席各要几员）加上它发哪些工具；`flow: true` 的能当流程串进会话，其余是静止机制 | **机制**（`Mechanism`；声明在 `src/units/session_model/domain/mechanism.rs` 的 `MECHANISMS`） | 角色组、流程模板 |
 | 机制里的一个身份组：提示词 + 工具面 + 能不能写 / 能不能发布 + 是否给模块工具 | **席位**（`Seat`；同一文件的 `SEATS`，id 全局唯一） | 角色、角色表 |
 | 驱动与具体流程之间的插件契约（推一步 / 让出一步 / 交回 / 处置自己发的关卡） | **流程**（`Flow`；`flow: true` 的机制即流程，id 即机制 id） | 流程引擎、编排器 |
 | 一次运行与它的落盘单元 | **会话**（session） | 对话、聊天 |

@@ -37,7 +37,7 @@
   - domain 不读盘：`has_userdata` 作为事实随沙箱注入。
   - 事实为否（建不了）时不进 `rw`；`standalone` 的缺省工作目录退回模块根。
   - `prepare_fence` 跳过不存在的落点，不判整次失败。
-- 新增 / 修改系统工具 → 改 `systools/tools.yaml` 与（需要时）`session/domain/mechanism.rs` 的席位声明；尚未实现的方向记在 `systool_gaps.yaml`（仓库根；不替代测试缺口账）。
+- 新增 / 修改系统工具 → 改 `systools/tools.yaml` 与（需要时）`src/units/session_model/domain/mechanism.rs` 的席位声明；尚未实现的方向记在 `systool_gaps.yaml`（仓库根；不替代测试缺口账）。
 - 新增 / 修改产品命令（命令名、别名、分组、参数声明、确认门槛、执行者）→ 改 `systools/commands.yaml`；写法、校验与补全由参数声明派生（`src/units/tools/domain/op.rs`），执行分派仍写在入口与终端层，表与分派的对齐由 `src/tests/commands.rs` 锁死。
 
 ## 本目录

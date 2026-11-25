@@ -3,11 +3,12 @@
 //! 不管：文件机制（在 `detail/fs_history.rs`）、状态派生与回档算术（在 `domain/`）、队列代理（在 runtime）。
 //! 联动：别的能力走 `api::History`；呈现层走 `api::HistoryOps`（由队列代理实现）；装配在组合根，这里只收注入的端口。
 
-use crate::units::conversation::session::api::{History, HistoryView, SessionMeta};
+use crate::units::conversation::session::api::History;
 use crate::units::conversation::session::domain::assemble as face_asm;
-use crate::units::conversation::session::domain::mechanism;
-use crate::units::conversation::session::domain::persist::persist_policy_for;
 use crate::units::conversation::session::ports::HistoryStore;
+use crate::units::session_model::api as session_model;
+use crate::units::session_model::api::persist_policy_for;
+use crate::units::session_model::api::{HistoryView, SessionMeta};
 use crate::units::transcript::api::SessionEvent;
 use std::sync::Arc;
 
@@ -191,11 +192,11 @@ pub fn core_operation(
     // 声明面按**通道形态**给：原生通道才声明（信封通道的模型看提示词里的工具说明）。
     // 席位面由机制声明按总表合成；席位没登记时退化成空面（装配期已由 `mechanism::problems` 拦下）。
     let book = systools.book();
-    let face_rows: Vec<(&str, &crate::units::tools::api::ToolSchema)> = match mechanism::seat(seat)
-    {
-        Some(seat) => face_asm::resolve(seat, &book).unwrap_or_default(),
-        None => Vec::new(),
-    };
+    let face_rows: Vec<(&str, &crate::units::tools::api::ToolSchema)> =
+        match session_model::seat(seat) {
+            Some(seat) => face_asm::resolve(seat, &book).unwrap_or_default(),
+            None => Vec::new(),
+        };
     let face_ids: Vec<String> = face_rows.iter().map(|(id, _)| id.to_string()).collect();
     // 声明面先备好：它被 opts 借走，**必须先于 opts 声明**（否则借用活得比它长）。
     let decls: Vec<crate::units::llm::api::ToolDecl> =

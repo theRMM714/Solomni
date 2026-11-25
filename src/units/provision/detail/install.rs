@@ -140,9 +140,9 @@ while [ "$i" -lt "$n" ]; do
   a=$1
   shift
   case "$a" in
-    --target=*unknown-*) a=$(printf '%s\n' "$a" | sed 's/^--target=\(.*\)-unknown-/--target=\1-/') ;;
-    --target=x86_64-apple-darwin) a=--target=x86_64-macos ;;
-    --target=aarch64-apple-darwin) a=--target=aarch64-macos ;;
+    --target=*unknown-*) a=$(printf '%s\n' "$a" | sed 's/^--target=\(.*\)-unknown-/--target=\1-/') ;
+    --target=x86_64-apple-darwin) a=--target=x86_64-macos ;
+    --target=aarch64-apple-darwin) a=--target=aarch64-macos ;
   esac
   set -- "$@" "$a"
   i=$((i + 1))
