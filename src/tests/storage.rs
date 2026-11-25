@@ -244,3 +244,29 @@ fn reset_refuses_a_guest_not_in_the_manifest() {
     assert!(lines.is_empty());
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// 目的：模块产物盘点读安装根的 `modules/<id>/build`；数据根里的同名目录不算（构建产物回写模块目录）。
+#[test]
+fn module_outputs_are_read_from_the_module_source_tree() {
+    use crate::units::maintenance::storage::api::Storage;
+    let root = crate::tests::scratch("storage-outputs");
+    let src = crate::kernel::domain::layout::modules_src(&root)
+        .join("demo")
+        .join("build");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("artifact.bin"), vec![0u8; 4096]).unwrap();
+    let decoy = crate::kernel::domain::layout::modules_data(&root)
+        .join("demo")
+        .join("build");
+    std::fs::create_dir_all(&decoy).unwrap();
+    std::fs::write(decoy.join("artifact.bin"), vec![0u8; 8192]).unwrap();
+    let r = service(&root).report().unwrap();
+    let cat = r
+        .categories
+        .iter()
+        .find(|c| c.id == "module-outputs")
+        .unwrap();
+    assert_eq!(cat.items.len(), 1);
+    assert_eq!(cat.items[0].id, "demo");
+    assert_eq!(cat.items[0].bytes, 4096);
+}

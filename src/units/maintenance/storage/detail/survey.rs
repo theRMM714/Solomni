@@ -275,13 +275,14 @@ fn sessions(root: &Path) -> SpaceCategory {
 }
 
 fn module_outputs(root: &Path) -> SpaceCategory {
-    let content = crate::units::content::api::paths(root);
-    let items = scan::children(&content.modules_data())
+    // 构建产物回写模块自己的目录（宿主构建的 cwd 就在模块根），不在数据根。
+    let modules = crate::units::catalog::modules::api::source_dir(root);
+    let items = scan::children(&modules)
         .into_iter()
         .filter(|p| p.is_dir())
         .filter_map(|p| {
             let name = scan::name_of(&p);
-            let build = content.area(&name).build();
+            let build = p.join("build");
             if !build.is_dir() {
                 return None;
             }
@@ -303,7 +304,7 @@ fn module_outputs(root: &Path) -> SpaceCategory {
         "模块产物",
         items,
         false,
-        "宿主侧构建产物；不自动回收",
+        "宿主侧构建产物（在各模块目录里）；不自动回收",
     )
 }
 

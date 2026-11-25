@@ -6,7 +6,7 @@
 
 ## 管什么 / 不管什么
 
-- 管：**落点**——`data/modules`、模块 id → 私有区（`data/modules/<id>`）、私有区里的 `userdata/` 与 `build/`、`data/runtimes`。
+- 管：**落点**——`data/modules`、模块 id → 私有区（`data/modules/<id>`）、私有区里的 `userdata/`、`data/runtimes`。
 - 管：**私有区的确保存在**（`ensure_userdata`，幂等）。这是产品里唯一的"载入即写盘"，以前写在 `catalog` 的扫描器里、且落在源码树；现在归本单元，落点在 `data/` 下。
 - 管：**模块 id 的路径段安全化**（`safe_segment`：只留 ascii 字母数字与 `-_`，丢弃 `.`，其余替 `_`）——兜底防穿越，不改变 `catalog` 的 id 契约。
 - 不管：**模块清单与校验**——`module.yaml` 的读取、id/版本/能力/工具/服务/隐秘字段的拒收理由都在 `catalog`。
@@ -24,7 +24,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`（`layout` 的介质名）
-- 谁在用我：`catalog`（模块扫描与私有区事实）、`work`（guest 的模块根挂载）、`maintenance`（模块产物盘点）、`entry`（组合根装配）
+- 谁在用我：`catalog`（模块扫描与私有区事实）、`work`（guest 的模块根挂载）、`entry`（组合根装配）
 
 ## 一、盘上有什么
 
@@ -35,10 +35,10 @@
 | 模块私有区根 | `data/modules` | `catalog`（id 与清单） | 是 |
 | 模块私有区 | `data/modules/<id>` | 本单元（只给落点） | 是 |
 | 跨任务私有数据 | `data/modules/<id>/userdata` | 模块自己（作为进程 HOME） | 是 |
-| 模块构建产物 | `data/modules/<id>/build` | `builds` / 模块自身构建 | 是 |
+| 模块构建产物 | `modules/<id>/build`（安装根，**不在数据根**） | `builds` / 模块自身构建 | 是（由 `.gitignore` 忽略） |
 | 运行包投放口 | `data/runtimes` | `catalog::packages`（`package.yaml`） | 是（用户投放） |
 
-- 模块源码在 **安装根**的 `modules/<id>`（随包只读），与私有区严格分离：`userdata/` 已完全不落源码树。`build/` 的落点还差一步——`builds` 现在仍把模块目录挂成可写、cwd 就在里面，产物回写到源码树；迁到 `data/modules/<id>/build` 记在缺口 `content-build-landing`（`tests/gaps.yaml`）。
+- 模块源码在 **安装根**的 `modules/<id>`（随包只读），与私有区严格分离：`userdata/` 已完全不落源码树。构建产物例外——`builds` 把模块目录挂成可写、cwd 就在里面，产物回写到 `modules/<id>/build`；那是**源码树里的本地产物**，由 `.gitignore` 忽略，不搬进数据根（数据根只放数据）。
 - 私有区与源码的对应只经 `Content::area(id)` 表达；业务层要拿"模块能写哪儿"，拿的是 `Module.private`（`catalog` 扫描时从本单元问来的），而不是自己拼路径。
 
 ## 二、私有区为什么归这里，而不是模块源码目录
@@ -50,8 +50,8 @@
 ## 三、待办（本阶段没做，别当成已完成）
 
 - **安装 / 卸载没有实现**：`ContentInstall` 的三个方法一律返回 `Err`，缺口 id 为 `content-install` / `content-remove`（登记在 `tests/gaps.yaml`）。`Installed` / `InstallPlan` 两个 DTO 先把形状定下来，等实现时再填。
-- **`build/` 落点已定义，但 `builds` 还没搬过去**：产物目前回写到源码树的模块目录（见 §一 末条）。迁移要改编排行为（构建的工作目录、可写授予与回写目标），不是拼路径的事，因此记成缺口 `content-build-landing`；接上时落点一律用 `area(id).build()`，不要再拼路径。
-- **模块私有区的配额 / 回收**：`storage` 现在只展示 `build/` 的占用（`CAT_OUTPUTS`，不自动回收）；`userdata/` 永不自动回收。
+- **`build/` 不进数据根**（已定）：构建的 cwd 就在模块目录，产物回写在 `modules/<id>/build`，由 `.gitignore` 固定忽略（见 §一 末条）。数据根只放 `userdata/`；`storage` 的模块产物盘点从 `catalog::modules::api::source_dir` 读源码树，不读数据根。
+- **模块私有区的配额 / 回收**：`storage` 现在只展示模块目录里 `build/` 的占用（`CAT_OUTPUTS`，不自动回收）；`userdata/` 永不自动回收。
 
 ## 改动本单元时必须同步
 

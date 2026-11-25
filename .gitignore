@@ -23,7 +23,7 @@
 /data/*
 !/data/.gitkeep
 
-# ---- 模块构建产物（builds 目前仍回写到模块目录；落点迁移见 tests/gaps.yaml 的 content-build-landing）----
+# ---- 模块构建产物（构建的 cwd 就在模块目录，产物回写在这里；数据根只放数据）----
 modules/*/build/
 
 # ---- 本地工具区（运行期环境，不入库）----

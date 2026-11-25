@@ -305,26 +305,3 @@
     能卸载指定版本；被模块或会话占用时如实拒绝；`ContentInstall::remove` 不再返回「还没做」；
     `node run-tests.js` 全绿。
   blocked_by: 缺少实现（本期只留形状）
-
-- id: content-build-landing
-  scope: global
-  level: T2
-  why: |
-    模块构建产物（`build/`）的落点还没搬进数据根：`content` 已声明落点是
-    `data/modules/<id>/build`（`ModuleArea::build`，`storage` 的模块产物盘点也按它算），
-    但 `builds` 执行时把模块目录本身（安装根的 `modules/<id>`）挂成可写、cwd 就在里面，
-    构建产物因此回写到**源码树**（`src/units/maintenance/builds/service.rs` 的 `cwd: module.root.clone()`
-    与 `grants_of(vec![module.root.clone(), place.state], …)`）。安装根按契约是随包只读内容
-    （打包产物里可能根本不可写），两边现在是矛盾的：源码树会被构建污染，
-    `data/modules/<id>/build` 的占用却是空的。
-  how: |
-    1) 构建的工作目录与回写目标改成模块的**数据区**（`data/modules/<id>`）：源从安装根同步进来
-       （`builds` 的源同步脚本已在做镜像，复用同一套），产物只落数据区；
-    2) 围栏授予同步改：安装根的模块目录退成只读源码，数据区的 `build/` 是唯一可写落点；
-    3) 指纹跳过规则不变（`build/` 与 `userdata/` 不是源）；`storage` 的模块产物盘点自动对上；
-    4) 用例：构建一次后源码树里没有 `build/`，`data/modules/<id>/build` 有产物且能直接跑。
-  accept: |
-    构建后源码树保持不变、产物在 `data/modules/<id>/build`；模块工具仍能直接用产物起进程；
-    `.gitignore` 不再需要为源码树的 `build/` 开洞；`node run-tests.js` 全绿。
-  blocked_by: |
-    本轮范围决定（P2.4 只做路径所有权与私有区，不改编排行为；改落点会动构建挂载与回写）
