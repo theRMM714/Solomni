@@ -9,6 +9,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/units/pure/registry_model/api.rs` | 入站面：重导出 agent 的存档形态、名单形状、视图与名字规则（其它单元与呈现层只准用这里） |
-| `src/units/pure/registry_model/domain.rs` | 纯定义的入口：声明 `agents` 概念子模块 |
+| `src/units/pure/registry_model/api.rs` | 入站面：重导出 agent / 供应商 / 模型的存档形态、视图、名字规则与思考目录校验（其它单元与呈现层只准用这里） |
+| `src/units/pure/registry_model/domain.rs` | 纯定义的入口：声明 `agents`、`models` 概念子模块 |
 | `src/units/pure/registry_model/domain/agents.rs` | agent 的存档形态与纯逻辑：`Agent` / `AgentDraft` / `AgentMeta` / `AgentView`、拟名条目 `RosterPick`、名字校验与保留名、名录渲染与点名 |
+| `src/units/pure/registry_model/domain/models.rs` | 供应商与模型的值形态：`Provider` / `ModelEntry` / `ModelDraft`、工具调用形态 `ToolMode`、思考档位 `ThinkingLevel` / `ThinkingCatalog` / `ThinkingSpec`、`StorageSettings`、三张视图与思考目录校验 `validate_thinking_catalog` |

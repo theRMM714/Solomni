@@ -129,11 +129,11 @@ pub fn tool_result_body(c: &crate::units::transcript::api::ToolCallView) -> Stri
 ///   - 这条回复的调用都带合法原生 id 且当前走原生通道 → assistant(正文 + tool_calls) + 每条调用一条 role=tool；
 ///   - 其余（手写信封、原生通道里写坏的调用、切换形态后的旧消息）→ assistant(正文) + 结果当用户消息。
 pub fn reply_msgs(
-    mode: crate::units::llm::api::ToolMode,
+    mode: crate::units::pure::registry_model::api::ToolMode,
     raw: &str,
     calls: &[crate::units::transcript::api::ToolCallView],
 ) -> Vec<crate::units::llm::api::Msg> {
-    let protocol = mode == crate::units::llm::api::ToolMode::Native
+    let protocol = mode == crate::units::pure::registry_model::api::ToolMode::Native
         && !calls.is_empty()
         && calls.iter().all(|c| !c.call_id.is_empty());
     let mut out: Vec<crate::units::llm::api::Msg> = Vec::with_capacity(calls.len() + 1);
@@ -179,7 +179,7 @@ pub fn core_operation(
     systools: &dyn crate::units::tools::api::Tools,
     seat: &str,
     tool: &str,
-    mode: crate::units::llm::api::ToolMode,
+    mode: crate::units::pure::registry_model::api::ToolMode,
     chat: &mut dyn crate::units::llm::api::Chat,
     msgs: &[crate::units::llm::api::Msg],
     opts: crate::units::llm::api::CompleteOpts<'static>,
@@ -199,7 +199,7 @@ pub fn core_operation(
     let face_ids: Vec<String> = face_rows.iter().map(|(id, _)| id.to_string()).collect();
     // 声明面先备好：它被 opts 借走，**必须先于 opts 声明**（否则借用活得比它长）。
     let decls: Vec<crate::units::llm::api::ToolDecl> =
-        if mode == crate::units::llm::api::ToolMode::Native {
+        if mode == crate::units::pure::registry_model::api::ToolMode::Native {
             face_rows.iter().map(|(id, s)| s.decl(id)).collect()
         } else {
             Vec::new()
@@ -326,19 +326,21 @@ pub fn core_operation(
             return Ok(payload);
         }
         // 没有目标调用：看它请求的是不是**该席位拿得到的只读核实工具**（read / grep）。
-        let calls: Vec<(String, String, String)> =
-            if mode == crate::units::llm::api::ToolMode::Native && !done.calls.is_empty() {
-                done.calls
-                    .iter()
-                    .map(|c| (c.id.clone(), c.name.clone(), c.args_json.clone()))
-                    .collect()
-            } else {
-                parsed
-                    .tools
-                    .iter()
-                    .map(|t| (String::new(), t.name.clone(), t.args_json.clone()))
-                    .collect()
-            };
+        let calls: Vec<(String, String, String)> = if mode
+            == crate::units::pure::registry_model::api::ToolMode::Native
+            && !done.calls.is_empty()
+        {
+            done.calls
+                .iter()
+                .map(|c| (c.id.clone(), c.name.clone(), c.args_json.clone()))
+                .collect()
+        } else {
+            parsed
+                .tools
+                .iter()
+                .map(|t| (String::new(), t.name.clone(), t.args_json.clone()))
+                .collect()
+        };
         let ctx = match verify.as_deref_mut() {
             Some(c) => c,
             None => {

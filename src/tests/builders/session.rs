@@ -56,7 +56,7 @@ pub(crate) fn member_with_tools(
     let m = Member::new(
         id,
         crate::tests::doubles::test_params(id),
-        crate::units::llm::api::ToolMode::Envelope,
+        crate::units::pure::registry_model::api::ToolMode::Envelope,
         scripted(script),
     );
     // 该路径走模块声明的外部命令（scan）：空沙箱 + 内存 IO，内置工具不参与。
@@ -64,7 +64,7 @@ pub(crate) fn member_with_tools(
         member: m,
         tools: Some(MemberTools {
             face: crate::units::conversation::session::api::ToolFace {
-                mode: crate::units::llm::api::ToolMode::Envelope,
+                mode: crate::units::pure::registry_model::api::ToolMode::Envelope,
                 seat: "solo".to_string(),
                 modules,
                 tier: crate::units::pure::exec_model::api::Tier::Host,

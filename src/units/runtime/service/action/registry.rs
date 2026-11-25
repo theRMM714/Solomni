@@ -43,7 +43,7 @@ impl Handle {
                     None => RegistryOps::models(self)?
                         .into_iter()
                         .find(|m| m.id == s("id"))
-                        .map(|m| crate::units::catalog::registry::api::ThinkingSpec {
+                        .map(|m| crate::units::pure::registry_model::api::ThinkingSpec {
                             default: m.thinking.default,
                             levels: m.thinking.levels,
                         })
@@ -51,9 +51,9 @@ impl Handle {
                 };
                 // 工具调用形态：表单带 tools 就用它；没带 = 编辑保留原值，新建缺省（native）。
                 let tools = match args.get("tools").and_then(|v| v.as_str()) {
-                    Some(raw) => serde_json::from_value::<crate::units::llm::api::ToolMode>(
-                        serde_json::json!(raw),
-                    )
+                    Some(raw) => serde_json::from_value::<
+                        crate::units::pure::registry_model::api::ToolMode,
+                    >(serde_json::json!(raw))
                     .map_err(|_| format!("工具调用方式只认 native / envelope：{}", raw))?,
                     None => self
                         .models()?
@@ -62,7 +62,7 @@ impl Handle {
                         .map(|m| m.tools)
                         .unwrap_or_default(),
                 };
-                let draft = crate::units::catalog::registry::api::ModelDraft {
+                let draft = crate::units::pure::registry_model::api::ModelDraft {
                     id: s("id"),
                     name: s("name"),
                     api_model: s("api_model"),

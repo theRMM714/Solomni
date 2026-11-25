@@ -364,7 +364,7 @@ impl RegistryOps for Handle {
 
     fn upsert_model(
         &self,
-        draft: crate::units::catalog::registry::api::ModelDraft,
+        draft: crate::units::pure::registry_model::api::ModelDraft,
     ) -> Result<(), String> {
         // 保存前实测（原生工具与回放形状）与落盘判据都在 registry：本层只把它交到核心线程上跑。
         self.call(move |core| {

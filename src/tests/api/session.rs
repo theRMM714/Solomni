@@ -607,13 +607,13 @@ fn set_permission_profile_action_switches_the_session_profile() {
 
 #[test]
 fn set_thinking_action_switches_the_work_level_and_rejects_unmapped_levels() {
-    use crate::units::catalog::registry::api::ThinkingSpec;
+    use crate::units::pure::registry_model::api::ThinkingSpec;
     use std::collections::BTreeMap;
     let handle = spawn(vec![module_of("a")], Vec::new());
     let faces = Faces::from_handle(&handle);
     faces
         .registry
-        .upsert_model(crate::units::catalog::registry::api::ModelDraft {
+        .upsert_model(crate::units::pure::registry_model::api::ModelDraft {
             thinking: ThinkingSpec {
                 default: None,
                 levels: BTreeMap::from([
@@ -772,13 +772,13 @@ fn create_work_takes_the_context_freshness_chosen_in_the_wizard() {
 
 #[test]
 fn thinking_view_uses_the_common_default_and_hides_unmapped_levels() {
-    use crate::units::catalog::registry::api::ThinkingSpec;
+    use crate::units::pure::registry_model::api::ThinkingSpec;
     use std::collections::BTreeMap;
     let handle = spawn(vec![module_of("a")], Vec::new());
     let faces = Faces::from_handle(&handle);
     faces
         .registry
-        .upsert_model(crate::units::catalog::registry::api::ModelDraft {
+        .upsert_model(crate::units::pure::registry_model::api::ModelDraft {
             thinking: ThinkingSpec {
                 default: Some("high".to_string()),
                 levels: BTreeMap::from([

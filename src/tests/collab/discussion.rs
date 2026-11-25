@@ -369,7 +369,7 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
     let members = vec![Member::new(
         "m0",
         crate::tests::doubles::test_params("m0"),
-        crate::units::llm::api::ToolMode::Envelope,
+        crate::units::pure::registry_model::api::ToolMode::Envelope,
         scripted(vec!["我觉得可以".into()]),
     )];
     let mut disc = Discussion::new(

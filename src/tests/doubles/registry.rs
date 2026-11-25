@@ -28,7 +28,7 @@ impl InMemorySettings {
                 api_model: "m".to_string(),
                 provider: "p".to_string(),
                 note: String::new(),
-                tools: crate::units::llm::api::ToolMode::Envelope,
+                tools: crate::units::pure::registry_model::api::ToolMode::Envelope,
                 context: 32_000,
                 thinking: Default::default(),
             },

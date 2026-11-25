@@ -38,7 +38,7 @@ pub struct Member {
     /// 目的：会话参数：身份块由它**每回合现渲染**（不给成员存一份渲染好的文本）。
     pub params: crate::units::conversation::session::api::SessionParams,
     /// 目的：该席位的通道形态（登记处派生）：身份块里的调用约定按它渲染。
-    pub mode: crate::units::llm::api::ToolMode,
+    pub mode: crate::units::pure::registry_model::api::ToolMode,
     /// 目的：内存通道：**只有测试用**（生产里回合跑在各自的 agent 会话里，见 session-model.md 二之二）。
     #[cfg(test)]
     pub chat: Option<BoxedChat>,
@@ -51,7 +51,7 @@ impl Member {
     pub fn plain(
         id: &str,
         params: crate::units::conversation::session::api::SessionParams,
-        mode: crate::units::llm::api::ToolMode,
+        mode: crate::units::pure::registry_model::api::ToolMode,
     ) -> Member {
         Member {
             id: id.to_string(),
@@ -69,7 +69,7 @@ impl Member {
     pub fn new(
         id: &str,
         params: crate::units::conversation::session::api::SessionParams,
-        mode: crate::units::llm::api::ToolMode,
+        mode: crate::units::pure::registry_model::api::ToolMode,
         chat: BoxedChat,
     ) -> Member {
         Member {

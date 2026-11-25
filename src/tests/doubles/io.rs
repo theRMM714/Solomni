@@ -527,14 +527,14 @@ pub(crate) fn model_draft(
     provider: &str,
     note: &str,
     context: u64,
-) -> crate::units::catalog::registry::api::ModelDraft {
-    crate::units::catalog::registry::api::ModelDraft {
+) -> crate::units::pure::registry_model::api::ModelDraft {
+    crate::units::pure::registry_model::api::ModelDraft {
         id: id.to_string(),
         name: name.to_string(),
         api_model: api_model.to_string(),
         provider: provider.to_string(),
         note: note.to_string(),
-        tools: crate::units::llm::api::ToolMode::Envelope,
+        tools: crate::units::pure::registry_model::api::ToolMode::Envelope,
         context,
         thinking: Default::default(),
     }

@@ -12,6 +12,6 @@
 | `src/units/catalog/registry/api.rs` | 入站能力面：登记处 DTO 的重导出、`Registry` 能力面与呈现层的队列面 `RegistryOps`（内部线程 + 命令队列） |
 | `src/units/catalog/registry/service.rs` | 登记处的状态与用例：持四份 yaml 的内存形态（`Settings`），改完即经 `SettingsStore` 落盘 |
 | `src/units/catalog/registry/ports.rs` | 出站端口：四份 yaml 的持久化 `SettingsStore`（load / save） |
-| `src/units/catalog/registry/domain/providers.rs` | 供应商与模型的内存形态与通道解析：`Provider`（端点 + 密钥）、`ModelEntry`（模型串 / 上下文 / 工具形态 / 思考强度映射）与 `Settings` / `AppSettings`；`settings.yaml` 的全局 `SandboxSettings`（硬约束 + 会话默认权限）与 `ThinkingCatalog`（思考等级目录）也在这一份；沙箱授权的互斥校验用 kernel 平台事实 `HAS_EXTERNAL_ACL_STEP` |
+| `src/units/catalog/registry/domain/providers.rs` | 登记处的设置状态与通道解析：`AppSettings`（`settings.yaml` 的基本设置）、`SandboxSettings` 全家（硬约束 + 会话默认权限）、`Settings`（四份 yaml 的内存合体）与 `impl Settings` 的通道解析、工具形态、上下文窗口、思考片段与视图；设置 / 沙箱 / 压缩的校验（沙箱授权互斥校验用 kernel 平台事实 `HAS_EXTERNAL_ACL_STEP`）；供应商与模型的值形态在环 1 的 registry_model |
 | `src/units/catalog/registry/domain/picks.rs` | 拟名单与模型的落地：`resolve_picks` 把核心拟的名单逐条校验成 agent 实例并给出拒收理由、`unique_instance_name` 去重尾号、`model_listing` 渲染可用模型清单（被校验的形状在环 1 的 registry_model） |
 | `src/units/catalog/registry/detail/yaml_settings.rs` | `SettingsStore` 的磁盘实现：providers / models / settings / agents 四份 yaml 的读写（密钥只落 `providers.yaml`；私密权限经 `fs_meta::restrict_private_file`） |

@@ -20,7 +20,7 @@ pub fn draft_plan(
     roster: &str,
     transcript: &str,
     core_chat: &mut dyn Chat,
-    mode: crate::units::llm::api::ToolMode,
+    mode: crate::units::pure::registry_model::api::ToolMode,
     opts: crate::units::llm::api::CompleteOpts<'static>,
     cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     verify: Option<&mut (dyn crate::units::conversation::session::api::CoreVerify + 'static)>,
@@ -173,7 +173,7 @@ impl Execution {
         prompt: &dyn Prompt,
         systools: &dyn crate::units::tools::api::Tools,
         llm: crate::units::llm::api::LlmOpts,
-        mode: crate::units::llm::api::ToolMode,
+        mode: crate::units::pure::registry_model::api::ToolMode,
         verify: Option<&mut (dyn crate::units::conversation::session::api::CoreVerify + 'static)>,
         // 核心这一轮的行推给谁（总验收也要能看到它在核对什么）。
         sink: &mut dyn FnMut(SessionEvent),

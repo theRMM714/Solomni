@@ -217,13 +217,15 @@ pub fn converse_with(
         };
         // 形态与工具声明面：由本成员的通道形态决定（envelope = 不声明，走手写信封；native = 声明本成员的工具）
         let (mode, decls) = match tools.as_deref_mut() {
-            Some(ctx) if ctx.face.mode == crate::units::llm::api::ToolMode::Native => {
+            Some(ctx)
+                if ctx.face.mode == crate::units::pure::registry_model::api::ToolMode::Native =>
+            {
                 let mode = ctx.face.mode;
                 (mode, tool_decls(&ctx.face))
             }
             Some(ctx) => (ctx.face.mode, ToolDecls::default()),
             None => (
-                crate::units::llm::api::ToolMode::Envelope,
+                crate::units::pure::registry_model::api::ToolMode::Envelope,
                 ToolDecls::default(),
             ),
         };
@@ -371,7 +373,7 @@ pub fn converse_with(
                 }
             };
             let said: Option<(Verb, String, bool)> =
-                if mode == crate::units::llm::api::ToolMode::Native {
+                if mode == crate::units::pure::registry_model::api::ToolMode::Native {
                     calls
                         .iter()
                         .find_map(|c| verb_of(&c.name).map(|v| (v, arg_text(&c.args_json), false)))
@@ -405,7 +407,7 @@ pub fn converse_with(
         }
         // ── 信封通道：供应商偶尔把调用放进原生槽位：两套形态互斥，不能执行，但也绝不静默丢——
         // 落一条失败工具行 + warn，让模型改写信封重发（否则正文停在冒号，没有任何错误行）。
-        if mode == crate::units::llm::api::ToolMode::Envelope
+        if mode == crate::units::pure::registry_model::api::ToolMode::Envelope
             && !calls.is_empty()
             && reply.tools.is_empty()
             && let Some(ctx) = tools.as_deref_mut()
@@ -466,7 +468,7 @@ pub fn converse_with(
         }
 
         // ── 原生通道：工具调用来自供应商的结构化槽位（不解析信封）──
-        if mode == crate::units::llm::api::ToolMode::Native
+        if mode == crate::units::pure::registry_model::api::ToolMode::Native
             && let Some(ctx) = tools.as_deref_mut()
         {
             // ① 有原生调用：逐个执行，各成一条工具行；助手消息如实记下"它调了什么"（回放与下一轮都看得到）

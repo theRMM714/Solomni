@@ -5,14 +5,15 @@
 
 use crate::kernel::ports::Log;
 use crate::units::catalog::modules::api::Roster;
-use crate::units::catalog::registry::api::{ModelView, ProviderView, Registry};
-use crate::units::catalog::registry::domain::providers::{
-    self, AppSettings, ModelDraft, ModelEntry, Provider, Settings,
-};
+use crate::units::catalog::registry::api::Registry;
+use crate::units::catalog::registry::domain::providers::{self, AppSettings, Settings};
 use crate::units::catalog::registry::ports::SettingsStore;
-use crate::units::llm::api::{Channel, Llm, ProbeOutcome, ReplayReport, ToolMode};
+use crate::units::llm::api::{Channel, Llm, ProbeOutcome, ReplayReport};
 use crate::units::pure::registry_model::api as agents;
 use crate::units::pure::registry_model::api::AgentView;
+use crate::units::pure::registry_model::api::{
+    ModelDraft, ModelEntry, ModelView, Provider, ProviderView, ToolMode, validate_thinking_catalog,
+};
 use std::sync::Arc;
 
 /// 目的：只在目标为空时用发现值填上（已登记的一律保留）。
@@ -41,7 +42,7 @@ fn validate_app(
     )
     .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
     // 思考目录：新目录必须自洽，且不能删掉仍被模型引用的档位（否则旧映射悬空）。
-    providers::validate_thinking_catalog(&app.thinking)
+    validate_thinking_catalog(&app.thinking)
         .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
     for (mid, m) in models {
         for level in m.thinking.levels.keys() {

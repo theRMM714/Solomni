@@ -284,7 +284,7 @@ pub(crate) fn archive_hides_dispatch_and_restore_brings_it_back() {
 /// 约束：同一段转录加一条 notice，重建出的对话条数与角色序列与不加时完全一致。
 #[test]
 pub(crate) fn notice_lines_stay_out_of_the_model_dialogue() {
-    use crate::units::llm::api::ToolMode;
+    use crate::units::pure::registry_model::api::ToolMode;
     use crate::units::turn::turn::api::replay_dialogue;
     let events = |with_notice: bool| {
         let mut lines =
@@ -327,7 +327,7 @@ pub(crate) fn notice_lines_stay_out_of_the_model_dialogue() {
 /// 约束：「继续」是重开一轮，不是把半句当发言续写（见 docs/session/session-model.md）。
 #[test]
 pub(crate) fn cut_lines_stay_out_of_the_model_dialogue() {
-    use crate::units::llm::api::ToolMode;
+    use crate::units::pure::registry_model::api::ToolMode;
     use crate::units::turn::turn::api::replay_dialogue;
     let events = |with_cut: bool| {
         let mut lines =

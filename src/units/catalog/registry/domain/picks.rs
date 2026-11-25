@@ -4,7 +4,7 @@
 //! 联动：service.rs 的 agent 写入消费 resolve_picks；registry/api.rs 对外重导出这三个函数。
 
 use crate::units::catalog::modules::api::Roster;
-use crate::units::catalog::registry::domain::providers::ModelEntry;
+use crate::units::pure::registry_model::api::ModelEntry;
 use crate::units::pure::registry_model::api::{AgentMeta, Agents, RosterPick, validate_name};
 use std::collections::BTreeMap;
 

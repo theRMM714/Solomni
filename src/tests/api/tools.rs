@@ -18,7 +18,7 @@ use std::sync::Arc;
 fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
     let handle = spawn(vec![module_of("a")], Vec::new());
     let faces = Faces::from_handle(&handle);
-    let draft = |id: &str, tools| crate::units::catalog::registry::api::ModelDraft {
+    let draft = |id: &str, tools| crate::units::pure::registry_model::api::ModelDraft {
         tools,
         ..model_draft(id, id, id, "p", "", 0)
     };
@@ -27,7 +27,7 @@ fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
         .registry
         .upsert_model(draft(
             "env-model",
-            crate::units::llm::api::ToolMode::Envelope,
+            crate::units::pure::registry_model::api::ToolMode::Envelope,
         ))
         .expect("信封形态不需要实测");
     assert!(
@@ -43,7 +43,7 @@ fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
         .registry
         .upsert_model(draft(
             "native-model",
-            crate::units::llm::api::ToolMode::Native,
+            crate::units::pure::registry_model::api::ToolMode::Native,
         ))
         .unwrap_err();
     assert!(!err.is_empty(), "实测没结论要如实报错");
@@ -70,7 +70,10 @@ fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
     let ok_ops = Faces::from_handle(&ok_handle);
     ok_ops
         .registry
-        .upsert_model(draft("native-ok", crate::units::llm::api::ToolMode::Native))
+        .upsert_model(draft(
+            "native-ok",
+            crate::units::pure::registry_model::api::ToolMode::Native,
+        ))
         .expect("实测明确通过应允许保存");
     assert_eq!(
         ok_ops
@@ -80,7 +83,7 @@ fn native_model_save_is_gated_by_measurement_but_envelope_is_not() {
             .iter()
             .find(|m| m.id == "native-ok")
             .map(|m| m.tools),
-        Some(crate::units::llm::api::ToolMode::Native),
+        Some(crate::units::pure::registry_model::api::ToolMode::Native),
         "保存的就是实测通过的原生形态"
     );
 }

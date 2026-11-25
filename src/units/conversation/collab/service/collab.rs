@@ -135,7 +135,7 @@ pub struct CollabSession {
     /// 目的：回复 id 计数器（转录行按它分组；按落盘重建时从转录里的最大值续号）。
     pub(crate) core_chat: crate::units::llm::api::BoxedChat,
     /// 目的：核心通道的工具调用形态（原生才声明工具；信封通道看提示词里的说明）。
-    pub(crate) core_mode: crate::units::llm::api::ToolMode,
+    pub(crate) core_mode: crate::units::pure::registry_model::api::ToolMode,
     /// 目的：提示词册能力面：**不是册子本体**（持有者只有提示词能力一处），这里只按名字取段。
     pub(crate) prompts: Arc<dyn Prompt>,
     /// 目的：工具总表的能力面（**表本体在工具能力里**，与册子互不依赖）。
@@ -287,7 +287,7 @@ impl CollabSession {
         systools: &dyn crate::units::tools::api::Tools,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         opts: crate::units::llm::api::CompleteOpts<'static>,
-        mode: crate::units::llm::api::ToolMode,
+        mode: crate::units::pure::registry_model::api::ToolMode,
         core_chat: &mut dyn Chat,
         verify: Option<&mut (dyn crate::units::conversation::session::api::CoreVerify + 'static)>,
         kind: &str,
@@ -347,7 +347,7 @@ impl CollabSession {
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         chain: Option<&crate::units::pure::taskchain::api::TaskChain>,
         opts: crate::units::llm::api::CompleteOpts<'static>,
-        mode: crate::units::llm::api::ToolMode,
+        mode: crate::units::pure::registry_model::api::ToolMode,
         core_chat: &mut dyn Chat,
         verify: Option<&mut (dyn crate::units::conversation::session::api::CoreVerify + 'static)>,
         // 上一次填错了要它重填的话（核心据此**一直重填**到合法，不设次数上限）。
