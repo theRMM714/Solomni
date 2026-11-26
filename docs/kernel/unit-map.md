@@ -13,7 +13,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/kernel.rs` | 地基库的入口与公开面：`contracts` / `api` / `ports` / `domain` / `detail` 五个子模块的形状声明 |
-| `src/kernel/api.rs` | 地基库对外面的入口：只声明 `api/` 下的面模块。面按**对外概念**切（`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `path` / `platform`），每个面只做重导出、不定义条目；能力与装配层经 `api::<面>` 取用，内核内部直取所属机制（见 [README](README.md) 的「六、对外面」） |
+| `src/kernel/api.rs` | 地基库对外面的入口：只声明 `api/` 下的面模块。面按**对外概念**切（`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `net` / `path` / `platform`），每个面只做重导出、不定义条目；能力与装配层经 `api::<面>` 取用，内核内部直取所属机制（见 [README](README.md) 的「六、对外面」） |
 | `src/kernel/ports.rs` | 全项目共享的机制端口：`Log` / `PathCodec` / `AskUser` / `ToolHandler` / `HostProbe` / `ProcessRunner` / `SessionHost` / `FenceHost` / `FenceGate` / `UserPath` 的 trait 定义与它们的纯数据形态（含 `ShellRun` 的 `gate`、用户 PATH 的 `PathValue`） |
 | `src/kernel/contracts.rs` | 跨层共享形状的入口：`fence` / `note` / `run` / `types` 四个子模块声明 |
 | `src/kernel/contracts/types.rs` | 跨层共享的端口载荷（纯数据）：`SessionId` / `ToolOutcome` / `Ask` / `AskOutcome` 与默认预算、能力名文法（执行档位与作业进度归 `exec_model`，不在 kernel） |
@@ -48,9 +48,12 @@
 | `src/kernel/detail/locus.rs` | 落点身份（门面）：按卷 + 文件 id 判同一物理对象与物理包含；平台实现在 `src/kernel/detail/locus/windows.rs` / `src/kernel/detail/locus/unix.rs` |
 | `src/kernel/detail/locus/windows.rs` | `locus` 的 Windows 后端：卷序列号 + 文件 id、UNC 与映射盘判定 |
 | `src/kernel/detail/locus/unix.rs` | `locus` 的非 Windows 后端：设备号 + inode、网络路径恒 false |
-| `src/kernel/detail/outbound.rs` | 出站 HTTPS 的共享机制（门面）：通用 ureq 代理；TLS 后端装配在 `src/kernel/detail/outbound/windows.rs` / `src/kernel/detail/outbound/unix.rs` |
-| `src/kernel/detail/outbound/windows.rs` | `outbound` 的 Windows 后端：native-tls + 系统证书库 |
-| `src/kernel/detail/outbound/unix.rs` | `outbound` 的非 Windows 后端：rustls 默认配置 |
+| `src/kernel/detail/io.rs` | IO 面（门面）：唯一直接碰 OS / 网络 / 进程 / 时钟的一层，声明 IO 子模块（当前 `net`） |
+| `src/kernel/detail/io/net.rs` | 出站网络原语（门面）：组装 `backend` 与 `outbound`，让 ureq 与 reqwest 两条通道共用一份平台 TLS 决策；契约用例证明两边都建得出来 |
+| `src/kernel/detail/io/net/backend.rs` | 平台 TLS 装配门面：三个出口（ureq 的 TLS 配置、reqwest 构建器注入、后端名称），按平台选中 `backend/{windows,unix}.rs` |
+| `src/kernel/detail/io/net/backend/windows.rs` | `backend` 的 Windows 后端：ureq 显式 native-tls + 系统证书库；reqwest 的 native-tls 由依赖特性定死，构建器原样返回 |
+| `src/kernel/detail/io/net/backend/unix.rs` | `backend` 的非 Windows 后端：rustls + ring + 系统证书验证器；ureq 用 rustls 默认 |
+| `src/kernel/detail/io/net/outbound.rs` | ureq 代理构建：连接 / 总超时预算，4xx/5xx 当**数据**不当错误（状态由调用方判） |
 | `src/kernel/detail/user_path.rs` | `UserPath` 端口的门面：Windows 实现在 `src/kernel/detail/user_path/windows.rs`，其余平台为空模块 |
 | `src/kernel/detail/user_path/windows.rs` | `UserPath` 的 Windows 实现：读写 `HKCU\Environment` 的 `Path`，保留 `REG_SZ` / `REG_EXPAND_SZ` 类型并广播 `WM_SETTINGCHANGE` |
 | `src/kernel/detail/unpack.rs` | 归档解包机制（门面）：tar / tar.gz / tar.zst / tar.xz / zip 解到目录，支持 strip 与宽容链接；权限位与软链在 `src/kernel/detail/unpack/{windows,unix}.rs` |

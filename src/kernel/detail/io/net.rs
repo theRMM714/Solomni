@@ -1,0 +1,24 @@
+//! 目的：出站网络的原语——ureq 与 reqwest 两条通道从同一份平台决策取 TLS。
+//! 管：`backend`（按平台装配 TLS）与 `outbound`（ureq 代理的预算与状态语义）的组装。
+//! 不管：请求内容、状态码判定、重试与错误归类（在各自单元）；代理与信任环境由各栈自己从环境拾取，这里不另写解析。
+//! 联动：对外面 `src/kernel/api/net.rs`；llm 的 http_agent / http_stream 与 provision 的 fetch 经它取。
+
+pub(crate) mod backend;
+pub(crate) mod outbound;
+
+#[cfg(test)]
+mod tests {
+    /// 目的：两条通道装配的是同一套平台 TLS——后端名称与平台一致，且两边都真的建得出来。
+    #[test]
+    fn two_channels_share_one_tls_decision() {
+        let expected = if cfg!(windows) { "native-tls" } else { "rustls" };
+        assert_eq!(super::backend::name(), expected);
+
+        let _agent = super::outbound::agent(5, 30);
+
+        super::backend::reqwest_builder(reqwest::Client::builder())
+            .expect("平台 TLS 配置")
+            .build()
+            .expect("HTTP 客户端");
+    }
+}

@@ -1,6 +1,6 @@
 //! 目的：用产品自己的出站代理打一次最小 HTTPS 请求（隐藏模式 --https-check）。
 //! 管：参数解析、真实请求与四态结论打印。
-//! 不管：TLS 后端选择与错误分类（在 llm 的 detail）。
+//! 不管：TLS 后端选择（在 kernel 的 `io/net`）与错误分类（在 llm 的 detail）。
 //! 联动：由 main 在 --https-check 分支调用。
 
 /// 目的：用**产品自己的出站代理**（含按平台装配的 TLS）打一次最小 HTTPS 请求，如实报结论。
@@ -13,8 +13,8 @@ pub fn https_check(args: &[String], i: usize) -> i32 {
         eprintln!("用法：solomni --https-check <https url>");
         return 2;
     }
-    let backend = crate::units::llm::detail::http_agent::tls_backend();
-    let agent = crate::units::llm::detail::http_agent::agent(10, 20);
+    let backend = crate::kernel::api::net::tls_backend();
+    let agent = crate::kernel::api::net::agent(10, 20);
     match agent.get(&url).call() {
         Ok(resp) => {
             println!("[HTTPS] ok {} {} {}", resp.status().as_u16(), backend, url);

@@ -18,7 +18,7 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api`（按对外概念分文件：`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `path` / `platform`——见「六、对外面」）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`FenceHost`、`FenceGate`、`UserPath`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执与回执说明）、`domain`（路径书写、取消表、沙箱模式、回执装配）、`detail`（`clock`、`file_log`、`host_probe`、`outbound`、`unpack`、`user_path`、`process`、`procs`、`session`、`i18n`、`confine`：门面 + `job` / `ledger` / `paths` / `prep`）。
+- 入站面：`api`（按对外概念分文件：`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `net` / `path` / `platform`——见「六、对外面」）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`FenceHost`、`FenceGate`、`UserPath`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执与回执说明）、`domain`（路径书写、取消表、沙箱模式、回执装配）、`detail`（`clock`、`file_log`、`host_probe`、`io`（`net`）、`unpack`、`user_path`、`process`、`procs`、`session`、`i18n`、`confine`：门面 + `job` / `ledger` / `paths` / `prep`）。
 - `AskUser` 是「需要用户裁决的机制请用户裁决」的**唯一**入口（`src/kernel/ports.rs`），工具执行层与围栏用它。
   - 形状：`ask(问题) -> 选项 id`，**阻塞**。
   - `halt(为什么)` = 停会话 + 落警告；调用方只在有可回答前端时用它，没有前端按 fail-closed 收场。

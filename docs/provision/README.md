@@ -119,7 +119,7 @@
 - 改清单字段或新增依赖 → `dependencies.yaml` 与 `dependencies/THIRD-PARTY-NOTICES.md`（自托管包的许可证与对应源码）；需要新下载源时改 `links.yaml`。
 - **自托管 release 资产按依赖族发版**（`source: release:<tag>/<资产>`），连 `sha256:` 一起登记（值由 `node pins.js update` 从该 release 的 `SHA256SUMS` 或 GitHub API digest 生成）；链接类源的校验值写进 `links.yaml` 的 `<键>.sha256`。升级资产时 URL 与校验值必须同一个 diff 改掉（`dependencies.yaml`）；哈希不手抄，跑 `node pins.js update` 后用 `node pins.js check` 复核。
 - 改入站契约或路由 → `docs/presentation/contracts.md` 的 ROUTES 表与 `src/tests/routes.rs`（契约测试机器比对）。
-- 改下载 / 解包机制 → kernel 的 `outbound` / `unpack` 单元地图。
+- 改下载 / 解包机制 → kernel 的 `io::net` / `unpack` 单元地图。
 - 改 guest 运行期编排 → [docs/vm/README.md](../vm/README.md) 与 vm 的 `GuestSpec.seed` / `guest_wait_agent` 契约。
 
 ## 本目录

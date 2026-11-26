@@ -1,7 +1,7 @@
 //! 目的：可取消的 OpenAI 兼容流式 HTTP 适配器。
 //! 管：一次模型调用的出站流、SSE 解析、分层超时与取消关闭。
 //! 不管：端点候选与重试归类（endpoint）、通道构造（http_chat）、会话状态与行落盘（会话单元）。
-//! 联动：http_chat 调它；预算来自 llm::api::CompleteOpts；TLS / 代理由 reqwest 的平台配置。
+//! 联动：http_chat 调它；预算来自 llm::api::CompleteOpts；TLS 装配与代理由 kernel 的 `io/net` 统一决定（经 `api::net` 注入）。
 
 use super::endpoint::{Attempt, retryable_status};
 use super::http_agent::redact;
@@ -29,7 +29,7 @@ fn client() -> Result<reqwest::Client, String> {
         .connect_timeout(CONNECT_TIMEOUT)
         // 与旧 ureq 通道一致：只走 HTTP/1.1，避免供应商在 h2 下缓冲 SSE。
         .http1_only();
-    let builder = crate::units::llm::detail::http_tls::configure(builder)?;
+    let builder = crate::kernel::api::net::configure_reqwest(builder)?;
     builder
         .build()
         .map_err(|e| format!("建立 HTTP 客户端失败：{}", e))
