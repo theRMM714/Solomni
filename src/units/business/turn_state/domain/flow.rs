@@ -9,6 +9,7 @@ use std::sync::atomic::AtomicBool;
 use crate::kernel::api::types::Ask;
 use crate::units::business::agentloop::api::MemberTurn;
 use crate::units::business::llm::api::{CompleteOpts, Msg};
+use crate::units::business::session_model::api::Artifact;
 use crate::units::business::transcript::api::SessionEvent;
 use crate::units::business::turn_state::domain::decisions::GateTicket;
 use crate::units::business::workspace::api::Sandboxes;
@@ -134,17 +135,19 @@ pub trait Flow: Send {
         let _ = roster;
     }
     /// 目的：上一段流程交来的产物（复合流程的第一段收到的是用户需求）。
-    fn intake(&mut self, text: String) {
-        let _ = text;
+    /// 约束：产物照原样收下——种类由 `Loop::accepts` 声明、装配期校验，本段不猜也不改。
+    fn intake(&mut self, artifact: Artifact) {
+        let _ = artifact;
     }
     /// 目的：会话开场把用户需求交给流程（第一段收下它；默认只是当成本段输入）。
     /// 约束：一段流程只开场一次；需求由用户那条消息给出，不是流程自己编的。
     fn begin_with(&mut self, task: &str, sink: &mut dyn FnMut(SessionEvent)) {
         let _ = sink;
-        self.intake(task.to_string());
+        self.intake(Artifact::Requirement(task.to_string()));
     }
     /// 目的：本段流程的产物（交给下一段；`None` = 没交出东西）。
-    fn output(&self) -> Option<String> {
+    /// 约束：种类由 `Loop::produces` 声明；复合流程原样搬运，不解释内容。
+    fn output(&self) -> Option<Artifact> {
         None
     }
     /// 目的：流程自己判定整场工作已收尾（界面据此显示完成）。

@@ -48,13 +48,13 @@ flowchart RL
 | 环 2 · 状态与机制 | `turn_state` | `agentloop` | 6 |
 | 环 2 · 状态与机制 | `agentloop` | `residents` | 5 |
 | 环 2 · 状态与机制 | `tools` | `catalog` | 5 |
+| 环 2 · 状态与机制 | `turn_state` | `session_model` | 5 |
 | 环 2 · 状态与机制 | `turn_state` | `transcript` | 5 |
 | 环 2 · 状态与机制 | `tools` | `llm` | 4 |
 | 环 2 · 状态与机制 | `turn_state` | `workspace` | 4 |
 | 环 2 · 状态与机制 | `turn_state` | `catalog` | 4 |
 | 环 2 · 状态与机制 | `catalog` | `llm` | 3 |
 | 环 2 · 状态与机制 | `residents` | `catalog` | 3 |
-| 环 2 · 状态与机制 | `turn_state` | `session_model` | 3 |
 | 环 2 · 状态与机制 | `turn_state` | `llm` | 3 |
 | 环 2 · 状态与机制 | `catalog` | `workspace` | 2 |
 | 环 2 · 状态与机制 | `provision` | `workspace` | 2 |

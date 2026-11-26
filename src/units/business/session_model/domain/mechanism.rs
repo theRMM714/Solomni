@@ -3,6 +3,8 @@
 //! 不管：工具面怎么合成（在 `agentloop` 的 `assemble`，按会话类型挂的工具来源各自交 id）；会话类型表（`profile` 引用段 id）。
 //! 联动：`profile` 的会话类型声明一串流程段或一个静止段；`turn` 的每回合按「段 + 角色」取身份与机制动作。
 
+use crate::units::business::session_model::domain::artifact::Kind;
+
 /// 目的：一个**角色**——身份本身：带哪段提示词、由核心通道还是成员会话出演。
 /// 约束：角色只是身份；人数与机制动作属于「它在某一段里坐的那个位」（`Cast`）。
 ///   文件面与模块面不在这里：前者由 agent 的能力组决定，后者由它装了哪些模块决定（见 `tools` 的 `ToolSource`）。
@@ -43,6 +45,10 @@ pub struct Loop {
     /// 目的：这一段里哪些**动作**要用户点头才执行（工具 id，不是能力组）：调用时先走裁决通道。
     /// 约束：只影响授权（`Policy`），不影响发放；粒度刻意细到工具——能力组里混着只读动作，按组问会把查询也变成弹窗。
     pub ask: &'static [&'static str],
+    /// 目的：这一段能接哪些产物（种类，不带内容）：串起来时前一段交出的东西要在这里面。
+    pub accepts: &'static [Kind],
+    /// 目的：这一段收尾时交给下一段哪种产物；`None` = 不交东西（后面还接一段就串不起来）。
+    pub produces: Option<Kind>,
 }
 
 /// 目的：核心代理角色：把用户的话转成对其它会话的动作（开、发、看、停）。
@@ -107,6 +113,8 @@ const DISCUSS: Loop = Loop {
         crate::units::business::session_model::domain::tools::FS_WRITE,
         crate::units::business::session_model::domain::tools::SHARED_WRITE,
     ],
+    accepts: &[Kind::Requirement],
+    produces: Some(Kind::Summary),
     cast: &[
         Cast {
             role: CORE_PROXY.id,
@@ -128,6 +136,8 @@ const EXECUTE: Loop = Loop {
     deny: &[],
     flow: true,
     ask: &[],
+    accepts: &[Kind::Requirement, Kind::Summary],
+    produces: None,
     cast: &[
         Cast {
             role: PLANNER.id,
@@ -153,6 +163,8 @@ const STANDARD: Loop = Loop {
     deny: &[],
     flow: false,
     ask: &[],
+    accepts: &[Kind::Requirement],
+    produces: None,
     cast: &[Cast {
         role: SOLO.id,
         min: 0,
@@ -166,6 +178,8 @@ const PROXY: Loop = Loop {
     deny: &[],
     flow: false,
     ask: &[],
+    accepts: &[],
+    produces: None,
     cast: &[Cast {
         role: CORE_PROXY.id,
         min: 0,

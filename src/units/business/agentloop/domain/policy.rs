@@ -138,6 +138,8 @@ mod tests {
         cast: &[],
         deny: &[],
         ask: &[crate::units::business::tools::api::WRITE],
+        accepts: &[],
+        produces: None,
     };
 
     /// 目的：段声明了要问，段里这个动作给「问」；没声明的动作照旧放行。
@@ -176,6 +178,8 @@ mod tests {
             cast: &[],
             deny: &[FS_WRITE],
             ask: &[crate::units::business::tools::api::WRITE],
+            accepts: &[],
+            produces: None,
         };
         let sources: Vec<String> =
             vec![crate::units::business::session_model::api::SOURCE_AGENT.to_string()];

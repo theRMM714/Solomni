@@ -8,7 +8,7 @@
 
 - 管：会话元信息 `SessionMeta`（含 `UsageTotals` / `WorkspaceBinding` / `RunState` / `Delegation`）与历史视图 `HistoryView`、默认的新鲜度保留比例 `default_freshness_keep_percent`。
 - 管：会话类型表 `Profiles` / `Profile` / `SessionSpec` 与装配期校验、内置类型的 id、`sources` / `system_tools`。
-- 管：流程段与角色**声明**——`Role` / `Cast` / `Loop` 三种形状（`Loop.deny` 声明这一段抑制哪几组能力，`Loop.ask` 声明这一段哪些动作要用户点头）、`ROLES` / `LOOPS` 两张表、`loop_of` / `cast_of` / `role` / `flow_ids`。
+- 管：流程段与角色**声明**——`Role` / `Cast` / `Loop` 三种形状（`Loop.deny` 声明这一段抑制哪几组能力，`Loop.ask` 声明这一段哪些动作要用户点头，`Loop.accepts` / `Loop.produces` 声明这一段收哪一种交接产物、交哪一种）、`ROLES` / `LOOPS` 两张表、`loop_of` / `cast_of` / `role` / `flow_ids`。
 - 管：工具来源端口 `ToolSource` 与回合上下文 `TurnCtx`（来源 id、能力组常量）。
 - 管：留档策略 `PersistPolicy` / `persist_policy_for` / `is_system_session` / `SYSTEM_SID_SUGGEST`。
 - 不管：会话对象与回合引擎（`src/units/business/agentloop/domain/session.rs` 与服务层）；角色面与工具总表的自洽断言（`src/units/business/conversation/session/domain/loop_check.rs`）；落盘 IO（`src/units/business/conversation/session/detail/`）；流程调度与回合推进（`collab` / `turn`）。
