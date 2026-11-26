@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use crate::kernel::ports::AskUser;
-use crate::units::business::session_model::api::{HistoryView, SessionMeta};
+use crate::units::business::session_model::api::{AskDesk, HistoryView, SessionMeta};
 use crate::units::business::transcript::api::SessionEvent;
 
 #[allow(unused_imports)]
@@ -29,6 +29,12 @@ pub use crate::units::business::turn_state::domain::live::Session;
 pub use crate::units::business::turn_state::domain::sequence::Sequence;
 /// 目的：回合状态本体（在世表 + 运行态 + 装配一席要用的入站面）的出口。
 pub use crate::units::business::turn_state::domain::turn::Turn;
+
+/// 目的：把这条会话的**裁决通道收窄成流程段的发起面**：挂起一张卡 + 问"有没有人在等"。
+/// 参数：`door` = 该会话的裁决通道（与工具层共用同一条）。
+pub fn desk_face(door: Arc<dyn Gates>) -> Arc<dyn AskDesk> {
+    crate::units::business::turn_state::domain::ask::desk_face(door)
+}
 
 /// 目的：造这个会话的**工具层提问端口**（登记一张卡、外送并落盘、停会话都走同一会话那条道）。
 /// 参数：`door` = 该会话的裁决通道；`sid` = 会话名；`emit` = 推一条事件；`stop` = 停这个会话。

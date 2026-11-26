@@ -22,7 +22,7 @@
 - `AskUser` 是「需要用户裁决的机制请用户裁决」的**唯一**入口（`src/kernel/ports.rs`），工具执行层与围栏用它。
   - 形状：`ask(问题) -> 选项 id`，**阻塞**。
   - `halt(为什么)` = 停会话 + 落警告；调用方只在有可回答前端时用它，没有前端按 fail-closed 收场。
-  - 实现在会话侧（`runtime` 的 `SessionAsk`），走会话的**统一裁决通道**——见 [docs/session/session-model.md](../session/session-model.md) 的「请用户裁决」。
+  - 实现在回合状态侧（`src/units/business/turn_state/domain/ask.rs` 的 `SessionAsk`），走会话的**统一裁决通道**——见 [docs/session/session-model.md](../session/session-model.md) 的「请用户裁决」。
 - 状态归属：取消表、围栏台账与进程账都在本单元机制侧维护，业务状态不在此。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
@@ -54,10 +54,10 @@
   - **预检失败不写**：解释器根不可授权时 `prepare_fence` 直接给出必要落点缺失，不产生「写一半 / 回滚」的状态；回执只写真身路径。
   - **必要落点授不上：不许降级**。工具层的围栏裁决（`src/units/business/tools/service/fence.rs` 的 `ToolFenceGate`）经统一裁决通道（见 [session-model.md](../session/session-model.md) 的「请用户裁决」）推一条消息：哪一环、哪个目录、缺什么前提、怎么补。
     - 两条选项：`fence_unfenced_once`（本轮无围栏跑一次——回执与 stderr 都**如实标为无围栏**）/ `fence_abort`（放弃这次调用）。
-    - 这一问声明「没人答就当我选了放弃」（`on_unanswered` = `fence_abort`）。
+    - 没有默认项：这一问不带「没人答就当我选了什么」，没人答就是没放行（`AskOutcome::NoAnswer`）。
     - 用户拒绝、没人答、用户按停止：一律**不执行**（fail-closed，`src/units/business/tools/service/fence.rs`）。
     - 回执把「用户拒绝」与「没人答」分开写清楚。
-  - **构不出可用选项**时**不发起裁决**（契约禁止置灰，`src/units/business/tools/service/fence.rs`）：有可回答的前端就**停掉这个会话 + 落一条警告**，没有前端只如实拒绝这次调用；停过一次之后不再推卡。
+  - **构不出可用选项**时**不发起裁决**（契约禁止置灰，`src/units/business/tools/service/fence.rs`）：裁决端口回 `AskOutcome::NoOptions` 并落一条 `Notice`，**停不停由发起方定**——围栏有可回答的前端就自己停掉这个会话，没有前端只如实拒绝这次调用。
   - **可选落点授不上只记事实**：留一条 stderr 脚印，不牵动这次执行。
   - **视图盘让容器 cwd 不再需要祖先授权**（仅 Windows）：产品根映射成本实例独占的视图盘（一个空闲盘符，优先 Z:、被占则依次往下找；实测常见 S:/R:，别假设恒为 Z:），**视图写法目前只用于 shell（cwd == 私有沙箱）的容器 cwd 与程序名；模块工具沿用宿主 cwd，不参与视图盘收敛。**（模块工具的程序名里带分隔符的相对路径若译成视图写法，会被算成跨卷绝对路径，容器里反而调不起来。）shell 的容器 cwd 是 `<盘符>:\session\<工作>\<agent>`，模型拿到的路径也是；路径码把视图写法翻回宿主真实路径再判越界。映射根下还是宿主同一批文件，授权仍落在宿主路径上，但 PowerShell 逐级解析 cwd 只会经过产品根内的层级，产品根之外的祖先（盘根、用户目录等）不再需要任何 ACE。产品根上的一条 `(OI)(CI)` 读属性是唯一相关的机器级落点（见下一条）；视图盘由组合根在会话前分配（一次性命令 `runtime: none` 不分配）、正常退出释放；Ctrl+C / 关窗 / 注销 / 关机这类控制台终止由分配时装上的控制台钩子先撤映射与登记，崩溃 / 强杀留下的映射由下次启动清扫与 `--fence-clean` 回收（登记只认「pid + 进程创建时刻」，pid 被系统复用后创建时刻对不上，不算还有人用；`src/kernel/detail/view_drive/windows.rs`；门面 `src/kernel/detail/view_drive.rs` 只在 Windows 重导出实现，路径码出口 `kernel::api::view_codec` 在其余平台恒为 `None`）。
   - **授权主体分两个（仅 Windows）**：我们自己写的 ACE 一律授给**本产品的能力 SID**（`solomni.fence.baseline`，经 `DeriveCapabilitySidsFromName` 派生成 `S-1-15-3-*`，见 `src/kernel/detail/container/windows.rs` 的 `CAPABILITY_NAME` / `product_capability_sid`）——profile（`CreateAppContainerProfile`）与令牌（`SECURITY_CAPABILITIES`）两处都声明它，只有声明了的容器才拿得到这条只读。**不用 `ALL APPLICATION PACKAGES`（`S-1-15-2-1`）当授权主体**：那等于把读权限下放给本机所有 AppContainer 应用。系统目录（`System32` 等）自带的 AAPP 只读 ACE 不是我们写的、也改不动，所以解释器预检**两个主体都认**（`interpreter_baseline_present`），但只有能力 SID 那条算「我们已授」（`system_baseline_sid` 只用于识别，不用于写入）。真机判据：`tests/windows/probes/capability.rs` 的 `capability_sid_is_grantable_and_not_blanket`——带能力的容器读得到只授给该能力的文件、不带能力的读不到，且两者都写得了自己的工作目录。

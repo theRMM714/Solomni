@@ -494,7 +494,7 @@ pub(super) fn core_flow(faces: &Faces, args: &Value, json: bool) -> i32 {
 
 /// 目的：CLI 读输入读到尽头（EOF）时，把挂着的裁决按**停止 = 拒绝**收场——前端负责解开等待方。
 /// 返回：真的停下了这条（整棵）会话。
-/// 约束：停止 = 拒绝（整队作废）；不套用发起方声明的默认项——那会把"没人答"变成放行。
+/// 约束：停止 = 拒绝（整队作废）；没人答就是失败（没有默认项）——把它当放行等于替用户做决定。
 pub(crate) fn eof_stop(faces: &Faces, sid: &str) -> bool {
     println!("[提示] 输入已到尽头：挂着的裁决按「停止 = 拒绝」收场，这一趟不继续。");
     !faces.runtime.stop(sid).is_empty()

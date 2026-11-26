@@ -10,8 +10,8 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/units/business/turn_state/api.rs` | 入站面：转出 `Turn` / `Session`、裁决队、流程契约与工厂、`session_ask`、`History` / `HistoryOps` 两个端口面；`domain` 不出单元，装配一席的 `SessionPorts` 随装配机在 `agentloop` |
-| `src/units/business/turn_state/domain/ask.rs` | 工具层提问端口的回合侧实现：推一条问题并阻塞等一个选项 id；构不出选项时停会话 + 落警告；停止 / 关闭按「拒绝」解开 |
-| `src/units/business/turn_state/domain/decisions.rs` | 裁决队：先来后到、队首可见可答、回答校验（卡号是队首 + 选项属于该卡）、整队作废（停止 = 拒绝）把等待方解开；对外只出 `Decisions` 与 `Gates` 两个窄端口 |
+| `src/units/business/turn_state/domain/ask.rs` | 裁决通道的回合侧实现：`AskUser`（推一条问题并阻塞等一个选项 id；空选项集回 `NoOptions` + `Notice`、不自停会话；没人答回 `NoAnswer` + `Notice`；停止 / 关闭按「拒绝」解开）与 `AskDesk` 的实现 `DeskFace`（`later` / `pending` / `head` / `drop_head` 四个窄方法转发给裁决队） |
+| `src/units/business/turn_state/domain/decisions.rs` | 裁决队：队里存 `kernel::Ask`（`Entry { id, ask, slot }`），两个入口——`later` 不阻塞、可重建（沿用原卡号）与 `wait` 阻塞、线程绑定（不重建）；先来后到、队首可见可答、回答校验（卡号是队首 + 选项属于该卡）、整队作废（停止 = 拒绝）把等待方解开；对外出 `Gates` 与出队票 `GateTicket { option, note, ask }` |
 | `src/units/business/turn_state/domain/flow.rs` | 流程面：插件契约 `Flow`（推一步 / 取走让出的一步 / 交回处置 / 处置自己发的关卡）、让出的那一步 `MemberAsk`、交回后的处置 `Handback`、关卡落定 `Settle` 与可派的活 `WorkPlan`；不实现任何流程 |
 | `src/units/business/turn_state/domain/flows.rs` | 流程工厂面：`Flows`（id → 造一段）、装配用的 `FlowSetup`、按类型表串段的 `sequence_of`；实现由组合根注入 |
 | `src/units/business/turn_state/domain/live.rs` | 在世表与运行态：`Session` 两种形态（单 agent / 一个流程槽）、`TurnState`（运行态、创建占位、裁决通道表、shell 活进程槽） |

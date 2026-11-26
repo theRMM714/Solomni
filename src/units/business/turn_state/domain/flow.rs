@@ -6,9 +6,10 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use crate::kernel::api::types::Ask;
 use crate::units::business::agentloop::api::MemberTurn;
 use crate::units::business::llm::api::{CompleteOpts, Msg};
-use crate::units::business::transcript::api::{Gate, SessionEvent};
+use crate::units::business::transcript::api::SessionEvent;
 use crate::units::business::turn_state::domain::decisions::GateTicket;
 use crate::units::business::workspace::api::Sandboxes;
 use crate::units::pure::registry_model::api::AgentMeta;
@@ -162,11 +163,11 @@ pub trait Flow: Send {
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<Settle, String> {
         let _ = sink;
-        Err(format!("这张卡不是本流程发的：{}", ticket.gate.kind))
+        Err(format!("这张卡不是本流程发的：{}", ticket.ask.kind))
     }
     /// 目的：这一关要不要**就地收尾**（在核心线程上同步写完再放行，不等工作线程）。
-    fn settles_inline(&self, gate: &Gate) -> bool {
-        let _ = gate;
+    fn settles_inline(&self, ask: &Ask) -> bool {
+        let _ = ask;
         false
     }
     /// 目的：本流程的可派工作（把工作拆成节点的流程返回它；默认没有）。

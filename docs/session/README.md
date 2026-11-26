@@ -26,7 +26,7 @@
 
 - 一条会话的运行时（`src/units/business/agentloop/domain/session.rs`）或回合引擎（`src/units/business/agentloop/engine/`）一改 → 装配入口（`src/units/business/agentloop/domain/assembly.rs`，在 `agentloop`）与驱动（`src/units/business/turn/`）同跟。
 - 行与事件词汇（`src/units/business/transcript/domain/events.rs`、`LineView` 字段）一改 → `collab` 的状态派生、`runtime` 的视图、`cli` / `web` 渲染、`src/tests/session/` 全跟。
-- 机制自己的事件与关卡（`Push` 的 `kind` / `payload`、`Gate`）改 → 对应机制的词汇文件（协作在 `src/units/business/collab/domain/events.rs` 与 `src/units/business/collab/domain/gates.rs`）与它的渲染；会话侧不跟着改。
+- 机制自己的事件与关卡（`Push` 的 `kind` / `payload`、`Ask` 的 `kind` / `payload`）改 → 对应机制的词汇文件（协作在 `src/units/business/collab/domain/events.rs` 与 `src/units/business/collab/domain/gates.rs`）与它的渲染；会话侧不跟着改。
 - 流程面（`src/units/business/turn_state/domain/flow.rs` 的 `Flow` / `MemberAsk` / `Handback` / `WorkPlan`，归 `turn_state`）一改 → 每个流程的实现（协作在 `src/units/business/collab/service/flow.rs`）与驱动（`src/units/business/turn/turn/service/flow.rs`、`src/units/business/turn/turn/service/generation/collab.rs`）一起改。
 - 复合流程（`src/units/business/turn_state/domain/sequence.rs` 的 `Sequence`）一改 → 装配点（`src/units/business/work/service/create.rs`、`src/units/business/turn/turn/service/rebuild.rs`）与流程自己的 `intake` / `output` / `part` 一起看：前一段交出的产物就是后一段的需求。
 - 流程工厂面（`src/units/business/turn_state/domain/flows.rs` 的 `Flows` / `FlowSetup` / `sequence_of`）一改 → 各流程工厂的实现（协作在 `src/units/business/collab/service/flows.rs`）与组合根的注入（`src/units/business/runtime/service/core.rs`）一起改：装配点只问 id 要段，不认识具体流程。

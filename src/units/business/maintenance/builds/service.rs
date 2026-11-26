@@ -35,7 +35,7 @@ pub struct BuildsService {
     states: Arc<dyn BuildStates + Send + Sync>,
     cache: Arc<dyn BuildCache + Send + Sync>,
     runner: Arc<dyn ProcessRunner + Send + Sync>,
-    /// 宿主执行围栏授不上时的裁决（与工具层同一条路）：构建没有可回答的前端，按默认项 fail-closed。
+    /// 宿主执行围栏授不上时的裁决（与工具层同一条路）：构建没有可回答的前端就按失败收场（fail-closed）。
     gate: Arc<dyn FenceGate + Send + Sync>,
     fence: Arc<dyn FenceHost + Send + Sync>,
     probe: Arc<dyn HostProbe + Send + Sync>,

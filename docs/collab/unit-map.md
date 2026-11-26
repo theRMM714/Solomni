@@ -18,7 +18,7 @@
 | `src/units/business/collab/service/discussion.rs` | 讨论状态机：建组、轮转发言、表态判定与协议反应（`AfterTurn`）；轮循环与工具循环已迁 session（见 [`docs/session/unit-map.md`](../session/unit-map.md)） |
 | `src/units/business/collab/service/synthesis.rs` | 整理讨论出方案与任务链、总验收清单与返工判定 |
 | `src/units/business/collab/domain/events.rs` | 协作的事件词汇：机制变体 → `SessionEvent::Push`、线上事件 → 机制变体，验收条目 `CheckView` 随它 |
-| `src/units/business/collab/domain/gates.rs` | 协作的关卡词汇：待决项种类、选项 id、卡片与背景文案，并翻译成 `session` 的 `Gate`（队列不认这些） |
+| `src/units/business/collab/domain/gates.rs` | 协作的关卡词汇：待决项种类、选项 id、卡片与背景文案，并翻译成 `kernel::Ask`（`Pending::ask`；队列不认这些） |
 | `src/units/business/collab/service/flows.rs` | 协作流程工厂（实现 `session` 的 `Flows`）：按 id 造讨论段或执行段，新建走 `CollabSession::start`、重建走 `CollabSession::restore`；组合根拿它注入 turn / work |
 | `src/units/business/collab/service/flow.rs` | 协作作为流程：把泵的推进一步 / 让出成员回合 / 交回处置 / 关卡落定（`settle` / `settles_inline`）翻译成 `session` 的 `Flow`，并以 `impl WorkPlan for CollabSession` 交出「哪些节点该派、节点提示词与返工提示、开跑收工」这套事实（驱动因此不认识协作） |
 | `src/units/business/collab/domain/collab_state.rs` | 「转录即状态」派生：从事件流水纯函数地算出当前状态（可回放、可单测） |

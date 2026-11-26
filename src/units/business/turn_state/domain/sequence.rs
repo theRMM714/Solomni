@@ -6,8 +6,9 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use crate::kernel::api::types::Ask;
 use crate::units::business::agentloop::api::MemberTurn;
-use crate::units::business::transcript::api::{Gate, SessionEvent};
+use crate::units::business::transcript::api::SessionEvent;
 use crate::units::business::turn_state::domain::decisions::GateTicket;
 use crate::units::business::turn_state::domain::flow::{
     Flow, Handback, MemberAsk, Settle, WorkPlan,
@@ -206,11 +207,11 @@ impl Flow for Sequence {
                 return Ok(settled);
             }
         }
-        Err(format!("这张卡不是本会话的流程发的：{}", ticket.gate.kind))
+        Err(format!("这张卡不是本会话的流程发的：{}", ticket.ask.kind))
     }
 
-    fn settles_inline(&self, gate: &Gate) -> bool {
-        self.steps.iter().any(|s| s.settles_inline(gate))
+    fn settles_inline(&self, ask: &Ask) -> bool {
+        self.steps.iter().any(|s| s.settles_inline(ask))
     }
 
     fn intake(&mut self, text: String) {

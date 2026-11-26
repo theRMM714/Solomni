@@ -79,9 +79,10 @@ impl From<crate::kernel::contracts::run::RunOutcome> for ToolOutcome {
 }
 
 /// 目的：一条**请用户裁决**的问题：谁在问（信封）+ 消息三段 + 选项集——通道只管送，不解释内容。
-/// 约束：请求方（工具执行层、围栏这类机制）与通道（会话的裁决队）共用这一个形状，所以它属于 kernel（R6）；
+/// 约束：请求方（工具执行层、流程段、围栏这类机制）与通道（会话的裁决队）共用这一个形状，所以它属于 kernel（R6）；
 ///   问什么、有几个选项、每个选项做什么都由请求方实现，通道只把选项 **id** 原样还给请求方。
-///   端口见 `crate::kernel::ports::AskUser`；选项 id 与卡片的派生见 docs/session/session-model.md 的「请用户裁决」。
+///   `kind / payload` 是请求方自己的机制载荷：通道不解释，只随卡一起存，重建时原样还回去。
+///   端口见 `crate::kernel::ports::AskUser` 与会话侧的 `AskDesk`；选项 id 与卡片的派生见 docs/session/session-model.md 的「请用户裁决」。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Ask {
     /// 目的：谁在问——信封第一段（core 核心 / member 某一席 / tools 工具层）。
@@ -96,11 +97,15 @@ pub struct Ask {
     pub detail: String,
     /// 目的：选项集——`(id, label)`；**id 是行为契约**（回答按 id 分派、改文案不改行为），label 只给渲染。
     pub options: Vec<(String, String)>,
-    /// 目的：**没人答时怎么办**——发起方声明一个**自己卡上的选项 id**（通道不解释它意味着什么）；
-    ///   不写 = 没人答就交回发起方按 fail-closed 处置。它是"这一问的收场声明"，不是通道的词表：
-    ///   想加"接受 / 拒绝 / 全部接受"这类选项，改的是发起方自己的选项集，不是这里。
+    /// 目的：机制载荷的类型名（请求方自己定义，例如 plan_review / fence）；通道不解释，重建时原样还回。
     #[serde(default)]
-    pub on_unanswered: Option<String>,
+    pub kind: String,
+    /// 目的：机制载荷（随卡一起存；重建时原样还回请求方，例如那一关的建议）。
+    #[serde(default)]
+    pub payload: serde_json::Value,
+    /// 目的：哪些选项必须附言——`(选项 id, 为什么)`；空 = 都不要求。
+    #[serde(default)]
+    pub notes: Vec<(String, String)>,
 }
 
 impl Ask {
@@ -111,29 +116,28 @@ impl Ask {
 }
 
 /// 目的：一次提问的收场——**为什么没有答案**如实分开，发起方据此处置（不必逐态 match，用 `decided`）。
-/// 约束：通道只认选项 id 与这三种"没有答案"的事实，不认识"接受 / 拒绝"这类语义（那是发起方自己的选项）。
+/// 约束：通道只认选项 id 与这几种"没有答案"的事实，不认识"接受 / 拒绝"这类语义（那是发起方自己的选项）。
+///   没有默认项：没人答就是失败，发起方按失败收场。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AskOutcome {
     /// 前端答了某个选项 id。
     Chosen(String),
-    /// 没人答，按发起方声明的 `on_unanswered` 收场（**如实标为"不是用户答的"**）。
-    Defaulted(String),
-    /// 没人答、也没声明默认项：发起方按 fail-closed 处置（这一趟没有可回答的前端，或前端断了）。
+    /// 没人答（这一趟没有可回答的前端，或前端断了）：发起方按失败处置，不执行。
     NoAnswer,
-    /// 用户按了停止 / 会话被关闭：整队作废（= 拒绝）——**不套用默认项**，停止不能被当成放行。
+    /// 用户按了停止 / 会话被关闭：整队作废（= 拒绝），停止不能被当成放行。
     Stopped,
-    /// 构不出可用选项：端口不发起裁决，改为停掉这个会话 + 落一条警告（发起方不执行）。
+    /// 构不出可用选项：端口不发起裁决，只回这一条；停不停会话由发起方决定。
     NoOptions,
 }
 
 impl AskOutcome {
-    /// 目的：这次**照哪个选项 id 办**——用户答的或声明的默认项都算；`None` = 这次不办。
+    /// 目的：这次**照哪个选项 id 办**——只有用户真的答了才算；`None` = 这次不办。
     /// 约束：发起方只需要看这一个结果，不必逐态 match；"为什么没答案"的如实记录由端口落进会话。
     // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
     #[allow(dead_code)]
     pub fn decided(&self) -> Option<&str> {
         match self {
-            AskOutcome::Chosen(id) | AskOutcome::Defaulted(id) => Some(id.as_str()),
+            AskOutcome::Chosen(id) => Some(id.as_str()),
             _ => None,
         }
     }

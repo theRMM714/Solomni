@@ -136,8 +136,8 @@ fn waiting_list_is_built_line_by_line() {
     let begin = Pending::ConfirmBegin;
     assert!(cli::waiting_lines(&[]).is_empty(), "没人等就一行都不占");
     let lines = cli::waiting_lines(&[
-        ask.gate("d2", "").waiter("d2"),
-        begin.gate("d3", "").waiter("d3"),
+        crate::units::business::transcript::api::waiter_of(&ask.ask(""), "d2"),
+        crate::units::business::transcript::api::waiter_of(&begin.ask(""), "d3"),
     ]);
     assert_eq!(lines.len(), 3, "一条头 + 每位等待者一行：{:?}", lines);
     assert!(
@@ -154,7 +154,7 @@ fn waiting_list_is_built_line_by_line() {
 }
 
 /// 目的：CLI 上挂着的裁决答不上（输入到尽头 EOF）时按**停止 = 拒绝**收场——不能一直吊着。
-/// 约束：停止不套用发起方声明的默认项；等待方被解开、会话随后不再被派发。
+/// 约束：停止不套用任何默认项（没有默认项）；等待方被解开、会话随后不再被派发。
 #[test]
 fn eof_answers_a_pending_card_by_stopping_instead_of_hanging() {
     use crate::units::business::collab::api::Pending;
@@ -175,7 +175,7 @@ fn eof_answers_a_pending_card_by_stopping_instead_of_hanging() {
     // 造一个"工作线程正等答"的现场：线程在裁决通道上挂卡并阻塞等，主线程等卡进队。
     let waiter = {
         let door = Arc::clone(&door);
-        std::thread::spawn(move || door.ask(Pending::ConfirmBegin.gate("", ""), &mut |_| {}))
+        std::thread::spawn(move || door.wait(&Pending::ConfirmBegin.ask(""), &mut |_| {}))
     };
     let mut spins = 0;
     while door.is_empty() && spins < 500 {

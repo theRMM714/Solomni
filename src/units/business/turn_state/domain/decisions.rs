@@ -1,19 +1,22 @@
-//! 目的：**裁决队列**——一条通道的排队与等待：核心各关卡与工具级确认**共用同一条队**。
+//! 目的：**裁决队列**——一条通道的排队与等待：流程段各关卡与工具级确认**共用同一条队**。
 //! 管：按会话先来后到排队、只有队首可见可答、回答的校验（卡号是队首 + 选项属于那张卡）、
 //!   整队作废（停止 = 拒绝）把等待方解开、卡号的发放与续号；对外只出两个窄端口 `Decisions` 与 `Gates`。
+//!   队列只存一种形状 `Ask`（`kind / payload` 是发起方自己的载荷）：重建时原样还回发起方。
 //! 不管：问什么（发起方给消息与选项）、回答怎么处置（发起方）、界面怎么画（呈现层）。
 //! 联动：卡片形状与选项 id 在 `crate::units::business::transcript::api`；契约见
-//!   docs/session/session-model.md 的「请用户裁决：一条通道，消息 + 选项」；
+//!   docs/session/session-model.md 的「请用户裁决：一个形状，一条队，两种时序」；
 //!   由核心持有（`src/units/business/runtime/service.rs` 的 desk），生成线程与回答口都经 `turn_state::api` 的端口。
 
+use crate::kernel::api::types::Ask;
 use crate::units::business::transcript::api::{
-    DecisionAnswer, DecisionQueue, DecisionWaiter, Gate, SessionEvent, idle,
+    DecisionAnswer, DecisionQueue, DecisionWaiter, SessionEvent, card_of, event_of, idle, json_of,
+    note_of, waiter_of,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Condvar, Mutex};
 
 /// 目的：等待格被解开的方式——回答、用户停止（整队作废）、还是这一趟根本没有回答者（会话按转录重建、前端断了）。
-/// 约束：`Stopped` 与 `Gone` 必须分开——停止是用户的动作（= 拒绝），**不能被发起方的默认项吞成放行**。
+/// 约束：`Stopped` 与 `Gone` 必须分开——停止是用户的动作（= 拒绝），不能与"没人答"混成一件事。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlotWake {
     /// 用户 / 前端答了一个选项 id。
@@ -32,7 +35,7 @@ pub enum SlotWake {
 struct SlotState {
     option: Option<String>,
     released: bool,
-    /// 本次解开是不是"用户停止 / 会话关闭"（整队作废）——只有它不是默认项的适用场景。
+    /// 本次解开是不是"用户停止 / 会话关闭"（整队作废）——它与"没人答"必须分开。
     stopped: bool,
 }
 
@@ -87,13 +90,13 @@ impl AnswerSlot {
     }
 }
 
-/// 目的：一张**已经出队**的回答交给发起方处置时带的东西（选项 + 附言 + 这一关的材料）。
-/// 约束：这一关自带机制名与载荷（含那条建议），队列不解释它——解释归发起方。
+/// 目的：一张**已经出队**的回答交给发起方处置时带的东西（选项 + 附言 + 这一问的材料）。
+/// 约束：`ask` 自带机制名与载荷（含那条建议），队列不解释它——解释归发起方。
 pub struct GateTicket {
     pub option: String,
     pub note: String,
-    /// 目的：这一关的材料，装箱（它比票本身大一个量级，票随 Answered 传一手不该整块搬）。
-    pub gate: Box<Gate>,
+    /// 目的：这一问的材料，装箱（它比票本身大一个量级，票随 Answered 传一手不该整块搬）。
+    pub ask: Box<Ask>,
 }
 
 /// 目的：一次回答落在哪一种关上（处置归发起方）。
@@ -104,10 +107,10 @@ pub enum Answered {
     Gate(GateTicket, Vec<SessionEvent>),
 }
 
-/// 队列里的一格：卡号 + 这一关（机制名、载荷、卡、附言规则）；`slot` 有值 = 这一关等在工作线程上。
+/// 队列里的一格：卡号 + 这一问（消息、选项、机制名与载荷）；`slot` 有值 = 这一问等在工作线程上。
 struct Entry {
     id: String,
-    gate: Gate,
+    ask: Ask,
     slot: Option<Arc<AnswerSlot>>,
 }
 
@@ -115,15 +118,15 @@ struct Entry {
 /// 约束：别的单元只拿这个端口，拿不到带锁的队列结构（R16）；等答用的等待格在实现里现造、不外传。
 pub trait Gates: Send + Sync {
     /// 目的：挂一张卡（**不阻塞**）。
-    /// 参数：`id` = 沿用的原卡号（重建时那张没人答的卡用它自己的号；`None` = 新发一个）。
+    /// 参数：`card` = 沿用的原卡号（重建时那张没人答的卡用它自己的号；`None` = 新发一个）；`ask` = 这一问。
     /// 返回：卡号与要外送的事件（推的与快照同源）。
-    fn raise(&self, id: Option<&str>, gate: Gate) -> (String, Vec<SessionEvent>);
+    fn later(&self, card: Option<&str>, ask: &Ask) -> (String, Vec<SessionEvent>);
 
     /// 目的：挂一张卡并**阻塞等一个回答**（工具级确认这类等在工作线程上的关）。
-    /// 参数：`emit` = 卡片事件的出口——**先外送再等**，界面才看得到那一问。
+    /// 参数：`ask` = 这一问；`emit` = 卡片事件的出口——**先外送再等**，界面才看得到那一问。
     /// 返回：回答的选项 id，或"为什么没有答案"（用户停止 / 没人答）。
     /// 约束：不设超时；整队作废（停止 = 拒绝）与重建都会解开它，两种原因如实分开。
-    fn ask(&self, gate: Gate, emit: &mut dyn FnMut(SessionEvent)) -> SlotWake;
+    fn wait(&self, ask: &Ask, emit: &mut dyn FnMut(SessionEvent)) -> SlotWake;
 
     /// 目的：回答**队首那张**卡：校验卡号与选项，写回答并出队。
     /// 参数：`note` = 附言（进那条回答记录；怎么用由发起方定）。
@@ -139,9 +142,9 @@ pub trait Gates: Send + Sync {
     /// 返回：没挂起 = `None`；有挂起时与推的那条卡片事件是同一份事实。
     fn json(&self) -> Option<serde_json::Value>;
 
-    /// 目的：队首那一关（卡号 + 这一关）。
+    /// 目的：队首那一问（卡号 + 这一问）。
     /// 返回：没挂起 = `None`。
-    fn head(&self) -> Option<(String, Gate)>;
+    fn head(&self) -> Option<(String, Ask)>;
 
     /// 目的：队列空不空（空 = 没挂起的事）。
     fn is_empty(&self) -> bool;
@@ -177,20 +180,20 @@ pub struct DecisionDoor {
 
 impl DecisionDoor {
     /// 目的：新挂起一件事：进**队尾**，返回它的卡号与要外送的事件。
-    /// 参数：`id` = 沿用的原卡号（重建时那张没人答的卡用它自己的号；`None` = 新发一个）；
-    ///   `slot` = 这一关是否等在工作线程上。
-    /// 约束：新卡号在这一处分配（卡内 id 以这里为准）；等在工作线程上的那一关**不推空闲**（生成还在跑，只是在等这一答）。
+    /// 参数：`card` = 沿用的原卡号（重建时那张没人答的卡用它自己的号；`None` = 新发一个）；
+    ///   `ask` = 这一问；`slot` = 这一问是否等在工作线程上。
+    /// 约束：新卡号在这一处分配（卡内 id 以这里为准）；等在工作线程上的那一问**不推空闲**（生成还在跑，只是在等这一答）。
     pub fn push(
         &self,
-        id: Option<&str>,
-        gate: Gate,
+        card: Option<&str>,
+        ask: Ask,
         slot: Option<Arc<AnswerSlot>>,
     ) -> (String, Vec<SessionEvent>) {
         let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let id = match id {
-            Some(id) => {
-                note_card(Some(id), &mut g.issued);
-                id.to_string()
+        let id = match card {
+            Some(card) => {
+                note_card(Some(card), &mut g.issued);
+                card.to_string()
             }
             None => {
                 g.issued += 1;
@@ -200,7 +203,7 @@ impl DecisionDoor {
         let blocking = slot.is_some();
         g.queue.push_back(Entry {
             id: id.clone(),
-            gate,
+            ask,
             slot,
         });
         let mut evs = if blocking { Vec::new() } else { vec![idle()] };
@@ -217,10 +220,10 @@ impl DecisionDoor {
             .is_empty()
     }
 
-    /// 目的：队首那一关（卡号 + 这一关）；没挂起 = `None`。
-    pub fn head(&self) -> Option<(String, Gate)> {
+    /// 目的：队首那一问（卡号 + 这一问）；没挂起 = `None`。
+    pub fn head(&self) -> Option<(String, Ask)> {
         let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        g.queue.front().map(|e| (e.id.clone(), e.gate.clone()))
+        g.queue.front().map(|e| (e.id.clone(), e.ask.clone()))
     }
 
     /// 目的：当前那一队裁决（队首卡 + 后面还在等的几张）；没挂起 = `None`。
@@ -228,7 +231,7 @@ impl DecisionDoor {
         let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let head = g.queue.front()?;
         Some(DecisionQueue {
-            card: head.gate.card_with(&head.id),
+            card: card_of(&head.ask, &head.id),
             waiting: waiters(&g),
         })
     }
@@ -237,7 +240,7 @@ impl DecisionDoor {
     pub fn json(&self) -> Option<serde_json::Value> {
         let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let head = g.queue.front()?;
-        Some(head.gate.to_json(&head.id, &waiters(&g)))
+        Some(json_of(&head.ask, &head.id, &waiters(&g)))
     }
 
     /// 目的：回答**队首那张**卡：校验卡号与选项，写回答并出队。
@@ -255,11 +258,11 @@ impl DecisionDoor {
                 head.id
             ));
         }
-        if !head.gate.card_with(&head.id).has_option(option) {
+        if !head.ask.has_option(option) {
             return Err(format!("这张卡上没有这个选项：{}", option));
         }
-        // 附言要求也是这一关的声明（发起方给）：出队**之前**校验——被拒的回答不留痕。
-        if let Some(why) = head.gate.note_requirement(option)
+        // 附言要求也是这一问的声明（发起方给）：出队**之前**校验——被拒的回答不留痕。
+        if let Some(why) = note_of(&head.ask, option)
             && note.trim().is_empty()
         {
             return Err(why);
@@ -284,7 +287,7 @@ impl DecisionDoor {
                 GateTicket {
                     option: option.to_string(),
                     note,
-                    gate: Box::new(entry.gate),
+                    ask: Box::new(entry.ask),
                 },
                 evs,
             )),
@@ -320,7 +323,7 @@ impl DecisionDoor {
         let cards: Vec<String> = g.queue.iter().map(|e| e.id.clone()).collect();
         for e in g.queue.iter() {
             if let Some(s) = &e.slot {
-                // 整队作废 = 用户停止 / 会话关闭：按"停止 = 拒绝"解开（不套用默认项）。
+                // 整队作废 = 用户停止 / 会话关闭：按"停止 = 拒绝"解开（不能当成放行）。
                 s.release(true);
             }
         }
@@ -331,14 +334,14 @@ impl DecisionDoor {
 }
 
 impl Gates for DecisionDoor {
-    fn raise(&self, id: Option<&str>, gate: Gate) -> (String, Vec<SessionEvent>) {
-        self.push(id, gate, None)
+    fn later(&self, card: Option<&str>, ask: &Ask) -> (String, Vec<SessionEvent>) {
+        self.push(card, ask.clone(), None)
     }
 
-    fn ask(&self, gate: Gate, emit: &mut dyn FnMut(SessionEvent)) -> SlotWake {
+    fn wait(&self, ask: &Ask, emit: &mut dyn FnMut(SessionEvent)) -> SlotWake {
         // **先登记再推卡**：否则用户手快会答在一张还没进队的卡上，答案丢掉、发起方干等。
         let slot = AnswerSlot::new();
-        let (_, evs) = self.push(None, gate, Some(Arc::clone(&slot)));
+        let (_, evs) = self.push(None, ask.clone(), Some(Arc::clone(&slot)));
         for e in evs {
             emit(e);
         }
@@ -357,7 +360,7 @@ impl Gates for DecisionDoor {
         DecisionDoor::json(self)
     }
 
-    fn head(&self) -> Option<(String, Gate)> {
+    fn head(&self) -> Option<(String, Ask)> {
         DecisionDoor::head(self)
     }
 
@@ -379,7 +382,7 @@ impl Gates for DecisionDoor {
 }
 
 /// 目的：把**当前队列形态**变成要外送的事件（队首卡 + 后面还在等的那几张）：形态变了才给。
-/// 约束：推的与快照的是同一份（`Gate::event`），不做第二真相。
+/// 约束：推的与快照的是同一份（`event_of`），不做第二真相。
 fn announce(g: &mut Inner) -> Vec<SessionEvent> {
     let Some(head) = g.queue.front() else {
         g.announced = None;
@@ -396,7 +399,7 @@ fn announce(g: &mut Inner) -> Vec<SessionEvent> {
     if g.announced.as_ref() == Some(&shape) {
         return Vec::new();
     }
-    let ev = head.gate.event(&head.id, &waiters(g));
+    let ev = event_of(&head.ask, &head.id, &waiters(g));
     g.announced = Some(shape);
     vec![ev]
 }
@@ -406,7 +409,7 @@ fn waiters(g: &Inner) -> Vec<DecisionWaiter> {
     g.queue
         .iter()
         .skip(1)
-        .map(|e| e.gate.waiter(&e.id))
+        .map(|e| waiter_of(&e.ask, &e.id))
         .collect()
 }
 
@@ -617,6 +620,72 @@ mod tests {
                 .expect("回答之后等待方必须被解开");
             assert_eq!(got, SlotWake::Answer("allow".to_string()), "第 {} 轮", i);
             h.join().expect("等待线程");
+        }
+    }
+
+    /// 目的：一条队先来后到——第二张挂进来也只能看见队首，答了队首它才升上来（同一张卡号不变）。
+    #[test]
+    fn one_queue_serves_first_come_first_served() {
+        let door = DecisionDoor::default();
+        let (first, _) = door.later(None, &ask_of("第一问"));
+        let (second, _) = door.later(None, &ask_of("第二问"));
+        assert_eq!(door.head().map(|(id, _)| id), Some(first.clone()));
+        let wrong = match door.answer(&second, "ok", "") {
+            Err(e) => e,
+            Ok(_) => panic!("还没轮到第二张，不该答得上"),
+        };
+        assert!(wrong.contains("已经不是当前那张"), "{}", wrong);
+        assert!(door.answer(&first, "ok", "").is_ok(), "队首那一张要答得上");
+        assert_eq!(
+            door.head().map(|(id, _)| id),
+            Some(second.clone()),
+            "答完队首，第二张按它自己的卡号升上来"
+        );
+    }
+
+    /// 目的：重建挂回来的卡沿用**它自己的卡号**（跨重启不重问、不撞号）。
+    #[test]
+    fn a_rebuilt_card_keeps_the_number_it_was_given() {
+        let door = DecisionDoor::default();
+        let (kept, _) = door.later(Some("d7"), &ask_of("沿用的那一问"));
+        assert_eq!(kept, "d7");
+        let (next, _) = door.later(None, &ask_of("新的一问"));
+        assert_eq!(next, "d8", "续号从最大的已发卡号往后走");
+    }
+
+    /// 目的：通道只搬形状——发起方放进 `kind` / `payload` 的重建材料原样还回来（流程与工具同一份）。
+    #[test]
+    fn the_door_hands_back_the_payload_it_was_given() {
+        let door = DecisionDoor::default();
+        let mut ask = ask_of("哪一段的卡");
+        ask.kind = "plan_review".to_string();
+        ask.payload = serde_json::json!({ "nodes": ["n1"] });
+        let (_, evs) = door.later(None, &ask);
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                SessionEvent::DecisionCard { gate, payload, .. }
+                    if gate == "plan_review" && payload.get("nodes").is_some()
+            )),
+            "外送的卡要带发起方的重建材料"
+        );
+        let (_, back) = door.head().expect("队首");
+        assert_eq!(back.kind, "plan_review");
+        assert_eq!(back.payload, ask.payload);
+    }
+
+    /// 目的：造一问最小可答的卡（选项一个，够走完回答校验）。
+    fn ask_of(title: &str) -> Ask {
+        Ask {
+            role: "core".to_string(),
+            name: "测试".to_string(),
+            title: title.to_string(),
+            body: String::new(),
+            detail: String::new(),
+            options: vec![("ok".to_string(), "好".to_string())],
+            kind: "test".to_string(),
+            payload: serde_json::Value::Null,
+            notes: Vec::new(),
         }
     }
 }

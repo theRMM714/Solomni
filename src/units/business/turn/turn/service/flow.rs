@@ -11,7 +11,7 @@ use crate::units::business::agentloop::api::TurnIo;
 use crate::units::business::conversation::session::api::{flat_modules, work_root};
 use crate::units::business::prompt::api::Segment;
 use crate::units::business::session_model::api::{RunState, SessionMeta, SessionSpec, UsageTotals};
-use crate::units::business::transcript::api::{DecisionQueue, Gate, SessionEvent};
+use crate::units::business::transcript::api::{DecisionQueue, SessionEvent};
 use crate::units::business::turn::turn::api::{Prepared, RestoreRequest};
 use crate::units::business::turn_state::api::Session;
 use crate::units::business::turn_state::api::{Answered, Flow, GateTicket, Handback, Identity};
@@ -654,10 +654,10 @@ impl Turn {
     }
 
     /// 目的：这一关要不要**就地收尾**（在核心线程上同步写完再放行）：由流程说了算，驱动不认关卡种类。
-    pub fn settles_inline(&self, sid: &str, gate: &Gate) -> bool {
+    pub fn settles_inline(&self, sid: &str, ask: &crate::kernel::api::types::Ask) -> bool {
         self.session(sid)
             .and_then(|s| s.flow())
-            .is_some_and(|m| m.settles_inline(gate))
+            .is_some_and(|m| m.settles_inline(ask))
     }
 
     /// 目的：当前挂着的那一队裁决（没有挂起 = None）：呈现层按它渲染，回答按**队首**认卡。
@@ -821,12 +821,10 @@ impl Turn {
         if !self.holds(sid) {
             return Err("无此会话".to_string());
         }
-        // 队列只搬 Gate（kind + payload + 卡）：这一关是哪一种由协作流程自己解释。
+        // 队列只搬 Ask（kind + payload + 卡）：这一关是哪一种由协作流程自己解释。
         Ok(self.desk().peek_gate(sid).and_then(|d| {
             d.head()
-                .and_then(|(_, gate)| {
-                    crate::units::business::collab::api::Pending::from_gate(&gate)
-                })
+                .and_then(|(_, ask)| crate::units::business::collab::api::Pending::from_ask(&ask))
                 .map(|(p, _)| p)
         }))
     }

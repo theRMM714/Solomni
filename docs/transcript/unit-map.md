@@ -11,4 +11,4 @@
 | --- | --- |
 | `src/units/business/transcript/api.rs` | 入站面：重导出事件、转录行、裁决卡与上下文用量及其构造函数（别的单元与呈现层只准用这里） |
 | `src/units/business/transcript/domain.rs` | 纯定义的入口：声明 `events` 概念子模块 |
-| `src/units/business/transcript/domain/events.rs` | 线格式词汇：`SessionEvent` 与机制事件通道 `Push`、`LineView` / `ToolCallView`、裁决卡信封与关 `Gate`、`ContextUsage` 与其构造与判定 |
+| `src/units/business/transcript/domain/events.rs` | 线格式词汇：`SessionEvent` 与机制事件通道 `Push`、`LineView` / `ToolCallView`、裁决卡信封（`card_of` / `waiter_of` / `event_of` / `json_of` / `note_of`：`kernel::Ask` → 卡 / 等待方 / 事件）、`ContextUsage` 与其构造与判定 |
