@@ -9,7 +9,7 @@
 
 > 它是**回合驱动的唯一实现**：会话准入与派发闸、按需重建、一席事实的取用、回合与协作的推进规则、
 > 五条生成链与七条点火器、事件台与逐轮落盘手柄。会话在世表与运行态、创建占位、裁决队与流程契约都在
-> `turn_state`；会话本体 `AgentSession` 与一席装配在 `agentloop`；转录落盘归 `conversation::session`；
+> `turn_state`；会话本体 `AgentSession` 与一个身份装配在 `agentloop`；转录落盘归 `conversation::session`；
 > 命令队列、动作分发与线程池归宿主 `runtime`。本单元还带 `env` 子业务（环境事实的纯派生），其逐文件职责见 [env 单元地图](../env/unit-map.md)。
 
 | 文件 | 职责 |

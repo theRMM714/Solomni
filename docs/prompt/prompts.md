@@ -2,10 +2,10 @@
 
 > 本文是**提示词册结构与键清单的唯一权威**：每份文件里有什么键、每个键干什么。
 > 规则（谁写、占位符、缺键报错、什么不进册子）见本文「三、册子规则」；
-> "哪个席位用哪份提示词、拿哪些工具"见 [tools-and-roles.md](../tools/tools-and-roles.md) 的「提示词按席位分配」；
+> "哪个角色用哪份提示词、拿哪些工具"见 [tools-and-roles.md](../tools/tools-and-roles.md) 的「提示词按角色分配」；
 > 模块自己的能力摘要（`brief`）与工具用法（`system`）见 [MODULE_SPEC.md](../../MODULE_SPEC.md)。
 
-册子按**共享 / 席位**两个目录切分；目录枚举与读盘归 `assets`（`prompts/` 的唯一主人），加载经 `PromptSource` 端口（`units/business/prompt/ports.rs`，实现在 `units/business/prompt/detail/yaml_prompts.rs`），
+册子按**共享 / 角色**两个目录切分；目录枚举与读盘归 `assets`（`prompts/` 的唯一主人），加载经 `PromptSource` 端口（`units/business/prompt/ports.rs`，实现在 `units/business/prompt/detail/yaml_prompts.rs`），
 `{{key}}` 渲染与"缺键即报错"在 `units/business/prompt/domain/prompt.rs`（纯逻辑，不读文件）。
 键的完整清单就是下面这张表——**本表由结构审查的 docsTruth 门禁（`tests/gates/structure/docsTruth.js`）与盘上的册子双向比对**（gate id 见 `node run-tests.js --list`）：加了键没改表、表里的键已不存在，都是硬失败。
 
@@ -13,14 +13,14 @@
 
 | 文件 | 键 | 用途 |
 | --- | --- | --- |
-| `shared/mechanisms.yaml` | `mechanisms[].seats` / `mechanisms[].text` | **机制说明按适用席位分发**：一个回合的身份块把**适用该席位**的条目按声明顺序拼起来（`{{mechanism}}`）。`seats` 匹配的是**席位 id**（声明在 `src/units/business/session_model/domain/mechanism.rs` 的 `SEATS`）——对应关系全在数据里，代码只做匹配（`CoreTexts::mechanisms_for`）；谁在哪个机制里坐什么席位由同一文件的 `MECHANISMS` 报 |
+| `shared/mechanisms.yaml` | `mechanisms[].seats` / `mechanisms[].text` | **机制说明按适用角色分发**：一个回合的身份块把**适用该角色**的条目按声明顺序拼起来（`{{mechanism}}`）。`seats` 匹配的是**角色 id**（声明在 `src/units/business/session_model/domain/mechanism.rs` 的 `ROLES`）——对应关系全在数据里，代码只做匹配（`CoreTexts::mechanisms_for`）；哪个段由哪些角色位出演由同一文件的 `LOOPS` 报 |
 | `shared/protocol.yaml` | `chat_protocol` | 讨论约定（讨论席与执行席一起注入，可自由演化） |
 | `shared/tools.yaml` | `env_hosts` / `env_guests` / `envs[].host\|guest\|text` | **工作环境按环境分发**：本机档按宿主平台（`env_hosts`：linux / windows / macos），虚拟机档按 guest 的 os（`env_guests`）；每条只写 host 或 guest 之一，装载时校验全表覆盖（不静默漏发一份环境）。文本变量：work_name / agent / work_root / sandbox_root / module_roots / path_rules——虚拟机档给的是 **guest 内路径**；路径规矩只有一处（`texts.yaml` 的 `path_rules`，`env_block` 用它渲染后插进每个环境块） |
 | | `patch_guide` | 自由格式补丁的写法（每块以 `*** End File` 收尾、SEARCH 要整行一致、一次可多块、整体原子） |
 | | `tool_calling_envelope` / `tool_calling_native` | 工具调用约定**两套，互斥**：一个通道只用一套，由通道形态决定注入哪套 |
 | `shared/texts.yaml` | `module_tool_params_header` | 模块工具参数段的小标题（静态模块工具或已就绪服务操作声明了 `params` 时出现；两类参数合并成一段，标题只出现一次） |
 | | `path_rules` / `tools_this_turn` / `compact_prompt` / `discuss_reminder` | **指令段**（进入模型上下文，但属于"模型被要求做什么"）：路径写法、本回合工具说明块标题（信封通道列全部工具；原生通道只保留 patch 写法）、压缩回合指令、讨论轮次里"上一轮没表态"的提醒 |
-| `shared/agent.yaml` | `agent.system` / `agent.chara` | agent 身份骨架（人设块 + 模块 `brief` 能力行 + `system` 工具用法 + 该会话**类型 × 席位**的机制说明 + 工作环境 + 调用约定；**工具清单不在这里**，随回合注入）。`system` 的变量：agent / chara_block / modules / mechanism / env / tool_calling；`chara` 是独立人设段（变量 chara，空人设不插入空标题） |
+| `shared/agent.yaml` | `agent.system` / `agent.chara` | agent 身份骨架（人设块 + 模块 `brief` 能力行 + `system` 工具用法 + 该会话**类型 × 角色**的机制说明 + 工作环境 + 调用约定；**工具清单不在这里**，随回合注入）。`system` 的变量：agent / chara_block / modules / mechanism / env / tool_calling；`chara` 是独立人设段（变量 chara，空人设不插入空标题） |
 | `roles/discussant.yaml` | `discuss.opener` / `discuss.step` / `discuss.autonomy_note` | 讨论首轮、轮转、小组自裁说明 |
 | `roles/planner.yaml` | `synthesize.*` | 整理方案 |
 | | `node_review.*` | 节点验收（产出"节点 id — 负责人"表与结论） |
@@ -28,7 +28,7 @@
 | | `verdict.*` | 判定用户那一句是否明确（明确才开工 / 放行，`collab::judge_clear`） |
 | `roles/executor.yaml` | `execute.user` | 执行任务 |
 | `roles/orchestrator.yaml` | `review.system` / `review.user` | 总验收与推进 |
-| `roles/core_proxy.yaml` | `proxy.system` | 核心代理的身份提示词（在用户授予的任务级授权范围内代用户决定与转达；工具面由机制席位按回合注入）。代理会话**不是 agent**：它的身份块渲染这一段（`{{mechanism}}` 取 `mechanisms.proxy`，`{{env}}` / `{{tool_calling}}` 与 agent 身份同一份口径，见 session 的席位身份块 `session::domain::session::prompt::role_system`），不是模块能力包 |
+| `roles/core_proxy.yaml` | `proxy.system` | 核心代理的身份提示词（在用户授予的任务级授权范围内代用户决定与转达；工具面由流程段与角色按回合注入）。代理会话**不是 agent**：它的身份块渲染这一段（`{{mechanism}}` 取 `mechanisms.proxy`，`{{env}}` / `{{tool_calling}}` 与 agent 身份同一份口径，见 session 的角色身份块 `session::domain::session::prompt::role_system`），不是模块能力包 |
 | | `summarize.system` / `summarize.user` | **讨论收尾的总结**：讨论段的产物、执行段的需求（`user` 的变量：transcript）。由核心代理的一次普通生成写出，落成转录一条 `[总结]` 与一条 `summary` 事件 |
 
 > 运行时回执**不在册子**：工具回执与参数/补丁错误在 `tools`，信封不合法的修法在 `llm`，围栏/进程收尾在 `kernel`，模块分派与轮次标注在 `collab`，清单行在 `registry` / `modules` / `tools`，`@` 引用说明在 `prompt/domain/refs.rs`。**路径校验与权限拒绝由 workspace 代码直接返回。**
@@ -46,7 +46,7 @@
   或 `Prompt::render(Segment::…, vars)`（渲染）；名字表是 `units/business/prompt/domain/prompt.rs` 的 `Segment`——
   **加一段提示词 = 册子加键 + 这里加变体**（缺了编译不过）。运行时回执不由本单元返回。
 - 渲染（`{{key}}` 替换、缺键 / 缺变量即报错）在 `units/business/prompt/domain/prompt.rs`（纯逻辑，不读文件）；
-- **工具总表与机制席位不在这份册子里**：`systools/tools.yaml`（工具是什么）与 `src/units/business/session_model/domain/mechanism.rs` 的 `SEATS`（身份有什么）
+- **工具总表与角色表不在这份册子里**：`systools/tools.yaml`（工具是什么）与 `src/units/business/session_model/domain/mechanism.rs` 的 `ROLES` / `LOOPS`（身份有什么、哪一段要哪些角色）
   由 `units/business/tools/detail/yaml_systools.rs` 的 `YamlSystools` 装配成 `SystemTools`，**与册子分开注入**——
   挂进册子会让提示词反过来依赖工具，两边成环（见 [layers.md](../architecture/layers.md)）；
 - **组装（哪一回合发哪几段）留在各业务**：身份块归 `session`、工具说明归 `tools`、清单文本归 `registry` / `workspace`

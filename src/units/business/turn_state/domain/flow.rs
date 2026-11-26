@@ -13,6 +13,26 @@ use crate::units::business::turn_state::domain::decisions::GateTicket;
 use crate::units::business::workspace::api::Sandboxes;
 use crate::units::pure::registry_model::api::AgentMeta;
 
+/// 目的：一回合的身份：坐在哪个流程段、扮演哪个角色（工具面与身份块都按它现拼）。
+/// 约束：段与角色都由流程声明，驱动不认识具体流程；两者一起换，不许只换一个。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Identity {
+    /// 目的：流程段 id（standard / discuss / execute / proxy）。
+    pub loop_id: String,
+    /// 目的：这一段里的角色 id（solo / discussant / planner / executor / core_proxy…）。
+    pub role: String,
+}
+
+impl Identity {
+    /// 目的：按（段, 角色）造一份身份。
+    pub fn new(loop_id: &str, role: &str) -> Identity {
+        Identity {
+            loop_id: loop_id.to_string(),
+            role: role.to_string(),
+        }
+    }
+}
+
 /// 目的：流程让出的那一步——请驱动取某个成员会话跑一回合。
 /// 约束：流程**不自己调模型**（它拿不到别的会话）；这里只交出「问谁、带什么、按什么参数」。
 pub struct MemberAsk {
@@ -20,8 +40,8 @@ pub struct MemberAsk {
     pub index: usize,
     /// 目的：成员 agent 名——它的会话名是「<工作>--<成员>」。
     pub member: String,
-    /// 目的：这一席的席位 id（成员会话按它取身份块与工具面；临时拼装的会话不套预设）。
-    pub seat: String,
+    /// 目的：这一回合的身份（段 + 角色）：成员会话按它取身份块与工具面。
+    pub who: Identity,
     /// 目的：本回合的身份块（流程决定它怎么理解这一步）。
     pub identity: String,
     /// 目的：本回合要喂给模型的上下文。
@@ -178,8 +198,8 @@ pub trait Flow: Send {
     fn default_answer(&self) -> Option<String> {
         None
     }
-    /// 目的：这条流程此刻的成员席 id（派节点时给子会话定席位）；默认没有成员席。
-    fn member_seat(&self) -> Option<&'static str> {
+    /// 目的：这条流程此刻的成员身份（派节点时给子会话定段与角色）；默认没有成员身份。
+    fn member_identity(&self) -> Option<(&'static str, &'static str)> {
         None
     }
 }

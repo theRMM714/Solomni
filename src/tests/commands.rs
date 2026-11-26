@@ -359,8 +359,10 @@ fn every_action_belongs_to_the_human_face_or_a_session_source() {
             .iter()
             .map(|s| s.to_string()),
     );
-    for seat in sm::SEATS {
-        session.extend(seat.tools.iter().map(|s| s.to_string()));
+    for l in sm::LOOPS {
+        for c in l.cast {
+            session.extend(c.tools.iter().map(|s| s.to_string()));
+        }
     }
     for p in crate::tests::doubles::test_profiles().profiles {
         session.extend(p.system_tools);

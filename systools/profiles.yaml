@@ -1,15 +1,15 @@
-# 会话类型表：一个会话类型就是一串要跑的流程；每个流程要哪些席位、要几个人，由机制自己报
-# （src/units/conversation/session/domain/mechanism.rs 的 MECHANISMS）。
+# 会话类型表：一个会话类型就是一串要跑的流程段；每段要哪些角色、要几个人、发哪些机制动作，由段自己报
+# （src/units/business/session_model/domain/mechanism.rs 的 LOOPS）。
 # id = 命令与落盘用（只写 ASCII，CLI 里好敲）；name = 界面渲染用（侧栏、向导直接显示它）。
-# 装配期会校验：id 唯一且无空白、流程已注册且不重复、没有流程的类型要有静止机制。
-# flows 为空 = 没有流程，直接轮循环（单机与代理就是这样），这时 mechanism 是它的静止机制。
+# 装配期会校验：id 唯一且无空白、流程段已注册且不重复、没有流程的类型要有静止段。
+# flows 为空 = 没有流程，直接轮循环（单机与代理就是这样），这时 loop 是它的静止段。
 # auto: true = 整块交给核心代理（没有名单、没有本次需求，核心在会话里自己决定做什么）；这类类型不能再有 flows。
 # agent_visible: true = agent 能经 create_session 建这个类型（默认 false：只有人经呈现层能建）。
 profiles:
   - id: single
     name: 单机
     hint: 一个 agent 直接干活：选 1 个模块 = 直连式，选多个 = 组合式。
-    mechanism: standard
+    loop: standard
     flows: []
     # 单机：agent 自己的能力组 + 它装的模块工具 + 共享区（工作区）的工具。
     sources: [agent, module, workspace]
@@ -19,14 +19,14 @@ profiles:
     name: 会议
     hint: 多个 agent 各自独立沙箱：先讨论收敛，核心写总结，再按任务链执行、统一验收。
     flows: [discuss, execute]
-    # 会议：多了「当前流程」这一来源（席位/环节声明的工具）。
+    # 会议：多了「当前流程段」这一来源（这一段发给当前角色的机制动作）。
     sources: [agent, module, workspace, loop]
     agent_visible: true
 
   - id: proxy
     name: 代理
     hint: 决定权整块交给核心：它自己挑人、建子工作并代你回答关卡。
-    mechanism: proxy
+    loop: proxy
     auto: true
     flows: []
     # 代理：整块交给核心，工具面只有会话类型展开进来的 system 工具。

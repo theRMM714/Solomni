@@ -234,11 +234,13 @@ pub struct ToolFace {
     /// 目的：shell 的只读工具链根：项目内基础 profile + 该 agent 模块的运行包根。
     /// 约束：只进 shell 的 per-call 围栏；模块工具的放行仍走它自己的命令解释器基线。
     pub runtime_roots: Vec<PathBuf>,
-    /// 目的：这个席位**可以调的系统工具 id**（由会话装配机的 `assemble::seat_face` 合成：讨论席 = discussant；执行席 = solo / executor）。
+    /// 目的：这一回合**可以调的系统工具 id**（由会话装配机的 `assemble` 按来源合成）。
     ///   存在的理由：把"谁能用哪些工具"变成**校验**，而不是提示词里的一句话。
     pub allowed: Vec<String>,
-    /// 目的：这一席的席位 id（机制声明的席位）——工具调用的审计记录用它当调用者身份。
-    pub seat: String,
+    /// 目的：这一回合在哪个流程段（loop 来源按 (段, 角色) 查角色位的机制动作）。
+    pub loop_id: String,
+    /// 目的：这一回合的角色 id（流程段声明的角色）——工具调用的审计记录用它当调用者身份。
+    pub role: String,
     /// 目的：会话类型声明挂哪些工具来源（换席时装配机按它造来源实例）。
     pub source_ids: Vec<String>,
     /// 目的：会话 meta 里的 system 工具 id（会话类型展开，成员回合为空）。
@@ -247,7 +249,7 @@ pub struct ToolFace {
     pub abilities: Vec<String>,
     /// 目的：会话类型 id（诊断与装配用）。
     pub profile: String,
-    /// 目的：这个席位**能不能用它自己模块的工具**（席位的 module_tools；执行席是，讨论席不是）。
+    /// 目的：这个回合**挂没挂模块来源**（挂不挂由会话类型决定，与角色无关）。
     pub with_modules: bool,
     /// 目的：工具说明块的素材（patch 语法 / 模块工具 / 模块工具参数）：装配期算一次，随回合注入。
     pub notes: crate::units::business::tools::api::ToolNotes,
@@ -333,15 +335,16 @@ impl CoreVerify for MemberTools {
 }
 
 impl MemberTools {
-    /// 目的：把这一席的活工具面**换成另一席**（回合换席的唯一入口）：发放名单、模块工具表、说明块与
-    ///   发布工具执行者都交给会话的装配机现拼，调用方不得自己改 `face.allowed`。
-    /// 约束：席位没变就原样返回；未知席位由装配机退化成空面（装配期已由 `mechanism::problems` 拦下）。
-    pub(crate) fn install_seat(&mut self, seat: &str) {
-        if self.face.seat == seat {
+    /// 目的：把这一回合的活工具面**换成另一段里的另一个角色**（换身份的唯一入口）：发放名单、模块工具表、
+    ///   说明块与共享区工具执行者都交给会话的装配机现拼，调用方不得自己改 `face.allowed`。
+    /// 约束：身份没变就原样返回；未知段或角色由装配机退化成空面（装配期已由 `loop_check::problems` 拦下）。
+    pub(crate) fn enter_identity(&mut self, loop_id: &str, role: &str) {
+        if self.face.loop_id == loop_id && self.face.role == role {
             return;
         }
         let next = super::assemble::assemble(super::assemble::FaceInput {
-            role: seat,
+            loop_id,
+            role,
             agent: &self.face.sandbox.agent,
             workspace_name: Some(self.face.sandbox.work_name.as_str()).filter(|n| !n.is_empty()),
             abilities: &self.face.abilities,
@@ -358,7 +361,8 @@ impl MemberTools {
         self.face.modules = next.modules;
         self.face.with_modules = next.with_modules;
         self.face.notes = next.notes;
-        self.face.seat = next.role;
+        self.face.loop_id = loop_id.to_string();
+        self.face.role = next.role;
         self.handlers = next.handlers;
     }
 
@@ -382,7 +386,7 @@ impl MemberTools {
             for id in ids {
                 if let Some(schema) = self.face.builtin_tools.get(id) {
                     // 环境参数只属于人经呈现层：核心代理的 create_session 工具面不列 tier / guest。
-                    let text = if self.face.seat == "core_proxy" && id == "create_session" {
+                    let text = if self.face.role == "core_proxy" && id == "create_session" {
                         schema.render_for_prompt_hiding(&["tier", "guest"])
                     } else {
                         schema.render_for_prompt()

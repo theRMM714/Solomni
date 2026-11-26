@@ -278,7 +278,8 @@ pub(crate) fn member_with_service_tools(
             runtime_path: None,
             runtime_roots: Vec::new(),
             allowed,
-            seat: "solo".to_string(),
+            loop_id: "standard".to_string(),
+            role: "solo".to_string(),
             source_ids: vec!["agent".to_string(), "module".to_string()],
             system_tools: Vec::new(),
             abilities: crate::units::pure::registry_model::api::DEFAULT_ABILITIES

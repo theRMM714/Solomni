@@ -273,7 +273,8 @@ pub(crate) fn native_member(
         tools: Some(MemberTools {
             face: crate::units::business::agentloop::api::ToolFace {
                 mode: crate::units::pure::registry_model::api::ToolMode::Native,
-                seat: "solo".to_string(),
+                loop_id: "standard".to_string(),
+                role: "solo".to_string(),
                 modules,
                 tier: crate::units::pure::exec_model::api::Tier::Host,
                 guest_lease: String::new(),

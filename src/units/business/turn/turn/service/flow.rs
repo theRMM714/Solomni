@@ -14,14 +14,14 @@ use crate::units::business::session_model::api::{RunState, SessionMeta, SessionS
 use crate::units::business::transcript::api::{DecisionQueue, Gate, SessionEvent};
 use crate::units::business::turn::turn::api::{Prepared, RestoreRequest};
 use crate::units::business::turn_state::api::Session;
-use crate::units::business::turn_state::api::{Answered, Flow, GateTicket, Handback};
+use crate::units::business::turn_state::api::{Answered, Flow, GateTicket, Handback, Identity};
 use crate::units::pure::registry_model::api::AgentMeta;
 
 use crate::units::business::turn_state::api::Turn;
 
-/// 目的：一个就绪节点要起的生成：节点名、子会话、这一回合的任务提示词、这一回合的席位。
-/// 约束：席位为 `None` 表示这套流程没给席位，生成按会话自己的席位跑。
-pub(crate) type NodeSpawn = (String, String, String, Option<String>);
+/// 目的：一个就绪节点要起的生成：节点名、子会话、这一回合的任务提示词、这一回合的身份（段 + 角色）。
+/// 约束：身份为 `None` 表示这套流程没给身份，生成按会话自己的静止身份跑。
+pub(crate) type NodeSpawn = (String, String, String, Option<Identity>);
 
 impl Turn {
     /// 目的：**同步**跑一个节点的子会话（CLI 与测试走这条；Web 生产路径由宿主起工作线程）。
@@ -29,12 +29,12 @@ impl Turn {
         &mut self,
         child: &str,
         objective: &str,
-        seat: Option<&str>,
+        who: Option<&Identity>,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
     ) -> Vec<SessionEvent> {
         self.bump_turn_of_child(child);
-        match self.prepare_node(child, objective, seat, registry, probe) {
+        match self.prepare_node(child, objective, who, registry, probe) {
             Ok(Prepared::Run {
                 session,
                 prefix,
@@ -107,7 +107,7 @@ impl Turn {
             // ② 该 agent 的会话：没有就按需建（名单确认时已建，这里兜底）。
             let child = ask.child_of(sid);
             if self.history.load(&child).is_err() {
-                self.spawn_agent_session(sid, &ask.member, &ask.seat, registry, probe)?;
+                self.spawn_agent_session(sid, &ask.member, &ask.who, registry, probe)?;
             }
             // ③ 跑这一回合：**与单 agent 同一条轮循环**（身份块 + 本回合席位 + 对话 + 本回合提示 + 表态）。
             // 工具面由会话按席位现拼（讨论席 = 动词 + 沙箱面）；产出逐轮落进**它自己的会话**。
@@ -128,12 +128,22 @@ impl Turn {
                 };
                 let mut emit = |e: SessionEvent| notes.borrow_mut().push(e);
                 let mut sink = |e: SessionEvent| notes.borrow_mut().push(e);
-                if crate::units::business::session_model::api::seat(&ask.seat).is_none() {
-                    return Err(format!("会话 {} 的席位没登记：{}", child, ask.seat));
+                if crate::units::business::session_model::api::loop_of(&ask.who.loop_id).is_none()
+                    || crate::units::business::session_model::api::cast_of(
+                        &ask.who.loop_id,
+                        &ask.who.role,
+                    )
+                    .is_none()
+                {
+                    return Err(format!(
+                        "会话 {} 的段或角色没登记：{}/{}",
+                        child, ask.who.loop_id, ask.who.role
+                    ));
                 }
                 let t = s.discussion_turn(
                     &ask.identity,
-                    &ask.seat,
+                    &ask.who.loop_id,
+                    &ask.who.role,
                     ask.turn.clone(),
                     ask.turn_id,
                     ask.round,
@@ -275,8 +285,8 @@ impl Turn {
             if todo.is_empty() {
                 break;
             }
-            for (node, child, objective, seat) in todo {
-                out.extend(self.drive_node(&child, &objective, seat.as_deref(), registry, probe));
+            for (node, child, objective, who) in todo {
+                out.extend(self.drive_node(&child, &objective, who.as_ref(), registry, probe));
                 let note = self.node_note(&child);
                 self.mark_node_done(sid, &node, &note);
             }
@@ -305,12 +315,12 @@ impl Turn {
         }
         // 派哪些、谁在忙由流程给事实（"只派当前阶段""一个成员一次跑一件"是流程自己的判据）。
         let (ready, busy) = (plan.ready(), plan.busy());
-        // 派节点的只能是带成员席的流程；席位由流程给（驱动不认识具体流程的席位）。
-        let seat = self
+        // 派节点的只能是带成员身份的流程；段与角色由流程给（驱动不认识具体流程的身份）。
+        let who = self
             .session(sid)
             .and_then(|s| s.flow())
-            .and_then(|f| f.member_seat())
-            .map(|r| r.to_string());
+            .and_then(|f| f.member_identity())
+            .map(|(l, r)| Identity::new(l, r));
         let mut out = Vec::new();
         let mut todo = Vec::new();
         // 资源约束：**一个 agent 的会话一次只能跑一轮**——它已有在跑的节点（或本轮已派的）就跳过，
@@ -321,7 +331,7 @@ impl Turn {
                 continue;
             }
             taken.push(assignee.clone());
-            match self.spawn_sub_session(sid, &node, seat.as_deref(), registry, probe) {
+            match self.spawn_sub_session(sid, &node, who.as_ref(), registry, probe) {
                 Ok(child) => {
                     // 派发文案用册子里的执行提示词模板渲染（objective 是核心 AI 写的那段任务提示词），
                     // 并附上上一次的验收结论（没有 = 首轮）：**返工必须知道上次错在哪**，否则只会原样重做。
@@ -345,7 +355,7 @@ impl Turn {
                         started = Some(p.started_event(&node, &child, &assignee));
                     }
                     out.extend(started);
-                    todo.push((node, child, objective, seat.clone()));
+                    todo.push((node, child, objective, who.clone()));
                 }
                 Err(e) => out
                     .extend(self.notice_row(sid, &format!("[错误] 节点 {} 派发失败：{}", node, e))),
@@ -360,7 +370,7 @@ impl Turn {
         &mut self,
         parent: &str,
         agent: &str,
-        seat: &str,
+        who: &Identity,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
     ) -> Result<String, String> {
@@ -375,9 +385,10 @@ impl Turn {
         // 讨论与执行不分家（见 docs/session/session-model.md）。同名即复用，幂等。
         let child = format!("{}--{}", parent, agent);
         if let Ok((mut existing, _)) = self.history.load(&child) {
-            // 会话是**一个 agent 一个**：换段流程时它的静止席位要跟着换，否则重建后还会拿到上一席的面。
-            if existing.spec.seat != seat {
-                existing.spec.seat = seat.to_string();
+            // 会话是**一个 agent 一个**：换段流程时它的身份要跟着换，否则重建后还会拿到上一身份的面。
+            if existing.spec.loop_id != who.loop_id || existing.spec.role != who.role {
+                existing.spec.loop_id = who.loop_id.clone();
+                existing.spec.role = who.role.clone();
                 self.history.save_meta(&existing)?;
             }
             return Ok(child);
@@ -388,9 +399,9 @@ impl Turn {
             context_freshness: false,
             freshness_keep_percent: 80,
             name: child.clone(),
-            // 子会话是"一个 agent 在自己的沙箱里干活"：没有流程，身份是流程给的那一席
-            //（驱动不认识具体流程的席位，所以由调用方把席位传进来）。
-            spec: SessionSpec::plain("", "", seat),
+            // 子会话是"一个 agent 在自己的沙箱里干活"：没有流程，身份是流程给的那一段与角色
+            //（驱动不认识具体流程的身份，所以由调用方把段与角色传进来）。
+            spec: SessionSpec::plain("", "", &who.role).in_loop(&who.loop_id),
             delegate: false,
             modules: a.modules.clone(),
             // 会话跨整场工作，所以记**工作的需求**（节点目标由链记着，随回合下发）。
@@ -419,12 +430,12 @@ impl Turn {
     }
 
     /// 目的：为任务链的一个节点建**子会话**：它就是该节点负责人的 agent 会话（一个 agent 一个会话）。
-    /// 参数：`seat` = 这一席的席位 id（由流程给；驱动不认识具体流程的席位）。
+    /// 参数：`who` = 这一回合的段与角色（由流程给；驱动不认识具体流程的身份）。
     pub(crate) fn spawn_sub_session(
         &mut self,
         parent: &str,
         node: &str,
-        seat: Option<&str>,
+        who: Option<&Identity>,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
     ) -> Result<String, String> {
@@ -437,9 +448,9 @@ impl Turn {
             .ok_or_else(|| format!("本会话没有可派的活，或链里没有节点 {}", node))?;
         // 节点的会话**就是它负责人的 agent 会话**（一个 agent 一个会话，讨论与执行不分家）。
         // 节点本身不再记在 meta 里——哪个节点正跑在这个会话里，由链的 sub_session 认。
-        let seat =
-            seat.ok_or_else(|| format!("会话 {} 这一段流程没有成员席，不能派节点", parent))?;
-        self.spawn_agent_session(parent, &assignee, seat, registry, probe)
+        let who =
+            who.ok_or_else(|| format!("会话 {} 这一段流程没有成员身份，不能派节点", parent))?;
+        self.spawn_agent_session(parent, &assignee, who, registry, probe)
     }
     /// 目的：代理模式：一个子会话停下了 → 往**代理会话**写一条通知行（只写这一条，不转发子会话转录）。
     ///  返回被通知的代理会话名；父不是代理会话（协作节点等）就返回 None、什么都不做。

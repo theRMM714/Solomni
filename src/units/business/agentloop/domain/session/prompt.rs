@@ -131,9 +131,11 @@ pub struct SessionParams {
     pub modules: Vec<ModulePrompt>,
     /// 目的：**席位提示词段**：`None` = 普通 agent（模块能力包 + `AgentSystem`）； `Some(seg)` = 不是 agent 的核心身份（代理这类），身份块渲染 `seg` 那一段席位提示词。 存段名而不是渲染好的文本：身份块**每回合现渲染**（册子一改，下一次调用就生效）。
     pub seat_system: Option<crate::units::business::prompt::api::Segment>,
-    /// 目的：这一席的**席位**（solo / executor / discussant / core_proxy…）：机制册按它取说明，工具面也按席位发。
-    ///   约束：这是「当前坐的席位」——流程换席时驱动随回合换它、跑完还原（`TurnRun.seat`）。
-    pub seat: String,
+    /// 目的：这一回合的**角色**（solo / executor / discussant / core_proxy…）：身份块与 tool 来源按它取。
+    ///   约束：这是「当前的角色」——流程换段时驱动随回合换它、跑完还原（`TurnRun.role`）。
+    pub role: String,
+    /// 目的：这一回合坐在哪个**流程段**（standard / discuss / execute / proxy）：loop 来源按 (段, 角色) 查角色位。
+    pub loop_id: String,
     /// 目的：这场会话跑在哪种 guest 里（本机档 = None）——工作环境块按它选 guest 档，路径按 guest 拼法渲染。
     pub guest: Option<crate::units::business::vm::api::GuestOs>,
 }
@@ -144,7 +146,8 @@ impl SessionParams {
         agent: &str,
         sb: &crate::units::business::workspace::api::Sandbox,
         modules: &[crate::units::business::catalog::modules::api::Module],
-        seat: &str,
+        loop_id: &str,
+        role: &str,
     ) -> SessionParams {
         SessionParams {
             agent: agent.to_string(),
@@ -162,7 +165,8 @@ impl SessionParams {
                 })
                 .collect(),
             seat_system: None,
-            seat: seat.to_string(),
+            role: role.to_string(),
+            loop_id: loop_id.to_string(),
             guest: None,
         }
     }
@@ -220,7 +224,7 @@ impl SessionParams {
         let env = env_block(prompt, self);
         match self.seat_system {
             // 席位身份（代理这类不是 agent 的核心）：同一份机制 / 环境 / 调用约定口径。
-            Some(seg) => seat_system(prompt, seg, &self.agent, &env, mode, &self.seat),
+            Some(seg) => seat_system(prompt, seg, &self.agent, &env, mode, &self.role),
             None => agent_system(
                 prompt,
                 &self.agent,
@@ -228,7 +232,7 @@ impl SessionParams {
                 &self.modules,
                 &env,
                 mode,
-                &self.seat,
+                &self.role,
             ),
         }
     }
@@ -302,9 +306,10 @@ pub fn env_block(
 pub struct TurnRun<'a> {
     /// 目的：本回合的身份块（驱动按当前提示词册现渲染；不进对话）。
     pub identity: &'a str,
-    /// 目的：本回合坐的席位 id（机制说明按它取）——**每回合必给**，工具面由它现拼。
-    ///   讨论席 / 节点按回合给席位；单 agent 给会话自己的那一席。
-    pub seat: &'a str,
+    /// 目的：本回合坐的流程段与角色 id（工具面按它们现拼）——**每回合必给**。
+    ///   讨论席 / 节点按回合给；单 agent 给会话自己的那一段与角色。
+    pub loop_id: &'a str,
+    pub role: &'a str,
     /// 目的：本回合的提示（讨论席的开场/轮转词；执行席常为空——它的指令在派发行里）。
     pub turn: Vec<Msg>,
     /// 目的：本回合认不认**协作表态**（讨论席认；执行席不认）。

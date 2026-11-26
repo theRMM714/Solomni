@@ -17,11 +17,10 @@ pub(crate) fn run_member_turn<H: TurnHost>(
     // 会话不存在就按需建（名单确认时已建，这里兜底）。
     {
         let (parent, agent) = (sid.to_string(), req.agent.clone());
-        let seat = req.seat.clone();
+        let who = req.who.clone();
         host.core_env(move |turn, registry, probe| {
             // 建过就是幂等复用（同名会话已存在 = 直接返回它的名字）。
-            let seat = seat.as_str();
-            turn.spawn_agent_session(&parent, &agent, seat, registry, probe)
+            turn.spawn_agent_session(&parent, &agent, &who, registry, probe)
                 .map(|_| ())
         })?;
     }
@@ -46,10 +45,12 @@ pub(crate) fn run_member_turn<H: TurnHost>(
     let identity = req.identity.clone();
     let round = req.round;
     let turn_id = req.turn_id;
-    // 这一回合坐的席位：**席位是回合的值**，工具面由会话在换席时现拼（讨论席：机制动词 + 沙箱面）。
-    let seat_in = req.seat.clone();
-    if crate::units::business::session_model::api::seat(&seat_in).is_none() {
-        return Err(format!("席位没登记：{}", seat_in));
+    // 这一回合坐的段与角色：**身份是回合的值**，工具面由会话在换身份时现拼（讨论段：流程动作 + 沙箱面）。
+    let who = req.who.clone();
+    if crate::units::business::session_model::api::loop_of(&who.loop_id).is_none()
+        || crate::units::business::session_model::api::cast_of(&who.loop_id, &who.role).is_none()
+    {
+        return Err(format!("段或角色没登记：{}/{}", who.loop_id, who.role));
     }
     // 子会话自己的**权威行**（逐轮）与**运行态收尾**都走它自己的事件台，
     // 并且**边产边落盘**：这个会话不经过主会话那条 sink，落盘手柄随线程带过去。
@@ -91,7 +92,16 @@ pub(crate) fn run_member_turn<H: TurnHost>(
             };
             // 这一回合：身份块（现渲染）+ 本回合席位（工具面由它现拼）+ 该会话的**对话** + 开场/轮转词 + 表态。
             let ran = s.discussion_turn(
-                &identity, &seat_in, turn, turn_id, round, &io, &cancel, &mut emit, &mut sink,
+                &identity,
+                &who.loop_id,
+                &who.role,
+                turn,
+                turn_id,
+                round,
+                &io,
+                &cancel,
+                &mut emit,
+                &mut sink,
             );
             (s, ran)
         })

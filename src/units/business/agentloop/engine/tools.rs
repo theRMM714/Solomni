@@ -426,7 +426,7 @@ pub(crate) fn run_batch(
             ctx.log.info(
                 "action",
                 &crate::units::business::tools::api::action_audit(
-                    &ctx.face.seat,
+                    &ctx.face.role,
                     &name,
                     outcome.ok,
                     &outcome.output,

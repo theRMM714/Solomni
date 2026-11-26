@@ -41,7 +41,7 @@
 - **模块目录恒只读**；模块自己的私有区（`data/modules/<id>/userdata`）只给模块工具进程写；模块工具写**调用方 agent 的沙箱**（契约见 [MODULE_SPEC.md](../../MODULE_SPEC.md)）。
 - **主机只读根**（`sandbox.policy.host_read_roots`）恒只读挂进围栏。
 - **项目工具链与运行包**恒只读（可信执行基座，机器级一次性预授，与档位无关，见 [kernel/README.md](../kernel/README.md) 的「授权主体分两个」）。
-- 因此「读模块源码」「读写共享区」「执行落点在哪」都不是权限项：前者由席位面（工具面 / 模块声明）决定，后者恒为私有沙箱（见「四」）。
+- 因此「读模块源码」「读写共享区」「执行落点在哪」都不是权限项：前者由工具面（工具面 / 模块声明）决定，后者恒为私有沙箱（见「四」）。
 
 ## 三、共享区归属（在 workspace，不在本单元）
 
@@ -78,7 +78,7 @@
 - 围栏的固定并集：私有沙箱（`home`）+ 该模块私有区可写、模块目录只读子树、`net` 与全局开关求交（`fence_spec_grants_fixed_surfaces`）。
 - 共享区三态与黑名单：序列化、交集、收窄不放大（`shared_scope_narrowing_never_widens`、`shared_scope_serde_and_merge_edges`，`src/tests/permission.rs`）。
 - 工作工具的路径过滤跟着读范围走（`work_status_filters_paths_outside_read_scope`、`work_lost_is_scoped_by_read_permission`、`work_versions_and_resolve_are_scoped_by_read_permission`）；`write=none` 时提交 / 推送被拒（`no_write_scope_refuses_commit_and_push`）。
-- 工具面只由席位面决定，档位不裁剪（`profile_does_not_change_the_tool_face`，`src/tests/tools/shell.rs`）。
+- 工具面只由工具面决定，档位不裁剪（`profile_does_not_change_the_tool_face`，`src/tests/tools/shell.rs`）。
 - CI 的 `--fence-live` 门禁把安全探针的环境跳过记 `quality-fail`，不许当成通过（`tests/gates/steps.js` 的 `securitySkipsIn`）；`--strict-env` 没带 `--fence-live` 同样失败。
 - 围栏路径的根内判定在规范化失败时拒绝含上级段的路径（`inside_root_rejects_parent_escape_even_when_canonicalize_fails`，`src/kernel/detail/confine/windows/tests.rs`）。
 

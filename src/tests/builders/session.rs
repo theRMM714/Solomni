@@ -83,7 +83,8 @@ pub(crate) fn member_with_tools(
         tools: Some(MemberTools {
             face: crate::units::business::agentloop::api::ToolFace {
                 mode: crate::units::pure::registry_model::api::ToolMode::Envelope,
-                seat: "solo".to_string(),
+                loop_id: "standard".to_string(),
+                role: "solo".to_string(),
                 modules,
                 tier: crate::units::pure::exec_model::api::Tier::Host,
                 guest_lease: String::new(),

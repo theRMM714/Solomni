@@ -17,7 +17,7 @@ pub use crate::units::business::turn_state::domain::decisions::{
 };
 // 流程面：驱动只认这几个名字（推一步 / 让出一回合 / 交回后的处置 / 可派的活）。
 pub use crate::units::business::turn_state::domain::flow::{
-    Flow, Handback, MemberAsk, Settle, WorkPlan,
+    Flow, Handback, Identity, MemberAsk, Settle, WorkPlan,
 };
 // 流程工厂面：组合根把实现注入 turn / work，装配点只按 id 取段。
 pub use crate::units::business::turn_state::domain::flows::{FlowSetup, Flows, sequence_of};

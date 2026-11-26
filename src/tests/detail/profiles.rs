@@ -17,12 +17,11 @@ fn the_shipped_table_covers_the_three_modes_and_its_roles_exist() {
     let st = YamlSystools::new(assets_at(&root))
         .load()
         .expect("读工具总表");
-    // 会话类型表在装载时就校验了机制与流程；这里再锁一遍席位面与工具总表的一致性。
-    let problems =
-        crate::units::business::conversation::session::api::mechanism_problems(&st.tools);
+    // 会话类型表在装载时就校验了流程段与流程；这里再锁一遍角色面与工具总表的一致性。
+    let problems = crate::units::business::conversation::session::api::loop_problems(&st.tools);
     assert!(
         problems.is_empty(),
-        "机制面与系统工具总表不一致：{:?}",
+        "角色面与系统工具总表不一致：{:?}",
         problems
     );
 }

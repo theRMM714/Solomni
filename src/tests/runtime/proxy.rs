@@ -82,12 +82,13 @@ pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
             );
         }
     }
-    // 席位面不再含这些名字：它们来自会话类型，不来自 loop。
-    let seat = crate::units::business::session_model::api::seat("core_proxy").expect("代理席在册");
+    // 角色位不再含这些名字：它们来自会话类型，不来自流程段。
+    let core = crate::units::business::session_model::api::cast_of("proxy", "core_proxy")
+        .expect("代理段的核心角色位在册");
     assert!(
-        seat.tools.is_empty(),
-        "代理席的工具面已交给会话类型：{:?}",
-        seat.tools
+        core.tools.is_empty(),
+        "代理角色位的工具面已交给会话类型：{:?}",
+        core.tools
     );
     assert!(
         !st.tools.contains_key("core_proxy"),

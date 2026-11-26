@@ -121,6 +121,7 @@ pub(crate) fn test_params(agent: &str) -> crate::units::business::agentloop::api
         agent,
         &test_sandbox(agent, &[]),
         &[],
+        "standard",
         "solo",
     )
 }

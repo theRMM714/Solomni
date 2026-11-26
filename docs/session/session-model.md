@@ -9,8 +9,8 @@
 
 ## 一、形态
 - **执行席按 agent 一会话**（含同 agent 串行）、**讨论回合开工具循环**（能只读核实、拿不到模块工具）、**讨论由核心驱动**（泵只决定"该问谁"，成员回合在它自己的会话里跑，核实行与回合标记都落进那个会话；主会话只留"谁说了什么"）。
-- **会话类型是落盘的声明，不是分支**：建会话时把类型表里那一条解析成 `SessionSpec`（`kind` / `name` / `seat` / `flows` / `auto` / `sources` / `system_tools`）写进 `meta.yaml`，之后装配只看这份声明——有流程就按流程装配，没有就一个 agent 直接轮循环（`spec.driven()`）；代码里没有「形态枚举」，也不按 id 分支（「整块交给核心」看 `auto`，不看名字）。类型 id 同时是命令与落盘用的词（ASCII），`name` 只给界面显示，`hint` 是选类型时的一句说明。
-- **会话类型是数据**：一个会话类型就是一串流程 id，声明在 `systools/profiles.yaml`（自带 single / collab / proxy 三条；`flows` 为空 = 没有流程、直接轮循环）。每条写清 `id`（命令与落盘用）、`name`（界面显示）、`hint`（一句说明）、`flows`、`auto`（这个类型整块交给核心：没有名单也没有需求）、`agent_visible`（**agent** 能不能用 `create_session` 建它；默认 false = 只有人经呈现层能建，人的入口不受它限制）、`sources`（挂哪几个工具来源：`agent` / `module` / `loop` / `workspace` / `profile`）、`system_tools`（系统工具 id，建会话时展开进 `meta`），以及**没有流程时**坐的静止机制 `mechanism`（如 `standard` / `proxy`，解析成它唯一那一席）。**席位不在这里报**：一个机制由哪些席位出演（`core: true` = 核心通道，不进成员表；其余是成员席，各报 `min` 员）是机制自己的声明，在 `src/units/business/session_model/domain/mechanism.rs` 的 `MECHANISMS`（新增机制在那里加一条，`flow: true` 的才能当流程）。装配期校验：id 唯一且不含空白、流程已注册且不重复出现、没有流程的类型要有静止机制且它不能是流程机制、有流程的类型不该再声明机制、每个流程至少各有一个核心席与成员席；各流程成员席人数取最大折成 `min_agents`：建会话时人数不够就直接拒绝，代拟名单由流程在建组时判（`session::domain::profile::Profiles`，加载在 `src/units/business/conversation/session/detail/yaml_profiles.rs`）。
+- **会话类型是落盘的声明，不是分支**：建会话时把类型表里那一条解析成 `SessionSpec`（`kind` / `name` / `loop_id` / `role` / `flows` / `auto` / `sources` / `system_tools`）写进 `meta.yaml`，之后装配只看这份声明——有流程就按流程装配，没有就一个 agent 直接轮循环（`spec.driven()`）；代码里没有「形态枚举」，也不按 id 分支（「整块交给核心」看 `auto`，不看名字）。类型 id 同时是命令与落盘用的词（ASCII），`name` 只给界面显示，`hint` 是选类型时的一句说明。
+- **会话类型是数据**：一个会话类型就是一串流程 id，声明在 `systools/profiles.yaml`（自带 single / collab / proxy 三条；`flows` 为空 = 没有流程、直接轮循环）。每条写清 `id`（命令与落盘用）、`name`（界面显示）、`hint`（一句说明）、`flows`、`auto`（这个类型整块交给核心：没有名单也没有需求）、`agent_visible`（**agent** 能不能用 `create_session` 建它；默认 false = 只有人经呈现层能建，人的入口不受它限制）、`sources`（挂哪几个工具来源：`agent` / `module` / `loop` / `workspace` / `profile`）、`system_tools`（系统工具 id，建会话时展开进 `meta`），以及**没有流程时**坐的静止段 `loop`（如 `standard` / `proxy`，解析成它唯一那个角色位）。**角色与角色位不在这里报**：一个流程段由哪些角色出演（`core: true` = 核心通道，不进成员表；其余是成员角色，角色位各报 `min` 员与它交的机制动作）是段自己的声明，在 `src/units/business/session_model/domain/mechanism.rs` 的 `LOOPS`（新增流程段在那里加一条，`flow: true` 的才能当流程；角色本身在同文件的 `ROLES`）。装配期校验：id 唯一且不含空白、流程已注册且不重复出现、没有流程的类型要有静止段且它不能是流程段、有流程的类型不该再声明静止段、每个流程至少各有一个核心角色与成员角色、角色位引用的角色在册且它交的动作都在工具总表里；各流程成员角色位人数取最大折成 `min_agents`：建会话时人数不够就直接拒绝，代拟名单由流程在建组时判（`session::domain::profile::Profiles`，加载在 `src/units/business/conversation/session/detail/yaml_profiles.rs`）。
 - **形状只由类型表定**：没有现拼流程的旁路——`create_session` 的 `kind` 必填，表里没有的类型直接建不出来（`Work::create` 报「会话类型表里没有「…」这个类型」，`src/units/business/work/service/create.rs`）。两扇门共用同一份类型表，但收窄面不同：**人经呈现层**只按「表里有没有」判；**agent** 的 `create_session` 只收 `agent_visible: true` 的类型（`catalog_agents` 的 `scope=types` 也只列这一组，`src/units/business/proxy/service/proxy.rs` 的 `resolve_new_session` 按 `catalog.kinds` 校验）。
 - **agent 会话在第一个回合按需建**。
 - 主会话投影行带 `turn`（回档按回合同步截断）；工具面由会话类型挂的工具来源合成（来源各自交 id，装配期去重成面）；压缩：`compact` 工具 + `compacted` 转录行 + 发送视图，按模型窗口百分比自动触发。
@@ -38,7 +38,7 @@ session/<工作名>/
 ```
 
 - **目录保留名**（`work` / `children` / `.proxy` / `.work` / `.work-root`）的名单在 `systools/names.yaml`：布局一改就改表，代码里不硬编码。
-- **缺省名由后端派生**：没显式给名字时，会话名 = 预设 id + 本机到分钟的时间戳（如 `single-20261124-2053`）；没有预设 id 就退到 `work`；子会话是 `<父名>--<席位名>`，不另起时间戳。显式给了名字才用它，重名一律带 `-2` / `-3` 尾号（`src/units/business/runtime/service/action.rs` 的 `derived_session_name` + `unique_work_name`，时间戳来自 `src/kernel/detail/clock.rs` 的 `local_stamp`）。
+- **缺省名由后端派生**：没显式给名字时，会话名 = 预设 id + 本机到分钟的时间戳（如 `single-20261124-2053`）；没有预设 id 就退到 `work`；子会话是 `<父名>--<角色名>`，不另起时间戳。显式给了名字才用它，重名一律带 `-2` / `-3` 尾号（`src/units/business/runtime/service/action.rs` 的 `derived_session_name` + `unique_work_name`，时间戳来自 `src/kernel/detail/clock.rs` 的 `local_stamp`）。
 - `meta.yaml` 的 `agents` 是名单的唯一真相（代拟路径在用户确认那一刻写回）；`exec` 段是执行选型的唯一真相（档位 / 虚拟根名 / 定版 `pins`；缺段按默认读回）。会话级权限层在 `sandbox.ceiling`（根）/ `sandbox.narrowing`（子）。
 - agent 会话**在第一个讨论回合按需建**（名单确认时不预建），命名 `<工作>--<agent>`。
 - agent 会话是**普通会话**：独立上下文、独立转录、独立围栏，复用同一套会话机制；**不新增会话类型**。
@@ -148,7 +148,7 @@ session/<工作名>/
 - 成员回合跑在**它自己的会话**里，主会话在整回合里一个事件都收不到。所以核心要主动交代两件事，否则用户看到的界面就是"整回合不动、只有手动刷新才同步"：
 
 - **逐片外送**：成员回合与**核心操作**的正文都逐片推 `Delta`（沿用"到 `{` 就截住"的分片规则——信封绝不当正文流出），核实行实时推 `ToolCall`。外送目标是**该 agent 自己的会话**（打开它的标签页就能看到它逐字在说、在读文件）。**被截住或合并掉的空片段不推事件**（`session::api::delta_visible`：只有 `start` 与有内容的片段外送），否则长信封会让前端每秒收到几十条空 delta、看起来像卡死。
-- **逐轮定稿**：成员回合与单 agent / 节点回合跑的是**同一条轮循环**（`engine::converse_with`；这一回合的参数收在 `session::TurnRun`：身份、席位、本回合提示、表态约定、回合号）。
+- **逐轮定稿**：成员回合与单 agent / 节点回合跑的是**同一条轮循环**（`engine::converse_with`；这一回合的参数收在 `session::TurnRun`：身份、角色、本回合提示、表态约定、回合号）。
 - 一轮跑完就出这一轮的行（`engine::build_round_lines` 是**唯一的行构造点**），那批行**同时入它自己的事件台与落盘**——只落盘的话，那个标签页的流式块永远等不到替换它的那一行，正文一直挂着闪烁光标、看着像"还在流式"。思维链随该轮的权威行保存（工具轮没有正文时挂到工具行上），流式结束或重放后仍可查看；没有定稿的停止/错误分片在空闲事件到达时撤下，不冒充转录。
 - 主会话那份是**投影**（`feed_with` 只投影"谁说了什么"），与子会话各一份、互不重复。
 - **运行态的唯一真相是事件**：`SessionEvent::Working { agent }`（短暂、不落盘，`None` = 空闲）在"要问谁 / 这条会话开始生成"时推带名字的那条、收尾推空闲；**主会话与子会话各推各的**——子会话若只靠"有增量=在跑"推断，收尾就永远清不掉：那个标签页一直显示"正在工作"、按钮一直停在「停止」。
@@ -248,7 +248,7 @@ session/<工作名>/
 2. 核心：泵推一步 → AskMember { agent, msgs }
 3. 核心：put_collab(sid)                    先放回，腾出手
 4. 核心：take_single(<工作>--<agent>)       该 agent 的会话移出表
-5. 核心：跑这一回合（TurnRun：动词 + 席位）  与单 agent 同一条轮循环，见"逐轮定稿"
+5. 核心：跑这一回合（TurnRun：动词 + 角色）  与单 agent 同一条轮循环，见"逐轮定稿"
 6. 核心：put_single(...)                    放回（转录增量落盘在它自己目录里）
 7. 核心：投影 → 主会话追加"该 agent 的发言行"（带 turn 标记）
 8. 核心：回到 1，直到泵给终态
@@ -307,7 +307,7 @@ session/<工作名>/
 
 - **模块工具只在执行回合给**：讨论回合的会话类型（`collab` 的子会话）不挂 `module` 来源，所以拿不到"干活"的手段——不是"被拒绝"，是**没有**。
 - **这一份工具面是随回合注入的**：核心查"这一回合的身份能用的工具"。信封通道把那一份（说明 + 参数）作为一条系统消息放进该回合的上下文；原生通道由**声明槽**下发名字 / 说明 / JSON Schema，不再重复文字清单（只保留 patch 这类声明表达不了的写法）。**整本工具总表不进提示词**——列了必然被拒的工具等于请模型去撞墙（细则见 [tools-and-roles.md](../tools/tools-and-roles.md) 二）。
-- 工具来源（src/units/business/session_model/domain/tools.rs 的 `ToolSource`）**各自交 id**：agent 按能力组交文件面与执行面、module 交限定 id、loop 交当前席位的机制动作、workspace 交 `work_*`、profile 交会话类型声明的系统工具；这一面由**唯一装配机**现拼（src/units/business/agentloop/domain/assemble.rs 的 `assemble` → `FaceInput` / `SeatFace`，实现见 `sources.rs`）：发放（提示词块与原生声明槽）与越权校验同出一份清单，代码里不另写名单。回合只携带**席位**（`TurnRun.seat`）：每回合驱动换席时由会话现拼这一席的面并还原（AgentSession::enter_seat → MemberTools::install_seat）；节点 / 单 agent 回合在准备段就把席位装进会话，不沿用会话出生时的面（见 [tools-and-roles.md](../tools/tools-and-roles.md) 三）。
+- 工具来源（src/units/business/session_model/domain/tools.rs 的 `ToolSource`）**各自交 id**：agent 按能力组交文件面与执行面、module 交限定 id、loop 交当前这一回合（段 + 角色）的机制动作、workspace 交 `work_*`、profile 交会话类型声明的系统工具；这一面由**唯一装配机**现拼（src/units/business/agentloop/domain/assemble.rs 的 `assemble` → `FaceInput` / `SeatFace`，实现见 `sources.rs`）：发放（提示词块与原生声明槽）与越权校验同出一份清单，代码里不另写名单。回合只携带**段与角色**（`TurnRun.loop_id` / `TurnRun.role`）：每回合驱动换身份时由会话现拼这一身份的面并还原（AgentSession::enter_identity → MemberTools::enter_identity）；节点 / 单 agent 回合在准备段就把身份装进会话，不沿用会话出生时的面（见 [tools-and-roles.md](../tools/tools-and-roles.md) 三）。
 - **派发三类来源同一条路径**：这一回合的工具面里，系统工具走 `ToolExec::run_builtin`，模块工具走 `dispatch_external`，**核心自有工具**（代理工具等）问注入的 `ToolHandler` 谁认领它——三类同一条路径（`src/kernel/ports.rs` 的 `ToolHandler`，见 [architecture/README.md](../architecture/README.md) §二）。加一类工具只注册一个 handler，不改循环。
 
 ### 四之一、会话参数与对话分开
@@ -448,7 +448,7 @@ session/<工作名>/
 ## 十一、联动
 
 - 任务链、审查关卡、验收与边界：见 [task-chain.md](../collab/task-chain.md)
-- 系统工具与机制席位（谁能用哪些工具）：见 [tools-and-roles.md](../tools/tools-and-roles.md)
+- 系统工具、流程段与角色（谁能用哪些工具）：见 [tools-and-roles.md](../tools/tools-and-roles.md)
 - 协作流程的产品视角：见 [PRODUCT.md](../../PRODUCT.md)
 
 ## 检查
@@ -458,7 +458,7 @@ session/<工作名>/
 
 ## 路由
 - 任务链与审查关卡：[../collab/task-chain.md](../collab/task-chain.md)
-- 工具与机制席位：[../tools/tools-and-roles.md](../tools/tools-and-roles.md)
+- 工具、流程段与角色：[../tools/tools-and-roles.md](../tools/tools-and-roles.md)
 - 呈现层契约：[../presentation/contracts.md](../presentation/contracts.md)
 - 权限语义：[../permission/README.md](../permission/README.md)
 - 架构约束：[architecture/README.md](../architecture/README.md)

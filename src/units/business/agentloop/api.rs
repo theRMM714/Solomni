@@ -3,9 +3,9 @@
 //! 不管：`domain` / `engine` 的内部实现；历史落盘、裁决队列与会话树（在会话单元）；端口实现（在各自机制单元）。
 //! 联动：会话单元的装配与用例、turn 的生成流程、work 与 collab 的调度、runtime 的核心操作都从这里取；契约见 docs/agentloop/README.md。
 
-/// 目的：测试用——按一席的来源算工具面 id（生产路径只有 assemble）。
+/// 目的：测试用——按某个角色在它所在段里的来源算工具面 id（生产路径只有 assemble）。
 #[cfg(test)]
-pub use crate::units::business::agentloop::domain::assemble::seat_face;
+pub use crate::units::business::agentloop::domain::assemble::role_face;
 #[allow(unused_imports)]
 pub use crate::units::business::agentloop::domain::assemble::{
     FaceInput, SeatFace, assemble, face_of, service_ops_of, serviced_tools,

@@ -174,8 +174,8 @@ impl Flow for Sequence {
         self.steps.last().is_some_and(|s| s.is_done())
     }
 
-    fn member_seat(&self) -> Option<&'static str> {
-        self.current().and_then(|s| s.member_seat())
+    fn member_identity(&self) -> Option<(&'static str, &'static str)> {
+        self.current().and_then(|s| s.member_identity())
     }
 
     fn notice(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {

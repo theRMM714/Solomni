@@ -280,23 +280,24 @@ impl AgentSession {
         &self.params
     }
 
-    /// 目的：这一回合坐的席位 id（流程换段时由驱动按回合现换，跑完还原）。
-    pub fn seat(&self) -> &str {
-        &self.params.seat
+    /// 目的：这一回合的角色 id（流程换段时由驱动按回合现换，跑完还原）。
+    pub fn role(&self) -> &str {
+        &self.params.role
     }
 
-    /// 目的：换席——只在回合内由驱动调用，回合结束必须还原，否则下一回合会带着上一席的身份。
-    pub(crate) fn set_seat(&mut self, seat: &str) {
-        self.params.seat = seat.to_string();
+    /// 目的：换角色——只在回合内由驱动调用，回合结束必须还原，否则下一回合会带着上一段的身份。
+    pub(crate) fn set_identity(&mut self, loop_id: &str, role: &str) {
+        self.params.loop_id = loop_id.to_string();
+        self.params.role = role.to_string();
     }
 
-    /// 目的：**坐到另一席上**：身份与工具面同换（席位是回合的值，会话只是这一回合坐在它上面）。
-    ///   工具面交给会话自己的装配机现拼（`MemberTools::install_seat`），这里不另写一份名单。
-    /// 约束：会话没有工具环境时只换身份；席位没变时是 no-op。
-    pub(crate) fn enter_seat(&mut self, seat: &str) {
-        self.set_seat(seat);
+    /// 目的：**换到另一段里的另一个角色**：身份与工具面同换（段与角色是回合的值，会话只是这一回合坐在它上面）。
+    ///   工具面交给会话自己的装配机现拼（`MemberTools::enter_identity`），这里不另写一份名单。
+    /// 约束：会话没有工具环境时只换身份；身份没变时是 no-op。
+    pub(crate) fn enter_identity(&mut self, loop_id: &str, role: &str) {
+        self.set_identity(loop_id, role);
         if let Some(tools) = self.tools.as_mut() {
-            tools.install_seat(seat);
+            tools.enter_identity(loop_id, role);
         }
     }
 
@@ -951,7 +952,8 @@ mod tests {
             chara: String::new(),
             modules: Vec::new(),
             seat_system: None,
-            seat: "solo".to_string(),
+            role: "solo".to_string(),
+            loop_id: "standard".to_string(),
             guest: None,
         };
         AgentSession::new(

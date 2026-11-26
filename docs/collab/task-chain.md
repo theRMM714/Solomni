@@ -73,7 +73,7 @@ TaskNode { id, title, objective, assignee, deps, status, sub_session, acceptance
 | 节点失败 / 超时 | 节点 Failed + 暂停 + 主会话通知（不自动重试） |
 | 停止父会话 | 不启新节点；已在跑的子会话各自停 |
 | 用户改子会话目标 | 旧产出**不作废**；核心验收按新目标 |
-| `create_session` 等代理工具 | `core_proxy` 席位 + 六个代理工具 + 真实会话宿主（队列桥），端到端旅程在 L4 里真跑（见 [tools-and-roles.md](../tools/tools-and-roles.md)） |
+| `create_session` 等代理工具 | `core_proxy` 角色 + 六个代理工具 + 真实会话宿主（队列桥），端到端旅程在 L4 里真跑（见 [tools-and-roles.md](../tools/tools-and-roles.md)） |
 
 ## 七、验收与返工
 
@@ -89,7 +89,7 @@ TaskNode { id, title, objective, assignee, deps, status, sub_session, acceptance
 
 ## 八、联动
 
-- 工具与机制席位（planner 建链、orchestrator 推进）：[tools-and-roles.md](../tools/tools-and-roles.md)
+- 工具、流程段与角色（planner 建链、orchestrator 推进）：[tools-and-roles.md](../tools/tools-and-roles.md)
 - 产品行为：[PRODUCT.md](../../PRODUCT.md)；会话与并发模型：[architecture/README.md](../architecture/README.md)
 - 呈现层入站契约：[contracts.md](../presentation/contracts.md)
 
@@ -99,7 +99,7 @@ TaskNode { id, title, objective, assignee, deps, status, sub_session, acceptance
 
 ## 路由
 - 会话模型：[../session/session-model.md](../session/session-model.md)
-- 工具与机制席位：[../tools/tools-and-roles.md](../tools/tools-and-roles.md)
+- 工具、流程段与角色：[../tools/tools-and-roles.md](../tools/tools-and-roles.md)
 - 产品行为：[../../PRODUCT.md](../../PRODUCT.md)
 - 架构与并发模型：[../../ARCHITECTURE.md](../../ARCHITECTURE.md)
 - 呈现层契约：[../presentation/contracts.md](../presentation/contracts.md)

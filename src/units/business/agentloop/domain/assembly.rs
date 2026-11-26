@@ -51,8 +51,10 @@ pub struct MemberSpec<'a> {
     pub unavailable: BTreeMap<String, Vec<String>>,
     /// 目的：工具形态（原生 / 信封）。
     pub mode: ToolMode,
-    /// 目的：这一席的席位 id（用户建的单 agent 会话 = solo，协作子会话 = executor）。
-    pub seat: &'a str,
+    /// 目的：这一回合坐的流程段 id（standard / discuss / execute / proxy）。
+    pub loop_id: &'a str,
+    /// 目的：这一回合的角色 id（用户建的单 agent 会话 = solo，协作子会话 = executor）。
+    pub role: &'a str,
     /// 目的：档位（本机 / 虚拟机）。
     pub tier: Tier,
     /// 目的：这一席的 guest 租约（本机档为空串）。
@@ -147,7 +149,8 @@ pub struct ProxySpec<'a> {
 pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools {
     let sb = spec.sandbox;
     let seat = assemble_face(FaceInput {
-        role: spec.seat,
+        loop_id: spec.loop_id,
+        role: spec.role,
         agent: &sb.agent,
         workspace_name: Some(sb.work_name.as_str()).filter(|n| !n.is_empty()),
         abilities: spec.abilities,
@@ -177,7 +180,8 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
             runtime_roots: spec.env.runtime_roots.clone(),
             // 这一席的系统工具面**由装配机按席位合成**（越权校验的唯一判据）：给什么写什么，代码里不留第二份名单。
             allowed: seat.allowed,
-            seat: seat.role,
+            loop_id: spec.loop_id.to_string(),
+            role: seat.role,
             source_ids: spec.source_ids.to_vec(),
             system_tools: spec.system_tools.to_vec(),
             abilities: spec.abilities.to_vec(),
@@ -229,10 +233,15 @@ pub fn single_session(
         ),
     );
     // **会话参数**：身份块每回合由它现渲染（不存进消息列表）。
-    let params =
-        SessionParams::from_workspace(&a.name, spec.member.sandbox, spec.member.modules, "solo")
-            .with_chara(a.chara.clone())
-            .with_guest(spec.guest);
+    let params = SessionParams::from_workspace(
+        &a.name,
+        spec.member.sandbox,
+        spec.member.modules,
+        spec.member.loop_id,
+        spec.member.role,
+    )
+    .with_chara(a.chara.clone())
+    .with_guest(spec.guest);
     // 单 agent 工作：用户自己开的那场对话（不是任务链的节点）——身份是 solo。
     let tools = member_tools(ports, &spec.member);
     let mut s = AgentSession::new(

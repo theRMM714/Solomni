@@ -70,7 +70,7 @@ fn core_rows(
 #[allow(clippy::too_many_arguments)]
 pub fn core_operation(
     systools: &dyn crate::units::business::tools::api::Tools,
-    seat: &str,
+    role: &str,
     tool: &str,
     mode: crate::units::pure::registry_model::api::ToolMode,
     chat: &mut dyn crate::units::business::llm::api::Chat,
@@ -82,14 +82,15 @@ pub fn core_operation(
     sink: &mut dyn FnMut(crate::units::business::transcript::api::SessionEvent),
 ) -> Result<serde_json::Value, String> {
     // 声明面按**通道形态**给：原生通道才声明（信封通道的模型看提示词里的工具说明）。
-    // 席位面由机制声明按总表合成；席位没登记时退化成空面（装配期已由 `mechanism::problems` 拦下）。
+    // 角色面由流程段声明按总表合成；角色没登记时退化成空面（装配期已由 `loop_check::problems` 拦下）。
     let book = systools.book();
-    // 这一轮的面 = 席位自己声明的工具（loop 来源）∪ 只读核实面（read / list / grep）。
+    // 这一轮的面 = 这个角色在它所属段里声明的动作（loop 来源）∪ 只读核实面（read / list / grep）。
     // 核实面恒在：核心操作也要先看现场再下结论，而 `is_readonly` 只放行这三个。
-    let mut ids: Vec<&str> = match session_model::seat(seat) {
-        Some(s) => s.tools.to_vec(),
-        None => Vec::new(),
-    };
+    let mut ids: Vec<&str> = session_model::LOOPS
+        .iter()
+        .flat_map(|l| l.cast.iter().filter(|c| c.role == role))
+        .flat_map(|c| c.tools.iter().copied())
+        .collect();
     for id in [
         crate::units::business::tools::api::READ,
         crate::units::business::tools::api::LIST,

@@ -657,6 +657,7 @@ impl CollabSession {
                 &a.name,
                 &sandbox,
                 &modules,
+                "discuss",
                 "discussant",
             )
             .with_chara(a.chara.clone());
