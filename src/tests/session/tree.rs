@@ -390,7 +390,7 @@ pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
         .spawn_agent_session(
             &parent,
             "a",
-            "executor",
+            &crate::units::business::turn_state::api::Identity::new("execute", "executor"),
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -503,7 +503,7 @@ pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
         .spawn_agent_session(
             &parent,
             "a",
-            "executor",
+            &crate::units::business::turn_state::api::Identity::new("execute", "executor"),
             core.registry.as_ref(),
             core.probe.as_ref(),
         )

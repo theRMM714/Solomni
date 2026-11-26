@@ -21,7 +21,7 @@ pub(crate) fn spawn_detached_node<H: TurnHost>(
     host: &H,
     sid: &str,
     objective: &str,
-    seat: Option<&str>,
+    who: Option<&crate::units::business::turn_state::api::Identity>,
 ) {
     // 节点执行也用整场工作的同一套回合计数（回档同步靠两边同一套编号）。
     let _ = host.core({
@@ -33,11 +33,11 @@ pub(crate) fn spawn_detached_node<H: TurnHost>(
     });
     let me = host.clone();
     let (sid, objective) = (sid.to_string(), objective.to_string());
-    let seat = seat.map(str::to_string);
+    let who = who.cloned();
     let _ = std::thread::Builder::new()
         .name("solomni-node".to_string())
         .spawn(move || {
-            let _ = node_generation(&me, &sid, &objective, seat.as_deref());
+            let _ = node_generation(&me, &sid, &objective, who.as_ref());
         });
 }
 

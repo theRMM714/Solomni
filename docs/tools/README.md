@@ -6,12 +6,12 @@
 
 ## 管什么 / 不管什么
 
-- 管：系统工具总表与名字表（`systools/tools.yaml`、`systools/names.yaml`）的解码与「按表校验调用」的判据；目录与读盘归 `assets`（`systools/` 的唯一主人）；席位面由 `agentloop` 单元的唯一装配机（src/units/business/agentloop/domain/assemble.rs）按席位现拼。
+- 管：系统工具总表与名字表（`systools/tools.yaml`、`systools/names.yaml`）的解码与「按表校验调用」的判据；目录与读盘归 `assets`（`systools/` 的唯一主人）；工具面由 `agentloop` 单元的唯一装配机（src/units/business/agentloop/domain/assemble.rs）按角色现拼。
 - 管：内置文件工具（read / list / write / edit / patch / delete / grep）的执行编排与纯规则、工具参数契约、补丁通道。
 - 管：执行类系统工具 `shell` 的参数 / 超时规则与派发；host 的拉起与围栏机制是 kernel 共享的 `ProcessRunner` / `confine`，VM 走 guest。
 - 管：模块工具进程的执行编排；拉起与围栏机制是 kernel 共享的 `ProcessRunner` / `confine`。
 - 管：围栏可达范围的派生（`src/units/business/tools/domain/fence.rs` 的 `for_call` / `for_session` / `standalone`）。
-- 不管：不放领域语义（席位是会话的身份，不是业务概念）；不选模型；不碰会话流水。
+- 不管：不放领域语义（角色是会话的身份，不是业务概念）；不选模型；不碰会话流水。
 - 不管：不决定用户授权的主机只读根（`sandbox.policy.host_read_roots`）——由调用方（`runtime` / `collab`）叠加。
 
 ## 入站契约与状态归属
@@ -29,7 +29,7 @@
 
 ## 改动本单元时必须同步
 
-- 工具表与机制席位的同步见 [tools-and-roles.md](tools-and-roles.md) 与 `systools/`。
+- 工具表与流程段与角色的同步见 [tools-and-roles.md](tools-and-roles.md) 与 `systools/`。
 - 围栏机制的同步细则（平台探针、台账、ACE、解释器基线）与围栏落点（必要 / 可选、授不上的行为、平台差异）都在 [kernel](../kernel/README.md) 的「一、围栏落点：必要与可选」与「二、工具进程与守门协议」。
 - `FencePlan.net` 的平台落点以 kernel 的「二、工具进程与守门协议」为准；tools 只派生**计划**，不解释平台能力。
 - 授权面按**注入的事实**派生：
@@ -37,7 +37,7 @@
   - domain 不读盘：私有区落点作为事实随沙箱注入（`Sandbox.module_data`）。
   - 事实为否（建不了）时不进 `rw`；`standalone` 的缺省工作目录退回模块根。
   - `prepare_fence` 跳过不存在的落点，不判整次失败。
-- 新增 / 修改系统工具 → 改 `systools/tools.yaml` 与（需要时）`src/units/business/session_model/domain/mechanism.rs` 的席位声明；尚未实现的方向记在 `systool_gaps.yaml`（仓库根；不替代测试缺口账）。
+- 新增 / 修改系统工具 → 改 `systools/tools.yaml` 与（需要时）`src/units/business/session_model/domain/mechanism.rs` 的角色位声明；尚未实现的方向记在 `systool_gaps.yaml`（仓库根；不替代测试缺口账）。
 - 新增 / 修改产品命令（命令名、别名、分组、参数声明、确认门槛、执行者）→ 改 `systools/commands.yaml`；写法、校验与补全由参数声明派生（`src/units/business/tools/domain/op.rs`），执行分派仍写在入口与终端层，表与分派的对齐由 `src/tests/commands.rs` 锁死。
 
 ## 本目录
@@ -45,4 +45,4 @@
 | 文件 | 内容 |
 | --- | --- |
 | [`unit-map.md`](unit-map.md) | 逐文件职责（T0 与磁盘双向比对） |
-| [`tools-and-roles.md`](tools-and-roles.md) | 系统工具、机制席位（身份）与「谁能用哪些工具」 |
+| [`tools-and-roles.md`](tools-and-roles.md) | 系统工具、流程段与角色（身份）与「谁能用哪些工具」 |

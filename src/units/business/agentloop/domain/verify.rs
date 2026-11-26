@@ -55,6 +55,8 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
     let book = spec.book.clone();
     let residents = crate::units::business::residents::api::NoResidents;
     let seat = assemble(FaceInput {
+        // 核心核实没有流程段：它的面只由 agent 来源给（读面三个）。
+        loop_id: "",
         role: spec.seat,
         agent: &sb.agent,
         // 核心核实没有工作区：共享区工具一个也不发。
@@ -73,7 +75,8 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
     Some(Box::new(MemberTools {
         face: ToolFace {
             mode: spec.mode,
-            seat: seat.role,
+            loop_id: String::new(),
+            role: seat.role,
             modules: seat.modules,
             tier: Tier::Host,
             guest_lease: String::new(),

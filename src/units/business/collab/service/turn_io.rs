@@ -62,13 +62,16 @@ impl CollabSession {
         self.disc.as_ref()?.member_id(i).map(|s| s.to_string())
     }
 
-    /// 目的：第 i 个成员这一席的席位 id（成员会话按它渲染身份块、发工具面）。
-    pub fn member_seat_at(&self, i: usize) -> Option<String> {
-        self.disc
-            .as_ref()?
-            .members
-            .get(i)
-            .map(|m| m.params.seat.clone())
+    /// 目的：第 i 个成员这一回合的身份（段 + 角色；成员会话按它渲染身份块、发工具面）。
+    pub fn member_identity_at(
+        &self,
+        i: usize,
+    ) -> Option<crate::units::business::turn_state::api::Identity> {
+        let m = self.disc.as_ref()?.members.get(i)?;
+        Some(crate::units::business::turn_state::api::Identity::new(
+            &m.params.loop_id,
+            &m.params.role,
+        ))
     }
 
     /// 目的：核实用的小工具环境（只读）：按席位现装一份，交给核心操作的 `verify` 形参。

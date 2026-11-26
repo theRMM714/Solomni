@@ -186,8 +186,9 @@ impl Turn {
         unavailable: BTreeMap<String, Vec<String>>,
         net: bool,
         mode: ToolMode,
-        // 这一席的身份：用户建的单 agent 会话 = solo，协作子会话 = executor（见机制声明的席位）。
-        seat: &str,
+        // 这一回合的段与角色：用户建的单 agent 会话 = standard/solo，协作子会话 = 流程的成员角色。
+        loop_id: &str,
+        role: &str,
         tier: Tier,
         guest_lease: String,
         host_plan: &PackagePlan,
@@ -205,7 +206,8 @@ impl Turn {
             sandbox: sb,
             unavailable,
             mode,
-            seat,
+            loop_id,
+            role,
             tier,
             guest_lease,
             shell: self.shell_slot(&sb.session),
@@ -248,8 +250,9 @@ impl Turn {
                 sandbox: sb,
                 unavailable,
                 mode: registry.tool_mode(a.model.as_deref()),
-                // 单 agent 工作：用户自己开的那场对话（不是任务链的节点）——坐标准机制的那一席。
-                seat: "solo",
+                // 单 agent 工作：用户自己开的那场对话（不是任务链的节点）——坐会话类型声明的那一席。
+                loop_id: &shape.loop_id,
+                role: &shape.role,
                 tier,
                 guest_lease,
                 shell: self.shell_slot(&sb.session),

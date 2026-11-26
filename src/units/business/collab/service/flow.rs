@@ -12,7 +12,7 @@ use crate::units::business::collab::service::collab::{CollabSession, Phase};
 use crate::units::business::collab::service::discussion::AfterTurn;
 
 use crate::units::business::agentloop::api::MemberTurn;
-use crate::units::business::session_model::api::{mechanism_of, seat};
+use crate::units::business::session_model::api::{loop_of, role};
 use crate::units::business::transcript::api::{Gate, SessionEvent};
 use crate::units::business::turn_state::api::{
     Flow, GateTicket, Handback, MemberAsk, Settle, WorkPlan,
@@ -46,7 +46,7 @@ impl Flow for CollabSession {
         Some(MemberAsk {
             index,
             member,
-            seat: self.member_seat_at(index)?,
+            who: self.member_identity_at(index)?,
             identity,
             turn,
             turn_id: self.next_turn_id(),
@@ -154,17 +154,19 @@ impl Flow for CollabSession {
         Some(OPT_BEGIN_ALLOW.to_string())
     }
 
-    fn member_seat(&self) -> Option<&'static str> {
+    fn member_identity(&self) -> Option<(&'static str, &'static str)> {
         let id = match self.phase {
             Phase::Discuss => "discuss",
             Phase::Execute => "execute",
         };
-        mechanism_of(id)?
-            .seats
+        let l = loop_of(id)?;
+        let r = l
+            .cast
             .iter()
-            .filter_map(|id| seat(id))
-            .find(|s| !s.core)
-            .map(|s| s.id)
+            .filter_map(|c| role(c.role))
+            .find(|r| !r.core)
+            .map(|r| r.id)?;
+        Some((l.id, r))
     }
 }
 

@@ -67,7 +67,8 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
         .history_handle()
         .load(&child)
         .expect("agent 会话的声明已落盘");
-    assert_eq!(meta.spec.seat, "executor", "执行段子会话的席位");
+    assert_eq!(meta.spec.loop_id, "execute", "执行段子会话的段");
+    assert_eq!(meta.spec.role, "executor", "执行段子会话的角色");
     // 只改落盘声明不够：活体会话若仍坐讨论席，节点回合就拿不到写面与发布面，
     // 模型一个字节也写不下去（"每次想调用 write，实际发出的仍是 read"）。
     let live = core
@@ -80,7 +81,7 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
         panic!("成员会话应是单 agent 会话");
     };
     let face = &agent.tools.as_ref().expect("成员会话有工具环境").face;
-    assert_eq!(face.seat, "executor", "在世会话的席位");
+    assert_eq!(face.role, "executor", "在世会话的角色");
     assert!(
         face.allowed.iter().any(|t| t == "work_commit"),
         "执行席该拿到发布面：{:?}",
@@ -329,13 +330,7 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
 pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     let systools = test_systools();
     // 机制声明把核心操作发给对应的核心席位（越权校验与工具面的判据都是它）。
-    let face = |id: &str| -> Vec<String> {
-        let seat = crate::units::business::session_model::api::seat(id).expect("席位在册");
-        crate::units::business::agentloop::api::seat_face(seat)
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect()
-    };
+    let face = |id: &str| -> Vec<String> { crate::units::business::agentloop::api::role_face(id) };
     for (role, tool) in [
         ("planner", "plan"),
         ("planner", "slate"),
@@ -373,7 +368,8 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     let mut verify = MemberTools {
         face: crate::units::business::agentloop::api::ToolFace {
             mode: crate::units::pure::registry_model::api::ToolMode::Envelope,
-            seat: "orchestrator".to_string(),
+            loop_id: "execute".to_string(),
+            role: "orchestrator".to_string(),
             modules: BTreeMap::new(),
             tier: crate::units::pure::exec_model::api::Tier::Host,
             guest_lease: String::new(),

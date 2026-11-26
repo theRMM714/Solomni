@@ -290,7 +290,7 @@ pub(crate) fn session_at_roots_go_by_the_session_guest() {
     use crate::units::business::agentloop::api::SessionParams;
     // 会话的 @ 根由参数派生：没有 guest（本机档）就恒等，有 guest 就与同一 guest 造的桥给同一种写法。
     let sb = test_sandbox("甲", &["data"]);
-    let host = SessionParams::from_workspace("甲", &sb, &[], "solo");
+    let host = SessionParams::from_workspace("甲", &sb, &[], "standard", "solo");
     let host_roots = host.ref_roots();
     assert!(host_roots.path_codec.is_some(), "会话的 @ 根要带翻译器");
     assert_eq!(
@@ -303,7 +303,8 @@ pub(crate) fn session_at_roots_go_by_the_session_guest() {
         crate::units::business::vm::api::GuestOs::Macos,
         crate::units::business::vm::api::GuestOs::Windows,
     ] {
-        let p = SessionParams::from_workspace("甲", &sb, &[], "solo").with_guest(Some(g));
+        let p =
+            SessionParams::from_workspace("甲", &sb, &[], "standard", "solo").with_guest(Some(g));
         let r = p.ref_roots();
         let codec = r.path_codec.as_ref().expect("带 guest 的会话要有翻译器");
         // 三种 guest 各自给的写法必须与各自方言的桥一致（提示词里的写法与转录里的写法同源）。

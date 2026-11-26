@@ -12,7 +12,7 @@ use crate::units::business::catalog::registry::api::Registry;
 
 use crate::units::business::agentloop::api::AgentSession;
 use crate::units::business::conversation::session::api::subtree_of;
-use crate::units::business::session_model::api::{RunState, seat as seat_of};
+use crate::units::business::session_model::api::{RunState, cast_of, loop_of};
 use crate::units::business::transcript::api::SessionEvent;
 use crate::units::business::turn::turn::api::Prepared;
 use crate::units::business::turn_state::api::Session;
@@ -130,7 +130,7 @@ impl Turn {
         &mut self,
         child: &str,
         objective: &str,
-        seat: Option<&str>,
+        who: Option<&crate::units::business::turn_state::api::Identity>,
         registry: &dyn Registry,
         probe: &dyn HostProbe,
     ) -> Result<Prepared, String> {
@@ -147,15 +147,21 @@ impl Turn {
         let mut session = self.take_single(child)?;
         self.refresh_context_budget(registry, &mut session);
         session.set_thinking(llm.thinking.clone());
-        // 席位是**回合的值**：节点要坐的那一席由流程给（None = 会话自己的静止席位）。
-        // 先换席位再渲染身份——身份块按席位现取（与工具面同源），反过来会拿上一席的身份干活。
-        let seat = seat
-            .map(str::to_string)
-            .unwrap_or_else(|| session.seat().to_string());
-        if seat_of(&seat).is_none() {
-            return Err(format!("会话 {} 的席位没登记：{}", child, seat));
+        // 身份是**回合的值**：节点要坐的段与角色由流程给（None = 会话自己的静止身份）。
+        // 先换身份再渲染身份块——身份块按（段, 角色）现取（与工具面同源），反过来会拿上一身份干活。
+        let who = who.cloned().unwrap_or_else(|| {
+            crate::units::business::turn_state::api::Identity::new(
+                &session.params().loop_id,
+                session.role(),
+            )
+        });
+        if loop_of(&who.loop_id).is_none() || cast_of(&who.loop_id, &who.role).is_none() {
+            return Err(format!(
+                "会话 {} 的段或角色没登记：{}/{}",
+                child, who.loop_id, who.role
+            ));
         }
-        session.enter_seat(&seat);
+        session.enter_identity(&who.loop_id, &who.role);
         let identity = session
             .params()
             .identity(&*self.prompt, session.tool_mode());

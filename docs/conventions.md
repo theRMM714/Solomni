@@ -42,10 +42,11 @@
 | 代码里按边界切分的一块：`layers.yaml` 一行一个（业务单元即 `src/units/<桶>/<单元>/`，桶是角色：`pure` 环 1、`resource` 盘主、`business` 其余；`kernel` 是环 0 的单元）；根（入口层）与呈现层是适配器，不入环表 | **单元**（unit） | 模块、组件 |
 | 业务边界（`src/units/<单元>/<子业务>/`；独立业务的判据见 `docs/architecture/boundaries.md`） | **子业务**（能力 / capability） | 业务模块、模块 |
 | 一次任务里"用谁、怎么组合、谁拍板" | **形态**（single / collab / proxy） | 模式、架构、拓扑 |
-| 一个会话类型的组成（id 与显示名、流程序列、是否整块交给核心、没有流程时的静止机制） | **会话类型**（`Profiles`；数据在 `systools/profiles.yaml`；落盘是 `SessionSpec`） | 会话模板、流程模板 |
-| 回合身份的来源：一组席位（核心席与成员席各要几员）加上它发哪些工具；`flow: true` 的能当流程串进会话，其余是静止机制 | **机制**（`Mechanism`；声明在 `src/units/business/session_model/domain/mechanism.rs` 的 `MECHANISMS`） | 角色组、流程模板 |
-| 机制里的一个身份组：提示词 + 工具面 + 能不能写 / 能不能发布 + 是否给模块工具 | **席位**（`Seat`；同一文件的 `SEATS`，id 全局唯一） | 角色、角色表 |
-| 驱动与具体流程之间的插件契约（推一步 / 让出一步 / 交回 / 处置自己发的关卡） | **流程**（`Flow`；`flow: true` 的机制即流程，id 即机制 id） | 流程引擎、编排器 |
+| 一个会话类型的组成（id 与显示名、流程序列、是否整块交给核心、挂哪些工具来源、没有流程时坐哪个静止段） | **会话类型**（`Profiles`；数据在 `systools/profiles.yaml`；落盘是 `SessionSpec`） | 会话模板、流程模板 |
+| 一段流程里的身份位：哪个角色、要几员、交哪些机制动作；`flow: true` 的能当流程串进会话，其余是静止段 | **流程段**（`Loop`；声明在 `src/units/business/session_model/domain/mechanism.rs` 的 `LOOPS`） | 阶段、机制、角色组 |
+| 流程段里的一个角色位：角色 + 人数 + 它在这一段交的机制动作 | **角色位**（`Cast`） | 席位、席位声明 |
+| 一个身份的提示词与是否核心通道：核心位不进成员表 | **角色**（`Role`；同一文件的 `ROLES`，id 全局唯一） | 席位、seat |
+| 驱动与具体流程之间的插件契约（推一步 / 让出一步 / 交回 / 处置自己发的关卡） | **流程**（`Flow`；`flow: true` 的段即流程，id 即段 id） | 流程引擎、编排器 |
 | 一次运行与它的落盘单元 | **会话**（session） | 对话、聊天 |
 | 挂在父会话 `children/` 下的会话 | **子会话**（强调"它是一场完整工作"时可写**子工作**） | 子 agent、子任务 |
 | 用户投喂与成品的地方 | **共享区**（`work/`；整棵树只有一个） | 工作区、workspace（除非确指 `data/session/<工作名>/` 这个目录） |
@@ -53,6 +54,7 @@
 | 那个唯一的程序 | **核心** | 内核、核心进程（`kernel` 是地基库单元，不是核心） |
 | 机器可读的事件流水 | **转录**（transcript） | 日志、聊天记录 |
 | 由核心实现 / 由模块声明的工具 | **系统工具 / 模块工具** | 外部工具（= 模块工具） |
+| 这一回合模型能看到并调用的工具 id 集合（来源各自交 id、去重成一份） | **工具面**（`ToolSource` / `TurnCtx`；装配在 `src/units/business/agentloop/domain/assemble.rs`） | 工具白名单、工具清单 |
 | 系统工具里由 `tools` 单元直接实现、不经模块或核心动作的那组 | **内置工具**（`read` / `write` / `edit` / `patch` / `delete` / `list` / `grep` / `submit_report`）；其中操作文件的几个也叫**内置文件工具** | — |
 | 系统工具里执行外部命令、经 kernel 进程机制（守门进程 / guest）跑的那组 | **执行类系统工具**（当前 `shell`） | 终端、shell 工具 |
 | 模块声明的常驻外部服务（MCP / harness 等） | **常驻服务**（单元 `residents`） | 外部服务、后台进程、daemon |

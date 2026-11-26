@@ -79,7 +79,9 @@ pub fn serviced_tools(
 
 /// 目的：装配一席工具面要的**全部输入**：回合上下文 + 来源 id + 会话侧的模块/沙箱 + 三个端口面。
 pub struct FaceInput<'a> {
-    /// 目的：当前回合的席位 id（阶段 B 由 loop 声明取代）。
+    /// 目的：这一回合在哪个流程段（loop 来源按它查角色位的机制动作）。
+    pub loop_id: &'a str,
+    /// 目的：这一回合的角色 id。
     pub role: &'a str,
     /// 目的：当前回合是哪个 agent。
     pub agent: &'a str,
@@ -120,7 +122,7 @@ pub struct SeatFace {
 /// 约束：别的路径（核心操作、核心核实、回合换席）都调这里，不得各写一份；`install_seat` 也用它现拼一席。
 pub fn assemble(input: FaceInput<'_>) -> SeatFace {
     let ctx = TurnCtx {
-        loop_id: None,
+        loop_id: Some(input.loop_id).filter(|id| !id.is_empty()),
         role: input.role,
         agent_id: input.agent,
         abilities: input.abilities,
@@ -187,18 +189,26 @@ pub fn face_of(ctx: &TurnCtx<'_>, sources: &[Arc<dyn ToolSource>]) -> (Vec<Strin
     (allowed, used)
 }
 
-/// 目的：测试用——按一席的全能力口径算工具面 id（生产路径只有 assemble）。
-/// 约束：模块来源恒空（测试只看声明与能力组），有工作区、无 system 工具。
+/// 目的：测试用——按某个角色在它所在段里的全能力口径算工具面 id（生产路径只有 assemble）。
+/// 约束：段按角色反查（取第一个含它的段）；模块来源恒空（测试只看声明与能力组），有工作区、无 system 工具。
 #[cfg(test)]
-pub fn seat_face(seat: &crate::units::business::session_model::api::Seat) -> Vec<String> {
-    use crate::units::business::session_model::api::{SOURCE_AGENT, SOURCE_LOOP, SOURCE_WORKSPACE};
+pub fn role_face(role_id: &str) -> Vec<String> {
+    use crate::units::business::session_model::api::{
+        LOOPS, SOURCE_AGENT, SOURCE_LOOP, SOURCE_WORKSPACE,
+    };
+    let found = LOOPS
+        .iter()
+        .find(|l| l.cast.iter().any(|c| c.role == role_id));
+    let Some(loop_id) = found.map(|l| l.id) else {
+        return Vec::new();
+    };
     let abilities: Vec<String> = crate::units::pure::registry_model::api::DEFAULT_ABILITIES
         .iter()
         .map(|s| s.to_string())
         .collect();
     let ctx = TurnCtx {
-        loop_id: None,
-        role: seat.id,
+        loop_id: Some(loop_id),
+        role: role_id,
         agent_id: "test",
         abilities: &abilities,
         profile: "single",

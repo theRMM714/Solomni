@@ -91,7 +91,7 @@ impl Flow for StandIn {
         Some(MemberAsk {
             index: 0,
             member: "a".to_string(),
-            seat: "solo".to_string(),
+            who: crate::units::business::turn_state::api::Identity::new("standard", "solo"),
             identity: "你是替身流程问出来的一步：说一句就行。".to_string(),
             turn: Vec::<Msg>::new(),
             turn_id: 1,

@@ -271,7 +271,6 @@ impl Core {
                 crate::units::business::work::api::ProxySeed {
                     name,
                     kind: crate::units::business::session_model::api::PROXY,
-                    seat: crate::units::business::session_model::api::PROXY_SEAT,
                     granted_at,
                     tier: crate::units::pure::exec_model::api::Tier::Host,
                     guest: None,

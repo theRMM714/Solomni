@@ -10,9 +10,9 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/units/business/conversation/session/detail/fs_history.rs` | `HistoryStore` 的落盘实现：`meta.yaml` + `transcript.jsonl`；子会话落在父会话的 `children/` 下 |
-| `src/units/business/conversation/session/api.rs` | 入站面：`HistoryOps` / `History` 与会话事实、事件词汇、落盘手柄与会话树派生的重导出；一席装配材料随装配机在 `agentloop::api` |
+| `src/units/business/conversation/session/api.rs` | 入站面：`HistoryOps` / `History` 与会话事实、事件词汇、落盘手柄与会话树派生的重导出；一个身份装配材料随装配机在 `agentloop::api` |
 | `src/units/business/conversation/session/service.rs` | 用例与端口持有者：历史落盘端口只在这里（R12）；增量落盘手柄 `Persister` 与事件收编 `record_events`（核心操作回路在 `agentloop`） |
 | `src/units/business/conversation/session/service/tree.rs` | 会话树派生：子树、工作根、配置归属、树级装配 meta、guest 作用域与租约、树序与扁平模块 |
 | `src/units/business/conversation/session/ports.rs` | 出站端口：`HistoryStore`（会话历史的读写与删除） |
-| `src/units/business/conversation/session/domain/seat_check.rs` | 席位面与工具总表的自洽断言（`problems`，工具面装配在 `agentloop`）：席位 id 唯一、提示词非空、核心席不授模块工具、能发布必须先能写、席位面工具都在总表里、机制与席位双向一致；声明本身在 `session_model` |
+| `src/units/business/conversation/session/domain/loop_check.rs` | 流程段与工具总表的自洽断言（`problems`，工具面装配在 `agentloop`）：角色 id 唯一、提示词非空，流程段 id 唯一、角色位引用的角色在册、角色位交的机制动作都在总表里，流程段要同时有核心与成员角色、静止段恰好一个角色位；声明本身在 `session_model` |
 | `src/units/business/conversation/session/detail/yaml_profiles.rs` | 会话类型表的装配输入：经 `Assets` 拿 `systools/profiles.yaml` 再解码校验（落点与读盘在 `assets`；缺文件 / 语法坏 / 规则不过都如实报），装载后交组合根 |

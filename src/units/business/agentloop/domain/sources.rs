@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::units::business::agentloop::domain::member_tools::ModuleTools;
 use crate::units::business::session_model::api::{
     EXEC, FS_READ, FS_WRITE, SHARED_WRITE, SOURCE_AGENT, SOURCE_LOOP, SOURCE_MODULE,
-    SOURCE_PROFILE, SOURCE_WORKSPACE, ToolSource, TurnCtx, seat,
+    SOURCE_PROFILE, SOURCE_WORKSPACE, ToolSource, TurnCtx, cast_of,
 };
 use crate::units::business::tools::api::{DELETE, EDIT, GREP, LIST, PATCH, READ, SHELL, WRITE};
 use crate::units::business::workspace::api::WORK_TOOLS;
@@ -78,8 +78,8 @@ impl ToolSource for ModuleSource {
     }
 }
 
-/// 目的：当前 loop（阶段 A 用席位声明代替）交的工具；席位从回合上下文的 role 取。
-/// 约束：席位没在册时交空面（装配期已由机制表校验拦下）。
+/// 目的：当前流程段交的工具：按回合上下文里的段 id 与角色 id 查角色位。
+/// 约束：段或角色位没在册时交空面（装配期已由流程段表校验拦下）；同一角色在不同段可以拿不同的机制动作。
 pub struct LoopSource;
 
 impl ToolSource for LoopSource {
@@ -88,8 +88,9 @@ impl ToolSource for LoopSource {
     }
 
     fn offer(&self, ctx: &TurnCtx) -> Vec<String> {
-        seat(ctx.role)
-            .map(|s| s.tools.iter().map(|t| t.to_string()).collect())
+        ctx.loop_id
+            .and_then(|loop_id| cast_of(loop_id, ctx.role))
+            .map(|c| c.tools.iter().map(|t| t.to_string()).collect())
             .unwrap_or_default()
     }
 }

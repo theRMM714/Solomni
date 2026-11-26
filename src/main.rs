@@ -473,15 +473,15 @@ fn main() {
     let toolexec: Arc<dyn units::business::tools::api::ToolExec + Send + Sync> = tools_svc.clone();
     let systools: Arc<dyn units::business::tools::api::Tools + Send + Sync> = tools_svc;
 
-    // 机制席位与工具总表必须双向自洽（席位面里的工具都在总表、callers 与席位面一一对应）：
+    // 流程段、角色与工具总表必须自洽（角色位里的机制动作都在总表）：
     // 悬空引用是装配错误，与上面的工具总表自检同一条时机。
-    let mechanism_problems = units::business::conversation::session::api::mechanism_problems(
+    let loop_problems = units::business::conversation::session::api::loop_problems(
         &units::business::tools::api::Tools::book(&*systools),
     );
-    if !mechanism_problems.is_empty() {
+    if !loop_problems.is_empty() {
         eprintln!(
-            "[装配失败] 系统工具与机制面不自洽：{}",
-            mechanism_problems.join("；")
+            "[装配失败] 系统工具与流程段不自洽：{}",
+            loop_problems.join("；")
         );
         std::process::exit(1);
     }

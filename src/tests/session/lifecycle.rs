@@ -92,7 +92,7 @@ pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
         .spawn_agent_session(
             &parent,
             "a",
-            "executor",
+            &crate::units::business::turn_state::api::Identity::new("execute", "executor"),
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -297,7 +297,7 @@ pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {
         .spawn_agent_session(
             &top,
             "a",
-            "executor",
+            &crate::units::business::turn_state::api::Identity::new("execute", "executor"),
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -307,7 +307,7 @@ pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {
         .spawn_agent_session(
             &mid,
             "a",
-            "executor",
+            &crate::units::business::turn_state::api::Identity::new("execute", "executor"),
             core.registry.as_ref(),
             core.probe.as_ref(),
         )
@@ -328,7 +328,7 @@ pub(crate) fn identity_takes_the_mechanism_of_its_seat() {
     let mode = crate::units::pure::registry_model::api::ToolMode::Envelope;
     let identity = |role: &str| {
         let mut p = test_params("a");
-        p.seat = role.to_string();
+        p.role = role.to_string();
         p.identity(&prompt, mode)
     };
     let solo = identity("solo");
@@ -370,7 +370,7 @@ pub(crate) fn history_delete_refuses_when_any_node_in_the_subtree_is_running() {
         .spawn_agent_session(
             &parent,
             "a",
-            "executor",
+            &crate::units::business::turn_state::api::Identity::new("execute", "executor"),
             core.registry.as_ref(),
             core.probe.as_ref(),
         )

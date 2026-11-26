@@ -16,7 +16,7 @@
 | `src/presentation/cli/catalog.rs` | 命令手册的排版：把 `systools/commands.yaml`（经 `OpBook` 的 `Op`）投影成手册、实时菜单（`/` 前缀）、Tab 补全与未知命令建议（两相都算，启动相给 `--名字`，写法由参数声明派生）；不持有一份自己的命令清单 |
 | `src/presentation/cli/boot.rs` | 启动相命令的执行：把操作数与命令名翻成系统维护用例的一次调用，排版回执与退出码，写操作就地确认（`Ask`：命令行用 `NeverAsk`、转录中心用终端问答）；便携维护 `setup` 的模式名在这里翻成 `SetupMode`；不解析命令表、不做业务判断 |
 | `src/presentation/cli/argv.rs` | 全局旗语的唯一解析器（含 `--no-anim` / `--no-workspace`）：`--x v` 与 `--x=v` 等价、内部协议旗语原样透传、未知旗语给编辑距离建议 |
-| `src/presentation/cli/gate.rs` | 交互回合：跟读事件流、裁决卡问答、等安静与动作回显；建会话动作的入参收成 `SessionAsk`（名字 / 流程 / 席位 / 任务 / 档位 / 工作区），绑定与校验都在后端 |
+| `src/presentation/cli/gate.rs` | 交互回合：跟读事件流、裁决卡问答、等安静与动作回显；建会话动作的入参收成 `SessionAsk`（名字 / 流程 / 角色 / 任务 / 档位 / 工作区），绑定与校验都在后端 |
 | `src/presentation/cli/flows.rs` | 会话流：单 agent / 代理 / 协作 / 供应商 / 模型 / 核心设置；建会话时把启动目录工作区交给后端，并提示工作区路径或没绑的原因 |
 | `src/presentation/cli/term.rs` | 终端 I/O：TTY 判定、raw mode 开关、启动页字标、固定输入框的绘制与擦除、事件到按键的翻译、非交互回退、`TERM=dumb` 的 ASCII 回退与 `--no-anim` 静态帧 |
 | `src/presentation/cli/input.rs` | 输入框的行编辑：缓冲区、光标、历史；按键语义到编辑动作的映射 |

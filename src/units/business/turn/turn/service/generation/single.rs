@@ -32,14 +32,14 @@ pub(crate) fn node_generation<H: TurnHost>(
     host: &H,
     child: &str,
     objective: &str,
-    seat: Option<&str>,
+    who: Option<&crate::units::business::turn_state::api::Identity>,
 ) -> Result<Advance, String> {
     host.ensure_guest(child)?;
     let prepared = host.core_env({
         let (child, objective) = (child.to_string(), objective.to_string());
-        let seat = seat.map(str::to_string);
+        let who = who.cloned();
         move |turn, registry, probe| {
-            turn.prepare_node(&child, &objective, seat.as_deref(), registry, probe)
+            turn.prepare_node(&child, &objective, who.as_ref(), registry, probe)
         }
     })?;
     run_prepared(host, child, prepared, None)

@@ -147,7 +147,8 @@ impl Turn {
                     &a.name,
                     &sb,
                     &modules,
-                    &meta.spec.seat,
+                    &meta.spec.loop_id,
+                    &meta.spec.role,
                 )
                 .with_chara(a.chara.clone())
                 .with_guest(crate::units::business::vm::api::guest_os_of(
@@ -163,8 +164,8 @@ impl Turn {
                     &meta.exec,
                     &modules,
                 );
-                // 席位取落盘声明里的那一席（成员 / 节点会话是 executor）——与实时同一个口径。
-                let seat = meta.spec.seat.clone();
+                // 段与角色取落盘声明里的那一份（成员 / 节点会话是流程的成员角色）——与实时同一个口径。
+                let (loop_id, role) = (meta.spec.loop_id.clone(), meta.spec.role.clone());
                 let host_plan = if meta.exec.tier == crate::units::pure::exec_model::api::Tier::Host
                 {
                     crate::units::business::vm::api::host_plan_for(
@@ -186,8 +187,9 @@ impl Turn {
                     sandbox: &sb,
                     unavailable,
                     mode,
-                    // 身份与席位**同一把尺子**（重建与实时不能各写一份）。
-                    seat: &seat,
+                    // 身份与段/角色**同一把尺子**（重建与实时不能各写一份）。
+                    loop_id: &loop_id,
+                    role: &role,
                     tier: meta.exec.tier,
                     guest_lease: guest_lease_for(self.history.as_ref(), meta)?,
                     shell: self.shell_slot(&sb.session),
@@ -547,14 +549,16 @@ impl Turn {
         let tool_mode = registry.tool_mode(None);
         // 身份是**席位提示词**（core_proxy），不是某个 agent 的模块能力包：
         // 流程 / 环境 / 调用约定仍与 agent 身份同一份口径（见 workspace 的 render_system）。
-        let mut params = SessionParams::from_workspace(SPEAKER, &sb, &[], "core_proxy");
+        let mut params =
+            SessionParams::from_workspace(SPEAKER, &sb, &[], &meta.spec.loop_id, &meta.spec.role);
         params.seat_system = Some(crate::units::business::prompt::api::Segment::ProxySystem);
         let member = crate::units::business::agentloop::api::MemberSpec {
             modules: &[],
             sandbox: &sb,
             unavailable: BTreeMap::new(),
             mode: tool_mode,
-            seat: "core_proxy",
+            loop_id: &meta.spec.loop_id,
+            role: &meta.spec.role,
             tier: crate::units::pure::exec_model::api::Tier::Host,
             guest_lease: String::new(),
             shell: self.shell_slot(&sb.session),
