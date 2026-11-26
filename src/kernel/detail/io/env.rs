@@ -28,16 +28,37 @@ pub fn pathext() -> Option<String> {
 }
 
 /// 目的：系统目录（Windows 用它拼 `System32`；别的平台没有就是 `None`）。
+#[cfg_attr(
+    not(windows),
+    allow(
+        dead_code,
+        reason = "系统目录只有 Windows 的容器后端会取；非 Windows 保留同一面，调用方无需按平台分叉"
+    )
+)]
 pub fn system_root() -> Option<PathBuf> {
     std::env::var_os("SystemRoot").map(PathBuf::from)
 }
 
 /// 目的：本用户的本地应用数据根（Windows 的容器 profile 落在这里）。
+#[cfg_attr(
+    not(windows),
+    allow(
+        dead_code,
+        reason = "本地应用数据根只有 Windows 的残留清扫会取；非 Windows 保留同一面，调用方无需按平台分叉"
+    )
+)]
 pub fn local_app_data() -> Option<PathBuf> {
     std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
 }
 
 /// 目的：本进程的可执行文件路径（中继要以自己为壳再跑一遍，取证也要它）。
+#[cfg_attr(
+    target_os = "linux",
+    allow(
+        dead_code,
+        reason = "Linux 的父死子亡由内核信号给、不必拿自身当壳；Windows 中继与 macOS 守门进程才取自身路径"
+    )
+)]
 pub fn current_exe() -> std::io::Result<PathBuf> {
     std::env::current_exe()
 }

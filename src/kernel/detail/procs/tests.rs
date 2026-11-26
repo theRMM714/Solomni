@@ -144,7 +144,7 @@ fn a_guarded_child_survives_the_spawning_thread() {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
         guard(&mut cmd);
-        spawn(cmd).expect("在短命线程上起子进程")
+        spawn_raw(cmd).expect("在短命线程上起子进程")
     })
     .join()
     .expect("启动线程 join");
@@ -218,7 +218,7 @@ fn guard_helper_spawns_a_guarded_child() {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     guard(&mut cmd);
-    let mut child = spawn(cmd).expect("起受保护的长命令");
+    let mut child = spawn_raw(cmd).expect("起受保护的长命令");
     let Some(pidfile) = std::env::var_os("SOLOMNI_TEST_GUARD_PIDFILE") else {
         let pgid = unsafe { libc::getpgid(child.id() as i32) };
         let _ = terminate(child.id());
