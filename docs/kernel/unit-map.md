@@ -66,7 +66,9 @@
 | `src/kernel/detail/process/tests.rs` | 进程适配器的真实契约用例：真起进程、真收输出、真判退出码与平台分支（`#[cfg(test)] mod tests;` 指向） |
 | `src/kernel/detail/i18n.rs` | 回执说明的渲染与词表：语言协商（设置 → `SOLOMNI_LANG` → 源语言）、`locales/zh-CN.ftl` 的 Fluent 渲染、把整份词表导出给界面（键仍是稳定码） |
 | `src/kernel/detail/procs/tests.rs` | 进程账与回收的契约用例：登记/注销、存活探测、父死子亡的分平台接线（`#[cfg(test)] mod tests;` 指向） |
-| `src/kernel/detail/procs.rs` | 长驻子进程的账（`data/state/processes.json`）与回收（门面）：登记、对账与回收流程；平台实现在 `src/kernel/detail/procs/windows.rs` / `src/kernel/detail/procs/unix.rs` |
+| `src/kernel/detail/procs.rs` | 长驻子进程的账（`data/state/processes.json`）与回收（门面）：登记、对账与回收流程，以及施工面的底层零件（`guard` / `spawn_raw` / `attach`，只给同目录的 `spawn.rs` 用）；平台实现在 `src/kernel/detail/procs/windows.rs` / `src/kernel/detail/procs/unix.rs` |
+| `src/kernel/detail/procs/spawn.rs` | 长驻子进程的唯一施工面：`Spawn`（命令行 / 三路流 / 账上身份 / stderr 去处）与 `spawn`——一次办完进程组长、父死子亡、长命线程、stderr 常驻抽干与入账，交出 `Daemon`；一行 stderr 的 UTF-8 宽容解码也在这里 |
+| `src/kernel/detail/procs/daemon.rs` | 长驻子进程的句柄（`Daemon`）：问一次退没退 / 有界等退出 / stderr 尾行 / 取走两条管道 / 收场（先礼后兵，按进程组或整棵树），丢掉即收掉；抽干线程写的有界尾行 `Tail` 也在这里 |
 | `src/kernel/detail/procs/windows.rs` | `procs` 的 Windows 后端：作业对象、创建时间身份、存活探测与 `taskkill` |
 | `src/kernel/detail/procs/unix.rs` | `procs` 的非 Windows 后端：进程组、PDEATHSIG、macOS 守门进程、命令行身份与信号终止 |
 | `src/kernel/detail/session.rs` | 长驻外部进程机制（门面）：守门进程长跑、按行收发、关闭杀树、进程账登记与注销；平台围栏准备在 `src/kernel/detail/session/{windows,unix}.rs`，实现 `SessionHost` |

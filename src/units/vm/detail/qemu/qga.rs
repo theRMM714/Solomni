@@ -5,21 +5,20 @@
 
 use super::UNFENCED_GUEST_RUN_SECS;
 use super::seed::SeedServer;
+use crate::kernel::api::process::Daemon;
 use crate::kernel::api::types::ToolOutcome;
-use crate::kernel::detail::procs::ProcessBook;
 use crate::kernel::domain::receipt::{ShellEnd, shell_receipt};
 use crate::units::vm::domain::guest::{GuestAccess, GuestRun, OutputLimit};
 use crate::units::vm::ports::{GuestChannel, GuestVm};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
-use std::process::Child;
 use std::time::{Duration, Instant};
 
 pub(super) fn connect_within(
     port: u16,
     budget: Duration,
-    mut child: Option<&mut Child>,
+    mut child: Option<&mut Daemon>,
 ) -> Result<TcpStream, String> {
     let deadline = Instant::now() + budget;
     loop {
@@ -27,7 +26,7 @@ pub(super) fn connect_within(
             Ok(s) => return Ok(s),
             Err(e) => {
                 if let Some(proc) = child.as_deref_mut()
-                    && let Ok(Some(status)) = proc.try_wait()
+                    && let Some(status) = proc.try_wait()
                 {
                     return Err(format!("QEMU 进程已退出（{}）：{}", status, e));
                 }
@@ -41,7 +40,8 @@ pub(super) fn connect_within(
 }
 
 pub(super) struct QemuHandle {
-    pub(super) child: Option<Child>,
+    /// 目的：QEMU 进程的句柄——收场、判退出与销账都经它（丢掉句柄就是收掉）。
+    pub(super) daemon: Option<Daemon>,
     pub(super) reader: BufReader<TcpStream>,
     pub(super) writer: TcpStream,
     /// 目的：QGA 的本地端口——通道被 QEMU 重置时照它重连（chardev 准备好之前连上的那条会被 RST）。
@@ -50,10 +50,6 @@ pub(super) struct QemuHandle {
     pub(super) seed: Option<SeedServer>,
     /// 目的：每租约可写层文件；stop / Drop 时删掉（删会话即丢写层）。
     pub(super) overlay: Option<PathBuf>,
-    /// 目的：长驻子进程的账（有就在收尾时注销这一条）。
-    pub(super) book: Option<std::sync::Arc<ProcessBook>>,
-    /// 目的：这个句柄对应的 QEMU 进程（注销登记用）。
-    pub(super) pid: u32,
 }
 
 impl QemuHandle {
@@ -66,40 +62,22 @@ impl QemuHandle {
         if let Some(mut s) = self.seed.take() {
             s.stop();
         }
-        if let Some(mut c) = self.child.take() {
-            let mut waited = false;
+        if let Some(mut daemon) = self.daemon.take() {
             if asked {
-                let deadline = Instant::now() + Duration::from_secs(8);
-                loop {
-                    match c.try_wait() {
-                        Ok(Some(_)) => {
-                            waited = true;
-                            break;
-                        }
-                        Ok(None) if Instant::now() < deadline => {
-                            std::thread::sleep(Duration::from_millis(100));
-                        }
-                        _ => break,
-                    }
-                }
+                // 等它自己落盘退出；等不到就收掉（句柄里的收场是先礼后兵、连账一起销）。
+                daemon.wait_exit(Duration::from_secs(8));
             }
-            if !waited {
-                let _ = c.kill();
-                let _ = c.wait();
-            }
+            daemon.stop();
         }
         if let Some(path) = self.overlay.take() {
             let _ = std::fs::remove_file(&path);
-        }
-        if let Some(book) = &self.book {
-            book.forget(self.pid);
         }
     }
 
     /// 目的：通道断了就照同一个端口重连一次，并把读超时照原样装回去。
     /// 约束：QEMU 的 chardev 还没就绪时连上的那条会被它 RST——"连上"不等于"通"，断了就重连。
     fn reconnect(&mut self) -> Result<(), String> {
-        let stream = connect_within(self.port, Duration::from_secs(5), self.child.as_mut())?;
+        let stream = connect_within(self.port, Duration::from_secs(5), self.daemon.as_mut())?;
         stream
             .set_read_timeout(Some(Duration::from_secs(10)))
             .map_err(|e| format!("给 QGA 通道设读超时失败：{}", e))?;

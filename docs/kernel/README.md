@@ -125,13 +125,17 @@
   - `owner`：QEMU 记租约；共享 helper 记落点（首个挂载 / guest）；常驻服务记 `resident/<模块>/<服务>`。
   - 打开时读不懂就当空账；父目录不存在就补建。落盘用同目录临时文件 + rename。
   - 同一 pid 只留最新一条；`list` 按 `(since, pid)` 升序。
-- 父死子亡（`procs::guard` / `bind` / `watch`，接线走 `attach`）：
+- 施工面（`src/kernel/detail/procs/spawn.rs`）：单元只经 `kernel::api::process::{Spawn, Stream, spawn, Daemon}` 起长驻子进程，`spawn` 一次办完五件事——进程组长与父死子亡、长命线程上 spawn、stderr 常驻抽干（并逐行 UTF-8 宽容解码）、`attach` 接线与读身份、登记进账本；命令行怎么拼、就绪判据、优雅停机与重启策略仍留给单元。
+  - `Spawn` 的形状：`program` / `args` / `cwd` / `clear_env` / `env`（逐条给）/ 三路流（`Null` / `Inherit` / `Piped`）/ `tail`（留几行 stderr）/ `echo_stderr`（每行转写：进日志、上控制台）/ 账上身份（`purpose` / `owner` / `marker`）/ `book`。
+  - 拿到的 `Daemon`：`try_wait` / `wait_exit` / `stderr_tail` / `take_stdin` / `take_stdout` / `stop`；**丢掉即收掉**（`Drop` 先礼后兵，按进程组或整棵树），收场同时销账。`stop` 幂等。
+  - stderr 只有 `Piped` 才抽干；抽干是常驻线程（管道写满会把子进程卡住）。尾行容量有界（默认 20 行），只留尾部，长跑的进程吃不掉内存。
+- 父死子亡（`procs::guard` / `bind` / `watch`，接线走 `attach`——三者都是 `pub(crate)` 的内部零件，只给 `spawn.rs` 用）：
   - Unix 起进程前开独立进程组（`process_group(0)`），收树不牵连核心。
   - Linux：`pre_exec` 里设 `PR_SET_PDEATHSIG=SIGKILL`，核心一死由内核收掉子进程。
   - macOS：`procs::watch` 另起本程序的守门进程 `--proc-watchdog <核心 pid> <子进程 pid>`；它用 kqueue 的 `EVFILT_PROC` / `NOTE_EXIT` 同时盯核心与子进程，核心先退就按进程组 `SIGKILL` 子进程。守门进程清空环境、独立进程组、不挂 PDEATHSIG；起不来如实返回原因，不阻断启动。
   - Windows：`procs::bind` 把子进程绑进一个 `KILL_ON_JOB_CLOSE` 作业对象；核心一死，作业关闭，子进程跟着死。
-  - `procs::attach` 是起进程之后唯一的接线点（`bind` + `watch`，并读一次身份）：挂不上只打一条 `[进程]` 并把原因交回调用方，**不阻断启动**。调用方把它记进账的 `guard_note`——`--doctor` 与界面据此把该条标成「核心被强杀会留下孤儿」，下次启动对账再按身份收掉它。
-  - Unix 上 `procs::spawn` 统一切到常驻的 `solomni-proc-launcher` 线程上 spawn：`PR_SET_PDEATHSIG` 绑的是**发起 spawn 的线程**；在 Web 每请求一线程或短命工作线程上直接 spawn，线程一退就会把 QEMU / 共享 helper / 常驻服务守门进程一并杀掉。
+  - `procs::attach` 是 `spawn.rs` 里起进程之后唯一的接线点（`bind` + `watch`，并读一次身份）：挂不上只打一条 `[进程]` 并把原因交回调用方，**不阻断启动**。调用方把它记进账的 `guard_note`——`--doctor` 与界面据此把该条标成「核心被强杀会留下孤儿」，下次启动对账再按身份收掉它。
+  - Unix 上 `procs::spawn_raw` 统一切到常驻的 `solomni-proc-launcher` 线程上 spawn：`PR_SET_PDEATHSIG` 绑的是**发起 spawn 的线程**；在 Web 每请求一线程或短命工作线程上直接 spawn，线程一退就会把 QEMU / 共享 helper / 常驻服务守门进程一并杀掉。
 - 启动对账（`ProcessBook::reconcile`，组合根在会话开工前跑一次）：
   - 进程已不在（`alive` 为假）：删掉条目。
   - Windows：读该 pid 的创建时间，与账上 `created` 对得上才 `taskkill /PID <pid> /T /F` 收掉；对不上按 pid 已被复用作废；账上没有 `created`（更早的账）只报不动手。
@@ -143,8 +147,8 @@
   - 归属证据（创建时刻 / 命令行标记）才是身份判据；`presence` 只回答「这个 pid 还在不在」，不用来认亲。
   - 终止：Unix 按进程组先 TERM 再 KILL（不是组长的就发单 pid）；Windows 用 `taskkill /PID <pid> /T /F`。
 - 接线点：
-  - QEMU 引擎、SMB helper、virtiofsd 在起进程处走 `guard` → `spawn` → `attach`，并在 `ProcessBook` 里 `record`（带 `created` / `guard_note`）；销毁时 `forget`。
-  - 常驻服务的守门进程（`src/kernel/detail/session.rs` 的 `ProcessSessions::open`）同样走 `guard` → `spawn` → `attach`，并登记进同一份账本（`purpose = resident`）：会话收掉时注销，核心被强杀留下的孤儿由启动对账按身份收掉。
+  - QEMU 引擎、SMB helper、virtiofsd 在起进程处只调一次 `spawn(Spawn{…})`（各单元自己的 argv、就绪判据与停机语义仍在原地）；销毁时 `Daemon::stop`，或直接丢掉句柄。
+  - 常驻服务的守门进程（`src/kernel/detail/session.rs` 的 `ProcessSessions::open`）走同一处施工面（`purpose = resident`），登记进同一份账本：会话收掉时注销，核心被强杀留下的孤儿由启动对账按身份收掉。
   - 观测：`--doctor` 的 `processes` 与 `GET /api/processes` 读同一份账本，每条带 `orphanRisk` / `guardNote`；覆盖 QEMU、共享 helper 与常驻服务守门进程。
 
 ## 四、运行日志（`Log` 端口）

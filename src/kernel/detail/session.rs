@@ -7,8 +7,7 @@ use crate::kernel::detail::procs;
 use crate::kernel::ports::{Session, SessionHost, SessionSpec};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, ChildStdout, Stdio};
-use std::sync::Mutex;
+use std::process::{ChildStdin, ChildStdout};
 
 #[cfg(windows)]
 mod windows;
@@ -61,34 +60,21 @@ impl ProcessSessions {
 
 /// 一个跑着的守门进程会话。
 struct FencedSession {
-    child: Mutex<Child>,
+    /// 目的：长驻子进程的句柄——收场、判退出与销账都经它（丢掉句柄就是收掉）。
+    daemon: procs::daemon::Daemon,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
     /// 见过 EOF 或读错误 = 这个会话已经不可用了（崩溃检测的判据）。
     eof: bool,
-    /// 目的：账上那条的 pid——收掉时按它注销。
-    pid: u32,
-    /// 目的：同一份进程账（收掉时注销本会话那条）。
-    book: std::sync::Arc<procs::ProcessBook>,
 }
 
-/// 目的：常驻服务守门进程在账上的一条——身份与父死子亡的结论来自起进程那一刻的事实。
-fn resident_entry(agent: &str, pid: u32, since: u64, launched: procs::Launched) -> procs::Entry {
-    // 标记要在守门进程的命令行里找得到：agent 名出现在 FenceJob 的 JSON 里；没有 agent（不经过常驻服务的调用方）
-    // 就退回它一定是的那一段。
-    let marker = if agent.is_empty() {
+/// 目的：守门进程在账上的标记——对账时在命令行里找这一段来确认"还是我们那一个"。
+/// 约束：agent 名出现在 FenceJob 的 JSON 里；没有 agent（不经过常驻服务的调用方）就退回它一定是的那一段。
+fn resident_marker(agent: &str) -> String {
+    if agent.is_empty() {
         "--fence-run".to_string()
     } else {
         agent.to_string()
-    };
-    procs::Entry {
-        pid,
-        since,
-        purpose: "resident".to_string(),
-        owner: agent.to_string(),
-        marker,
-        created: launched.created,
-        guard_note: launched.guard_note,
     }
 }
 
@@ -121,18 +107,9 @@ impl Session for FencedSession {
         !self.eof
     }
 
+    /// 目的：收掉守门进程连同它拉起的服务（幂等；句柄丢掉时同样收）。
     fn kill(&mut self) {
-        if let Ok(mut child) = self.child.lock() {
-            crate::kernel::detail::process::kill_tree(&mut child);
-        }
-        self.book.forget(self.pid);
-    }
-}
-
-impl Drop for FencedSession {
-    /// 目的：会话被丢掉（正常关闭，或握手失败后丢了句柄）时同样连根收掉并注销——不留孤儿、不留死条目。
-    fn drop(&mut self) {
-        self.kill();
+        self.daemon.stop();
     }
 }
 
@@ -155,47 +132,41 @@ impl SessionHost for ProcessSessions {
                 allow_degraded: self.mode.degraded(),
             },
         };
-        let mut cmd = crate::kernel::detail::confine::launcher(&self.exe, &job, &spec.command);
-        cmd.current_dir(&spec.fence.cwd)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
+        let launcher = crate::kernel::detail::confine::launcher(&self.exe, &job, &spec.command);
+        // 环境从零开始拼：继承来的变量（含凭据）不跟着守门进程走，只给围栏与调用方点名的那几个。
+        let mut spawn = procs::spawn::Spawn::new(launcher.get_program())
+            .args(launcher.get_args())
+            .cwd(&spec.fence.cwd)
+            .clear_env()
+            .stdin(procs::spawn::Stream::Piped)
+            .stdout(procs::spawn::Stream::Piped)
             // 围栏自己的说明（如降级提示）直接进父进程 stderr，与一次执行的落脚一致。
-            .stderr(Stdio::inherit());
-        cmd.env_clear();
+            .stderr(procs::spawn::Stream::Inherit)
+            .purpose("resident")
+            .owner(spec.fence.agent.as_str())
+            .marker(resident_marker(&spec.fence.agent))
+            .book(Some(std::sync::Arc::clone(&self.book)));
         for (k, v) in crate::kernel::detail::confine::fence_env(&spec.fence, &spec.command) {
-            cmd.env(k, v);
+            spawn = spawn.env(k, v);
         }
         if let Some(p) = &spec.path {
-            cmd.env("PATH", p);
+            spawn = spawn.env("PATH", p);
         }
         for (k, v) in &spec.env {
-            cmd.env(k, v);
+            spawn = spawn.env(k, v);
         }
-        // 父死子亡与独立进程组：核心被强杀时，守门进程连同它拉起的服务不该留下。
-        procs::guard(&mut cmd);
-        let mut child = procs::spawn(cmd).map_err(|e| format!("服务进程启动失败：{}", e))?;
-        // 作业对象（Windows）/ 守门进程（macOS）：核心一死，它与服务一起收；挂不上只如实报一条并记进账。
-        let launched = procs::attach(&child, &spec.fence.agent);
-        let pid = child.id();
-        self.book.record(resident_entry(
-            &spec.fence.agent,
-            pid,
-            procs::now_ts(),
-            launched,
-        ));
-        // 取不到管道就没有会话可用：连刚起的守门进程与账上那条一起收掉，不留半步。
-        let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-            crate::kernel::detail::process::kill_tree(&mut child);
-            self.book.forget(pid);
+        // 起进程这一步已经把父死子亡、独立进程组、长命线程与登记入账一起办好了。
+        let mut daemon = procs::spawn::spawn(spawn)
+            .map_err(|e| format!("服务进程启动失败：{}", e))?;
+        // 取不到管道就没有会话可用：句柄一丢就收掉守门进程与账上那条，不留半步。
+        let (Some(stdin), Some(stdout)) = (daemon.take_stdin(), daemon.take_stdout()) else {
             return Err("无法取得服务进程的 stdin / stdout".to_string());
         };
         Ok(Box::new(FencedSession {
-            child: Mutex::new(child),
+            daemon,
             stdin,
             stdout: BufReader::new(stdout),
             eof: false,
-            pid,
-            book: std::sync::Arc::clone(&self.book),
         }))
     }
 }
@@ -204,46 +175,19 @@ impl SessionHost for ProcessSessions {
 mod tests {
     use super::*;
 
-    /// 目的：常驻服务守门进程在账上的那条——用途 / 归属 / 标记 / 兜底结论都来自起进程那一刻的事实。
+    /// 目的：守门进程的标记要在它自己的命令行里找得到（对账靠它确认身份，认不出就收不掉孤儿）。
     #[test]
-    fn a_resident_guard_is_recorded_with_its_service_identity() {
-        let e = resident_entry(
+    fn a_resident_marker_is_findable_in_its_command_line() {
+        assert_eq!(
+            resident_marker("resident/m1/echo"),
             "resident/m1/echo",
-            42,
-            7,
-            procs::Launched {
-                created: Some(11),
-                guard_note: Some("把子进程绑进作业对象失败".to_string()),
-            },
-        );
-        assert_eq!(e.purpose, "resident");
-        assert_eq!(e.owner, "resident/m1/echo");
-        assert_eq!(
-            e.marker, "resident/m1/echo",
-            "标记要在守门进程的命令行里找得到（对账靠它确认身份）"
-        );
-        assert_eq!(e.created, Some(11));
-        assert_eq!(
-            e.guard_note.as_deref(),
-            Some("把子进程绑进作业对象失败"),
-            "没挂上的原因要如实进账"
+            "agent 名出现在 FenceJob 的 JSON 里，账上用同一段做标记"
         );
     }
 
     /// 目的：不经过常驻服务的调用方没有 agent 名时，标记退回守门进程一定有的那一段，免得对账认不出这个 pid。
     #[test]
-    fn a_resident_guard_without_an_agent_still_has_a_marker() {
-        let e = resident_entry(
-            "",
-            43,
-            8,
-            procs::Launched {
-                created: None,
-                guard_note: None,
-            },
-        );
-        assert_eq!(e.marker, "--fence-run");
-        assert_eq!(e.owner, "");
-        assert!(e.guard_note.is_none());
+    fn a_resident_marker_without_an_agent_still_exists() {
+        assert_eq!(resident_marker(""), "--fence-run");
     }
 }

@@ -3,13 +3,13 @@
 //! 不管：QEMU 进程本身与命令通道（detail/qemu.rs）、镜像判定与挂载清单（domain/guest.rs）。
 //! 联动：实现 ports::ShareBackend；由组合根构造、service.rs 持有；helper 是独立仓的预编译产物（见 dependencies.yaml 的 vm.smbd.windows）。
 
-use crate::kernel::detail::procs::{self, Entry, ProcessBook};
+use crate::kernel::api::process::{Daemon, Spawn, Stream, spawn};
+use crate::kernel::detail::procs::ProcessBook;
 use crate::units::vm::domain::exec::SMBD_BIN;
 use crate::units::vm::domain::guest::{GuestImage, GuestMount, sh_quote};
 use crate::units::vm::ports::{ShareBackend, ShareGuard, SharePlan};
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -80,34 +80,17 @@ pub(crate) fn smb_plan(mounts: &[GuestMount], port: u16) -> SharePlan {
     }
 }
 
-/// 目的：helper 的存活凭据——guest 租约期间持进程，释放即杀（幂等）。
+/// 目的：helper 的存活凭据——guest 租约期间持进程，释放即收（幂等）。
 struct SmbGuard {
-    child: Option<Child>,
-    /// 长驻子进程的账（有就在收尾时注销）。
-    book: Option<std::sync::Arc<ProcessBook>>,
-}
-
-impl SmbGuard {
-    fn cleanup(&mut self) {
-        if let Some(mut c) = self.child.take() {
-            if let Some(book) = &self.book {
-                book.forget(c.id());
-            }
-            let _ = c.kill();
-            let _ = c.wait();
-        }
-    }
+    /// 目的：长驻子进程的句柄——丢掉就是收掉（先礼后兵、连账一起销），不用再单独写收尾。
+    daemon: Option<Daemon>,
 }
 
 impl ShareGuard for SmbGuard {
     fn release(&mut self) {
-        self.cleanup();
-    }
-}
-
-impl Drop for SmbGuard {
-    fn drop(&mut self) {
-        self.cleanup();
+        if let Some(mut daemon) = self.daemon.take() {
+            daemon.stop();
+        }
     }
 }
 
@@ -138,50 +121,33 @@ impl ShareBackend for SmbShare {
                 SMBD_BIN
             )
         })?;
-        let mut cmd = Command::new(&exe);
-        cmd.arg("--listen").arg("127.0.0.1:0");
+        let first_mount = mounts
+            .first()
+            .map(|m| m.host.display().to_string())
+            .unwrap_or_default();
+        // 起 helper：父死子亡、独立进程组、长命线程与登记入账都在这一处办完。
+        // stderr 不丢：握手失败时现场（helper 自己说的话）是唯一能区分"谁关的连接"的证据。
+        let mut spec = Spawn::new(&exe)
+            .arg("--listen")
+            .arg("127.0.0.1:0")
+            .stdout(Stream::Piped)
+            .stderr(Stream::Piped)
+            // helper 的诊断输出逐行转出来（带前缀，便于和 guest 侧 mount 报错对上时间）。
+            .echo_stderr(|line| eprintln!("[虚拟机] smbd：{}", line))
+            .purpose("share:smb")
+            .owner(first_mount.clone())
+            .marker(format!("--share s0={}", first_mount))
+            .book(self.book.clone());
         for (i, m) in mounts.iter().enumerate() {
             let ro = if m.read_only { ":ro" } else { "" };
-            cmd.arg("--share")
+            spec = spec
+                .arg("--share")
                 .arg(format!("s{i}={}{}", m.host.display(), ro));
         }
-        // 父死子亡（Unix）：核心被强杀时 helper 不该继续占着共享目录。
-        procs::guard(&mut cmd);
-        // stderr 不丢：握手失败时现场（helper 自己说的话）是唯一能区分"谁关的连接"的证据。
-        cmd.stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let mut child = procs::spawn(cmd)
-            .map_err(|e| format!("起不了 SMB helper（{}）：{}", exe.display(), e))?;
-        let launched = procs::attach(&child, "share:smb");
-        if let Some(book) = &self.book {
-            let first_mount = mounts
-                .first()
-                .map(|m| m.host.display().to_string())
-                .unwrap_or_default();
-            book.record(Entry {
-                pid: child.id(),
-                since: procs::now_ts(),
-                purpose: "share:smb".to_string(),
-                owner: first_mount.clone(),
-                marker: format!("--share s0={}", first_mount),
-                created: launched.created,
-                guard_note: launched.guard_note,
-            });
-        }
-        let stdout = child
-            .stdout
-            .take()
+        let mut daemon = spawn(spec)?;
+        let stdout = daemon
+            .take_stdout()
             .ok_or_else(|| "SMB helper 没有 stdout".to_string())?;
-        // helper 的诊断输出逐行转出来（带前缀，便于和 guest 侧 mount 报错对上时间）。
-        if let Some(stderr) = child.stderr.take() {
-            std::thread::spawn(move || {
-                let reader = BufReader::new(stderr);
-                for line in reader.lines().map_while(Result::ok) {
-                    eprintln!("[虚拟机] smbd：{}", line);
-                }
-            });
-        }
         // 有界等待 helper 打出第一行 LISTENING <addr>：它卡住时不能让我们干等。
         let (tx, rx) = mpsc::channel::<String>();
         std::thread::spawn(move || {
@@ -197,13 +163,9 @@ impl ShareBackend for SmbShare {
                 }
             }
         });
+        // 卡住时不能让我们干等：超时就报错走人，句柄随手丢掉——helper 与账上那条一起收。
         let first = rx.recv_timeout(Duration::from_secs(10)).map_err(|_| {
-            if let Some(book) = &self.book {
-                book.forget(child.id());
-            }
-            let _ = child.kill();
-            "等 SMB helper 的 LISTENING 超时（helper 自己的输出见上方 [虚拟机] smbd 行）"
-                .to_string()
+            "等 SMB helper 的 LISTENING 超时（helper 自己的输出见上方 [虚拟机] smbd 行）".to_string()
         })?;
         let addr = first
             .strip_prefix("LISTENING ")
@@ -219,8 +181,7 @@ impl ShareBackend for SmbShare {
         Ok((
             smb_plan(mounts, port),
             Box::new(SmbGuard {
-                child: Some(child),
-                book: self.book.clone(),
+                daemon: Some(daemon),
             }),
         ))
     }

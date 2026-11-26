@@ -3,7 +3,7 @@
 //! 管：规则——计划里的每条授予（写授予读写与目录操作、读授予只读）、运行基线（系统只读区）只读可执行；其余一律拒绝。
 //!   断网——`net=Off` 时用 seccomp 拒绝非 AF_UNIX / AF_NETLINK socket（TCP / UDP / raw 都出不去），
 //!   `net=Public` 不装网络过滤器（Linux 没有与 Windows / macOS 对等的入站限制，平台差异见 docs/kernel/README.md）。
-//! 不管：虚拟机档网络——由 QEMU 网卡决定。
+//! 不管：虚拟机档网络——由虚拟化引擎的网卡决定。
 //! 联动：机制不可用时（老内核、规则被内核拒、seccomp 不可用）如实降级并打印说明；能力等级在启动报告里已如实告知。
 
 use super::{Capability, FENCE_FAILED, FenceVerdict, shell_command};
