@@ -3,4 +3,11 @@
 //! 不管：值的真假判断（`enabled(...)` 之类留在调用方）；写环境（启动面自己做）。
 //! 联动：实现在 `src/kernel/detail/io/env.rs`；provision 的 fetch、vm 的共享开关与各单元的取证路径经它取。
 
+#[cfg_attr(
+    not(windows),
+    allow(
+        unused_imports,
+        reason = "可执行文件路径只有 Windows 的启动面替身会经单元面取；其余平台保留同一形状，单元无需按平台分叉"
+    )
+)]
 pub use crate::kernel::detail::io::env::{current_exe, temp_dir, var};

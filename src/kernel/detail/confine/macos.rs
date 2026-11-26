@@ -199,7 +199,7 @@ fn install_profile(spec: &FencePlan, command: &str) -> Result<(), String> {
             + usize::from(!spec.home.as_os_str().is_empty())
     );
     // 排障开关：把解释器解析结果与完整 profile 打出来（探针打开它；正常运行不打，免得污染工具回执）。
-    if env::var("SOLOMNI_FENCE_PROFILE").is_ok() {
+    if env::var("SOLOMNI_FENCE_PROFILE").is_some() {
         let dirs: Vec<String> = interpreter_dirs(command)
             .iter()
             .map(|d| d.display().to_string())
