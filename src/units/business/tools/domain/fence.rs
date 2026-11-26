@@ -121,7 +121,9 @@ pub fn fence_ask(block: &FenceBlocked, name: &str, unfenced_possible: bool) -> O
             ),
             (OPT_FENCE_ABORT.to_string(), "放弃这次调用".to_string()),
         ],
-        // 没人答时按发起方自己的选项收场：当我选了"放弃这次调用"（= 不执行，fail-closed）。
-        on_unanswered: Some(OPT_FENCE_ABORT.to_string()),
+        // 没人答就是没放行：发起方按 fail-closed 收场（不执行这次调用）。
+        kind: "fence".to_string(),
+        payload: serde_json::json!({ "fence": block.what, "line": block.line() }),
+        notes: Vec::new(),
     })
 }

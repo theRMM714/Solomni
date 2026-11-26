@@ -10,10 +10,10 @@ use crate::units::business::collab::domain::gates::Pending;
 use crate::units::business::collab::service::discussion::Discussion;
 use crate::units::business::llm::api::{CompleteOpts, Llm};
 use crate::units::business::prompt::api::{Prompt, Segment};
+use crate::units::business::session_model::api::AskDesk;
 use crate::units::business::session_model::api::SessionMeta;
 use crate::units::business::tools::api::ToolExec;
 use crate::units::business::transcript::api::{LineView, SessionEvent};
-use crate::units::business::turn_state::api::Gates;
 use crate::units::business::vm::api::Vm;
 use crate::units::business::workspace::api::Sandboxes;
 use std::sync::Arc;
@@ -186,16 +186,12 @@ impl CollabSession {
         }
         // 用户点「继续」= **重派核心指名没过的那几个节点**（只退这些；同阶段已通过的保持已通过，
         // 不整阶段重来）。放在这里而不是泵里：唤醒（子会话完成）不能替用户做这个决定。
-        let blocked = match self
-            .door
-            .head()
-            .and_then(|(_, gate)| Pending::from_gate(&gate))
-        {
+        let blocked = match self.ask.head().and_then(|(_, ask)| Pending::from_ask(&ask)) {
             Some((Pending::NodeBlocked { nodes }, _)) => Some(nodes),
             _ => None,
         };
         if let Some(nodes) = blocked {
-            self.door.drop_head();
+            self.ask.drop_head();
             self.gate_advice.clear();
             for n in &nodes {
                 self.reset_node(n);
@@ -215,11 +211,11 @@ impl CollabSession {
             return;
         }
         // 停会话把整队作废之后回来：那一关还挂在状态上，续一个新卡号接着问（不假装修好了）。
-        if self.door.is_empty() && !self.roster.is_empty() {
+        if !self.ask.pending() && !self.roster.is_empty() {
             self.ask_user(Pending::ConfirmBegin, sink);
             return;
         }
-        if self.door.is_empty() && !self.slate_picks.is_empty() {
+        if !self.ask.pending() && !self.slate_picks.is_empty() {
             self.ask_user(Pending::ConfirmSlate, sink);
             return;
         }
@@ -260,7 +256,7 @@ impl CollabSession {
         // 这一段跑讨论还是执行（同一条会话按会话类型表各重建一份）。
         phase: Phase,
         // 本会话的裁决队（核心按会话 id 与转录里已发出的卡号给）：重建出来的整队进它。
-        door: Arc<dyn Gates>,
+        ask: Arc<dyn AskDesk>,
     ) -> Result<CollabSession, String> {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
         let st = crate::units::business::collab::domain::collab_state::derive(events, &names);
@@ -297,7 +293,7 @@ impl CollabSession {
             },
             slate_picks: Vec::new(),
             settings,
-            door,
+            ask,
             allow: st.allow,
             plan: st.plan.clone(),
             // 链随 plan_review 事件落档：重建后按它还原，不重新整理（省一次模型调用）。
@@ -373,8 +369,7 @@ impl CollabSession {
                 continue;
             }
             // 没人回答的那张沿用它自己的卡号；状态派生出来的那一关还没有卡号，由队列续号。
-            s.door
-                .raise(id.as_deref(), p.gate(id.as_deref().unwrap_or(""), &advice));
+            s.ask.later(id.as_deref(), &p.ask(&advice));
         }
         Ok(s)
     }
@@ -386,15 +381,11 @@ impl CollabSession {
 }
 
 /// 目的：这一关归哪一段流程：两段共用同一条裁决队，重建时各登记自己那几张，免得同一张卡问两遍。
-/// 约束：工具级确认（`ToolAsk`）不认段——它等在工作线程上，由讨论段登记一次即可，答案由 `Sequence` 递给真正发起的那一段。
 fn gate_belongs_to(phase: Phase, p: &Pending) -> bool {
     match phase {
         Phase::Discuss => matches!(
             p,
-            Pending::Ask { .. }
-                | Pending::ConfirmSlate
-                | Pending::ConfirmBegin
-                | Pending::ToolAsk(_)
+            Pending::Ask { .. } | Pending::ConfirmSlate | Pending::ConfirmBegin
         ),
         Phase::Execute => matches!(p, Pending::PlanReview | Pending::NodeBlocked { .. }),
     }

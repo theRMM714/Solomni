@@ -6,10 +6,11 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use crate::kernel::api::types::Ask;
 use crate::units::business::agentloop::api::MemberTurn;
 use crate::units::business::llm::api::{CompleteOpts, Msg};
 use crate::units::business::tools::api::Tools;
-use crate::units::business::transcript::api::{Gate, SessionEvent};
+use crate::units::business::transcript::api::SessionEvent;
 use crate::units::business::turn_state::api::{Flow, GateTicket, Handback, MemberAsk, Settle};
 
 /// 目的：最小流程：开场推一条自己的事件，问名单里第一个成员一回合，吸收后收工。
@@ -131,8 +132,8 @@ impl Flow for StandIn {
         self.done
     }
 
-    fn settles_inline(&self, gate: &Gate) -> bool {
-        gate.kind == "standin"
+    fn settles_inline(&self, ask: &Ask) -> bool {
+        ask.kind == "standin"
     }
 
     fn settle(

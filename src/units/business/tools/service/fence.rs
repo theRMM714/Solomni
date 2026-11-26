@@ -9,7 +9,7 @@ use crate::kernel::ports::{FenceCase, FenceGate, FenceVerdict, ask_user};
 use crate::units::business::tools::domain::fence::{OPT_FENCE_UNFENCED, fence_ask};
 
 /// 目的：工具层的围栏裁决——把"必要落点授不上"按用户裁决变成"无围栏跑一次"或"不执行"。
-/// 约束：strict 不提供无围栏选项；构不出选项时停会话并拒绝；文案逐字是模型看到的回执契约。
+/// 约束：strict 不提供无围栏选项；这一趟没人答就按拒绝收场（fail-closed）；文案逐字是模型看到的回执契约。
 pub struct ToolFenceGate;
 
 impl FenceGate for ToolFenceGate {
@@ -79,12 +79,8 @@ fn refusal(blocked: &FenceBlocked, outcome: &AskOutcome) -> String {
             "用户没有放行这次工具调用：它**没有执行**。请换一种做法，或请用户调整会话权限（ask / full）。"
                 .to_string(),
         ),
-        AskOutcome::Defaulted(id) => Some(format!(
-            "[围栏] 这一问没人能答（没有可回答的前端）：{}（{}）授不上——按这一问声明的默认项「{}」收场。",
-            part, path, id
-        )),
         AskOutcome::NoAnswer => Some(format!(
-            "[围栏] 这一问没人能答（没有可回答的前端），也没有声明默认项：{}（{}）授不上——这次调用**没有执行**。",
+            "[围栏] 这一问没人能答（没有可回答的前端）：{}（{}）授不上——这次调用**没有执行**。",
             part, path
         )),
         AskOutcome::Stopped | AskOutcome::NoOptions => None,
@@ -126,4 +122,50 @@ fn unfenced_note(blocked: &FenceBlocked) -> String {
         where_text(blocked),
         blocked.why
     )
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kernel::api::types::Ask;
+    use crate::kernel::ports::AskUser;
+
+    /// 目的：没有可回答的前端（这一趟没人能答）：如实拒绝这次调用。
+    struct Silent;
+
+    impl AskUser for Silent {
+        fn ask(&self, _ask: &Ask) -> AskOutcome {
+            AskOutcome::NoAnswer
+        }
+
+        fn halt(&self, _why: &str) {}
+    }
+
+    /// 目的：**没人答不等于放行**：这一趟没放行就按拒绝收场（fail-closed），绝不悄悄按无围栏跑。
+    #[test]
+    fn a_question_nobody_answers_never_means_unfenced() {
+        let blocked = FenceBlocked {
+            what: "模块目录",
+            path: std::path::PathBuf::from("C:/mods/a"),
+            why: "写 DACL 失败（错误码 5）".to_string(),
+            fix: "以管理员身份跑一次 setup",
+        };
+        let case = FenceCase {
+            blocked: &blocked,
+            strict: false,
+            unfenced_possible: true,
+            agent: "甲",
+            ask: Some(&Silent),
+        };
+        match ToolFenceGate.decide(&case) {
+            FenceVerdict::Refused { output } => {
+                assert!(output.contains("没人能答"), "要说清为什么没跑：{}", output);
+                assert!(
+                    output.contains("没有执行"),
+                    "要明确这次调用没执行：{}",
+                    output
+                );
+            }
+            FenceVerdict::Unfenced { .. } => panic!("没人答不能当成放行"),
+        }
+    }
 }

@@ -57,7 +57,7 @@ TaskNode { id, title, objective, assignee, deps, status, sub_session, acceptance
 - 审查关卡是**核心请用户裁决**：推一张卡片（`SessionEvent::DecisionCard`，`gate = plan_review`，选项 `plan_start` / `plan_say`），核心把"为什么要你定 + 我建议怎么做"说清楚。
 - 建议由核心给：**随方案（`plan`）与节点验收（`node_verdict`）那一次调用一起产出**，不额外花调用；没有建议就是空串（它进卡片的消息）。
 - **`plan_start` 直接放行**；**`plan_say`（先说一句）由核心判他的意图是否明确**：明确才开工；模糊就不动——他的话进主会话当反馈，关卡继续挂着等用户（核心不做自动重试、不自己往下推）。
-- 通道与选项 id 是契约，见 [docs/session/session-model.md](../session/session-model.md) 的「请用户裁决：一条通道，消息 + 选项」。
+- 通道与选项 id 是契约，见 [docs/session/session-model.md](../session/session-model.md) 的「请用户裁决：一个形状，一条队，两种时序」。
 - **改需求不是关卡**：它是会话级动作（`can_update_task` 为真才渲染按钮），用户想改随时点：清掉旧需求行，在末尾追加「需求已修改，以下是新需求：…」，核心按最后一条判定。它不截断转录、不回滚工作区。
 - **改任务目标 = 改该节点的任务提示词**（不是用户随口一句话）；改完**不作废**——让它跑完，由核心验收按**当前目标**判定；核心若认为链有问题，暂停并回主会话与用户讨论。
 

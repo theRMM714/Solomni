@@ -1,7 +1,7 @@
 //! 目的：回合收发——把成员的回复喂回状态机（feed_with）、取出待问的一步（take_pending_ask）、把一张已出队的回答落到业务上（dispose）以及核心的核实环境与通道参数（verify_env / disc_opts）。
 //! 管：成员回合结果进状态机的入口；提问取出与回答落地；核实环境与通道参数的取用。
 //! 不管：状态机本体（discussion.rs / collab.rs）；模型调用与工具执行机制。
-//! 联动：被 CollabSession 消费；裁决通道见 docs/session/session-model.md 的「请用户裁决：一条通道，消息 + 选项」。
+//! 联动：被 CollabSession 消费；裁决通道见 docs/session/session-model.md 的「请用户裁决：一个形状，一条队，两种时序」。
 
 use super::collab::*;
 use crate::units::business::collab::domain::gates::{
@@ -140,9 +140,9 @@ impl CollabSession {
         let option = ticket.option.as_str();
         let note = ticket.note.trim().to_string();
         let empty_before = self.roster.is_empty();
-        // 这一关是哪一种由发起方解释：队列只搬 kind + payload（见 src/units/business/transcript/domain/events.rs 的 Gate）。
-        let (p, advice) = Pending::from_gate(&ticket.gate)
-            .ok_or_else(|| format!("这张卡不是本机制发的：{}", ticket.gate.kind))?;
+        // 这一关是哪一种由发起方解释：队列只搬 kind + payload（见 src/units/business/transcript/domain/events.rs 的 Ask）。
+        let (p, advice) = Pending::from_ask(&ticket.ask)
+            .ok_or_else(|| format!("这张卡不是本机制发的：{}", ticket.ask.kind))?;
         let nodes = match &p {
             Pending::NodeBlocked { nodes } => nodes.clone(),
             _ => Vec::new(),

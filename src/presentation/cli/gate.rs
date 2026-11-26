@@ -514,11 +514,11 @@ mod tests {
     use super::*;
     use crate::kernel::api::types::Ask;
     use crate::units::business::collab::api::Pending;
-    use crate::units::business::transcript::api::tool_ask;
+    use crate::units::business::transcript::api::{DecisionCard, card_of, waiter_of};
 
-    /// 目的：用生产那一条派生造卡（工具层那一类：三段话与选项原样来自发起方）。
+    /// 目的：用生产那一条派生造卡（三段话与选项原样来自发起方，卡号由队列发）。
     fn card(title: &str, body: &str, detail: &str, options: &[(&str, &str)]) -> DecisionCard {
-        tool_ask(&Ask {
+        let ask = Ask {
             role: "tools".to_string(),
             name: "甲".to_string(),
             title: title.to_string(),
@@ -528,9 +528,11 @@ mod tests {
                 .iter()
                 .map(|(id, label)| (id.to_string(), label.to_string()))
                 .collect(),
-            on_unanswered: None,
-        })
-        .card_with("card-1")
+            kind: "ask".to_string(),
+            payload: serde_json::json!({}),
+            notes: Vec::new(),
+        };
+        card_of(&ask, "card-1")
     }
 
     /// 目的：非 TTY 逐行原样：标题 / 正文 / 详情 / 选项各一行，空段不占行。
@@ -634,8 +636,8 @@ mod tests {
             question: "选哪个？".to_string(),
         };
         let waiting = vec![
-            ask.gate("d2", "").waiter("d2"),
-            Pending::ConfirmBegin.gate("d3", "").waiter("d3"),
+            waiter_of(&ask.ask(""), "d2"),
+            waiter_of(&Pending::ConfirmBegin.ask(""), "d3"),
         ];
         let (_, lines) = term::capture(|| print_waiting(&waiting));
         term::reset_ui();
@@ -704,7 +706,7 @@ mod tests {
         };
         let waiter = {
             let door = std::sync::Arc::clone(&door);
-            std::thread::spawn(move || door.ask(Pending::ConfirmBegin.gate("", ""), &mut |_| {}))
+            std::thread::spawn(move || door.wait(&Pending::ConfirmBegin.ask(""), &mut |_| {}))
         };
         let mut spins = 0;
         while door.is_empty() && spins < 500 {

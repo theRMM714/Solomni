@@ -7,8 +7,7 @@ use std::sync::Arc;
 
 use crate::units::business::catalog::registry::api::Settings;
 use crate::units::business::llm::api::Channel;
-use crate::units::business::session_model::api::{Profiles, SessionMeta};
-use crate::units::business::turn_state::domain::decisions::Gates;
+use crate::units::business::session_model::api::{AskDesk, Profiles, SessionMeta};
 use crate::units::business::turn_state::domain::flow::Flow;
 use crate::units::business::turn_state::domain::sequence::Sequence;
 use crate::units::business::workspace::api::Sandboxes;
@@ -26,8 +25,8 @@ pub struct FlowSetup<'a> {
     pub delegated: bool,
     /// 目的：本工作的沙箱清单（流程按 agent 名取）。
     pub sandboxes: Sandboxes,
-    /// 目的：本会话的裁决队（各段共用同一条）。
-    pub desk: Arc<dyn Gates>,
+    /// 目的：本会话的裁决通道**发起面**（各段共用同一条队的挂起口）。
+    pub ask: Arc<dyn AskDesk>,
     /// 目的：重建现场：`Some` 就从转录恢复那一段，`None` 就是新建。
     pub restore: Option<(&'a SessionMeta, &'a [serde_json::Value])>,
 }

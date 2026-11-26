@@ -6,7 +6,7 @@
 
 ## 管什么 / 不管什么
 
-- 管：会话事件 `SessionEvent`（含机制事件通道 `Push`）、转录行 `LineView` 与工具调用行 `ToolCallView`、裁决卡与信封（`DecisionCard` / `DecisionEnvelope` / `DecisionMessage` / `OptionView` / `DecisionWaiter` / `DecisionQueue` / `DecisionAnswer` / `Gate`）、上下文用量 `ContextUsage`，以及它们的构造函数与判定（`idle` / `working` / `qualify` / `tool_ask` / `last_compaction` / `interrupted_note` / `stopped_note`）。
+- 管：会话事件 `SessionEvent`（含机制事件通道 `Push`）、转录行 `LineView` 与工具调用行 `ToolCallView`、裁决卡与信封（`DecisionCard` / `DecisionEnvelope` / `DecisionMessage` / `OptionView` / `DecisionWaiter` / `DecisionQueue` / `DecisionAnswer`）与把 `kernel::Ask` 翻译成卡 / 等待方的五个自由函数（`card_of` / `waiter_of` / `event_of` / `json_of` / `note_of`）、上下文用量 `ContextUsage`，以及它们的构造函数与判定（`idle` / `working` / `qualify` / `last_compaction` / `interrupted_note` / `stopped_note`）。
 - 不管：会话状态与派生（在 `conversation` 的 `session` 子业务）；裁决排队与等待的机制（那里的 `src/units/business/turn_state/domain/decisions.rs`）；落盘与回放（那里的 `detail/` 与 `service/`）；前端渲染（`src/presentation`）；措辞与译文（`prompt`）。
 - 不管：不碰 IO、不持端口、不持有状态；但它是**环 2**而不是环 1——转录行里嵌着别的单元的载荷值（见「为什么是独立单元」）。
 

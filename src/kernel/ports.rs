@@ -51,30 +51,28 @@ pub trait PathCodec: Send + Sync + std::fmt::Debug {
 ///   实现方负责**阻塞**、把用户选中的**选项 id** 原样带回，并在没有可回答的前端时按 fail-closed 收场。
 pub trait AskUser: Send + Sync {
     /// 目的：把这条问题推给用户并**阻塞**等他答（不设超时——不点不继续）。
-    /// 参数：`ask` = 谁在问 + 消息三段 + 选项集 + 没人答时的默认项；选项集**不得为空**（契约禁止置灰）。
-    /// 返回：**这次照哪个选项办、或为什么没办**——用户答的、按声明默认项收场的、没人答的、
-    ///   用户停止的、构不出可用选项的，各自如实分开（见 `AskOutcome`）；"为什么"由端口自己落进会话。
+    /// 参数：`ask` = 谁在问 + 消息三段 + 选项集 + 机制载荷；选项集**不得为空**（契约禁止置灰）。
+    /// 返回：**这次照哪个选项办、或为什么没办**——用户答的、没人答的、用户停止的、
+    ///   构不出可用选项的，各自如实分开（见 `AskOutcome`）；"为什么"由端口自己落进会话。
     // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
     #[allow(dead_code)]
     fn ask(&self, ask: &Ask) -> AskOutcome;
 
-    /// 目的：这一环**构不出可用选项**时的收场：**不发起裁决**，改为**停掉这个会话 + 落一条警告**。
+    /// 目的：停掉这个会话（发起方决定不再继续时用，例如构不出可用选项之后）。
     /// 参数：`why` = 哪一环做不下去、要补什么（请求方给的原话，写进那条警告）。
+    /// 约束：端口自己不在空选项集时停会话——`AskOutcome::NoOptions` 只回事实，停不停由发起方决定。
     fn halt(&self, why: &str);
 }
 
-/// 目的：一次提问的**统一入口**——有前端就问它，没前端就按发起方声明的默认项收场（默认 = 不办）。
-/// 约束：声明只在**属于这张卡选项集**时才算数（不属于就按"没人答"处置，不静默改写）；
+/// 目的：一次提问的**统一入口**——有前端就问它，没前端就回"没人答"（发起方按失败处置）。
+/// 约束：没有默认项这一说：没人答就是失败，不静默改写；
 ///   发起方只该用 `AskOutcome::decided` 取结果，不必逐态 match。
 // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
 #[allow(dead_code)]
 pub fn ask_user(port: Option<&dyn AskUser>, ask: &Ask) -> AskOutcome {
     match port {
         Some(p) => p.ask(ask),
-        None => match ask.on_unanswered.as_deref().filter(|id| ask.has_option(id)) {
-            Some(id) => AskOutcome::Defaulted(id.to_string()),
-            None => AskOutcome::NoAnswer,
-        },
+        None => AskOutcome::NoAnswer,
     }
 }
 

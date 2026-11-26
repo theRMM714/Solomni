@@ -11,9 +11,10 @@ use crate::units::business::collab::domain::gates::{OPT_BEGIN_ALLOW, Pending};
 use crate::units::business::collab::service::collab::{CollabSession, Phase};
 use crate::units::business::collab::service::discussion::AfterTurn;
 
+use crate::kernel::api::types::Ask;
 use crate::units::business::agentloop::api::MemberTurn;
 use crate::units::business::session_model::api::{loop_of, role};
-use crate::units::business::transcript::api::{Gate, SessionEvent};
+use crate::units::business::transcript::api::SessionEvent;
 use crate::units::business::turn_state::api::{
     Flow, GateTicket, Handback, MemberAsk, Settle, WorkPlan,
 };
@@ -120,8 +121,8 @@ impl Flow for CollabSession {
         Ok(Settle { resume, roster })
     }
 
-    fn settles_inline(&self, gate: &Gate) -> bool {
-        matches!(Pending::from_gate(gate), Some((Pending::ConfirmSlate, _)))
+    fn settles_inline(&self, ask: &Ask) -> bool {
+        matches!(Pending::from_ask(ask), Some((Pending::ConfirmSlate, _)))
     }
 
     fn plan(&self) -> Option<&dyn WorkPlan> {

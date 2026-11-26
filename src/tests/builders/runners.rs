@@ -283,7 +283,9 @@ impl ProcessRunner for AskingRunner {
                     "放弃这次调用".to_string(),
                 ),
             ],
-            on_unanswered: None,
+            kind: "fence".to_string(),
+            payload: serde_json::json!({}),
+            notes: Vec::new(),
         };
         self.asked
             .lock()

@@ -81,7 +81,7 @@ impl Flows for CollabFlows {
                 events,
                 setup.sandboxes.clone(),
                 phase,
-                Arc::clone(&setup.desk),
+                Arc::clone(&setup.ask),
             )?,
             None => {
                 let channel = setup
@@ -102,7 +102,7 @@ impl Flows for CollabFlows {
                     setup.delegated,
                     setup.sandboxes.clone(),
                     phase,
-                    Arc::clone(&setup.desk),
+                    Arc::clone(&setup.ask),
                 )?
             }
         };

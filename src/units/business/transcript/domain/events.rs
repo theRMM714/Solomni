@@ -37,14 +37,6 @@ pub struct DecisionCard {
     pub options: Vec<OptionView>,
 }
 
-impl DecisionCard {
-    /// 目的：这张卡的选项集**有没有**这个 id（回答校验的唯一判据）。
-    /// 约束：判据是选项集本身、不是文案——旧卡的答案因此放行不了新的请求。
-    pub fn has_option(&self, id: &str) -> bool {
-        self.options.iter().any(|o| o.id == id)
-    }
-}
-
 /// 目的：队首之后还在等的一张卡——界面只看信封与标题（谁在等、问的什么）。
 /// 约束：`id` / `gate` / `payload` 是**机制自己的重建材料**（与队首那张同一套），呈现层不看它们；
 ///   带上它们，整队才能只凭队首那条事件从转录重建（见 docs/session/session-model.md「请用户裁决」）。
@@ -560,98 +552,83 @@ impl SessionEvent {
     }
 }
 
-/// 目的：裁决队里的一关——**只装数据**：机制名、机制材料、卡、要附言的选项。
-/// 约束：队列只按卡校验、按 kind/payload 重建；它不解释这一关是哪一种（解释归发起方机制）。
-#[derive(Debug, Clone)]
-pub struct Gate {
-    /// 目的：这一关的机制名（落盘与重建按它认门）。
-    pub kind: String,
-    /// 目的：这一关的**机制载荷**（重启后重建这一关的材料），原样进裁决事件与等待者。
-    pub payload: serde_json::Value,
-    /// 目的：卡片（信封 + 消息 + 选项）；卡号由队列发，这里的不被信任。
-    pub card: DecisionCard,
-    /// 目的：要附言的选项——id → 要附言的原文（空 = 都不需要）。
-    pub notes: Vec<(String, String)>,
-}
-
-impl Gate {
-    /// 目的：这一关的某个选项**要不要附言**：要就给出"为什么"的原文（队列在出队前按它校验）。
-    pub fn note_requirement(&self, option: &str) -> Option<String> {
-        self.notes
-            .iter()
-            .find(|(id, _)| id == option)
-            .map(|(_, why)| why.clone())
-    }
-
-    /// 目的：这一关作为**等待者**的形态（谁在等、问的什么 + 它自己的重建材料）。
-    pub fn waiter(&self, id: &str) -> DecisionWaiter {
-        DecisionWaiter {
-            id: id.to_string(),
-            envelope: self.card.envelope.clone(),
-            title: self.card.message.title.clone(),
-            gate: self.kind.clone(),
-            payload: self.payload.clone(),
-        }
-    }
-
-    /// 目的：这一关的卡片，卡号以队列发的为准（卡内 id 只是占位）。
-    pub fn card_with(&self, id: &str) -> DecisionCard {
-        let mut card = self.card.clone();
-        card.id = id.to_string();
-        card
-    }
-
-    /// 目的：推给用户的裁决事件（卡片 + 机制自己的重建材料 + 后面还在等的那几张）。
-    /// 参数：waiting = 排在队首之后的等待者（先来后到）；队列里只有它一张就是空。
-    pub fn event(&self, id: &str, waiting: &[DecisionWaiter]) -> SessionEvent {
-        SessionEvent::DecisionCard {
-            card: self.card_with(id),
-            gate: self.kind.clone(),
-            payload: self.payload.clone(),
-            waiting: waiting.to_vec(),
-        }
-    }
-
-    /// 目的：快照形态（会话视图里的 pending）——与推的事件**同一份事实**。
-    pub fn to_json(&self, id: &str, waiting: &[DecisionWaiter]) -> serde_json::Value {
-        self.event(id, waiting).to_json()
-    }
-}
-
-/// 目的：工具层自己发起的一关（围栏这类）：消息与选项**由发起方给**，通道不解释内容。
-/// 约束：这一关不重建——它等在工作线程上，重启后等待方已不存在（重建出来也没人做主）。
-pub fn tool_ask(ask: &crate::kernel::api::types::Ask) -> Gate {
-    Gate {
-        kind: "tool_ask".to_string(),
-        payload: serde_json::to_value(ask).unwrap_or(serde_json::Value::Null),
-        card: DecisionCard {
-            id: String::new(),
-            envelope: DecisionEnvelope {
-                role: ask.role.clone(),
-                name: ask.name.clone(),
-            },
-            message: DecisionMessage {
-                title: ask.title.clone(),
-                body: ask.body.clone(),
-                detail: ask.detail.clone(),
-            },
-            options: ask
-                .options
-                .iter()
-                .map(|(id, label)| OptionView {
-                    id: id.clone(),
-                    label: label.clone(),
-                })
-                .collect(),
+/// 目的：一张卡（信封 + 消息 + 选项集）：卡号以队列发的为准，问的内容原样来自 `Ask`。
+/// 参数：`ask` = 这一问；`id` = 会话内唯一的卡号。
+pub fn card_of(ask: &crate::kernel::api::types::Ask, id: &str) -> DecisionCard {
+    DecisionCard {
+        id: id.to_string(),
+        envelope: DecisionEnvelope {
+            role: ask.role.clone(),
+            name: ask.name.clone(),
         },
-        notes: Vec::new(),
+        message: DecisionMessage {
+            title: ask.title.clone(),
+            body: ask.body.clone(),
+            detail: ask.detail.clone(),
+        },
+        options: ask
+            .options
+            .iter()
+            .map(|(id, label)| OptionView {
+                id: id.clone(),
+                label: label.clone(),
+            })
+            .collect(),
     }
+}
+
+/// 目的：这一问作为**等待者**的形态（谁在等、问的什么 + 它自己的重建材料）。
+/// 参数：`ask` = 这一问；`id` = 它在队里的卡号。
+pub fn waiter_of(ask: &crate::kernel::api::types::Ask, id: &str) -> DecisionWaiter {
+    let card = card_of(ask, id);
+    DecisionWaiter {
+        id: id.to_string(),
+        envelope: card.envelope.clone(),
+        title: card.message.title.clone(),
+        gate: ask.kind.clone(),
+        payload: ask.payload.clone(),
+    }
+}
+
+/// 目的：推给用户的裁决事件（卡片 + 机制自己的重建材料 + 后面还在等的那几张）。
+/// 参数：`waiting` = 排在队首之后的等待者（先来后到）；队列里只有它一张就是空。
+pub fn event_of(
+    ask: &crate::kernel::api::types::Ask,
+    id: &str,
+    waiting: &[DecisionWaiter],
+) -> SessionEvent {
+    SessionEvent::DecisionCard {
+        card: card_of(ask, id),
+        gate: ask.kind.clone(),
+        payload: ask.payload.clone(),
+        waiting: waiting.to_vec(),
+    }
+}
+
+/// 目的：快照形态（会话视图里的 pending）——与推的事件**同一份事实**。
+pub fn json_of(
+    ask: &crate::kernel::api::types::Ask,
+    id: &str,
+    waiting: &[DecisionWaiter],
+) -> serde_json::Value {
+    event_of(ask, id, waiting).to_json()
 }
 
 /// 目的：工具的全名（内置 / 核心自有 = 工具名；模块工具 = 模块.工具）：卡片与记录都用这一种写法。
+/// 参数：`module` = 模块 id（内置工具为 `None`）；`tool` = 工具自己的名字。
+/// 返回：带模块限定或裸名的全名。
 pub fn qualify(module: Option<&str>, tool: &str) -> String {
     match module {
         Some(m) => format!("{}.{}", m, tool),
         None => tool.to_string(),
     }
+}
+
+/// 目的：这一问的某个选项**要不要附言**：要就给出"为什么"的原文（队列在出队前按它校验）。
+/// 约束：附言规则由发起方随卡声明（`Ask.notes`）；通道只按它校验，被拒的回答不出队、不落回答。
+pub fn note_of(ask: &crate::kernel::api::types::Ask, option: &str) -> Option<String> {
+    ask.notes
+        .iter()
+        .find(|(id, _)| id == option)
+        .map(|(_, why)| why.clone())
 }

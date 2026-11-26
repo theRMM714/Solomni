@@ -221,8 +221,8 @@ impl TurnOps for Handle {
                 // 驱动不认关卡种类（流程面 `settles_inline`）。
                 let inline = {
                     let sid = sid.to_string();
-                    let gate = ticket.gate.clone();
-                    self.call(move |core| Ok(core.turn.settles_inline(&sid, &gate)))?
+                    let ask = ticket.ask.clone();
+                    self.call(move |core| Ok(core.turn.settles_inline(&sid, &ask)))?
                 };
                 if inline {
                     let more = self.call({

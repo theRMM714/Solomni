@@ -3,7 +3,7 @@
 //! 不管：队列本身的排队与校验（在 `crate::units::business::turn_state::api::Gates`，与工具级确认共用）、
 //!   讨论推进（`discussion.rs`）、泵的每一步（`pump.rs`）、回合收发与回答（`turn_io.rs`）、
 //!   代拟名单与按转录重建（`slate.rs`）；它不碰会话表，也不写别人的会话。
-//! 联动：契约见 docs/session/session-model.md 的「请用户裁决：一条通道，消息 + 选项」与
+//! 联动：契约见 docs/session/session-model.md 的「请用户裁决：一个形状，一条队，两种时序」与
 //!   docs/collab/task-chain.md；前端按快照的 pending 与推的裁决事件驱动，不做第二真相。
 
 use super::lines::push_delta;
@@ -14,9 +14,9 @@ use crate::units::business::collab::service::discussion::Discussion;
 use crate::units::business::collab::service::synthesis::Execution;
 use crate::units::business::llm::api::{Channel, Chat, Llm, Msg};
 use crate::units::business::prompt::api::{Prompt, Segment};
+use crate::units::business::session_model::api::AskDesk;
 use crate::units::business::tools::api::ToolExec;
 use crate::units::business::transcript::api::{LineView, SessionEvent};
-use crate::units::business::turn_state::api::Gates;
 use crate::units::business::vm::api::Vm;
 use crate::units::business::workspace::api::Sandboxes;
 use crate::units::pure::registry_model::api::AgentMeta;
@@ -112,8 +112,8 @@ pub struct CollabSession {
     pub(crate) slate_picks: Vec<AgentMeta>,
     /// 目的：登记处快照：agent 的模型解析与核心通道在此进行（策略在 runtime）。
     pub(crate) settings: Settings,
-    /// 目的：本会话的裁决通道（**与工具级确认共用同一条队**）：排队与校验归它，这里只管各关卡的处置。
-    pub(crate) door: Arc<dyn Gates>,
+    /// 目的：本会话的裁决通道：排队归它，这里只管各关卡的处置。
+    pub(crate) ask: Arc<dyn crate::units::business::session_model::api::AskDesk>,
     pub(crate) allow: bool,
     /// 目的：已记录在案的执行方案（回档/重启后沿用，未整理则为 None）。
     pub(crate) plan: Option<String>,
@@ -182,8 +182,8 @@ impl CollabSession {
         sandboxes: Sandboxes,
         // 这一段跑讨论还是执行（装配期按会话类型表里的流程序列各造一份）。
         phase: Phase,
-        // 本会话的裁决队（核心按会话 id 给；与工具级确认共用同一条）。
-        door: Arc<dyn Gates>,
+        // 本会话的裁决队（核心按会话 id 给）。
+        ask: Arc<dyn AskDesk>,
     ) -> Result<CollabSession, String> {
         let core_chat = llm.core_channel(&core_channel);
         let core_mode = settings.tool_mode_for(None);
@@ -196,7 +196,7 @@ impl CollabSession {
             task: String::new(),
             slate_picks: Vec::new(),
             settings,
-            door,
+            ask,
             allow: false,
             plan: None,
             chain: None,
@@ -440,7 +440,7 @@ impl CollabSession {
     pub(crate) fn ask_user(&mut self, p: Pending, sink: &mut dyn FnMut(SessionEvent)) {
         let advice = std::mem::take(&mut self.gate_advice);
         // 卡号由队列发（队列内唯一、跨重启稳定）：发起方给的 id 只是占位，进队时被覆盖。
-        let (_id, evs) = self.door.raise(None, p.gate("", &advice));
+        let (_id, evs) = self.ask.later(None, &p.ask(&advice));
         for e in evs {
             sink(e);
         }
@@ -470,8 +470,7 @@ impl CollabSession {
             Pending::NodeBlocked { nodes } => format!("没过验收的节点：{}", nodes.join("、")),
             Pending::Ask { member, question } => format!("{} 问：{}", member, question),
             Pending::ConfirmSlate => "代拟名单待用户确认。".to_string(),
-            // 工具层自己发起的那一类（围栏这类）不走"判意图明确"：它的处置在发起方那边。
-            Pending::ToolAsk(ask) => format!("工具层在问：{}。", ask.title),
+
             Pending::ConfirmBegin => "名单已定，等用户确认开始讨论。".to_string(),
         }
     }
@@ -479,7 +478,7 @@ impl CollabSession {
     /// 目的：正在等用户（队列里还有没答的卡）：泵**不再往下推**，直到用户回答或整队作废。
     ///   判据是队列本身：请教 / 名单确认 / 开工确认 / 方案待审 / 节点没过都排在同一条队上。
     pub fn awaiting_user(&self) -> bool {
-        !self.door.is_empty()
+        self.ask.pending()
     }
 
     /// 目的：成员回合失败：记下原因，下一次泵推一步时如实交回（不静默吞掉）。

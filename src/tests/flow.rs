@@ -4,10 +4,8 @@
 //! 联动：doubles/standin.rs 实现流程面；本文件不改 turn / work / runtime / lifecycle / presentation / session。
 
 use super::prelude::*;
+use crate::kernel::api::types::Ask;
 use crate::tests::doubles::StandIn;
-use crate::units::business::transcript::api::{
-    DecisionCard, DecisionEnvelope, DecisionMessage, Gate, OptionView,
-};
 use crate::units::business::turn_state::api::GateTicket;
 use crate::units::business::turn_state::api::Session;
 
@@ -91,36 +89,25 @@ pub(crate) fn a_standin_flow_settles_its_own_gate() {
     let _old = core.turn.take_flow_raw(&sid).expect("取在世会话");
     core.turn
         .put(sid.clone(), Session::Flow(Box::new(StandIn::new(systools))));
-    let card = DecisionCard {
-        id: "card-1".to_string(),
-        envelope: DecisionEnvelope {
-            role: "core".to_string(),
-            name: "替身".to_string(),
-        },
-        message: DecisionMessage {
-            title: "问一句".to_string(),
-            body: "题面".to_string(),
-            detail: String::new(),
-        },
-        options: vec![OptionView {
-            id: "ok".to_string(),
-            label: "好".to_string(),
-        }],
-    };
-    let gate = Gate {
+    let ask = Ask {
+        role: "core".to_string(),
+        name: "替身".to_string(),
+        title: "问一句".to_string(),
+        body: "题面".to_string(),
+        detail: String::new(),
+        options: vec![("ok".to_string(), "好".to_string())],
         kind: "standin".to_string(),
         payload: serde_json::json!({}),
-        card,
         notes: Vec::new(),
     };
     // ① 就地收尾与不是这一关的判据都归流程：驱动只问、不认种类。
     assert!(
-        core.turn.settles_inline(&sid, &gate),
+        core.turn.settles_inline(&sid, &ask),
         "流程说了这一关就地收尾"
     );
-    let elsewhere = Gate {
+    let elsewhere = Ask {
         kind: "elsewhere".to_string(),
-        ..gate.clone()
+        ..ask.clone()
     };
     assert!(
         !core.turn.settles_inline(&sid, &elsewhere),
@@ -130,7 +117,7 @@ pub(crate) fn a_standin_flow_settles_its_own_gate() {
     let ticket = GateTicket {
         option: "ok".to_string(),
         note: String::new(),
-        gate: Box::new(gate),
+        ask: Box::new(ask),
     };
     let events = core
         .turn

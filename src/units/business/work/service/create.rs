@@ -598,7 +598,7 @@ impl Work {
                     roster: metas.clone(),
                     delegated: delegate,
                     sandboxes: sandboxes.clone(),
-                    desk: Arc::clone(&door),
+                    ask: crate::units::business::turn_state::api::desk_face(Arc::clone(&door)),
                     restore: None,
                 };
                 let mut pipeline = crate::units::business::turn_state::api::sequence_of(
