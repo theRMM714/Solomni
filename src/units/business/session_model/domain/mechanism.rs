@@ -40,6 +40,9 @@ pub struct Loop {
     /// 目的：这一段抑制哪些能力组（`fs-read` / `fs-write` / `exec` / `shared-write`）：在场但这一段不给用。
     /// 约束：只影响授权（`Policy`），不影响发放——工具仍在面上，调用时回一条拒绝回执。
     pub deny: &'static [&'static str],
+    /// 目的：这一段里哪些**动作**要用户点头才执行（工具 id，不是能力组）：调用时先走裁决通道。
+    /// 约束：只影响授权（`Policy`），不影响发放；粒度刻意细到工具——能力组里混着只读动作，按组问会把查询也变成弹窗。
+    pub ask: &'static [&'static str],
 }
 
 /// 目的：核心代理角色：把用户的话转成对其它会话的动作（开、发、看、停）。
@@ -99,6 +102,7 @@ pub const ROLES: &[Role] = &[
 const DISCUSS: Loop = Loop {
     id: "discuss",
     flow: true,
+    ask: &[],
     deny: &[
         crate::units::business::session_model::domain::tools::FS_WRITE,
         crate::units::business::session_model::domain::tools::SHARED_WRITE,
@@ -123,6 +127,7 @@ const EXECUTE: Loop = Loop {
     id: "execute",
     deny: &[],
     flow: true,
+    ask: &[],
     cast: &[
         Cast {
             role: PLANNER.id,
@@ -147,6 +152,7 @@ const STANDARD: Loop = Loop {
     id: "standard",
     deny: &[],
     flow: false,
+    ask: &[],
     cast: &[Cast {
         role: SOLO.id,
         min: 0,
@@ -159,6 +165,7 @@ const PROXY: Loop = Loop {
     id: "proxy",
     deny: &[],
     flow: false,
+    ask: &[],
     cast: &[Cast {
         role: CORE_PROXY.id,
         min: 0,

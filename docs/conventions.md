@@ -55,7 +55,7 @@
 | 机器可读的事件流水 | **转录**（transcript） | 日志、聊天记录 |
 | 由核心实现 / 由模块声明的工具 | **系统工具 / 模块工具** | 外部工具（= 模块工具） |
 | 这一回合模型能看到并调用的工具 id 集合（来源各自交 id、去重成一份） | **工具面**（`ToolSource` / `TurnCtx`；装配在 `src/units/business/agentloop/domain/assemble.rs`） | 工具白名单、工具清单 |
-| 面对这一次调用回答"准不准"的那个端口（与"在不在场"分开；默认按流程段的 `deny` 判） | **授权端口**（`Policy`；`src/units/business/agentloop/domain/policy.rs`） | 权限系统、权限校验、白名单 |
+| 面对这一次调用回答"准不准"的那个端口（与"在不在场"分开；三档：放行 / 先问用户 / 拒绝，默认按流程段的 `deny` 与 `ask` 判） | **授权端口**（`Policy`；`src/units/business/agentloop/domain/policy.rs`） | 权限系统、权限校验、白名单 |
 | 系统工具里由 `tools` 单元直接实现、不经模块或核心动作的那组 | **内置工具**（`read` / `write` / `edit` / `patch` / `delete` / `list` / `grep` / `submit_report`）；其中操作文件的几个也叫**内置文件工具** | — |
 | 系统工具里执行外部命令、经 kernel 进程机制（守门进程 / guest）跑的那组 | **执行类系统工具**（当前 `shell`） | 终端、shell 工具 |
 | 模块声明的常驻外部服务（MCP / harness 等） | **常驻服务**（单元 `residents`） | 外部服务、后台进程、daemon |

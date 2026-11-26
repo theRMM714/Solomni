@@ -114,9 +114,10 @@ Loop { id: "discuss", flow: true, cast: &[Cast { role: "core_proxy", .. }, Cast 
 
 - 授权判定的约束：
 
-- **在不在场与准不准是两个端口**：来源只交 id（`ToolSource::offer`），准不准问 `Policy::decide`（`src/units/business/agentloop/domain/policy.rs`），请求带工具 id、交它的来源、当前段与角色。默认实现 `LoopPolicy` 只按段判：段声明抑制哪几组能力（`Loop.deny`，可选 `fs-read` / `fs-write` / `exec` / `shared-write`），这一段里那几组工具就不能调，回执说清是哪一段抑制了哪一组能力。当前只有 `Allow` / `Deny` 两种结论。
+- **在不在场与准不准是两个端口**：来源只交 id（`ToolSource::offer`），准不准问 `Policy::decide`（`src/units/business/agentloop/domain/policy.rs`），请求带工具 id、交它的来源、当前段与角色。默认实现 `LoopPolicy` 只按段判：段声明抑制哪几组能力（`Loop.deny`，可选 `fs-read` / `fs-write` / `exec` / `shared-write`），这一段里那几组工具就不能调，回执说清是哪一段抑制了哪一组能力。结论有三种：`Allow`（放行）、`Ask`（先问用户，见下一条）、`Deny`（拒绝）。
 - **抑制写在段上，不写工具名**：`deny` 写能力组，能力组到 id 的映射只有一份（`policy::ids_of`，与来源发放共用），所以加一个写工具不需要动任何抑制声明。
-- **引擎每次调用都过一遍授权**：`src/units/business/agentloop/engine/tools.rs` 的 `run_branch` 先按面判在场，再问 `Policy`，然后才进内置 / shell / 模块 / 核心自有工具四条执行路（授权拒绝不产生副作用、不当表态）。
+- **要点头的动作也写在段上，按工具 id 写**：`Loop.ask` 列的是这一段里要用户点头才执行的动作 id——不是能力组（能力组里混着只读动作，按组问会把一次查询变成弹窗）。引擎把它翻成一张 `kind = policy` 的卡（`policy::ask_card`，选项固定 `allow` / `deny`），走会话的裁决通道；**只有答了 `allow` 才执行**，`deny` / 没人答 / 被停止 / 构不出选项 / 这一趟没有可回答的前端，一律当没放行（回执写明这一次没有执行，`src/units/business/agentloop/engine/tools.rs` 的 `gate`）。生产声明现在四个段都是空的。
+- **引擎每次调用都过一遍授权**：`src/units/business/agentloop/engine/tools.rs` 的 `run_branch` 先按面判在场，再问 `Policy`，然后才进内置 / shell / 模块 / 核心自有工具四条执行路（授权拒绝不产生副作用、不当表态）；要问的动作在这一步停下来等答复，答了才继续。
 
 - 越权判定的约束：
 
