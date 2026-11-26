@@ -18,7 +18,7 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api`（按对外概念分文件：`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `net` / `path` / `platform`——见「六、对外面」）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`FenceHost`、`FenceGate`、`UserPath`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执与回执说明）、`domain`（路径书写、取消表、沙箱模式、回执装配）、`detail`（`clock`、`file_log`、`host_probe`、`io`（`net`）、`unpack`、`user_path`、`process`、`procs`、`session`、`i18n`、`confine`：门面 + `job` / `ledger` / `paths` / `prep`）。
+- 入站面：`api`（按对外概念分文件：`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `net` / `path` / `platform`——见「六、对外面」）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`FenceHost`、`FenceGate`、`UserPath`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执与回执说明）、`domain`（路径书写、取消表、沙箱模式、回执装配）、`detail`（`clock`、`file_log`、`host_probe`、`io`（`env` / `net`）、`unpack`、`user_path`、`process`、`procs`、`session`、`i18n`、`confine`：门面 + `job` / `ledger` / `paths` / `prep`）。
 - `AskUser` 是「需要用户裁决的机制请用户裁决」的**唯一**入口（`src/kernel/ports.rs`），工具执行层与围栏用它。
   - 形状：`ask(问题) -> 选项 id`，**阻塞**。
   - `halt(为什么)` = 停会话 + 落警告；调用方只在有可回答前端时用它，没有前端按 fail-closed 收场。
@@ -178,6 +178,15 @@
   - 理由二：绕道 `api` 的依赖在机制表里是**隐形**的（`api` 不是机制，边扫不到）；直取机制后机制边才如实，层号才是事实。
 - 同名机制合成一面：`contracts/fence` 与 `domain/fence` 都在 `api::fence`（描述符与沙箱策略是同一个对外概念）；模块型条目整模块重导出，保住 `api::layout::home(…)` / `api::i18n::render(…)` 的书写。
 - 新增一个对外条目：先落进所属机制，再在对应面里重导出；**新开一个面**要同步 `docs/kernel/unit-map.md` 与本页。眼下没有外部调用方的条目用 `#[allow(unused_imports)]` 显式放行并写理由，不从出口删掉——出口少一个，契约就悄悄漂了。
+
+## 七、IO 原语（`detail/io`）
+
+- **只有一份实现，不做端口**：出站网络与进程环境落在 `src/kernel/detail/io/`，单元经 `kernel::api::net` / `kernel::api::env` 取用；平台差异收在 `net/backend/{unix,windows}.rs`（`src/kernel/detail/io/net/backend/`）。判据与理由见 [ports.md](../architecture/ports.md) 的「IO 原语不画端口」。
+- **出站**：ureq 与 reqwest 两条通道共用一份平台 TLS 决策（`src/kernel/detail/io/net/backend.rs` 的三个出口），连接 / 总超时预算在 `src/kernel/detail/io/net/outbound.rs`；内核不引 reqwest / tokio，也不判 4xx/5xx 与重试（那是供应商语义，留单元）。
+- **入站回环**：`src/kernel/detail/io/net/loopback.rs` 的 `serve(port, max_body, handler)` 只绑 `127.0.0.1`，每请求一线程，请求体超过上限或不是 UTF-8 就由它直接回 400（handler 见不到坏 body）；交出 `Loopback`（`port` / `url` / `stop`，丢掉即收）。呈现层的转录中心与虚拟机的 cloud-init 种子服务都走它，`tiny_http` 的类型不出这一层。
+- **回环 TCP**：`src/kernel/detail/io/net/tcp.rs` 的 `reserve_port`（先占后放，只压小碰撞面、不作保留）、`dial`（唯一写死回环客户端地址处）、`await_loopback`（就绪轮询 + `gone` 回调，让调用方把「对端已死」说成自己的话）。
+- **进程环境**：`src/kernel/detail/io/env.rs` 是唯一读取面——`var` / `os` 两个原语 + 具名宿主事实（PATH、PATHEXT、SystemRoot、LOCALAPPDATA、可执行文件、临时目录）。`std::env::` 只许在它、`src/main.rs`、`src/entry/` 与 `src/presentation/`（终端能力探测）出现，其余经机制——门禁 `structure/env-surface` 判。
+- **内核不认识产品**：IO 层只提供原语，产品名与它的 argv / 配置文件名留在单元（门禁 `structure/kernel-products`）。
 
 ## 改动本单元时必须同步
 

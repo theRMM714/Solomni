@@ -5,6 +5,7 @@
 
 use super::{Capability, FENCE_FAILED, FencePrep, FenceStep, FenceVerdict, shell_command};
 use crate::kernel::contracts::fence::FencePlan;
+use crate::kernel::detail::io::env;
 use std::sync::OnceLock;
 use std::time::Instant;
 
@@ -54,7 +55,7 @@ fn probe() -> Capability {
 pub(crate) fn self_check() -> Result<(), String> {
     let sid = container_sid(&format!("{}FenceSelfCheck", PROFILE_PREFIX))?;
     let scratch =
-        std::env::temp_dir().join(format!("solomni-fence-selfcheck-{}", std::process::id()));
+        env::temp_dir().join(format!("solomni-fence-selfcheck-{}", std::process::id()));
     let outcome = self_check_scratch(sid, &scratch);
     free_sid(sid);
     outcome

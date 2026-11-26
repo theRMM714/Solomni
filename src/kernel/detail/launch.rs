@@ -4,6 +4,7 @@
 //! 联动：由 `confine` 的后端、`container` 的容器内启动、`process.rs` 与 `entry/toolchains.rs` 消费。
 
 use crate::kernel::contracts::fence::FencePlan;
+use crate::kernel::detail::io::env;
 use std::ffi::OsString;
 use std::process::Command;
 
@@ -27,8 +28,8 @@ pub(super) use windows::{canonical_path_var, node_realpath_env_in};
 /// 目的：命令里可能出现的外部程序：按 PATH 解析出真实路径（解析不出的跳过，不猜）。
 ///   它们的**安装目录**必须放行（只读+执行），否则受限进程连解释器都起不来——Windows 的目录 ACL 与 macOS 的 seatbelt 都靠它。
 pub(crate) fn interpreter_dirs(command: &str) -> Vec<std::path::PathBuf> {
-    let path_var = std::env::var_os("PATH").unwrap_or_default();
-    let pathext = std::env::var("PATHEXT").ok();
+    let path_var = env::path_var().unwrap_or_default();
+    let pathext = env::pathext();
     interpreter_dirs_in(command, &path_var, pathext.as_deref())
 }
 
@@ -162,7 +163,7 @@ pub fn fence_env(spec: &FencePlan, command: &str) -> Vec<(OsString, OsString)> {
     ];
     let mut out: Vec<(OsString, OsString)> = Vec::new();
     for k in keep {
-        if let Some(v) = std::env::var_os(k) {
+        if let Some(v) = env::os(k) {
             out.push((OsString::from(k), v));
         }
     }

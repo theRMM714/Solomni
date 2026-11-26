@@ -48,12 +48,15 @@
 | `src/kernel/detail/locus.rs` | 落点身份（门面）：按卷 + 文件 id 判同一物理对象与物理包含；平台实现在 `src/kernel/detail/locus/windows.rs` / `src/kernel/detail/locus/unix.rs` |
 | `src/kernel/detail/locus/windows.rs` | `locus` 的 Windows 后端：卷序列号 + 文件 id、UNC 与映射盘判定 |
 | `src/kernel/detail/locus/unix.rs` | `locus` 的非 Windows 后端：设备号 + inode、网络路径恒 false |
-| `src/kernel/detail/io.rs` | IO 面（门面）：唯一直接碰 OS / 网络 / 进程 / 时钟的一层，声明 IO 子模块（当前 `net`） |
-| `src/kernel/detail/io/net.rs` | 出站网络原语（门面）：组装 `backend` 与 `outbound`，让 ureq 与 reqwest 两条通道共用一份平台 TLS 决策；契约用例证明两边都建得出来 |
+| `src/kernel/detail/io.rs` | IO 面（门面）：唯一直接碰 OS / 网络 / 进程 / 时钟的一层，声明 IO 子模块（`env`：进程环境；`net`：出站网络与入站回环） |
+| `src/kernel/detail/io/net.rs` | 网络原语（门面）：声明 `backend` / `loopback` / `outbound` / `tcp`；出站让 ureq 与 reqwest 两条通道共用一份平台 TLS 决策，入站与回环 TCP 也只在这里落地 |
 | `src/kernel/detail/io/net/backend.rs` | 平台 TLS 装配门面：三个出口（ureq 的 TLS 配置、reqwest 构建器注入、后端名称），按平台选中 `backend/{windows,unix}.rs` |
 | `src/kernel/detail/io/net/backend/windows.rs` | `backend` 的 Windows 后端：ureq 显式 native-tls + 系统证书库；reqwest 的 native-tls 由依赖特性定死，构建器原样返回 |
 | `src/kernel/detail/io/net/backend/unix.rs` | `backend` 的非 Windows 后端：rustls + ring + 系统证书验证器；ureq 用 rustls 默认 |
 | `src/kernel/detail/io/net/outbound.rs` | ureq 代理构建：连接 / 总超时预算，4xx/5xx 当**数据**不当错误（状态由调用方判） |
+| `src/kernel/detail/io/net/loopback.rs` | 入站回环 HTTP 服务：只绑 127.0.0.1、请求体有界（坏 body 直接 400，handler 见不到）、每请求一线程、`stop` 能收回线程；交出 `Call` / `Answer` 两个中性形状 |
+| `src/kernel/detail/io/net/tcp.rs` | 回环 TCP 原语：`reserve_port`（先占后放，只压小碰撞面）、`dial`（唯一写死回环客户端地址处）、`await_loopback`（带「对端已死」回调的就绪等待） |
+| `src/kernel/detail/io/env.rs` | 进程环境的唯一读取面：`var` / `os` 两个原语 + 具名宿主事实（PATH、PATHEXT、SystemRoot、LOCALAPPDATA、可执行文件、临时目录） |
 | `src/kernel/detail/user_path.rs` | `UserPath` 端口的门面：Windows 实现在 `src/kernel/detail/user_path/windows.rs`，其余平台为空模块 |
 | `src/kernel/detail/user_path/windows.rs` | `UserPath` 的 Windows 实现：读写 `HKCU\Environment` 的 `Path`，保留 `REG_SZ` / `REG_EXPAND_SZ` 类型并广播 `WM_SETTINGCHANGE` |
 | `src/kernel/detail/unpack.rs` | 归档解包机制（门面）：tar / tar.gz / tar.zst / tar.xz / zip 解到目录，支持 strip 与宽容链接；权限位与软链在 `src/kernel/detail/unpack/{windows,unix}.rs` |

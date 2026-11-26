@@ -7,6 +7,7 @@
 //! 联动：能力不足时如实上报（capability），降级而非崩溃——绝不静默假装有围栏。
 
 use crate::kernel::contracts::fence::{FencePlan, FenceRunPolicy};
+use crate::kernel::detail::io::env;
 use std::path::{Path, PathBuf};
 
 #[cfg(target_os = "linux")]
@@ -59,7 +60,7 @@ pub const SELFCHECK_FAIL_FLAG: &str = "SOLOMNI_FENCE_SELFCHECK_FAIL";
 /// 目的：自检该不该按「本机不允许」处理：测试专用注入优先，否则问真实自检。
 ///   三平台的自检入口共用这一份判断，避免各写一遍导致探针在某平台上失效。
 pub(crate) fn selfcheck_forced_unavailable() -> bool {
-    std::env::var_os(SELFCHECK_FAIL_FLAG).is_some()
+    env::os(SELFCHECK_FAIL_FLAG).is_some()
 }
 
 /// 目的：本机后端——三平台各一个实现，上层只通过这个 trait 说话。

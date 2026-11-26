@@ -17,7 +17,6 @@ detail/clock: 0
 detail/fs_meta: 0
 detail/io: 0
 detail/lock: 0
-detail/procs: 0
 detail/unpack: 0
 domain/layout: 0
 domain/name: 0
@@ -28,6 +27,7 @@ domain/platform: 0
 contracts/run: 1
 detail/i18n: 1
 detail/locus: 1
+detail/procs: 1
 domain/fence: 1
 domain/receipt: 1
 

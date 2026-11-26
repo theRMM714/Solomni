@@ -1,8 +1,9 @@
-//! 目的：Web 转录中心：tiny_http 服务器 + 长轮询增量事件推送。
+//! 目的：Web 转录中心：回环 HTTP 服务（`src/kernel/detail/io/net/loopback.rs`）+ 长轮询增量事件推送。
 //! 管：HTTP 协议适配（请求分发、静态资源、长轮询与**入站面**之间的转译）、服务器生命周期；只绑 127.0.0.1，密钥永不进任何响应（入站面只给 id）。
 //! 不管：渲染（在浏览器 `src/presentation/web/assets/app/main.js` 起的分层模块）；路由目录与匹配（`src/presentation/web/routes.rs`）。
 //! 联动：核心状态在核心自己的线程上——这里拿不到它、也拿不到任何核心锁，「停止」直接说给核心听；请求经 `Faces`（`src/units/*/api.rs`）进入。
 
+use crate::kernel::api::net::{self, Answer, Call};
 use crate::presentation::faces::Faces;
 use crate::units::runtime::api::{Acted, ActionCall, Caller};
 use crate::units::transcript::api::SessionEvent;
@@ -12,10 +13,8 @@ pub(crate) mod assets;
 mod host_fs;
 pub mod routes;
 use serde_json::json;
-use std::io::Read;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tiny_http::{Header, Response, Server};
 
 /// 目的：默认监听端口（CLI 的 web 命令与启动参数共用这一个来源）。
 pub const DEFAULT_PORT: u16 = 3081;
@@ -68,7 +67,7 @@ pub fn serve(faces: Faces, port: u16, fence: FenceInfo) -> Result<(), String> {
     serve_until(&faces, port, &fence, &stop)
 }
 
-/// 目的：服务器主循环（可注入中断判据，便于测试）：每次最多等 200ms 就回来看一次。
+/// 目的：服务器主循环（可注入中断判据，便于测试）：入站服务在后台收请求，主线程只盯中断、到点收摊。
 /// 约束：每个请求仍是一线独立线程——长连接绝不阻塞其它请求（转录中心是多端并用的）。
 pub(crate) fn serve_until(
     faces: &Faces,
@@ -78,44 +77,32 @@ pub(crate) fn serve_until(
 ) -> Result<(), String> {
     // 日志经**入站面**（faces.log）取——呈现层不持有端口对象。
     let log = Arc::clone(&faces.log);
-    log.info("web::serve", &format!("转录中心启动，端口 {}", port));
-    let addr = format!("127.0.0.1:{}", port);
-    let server = Server::http(addr.as_str()).map_err(|e| e.to_string())?;
-    println!("Solomni 转录中心：http://{}（只监听本机）", addr);
     let fence = Arc::new(fence.clone());
-    while !stop() {
-        let request = match server.recv_timeout(Duration::from_millis(200)) {
-            Ok(Some(r)) => r,
-            Ok(None) => continue,
-            Err(e) => return Err(e.to_string()),
-        };
+    let handler = {
         let faces = faces.clone();
         let fence = Arc::clone(&fence);
         let log = Arc::clone(&log);
-        std::thread::spawn(move || {
-            let mut request = request;
-            let url = request.url().to_string();
-            let method = request.method().to_string();
-            let mut body = String::new();
-            let mut reader = request.as_reader().take(MAX_BODY_BYTES as u64 + 1);
-            let read_ok = reader.read_to_string(&mut body).is_ok();
-            log.info("web::request", &format!("{} {}", method, url));
-
-            let reply = if !read_ok || body.len() > MAX_BODY_BYTES {
-                complaint(400, "请求体过大或不是 UTF-8")
-            } else {
-                route(&faces, &fence, &log, &method, &url, &body)
-            };
-            let (code, headers, text) = reply;
-            let mut response = Response::from_string(text).with_status_code(code);
-            for (k, v) in headers {
-                if let Ok(h) = Header::from_bytes(k.as_bytes(), v.as_bytes()) {
-                    response = response.with_header(h);
-                }
+        move |call: Call| {
+            log.info("web::request", &format!("{} {}", call.method, call.path));
+            let (code, headers, text) =
+                route(&faces, &fence, &log, &call.method, &call.path, &call.body);
+            Answer {
+                code,
+                headers: headers
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v))
+                    .collect(),
+                body: text,
             }
-            let _ = request.respond(response);
-        });
+        }
+    };
+    let mut server = net::serve(port, MAX_BODY_BYTES, handler)?;
+    log.info("web::serve", &format!("转录中心启动，端口 {}", server.port()));
+    println!("Solomni 转录中心：{}（只监听本机）", server.url());
+    while !stop() {
+        std::thread::sleep(Duration::from_millis(100));
     }
+    server.stop();
     println!("[提示] 已离开转录中心，回到终端。");
     Ok(())
 }

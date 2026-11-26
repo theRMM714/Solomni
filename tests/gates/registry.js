@@ -29,6 +29,7 @@ const S = {
   capability: require("./structure/capability.js"),
   resourceNames: require("./structure/resource-names.js"),
   kernelProducts: require("./structure/kernel-products.js"),
+  envSurface: require("./structure/env-surface.js"),
   rootEntries: require("./structure/root-entries.js"),
   diskOwners: require("./structure/disk-owners.js"),
   toolPaths: require("./structure/tool-paths.js"),
@@ -143,6 +144,18 @@ const GATES = [
     inputs: ["src/kernel/**/*.rs"],
     run: (root, ctx) => {
       const r = S.kernelProducts.kernelProducts(root);
+      ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
+      return r.problems;
+    },
+  },
+  {
+    id: "structure/env-surface",
+    lane: "structure",
+    step: "T0 结构审查",
+    kind: "text",
+    inputs: ["src/**/*.rs"],
+    run: (root, ctx) => {
+      const r = S.envSurface.envSurface(root);
       ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
       return r.problems;
     },
@@ -312,6 +325,7 @@ const LANE_ORDER = {
     "structure/root-entries",
     "structure/disk-owners",
     "structure/kernel-products",
+    "structure/env-surface",
   "structure/tool-paths",
     "structure/permission-values",
     "structure/import-names",

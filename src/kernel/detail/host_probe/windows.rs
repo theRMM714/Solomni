@@ -3,16 +3,10 @@
 //! 不管：起虚拟机、能力等级与降级策略。
 //! 联动：由 `src/kernel/detail/host_probe.rs` 按平台选中。
 
-use std::path::Path;
+use crate::kernel::detail::io::env;
 
 /// 目的：系统目录里存在 `WinHvPlatform.dll` 即视为可用。
 pub(crate) fn available() -> bool {
-    std::env::var_os("SystemRoot")
-        .map(|root| {
-            Path::new(&root)
-                .join("System32")
-                .join("WinHvPlatform.dll")
-                .is_file()
-        })
+    env::system_root().map(|root| root.join("System32").join("WinHvPlatform.dll").is_file())
         .unwrap_or(false)
 }

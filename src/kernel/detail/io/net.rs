@@ -1,10 +1,12 @@
-//! 目的：出站网络的原语——ureq 与 reqwest 两条通道从同一份平台决策取 TLS。
-//! 管：`backend`（按平台装配 TLS）与 `outbound`（ureq 代理的预算与状态语义）的组装。
-//! 不管：请求内容、状态码判定、重试与错误归类（在各自单元）；代理与信任环境由各栈自己从环境拾取，这里不另写解析。
-//! 联动：对外面 `src/kernel/api/net.rs`；llm 的 http_agent / http_stream 与 provision 的 fetch 经它取。
+//! 目的：网络原语——出站 TLS 装配、入站回环服务、回环 TCP。
+//! 管：`backend`（按平台装配 TLS）、`outbound`（ureq 代理的预算与状态语义）、`loopback`（入站回环 HTTP）、`tcp`（回环端口的预订 / 拨号 / 等待）。
+//! 不管：请求内容、状态码判定、重试与错误归类（在各自单元）；代理与信任环境由各栈自己从环境拾取，这里不另写解析；路由语义在 handler 里。
+//! 联动：对外面 `src/kernel/api/net.rs`；llm 的 http_agent / http_stream、provision 的 fetch、呈现层的转录中心与虚拟机的种子服务都经它取。
 
 pub(crate) mod backend;
+pub(crate) mod loopback;
 pub(crate) mod outbound;
+pub(crate) mod tcp;
 
 #[cfg(test)]
 mod tests {

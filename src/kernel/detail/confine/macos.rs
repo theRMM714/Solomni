@@ -7,6 +7,7 @@
 
 use super::{Capability, FENCE_FAILED, FenceVerdict, shell_command};
 use crate::kernel::contracts::fence::{Access, FencePlan};
+use crate::kernel::detail::io::env;
 use crate::kernel::detail::launch::interpreter_dirs;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
@@ -75,7 +76,7 @@ fn seatbelt_confines() -> bool {
 
 fn seatbelt_confines_probe() -> bool {
     let canary =
-        std::env::temp_dir().join(format!("solomni-seatbelt-selfcheck-{}", std::process::id()));
+        env::temp_dir().join(format!("solomni-seatbelt-selfcheck-{}", std::process::id()));
     if std::fs::write(&canary, "canary").is_err() {
         return false;
     }
@@ -199,7 +200,7 @@ fn install_profile(spec: &FencePlan, command: &str) -> Result<(), String> {
             + usize::from(!spec.home.as_os_str().is_empty())
     );
     // 排障开关：把解释器解析结果与完整 profile 打出来（探针打开它；正常运行不打，免得污染工具回执）。
-    if std::env::var("SOLOMNI_FENCE_PROFILE").is_ok() {
+    if env::var("SOLOMNI_FENCE_PROFILE").is_ok() {
         let dirs: Vec<String> = interpreter_dirs(command)
             .iter()
             .map(|d| d.display().to_string())

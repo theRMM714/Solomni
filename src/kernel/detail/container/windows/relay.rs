@@ -5,11 +5,12 @@
 
 use super::{FENCE_FAILED, PSID, container_command, spawn_in_container, wait_and_reap};
 use crate::kernel::contracts::fence::FencePlan;
+use crate::kernel::detail::io::env;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::fs::File;
 use std::io::{Read, Write};
-use std::net::{Ipv4Addr, Shutdown, TcpListener, TcpStream};
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{FromRawHandle, RawHandle};
 use std::path::Path;
@@ -69,7 +70,7 @@ pub(crate) fn run(
     command: &str,
     ports: &[u16],
 ) -> Result<i32, String> {
-    let exe = std::env::current_exe().map_err(|e| format!("取本产品可执行文件路径失败：{e}"))?;
+    let exe = env::current_exe().map_err(|e| format!("取本产品可执行文件路径失败：{e}"))?;
     let (in_read, in_write) = pipe()?;
     let (out_read, out_write) = pipe()?;
     // 子进程只拿「读命令」「写结果」这两端；另两端留在宿主手里，是另一端的存活信号。
@@ -297,7 +298,7 @@ fn open_conn(
         let _ = send(writer, conn, KIND_REFUSE, &[]);
         return;
     }
-    let stream = match TcpStream::connect((Ipv4Addr::LOCALHOST, port)) {
+    let stream = match crate::kernel::detail::io::net::tcp::dial(port) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("[中继] 宿主 127.0.0.1:{} 连不上（{}）", port, e);
@@ -349,7 +350,7 @@ fn same_executable(pid: u32) -> bool {
     if pid == std::process::id() {
         return true;
     }
-    let Ok(mine) = std::env::current_exe() else {
+    let Ok(mine) = env::current_exe() else {
         return false;
     };
     let Some(theirs) = process_image(pid) else {
@@ -471,9 +472,9 @@ fn parent_map() -> HashMap<u32, u32> {
 
 /// 目的：把真正的命令起在容器里（子进程原样继承容器令牌——它仍在围栏内，只 stdio 继承中继的）。
 fn spawn_inner() -> Result<PROCESS_INFORMATION, String> {
-    let app = std::env::var(ENV_APP).map_err(|_| format!("缺环境变量 {}", ENV_APP))?;
-    let cmdline = std::env::var(ENV_CMD).map_err(|_| format!("缺环境变量 {}", ENV_CMD))?;
-    let cwd = std::env::var(ENV_CWD).map_err(|_| format!("缺环境变量 {}", ENV_CWD))?;
+    let app = env::var(ENV_APP).ok_or_else(|| format!("缺环境变量 {}", ENV_APP))?;
+    let cmdline = env::var(ENV_CMD).ok_or_else(|| format!("缺环境变量 {}", ENV_CMD))?;
+    let cwd = env::var(ENV_CWD).ok_or_else(|| format!("缺环境变量 {}", ENV_CWD))?;
     let mut line: Vec<u16> = std::ffi::OsStr::new(&cmdline)
         .encode_wide()
         .chain(std::iter::once(0))

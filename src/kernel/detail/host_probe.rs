@@ -4,6 +4,7 @@
 //! 联动：端口在 `src/kernel/ports.rs`；由入口层的组合根构造（`src/entry/`）。
 
 use crate::kernel::domain::platform::{EXE_SUFFIX, PATH_LIST_SEPARATOR};
+use crate::kernel::detail::io::env;
 use crate::kernel::ports::{HostMetadata, HostProbe};
 use std::path::{Path, PathBuf};
 
@@ -28,15 +29,15 @@ use other as hypervisor;
 /// 参数：`name` 是不带目录的可执行文件名；扩展名按 `PATHEXT` 展开（Windows 不设时用平台后缀）。
 /// 约束：查法只有这一处——`has_exe` 与自检报告共用它。
 pub fn find_exe(name: &str) -> Option<std::path::PathBuf> {
-    let path_var = std::env::var_os("PATH")?;
-    let exts: Vec<String> = std::env::var("PATHEXT")
+    let path_var = env::path_var()?;
+    let exts: Vec<String> = env::pathext()
         .map(|v| {
             v.split(PATH_LIST_SEPARATOR)
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .collect()
         })
-        .unwrap_or_else(|_| vec![EXE_SUFFIX.to_string()]);
+        .unwrap_or_else(|| vec![EXE_SUFFIX.to_string()]);
     for dir in std::env::split_paths(&path_var) {
         for ext in &exts {
             let candidate = dir.join(format!("{}{}", name, ext.to_lowercase()));
@@ -77,7 +78,7 @@ impl HostProbe for HostProbeAdapter {
 
     /// 当前进程的 PATH：环境变量只在机制层读，服务层问端口。
     fn path(&self) -> std::ffi::OsString {
-        std::env::var_os("PATH").unwrap_or_default()
+        env::path_var().unwrap_or_default()
     }
 
     fn is_dir(&self, path: &Path) -> bool {
