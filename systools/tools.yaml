@@ -1,13 +1,10 @@
-# 动作表：一条动作**是什么**（唯一真相：说明、参数契约、能否并发、谁能调它）。
-# 改动作的参数或说明只改这里；模型侧说明、调用校验与授权都读这一份声明。
-# callers = 谁能调它：user（人经呈现层）/ 席位 id；它与机制席位的工具面是同一关系的两面，
-# 由 session::domain::mechanism::problems 双向锁死——任何一边漏写/多写都是装配错误。
+# 动作表：一条动作**是什么**（唯一真相：说明、参数契约、能否并发）。
+# 改动作的参数或说明只改这里；模型侧说明与调用校验都读这一份声明。
+# 谁能拿到它**不在这张表里**：来源各自交 id（agent / 模块 / 流程 / 共享区 / 预设），授权归权限端口。
 # 与模块工具的区别：模块工具在各自 module.yaml（外部命令，动作 id = module.<模块id>.<工具名>）。
 
 tools:
   read:
-    capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
-    callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 按行窗口读取文本文件（UTF-8）：默认从头读，可用 offset/limit 直接读任意一段；总行数与版本按整份文件统计，超过 1MB 也能读后半段。
     parallel: true                    # 只读、无副作用：同一回复里的多个读取**真的并发跑**
     params:
@@ -27,8 +24,6 @@ tools:
         default: 2000
         desc: 本次最多返回的行数；省略即尽量多读
   write:
-    capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 整份写入文本文件（UTF-8）：不存在则新建，已存在则整份覆盖。受管文件（主线或你工作线里的路径）要求当前上下文能完整看到这一版（读过或刚整份写过）；读后又被改 → FS_STALE_VERSION，先重读。新建/未受管不要求先读；只改一处用 edit。
     params:
       path:
@@ -40,8 +35,6 @@ tools:
         required: true
         desc: 要写入的**完整**内容（会整份覆盖，不是追加、不是局部修改）
   edit:
-    capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 对已存在文本文件做一处字面精确替换（不动别处）。受管文件要求上下文里有这一版；replace_all 要求看过全文。落盘前锁内按读到的版本再核、对当前内容重定位锚点：版本变 → FS_STALE_VERSION；锚点不存在/不唯一 → FS_ANCHOR_NOT_FOUND / FS_ANCHOR_AMBIGUOUS。
     params:
       path:
@@ -61,12 +54,8 @@ tools:
         type: boolean
         desc: 是否替换全部命中；省略 = 要求唯一命中（多处命中会报错并列出位置）
   patch:
-    capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 用一段**自由格式**的补丁文本改文件（信封之后原样跟补丁；大段内容不要塞进 JSON）。多文件改动走一个写盘事务：先全部校验/暂存，再发布；任一文件失败就整体回滚，不会留下"前面已写"。语法见 patch_guide；删除文件用 delete，不要写 *** Delete File。
   delete:
-    capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       删除**你自己沙箱里**的文件；默认只删文件，目录必须显式 recursive=true。
       共享区不在这里删（用 work_commit 的 deletes 记进工作线，work_push 后才从共享区去掉）；模块目录（含 userdata）由模块自己的工具 / 服务进程维护。
@@ -80,8 +69,6 @@ tools:
         type: boolean
         desc: true = 路径是目录时连内容一起删；省略 = 只删文件，遇到目录会拒绝
   list:
-    capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
-    callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 列一个目录（名字 / 是否目录 / 字节数，按名字排序）。**确认资料齐不齐、脚本在不在就用它**；read 只读文件，遇到目录会引导你用 list。
     parallel: true                    # 只读、无副作用
     params:
@@ -90,8 +77,6 @@ tools:
         required: true
         desc: 要列出的目录
   grep:
-    capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
-    callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 在文件或目录里按正则（或字面）找行，返回「路径:行号:正文」；目录递归，按 .gitignore / .workignore 与隐藏文件、二进制剪枝。
     parallel: true                    # 只读、无副作用
     params:
@@ -131,8 +116,6 @@ tools:
 
   # —— 执行类系统工具：一次性 shell ——
   shell:
-    capability: exec
-    callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       在本环境跑一条一次性命令（构建/测试/脚本）：cwd 固定你的私有沙箱，无交互 stdin/TTY；cwd 用本环境写法（虚拟机档是 guest 内路径）。
       输出超限保留开头与结尾（按完整行取整）；回执末行 = cwd + 本次耗时，上一行 = 状态行（退出码/超时/用户停止），尾行不随输出截断。
@@ -165,8 +148,6 @@ tools:
 
   # —— 核心操作：核心 AI 的产出（驱动核心走下一步）必须走工具调用，不在正文里手写 JSON ——
   plan:
-    capability: none
-    callers: [planner]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 交出方案与任务链：总结讨论，把它拆成一张有向无环图。
     params:
       plan:
@@ -183,8 +164,6 @@ tools:
         desc: 给用户的**建议**（推荐现在开工还是先改方案 + 一句理由）；会显示在裁决卡片上。
 
   node_verdict:
-    capability: none
-    callers: [orchestrator]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       交出这一阶段的验收结论：逐节点核对产出够不够它的**当前目标**。
       后果（核心据此动作）：ok=false 的节点会被**退回待办**——用户点「继续」后**只重派这些**（同阶段其余节点保持"已通过"，不整阶段重来）；整阶段全部 ok 才解锁下一阶段。
@@ -199,8 +178,6 @@ tools:
         desc: 给用户的**返工建议**（放行还是返工 + 一句理由）；会显示在裁决卡片上。
 
   checklist:
-    capability: none
-    callers: [orchestrator]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       交出总验收清单：按方案逐条核对各节点的回报。
       后果（核心据此动作）：status=fail 的条目**必须**填 rework = 要返工的**节点 id**（从提示词里那张"节点 id — 负责人"表里选）——
@@ -213,8 +190,6 @@ tools:
         desc: 清单数组，每项 {"item","status":"pass|fail","evidence","reason","rework"}；fail 时 reason 说清差距、rework 填要返工的**节点 id**（没有它这次判定不算）。
 
   verdict:
-    capability: none
-    callers: [planner]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 判定用户对裁决的回应是否**明确到可以开工 / 放行**。
     params:
       clear:
@@ -229,8 +204,6 @@ tools:
         desc: 一句话说清判定：明确时说"照他说的做什么"；不明确时说清还差什么。
 
   slate:
-    capability: none
-    callers: [planner]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 交出这次工作的 agent 名单（推荐 / 代拟同一条协议）。
     params:
       picks:
@@ -239,8 +212,6 @@ tools:
         desc: 名单数组，每项要么 {"agent":"已存agent名","why":...}，要么 {"name","modules","model","why"}；模块与模型必须从清单里选。
 
   submit_report:
-    capability: none              # 不碰文件：承载"这个节点做完了什么"
-    callers: [executor]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 回报这个节点的产出：做完了什么、动了什么、还留什么问题。**收尾时用它**——它就是这一轮的最终答复。
     params:
       summary:
@@ -258,8 +229,6 @@ tools:
         desc: 遗留问题；没有就留空
 
   compact:
-    capability: none              # 不碰文件：改的是"发给模型什么"，不是"留下什么"
-    callers: [user]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 压缩上下文：把较早的内容写成一份 summary（此后不再发给模型，但用户仍可查看；保留段与之后的新内容不参与）。**只在压缩回合由系统发起时使用**。
     params:
       summary:
@@ -271,8 +240,6 @@ tools:
   # —— 核心代理（core_proxy）：核心代用户建会话、转达、观察与控制 ——
   # 真实会话宿主已落地：外部动作经 proxy 的 ProxyHost 端口，生产实现是 runtime 的 ProxyBridge（src/units/runtime/service/bridge.rs）
   catalog_agents:
-    capability: none              # 不碰文件：只读登记处与模块清单
-    callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 读取当前有效的 agent、模块与模型的公开登记信息（只读；agent 含人设 chara）。不返回密钥、真实私有路径或无关内容。
     parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
     params:
@@ -282,8 +249,6 @@ tools:
         non_empty: true
         desc: 要读的范围：agents（已存 agent）/ modules（模块公地）/ models（可用模型）/ types（agent 能建的会话类型）/ all（全部）
   create_session:
-    capability: none              # 不碰文件：建的是会话，不是路径
-    callers: [user, core_proxy]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       建一场工作（会话类型 + 名单 + 本次需求）：类型来自 systools/profiles.yaml；
       无流程类型（如 single）= 一个 agent 直接干活，有流程类型（如 collab）按声明流程跑；proxy 类型无名单，决定权整块交核心。
@@ -335,8 +300,6 @@ tools:
         type: string
         desc: 幂等标识（核心代理必填）：同一个 request_id 重放不会重复创建
   send_session_message:
-    capability: none              # 不碰文件：转达的是消息
-    callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       代替用户向子会话转达消息（后续补充 / 返工 / 代答门）。核心转达的每一条都留一条
       "由核心代理转达"的来源记录（不冒充用户原话）；多目标逐个回报成功与失败。
@@ -366,8 +329,6 @@ tools:
           目标正挂着一张裁决卡、而这次转达就是**代答**时，写你要选的**选项 id**（必须是那张卡上的选项，
           用 observe_session 的 pending 看选项 id）；不写 = 不代答——核心不替用户选（那一问按它自己声明的收场走）。
   observe_session:
-    capability: none              # 不碰文件：只读会话事实
-    callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       只读观察一个子会话的元信息（状态 / 待决问题 / 产物索引 / 消息条数），不隐式启动下一轮。
       **不回消息正文**：正文一律用 read_session_messages 主动倒查（子会话不把整份转录推给你）。
@@ -387,8 +348,6 @@ tools:
         type: string
         desc: 上次观察拿到的 cursor（= 那条会话的消息条数）；给了就多回一个 new_messages（自那次以来新增几条）。观察回执本身始终是**当前事实的幂等快照**，不会因为给了它而变增量
   read_session_messages:
-    capability: none              # 不碰文件：只读会话消息
-    callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       倒查一个子会话的消息：0 = 最新一条，1 = 倒数第二条，依次向更早翻。只读，不推进会话。
       需要看正文时用它，不要指望观察回执把整份转录带过来。
@@ -411,8 +370,6 @@ tools:
         default: 10
         desc: 本次取几条（1 到 50）；按新→旧排列
   control_session:
-    capability: none              # 不碰文件：改的是会话生命周期
-    callers: [user, core_proxy]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 控制代理子会话：interrupt=只取消在跑的生成，运行态不变，照常派发与唤醒；stop=整棵子树已停止，拦派发与唤醒并中断在跑生成；continue=解冻并按形态唤醒接着走；archive=整棵子树从主列表收起，不再派发或唤醒（非终态）；restore=归档子树翻回 active，不唤醒。
     params:
       session_id:
@@ -432,8 +389,6 @@ tools:
         type: string
         desc: 幂等标识（核心代理必填）：同一个 request_id 重放不会重复控制
   activate_session:
-    capability: none              # 不碰文件：恢复会话与它的 guest
-    callers: [user]               # 人经呈现层：只读历史 → 启用会话
     desc: 启用一条历史会话：从盘上重建、确保虚拟机 guest、解冻整棵子树；**不产生模型调用**（继续/恢复由 control_session 的 continue 单独触发）。
     params:
       session_id:
@@ -442,8 +397,6 @@ tools:
         non_empty: true
         desc: 要启用的会话 id
   guest_diagnose:
-    capability: none              # 不碰文件：只读 guest 内的进程 / CPU / 内存 / 负载 / 挂载
-    callers: [user]               # 人经呈现层：诊断一条虚拟机档会话的 guest
     desc: |
       只读诊断一条虚拟机档会话的 guest：进程表（pid / ppid / CPU / 内存 / 状态 / 运行时长）、
       CPU 汇总、内存、负载与挂载；**不写 guest、不改会话状态**。
@@ -457,9 +410,6 @@ tools:
 
   # —— 共享区版本化工作区：agent 只写自己的沙箱，用 pull / commit / push 与主副本同步 ——
   work_pull:
-    capability: none              # 由 workspace 能力执行（经核心自有工具的派发路径），不经 SysIo
-    publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       把共享区（主副本）指定路径拉进**你自己的沙箱**（同一相对路径），记下拉取基线。路径以共享区为根、/ 分隔；文件或文件夹（整棵拉取）。
       文本/图片/视频/其它二进制都按**字节**处理，不假定 UTF-8；内容按块流式写入，不整份进上下文。内置 write 只写文本；二进制由模块工具或用户投喂产出。
@@ -472,9 +422,6 @@ tools:
         required: true
         desc: 要拉取的路径数组（相对共享区、/ 分隔的字符串；文件夹会整棵展开）
   work_commit:
-    capability: none              # 由 workspace 能力执行；只写自己的工作线，共享区一个字都不动
-    publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       同 git commit：把沙箱点名文件记成**你自己工作线**上的一条提交，共享区与主线都不变；工作线只记你显式提交的路径。
       本地提交不做冲突判定：读不会变的树、写沙箱当前内容；冲突在 work_push 三方合并时才判。
@@ -493,9 +440,6 @@ tools:
         non_empty: true
         desc: 提交说明（一句话说清这次改了什么）
   work_push:
-    capability: none              # 由 workspace 能力执行；共享区只由它（和 work_sync / 用户投喂）推进
-    publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       同 git push：把工作线已提交改动推送进共享区主线，落一条 squash 提交（不是每条本地提交）。
       逐路径三方合并（两线**分叉点** / 你的工作线 / 主线当前）：一边没动取另一边；两边都动且结果不同 → **整次推送被拒**并逐条点名。
@@ -511,9 +455,6 @@ tools:
         non_empty: true
         desc: 主线提交说明（一句话说清这次推送的内容）
   work_status:
-    capability: none              # 只读：不碰文件，读版本库与拉取基线
-    publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
     desc: |
       读共享区（主线）当前提交、你的工作线头、**待推送净改动项数**（另报领先空提交条数、现在推会不会冲突），及沙箱逐条状态：
@@ -526,9 +467,6 @@ tools:
         type: array
         desc: 只看这些路径（相对共享区、/ 分隔）；省略 = 你已拉取过的全部路径 + 沙箱未跟踪清单
   work_ignore:
-    capability: none              # 由 workspace 能力执行；只改版本库目录里的 .workignore，不碰 .gitignore
-    publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       读写本次工作的**过滤名单** \`.workignore\`（放在版本库目录里，不进共享区，也不会被提交）：
       grep 与「哪些文件算工作区内容」（首次导入、work_status 的未跟踪清单、work_commit 的文件夹展开）共用这一份。
@@ -546,9 +484,6 @@ tools:
         type: array
         desc: 要追加或删掉的规则行（op=add / remove 时必填；一行一条，语法同 .gitignore）
   work_sync:
-    capability: none              # 由 workspace 能力执行；把工作区磁盘现状采纳成外部提交
-    publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       把工作区磁盘上点名路径尚未记录的变化采纳成一条 author=external 的主线提交，推进共享区 head；不改任何沙箱、不产生工作线提交（「已推送」仍只由 work_push 的 sources 记）。
       用于用户在产品外改了工作区（或 work_pull 回执提示“工作区有外部修改 / 独有文件”）后：先把用户改的事实记进主线，再按它拉取或推送。
@@ -559,9 +494,6 @@ tools:
         required: true
         desc: 要采纳的工作区路径数组（相对共享区、/ 分隔；文件夹会整棵展开）
   work_versions:
-    capability: none              # 只读：读基线对象、主副本对象与沙箱文件
-    publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
     desc: |
       看一条路径的三方版本：基线（上次拉取/提交版）、主副本当前版、沙箱本地版。
@@ -575,9 +507,6 @@ tools:
         non_empty: true
         desc: 共享区内的相对路径（/ 分隔的单个文件；文件夹请逐个看）
   work_diff:
-    capability: none              # 只读：读工作线对象与沙箱文件，不写任何东西
-    publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
     desc: |
       同 git diff：逐行比较，带 3 行上下文，默认比**工作线头**与**沙箱当前内容**。
@@ -597,9 +526,6 @@ tools:
         type: array
         desc: 只看这些路径（相对共享区、/ 分隔；省略 = 全部）
   work_resolve:
-    capability: none              # 改基线（take=upstream 还会改沙箱文件）；共享主副本不动
-    publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       解决基线冲突或显式选边（调用前先 work_versions 看三方；不做自动合并）。
       take=upstream：主副本覆盖沙箱（主副本已删则删本地）；**覆盖/删除前先备份本地到版本库 lost/，回执给备份路径**；备份失败整次拒绝。
@@ -621,9 +547,6 @@ tools:
         min: 0
         desc: take=local 必填：调用方看到的主副本提交 id（work_status / work_versions 返回）；与当前 head 不符会被拒绝
   work_reset:
-    capability: none              # 改工作线引用与私有沙箱；共享主副本不动
-    publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       同 git restore / reset：在**你自己**工作线上回退，共享区不受影响。paths 与 to 互斥，必须给一个。
       paths：沙箱路径恢复成基线版本（工作线头优先，没提交过取拉取基线）；覆盖前备份进 lost/@reset-paths/，基线也没有的从沙箱删掉。发布回退结果需重新 work_commit + work_push。
@@ -641,9 +564,6 @@ tools:
         type: boolean
         desc: to 形态专用：true = 只移工作线引用、不改沙箱文件；缺省 false（重铺沙箱）
   work_lost:
-    capability: none              # 列备份只读；restore 只写自己的沙箱，不碰共享主副本
-    publish: true                 # 发布面：会改共享工作区（只有能发布的席位才发得到）
-    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: |
       列出/恢复覆盖或删除前备份的**本地版本**（版本库 lost/，按 agent 隔离）；来源：work_resolve take=upstream、work_reset、回档/删除/留档。
       省略 path = 列本 agent 全部备份：原路径、备份位置（`@<来源>/<原路径>`）、来源、备份 hash/大小、当前沙箱 hash。
@@ -663,8 +583,6 @@ tools:
 
   # —— 协作动词：讨论阶段的表态（声明式工具：声明在总表，由 discussant 席位的 tools 发放）——
   say:
-    capability: none
-    callers: [discussant]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 发表意见、提方案（讨论阶段的正常发言）。
     params:
       text:
@@ -672,8 +590,6 @@ tools:
         required: true
         desc: 要说的话
   agree:
-    capability: none
-    callers: [discussant]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 同意当前方案：认为方案没有缺口、你可以开工时用它。发过之后不再被追问，直到在场者全部同意。
     params:
       text:
@@ -681,8 +597,6 @@ tools:
         required: true
         desc: 附一句同意理由（可短）
   leave:
-    capability: none
-    callers: [discussant]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 退出讨论：你的模块与这件事无关时用它（离开的人不计入"在场者全部同意"）。
     params:
       text:
@@ -690,8 +604,6 @@ tools:
         required: true
         desc: 为什么不再参与
   ask:
-    capability: none
-    callers: [discussant]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
     desc: 需要用户决定时用它（缺参数、需求有歧义、要在几条路线里选）：讨论暂停，等用户回答后继续。
     params:
       text:
@@ -701,23 +613,17 @@ tools:
 
   # —— 会话动作：人经呈现层调用（user）；agent 侧对应 create_session / control_session / send_session_message ——
   set_secret:
-    capability: none              # 不碰文件：只把值写进 .home/secrets.yaml
-    callers: [user]               # 产品级资源，只给人用；值不进动作目录、不进审计、不回显
     desc: 给模块声明的隐秘字段置值（字段必须已声明）。值只落 .home/secrets.yaml，只经环境变量注入该模块的工具 / 服务进程。
     params:
       module: { type: string, required: true, non_empty: true, desc: 模块 id }
       name: { type: string, required: true, non_empty: true, desc: 字段名（module.yaml 的 secrets 里声明的） }
       value: { type: string, required: true, desc: 值本身（永不回显、不进转录 / 日志 / 命令行） }
   clear_secret:
-    capability: none
-    callers: [user]
     desc: 清掉一个隐秘字段的值（声明还在）；已拉起的服务下次启动才不带它。
     params:
       module: { type: string, required: true, non_empty: true, desc: 模块 id }
       name: { type: string, required: true, non_empty: true, desc: 字段名 }
   control_resident:
-    capability: none              # 不碰文件：改的是常驻服务的生命周期
-    callers: [user]               # 产品级资源，只给人用；agent 通过工具面使用已启动的实例
     desc: 控制一个常驻服务的生命周期：start（拉起并发现操作）/ stop / enable（落盘启用并立即拉起）/ disable（立即停掉并落盘停用）。服务清单是独立只读视图。
     params:
       module: { type: string, required: true, non_empty: true, desc: 模块 id }
@@ -725,29 +631,21 @@ tools:
       action: { type: string, required: true, non_empty: true, desc: start / stop / enable / disable }
       lease: { type: string, desc: 本次实例的会话租约；省略 = 无会话（进程级） }
   set_module_enabled:
-    capability: none              # 不碰文件：改的是模块启停（落 .home/modules.yaml）
-    callers: [user]               # 产品级资源，只给人用
     desc: 启用 / 停用整个模块（落 .home/modules.yaml）。停用 = 它的常驻服务立即停掉、后续选择不再出现它；已在跑的会话保留它已建好的工具面。
     params:
       module: { type: string, required: true, non_empty: true, desc: 模块 id }
       enabled: { type: boolean, required: true, desc: true 启用 / false 停用 }
   send_message:
-    capability: none
-    callers: [user]
     desc: 向一条会话投喂一条**用户发言**并推进它（生成可用 control_session 的 stop 中止）。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
       text: { type: string, required: true, desc: 要说的话 }
   set_task:
-    capability: none
-    callers: [user]
     desc: 协作会话：写下本次需求（起点那一关；其余推进一律走 answer_card 回答卡片）。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
       text: { type: string, required: true, desc: 本次需求 }
   answer_card:
-    capability: none
-    callers: [user]
     desc: |
       回答一张裁决卡：带**卡片 id + 选项 id**（+ 可选附言），后端校验选项 id 属于当时那张卡的选项集
       （防旧卡的答案放行新请求），并且**只有队首那张**能答。
@@ -759,37 +657,27 @@ tools:
       option: { type: string, required: true, non_empty: true, desc: 选中的选项 id }
       note: { type: string, desc: 附言（用户自己的想法；请教这一关必填） }
   withdraw:
-    capability: none
-    callers: [user]
     desc: 协作会话：撤回某个 agent 的同意（核心按剩余转录重新判定收敛）。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
       agent: { type: string, required: true, non_empty: true, desc: 要撤回的 agent 实例名 }
   rewind:
-    capability: none
-    callers: [user]
     desc: 回档：archive（留档，可恢复）/ delete（真截断）/ restore（删掉该留档标记及其后）；返回重放后的完整事件流。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
       mode: { type: string, non_empty: true, desc: archive / delete / restore；省略 = archive（留档） }
       id: { type: integer, required: true, min: 0, desc: 行 id（archive / delete）或留档标记 id（restore） }
   update_task:
-    capability: none
-    callers: [user]
     desc: 改需求：给会话换一份本次需求；返回重放后的完整事件流。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
       text: { type: string, required: true, desc: 新的需求 }
   set_permission_profile:
-    capability: none              # 只改档位，不碰名单 / 环境
-    callers: [user]
     desc: 快速切换会话网络档位（offline / online）；子会话只能收窄，整棵 work tree 生成中拒绝。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
       profile: { type: string, required: true, non_empty: true, desc: offline / online }
   edit_session:
-    capability: none
-    callers: [user]
     desc: 配置：改每个 agent 的模块与模型、执行档位、定版与会话级权限（会话开过后名单与形态冻结）。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
@@ -800,8 +688,6 @@ tools:
       permission: { type: object, desc: 会话级网络档位（profile；子会话只能收窄；网络是全局策略） }
       shared: { type: object, desc: 会话级共享区归属（read / write / deny；子会话只能收窄） }
   upload:
-    capability: none
-    callers: [user]
     desc: 把一份文件写进本次工作的共享区（作者 = user，权威提交）；同名冲突如实报出，不静默覆盖。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
@@ -809,8 +695,6 @@ tools:
       data_base64: { type: string, required: true, desc: 文件内容的 base64 }
       overwrite: { type: boolean, desc: 同名时是否覆盖（缺省 false） }
   restore_work_commit:
-    capability: none
-    callers: [user]
     desc: 把共享区回滚到某个提交点（非破坏性：目标之后的提交仍保留，可再次回滚）；只改共享区与 head，不动各 agent 沙箱。同一工作子树里有会话在生成时拒绝。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
@@ -820,28 +704,20 @@ tools:
   # —— 登记处动作：产品级资源（供应商 / 密钥 / 模型 / agent / 设置）——
   # callers **只给 user**：这些是产品级资源，默认不开放给任何席位（密钥与全局配置只由人操作）。
   upsert_provider:
-    capability: none
-    callers: [user]
     desc: 登记（或更新）一个供应商：端点 + 密钥。api_key 留空 = 保留原密钥（界面从不回显，值也不进动作目录）。
     params:
       id: { type: string, required: true, non_empty: true, desc: 供应商 id }
       base_url: { type: string, required: true, non_empty: true, desc: 端点基地址 }
       api_key: { type: string, desc: 密钥；留空 = 保留原密钥 }
   remove_provider:
-    capability: none
-    callers: [user]
     desc: 移除一个供应商。
     params:
       id: { type: string, required: true, non_empty: true, desc: 供应商 id }
   discover_models:
-    capability: none
-    callers: [user]
     desc: 按该供应商的端点与密钥列出它当前可用的模型名（真实网络调用）。
     params:
       id: { type: string, required: true, non_empty: true, desc: 供应商 id }
   upsert_model:
-    capability: none
-    callers: [user]
     desc: 登记（或更新）一个模型：展示名 / 实际模型串 / 所属供应商 / 能力说明 / 工具调用方式 / 上下文窗口。原生形态保存前实测（工具调用 + 回放形状），明确通过才落盘；手写信封不测试。
     params:
       id: { type: string, required: true, non_empty: true, desc: 模型 id }
@@ -853,47 +729,33 @@ tools:
       context: { type: integer, min: 0, desc: 上下文窗口（token，估算用）；省略 = 0（未知） }
       thinking: { type: object, desc: "思考强度：default = 档位 id 或空；levels = 档位 id → 字符串（reasoning_effort 简写）或 JSON 对象；省略 = 保留原值；levels 为空 = 该模型不发思考参数" }
   remove_model:
-    capability: none
-    callers: [user]
     desc: 移除一个模型。
     params:
       id: { type: string, required: true, non_empty: true, desc: 模型 id }
   set_core_model:
-    capability: none
-    callers: [user]
     desc: 把某个模型设为核心默认（未指定模型的 agent 回落它）。
     params:
       id: { type: string, required: true, non_empty: true, desc: 模型 id }
   set_thinking:
-    capability: none
-    callers: [user]
     desc: 切换这条工作（会话级）的思考强度；写在工作根会话的 meta 上，子会话共享。只作用于对话生成（单 agent / 代理 / 协作成员回合），核心内部编排保持供应商默认。模型没登记该档时拒绝并列出模型。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id（子会话也可以，作用在工作根上） }
       level: { type: string, desc: 思考档位 id；空串 = 跟随模型默认（不指定） }
   set_context_freshness:
-    capability: none
-    callers: [user]
     desc: 切换这条工作（会话级）的过期内容替换：开着时，读过的文件被改过之后，那条工具结果在发给模型前换成占位符（省上下文；代价是替换点之后的缓存失效）。保底百分比保住发送视图的前缀（前缀缓存靠它）；替换省下的量不够付一次缓存失效时整体不换。写在工作根会话的 meta 上，子会话共享；生成中拒绝。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id（子会话也可以，作用在工作根上） }
       on: { type: boolean, desc: 开 / 关（省略 = 关） }
       keep_percent: { type: integer, desc: 保底百分比 0–90（0 = 不保底）；只接受 0–90，100 等于永不替换；省略 = 沿用现值 }
   probe_model_tools:
-    capability: none
-    callers: [user]
     desc: 实测一条通道支不支持原生工具调用（两条最小请求）；结论写回登记处，三态如实报。
     params:
       id: { type: string, required: true, non_empty: true, desc: 模型 id }
   probe_replay_shape:
-    capability: none
-    callers: [user]
     desc: 实测这个模型在回放形状上的结论（只报事实，不改登记处：采不采用由人定）。
     params:
       id: { type: string, required: true, non_empty: true, desc: 模型 id }
   upsert_agent:
-    capability: none
-    callers: [user]
     desc: 登记（或更新）一个 agent：名字 / 模块 / 默认模型 / 说明 / 人设。名字会成为沙箱目录名（校验更严）。
     params:
       name: { type: string, required: true, non_empty: true, desc: agent 名字 }
@@ -902,14 +764,10 @@ tools:
       note: { type: string, desc: 一句话说明（给人看） }
       chara: { type: string, desc: 人设 / 身份（给模型看；可多行；留空 = 不产生人设块） }
   remove_agent:
-    capability: none
-    callers: [user]
     desc: 从登记处移除一个 agent。
     params:
       name: { type: string, required: true, non_empty: true, desc: agent 名字 }
   set_settings:
-    capability: none
-    callers: [user]
     desc: 改产品设置（部分更新：未提交的字段保留现值）。sandbox 是全局沙箱策略（整段替换），保存后整体重启。
     params:
       streaming: { type: boolean, desc: 流式传输 }

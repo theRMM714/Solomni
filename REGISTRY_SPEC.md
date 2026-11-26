@@ -67,10 +67,12 @@ data/.home/
 | --- | --- | --- | --- | --- |
 | `<agent 名>` | 映射 | 否 | 空 | agent 名 → 存档 |
 | `modules` | 字符串数组 | 否 | `[]` | 成员模块；可以为空（零模块 agent 只用内置文件工具） |
+| `abilities` | 字符串数组 | 否 | 四组全给 | 能力组：`fs-read` / `fs-write` / `exec` / `shared-write`；写 `[]` = 一组都不给（只剩模块工具），写 `[fs-read]` = 只读 |
 | `model` | 字符串 | 否 | 无 | 默认模型；缺省 = 用核心默认 |
 | `note` | 字符串 | 否 | 空 | 一句话说明（给人看） |
 | `chara` | 字符串 | 否 | 空 | 人设 / 身份（给模型看，可多行） |
 - agent 只是「用户编排选择的存档」，不是能力注册表——能力仍在 `modules/` 公地（见 `PHILOSOPHY.md`）。
+- `abilities` 决定这个 agent 的工具来源交出哪些内置工具：`fs-read`→`read`/`list`/`grep`，`fs-write`→`write`/`edit`/`patch`/`delete`，`exec`→`shell`，`shared-write`→共享区的 `work_*`；它只决定**在场**，不判准不准（授权在权限端口）。
 - `note` 与 `chara` 是两件事：前者给人看（列表 / 推荐理由），后者进这个 agent 的身份提示词；`chara` 为空时不产生人设块。
 - 建会话时把 agent 的组合（名字 / 模块 / 模型 / 人设）取一份 copy 落进 `meta.yaml` 的 `agents`；之后改登记处不影响已开会话，会话配置里改的也只是这份 copy。
 - 同一个模块可以在一次工作里被多个 agent 共用（各自独立沙箱与调用）；每个 agent 的模块列表按出现顺序去重，`meta.modules` 是去重后的扁平清单。

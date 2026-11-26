@@ -11,6 +11,7 @@ use crate::units::business::agentloop::domain::assemble::{FaceInput, assemble};
 use crate::units::business::agentloop::domain::member_tools::{CoreVerify, MemberTools, ToolFace};
 use crate::units::business::llm::api::Llm;
 use crate::units::business::prompt::api::Prompt;
+use crate::units::business::session_model::api::{FS_READ, SOURCE_AGENT};
 use crate::units::business::tools::api::{Observations, ToolBook, ToolExec};
 use crate::units::business::vm::api::Vm;
 use crate::units::business::workspace::api::Sandbox;
@@ -54,21 +55,25 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
     let book = spec.book.clone();
     let residents = crate::units::business::residents::api::NoResidents;
     let seat = assemble(FaceInput {
-        seat: spec.seat,
+        role: spec.seat,
+        agent: &sb.agent,
+        // 核心核实没有工作区：共享区工具一个也不发。
+        workspace_name: None,
+        abilities: &[FS_READ.to_string()],
+        profile: "",
+        // 核心核实只挂 agent 来源（读面）：不挂模块来源。
+        source_ids: &[SOURCE_AGENT.to_string()],
+        system_tools: &[],
         modules: &[],
         sandbox: &sb,
-        book: &book,
         prompt: &*spec.prompt,
         residents: &residents,
-        // 核心核实只发内置只读工具：不发模块工具表。
-        modules_allowed: false,
-        // 核心核实的工具面只读：没有共享区提交这回事。
         workspace: None,
     });
     Some(Box::new(MemberTools {
         face: ToolFace {
             mode: spec.mode,
-            seat: seat.seat,
+            seat: seat.role,
             modules: seat.modules,
             tier: Tier::Host,
             guest_lease: String::new(),
@@ -82,6 +87,10 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
             runtime_path: None,
             runtime_roots: Vec::new(),
             allowed: seat.allowed,
+            source_ids: vec![SOURCE_AGENT.to_string()],
+            system_tools: Vec::new(),
+            abilities: vec![FS_READ.to_string()],
+            profile: String::new(),
             with_modules: seat.with_modules,
             notes: seat.notes,
         },

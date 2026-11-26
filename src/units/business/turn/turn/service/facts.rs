@@ -192,6 +192,14 @@ impl Turn {
         guest_lease: String,
         host_plan: &PackagePlan,
     ) -> crate::units::business::agentloop::api::ToolFace {
+        let source_ids: Vec<String> = ["agent", "module", "workspace"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let abilities: Vec<String> = crate::units::pure::registry_model::api::DEFAULT_ABILITIES
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let spec = MemberSpec {
             modules,
             sandbox: sb,
@@ -202,6 +210,10 @@ impl Turn {
             guest_lease,
             shell: self.shell_slot(&sb.session),
             env: self.member_env(registry, modules, sb, net, tier, host_plan),
+            source_ids: &source_ids,
+            system_tools: &[],
+            abilities: &abilities,
+            profile: "",
         };
         member_face(&self.session_ports(), &spec)
     }
@@ -224,8 +236,11 @@ impl Turn {
         guest: Option<GuestOs>,
         guest_lease: String,
         host_plan: &PackagePlan,
+        // 会话形状（会话类型展开后的声明）：工具来源与 system 工具都按它发。
+        shape: &crate::units::business::session_model::api::SessionSpec,
     ) -> (AgentSession, Vec<SessionEvent>) {
         // 形态按登记处解析；通道已在前置判据里解析成功，这里不再有"没有通道"的分支。
+        let abilities = a.abilities();
         let spec = SingleSpec {
             agent: a,
             member: MemberSpec {
@@ -239,6 +254,10 @@ impl Turn {
                 guest_lease,
                 shell: self.shell_slot(&sb.session),
                 env: self.member_env(registry, modules, sb, net, tier, host_plan),
+                source_ids: &shape.sources,
+                system_tools: &shape.system_tools,
+                abilities: &abilities,
+                profile: &shape.kind,
             },
             channel,
             guest,

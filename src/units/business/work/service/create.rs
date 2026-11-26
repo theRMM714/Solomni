@@ -577,6 +577,7 @@ impl Work {
                     guest,
                     guest_lease_for(self.history.as_ref(), &meta)?,
                     &host_plan,
+                    &meta.spec,
                 );
                 // 过期清理是**落盘事实**：装配时按 meta 装回开关与保底，默认关。
                 s.set_context_freshness(meta.context_freshness);
@@ -772,16 +773,19 @@ impl Work {
         // 先解析核心通道：没有模型就不建（工作区都还没有，失败什么都不留）。
         registry.core_channel()?;
         let (freshness_on, freshness_keep) = freshness.unwrap_or((false, 80));
+        // 形状取类型表里那一份（含它挂的工具来源与 system 工具）：代理类型只挂 profile 来源。
+        let spec = self.flows.book().spec_of(kind).ok_or_else(|| {
+            format!(
+                "会话类型表里没有「{}」这个类型（systools/profiles.yaml）",
+                kind
+            )
+        })?;
         let meta = SessionMeta {
             usage_totals: Default::default(),
             context_freshness: freshness_on,
             freshness_keep_percent: freshness_keep,
             name: name.to_string(),
-            spec: crate::units::business::session_model::api::SessionSpec::automatic(
-                kind,
-                &self.flows.book().label_of(kind),
-                seat,
-            ),
+            spec,
             delegate: false,
             modules: Vec::new(),
             task: None,

@@ -657,6 +657,7 @@ impl RegistryOps for FakeFaces {
                 model: None,
                 note: String::new(),
                 chara: String::new(),
+                abilities: None,
             })
             .collect())
     }
@@ -718,6 +719,7 @@ impl RegistryOps for FakeFaces {
             model: None,
             note: String::new(),
             chara: String::new(),
+            abilities: None,
         }])
     }
     fn upsert_agent(

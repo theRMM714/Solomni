@@ -11,12 +11,16 @@ profiles:
     hint: 一个 agent 直接干活：选 1 个模块 = 直连式，选多个 = 组合式。
     mechanism: standard
     flows: []
+    # 单机：agent 自己的能力组 + 它装的模块工具 + 共享区（工作区）的工具。
+    sources: [agent, module, workspace]
     agent_visible: true
 
   - id: collab
     name: 会议
     hint: 多个 agent 各自独立沙箱：先讨论收敛，核心写总结，再按任务链执行、统一验收。
     flows: [discuss, execute]
+    # 会议：多了「当前流程」这一来源（席位/环节声明的工具）。
+    sources: [agent, module, workspace, loop]
     agent_visible: true
 
   - id: proxy
@@ -25,3 +29,6 @@ profiles:
     mechanism: proxy
     auto: true
     flows: []
+    # 代理：整块交给核心，工具面只有会话类型展开进来的 system 工具。
+    sources: [profile]
+    system_tools: [catalog_agents, create_session, send_session_message, observe_session, read_session_messages, control_session]

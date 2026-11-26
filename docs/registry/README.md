@@ -43,7 +43,7 @@
 
 ## 四、写回与写面
 - 探测写回只发生在 `--probe-tools`：`envelope` / `native` 都写回 `models.yaml` 的 `tools`；`--probe-replay` 永不写回。
-- 写面（登记 / 移除 / 设核心默认 / 探测 / 改设置）以用户动作暴露：声明在 `systools/tools.yaml`（`callers: [user]`），执行体在 `src/units/business/runtime/service/action.rs` 的 `execute_registry`。
+- 写面（登记 / 移除 / 设核心默认 / 探测 / 改设置）以用户动作暴露：在人的命令面（`src/units/business/tools/domain/systool.rs` 的 `HUMAN_ACTIONS`），执行体在 `src/units/business/runtime/service/action.rs` 的 `execute_registry`。
 - 这些动作默认不开放给任何席位（供应商与密钥是产品级资源）。
 - 改一个写方法要同时改动作表、执行体与前端调用点。
 - 密钥回显边界：界面只呈现「供应商 id + 端点」与「模型 id + 展示名」，永不携带密钥；更新供应商时 `api_key` 留空 = 保留原值。

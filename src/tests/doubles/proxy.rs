@@ -43,6 +43,8 @@ impl FakeProxyHost {
                 model: Some("gpt".to_string()),
                 note: "已存".to_string(),
                 chara: "人设".to_string(),
+
+                abilities: None,
             }],
             modules: vec![
                 dproxy::ModuleFact {

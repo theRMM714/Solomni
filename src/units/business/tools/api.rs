@@ -19,9 +19,13 @@ pub use crate::units::business::tools::domain::shell::{
     ShellFacts, did_run, facts as shell_facts, parse as parse_shell, place_notes, shared_exec_note,
     truncated,
 };
+/// 目的：测试用——逐条核对人的命令面与呈现层入口一一对应。
+#[cfg(test)]
+pub use crate::units::business::tools::domain::systool::HUMAN_ACTIONS;
 pub use crate::units::business::tools::domain::systool::{
     DELETE, EDIT, GREP, LIST, Observations, PATCH, READ, REPORT, SHELL, ToolNotes, ToolOutcome,
-    WRITE, arg_fault_text, is_builtin, is_exec, is_freeform, names, patch_decl, refuse, tool_notes,
+    WRITE, arg_fault_text, is_builtin, is_exec, is_freeform, is_human_action, names, patch_decl,
+    refuse, tool_notes,
 };
 pub use crate::units::business::tools::domain::table::{SystemTools, action_audit};
 

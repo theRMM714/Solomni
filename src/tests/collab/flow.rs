@@ -352,15 +352,6 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     // 讨论席与执行席不拿核心操作（越权会被如实拒绝）。
     assert!(!face("discussant").iter().any(|t| t == "plan"));
     assert!(!face("executor").iter().any(|t| t == "checklist"));
-    // 谁能用"自己模块的工具"也由机制声明说了算：只有干活的那一席发（讨论席列出来等于请它去撞墙）。
-    let modules = |id: &str| {
-        crate::units::business::session_model::api::seat(id)
-            .expect("席位在册")
-            .module_tools
-    };
-    assert!(modules("executor"), "执行席要能用自己模块的工具");
-    assert!(!modules("discussant"), "讨论席不发模块工具");
-    assert!(!modules("planner"));
     // 载荷是**数组**参数（嵌套结构），不是标量。
     let schema = systools.tools.get("plan").expect("plan 该在工具总表里");
     assert_eq!(
@@ -397,6 +388,13 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
             runtime_path: None,
             runtime_roots: Vec::new(),
             allowed: vec!["read".to_string(), "plan".to_string()],
+            source_ids: vec!["agent".to_string(), "module".to_string()],
+            system_tools: Vec::new(),
+            abilities: crate::units::pure::registry_model::api::DEFAULT_ABILITIES
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            profile: "single".to_string(),
             with_modules: false,
             notes: crate::units::business::tools::api::ToolNotes::default(),
         },

@@ -61,6 +61,14 @@ pub struct MemberSpec<'a> {
     pub shell: Arc<ShellSlot>,
     /// 目的：工具环境事实（围栏 / 注入项 / 运行路径 / 工具链根），由 turn 侧的 `env` 派生后拷入。
     pub env: MemberEnvParts,
+    /// 目的：会话类型声明挂哪些工具来源（来源 id）。
+    pub source_ids: &'a [String],
+    /// 目的：会话 meta 里的 system 工具 id（会话类型展开；成员回合为空）。
+    pub system_tools: &'a [String],
+    /// 目的：这个 agent 的能力组（读面 / 工作面 / 执行面按它发）。
+    pub abilities: &'a [String],
+    /// 目的：会话类型 id。
+    pub profile: &'a str,
 }
 
 /// 目的：装配一份单 agent 会话所需的全部事实（agent、席事实、通道、guest、上下文预算与核心默认模型）。
@@ -139,14 +147,17 @@ pub struct ProxySpec<'a> {
 pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools {
     let sb = spec.sandbox;
     let seat = assemble_face(FaceInput {
-        seat: spec.seat,
+        role: spec.seat,
+        agent: &sb.agent,
+        workspace_name: Some(sb.work_name.as_str()).filter(|n| !n.is_empty()),
+        abilities: spec.abilities,
+        profile: spec.profile,
+        source_ids: spec.source_ids,
+        system_tools: spec.system_tools,
         modules: spec.modules,
         sandbox: sb,
-        book: &ports.systools.book(),
         prompt: &*ports.prompt,
         residents: &*ports.residents,
-        // 成员会话恒发自己模块的工具（席位说了算）。
-        modules_allowed: true,
         workspace: Some(&ports.workspace),
     });
     MemberTools {
@@ -166,7 +177,11 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
             runtime_roots: spec.env.runtime_roots.clone(),
             // 这一席的系统工具面**由装配机按席位合成**（越权校验的唯一判据）：给什么写什么，代码里不留第二份名单。
             allowed: seat.allowed,
-            seat: seat.seat,
+            seat: seat.role,
+            source_ids: spec.source_ids.to_vec(),
+            system_tools: spec.system_tools.to_vec(),
+            abilities: spec.abilities.to_vec(),
+            profile: spec.profile.to_string(),
             // 能不能用自己模块的工具由席位声明；说明块素材在同一个装配机里算好（服务操作已并进模块表）。
             with_modules: seat.with_modules,
             notes: seat.notes,

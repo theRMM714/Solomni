@@ -459,6 +459,8 @@ pub(crate) fn create_work_validates_user_choices() {
                 modules: vec!["a".to_string()],
                 model: None,
                 chara: String::new(),
+
+                abilities: None,
             },
             AgentMeta {
                 name: "乙".to_string(),
@@ -466,6 +468,8 @@ pub(crate) fn create_work_validates_user_choices() {
                 modules: vec!["b".to_string()],
                 model: None,
                 chara: String::new(),
+
+                abilities: None,
             },
         ],
         task: None,

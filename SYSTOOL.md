@@ -7,15 +7,15 @@
 
 | 要找什么 | 读哪一份 |
 | --- | --- |
-| 一条动作**是什么**：id / 说明 / 参数契约 / 能否并发 / 能力 / **publish（会不会改共享工作区）** / **callers（谁能调它）**；按文件域 / 核心操作 / 共享区版本化工作区 / 登记处动作 / 会话动作 / 代理工具 / 协作动词分段 | `systools/tools.yaml` |
+| 一条动作**是什么**：id / 说明 / 参数契约 / 能否并发；按文件域 / 核心操作 / 共享区版本化工作区 / 登记处动作 / 会话动作 / 代理工具 / 协作动词分段（**谁能拿到它不在这张表里**，由工具来源各自交 id） | `systools/tools.yaml` |
 | 系统工具与模块工具的分别：**系统工具**由核心实现（声明在上表的工具总表），**模块工具**由模块自己的外部命令实现；模块工具是动态动作（`module.<模块id>.<工具名>`），清单来自各模块 | `modules/*/module.yaml`；[MODULE_SPEC.md](MODULE_SPEC.md) |
-| 这个**身份有什么**：坐哪一席（核心 / 成员）+ 引用的系统工具 id + 提示词 + 是否给模块工具、能不能写、能不能发布 | `src/units/business/session_model/domain/mechanism.rs` 的 `SEATS` |
+| 这个**身份有什么**：坐哪一席（核心 / 成员）+ 提示词 + 它自己交的机制动作 id | `src/units/business/session_model/domain/mechanism.rs` 的 `SEATS` |
 | 工作区布局**固定占用的目录名**（agent 实例名不得占用） | `systools/names.yaml` |
-| 一个**会话类型**的 id 与显示名、按什么顺序跑哪些流程、是否整块交给核心（`auto`）、agent 能不能建它（`agent_visible`）、（没有流程的类型）坐哪个**静止机制** | `systools/profiles.yaml` |
+| 一个**会话类型**的 id 与显示名、按什么顺序跑哪些流程、是否整块交给核心（`auto`）、agent 能不能建它（`agent_visible`）、挂哪几个**工具来源**（`sources`）、带哪些**系统工具**（`system_tools`）、（没有流程的类型）坐哪个**静止机制** | `systools/profiles.yaml` |
 | 一个**机制**的席位：核心席与成员席各是哪些席位、各要几员 | `src/units/business/session_model/domain/mechanism.rs` 的 `MECHANISMS`（`flow: true` 的才是流程） |
-| 表里没有的会话类型为什么建不出来、agent 能建哪些类型 | 形状只由类型表定（`src/units/business/work/service/create.rs`）；agent 只看 `agent_visible`（`Profiles::agent_visible`，`catalog_agents` 的 `scope=types` 也照此过滤） |
+| 表里没有的会话类型为什么建不出来、agent 能建哪些类型 | 形状只由类型表定（`src/units/business/work/service/create.rs`）；agent 只看 `agent_visible`（`catalog_agents` 的 `scope=types` 也照此过滤） |
 | 已确认但尚未实施的系统工具与验收条件，**不限席位**（非当前工具表、非测试缺口账） | [systool_gaps.yaml](systool_gaps.yaml) |
-| 席位引用了表里不存在的 id 为什么硬失败、席位面与 `callers` 为什么必须双向一致 | 装配期 `mechanism::problems(&ToolBook)` 与 `SystemTools::problems()`，由 `src/tests/detail/prompt.rs` 锁死 |
+| 席位或会话类型引用了表里不存在的 id 为什么硬失败 | 装配期 `mechanism::problems(&ToolBook)` 与 `SystemTools::problems()`，由 `src/tests/detail/prompt.rs` 锁死 |
 
 ## 读哪一份
 
@@ -41,8 +41,8 @@
 
 ## 改动时必须同步
 
-- `systools/tools.yaml` → 加 / 改一个系统工具：唯一真相在这里，同次补实现、引用它的席位声明（`mechanism.rs` 的 `SEATS` / 工具 `callers`）与测试
-- `src/units/business/session_model/domain/mechanism.rs` → 改席位 / 机制：同次同步 `prompts/roles/<席位>`（提示词与工具面同处声明，分开必然漂）与 `systools/tools.yaml` 的 `callers`
+- `systools/tools.yaml` → 加 / 改一个系统工具：唯一真相在这里，同次补实现、让该发它的**来源**交出它的 id（或把它加进席位的机制动作 / 会话类型的系统工具）与测试
+- `src/units/business/session_model/domain/mechanism.rs` → 改席位 / 机制：同次同步 `prompts/roles/<席位>`（提示词与机制动作同处声明）与 `systools/tools.yaml`
 - `systools/names.yaml` → 加 / 改保留目录名：同次同步落盘布局文档 [docs/session/session-model.md](docs/session/session-model.md)
 - `systools/profiles.yaml` → 改会话类型 / 流程顺序：同次确认流程已在 `src/units/business/session_model/domain/mechanism.rs` 的 `MECHANISMS` 注册（席位与人数在那边），并同步机制册 `prompts/shared/mechanisms.yaml` 的席位条目（装配期校验，见 [docs/session/session-model.md](docs/session/session-model.md)）
 - `docs/tools/tools-and-roles.md` → 改路径模型 / 围栏口径：同次同步 [ARCHITECTURE.md](ARCHITECTURE.md)

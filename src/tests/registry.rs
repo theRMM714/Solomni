@@ -215,6 +215,8 @@ pub(crate) fn agent_crud_and_work_with_agents() {
             modules: vec!["a".to_string(), "b".to_string()],
             model: Some("m".to_string()),
             chara: "严谨的资料整理者".to_string(),
+
+            abilities: None,
         }],
         task: None,
         delegate: false,
@@ -251,6 +253,8 @@ pub(crate) fn agent_crud_and_work_with_agents() {
                 modules: vec!["a".to_string()],
                 model: None,
                 chara: String::new(),
+
+                abilities: None,
             },
             AgentMeta {
                 name: "y".to_string(),
@@ -258,6 +262,8 @@ pub(crate) fn agent_crud_and_work_with_agents() {
                 modules: vec!["a".to_string()],
                 model: None,
                 chara: String::new(),
+
+                abilities: None,
             },
         ],
         task: Some("需求".to_string()),

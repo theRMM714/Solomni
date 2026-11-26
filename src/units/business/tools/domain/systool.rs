@@ -52,6 +52,54 @@ pub const MAX_GREP_CHARS: usize =
 ///    为什么是工具而不是正文 JSON：回报会驱动核心（判节点完成），属于核心操作（见 tools-and-roles.md）。
 pub const REPORT: &str = "submit_report";
 
+/// 目的：**人的命令面**——呈现层（CLI / Web 动作目录）对外暴露的那些动作 id。
+/// 约束：只回答「这条动作有没有人的入口」，不是授权：会话里的工具面由来源各自交出（见 session_model
+///   的 ToolSource），同一 id 可以既是人的动作、又是某个来源在会话里交出的工具（read / create_session 就是）。
+///   与 systools/tools.yaml 的一致性由 src/tests/commands.rs 锁死：表里每条动作要么在这张单子，
+///   要么由某个会话来源交出，孤儿即红。
+pub const HUMAN_ACTIONS: &[&str] = &[
+    READ,
+    LIST,
+    GREP,
+    SHELL,
+    "compact",
+    "create_session",
+    "control_session",
+    "activate_session",
+    "guest_diagnose",
+    "set_secret",
+    "clear_secret",
+    "control_resident",
+    "set_module_enabled",
+    "send_message",
+    "set_task",
+    "answer_card",
+    "withdraw",
+    "rewind",
+    "update_task",
+    "set_permission_profile",
+    "set_thinking",
+    "set_context_freshness",
+    "edit_session",
+    "upload",
+    "restore_work_commit",
+    "upsert_provider",
+    "remove_provider",
+    "discover_models",
+    "upsert_model",
+    "remove_model",
+    "set_core_model",
+    "probe_model_tools",
+    "probe_replay_shape",
+    "upsert_agent",
+    "remove_agent",
+    "set_settings",
+];
+
+/// 目的：这条动作有没有人的入口（呈现层能不能调它）。
+pub fn is_human_action(id: &str) -> bool {
+    HUMAN_ACTIONS.contains(&id)
+}
 /// 目的：内置工具名（保留名）。
 ///    与 systools/tools.yaml 的 tools 是同一份名单，测试「builtin_tool_book_is_the_one_source_of_names_and_paths」锁死两者一致。
 pub fn is_builtin(name: &str) -> bool {

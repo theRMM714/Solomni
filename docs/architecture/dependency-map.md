@@ -17,14 +17,14 @@ flowchart RL
   R1["环 1 · 纯<br/>4 个单元"]
   R2["环 2 · 状态与机制<br/>17 个单元"]
   R3["环 3 · 用例<br/>9 个单元"]
-  R3 -->|"562 处 / 70 对"| R2
+  R3 -->|"563 处 / 70 对"| R2
 ```
 
 | 从 | 到 | 单元对 | 引用处 |
 | --- | --- | --- | --- |
-| 环 3 · 用例 | 环 2 · 状态与机制 | 70 | 562 |
+| 环 3 · 用例 | 环 2 · 状态与机制 | 70 | 563 |
 
-> 1 种跨环边、70 对单元、562 处引用；本段由 `tests/gates/structure/layers.js` 现算（`node tests/docs-sync.mjs --write`），不手写。
+> 1 种跨环边、70 对单元、563 处引用；本段由 `tests/gates/structure/layers.js` 现算（`node tests/docs-sync.mjs --write`），不手写。
 <!-- END:dependency-rings -->
 
 ## 二、同环：没有层，只有先后
@@ -34,16 +34,17 @@ flowchart RL
 <!-- BEGIN:dependency-same -->
 | 环 | 从 | 到 | 引用处 |
 | --- | --- | --- | --- |
-| 环 2 · 状态与机制 | `agentloop` | `tools` | 57 |
+| 环 2 · 状态与机制 | `agentloop` | `tools` | 62 |
 | 环 2 · 状态与机制 | `agentloop` | `llm` | 38 |
 | 环 2 · 状态与机制 | `agentloop` | `transcript` | 31 |
-| 环 2 · 状态与机制 | `agentloop` | `workspace` | 21 |
+| 环 2 · 状态与机制 | `agentloop` | `workspace` | 22 |
 | 环 2 · 状态与机制 | `agentloop` | `prompt` | 20 |
 | 环 2 · 状态与机制 | `agentloop` | `vm` | 14 |
-| 环 2 · 状态与机制 | `tools` | `workspace` | 14 |
+| 环 2 · 状态与机制 | `tools` | `workspace` | 13 |
 | 环 2 · 状态与机制 | `provision` | `vm` | 10 |
 | 环 2 · 状态与机制 | `vm` | `catalog` | 8 |
 | 环 2 · 状态与机制 | `agentloop` | `catalog` | 7 |
+| 环 2 · 状态与机制 | `agentloop` | `session_model` | 7 |
 | 环 2 · 状态与机制 | `turn_state` | `agentloop` | 6 |
 | 环 2 · 状态与机制 | `agentloop` | `residents` | 5 |
 | 环 2 · 状态与机制 | `tools` | `catalog` | 5 |
@@ -51,7 +52,6 @@ flowchart RL
 | 环 2 · 状态与机制 | `tools` | `llm` | 4 |
 | 环 2 · 状态与机制 | `turn_state` | `workspace` | 4 |
 | 环 2 · 状态与机制 | `turn_state` | `catalog` | 4 |
-| 环 2 · 状态与机制 | `agentloop` | `session_model` | 3 |
 | 环 2 · 状态与机制 | `catalog` | `llm` | 3 |
 | 环 2 · 状态与机制 | `residents` | `catalog` | 3 |
 | 环 2 · 状态与机制 | `turn_state` | `llm` | 3 |
@@ -107,20 +107,20 @@ flowchart RL
 | `runtime` | `catalog` | 环 3 · 用例 → 环 2 · 状态与机制 | 19 |
 | `turn` | `catalog` | 环 3 · 用例 → 环 2 · 状态与机制 | 16 |
 | `runtime` | `turn_state` | 环 3 · 用例 → 环 2 · 状态与机制 | 14 |
+| `turn` | `session_model` | 环 3 · 用例 → 环 2 · 状态与机制 | 13 |
 | `collab` | `prompt` | 环 3 · 用例 → 环 2 · 状态与机制 | 12 |
-| `turn` | `session_model` | 环 3 · 用例 → 环 2 · 状态与机制 | 12 |
 | `collab` | `tools` | 环 3 · 用例 → 环 2 · 状态与机制 | 10 |
 | `maintenance` | `catalog` | 环 3 · 用例 → 环 2 · 状态与机制 | 10 |
 | `turn` | `llm` | 环 3 · 用例 → 环 2 · 状态与机制 | 9 |
+| `runtime` | `tools` | 环 3 · 用例 → 环 2 · 状态与机制 | 8 |
 | `runtime` | `agentloop` | 环 3 · 用例 → 环 2 · 状态与机制 | 8 |
 | `runtime` | `workspace` | 环 3 · 用例 → 环 2 · 状态与机制 | 8 |
-| `work` | `session_model` | 环 3 · 用例 → 环 2 · 状态与机制 | 8 |
 | `work` | `catalog` | 环 3 · 用例 → 环 2 · 状态与机制 | 8 |
 | `work` | `turn_state` | 环 3 · 用例 → 环 2 · 状态与机制 | 8 |
 | `conversation` | `session_model` | 环 3 · 用例 → 环 2 · 状态与机制 | 7 |
 | `runtime` | `llm` | 环 3 · 用例 → 环 2 · 状态与机制 | 7 |
+| `work` | `session_model` | 环 3 · 用例 → 环 2 · 状态与机制 | 7 |
 | `collab` | `catalog` | 环 3 · 用例 → 环 2 · 状态与机制 | 6 |
-| `runtime` | `tools` | 环 3 · 用例 → 环 2 · 状态与机制 | 6 |
 | `runtime` | `session_model` | 环 3 · 用例 → 环 2 · 状态与机制 | 6 |
 | `system` | `vm` | 环 3 · 用例 → 环 2 · 状态与机制 | 6 |
 | `turn` | `workspace` | 环 3 · 用例 → 环 2 · 状态与机制 | 6 |
@@ -135,7 +135,6 @@ flowchart RL
 | `work` | `agentloop` | 环 3 · 用例 → 环 2 · 状态与机制 | 4 |
 | `collab` | `vm` | 环 3 · 用例 → 环 2 · 状态与机制 | 3 |
 | `collab` | `workspace` | 环 3 · 用例 → 环 2 · 状态与机制 | 3 |
-| `conversation` | `agentloop` | 环 3 · 用例 → 环 2 · 状态与机制 | 3 |
 | `conversation` | `catalog` | 环 3 · 用例 → 环 2 · 状态与机制 | 3 |
 | `runtime` | `transcript` | 环 3 · 用例 → 环 2 · 状态与机制 | 3 |
 | `turn` | `tools` | 环 3 · 用例 → 环 2 · 状态与机制 | 3 |
@@ -143,6 +142,7 @@ flowchart RL
 | `conversation` | `tools` | 环 3 · 用例 → 环 2 · 状态与机制 | 2 |
 | `conversation` | `turn_state` | 环 3 · 用例 → 环 2 · 状态与机制 | 2 |
 | `conversation` | `transcript` | 环 3 · 用例 → 环 2 · 状态与机制 | 2 |
+| `conversation` | `agentloop` | 环 3 · 用例 → 环 2 · 状态与机制 | 2 |
 | `conversation` | `llm` | 环 3 · 用例 → 环 2 · 状态与机制 | 2 |
 | `conversation` | `prompt` | 环 3 · 用例 → 环 2 · 状态与机制 | 2 |
 | `lifecycle` | `workspace` | 环 3 · 用例 → 环 2 · 状态与机制 | 2 |

@@ -164,14 +164,14 @@ pub(crate) fn discussion_member_can_inspect_before_speaking() {
     );
 }
 
-/// 目的：讨论回合**按机制席位校验**：面里没有的内置工具（write）被如实拒绝，不当表态吸收。
+/// 目的：讨论回合**按这一回合的工具面校验**：讨论 loop 不发、agent 也没有的工具（submit_report）被如实拒绝，不当表态吸收。
 #[test]
 pub(crate) fn discussion_member_cannot_call_a_builtin_outside_its_seat_face() {
     let mut member = BTreeMap::new();
     member.insert(
         "a".to_string(),
         vec![
-            "{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"x\",\"content\":\"y\"}}"
+            "{\"type\":\"tool\",\"name\":\"submit_report\",\"args\":{\"report\":\"x\"}}"
                 .to_string(),
             "{\"type\":\"say\",\"text\":\"我不该写文件\"}".to_string(),
             "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
@@ -205,8 +205,8 @@ pub(crate) fn discussion_member_cannot_call_a_builtin_outside_its_seat_face() {
     let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
     assert!(
         events.iter().any(|e| matches!(e, SessionEvent::Notice(n)
-            if n.contains("[越权]") && n.contains("write"))),
-        "机制席位没发给讨论席的工具该被如实拒绝：{:?}",
+            if n.contains("[越权]") && n.contains("submit_report"))),
+        "这一回合工具面里没有的工具该被如实拒绝：{:?}",
         events
     );
 }

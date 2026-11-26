@@ -1,8 +1,8 @@
-//! 目的：系统工具总表（`systools/tools.yaml`）——每条工具是什么、谁能调它、它会不会改共享工作区。
-//! 管：`SystemTools`（工具总表 + 名称保留名）与 `problems()` 的自洽断言（能力标签、调用者、发布面）。
-//! 不管：谁拿到哪些工具——机制与席位的声明在会话单元（`session::domain::mechanism`），面由它按总表合成；
-//!   本单元不认识席位，也就不存在「按席位发面」这一层。
-//! 联动：表由 `detail/yaml_systools.rs` 读入；`session` 的机制声明按总表解析席位面；`runtime` 的动作授权读 `callers`。
+//! 目的：系统工具总表（`systools/tools.yaml`）——每条工具的名字、说明与参数契约。
+//! 管：`SystemTools`（工具总表 + 名称保留名）与 `problems()` 的名字断言。
+//! 不管：谁拿到哪些工具——来源各自声明（agent / module / loop / workspace / profile），会话只收 id；
+//!   授权由权限端口判定。本单元不认识席位，也不判断「该发给谁」。
+//! 联动：表由 `detail/yaml_systools.rs` 读入；引擎按 id 取形状与实现。
 
 /// 目的：一次动作的**审计记录**（同一形状：谁、调了什么、成没成）。
 /// 约束：人经呈现层的动作与模型经工具调用的同一条动作共用它——审计只有一处格式化。
@@ -29,23 +29,13 @@ pub struct SystemTools {
 
 impl SystemTools {
     /// 目的：总表自身的自洽检查，空 = 一切正常。
-    /// 约束：每条都是机械断言（由测试门禁消费，不靠人看）：每条工具都有能力标签、都声明了调用者；
-    ///   `publish` 与工作区的动作面一一对应（能改共享区的只有 `work_*`）；
-    ///   谁能调谁、席位发什么，由会话单元的 `mechanism::problems` 按席位面双向比对。
+    /// 约束：每条都是机械断言（由测试门禁消费，不靠人看）：id 非空、不含空白。
+    ///   能不能被谁调不在这张表里——来源交 id，授权在权限端口。
     pub fn problems(&self) -> Vec<String> {
         let mut out = Vec::new();
-        for (id, schema) in &self.tools {
-            if schema.capability.trim().is_empty() {
-                out.push(format!("工具 {} 没声明 capability（权限标签）", id));
-            }
-            if schema.callers.is_empty() {
-                out.push(format!("动作 {} 没声明 callers（谁能调它）", id));
-            }
-            if schema.publish != crate::units::business::workspace::api::is_work_tool(id) {
-                out.push(format!(
-                    "动作 {} 的发布面标记与工作区的动作面不一致（publish 只能是 work_*）",
-                    id
-                ));
+        for id in self.tools.keys() {
+            if id.trim().is_empty() || id.chars().any(char::is_whitespace) {
+                out.push(format!("工具 id「{}」不合法（不能为空或含空白）", id));
             }
         }
         out

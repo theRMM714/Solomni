@@ -16,13 +16,13 @@
 | `src/units/business/tools/service/grep.rs` | 内置 `grep` 的匹配与输出编排：模式编译（正则 / 字面、忽略大小写）、glob 过滤、目录遍历后的目标收敛（含逐项读权限）、逐文件流式扫描与上下文拼行、命中 / 文件 / 二进制 / 无读权限计数、回执与截断说明 |
 | `src/units/business/tools/service/systool.rs` | 内置工具的执行编排：解析入参 → 按声明校验 → 沙箱寻址 → 先读后改门禁（patch 按整批一次快照）→ 经 `SysIo::mutate` / `transact` 落盘（锁内版本 CAS、原子替换、跨文件回滚）→ 产出观察事实（规则在 `src/units/business/tools/domain/systool.rs` 与 `src/units/business/tools/domain/patch.rs`）；`GREP` 分发到 `src/units/business/tools/service/grep.rs` |
 | `src/units/business/tools/domain/budget.rs` | 工具结果的**唯一预算**：单条静态上限 16k 字符（head+tail、按完整行取整、单行超长按字符切），再按本批剩余上下文给每条上限（`min(16k, 剩余 token × 2 / 本批调用数)`，reserve 见 `ResultBudget::for_batch`）；低于 1k 字符判枯竭、整批预检失败，未枯竭时生产者先截、会话层同预算兜底并允许二次收缩；截断加 `result.truncated` / `result.truncated.context` 与按工具续读提示（文件类给 read 的 offset/limit，执行类给缩小输出 / 写文件再读）；read 的续读 offset、shell 的状态行 / 末行在尾部保留 |
-| `src/units/business/tools/domain/systool.rs` | 内置文件工具与回报（read / write / edit / patch / delete / list / grep / submit_report）的纯规则：参数校验、观察账本、回执文案与 `ToolOutcome`；系统工具保留名（含 shell） |
+| `src/units/business/tools/domain/systool.rs` | 内置文件工具与回报（read / write / edit / patch / delete / list / grep / submit_report）的纯规则：参数校验、观察账本、回执文案与 `ToolOutcome`；系统工具保留名（含 shell）；**人的命令面** `HUMAN_ACTIONS` 与 `is_human_action`（只服务呈现层，不是授权） |
 | `src/units/business/tools/domain/patch.rs` | 补丁通道（patch 工具）的纯逻辑：解析自由格式的改动文本并在文件内容上按整行应用 |
-| `src/units/business/tools/domain/schema.rs` | 工具参数契约：解析、校验与渲染声明在文本层的参数 schema（内置工具在 `systools/tools.yaml`，模块工具在 `module.yaml`） |
+| `src/units/business/tools/domain/schema.rs` | 工具参数契约：解析、校验与渲染声明在文本层的参数 schema（内置工具在 `systools/tools.yaml`，模块工具在 `module.yaml`）；一条工具只有说明、参数与能否并发，**不含能力、发布与调用者** |
 | `src/units/business/tools/domain/module_tools.rs` | 模块清单 → 工具面：把 `module.yaml` 声明的工具与参数契约转成 `tools` 单元认识的形态，并把静态模块工具与已就绪服务操作的参数合并渲染成**一段** |
 | `src/units/business/tools/domain/commands.rs` | 产品命令面的纯数据形态（`Command` / `CommandBook` / `Phase`）：读 `systools/commands.yaml`、做骨架校验并投影成 `Op`；只管声明，不管执行 |
 | `src/units/business/tools/domain/op.rs` | 命令与动作的统一形状 `Op`（分组、相位、执行者、确认门槛、参数 schema、回执）与文本入口的全部派生：`parse` 把词法转成参数 JSON、`usage` 出写法、`complete` 出补全、`problems` 判自洽；一份声明供 CLI 手册、TUI 命令、Web 表单与模型工具声明共用 |
-| `src/units/business/tools/domain/table.rs` | 工具总表的纯数据形态（`SystemTools`）：总表自检与动作审计格式化；席位面由 `agentloop` 单元的唯一装配机（src/units/business/agentloop/domain/assemble.rs 的 `assemble`）按席位现拼 |
+| `src/units/business/tools/domain/table.rs` | 工具总表的纯数据形态（`SystemTools`）：总表自检（id 非空且无空白）与动作审计格式化；工具面由 `agentloop` 单元的唯一装配机（src/units/business/agentloop/domain/assemble.rs 的 `assemble`）按**会话类型挂的来源**现拼 |
 | `src/units/business/tools/domain/fence.rs` | 围栏描述符的派生策略与裁决卡材料（`fence_ask` / 选项 id；描述符与落点判据在 `src/kernel/contracts/fence.rs`） |
 | `src/units/business/tools/domain/shell.rs` | 执行类系统工具 shell 的纯规则：参数 / timeout 解析、命令长度、共享区执行位提示、回执解析（退出码 / 状态 / cwd·耗时） |
 | `src/units/business/tools/detail/sys_io.rs` | `SysIo` 端口的磁盘实现：纯 Rust 直接读写（严格 UTF-8、非法字节如实标注、写时建父目录）；按行窗口读流式扫完整份算行数与哈希；目录遍历走 `ignore::WalkBuilder`（不跟链接、按路径排序、规则剪枝），流式按行扫用 `BufReader` 且不受整份读上限约束；写盘在跨进程路径锁内做版本 CAS（锁目录由组合根注入，缺省退回进程内锁），临时文件 + 原子替换发布，`transact` 先校验/暂存再发布并在失败时回滚已发布文件 |

@@ -3,9 +3,12 @@
 //! 不管：`domain` / `engine` 的内部实现；历史落盘、裁决队列与会话树（在会话单元）；端口实现（在各自机制单元）。
 //! 联动：会话单元的装配与用例、turn 的生成流程、work 与 collab 的调度、runtime 的核心操作都从这里取；契约见 docs/agentloop/README.md。
 
+/// 目的：测试用——按一席的来源算工具面 id（生产路径只有 assemble）。
+#[cfg(test)]
+pub use crate::units::business::agentloop::domain::assemble::seat_face;
 #[allow(unused_imports)]
 pub use crate::units::business::agentloop::domain::assemble::{
-    FaceInput, SeatFace, assemble, face_tools, resolve, seat_face, service_ops_of, serviced_tools,
+    FaceInput, SeatFace, assemble, face_of, service_ops_of, serviced_tools,
 };
 /// 目的：只取装配出的工具面值；生产路径都直接建会话，所以它只在测试里编译。
 #[cfg(test)]
@@ -35,6 +38,9 @@ pub use crate::units::business::agentloop::domain::session::{
     FreshnessStats, ReadAt, SessionParams, TurnRun, delta_visible, expired_note, freshness_view,
     keep_whole_replies, stream_piece, summary_message, unique_work_name,
 };
+/// 目的：测试用——直接造一个来源，验「它按什么条件交 id」；生产路径由会话类型挂来源。
+#[cfg(test)]
+pub use crate::units::business::agentloop::domain::sources::WorkspaceSource;
 #[allow(unused_imports)]
 pub use crate::units::business::agentloop::domain::verify::{VerifySpec, verify_tools};
 #[allow(unused_imports)]

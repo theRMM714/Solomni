@@ -39,21 +39,16 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
 }
 
 impl Handle {
-    /// 目的：授权——动作表 `callers` 里有这个调用者身份才放行（授权只此一处）。
-    fn authorize_action(
-        &self,
-        id: &str,
-        caller: &Caller,
-        schema: &ToolSchema,
-    ) -> Result<(), String> {
-        let token = caller.token();
-        if schema.callers.iter().any(|c| c == token) {
-            Ok(())
-        } else {
-            Err(format!(
-                "动作 {} 不接受这个调用者：{}（越出授权范围）",
-                id, token
-            ))
+    /// 目的：授权——动作面是**人的呈现层**，只有 `Caller::User` 能走分发器。
+    ///   角色不进这里：核心操作走 `create_session_call` / `control_session_call` 这类具名入口。
+    fn authorize_action(&self, id: &str, caller: &Caller) -> Result<(), String> {
+        match caller {
+            Caller::User => Ok(()),
+            Caller::Role { .. } => Err(format!(
+                "动作 {} 不接受这个调用者：{}（动作面只给人经呈现层调用）",
+                id,
+                caller.token()
+            )),
         }
     }
 
@@ -314,12 +309,16 @@ impl Handle {
 }
 
 impl ActionOps for Handle {
-    /// 目录：只列这个调用者能调的动作，并给出**此刻可不可用**（人经呈现层按它渲染，不写第二份清单）。
+    /// 目录：只列**人的命令面**，并给出此刻可不可用（人经呈现层按它渲染，不写第二份清单）。
     fn catalog(&self, caller: &Caller, _sid: Option<&str>) -> Result<Vec<ActionView>, String> {
-        let token = caller.token();
         let mut out = Vec::new();
+        // 动作目录只为人渲染：角色拿到的是会话内的工具面，不是这张表。
+        if !matches!(caller, Caller::User) {
+            return Ok(out);
+        }
         for (id, schema) in &self.book {
-            if !schema.callers.iter().any(|c| c == token) {
+            // 目录就是**人的命令面**：会话内工具由来源发给成员，不出现在给人的动作清单里。
+            if !crate::units::business::tools::api::is_human_action(id) {
                 continue;
             }
             out.push(ActionView {
@@ -396,7 +395,7 @@ impl ActionOps for Handle {
         Ok(out)
     }
 
-    /// 一次动作：参数按声明校验 → 按 `callers` 授权 → 执行 → 审计。CLI 与 Web 共用这一份。
+    /// 一次动作：只认人的命令面 → 参数按声明校验 → 按调用者身份授权 → 执行 → 审计。CLI 与 Web 共用这一份。
     fn act(&self, call: ActionCall) -> Result<Acted, String> {
         let id = call.id.clone();
         let caller = call.caller.clone();
@@ -406,10 +405,15 @@ impl ActionOps for Handle {
         } else {
             match self.book.get(&id) {
                 None => Err(format!("未知动作：{}", id)),
+                // 会话内工具（文件面 / 协作动词 / 核心操作 / work_* / 代理的系统工具）没有人的入口：
+                // 它们由会话里的来源发给成员，执行走成员工具循环，不落在分发器上。
+                Some(_) if !crate::units::business::tools::api::is_human_action(&id) => {
+                    Err(format!("这个动作只在会话里用：{}（人的命令面不含它）", id))
+                }
                 Some(schema) => {
                     let mut args = call.args;
                     // `compact` 在册子里是**压缩回合的模型工具**（必填 summary）；用户动作只带信封里的
-                    // session_id，不能拿工具参数来校验动作。动作的 callers 仍按同一张表授权。
+                    // session_id，不能拿工具参数来校验动作。授权按调用者身份，不按这张表的字段。
                     let checked = if id == "compact" {
                         Ok(())
                     } else {
@@ -421,7 +425,7 @@ impl ActionOps for Handle {
                         Err(e) => Err(e),
                         Ok(()) => {
                             schema.apply_defaults(&mut args);
-                            self.authorize_action(&id, &caller, schema)
+                            self.authorize_action(&id, &caller)
                                 .and_then(|_| self.execute_action(&id, &caller, &args, call.out))
                         }
                     }

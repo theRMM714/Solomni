@@ -291,5 +291,6 @@ fn agent(name: &str, modules: &[&str]) -> AgentMeta {
         modules: modules.iter().map(|s| s.to_string()).collect(),
         model: None,
         chara: String::new(),
+        abilities: None,
     }
 }

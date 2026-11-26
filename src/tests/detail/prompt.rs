@@ -8,7 +8,7 @@ use super::*;
 /// 这一份面同时喂三处：回合注入的工具块、原生声明槽、越权校验——所以判据只有它一个。
 #[test]
 fn a_seat_face_comes_from_the_mechanism_declaration() {
-    use crate::units::business::agentloop::api::{resolve, seat_face};
+    use crate::units::business::agentloop::api::seat_face;
     use crate::units::business::session_model::api::seat;
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let st = YamlSystools::new(assets_at(&root))
@@ -16,11 +16,13 @@ fn a_seat_face_comes_from_the_mechanism_declaration() {
         .expect("读工具总表");
     let ids = |id: &str| -> Vec<String> {
         let seat = seat(id).expect("机制声明里的席位");
-        resolve(seat, &st.tools)
-            .expect("席位面引用的工具都在总表里")
-            .into_iter()
-            .map(|(id, _)| id.to_string())
-            .collect()
+        let face = seat_face(seat);
+        assert!(
+            face.iter().all(|t| st.tools.contains_key(t)),
+            "席位面引用的工具都在总表里：{:?}",
+            face
+        );
+        face
     };
     let discussant = ids("discussant");
     for verb in ["say", "agree", "leave", "ask"] {
@@ -42,11 +44,7 @@ fn a_seat_face_comes_from_the_mechanism_declaration() {
         );
     }
     // 描述与参数也来自工具总表（模型侧说明与校验同源）。
-    let (_, schema) = resolve(seat("discussant").expect("讨论席在册"), &st.tools)
-        .expect("讨论席面引用的工具都在总表里")
-        .into_iter()
-        .find(|(id, _)| *id == "agree")
-        .expect("agree 在讨论席面里");
+    let schema = st.tools.get("agree").expect("agree 在工具总表里");
     assert!(!schema.desc.is_empty(), "工具说明不该为空");
     assert!(
         schema
@@ -57,7 +55,7 @@ fn a_seat_face_comes_from_the_mechanism_declaration() {
     );
     assert!(seat("不存在的席位").is_none(), "未知席位要如实查不到");
     assert!(
-        seat_face(seat("solo").expect("单席在册")).contains(&"read"),
+        seat_face(seat("solo").expect("单席在册")).contains(&"read".to_string()),
         "单席该恒有沙箱面的读工具"
     );
     // 单 agent 工作（solo）与任务链执行席（executor）差在**回报工具**：回报只有节点子会话有消费者。
@@ -124,7 +122,7 @@ fn system_tools_and_mechanism_faces_are_self_consistent() {
     // 越权判据只有一处：**这一回合的工具面**（机制按席位合成），给了的放行、没给的不放行。
     let has = |id: &str, tool: &str| {
         crate::units::business::agentloop::api::seat_face(seat(id).expect("席位在册"))
-            .contains(&tool)
+            .contains(&tool.to_string())
     };
     assert!(has("discussant", "read"), "讨论席该能读");
     assert!(!has("discussant", "create_session"), "没给的工具必须不放行");
