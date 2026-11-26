@@ -34,17 +34,17 @@ flowchart RL
 <!-- BEGIN:dependency-same -->
 | 环 | 从 | 到 | 引用处 |
 | --- | --- | --- | --- |
-| 环 2 · 状态与机制 | `agentloop` | `tools` | 62 |
+| 环 2 · 状态与机制 | `agentloop` | `tools` | 63 |
 | 环 2 · 状态与机制 | `agentloop` | `llm` | 38 |
 | 环 2 · 状态与机制 | `agentloop` | `transcript` | 31 |
-| 环 2 · 状态与机制 | `agentloop` | `workspace` | 22 |
+| 环 2 · 状态与机制 | `agentloop` | `workspace` | 23 |
 | 环 2 · 状态与机制 | `agentloop` | `prompt` | 20 |
 | 环 2 · 状态与机制 | `agentloop` | `vm` | 14 |
 | 环 2 · 状态与机制 | `tools` | `workspace` | 13 |
 | 环 2 · 状态与机制 | `provision` | `vm` | 10 |
 | 环 2 · 状态与机制 | `vm` | `catalog` | 8 |
 | 环 2 · 状态与机制 | `agentloop` | `catalog` | 7 |
-| 环 2 · 状态与机制 | `agentloop` | `session_model` | 6 |
+| 环 2 · 状态与机制 | `agentloop` | `session_model` | 7 |
 | 环 2 · 状态与机制 | `turn_state` | `agentloop` | 6 |
 | 环 2 · 状态与机制 | `agentloop` | `residents` | 5 |
 | 环 2 · 状态与机制 | `tools` | `catalog` | 5 |

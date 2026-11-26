@@ -3,11 +3,13 @@
 //! 不管：角色与流程段声明本身（在 `session_model/domain/mechanism.rs`）；工具总表（在 `tools`）；工具面怎么合成（在 `assemble`）。
 //! 联动：`main.rs` 装配期调它把启动失败挡在最前面；测试门禁按它判角色与动作表是否同步（经会话单元的 `api::loop_problems`）。
 
-use crate::units::business::session_model::api::{LOOPS, ROLES, role};
+use crate::units::business::session_model::api::{
+    EXEC, FS_READ, FS_WRITE, LOOPS, ROLES, SHARED_WRITE, role,
+};
 use crate::units::business::tools::api::ToolBook;
 
 /// 目的：流程段与角色声明的自洽检查，空 = 一切正常。
-/// 约束：每条都是机械断言（由装配期与测试门禁消费）——角色 id 全局唯一且提示词非空；流程段 id 唯一、角色位不为空、角色位引用的角色都在册、流程段要同时有核心角色与成员角色、静止段恰好一个角色位；角色位声明的每个机制动作都在总表里（谁能拿到哪条工具不在这里比对：来源各自交 id，授权归权限端口）。
+/// 约束：每条都是机械断言（由装配期与测试门禁消费）——角色 id 全局唯一且提示词非空；流程段 id 唯一、角色位不为空、角色位引用的角色都在册、流程段要同时有核心角色与成员角色、静止段恰好一个角色位；流程段抑制的能力组必须是认识的那四个；角色位声明的每个机制动作都在总表里（谁能拿到哪条工具不在这里比对：来源各自交 id，授权归权限端口）。
 pub fn problems(book: &ToolBook) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen: Vec<&str> = Vec::new();
@@ -48,6 +50,14 @@ pub fn problems(book: &ToolBook) -> Vec<String> {
         }
         if l.flow && !(has_core && has_member) {
             out.push(format!("流程段 {} 要同时有核心角色与成员角色", l.id));
+        }
+        for ability in l.deny {
+            if !matches!(*ability, FS_READ | FS_WRITE | EXEC | SHARED_WRITE) {
+                out.push(format!(
+                    "流程段 {} 抑制了一个不认识的能力组：{}",
+                    l.id, ability
+                ));
+            }
         }
         if !l.flow && l.cast.len() != 1 {
             out.push(format!(

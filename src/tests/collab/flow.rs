@@ -409,6 +409,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         // 核实环境不换席：模块表与提示词面只备空值。
         modules: Vec::new(),
         prompt: Arc::new(test_prompts()),
+        policy: crate::units::business::agentloop::api::default_policy(),
     };
     // 第一轮：先核实（read）；第二轮：交出 plan。
     let seen = Arc::new(Mutex::new(Vec::new()));

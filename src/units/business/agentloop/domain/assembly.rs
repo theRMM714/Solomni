@@ -206,6 +206,8 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
         // 换席要现拼一席：模块、席位与说明块素材都留在活对象上（不靠会话外再传一遍）。
         modules: spec.modules.to_vec(),
         prompt: Arc::clone(&ports.prompt),
+        // 授权：默认策略按流程段的抑制表判；换策略只换这一处注入。
+        policy: crate::units::business::agentloop::domain::policy::default_policy(),
     }
 }
 

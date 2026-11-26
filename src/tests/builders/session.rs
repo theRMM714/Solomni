@@ -133,6 +133,7 @@ pub(crate) fn member_with_tools(
             // 替身不换席：模块表与提示词面只备空值（换席另有专门用例走真装配机）。
             modules: Vec::new(),
             prompt: Arc::new(test_prompts()),
+            policy: crate::units::business::agentloop::api::default_policy(),
         }),
     }
 }

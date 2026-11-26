@@ -71,6 +71,18 @@ pub(crate) fn run_branch(
             String::new(),
             crate::units::business::tools::api::refuse(name),
         )
+    } else if let crate::units::business::agentloop::domain::policy::Verdict::Deny(why) =
+        ctx.policy.decide(
+            &crate::units::business::agentloop::domain::policy::ToolRequest {
+                tool: name,
+                sources: &ctx.face.source_ids,
+                loop_id: &ctx.face.loop_id,
+                role: &ctx.face.role,
+            },
+        )
+    {
+        // 在面内、但这一段不给用：回执说清是哪一段抑制了哪一组能力（授权归策略，来源只管在场）。
+        (String::new(), refuse(why))
     } else if crate::units::business::tools::api::is_builtin(name) {
         // 门禁看的是"这一批调用发出时模型还能看到的观察"：批前快照，同批 read 不授权后面的 write。
         let facts = gate_facts.to_vec();
