@@ -90,9 +90,6 @@ impl OpBook {
                     desc: c.brief.clone(),
                     params: c.params.clone(),
                     parallel: false,
-                    capability: String::new(),
-                    callers: vec!["user".to_string()],
-                    publish: false,
                 },
                 json: c.json.clone(),
             })

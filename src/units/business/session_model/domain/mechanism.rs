@@ -1,10 +1,10 @@
-//! 目的：会话的**机制**声明——机制是回合的身份来源，席位是它底下的具体身份组，工具面按席位合成。
+//! 目的：会话的**机制**声明——机制是回合的身份来源，席位是它底下的具体身份组（提示词 + 机制动作）。
 //! 管：`Seat` / `Mechanism` 两种声明与 `MECHANISMS` / `SEATS` 两张表，以及按 id 取机制 / 席位 / 流程清单。
-//! 不管：工具面怎么合成（在会话单元的 `assemble`）；席位与系统工具总表的自洽断言（`problems` 在会话单元的 `seat_check`）；流程怎么调度回合（在 `collab` / `turn`）。
-//! 联动：会话类型表（`profile`）引用机制 id；`turn` 的每回合席位从这里取，工具面交给会话单元的 `assemble` 现拼。
+//! 不管：工具面怎么合成（在 `agentloop` 的 `assemble`，按会话类型挂的工具来源各自交 id）；席位与系统工具总表的自洽断言（`problems` 在会话单元的 `seat_check`）；流程怎么调度回合（在 `collab` / `turn`）。
+//! 联动：会话类型表（`profile`）引用机制 id，并声明挂哪些工具来源；`turn` 的每回合席位从这里取，工具面交给 `agentloop` 的 `assemble` 现拼。
 
-/// 目的：一个**席位**——机制里的具体身份组：发哪些工具、能不能写、能不能发布、带哪段提示词。
-/// 约束：`core` 的席位由核心通道出演（不进成员表），其余由成员会话出演；核心席不得授模块工具。
+/// 目的：一个**席位**——机制里的具体身份组：带哪段提示词、发哪些机制动作。
+/// 约束：`core` 的席位由核心通道出演（不进成员表），其余由成员会话出演。文件面与模块面不在这里：前者由 agent 的能力组决定，后者由它装了哪些模块决定（见 `tools` 的 `ToolSource`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Seat {
     /// 目的：席位 id（全局唯一）：同时是运行时动作授权里的身份名与提示词的匹配键。
@@ -15,12 +15,6 @@ pub struct Seat {
     pub min: usize,
     /// 目的：坐核心通道（真）还是坐成员会话（假）。
     pub core: bool,
-    /// 目的：发不发写面（`write` / `edit` / `patch` / `delete`）——只能写自己的沙箱，改不到共享区。
-    pub write: bool,
-    /// 目的：发不发发布面（`work_*`，会改共享工作区）——这是「只读 / 可写」的唯一分野。
-    pub publish: bool,
-    /// 目的：发不发它自己所属模块的工具（讨论席与核心席拿不到干活的手段）。
-    pub module_tools: bool,
     /// 目的：这一席独有的机制动作（机制自己声明、`tools` 提供实现与参数契约）。
     pub tools: &'static [&'static str],
 }
@@ -42,17 +36,8 @@ const CORE_PROXY: Seat = Seat {
     prompt: "roles/core_proxy",
     min: 0,
     core: true,
-    write: false,
-    publish: false,
-    module_tools: false,
-    tools: &[
-        "catalog_agents",
-        "create_session",
-        "send_session_message",
-        "observe_session",
-        "read_session_messages",
-        "control_session",
-    ],
+    // 会话控制这 6 个是 **system 工具**：由会话类型声明、建会话时展开进 meta（不挂在席位上）。
+    tools: &[],
 };
 
 /// 目的：讨论席：只表态与核实，不动手（没有写面、没有模块工具）。
@@ -61,9 +46,6 @@ const DISCUSSANT: Seat = Seat {
     prompt: "roles/discussant",
     min: 2,
     core: false,
-    write: false,
-    publish: false,
-    module_tools: false,
     tools: &["say", "agree", "leave", "ask"],
 };
 
@@ -73,9 +55,6 @@ const PLANNER: Seat = Seat {
     prompt: "roles/planner",
     min: 0,
     core: true,
-    write: false,
-    publish: false,
-    module_tools: false,
     tools: &["plan", "slate", "verdict"],
 };
 
@@ -85,9 +64,6 @@ const ORCHESTRATOR: Seat = Seat {
     prompt: "roles/orchestrator",
     min: 0,
     core: true,
-    write: false,
-    publish: false,
-    module_tools: false,
     tools: &["node_verdict", "checklist"],
 };
 
@@ -97,9 +73,6 @@ const EXECUTOR: Seat = Seat {
     prompt: "roles/executor",
     min: 1,
     core: false,
-    write: true,
-    publish: true,
-    module_tools: true,
     tools: &["submit_report"],
 };
 
@@ -109,9 +82,6 @@ const SOLO: Seat = Seat {
     prompt: "roles/executor",
     min: 0,
     core: false,
-    write: true,
-    publish: true,
-    module_tools: true,
     tools: &[],
 };
 

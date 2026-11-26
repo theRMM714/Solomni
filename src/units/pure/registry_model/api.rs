@@ -5,8 +5,8 @@
 
 #[allow(unused_imports)]
 pub use crate::units::pure::registry_model::domain::agents::{
-    Agent, AgentDraft, AgentMeta, AgentView, Agents, RosterPick, agent_meta, check_reserved,
-    listing, pick, validate_name, views,
+    Agent, AgentDraft, AgentMeta, AgentView, Agents, DEFAULT_ABILITIES, RosterPick, agent_meta,
+    check_reserved, listing, pick, validate_name, views,
 };
 
 #[allow(unused_imports)]

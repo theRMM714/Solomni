@@ -10,7 +10,7 @@
 - 管：**回合推进的宿主侧**——生成 / 协作泵 / 压缩的线程由队列手柄点火（线程名 `solomni-*` 不变）；推进规则、事件台与逐轮落盘在 `turn`（见 [../turn/README.md](../turn/README.md)）。
 - 管：**代理工具的宿主与时序**（`src/units/business/runtime/service/bridge.rs`）：队列桥 `ProxyBridge` 实现 `proxy` 的 `ProxyHost`（清单 / 建会话 / 转达 / 观察 / 控制 / 消息都回到核心线程），以及代理工具面在代理会话里的挂载（`src/units/business/runtime/service/bridge.rs` 的 `inject_proxy_handler`）；工具面、授权判据与幂等账在 `proxy`（见 [../proxy/README.md](../proxy/README.md)），代理会话的装配在 `turn` 的 `build_proxy`，「建一个代理工作」的用例在 `work`。
 - 管：**长步骤的边界**（见「一、长步骤的边界」）：生成、协作泵、压缩、起 / 停 guest 都不在队列里跑，队列只占「取 / 交」两步；建会话 / 启用历史会话 / 改配 / 删会话的 guest 启停在调用方线程上（起停对象在 `src/units/business/work/service/guest_job.rs`）。
-- 管：动作分发（`src/units/business/runtime/service/action.rs`）：参数校验 → 按 `callers` 授权 → 执行 → 审计。
+- 管：动作分发（`src/units/business/runtime/service/action.rs`）：参数校验 → 只服务人的命令面（`HUMAN_ACTIONS`）→ 执行 → 审计。
 - 管：**历史生命周期的时机**——回档三模式、历史列表 / 只读打开与删除的调用点在这里（用例与顺序在 `lifecycle`，见 [../lifecycle/README.md](../lifecycle/README.md)）。
 - 管：**同名薄转发**——工作用例（建工作两段、改配、视图、运行报告、建议、激活）的实现在 `work`，这里保留同名方法让队列与呈现层的调用点不变。
 - 管：把各单元的入站面装配成呈现层要的几个窄面（`src/presentation/faces.rs` 的 `Faces`）。

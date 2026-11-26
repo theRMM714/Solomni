@@ -11,8 +11,9 @@
 | --- | --- |
 | `src/units/business/session_model.rs` | 单元根：声明 `api` 与 `domain` |
 | `src/units/business/session_model/api.rs` | 入站面：重导出元信息、历史视图、类型声明、机制席位表与留档策略（其它单元与呈现层只准用这里） |
-| `src/units/business/session_model/domain.rs` | 定义入口：声明 `history`、`profile`、`mechanism`、`persist` 四个概念子模块 |
+| `src/units/business/session_model/domain.rs` | 定义入口：声明 `history`、`profile`、`mechanism`、`persist`、`tools` 五个概念子模块 |
 | `src/units/business/session_model/domain/history.rs` | 会话元信息 `SessionMeta`、运行态 `RunState`、累计用量 `UsageTotals`、工作区绑定 `WorkspaceBinding`、代理授权 `Delegation` 与历史视图 `HistoryView` |
-| `src/units/business/session_model/domain/profile.rs` | 会话类型表 `Profiles` / `Profile` / `SessionSpec` 的形状与装配期校验、内置类型 id 与 `inline_spec` |
+| `src/units/business/session_model/domain/profile.rs` | 会话类型表 `Profiles` / `Profile` / `SessionSpec` 的形状与装配期校验（含 `sources` 工具来源 id 与 `system_tools` 系统工具）、内置类型 id |
+| `src/units/business/session_model/domain/tools.rs` | 工具来源端口：`ToolSource`（来源 id + `offer(TurnCtx)`）、`TurnCtx`（这一回合的上下文：角色、agent、能力组、会话类型、工作区）、能力组与来源 id 常量 |
 | `src/units/business/session_model/domain/mechanism.rs` | 机制与席位**声明**：`Seat` / `Mechanism`、`SEATS` / `MECHANISMS` 两张表与按 id 取机制 / 席位 / 流程清单 |
 | `src/units/business/session_model/domain/persist.rs` | 留档策略：哪种会话留档、哪些事件算定稿（`PersistPolicy`）、系统会话识别与拟名单会话号 |

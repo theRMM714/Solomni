@@ -28,6 +28,8 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
             modules: vec!["a".to_string(), "b".to_string()],
             model: None,
             chara: String::new(),
+
+            abilities: None,
         }],
         task: None,
         delegate: false,
@@ -52,6 +54,8 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
                 modules: vec!["a".to_string()],
                 model: None,
                 chara: String::new(),
+
+                abilities: None,
             },
             AgentMeta {
                 name: "乙".to_string(),
@@ -59,6 +63,8 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
                 modules: vec!["a".to_string()],
                 model: None,
                 chara: String::new(),
+
+                abilities: None,
             },
         ],
         task: Some("需求".to_string()),

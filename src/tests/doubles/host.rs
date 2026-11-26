@@ -151,6 +151,8 @@ pub(crate) fn agents_of(modules: &[&str]) -> Vec<AgentMeta> {
             modules: vec![m.to_string()],
             model: None,
             chara: String::new(),
+
+            abilities: None,
         })
         .collect()
 }
@@ -171,6 +173,8 @@ pub(crate) fn work(name: &str, kind: &str, modules: &[&str]) -> WorkSpec {
             modules: modules.iter().map(|s| s.to_string()).collect(),
             model: None,
             chara: String::new(),
+
+            abilities: None,
         }]
     };
     WorkSpec {

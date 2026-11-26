@@ -11,8 +11,13 @@ use crate::units::pure::permission::api::{PermissionDefaults, ProfileId};
 pub(crate) fn profile_does_not_change_the_tool_face() {
     let book: ToolBook = crate::tests::doubles::test_systools().tools;
     assert!(book.contains_key("shell"), "shell 要在工具书里");
-    let face = vec!["shell".to_string()];
-    let ids = crate::units::business::agentloop::api::face_tools(face, &book);
+    let face = ["shell".to_string()];
+    // 工具面只按 id 记账：形状（说明与参数契约）在工具书里，面里没有的不该出现。
+    let ids: Vec<String> = face
+        .iter()
+        .filter(|id| book.contains_key(id.as_str()))
+        .cloned()
+        .collect();
     assert_eq!(ids, vec!["shell".to_string()], "席位面就是授权面");
     let net = |profile: ProfileId| {
         PermissionDefaults { profile }

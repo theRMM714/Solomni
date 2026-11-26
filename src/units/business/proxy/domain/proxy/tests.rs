@@ -14,6 +14,8 @@ fn facts() -> Catalog {
             model: Some("gpt".to_string()),
             note: String::new(),
             chara: "已存人设".to_string(),
+
+            abilities: None,
         }],
         modules: vec![
             ModuleFact {

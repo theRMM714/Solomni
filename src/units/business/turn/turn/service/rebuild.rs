@@ -179,6 +179,8 @@ impl Turn {
                     crate::units::business::catalog::packages::api::PackagePlan::default()
                 };
                 // 工具环境事实（围栏 / 注入项 / 运行路径 / 工具链根）由这里经 `env` 派生后按值拷进 `session`。
+                // 能力组与工具来源都按落盘声明（与实时同一份，不在重建时重算）。
+                let abilities = a.abilities();
                 let member = crate::units::business::agentloop::api::MemberSpec {
                     modules: &modules,
                     sandbox: &sb,
@@ -197,6 +199,10 @@ impl Turn {
                         meta.exec.tier,
                         &host_plan,
                     ),
+                    source_ids: &meta.spec.sources,
+                    system_tools: &meta.spec.system_tools,
+                    abilities: &abilities,
+                    profile: &meta.spec.kind,
                 };
                 // 重建也要恢复上下文预算与最近一次用量：否则重启后自动压缩与状态栏都失忆。
                 let (window, percent, keep_percent) =
@@ -560,6 +566,11 @@ impl Turn {
                 crate::units::pure::exec_model::api::Tier::Host,
                 &crate::units::business::catalog::packages::api::PackagePlan::default(),
             ),
+            source_ids: &meta.spec.sources,
+            system_tools: &meta.spec.system_tools,
+            // 代理发言席不是某个 agent：没有能力组，工具面只由来源（会话类型展开的 system 工具）给。
+            abilities: &[],
+            profile: &meta.spec.kind,
         };
         let (window, percent, keep_percent) = self.context_budget(registry, None);
         let spec = crate::units::business::agentloop::api::ProxySpec {

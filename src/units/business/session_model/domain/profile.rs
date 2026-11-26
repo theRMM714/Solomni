@@ -45,10 +45,17 @@ pub struct SessionSpec {
     /// 约束：由会话类型声明，不按类型 id 或机制名判定；`true` 的类型不得再声明流程。
     #[serde(default)]
     pub auto: bool,
+    /// 目的：挂哪些工具来源（来源 id：agent / module / loop / workspace / profile）。
+    /// 约束：来源只回答在场，不判授权；未知 id 在装配期报错；空 = 这个会话没有工具面。
+    #[serde(default)]
+    pub sources: Vec<String>,
+    /// 目的：会话类型的 system 工具 id（建会话时展开进 meta，写进 meta 后不改）。
+    #[serde(default)]
+    pub system_tools: Vec<String>,
 }
 
 impl SessionSpec {
-    /// 目的：造一条没有流程的声明（单 agent 会话；代理式再用 `automatic` 打开 `auto`）。
+    /// 目的：造一条没有流程的声明（单 agent 会话；子会话 node 也用它，形状靠默认来源）。
     pub fn plain(kind: &str, name: &str, seat: &str) -> SessionSpec {
         SessionSpec {
             kind: kind.to_string(),
@@ -56,14 +63,13 @@ impl SessionSpec {
             seat: seat.to_string(),
             flows: Vec::new(),
             auto: false,
-        }
-    }
-
-    /// 目的：造一条**整块交给核心**的声明（代理式会话：没有流程、没有静止需求）。
-    pub fn automatic(kind: &str, name: &str, seat: &str) -> SessionSpec {
-        SessionSpec {
-            auto: true,
-            ..SessionSpec::plain(kind, name, seat)
+            sources: vec![
+                "agent".to_string(),
+                "module".to_string(),
+                "workspace".to_string(),
+                "loop".to_string(),
+            ],
+            system_tools: Vec::new(),
         }
     }
 
@@ -107,6 +113,12 @@ pub struct Profile {
     /// 约束：默认 false——没标 = 只有人经呈现层能建；人的入口不受它限制。
     #[serde(default)]
     pub agent_visible: bool,
+    /// 目的：这个类型挂哪些工具来源（agent / module / loop / workspace / profile）。
+    #[serde(default)]
+    pub sources: Vec<String>,
+    /// 目的：这个类型的 system 工具 id（建会话时展开进 meta）。
+    #[serde(default)]
+    pub system_tools: Vec<String>,
 }
 
 /// 目的：会话类型总表（`systools/profiles.yaml` 的顶层形状）。
@@ -125,7 +137,7 @@ impl Profiles {
             .find(|p| p.id == kind)
             .map(|p| SessionSpec {
                 kind: p.id.clone(),
-                name: p.name.clone(),
+                name: self.label_of(&p.id),
                 seat: if p.flows.is_empty() {
                     mechanism_of(&p.mechanism)
                         .and_then(|m| m.seats.first().copied())
@@ -136,6 +148,8 @@ impl Profiles {
                 },
                 flows: p.flows.clone(),
                 auto: p.auto,
+                sources: p.sources.clone(),
+                system_tools: p.system_tools.clone(),
             })
     }
 
@@ -229,6 +243,22 @@ impl Profiles {
                     p.id, p.mechanism
                 ));
             }
+            let mut sources: Vec<&str> = Vec::new();
+            for id in &p.sources {
+                if id.trim().is_empty() {
+                    return Err(format!(
+                        "会话类型 {} 的工具来源 id 是空的（systools/profiles.yaml）",
+                        p.id
+                    ));
+                }
+                if sources.contains(&id.as_str()) {
+                    return Err(format!(
+                        "会话类型 {} 里同一个工具来源出现了两次：{}（systools/profiles.yaml）",
+                        p.id, id
+                    ));
+                }
+                sources.push(id);
+            }
             let mut flows: Vec<&str> = Vec::new();
             for id in &p.flows {
                 if mechanism_of(id).is_none() {
@@ -266,6 +296,8 @@ mod tests {
                     flows: Vec::new(),
                     auto: false,
                     agent_visible: true,
+                    sources: Vec::new(),
+                    system_tools: Vec::new(),
                 },
                 Profile {
                     id: MEETING.to_string(),
@@ -275,6 +307,8 @@ mod tests {
                     flows: vec!["discuss".to_string(), "execute".to_string()],
                     auto: false,
                     agent_visible: true,
+                    sources: Vec::new(),
+                    system_tools: Vec::new(),
                 },
                 Profile {
                     id: PROXY.to_string(),
@@ -284,6 +318,8 @@ mod tests {
                     flows: Vec::new(),
                     auto: true,
                     agent_visible: false,
+                    sources: Vec::new(),
+                    system_tools: Vec::new(),
                 },
             ],
         }

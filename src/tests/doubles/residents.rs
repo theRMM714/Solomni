@@ -260,6 +260,7 @@ pub(crate) fn member_with_service_tools(
             services: [(op.tool.clone(), op)].into_iter().collect(),
         },
     );
+    let allowed = crate::tests::builders::face_allowed(&modules);
     crate::units::business::agentloop::domain::member_tools::MemberTools {
         face: crate::units::business::agentloop::api::ToolFace {
             mode: crate::units::pure::registry_model::api::ToolMode::Envelope,
@@ -276,8 +277,15 @@ pub(crate) fn member_with_service_tools(
             module_env: Default::default(),
             runtime_path: None,
             runtime_roots: Vec::new(),
-            allowed: crate::units::business::tools::api::names(),
+            allowed,
             seat: "solo".to_string(),
+            source_ids: vec!["agent".to_string(), "module".to_string()],
+            system_tools: Vec::new(),
+            abilities: crate::units::pure::registry_model::api::DEFAULT_ABILITIES
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            profile: "single".to_string(),
             with_modules: true,
             notes: Default::default(),
         },

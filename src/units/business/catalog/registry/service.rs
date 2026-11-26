@@ -401,6 +401,8 @@ impl Registry for RegistryService {
                 },
                 note: note.to_string(),
                 chara: chara.trim().to_string(),
+
+                abilities: None,
             },
         );
         self.save("registry::agent_upsert")

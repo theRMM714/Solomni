@@ -398,7 +398,7 @@ fn action_table_rejects_unknown_id_value_and_caller() {
         ))
         .unwrap_err();
     assert!(err.contains("会话类型表"), "{}", err);
-    // 授权：动作表说 user 不能调只给核心代理的动作。
+    // 归属：只给核心代理（会话里）用的动作，人的命令面不含它。
     let err = faces
         .actions
         .act(call(
@@ -407,5 +407,5 @@ fn action_table_rejects_unknown_id_value_and_caller() {
             Caller::User,
         ))
         .unwrap_err();
-    assert!(err.contains("不接受这个调用者"), "{}", err);
+    assert!(err.contains("只在会话里用"), "{}", err);
 }

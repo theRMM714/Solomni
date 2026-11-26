@@ -325,57 +325,58 @@ fn global_flags_work_on_both_sides_of_a_boot_command() {
     assert!(bare.positionals.is_empty(), "启动相之后不该再进位置参数");
 }
 
-/// 覆盖：人能经呈现层用的动作，要么在呈现层有入口，要么在下面登记豁免。
+/// 覆盖：\`systools/tools.yaml\` 的每条动作都有归属——要么在人的命令面（\`HUMAN_ACTIONS\`）里，
+/// 要么由某个会话来源在会话里交出（内置面 / 模块工具 / 席位工具 / 工作区工具 / 会话类型的系统工具）。
 ///
-/// 口径：`systools/tools.yaml` 的 `callers` 里写了 `user` 的工具算「人的动作面」；豁免表只放
-/// 只能由席位在会话里调用的工具面（文件工具与判定回报），它们没有、也不该有人的入口。
-/// 新增动作时忘了给呈现层入口，这条会红——把 id 加进豁免表前先想清楚人到底怎么用它。
+/// 口径：人的命令面在 tools 单元的 \`is_human_action\` 里只有一处；呈现层入口检查对这份名单做，
+/// 名单里少数只有工具形态、没有按钮的条目在下面登记豁免。
+/// 新增动作忘了归属、或忘了给呈现层入口，这条会红。
 #[test]
-fn user_actions_have_a_presentation_entry_or_are_exempt() {
-    /// 工具面：只给会话里的席位用，人不直接调。
-    const TOOL_FACE: &[&str] = &[
-        "read",
-        "write",
-        "edit",
-        "patch",
-        "delete",
-        "list",
-        "grep",
-        "node_verdict",
-        "checklist",
-        "verdict",
-        "slate",
-        "submit_report",
-        "catalog_agents",
-        "send_session_message",
-        "observe_session",
-        "read_session_messages",
-    ];
+fn every_action_belongs_to_the_human_face_or_a_session_source() {
+    use crate::units::business::session_model::api as sm;
+    use crate::units::business::tools::api as t;
+    use crate::units::business::tools::api::HUMAN_ACTIONS;
+    /// 人的命令面里有、但只有工具形态（没有呈现层按钮）的那几条。
+    const TOOL_ONLY: &[&str] = &["read", "list", "grep", "shell", "compact"];
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let systools =
         std::fs::read_to_string(root.join("systools").join("tools.yaml")).expect("工具表要读得到");
-    let mut user_tools: Vec<String> = Vec::new();
-    let mut current = String::new();
+    let mut ids: Vec<String> = Vec::new();
     for line in systools.lines() {
         if let Some(rest) = line.strip_prefix("  ")
             && !rest.starts_with(' ')
             && let Some(name) = rest.strip_suffix(':')
         {
-            current = name.trim().to_string();
-            continue;
-        }
-        if let Some(rest) = line.trim_start().strip_prefix("callers:")
-            && !current.is_empty()
-            && rest
-                .trim()
-                .trim_start_matches('[')
-                .split(',')
-                .any(|c| c.trim() == "user")
-        {
-            user_tools.push(current.clone());
+            ids.push(name.trim().to_string());
         }
     }
-    assert!(!user_tools.is_empty(), "工具表里应当有人能用的动作");
+    assert!(!ids.is_empty(), "工具表里应当有动作");
+
+    // 会话侧会交出的 id：内置面（含 submit_report）、工作区工具、席位工具、会话类型的系统工具。
+    let mut session: Vec<String> = t::names();
+    session.extend(
+        crate::units::business::workspace::api::WORK_TOOLS
+            .iter()
+            .map(|s| s.to_string()),
+    );
+    for seat in sm::SEATS {
+        session.extend(seat.tools.iter().map(|s| s.to_string()));
+    }
+    for p in crate::tests::doubles::test_profiles().profiles {
+        session.extend(p.system_tools);
+    }
+    let mut orphan: Vec<&str> = Vec::new();
+    for id in &ids {
+        if t::is_human_action(id) || session.contains(id) {
+            continue;
+        }
+        orphan.push(id.as_str());
+    }
+    assert!(
+        orphan.is_empty(),
+        "这些动作既没有人的入口，也没有任何会话来源交出它：{:?}",
+        orphan
+    );
 
     let mut blob = String::new();
     let mut stack = vec![root.join("src").join("presentation")];
@@ -394,19 +395,19 @@ fn user_actions_have_a_presentation_entry_or_are_exempt() {
     }
 
     let mut absent: Vec<&str> = Vec::new();
-    for tool in &user_tools {
-        if TOOL_FACE.contains(&tool.as_str()) {
+    for id in HUMAN_ACTIONS {
+        if TOOL_ONLY.contains(id) {
             continue;
         }
-        let quoted = format!("\"{}\"", tool);
-        let single = format!("'{}'", tool);
+        let quoted = format!("\"{}\"", id);
+        let single = format!("'{}'", id);
         if !blob.contains(&quoted) && !blob.contains(&single) {
-            absent.push(tool.as_str());
+            absent.push(id);
         }
     }
     assert!(
         absent.is_empty(),
-        "这些动作人能用，但呈现层没有入口，也没登记豁免：{:?}",
+        "这些动作在人的命令面里，但呈现层没有入口，也没登记豁免：{:?}",
         absent
     );
 }

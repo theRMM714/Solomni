@@ -3,7 +3,6 @@
 //! 不管：会话对象与成员回合（`domain` 与同层的 driver/round）；工具的声明与执行（tools 端口后）；落盘（会话单元）。
 //! 联动：会话单元的用例驱动它；语义见 docs/tools/tools-and-roles.md（核心操作必须走工具调用 + 只读核实回路）。
 
-use crate::units::business::agentloop::domain::assemble;
 use crate::units::business::agentloop::domain::member_tools::CoreVerify;
 use crate::units::business::agentloop::domain::reply::reply_msgs;
 use crate::units::business::agentloop::domain::session::{delta_visible, stream_piece};
@@ -85,11 +84,25 @@ pub fn core_operation(
     // 声明面按**通道形态**给：原生通道才声明（信封通道的模型看提示词里的工具说明）。
     // 席位面由机制声明按总表合成；席位没登记时退化成空面（装配期已由 `mechanism::problems` 拦下）。
     let book = systools.book();
-    let face_rows: Vec<(&str, &crate::units::business::tools::api::ToolSchema)> =
-        match session_model::seat(seat) {
-            Some(seat) => assemble::resolve(seat, &book).unwrap_or_default(),
-            None => Vec::new(),
-        };
+    // 这一轮的面 = 席位自己声明的工具（loop 来源）∪ 只读核实面（read / list / grep）。
+    // 核实面恒在：核心操作也要先看现场再下结论，而 `is_readonly` 只放行这三个。
+    let mut ids: Vec<&str> = match session_model::seat(seat) {
+        Some(s) => s.tools.to_vec(),
+        None => Vec::new(),
+    };
+    for id in [
+        crate::units::business::tools::api::READ,
+        crate::units::business::tools::api::LIST,
+        crate::units::business::tools::api::GREP,
+    ] {
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    let face_rows: Vec<(&str, &crate::units::business::tools::api::ToolSchema)> = ids
+        .into_iter()
+        .filter_map(|id| book.get(id).map(|s| (id, s)))
+        .collect();
     let face_ids: Vec<String> = face_rows.iter().map(|(id, _)| id.to_string()).collect();
     // 声明面先备好：它被 opts 借走，**必须先于 opts 声明**（否则借用活得比它长）。
     let decls: Vec<crate::units::business::llm::api::ToolDecl> =

@@ -38,75 +38,61 @@ fn ctx(grant: Option<d::Grant>) -> d::ProxyCall {
     }
 }
 
-/// 目的：六个工具必须真的在总表里、且只发给 core_proxy（越权防线出自身份）。
+/// 目的：六个工具必须真的在总表里，且只挂在代理会话类型的 `system_tools` 上（越权防线出自会话形状）。
 #[test]
 pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
     let st = test_systools();
-    for name in [
+    const SIX: [&str; 6] = [
         d::CATALOG,
         d::CREATE,
         d::SEND,
         d::OBSERVE,
         d::CONTROL,
         d::MESSAGES,
-    ] {
+    ];
+    for name in SIX {
         let schema = st.tools.get(name).expect("代理工具必须在总表里");
-        assert_eq!(
-            schema.capability, "none",
-            "代理工具不碰文件，capability 必须是 none"
-        );
         assert!(!schema.desc.trim().is_empty(), "{} 缺说明", name);
         assert!(schema.params.is_some(), "{} 缺参数契约", name);
     }
-    let seat = crate::units::business::session_model::api::seat("core_proxy").expect("代理席在册");
-    let face: Vec<String> = crate::units::business::agentloop::api::seat_face(seat)
-        .into_iter()
-        .map(|s| s.to_string())
-        .collect();
-    let with_modules = seat.module_tools;
-    for name in [
-        d::CATALOG,
-        d::CREATE,
-        d::SEND,
-        d::OBSERVE,
-        d::CONTROL,
-        d::MESSAGES,
-        "read",
-        "list",
-        "grep",
-    ] {
-        assert!(face.iter().any(|t| t == name), "core_proxy 该能用 {}", name);
+    // 会话形状：只有代理类型把六个挂进 `system_tools`（其余类型的 system 面为空）。
+    let profiles = crate::tests::doubles::test_profiles();
+    let proxy = profiles
+        .spec_of(crate::units::business::session_model::api::PROXY)
+        .expect("代理类型在表里");
+    for name in SIX {
+        assert!(
+            proxy.system_tools.iter().any(|t| t == name),
+            "代理类型该声明 system 工具 {}：{:?}",
+            name,
+            proxy.system_tools
+        );
     }
+    for kind in [
+        crate::units::business::session_model::api::SINGLE,
+        crate::units::business::session_model::api::MEETING,
+    ] {
+        let spec = profiles.spec_of(kind).expect("产品类型在表里");
+        for name in SIX {
+            assert!(
+                !spec.system_tools.iter().any(|t| t == name),
+                "{} 不该声明代理工具 {}",
+                kind,
+                name
+            );
+        }
+    }
+    // 席位面不再含这些名字：它们来自会话类型，不来自 loop。
+    let seat = crate::units::business::session_model::api::seat("core_proxy").expect("代理席在册");
     assert!(
-        !with_modules,
-        "代理工具代用户决定，但不替 agent 干活（module_tools=false）"
+        seat.tools.is_empty(),
+        "代理席的工具面已交给会话类型：{:?}",
+        seat.tools
     );
     assert!(
         !st.tools.contains_key("core_proxy"),
         "core_proxy 是席位，不是工具"
     );
-    for role in ["discussant", "solo", "executor", "planner", "orchestrator"] {
-        let seat = crate::units::business::session_model::api::seat(role).expect("席位在册");
-        let rface: Vec<String> = crate::units::business::agentloop::api::seat_face(seat)
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect();
-        for name in [
-            d::CATALOG,
-            d::CREATE,
-            d::SEND,
-            d::OBSERVE,
-            d::CONTROL,
-            d::MESSAGES,
-        ] {
-            assert!(
-                !rface.iter().any(|t| t == name),
-                "{} 不该拿到代理工具 {}",
-                role,
-                name
-            );
-        }
-    }
 }
 
 /// 目的：没有授权就什么都不做：六个工具全部如实拒绝，且**根本没碰宿主**。
@@ -499,6 +485,8 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
                     modules: vec!["m1".to_string()],
                     model: None,
                     chara: String::new(),
+
+                    abilities: None,
                 }],
                 task: "做事".to_string(),
                 request_id: "r1".to_string(),
@@ -658,6 +646,8 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         modules: vec!["m1".to_string()],
         model: None,
         chara: String::new(),
+
+        abilities: None,
     }];
     assert!(
         faces
@@ -758,6 +748,8 @@ pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
                         modules: vec!["m1".to_string()],
                         model: None,
                         chara: String::new(),
+
+                        abilities: None,
                     }],
                     task: "做事".to_string(),
                     request_id: "r-env".to_string(),

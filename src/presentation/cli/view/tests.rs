@@ -377,6 +377,7 @@ fn agent(modules: &[&str], model: Option<&str>) -> Agent {
         model: model.map(str::to_string),
         note: String::new(),
         chara: String::new(),
+        abilities: None,
     }
 }
 

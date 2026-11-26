@@ -242,7 +242,7 @@ pub(crate) fn route(
                 Err(e) => complaint(400, e),
             }
         }
-        // 分发：一次动作 = 参数按声明校验 + callers 授权 + 执行 + 审计（各只有一处）。
+        // 分发：一次动作 = 人的命令面 + 参数按声明校验 + 身份授权 + 执行 + 审计（各只有一处）。
         "action" => {
             let req = match parse_body(body) {
                 Ok(v) => v,

@@ -35,7 +35,7 @@
 ## 改动本单元时必须同步
 
 - 改 `AgentSession` 的字段或簿记方法 → `docs/session/session-model.md`、`src/units/business/turn/`（驱动点）、`src/tests/session/`。
-- 改工具面装配（`assemble` / `seat_face` / `resolve`）→ 会话单元的席位自洽断言（`src/units/business/conversation/session/domain/seat_check.rs`）、`docs/tools/tools-and-roles.md`。
+- 改工具面装配（`assemble` / `face_of` / `sources`）→ 会话单元的席位自洽断言（`src/units/business/conversation/session/domain/seat_check.rs`）、`docs/tools/tools-and-roles.md`。
 - 改回合引擎的端口或结论类型 → `src/units/business/turn/turn/service/`、`src/tests/tools/`、`docs/session/session-model.md`。
 - 改核心操作回路 → `docs/tools/tools-and-roles.md`、`src/units/business/collab/` 与 `src/units/business/conversation/slate/` 的调用点。
 

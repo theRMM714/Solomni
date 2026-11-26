@@ -179,6 +179,8 @@ pub(crate) fn single_work(
             modules: modules.iter().map(|s| s.to_string()).collect(),
             model: None,
             chara: String::new(),
+
+            abilities: None,
         }],
         task: None,
         delegate: false,

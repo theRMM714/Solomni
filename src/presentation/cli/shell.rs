@@ -653,9 +653,6 @@ pub(crate) fn tool_op(module: &Module, name: &str, decl: &ToolDecl) -> Op {
             desc: decl.desc.clone(),
             params: decl.params.clone(),
             parallel: decl.parallel,
-            capability: String::new(),
-            callers: Vec::new(),
-            publish: false,
         },
         json: None,
     }

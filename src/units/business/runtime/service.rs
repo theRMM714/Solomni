@@ -23,7 +23,7 @@ use crate::units::business::runtime::api::{
     Acted, ActionCall, ActionOps, ActionParamView, ActionView, Caller, LogOps, RuntimeOps,
 };
 use crate::units::business::session_model::api::{HistoryView, RunState, SessionMeta};
-use crate::units::business::tools::api::{ToolExec, ToolSchema, Tools, arg_fault_text};
+use crate::units::business::tools::api::{ToolExec, Tools, arg_fault_text};
 use crate::units::business::transcript::api::{DecisionQueue, SessionEvent};
 use crate::units::business::turn::turn::api::{Advance, CollabWork, Events, Output};
 use crate::units::business::turn::turn::api::{SPEAKER, TurnOps};

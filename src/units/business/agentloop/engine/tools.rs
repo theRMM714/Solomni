@@ -197,8 +197,8 @@ pub(crate) fn commit_writes(
     }
 }
 
-/// 目的：这次调用在**本回合的工具面**里吗：内置按席位面合成的 id 清单，外部工具按"这一回合给不给模块工具"
-///   与模块归属（判据只有这一处——执行侧与"如实说一句越权"都读它）。
+/// 目的：这次调用在**本回合的工具面**里吗：内置与核心自有工具按 id 清单；模块工具按限定 id `<模块>.<工具>`
+///   （判据只有这一处——执行侧与"如实说一句越权"都读它）。
 pub(crate) fn face_has(ctx: &MemberTools, module: Option<&str>, name: &str) -> bool {
     // 系统工具册里的名字（含 `compact` 这类只由系统发起的工具）也按工具面校验：
     // 不能因为“没写 module”就落进模块工具的兜底分支。
@@ -211,11 +211,17 @@ pub(crate) fn face_has(ctx: &MemberTools, module: Option<&str>, name: &str) -> b
         // 核心自有工具与内置**同口径**：名字在这一回合的工具面里，就是放行。
         ctx.face.allowed.iter().any(|t| t == name)
     } else {
+        // 模块工具按限定 id 判：面里有 `<模块>.<工具>` 才是放行。
         // 没写 module 不算越权：那是"派发时消歧"的事，由 dispatch_external 如实说清（多模块下不猜）。
-        ctx.face.with_modules
-            && module
-                .map(|m| ctx.face.modules.contains_key(m))
-                .unwrap_or(true)
+        let hit = |m: &str| {
+            ctx.face
+                .allowed
+                .iter()
+                .any(|t| t == &format!("{}.{}", m, name))
+        };
+        module
+            .map(hit)
+            .unwrap_or_else(|| ctx.face.modules.keys().any(|m| hit(m)))
     }
 }
 
@@ -271,9 +277,6 @@ fn module_schema() -> ToolSchema {
         desc: String::new(),
         params: None,
         parallel: false,
-        capability: "none".to_string(),
-        callers: Vec::new(),
-        publish: false,
     }
 }
 
@@ -469,9 +472,16 @@ pub(crate) fn tool_decls(face: &ToolFace) -> ToolDecls {
         );
         decls.list.push(patch);
     }
-    // 模块工具按**成员归属**发放（不是席位的通用属性）：拿不到模块工具的身份（讨论席）不声明它们。
-    for (id, mt) in face.modules.iter().filter(|_| face.with_modules) {
+    // 模块工具按**成员归属**发放（不是席位的通用属性）：面里没有 `<模块>.<工具>` 就不声明它们。
+    for (id, mt) in &face.modules {
         for tool in mt.commands.keys() {
+            if !face
+                .allowed
+                .iter()
+                .any(|t| t == &format!("{}.{}", id, tool))
+            {
+                continue;
+            }
             let mut wire_name = format!("{}_{}", id, tool);
             let mut n = 2;
             while taken.contains(&wire_name) {
@@ -495,6 +505,13 @@ pub(crate) fn tool_decls(face: &ToolFace) -> ToolDecls {
         }
         // 已启动常驻服务的操作：与外部工具同一条声明路径（线上名里的点换成下划线，供应商函数名不收点）。
         for tool in mt.services.keys() {
+            if !face
+                .allowed
+                .iter()
+                .any(|t| t == &format!("{}.{}", id, tool))
+            {
+                continue;
+            }
             let flat = tool.replace('.', "_");
             let mut wire_name = format!("{}_{}", id, flat);
             let mut n = 2;
@@ -530,13 +547,11 @@ pub(crate) fn tool_decls(face: &ToolFace) -> ToolDecls {
 ///   列出去会让模型以为能调，同一句回执里再说「没有这个工具」就自相矛盾了。
 pub(crate) fn available_tools(face: &ToolFace) -> String {
     let mut list: Vec<String> = Vec::new();
-    if face.with_modules {
-        for (id, mt) in &face.modules {
-            for name in mt.commands.keys() {
-                list.push(format!("{}.{}", id, name));
-            }
-            for name in mt.services.keys() {
-                list.push(format!("{}.{}", id, name));
+    for (id, mt) in &face.modules {
+        for name in mt.commands.keys().chain(mt.services.keys()) {
+            let q = format!("{}.{}", id, name);
+            if face.allowed.contains(&q) {
+                list.push(q);
             }
         }
     }

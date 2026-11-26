@@ -31,7 +31,7 @@ pub(crate) fn tool_loop_rejects_undeclared_tool() {
     assert_eq!(exec.reports.get("m0").map(|s| s.as_str()), Some("完成"));
     let trace = exec.traces.get("m0").expect("工具调用应入册");
     assert!(
-        trace.iter().any(|v| v.output.contains("未声明")),
+        trace.iter().any(|v| v.output.contains("没有工具 nope")),
         "{:?}",
         trace.iter().map(|v| &v.output).collect::<Vec<_>>()
     );

@@ -239,6 +239,14 @@ pub struct ToolFace {
     pub allowed: Vec<String>,
     /// 目的：这一席的席位 id（机制声明的席位）——工具调用的审计记录用它当调用者身份。
     pub seat: String,
+    /// 目的：会话类型声明挂哪些工具来源（换席时装配机按它造来源实例）。
+    pub source_ids: Vec<String>,
+    /// 目的：会话 meta 里的 system 工具 id（会话类型展开，成员回合为空）。
+    pub system_tools: Vec<String>,
+    /// 目的：这个 agent 的能力组（读面 / 工作面 / 执行面按它发）。
+    pub abilities: Vec<String>,
+    /// 目的：会话类型 id（诊断与装配用）。
+    pub profile: String,
     /// 目的：这个席位**能不能用它自己模块的工具**（席位的 module_tools；执行席是，讨论席不是）。
     pub with_modules: bool,
     /// 目的：工具说明块的素材（patch 语法 / 模块工具 / 模块工具参数）：装配期算一次，随回合注入。
@@ -287,7 +295,7 @@ pub(crate) struct MemberTools {
 ///   契约只收自己的用法（R16：api 面不收活对象）：调用方递 `&mut MemberTools` 的实现，
 ///   `session::api::core_operation` 与 `slate::api::Request` 的公共签名里只出现这一个端口。
 pub trait CoreVerify {
-    /// 目的：这个名字是不是本席可用的只读核实工具（内置工具表里能力为 `fs-read`）。
+    /// 目的：这个名字是不是本席可用的只读核实工具（读面那三个内置工具之一）。
     fn is_readonly(&self, name: &str) -> bool;
     /// 目的：跑一次只读核实工具，回执行回执（读到的东西进本席观察账本）。
     fn run_readonly(
@@ -299,11 +307,10 @@ pub trait CoreVerify {
 
 impl CoreVerify for MemberTools {
     fn is_readonly(&self, name: &str) -> bool {
-        self.face
-            .builtin_tools
-            .get(name)
-            .map(|s| s.capability == "fs-read")
-            .unwrap_or(false)
+        use crate::units::business::tools::api::{GREP, LIST, READ};
+        matches!(name, READ | LIST | GREP)
+            && self.face.builtin_tools.contains_key(name)
+            && self.face.allowed.iter().any(|n| n == name)
     }
 
     fn run_readonly(
@@ -334,21 +341,24 @@ impl MemberTools {
             return;
         }
         let next = super::assemble::assemble(super::assemble::FaceInput {
-            seat,
+            role: seat,
+            agent: &self.face.sandbox.agent,
+            workspace_name: Some(self.face.sandbox.work_name.as_str()).filter(|n| !n.is_empty()),
+            abilities: &self.face.abilities,
+            profile: &self.face.profile,
+            source_ids: &self.face.source_ids,
+            system_tools: &self.face.system_tools,
             modules: &self.modules,
             sandbox: &self.face.sandbox,
-            book: &self.face.builtin_tools,
             prompt: &*self.prompt,
             residents: &*self.residents,
-            // 成员会话恒发自己模块的工具（席位说了算）。
-            modules_allowed: true,
             workspace: self.workspace.as_ref(),
         });
         self.face.allowed = next.allowed;
         self.face.modules = next.modules;
         self.face.with_modules = next.with_modules;
         self.face.notes = next.notes;
-        self.face.seat = next.seat;
+        self.face.seat = next.role;
         self.handlers = next.handlers;
     }
 

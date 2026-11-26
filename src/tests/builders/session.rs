@@ -34,6 +34,23 @@ pub(crate) struct WithTools {
     pub tools: Option<MemberTools>,
 }
 
+/// 目的：测试替身的放行名单：全部内置工具 + 模块表里的限定 id（`<模块>.<工具>`）。
+/// 约束：模块工具按限定 id 发放——与真装配机的口径一致；只算名单，不造模块表。
+pub(crate) fn face_allowed(
+    modules: &BTreeMap<String, crate::units::business::agentloop::api::ModuleTools>,
+) -> Vec<String> {
+    let mut out = crate::units::business::tools::api::names();
+    for (id, tools) in modules {
+        for name in tools.commands.keys().chain(tools.services.keys()) {
+            let qualified = format!("{}.{}", id, name);
+            if !out.contains(&qualified) {
+                out.push(qualified);
+            }
+        }
+    }
+    out
+}
+
 /// 目的：带工具环境的成员：模块 m0 声明 scan → python tools/scan.py（cwd = 该模块目录）。
 pub(crate) fn member_with_tools(
     id: &str,
@@ -53,6 +70,7 @@ pub(crate) fn member_with_tools(
             services: BTreeMap::new(),
         },
     );
+    let allowed = face_allowed(&modules);
     let m = Member::new(
         id,
         crate::tests::doubles::test_params(id),
@@ -83,8 +101,15 @@ pub(crate) fn member_with_tools(
                 module_env: Default::default(),
                 runtime_path: None,
                 runtime_roots: Vec::new(),
-                // 测试替身按"执行席"发放全部内置工具（机制席位的越权校验另有专门用例）。
-                allowed: crate::units::business::tools::api::names(),
+                // 测试替身按"执行席"发放全部内置工具与模块的限定 id（机制席位的越权校验另有专门用例）。
+                allowed,
+                source_ids: vec!["agent".to_string(), "module".to_string()],
+                system_tools: Vec::new(),
+                abilities: crate::units::pure::registry_model::api::DEFAULT_ABILITIES
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+                profile: "single".to_string(),
                 with_modules: true,
                 notes: crate::tests::doubles::test_notes(&test_sandbox("m0", &[]), &[]),
             },
@@ -127,6 +152,7 @@ pub(crate) fn agent_meta(name: &str, modules: &[&str], model: Option<&str>) -> A
         modules: modules.iter().map(|s| s.to_string()).collect(),
         model: model.map(|s| s.to_string()),
         chara: String::new(),
+        abilities: None,
     }
 }
 

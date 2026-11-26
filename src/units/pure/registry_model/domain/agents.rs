@@ -6,6 +6,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// 目的：agent 没声明能力组时给的全集（读面、工作面、执行、共享区写入）。
+/// 约束：能力组名与 `session_model` 的来源口径一致；声明了空列表就是什么都不给。
+pub const DEFAULT_ABILITIES: [&str; 4] = ["fs-read", "fs-write", "exec", "shared-write"];
+
 /// 目的：会话里的一个 agent 实例记录——会话名单的唯一形状（R15）：登记处视图经
 ///   `agent_meta` 转换，代理建会话与核心点名都复用它。归登记处所有：agent 的身份来自登记处，
 ///   会话只持有快照并与会话一起走（方向是 session → registry，不是反过来）。
@@ -23,6 +27,10 @@ pub struct AgentMeta {
     /// 目的：人设 / 身份（建会话时从登记处或临时声明里快照；之后与会话一起走）。
     #[serde(default)]
     pub chara: String,
+    /// 目的：能力组（fs-read / fs-write / exec / shared-write）；`None` = 没声明，按全集给。
+    /// 约束：空列表是有意义的声明（什么都不给），不能归一成 `None`。
+    #[serde(default)]
+    pub abilities: Option<Vec<String>>,
 }
 impl AgentMeta {
     /// 目的：会话名单里一个 agent 实例的**唯一**构造口径：名字与身份去首尾空白、模块保序去重、空模型归一成 `None`。
@@ -50,7 +58,30 @@ impl AgentMeta {
                 .map(|m| m.trim().to_string())
                 .filter(|m| !m.is_empty()),
             chara: chara.into().trim().to_string(),
+            abilities: None,
         }
+    }
+
+    /// 目的：这个 agent 实际拿到的能力组（没声明就给全集）。
+    pub fn abilities(&self) -> Vec<String> {
+        self.abilities
+            .clone()
+            .unwrap_or_else(|| DEFAULT_ABILITIES.iter().map(|s| s.to_string()).collect())
+    }
+
+    /// 目的：声明能力组（建名单时从登记处带过来；只做去空白与去重，空列表保留）。
+    pub fn with_abilities(mut self, abilities: Option<Vec<String>>) -> AgentMeta {
+        self.abilities = abilities.map(|list| {
+            let mut out: Vec<String> = Vec::with_capacity(list.len());
+            for a in list {
+                let id = a.trim().to_string();
+                if !id.is_empty() && !out.contains(&id) {
+                    out.push(id);
+                }
+            }
+            out
+        });
+        self
     }
 }
 
@@ -68,6 +99,9 @@ pub struct Agent {
     /// 目的：人设 / 身份（给模型看）：进入这个 agent 的身份提示词；可选、可多行。
     #[serde(default)]
     pub chara: String,
+    /// 目的：能力组（fs-read / fs-write / exec / shared-write）；`None` = 没声明，按全集给。
+    #[serde(default)]
+    pub abilities: Option<Vec<String>>,
 }
 
 /// 目的：agent 登记处（agents.yaml 的内存形态）。
@@ -81,6 +115,7 @@ pub struct AgentView {
     pub model: Option<String>,
     pub note: String,
     pub chara: String,
+    pub abilities: Option<Vec<String>>,
 }
 
 /// 目的：登记处视图 → 会话里的 agent 实例（`transient=false`）。**唯一**的转换口径：
@@ -93,6 +128,7 @@ pub fn agent_meta(v: &AgentView) -> AgentMeta {
         v.chara.clone(),
         false,
     )
+    .with_abilities(v.abilities.clone())
 }
 
 /// 目的：保存 agent 的入参（用户给的定义）。
@@ -216,6 +252,7 @@ pub fn views(agents: &Agents) -> Vec<AgentView> {
             model: a.model.clone(),
             note: a.note.clone(),
             chara: a.chara.clone(),
+            abilities: a.abilities.clone(),
         })
         .collect()
 }

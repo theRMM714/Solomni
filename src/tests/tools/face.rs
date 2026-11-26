@@ -473,6 +473,7 @@ pub(crate) fn module_tools_are_concurrent_only_when_declared() {
         if parallel {
             mt.parallel.insert("scan".to_string());
         }
+        t.face.allowed.push("m0.scan".to_string());
         t.tools = test_tools_svc_with(
             runner,
             Arc::new(InMemorySysIo::new()),
@@ -592,6 +593,8 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
                 modules: vec!["a".to_string()],
                 model: Some("m".to_string()),
                 chara: String::new(),
+
+                abilities: None,
             }],
             task: None,
             delegate: false,
@@ -669,7 +672,7 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
         notes(&e3)
     );
 }
-/// 目的：共享区版本化的六个工具：executor / solo 发到，讨论席与核心席不发；
+/// 目的：共享区版本化的六个工具：有工作区且有 `shared-write` 能力组才发（谁不许调由权限端口判）；
 ///   声明在工具总表里（机制席位的悬空引用由装配期 `SystemTools::problems()` 与 `src/tests/detail/` 锁死）。
 #[test]
 pub(crate) fn work_versioning_tools_are_granted_to_the_working_roles_only() {
@@ -687,39 +690,51 @@ pub(crate) fn work_versioning_tools_are_granted_to_the_working_roles_only() {
     for id in ids {
         assert!(book.contains_key(id), "{} 必须在工具总表里", id);
     }
-    let face = |id: &str| -> Vec<String> {
-        let seat = crate::units::business::session_model::api::seat(id).expect("席位在册");
-        crate::units::business::agentloop::api::seat_face(seat)
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect()
+    // 发放规则在**来源**里：有工作区 + 有共享区写入能力才交 work_*（谁不许调由权限端口判）。
+    use crate::units::business::session_model::api::{SHARED_WRITE, ToolSource, TurnCtx};
+    let sources: Vec<Arc<dyn ToolSource>> = vec![Arc::new(
+        crate::units::business::agentloop::api::WorkspaceSource,
+    )];
+    let abilities = vec![SHARED_WRITE.to_string()];
+    let with_area = TurnCtx {
+        loop_id: None,
+        role: "executor",
+        agent_id: "甲",
+        abilities: &abilities,
+        profile: "collab",
+        workspace: Some("w"),
     };
-    for role in ["executor", "solo"] {
-        let face = face(role);
-        for id in ids {
-            assert!(face.contains(&id.to_string()), "{} 该有 {}", role, id);
-        }
+    let (face, used) = crate::units::business::agentloop::api::face_of(&with_area, &sources);
+    assert_eq!(used, vec!["workspace".to_string()], "记下是谁交的 id");
+    for id in ids {
+        assert!(face.contains(&id.to_string()), "有工作区该有 {}", id);
     }
-    for role in ["discussant", "core_proxy", "planner", "orchestrator"] {
-        let face = face(role);
-        assert!(
-            !face.iter().any(|t| t.starts_with("work_")),
-            "{} 不该发共享区版本化工具：{:?}",
-            role,
-            face
-        );
-    }
+    let no_area = TurnCtx {
+        workspace: None,
+        ..with_area
+    };
+    let (face, _) = crate::units::business::agentloop::api::face_of(&no_area, &sources);
+    assert!(
+        face.is_empty(),
+        "没有工作区就一个共享区工具也不发：{:?}",
+        face
+    );
+    let no_ability = TurnCtx {
+        abilities: &[],
+        ..with_area
+    };
+    let (face, _) = crate::units::business::agentloop::api::face_of(&no_ability, &sources);
+    assert!(
+        face.is_empty(),
+        "没有共享区写入能力就一个也不发：{:?}",
+        face
+    );
     // 只读、无副作用的并发；pull / commit / resolve 会改状态，不并发。
     assert!(book["work_status"].parallel && book["work_versions"].parallel);
-    // **发布面就是这 11 个 work_***：会改共享工作区的动作只有它们，标记不许漏也不许多。
-    for (name, schema) in book.iter() {
-        assert_eq!(
-            schema.publish,
-            crate::units::business::workspace::api::is_work_tool(name),
-            "{} 的发布面标记与 workspace 的动作面不一致",
-            name
-        );
-    }
+    // **发布面就是这 11 个 work_***：会改共享工作区的动作只有它们。
+    assert!(crate::units::business::workspace::api::is_work_tool(
+        "work_commit"
+    ));
     assert!(
         !book["work_pull"].parallel
             && !book["work_commit"].parallel

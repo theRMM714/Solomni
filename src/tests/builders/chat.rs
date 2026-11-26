@@ -267,6 +267,7 @@ pub(crate) fn native_member(
         },
     );
     let sb = test_sandbox(id, &[]);
+    let allowed = super::face_allowed(&modules);
     WithTools {
         member: m,
         tools: Some(MemberTools {
@@ -286,8 +287,15 @@ pub(crate) fn native_member(
                 module_env: Default::default(),
                 runtime_path: None,
                 runtime_roots: Vec::new(),
-                // 测试替身按"执行席"发放全部内置工具（机制席位的越权校验另有专门用例）。
-                allowed: crate::units::business::tools::api::names(),
+                // 测试替身按"执行席"发放全部内置工具与模块的限定 id（机制席位的越权校验另有专门用例）。
+                allowed,
+                source_ids: vec!["agent".to_string(), "module".to_string()],
+                system_tools: Vec::new(),
+                abilities: crate::units::pure::registry_model::api::DEFAULT_ABILITIES
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+                profile: "single".to_string(),
                 with_modules: true,
                 notes: crate::tests::doubles::test_notes(&sb, &[]),
             },
