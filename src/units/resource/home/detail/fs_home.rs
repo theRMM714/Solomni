@@ -3,7 +3,7 @@
 //! 不管：文档名与私密策略（在 domain）、yaml（在 catalog）、目录路径（组合根给）。
 //! 联动：只经 `HomeService` 使用；路径来自 `kernel::domain::layout::home`。
 
-use crate::units::home::ports::HomeFiles;
+use crate::units::resource::home::ports::HomeFiles;
 use std::path::PathBuf;
 
 /// 目的：登记处目录的文件面（组合根构造）。

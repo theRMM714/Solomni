@@ -3,9 +3,9 @@
 //! 不管：目录枚举与读盘（在 `assets`）；工具总表与机制席位（在 units/tools/detail）；渲染与 `@` 引用改写（在 domain）。
 //! 联动：实现 prompt/ports.rs 的 PromptSource，由组合根装配；加载结果交 service::load。
 
-use crate::units::assets::api::Assets;
 use crate::units::prompt::domain::prompt::{Prompts, merge_book};
 use crate::units::prompt::ports::PromptSource;
+use crate::units::resource::assets::api::Assets;
 use std::sync::Arc;
 
 pub struct YamlPrompts {

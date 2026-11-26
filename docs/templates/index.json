@@ -35,7 +35,9 @@
         "docs/architecture/state.md",
         "docs/architecture/boundaries.md",
         "docs/architecture/comments.md",
-        "docs/architecture/rust-dev.md"
+        "docs/architecture/rust-dev.md",
+        "docs/architecture/io.md",
+        "docs/architecture/dependency-map.md"
       ]
     },
     "reference": {

@@ -11,6 +11,8 @@
 | 什么该是端口、有哪些端口、谁持有它 | [docs/architecture/ports.md](docs/architecture/ports.md) |
 | 状态归谁、落盘契约、运行日志、提示词册 | [docs/architecture/state.md](docs/architecture/state.md) |
 | 业务边界判据、状态归属、三分法、粒度上限、硬要求 R1–R20、T0 判据 | [docs/architecture/boundaries.md](docs/architecture/boundaries.md) |
+| 什么算 IO、各类 IO 的唯一实现在哪、谁可以取 | [docs/architecture/io.md](docs/architecture/io.md) |
+| 单元之间实际有哪些依赖边、跨环与同环各多少处 | [docs/architecture/dependency-map.md](docs/architecture/dependency-map.md) |
 | 注释契约：文件头四槽、条目槽、行内限量、零豁免 | [docs/architecture/comments.md](docs/architecture/comments.md) |
 | Rust 模块布局、格式与静态检查、unsafe 与平台分叉、跨平台机制、依赖 | [docs/architecture/rust-dev.md](docs/architecture/rust-dev.md) |
 | 架构细则的目录索引与「按改动找入口」 | [docs/architecture/README.md](docs/architecture/README.md) |

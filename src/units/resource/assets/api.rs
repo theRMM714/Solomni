@@ -5,8 +5,8 @@
 
 use std::path::Path;
 
-pub use crate::units::assets::domain::doc::Doc;
-pub use crate::units::assets::domain::paths::AssetPaths;
+pub use crate::units::resource::assets::domain::doc::Doc;
+pub use crate::units::resource::assets::domain::paths::AssetPaths;
 
 /// 目的：按安装根建落点派生器（只给组合根与探针用）。
 /// 参数：`install` = 产品安装根。

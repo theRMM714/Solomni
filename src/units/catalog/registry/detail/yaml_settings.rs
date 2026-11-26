@@ -5,10 +5,10 @@
 
 use crate::units::catalog::registry::api::{AppSettings, Settings};
 use crate::units::catalog::registry::ports::SettingsStore;
-use crate::units::home::api::{Doc, Home};
 use crate::units::pure::registry_model::api::Agents;
 use crate::units::pure::registry_model::api::ModelEntry;
 use crate::units::pure::registry_model::api::Provider;
+use crate::units::resource::home::api::{Doc, Home};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;

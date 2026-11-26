@@ -19,10 +19,11 @@ const SCAFFOLD = [
   "src/tests/fakes.rs",
   "src/tests/prelude.rs",
   "src/tests/detail.rs",
+  "src/tests/detail/",
   "src/tests/helpers/",
 ];
 
-const IMPL_USE = /crate::units::[a-z_]+::[a-z_]+::(service|domain|detail)\b/;
+const IMPL_USE = /crate::units::(?:(?:pure|resource)::[a-z_]+|[a-z_]+::[a-z_]+)::(service|domain|detail)\b/;
 
 function testsApiOnly(root) {
   const problems = [];

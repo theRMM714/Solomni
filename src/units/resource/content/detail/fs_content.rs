@@ -3,7 +3,7 @@
 //! 不管：路径是不是该建、建完怎么报（在 `service.rs`）。
 //! 联动：由组合根构造，只经端口给 `service.rs`。
 
-use crate::units::content::ports::ContentFs;
+use crate::units::resource::content::ports::ContentFs;
 use std::path::Path;
 
 /// 目的：真实文件系统的目录动作（无状态）。

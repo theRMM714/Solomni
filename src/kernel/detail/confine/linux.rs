@@ -354,8 +354,7 @@ fn landlock_confines() -> bool {
 /// 装一个「什么都不放行」的最小 ruleset，再去读金丝雀：读不到才算本机真能围。
 /// 子进程退出码：0 = 读到了（没约束）、1 = 被挡住（机制有效）、2 = 装不上（无法判定）。
 fn landlock_confines_probe() -> bool {
-    let canary =
-        env::temp_dir().join(format!("solomni-landlock-selfcheck-{}", std::process::id()));
+    let canary = env::temp_dir().join(format!("solomni-landlock-selfcheck-{}", std::process::id()));
     if std::fs::write(&canary, "canary").is_err() {
         return false;
     }

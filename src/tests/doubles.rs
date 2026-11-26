@@ -58,10 +58,12 @@ mod workspace;
 /// 目的：随包只读内容的**真实适配器**（指向给定安装根下的 `prompts/` 与 `systools/`）。
 /// 参数：`root` = 产品安装根（仓库根，或用例造出来的隔离根）。
 /// 返回：注入各装配输入适配器的 `Assets`。
-pub(crate) fn assets_at(root: &std::path::Path) -> Arc<dyn crate::units::assets::api::Assets> {
-    Arc::new(crate::units::assets::service::AssetsService::new(
+pub(crate) fn assets_at(
+    root: &std::path::Path,
+) -> Arc<dyn crate::units::resource::assets::api::Assets> {
+    Arc::new(crate::units::resource::assets::service::AssetsService::new(
         root,
-        Box::new(crate::units::assets::detail::FsAssetFs),
+        Box::new(crate::units::resource::assets::detail::FsAssetFs),
     ))
 }
 

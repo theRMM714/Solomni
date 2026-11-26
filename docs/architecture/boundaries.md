@@ -104,6 +104,7 @@
 - **kernelProducts**（内核无产品名）：`src/kernel` 下任何 `.rs`（含注释与测试）不得出现 `qemu` / `smbd` / `virtiofsd`——内核只提供通用机制，产品名与它的 argv、配置文件名留在单元里；命中即失败、零豁免（`tests/gates/structure/kernel-products.js`）；
 - **envSurface**（环境面）：`std::env::` 只许在 `src/kernel/detail/io/env.rs`、`src/main.rs`、`src/entry/`、`src/presentation/` 出现（呈现面是终端能力探测）；其余一律经 `kernel::api::env`，`std::env::consts` 与 `split_paths` 不在判据内（`tests/gates/structure/env-surface.js`）；
 - **diskOwners**（盘主）：一块盘一个主——`layout::<介质>()` 只许主人单元、组合根与内核调用，别的单元走主人单元 api / 端口；主人表与 `layout.rs` 双向比对，改了名不登记即报错（`tests/gates/structure/disk-owners.js`）；
+- **ioOwners**（IO 面）：入站监听、回环客户端、出站装配各只有一份实现（`src/kernel/detail/io/net/`）；命中点只能落在实现文件或表里逐条登记过的例外（容器内回环中继绑 `127.0.0.2`、流式栈自建 `reqwest` client），其余一律经 `kernel::api::net`（`tests/gates/structure/io-owners.js`，口径见 [io.md](io.md)）；
 - **toolPaths**（外部工具位置）：设置里的 `qemu_path` / `virtiofsd_path` / `smbd_path` 只在定义（catalog）、解析（provision）、写入（runtime）、装配（work、entry）读；别处要工具位置问 `provision::api::vm_tools` / `vm_tools_report`（`tests/gates/structure/tool-paths.js`）；
 - **fileSize**（文件粒度）：按角色分档判行数（实现 / 测试用例 / 测试支撑）与内联测试块，软线只回执、硬线失败，无 `EXEMPT`（`tests/gates/structure/size.js`）；
 - **reverse** / **presentation**：单元不反向依赖根或呈现层；呈现层只认入站面——各单元的 `::api`，加上内核的 `kernel::api`（回环端口、环境这类原语只有内核一份实现，屏里不许再写一套），具体哪屏能取哪几个由 [presentation/inbound.yaml](../presentation/inbound.yaml) 定；

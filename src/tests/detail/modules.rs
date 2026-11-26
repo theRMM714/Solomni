@@ -8,11 +8,13 @@ use super::*;
 /// 目的：给扫描用的内容盘适配——私有区落在隔离根下的 `data/modules`，不碰源码树。
 fn content_at(
     root: &std::path::Path,
-) -> std::sync::Arc<dyn crate::units::content::api::Content + Send + Sync> {
-    std::sync::Arc::new(crate::units::content::service::ContentService::new(
-        root,
-        Box::new(crate::units::content::detail::FsContentFs),
-    ))
+) -> std::sync::Arc<dyn crate::units::resource::content::api::Content + Send + Sync> {
+    std::sync::Arc::new(
+        crate::units::resource::content::service::ContentService::new(
+            root,
+            Box::new(crate::units::resource::content::detail::FsContentFs),
+        ),
+    )
 }
 
 #[test]

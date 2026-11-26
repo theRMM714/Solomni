@@ -5,7 +5,7 @@
 
 use crate::units::catalog::modules::api::{Module, ModuleManifest, Roster};
 use crate::units::catalog::modules::ports::ModuleSource;
-use crate::units::content::api::Content;
+use crate::units::resource::content::api::Content;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

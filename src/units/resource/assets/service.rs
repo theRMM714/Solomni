@@ -3,9 +3,9 @@
 //! 不管：读盘（在 `detail` 的端口实现里）；文档内容的解释（消费方）。
 //! 联动：组合根构造；`prompt` / `tools` / `conversation` 的适配器持有它。契约见 docs/assets/README.md。
 
-use crate::units::assets::api::{Assets, Doc, PromptDoc};
-use crate::units::assets::domain::paths::AssetPaths;
-use crate::units::assets::ports::AssetFiles;
+use crate::units::resource::assets::api::{Assets, Doc, PromptDoc};
+use crate::units::resource::assets::domain::paths::AssetPaths;
+use crate::units::resource::assets::ports::AssetFiles;
 use std::path::Path;
 
 /// 目的：随包只读内容的资源单元实现。

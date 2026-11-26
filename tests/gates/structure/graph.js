@@ -229,7 +229,8 @@ function capView(root, rows, problems) {
   const nodes = dirs.map((name) => {
     const layer = tiers.has(name) ? tiers.get(name) : 0;
     const rels = L.rsFilesOf(L.unitDir(root, name)).map((f) => relOf(root, f)).sort();
-    return { name: name, layer: layer, out: 0, inn: 0, files: fileRows(rows, rels, fileHit), issues: byCap.get(name) || [] };
+    const dir = relOf(root, L.unitDir(root, name));
+    return { name: name, layer: layer, dir: dir, out: 0, inn: 0, files: fileRows(rows, rels, fileHit), issues: byCap.get(name) || [] };
   });
   const byName = new Map(nodes.map((c) => [c.name, c]));
   const ranks = L.ranksOf(tiers, capEdges);
@@ -712,7 +713,7 @@ function page(data) {
     " out.push('</svg>');return out.join('');}",
     "function drawNode(){var view=cur.v,name=cur.n;stage.scrollTop=0;stage.scrollLeft=0;",
     " var n=nodeOf(view,name);if(!n)return;",
-    " var prefix=view==='caps'?'src/units/'+name:view==='mech'?'src/kernel/'+name:view==='entry'?'src/entry/':view==='pres'?'src/presentation/':'';",
+    " var prefix=view==='caps'?n.dir:view==='mech'?'src/kernel/'+name:view==='entry'?'src/entry/':view==='pres'?'src/presentation/':'';",
     " var fe=(view==='caps'?D.fe[name]:view==='mech'?D.mech.fe[name]:view==='entry'?D.entry.fe[name]:null)||[];",
     " crumb([['全景',''],[TAB[view],'view:'+view],[view==='pres'?n.name:n.name,view==='pres'?'v:'+view+':'+n.file:'v:'+view+':'+name]]);",
     " stage.innerHTML=fileGraph(n.files,fe,prefix);",

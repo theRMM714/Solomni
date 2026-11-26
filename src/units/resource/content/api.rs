@@ -3,7 +3,7 @@
 //! 不管：模块清单、校验、回收策略与安装实现（见各单元）。
 //! 联动：组合根与小业务经它取路径；实现只在 `service.rs`。
 
-pub use crate::units::content::domain::paths::{ContentPaths, ModuleArea};
+pub use crate::units::resource::content::domain::paths::{ContentPaths, ModuleArea};
 use std::path::{Path, PathBuf};
 
 /// 目的：按产品安装根造一份落点派生器（纯函数，不碰磁盘）。

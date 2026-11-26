@@ -1,9 +1,9 @@
 //! 目的：回收各处的落点与构建卷占用判定——survey 与 reclaim 共用同一套路径。
 //! 管：把盘点用的名字映射到 `vmstore` 的布局上，并问内核"构建锁此刻有没有人持"。
 //! 不管：怎么扫（survey）、怎么删（reclaim）、回收锁（lock）；落点本身归 `vmstore`。
-//! 联动：detail::survey 与 detail::reclaim 都经它取路径，扫与删不会各写一份；布局见 `units::vmstore`。
+//! 联动：detail::survey 与 detail::reclaim 都经它取路径，扫与删不会各写一份；布局见 `units::resource::vmstore`。
 
-use crate::units::vmstore::api;
+use crate::units::resource::vmstore::api;
 use std::path::{Path, PathBuf};
 
 /// 目的：构建缓存卷的目录。

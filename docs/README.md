@@ -69,7 +69,7 @@
 | 单 agent：实施、本机回路、收口 | [workflow/single-agent.md](workflow/single-agent.md) |
 | 多 agent：开工、派发、worktree、逐片 squash 集成、收口 | [workflow/multi-agent.md](workflow/multi-agent.md) |
 | 用户启动文档审计 / 治理（检查、修改、验收） | [workflow/docs-audit.md](workflow/docs-audit.md) |
-| 架构细则入口（分层、端口、状态、边界判据、注释契约、Rust 规范） | [architecture/README.md](architecture/README.md) |
+| 架构细则入口（分层、端口、状态、边界判据、IO 面与依赖地图、注释契约、Rust 规范） | [architecture/README.md](architecture/README.md) |
 | 文档分层、同步表、术语、引用格式 | [conventions.md](conventions.md) |
 | Rust 源码布局、格式与静态检查、unsafe、依赖 | [architecture/rust-dev.md](architecture/rust-dev.md) |
 

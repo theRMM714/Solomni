@@ -92,7 +92,10 @@ mod tests {
         let out = await_loopback(port, "某通道", Duration::from_millis(120), &mut alive);
         let text = out.expect_err("没人监听就该超时");
         assert!(text.contains("等某通道超时"), "{}", text);
-        assert!(started.elapsed() >= Duration::from_millis(100), "预算要真的等");
+        assert!(
+            started.elapsed() >= Duration::from_millis(100),
+            "预算要真的等"
+        );
     }
 
     #[test]
@@ -102,6 +105,9 @@ mod tests {
         reserved.release();
         let mut dead = || Some("对端已退出（exit status: 1）".to_string());
         let out = await_loopback(port, "某通道", Duration::from_secs(30), &mut dead);
-        assert!(out.unwrap_err().contains("对端已退出"), "对端的死因要原样带出");
+        assert!(
+            out.unwrap_err().contains("对端已退出"),
+            "对端的死因要原样带出"
+        );
     }
 }

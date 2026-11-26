@@ -84,28 +84,38 @@ pub(crate) fn provision_vm_with(
 }
 
 /// 目的：登记处读写面（`data/.home` 这块盘归 `home` 单元）——组合根只装一次，登记处 / 隐秘字段 / 模块覆盖共用。
-pub(crate) fn home_docs(root: &Path) -> Arc<dyn crate::units::home::api::Home + Send + Sync> {
-    Arc::new(crate::units::home::service::HomeService::new(Box::new(
-        crate::units::home::detail::FsHome::new(layout::home(root)),
-    )))
+pub(crate) fn home_docs(
+    root: &Path,
+) -> Arc<dyn crate::units::resource::home::api::Home + Send + Sync> {
+    Arc::new(crate::units::resource::home::service::HomeService::new(
+        Box::new(crate::units::resource::home::detail::FsHome::new(
+            layout::home(root),
+        )),
+    ))
 }
 
 /// 目的：会话盘面（`data/session` 这块盘归 `sessions` 单元）——组合根只在这里装一次，转录与共享区适配器都从它取根。
 pub(crate) fn sessions(
     root: &Path,
-) -> Arc<dyn crate::units::sessions::api::Sessions + Send + Sync> {
-    Arc::new(crate::units::sessions::service::SessionsService::new(
-        layout::session(root),
-        Box::new(crate::units::sessions::detail::FsSessionDirs::new()),
-    ))
+) -> Arc<dyn crate::units::resource::sessions::api::Sessions + Send + Sync> {
+    Arc::new(
+        crate::units::resource::sessions::service::SessionsService::new(
+            layout::session(root),
+            Box::new(crate::units::resource::sessions::detail::FsSessionDirs::new()),
+        ),
+    )
 }
 
 /// 目的：内容盘（`data/modules` 与 `data/runtimes` 归 `content` 单元）——组合根只在这里装一次。
-pub(crate) fn content(root: &Path) -> Arc<dyn crate::units::content::api::Content + Send + Sync> {
-    Arc::new(crate::units::content::service::ContentService::new(
-        root,
-        Box::new(crate::units::content::detail::FsContentFs),
-    ))
+pub(crate) fn content(
+    root: &Path,
+) -> Arc<dyn crate::units::resource::content::api::Content + Send + Sync> {
+    Arc::new(
+        crate::units::resource::content::service::ContentService::new(
+            root,
+            Box::new(crate::units::resource::content::detail::FsContentFs),
+        ),
+    )
 }
 
 /// 目的：按 settings.yaml 取存储策略；读不到用默认。
@@ -118,7 +128,7 @@ fn storage_policy(root: &Path) -> StoragePolicy {
 /// 目的：读一份基本设置（读不到 / 非法 = None）——读经 `home` 单元，组合根不自己碰文件。
 fn read_settings(root: &Path) -> Option<crate::units::catalog::registry::api::AppSettings> {
     let text = home_docs(root)
-        .read(crate::units::home::api::Doc::Settings)
+        .read(crate::units::resource::home::api::Doc::Settings)
         .ok()??;
     yaml_serde::from_str(&text).ok()
 }
@@ -172,7 +182,7 @@ pub(crate) fn build_vm(root: &Path) -> Arc<dyn Vm + Send + Sync> {
     };
     Arc::new(crate::units::vm::service::VmService::new(
         Arc::new(crate::units::vm::detail::QemuEngine::with_overlay_dir(
-            crate::units::vmstore::api::paths(root).overlays(),
+            crate::units::resource::vmstore::api::paths(root).overlays(),
         )),
         shares,
     ))

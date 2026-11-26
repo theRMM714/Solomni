@@ -13,7 +13,11 @@ mod tests {
     /// 目的：两条通道装配的是同一套平台 TLS——后端名称与平台一致，且两边都真的建得出来。
     #[test]
     fn two_channels_share_one_tls_decision() {
-        let expected = if cfg!(windows) { "native-tls" } else { "rustls" };
+        let expected = if cfg!(windows) {
+            "native-tls"
+        } else {
+            "rustls"
+        };
         assert_eq!(super::backend::name(), expected);
 
         let _agent = super::outbound::agent(5, 30);

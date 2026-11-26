@@ -11,6 +11,8 @@
 | 什么该是端口、有哪些端口、谁持有它 | [ports.md](ports.md) |
 | 状态归谁、落盘契约、运行日志、提示词册 | [state.md](state.md) |
 | 业务边界判据、状态归属、三分法、粒度上限、硬要求 R1–R20、T0 判据 | [boundaries.md](boundaries.md) |
+| 什么算 IO、各类 IO 的唯一实现在哪、谁可以取 | [io.md](io.md) |
+| 单元之间实际有哪些依赖边、跨环与同环各多少处 | [dependency-map.md](dependency-map.md) |
 | 注释契约：文件头四槽、条目的 `///` 槽、行内限量、零豁免 | [comments.md](comments.md) |
 | Rust 模块布局、格式与静态检查、unsafe 与平台分叉、跨平台机制、依赖 | [rust-dev.md](rust-dev.md) |
 
@@ -21,6 +23,8 @@
 | 新增一个单元、判断它该不该独立 | [boundaries.md](boundaries.md) 的「业务边界判据」→「单元与子业务的分工」（[layers.md](layers.md)） |
 | 动依赖边、给单元归环 | [layers.md](layers.md)：环是人拍板的架构决定 |
 | 给某处 IO 加端口或换适配器 | [ports.md](ports.md) |
+| 加一处网络 / 进程 / 环境 / 时钟访问，或把它挪进内核 | [io.md](io.md) |
+| 想知道「谁依赖谁」、动了一条跨单元边 | [dependency-map.md](dependency-map.md) |
 | 新增落盘目录、改布局、加日志埋点、加提示词段 | [state.md](state.md) |
 | 拆文件、判断多大算过大 | [boundaries.md](boundaries.md) 的「粒度上限」 |
 | 写文件头、`pub` 项文档与行内注释 | [comments.md](comments.md) |

@@ -75,8 +75,7 @@ fn seatbelt_confines() -> bool {
 }
 
 fn seatbelt_confines_probe() -> bool {
-    let canary =
-        env::temp_dir().join(format!("solomni-seatbelt-selfcheck-{}", std::process::id()));
+    let canary = env::temp_dir().join(format!("solomni-seatbelt-selfcheck-{}", std::process::id()));
     if std::fs::write(&canary, "canary").is_err() {
         return false;
     }

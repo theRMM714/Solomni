@@ -627,7 +627,7 @@ pub fn resolve_guest(root: &Path, guest: &str) -> Result<std::path::PathBuf, Str
             guest
         ));
     }
-    Ok(crate::units::vmstore::api::paths(root).guest(name))
+    Ok(crate::units::resource::vmstore::api::paths(root).guest(name))
 }
 
 /// 目的：虚拟根就绪检测——名字认得、那一格目录在场、布局可用（rootfs + 内核或磁盘镜像）。

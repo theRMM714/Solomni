@@ -16,7 +16,7 @@ use crate::units::maintenance::storage::api::{
 };
 use crate::units::provision::api::Provision;
 use crate::units::pure::exec_model::api::JobState;
-use crate::units::sessions::api::Sessions;
+use crate::units::resource::sessions::api::Sessions;
 use crate::units::system::api::{
     BuildRequest, EnsureRequest, Facts, Fault, FenceFacts, GcRequest, ResetRequest, SetupMode,
     SetupOps, System, WorkGcRequest,

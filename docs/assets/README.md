@@ -1,7 +1,7 @@
 # assets（随包只读内容）
 
 > 定位：`prompts/`、`systools/`、`locales/` 这三块**随包只读内容**的唯一主人——介质名、固定文档清单、按文档读文本、提示词册的目录枚举与排序。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/assets/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/resource/assets/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -28,8 +28,8 @@
 
 ## 一、盘上有什么
 
-- 落点拼法只有一处：`src/units/assets/domain/paths.rs`；新增一类随包内容落点 = 在那里加一个方法，别在消费方 `join`。
-- 文档名也只有一处：`src/units/assets/domain/doc.rs` 的 `Doc::file_name()` 与 `Doc::label()`（后者是给错误文案用的相对路径）。
+- 落点拼法只有一处：`src/units/resource/assets/domain/paths.rs`；新增一类随包内容落点 = 在那里加一个方法，别在消费方 `join`。
+- 文档名也只有一处：`src/units/resource/assets/domain/doc.rs` 的 `Doc::file_name()` 与 `Doc::label()`（后者是给错误文案用的相对路径）。
 
 | 落点 | 路径 | 内容归谁解释 | 可写 |
 | --- | --- | --- | --- |

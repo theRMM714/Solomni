@@ -127,7 +127,7 @@
 | --- | --- |
 | 项目概括和快速开始 | `README.md` |
 | 项目概括和快速开始（English） | `README_EN.md` |
-| 架构、分层、端口、状态与落盘、业务边界判据、硬要求（R1–R20）、注释契约、Rust 规范 | `ARCHITECTURE.md`（细则在 `docs/architecture/`） |
+| 架构、分层、端口、状态与落盘、业务边界判据、IO 面与依赖地图、硬要求（R1–R20）、注释契约、Rust 规范 | `ARCHITECTURE.md`（细则在 `docs/architecture/`） |
 | 产品行为、运行流程与用户旅程 | `PRODUCT.md` |
 | 项目方向、承诺与判据 | `PHILOSOPHY.md` |
 | 模块开发或修改 | `MODULE_SPEC.md` |

@@ -3,8 +3,8 @@
 //! 不管：文件机制（在 detail）；目录从哪来（组合根给）；内容语义（各业务）。
 //! 联动：实现 `api::Home`；由 `src/entry/assembly.rs` 装配一次、三个 yaml 适配器共用。
 
-use crate::units::home::api::{Doc, Home};
-use crate::units::home::ports::HomeFiles;
+use crate::units::resource::home::api::{Doc, Home};
+use crate::units::resource::home::ports::HomeFiles;
 
 /// 目的：登记处资源——持文件端口，按文档名读写。
 pub struct HomeService {

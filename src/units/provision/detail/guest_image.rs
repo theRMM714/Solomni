@@ -77,7 +77,7 @@ pub(crate) fn install_guest_rootfs(
 ) -> Result<(), String> {
     let family = family_of(dep)?;
     let base = under(root, &dep.install);
-    let cache = crate::units::vmstore::api::paths(root).downloads();
+    let cache = crate::units::resource::vmstore::api::paths(root).downloads();
     fs::create_dir_all(&base).map_err(|e| format!("建 {} 失败：{}", base.display(), e))?;
     let disk = cache.join("disk.raw");
     if !disk.is_file() {

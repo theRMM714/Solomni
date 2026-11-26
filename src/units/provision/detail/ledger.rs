@@ -73,7 +73,7 @@ pub(crate) fn probe_present(root: &Path, dep: &Dep) -> bool {
 
 /// 目的：台账落点——产品根下 `.vm/state/deps.json`。
 pub(crate) fn ledger_path(root: &Path) -> PathBuf {
-    crate::units::vmstore::api::paths(root).ledger()
+    crate::units::resource::vmstore::api::paths(root).ledger()
 }
 
 /// 目的：读台账；不在场或坏 JSON 都按空台账（首次安装的常态）。

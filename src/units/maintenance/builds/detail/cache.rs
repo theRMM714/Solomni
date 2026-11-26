@@ -6,8 +6,8 @@
 use crate::units::maintenance::builds::ports::{
     BuildCache, CacheGuard, CacheMount, ModuleWorkspace,
 };
+use crate::units::resource::vmstore::api;
 use crate::units::vm::api::GuestImage;
-use crate::units::vmstore::api;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -448,7 +448,7 @@ mod tests {
     #[test]
     fn volume_and_lock_live_under_build_cache() {
         let root = Path::new("/proj");
-        let base = crate::units::vmstore::api::paths(root).build_cache();
+        let base = crate::units::resource::vmstore::api::paths(root).build_cache();
         assert_eq!(volume_path(root, "windows"), base.join("windows.qcow2"));
         assert_eq!(lock_path(root, "windows"), base.join("windows.lock"));
         assert_eq!(
