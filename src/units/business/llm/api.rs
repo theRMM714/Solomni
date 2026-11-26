@@ -55,16 +55,6 @@ pub struct ToolDecl {
     pub parameters: serde_json::Value,
 }
 
-/// 目的：思考片段不得覆盖的请求协议字段（登记处与适配器都在合并前挡一次）。
-pub const REQUEST_RESERVED_KEYS: [&str; 6] = [
-    "model",
-    "messages",
-    "stream",
-    "stream_options",
-    "tools",
-    "tool_choice",
-];
-
 /// 目的：一次模型调用的通道参数：**策略在 runtime 定**（都来自全局设置），机制在适配器。
 ///    一个值一路传下去，而不是把 stream / 预算分别塞进各个函数的参数表——两处各传一份迟早会漏。
 #[derive(Debug, Clone, PartialEq)]
@@ -74,7 +64,7 @@ pub struct LlmOpts {
     /// 目的：单次调用总预算（全局设置 `llm_timeout_secs`）。
     pub timeout_secs: u64,
     /// 目的：本轮请求要并入的思考参数片段（None = 不发）；由登记处按"模型 + 会话档位"解析。
-    /// 约束：片段不得覆盖协议字段（见 REQUEST_RESERVED_KEYS）。
+    /// 约束：片段不得覆盖请求结构字段（见 `registry_model::api::RESERVED_REQUEST_KEYS`）。
     pub thinking: Option<std::sync::Arc<serde_json::Value>>,
 }
 
@@ -147,7 +137,7 @@ impl<'a> CompleteOpts<'a> {
 /// 目的：供应商返回的一次**原生**工具调用。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolCall {
-    /// 目的：供应商给的调用 id：回结果时必须原样带上（OpenAI 协议的 tool_call_id）。
+    /// 目的：供应商给的调用 id：回结果时必须原样带上（怎么带由协议实现决定）。
     pub id: String,
     pub name: String,
     /// 目的：参数原样（供应商给的是一段 JSON 文本；能不能解析由上层如实报，不在这里猜）。
@@ -175,50 +165,84 @@ pub trait Chat {
 /// 目的：拥有所有权的会话通道（装箱；会话可跨线程移动，Web 泵线程所需）。
 pub type BoxedChat = Box<dyn Chat + Send>;
 
-/// 目的：一条消息：role = system / user / assistant / tool。
-///    后两个字段是**原生工具调用**的协议字段（手写信封通道恒为空，也就不进 wire）：
-///    一次回复可以有**多个**调用，所以调用是数组挂在助手消息上；结果消息靠 tool_call_id 回应它们。
-///    回放（重启/回档后重建上下文）与实时必须产出同样的消息——唯一的构造函数见 session::api::reply_msgs。
+/// 目的：一条消息的角色。协议无关的四种；各家的 wire 名字由协议实现翻译（见 `ports::Protocol`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    System,
+    User,
+    Assistant,
+    Tool,
+}
+
+impl Role {
+    /// 目的：给人看的稳定串（日志、转录与断言都用它，不随协议变）。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Role::System => "system",
+            Role::User => "user",
+            Role::Assistant => "assistant",
+            Role::Tool => "tool",
+        }
+    }
+}
+
+impl std::fmt::Display for Role {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// 目的：日志与测试里按字面比较角色（`m.role == "user"`）；协议实现不许再用字符串比。
+impl PartialEq<&str> for Role {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+/// 目的：一条消息：角色 + 正文 + 这条助手消息发起的调用 + 工具结果回应的调用。
+///    `calls` / `answering` 是**协议无关**的表达：它们怎么发上 wire（字段叫什么、形态如何）由协议实现决定；
+///    手写信封通道的回复没有调用，两者恒为空，协议实现也就不发这两个字段。
+///    回放（重启/回档后重建上下文）与实时必须产出同样的消息——唯一的构造函数见 agentloop 的 `reply_msgs`。
 #[derive(Debug, Clone)]
 pub struct Msg {
-    pub role: String,
+    pub role: Role,
     pub content: String,
-    /// 目的：这条助手消息发起了哪些调用（空 = 不发这个字段）。
-    pub tool_calls: Vec<ToolCall>,
-    /// 目的：role = tool 时它回应的是哪个调用 id（其余角色为空）。
-    pub tool_call_id: String,
+    /// 目的：这条助手消息发起了哪些调用（空 = 这次回复没有调用）。
+    pub calls: Vec<ToolCall>,
+    /// 目的：role = Tool 时它回应的是哪个调用 id（其余角色为空串）。
+    pub answering: String,
 }
 
 impl Msg {
     pub fn system(content: impl Into<String>) -> Msg {
-        Msg::plain("system", content)
+        Msg::plain(Role::System, content)
     }
     pub fn user(content: impl Into<String>) -> Msg {
-        Msg::plain("user", content)
+        Msg::plain(Role::User, content)
     }
     pub fn assistant(content: impl Into<String>) -> Msg {
-        Msg::plain("assistant", content)
+        Msg::plain(Role::Assistant, content)
     }
     /// 目的：一次回复的助手消息：正文 + 它发起的**全部**调用（一次回复多个调用就靠它）。
     pub fn assistant_calls(content: impl Into<String>, calls: Vec<ToolCall>) -> Msg {
         Msg {
-            tool_calls: calls,
-            ..Msg::plain("assistant", content)
+            calls,
+            ..Msg::plain(Role::Assistant, content)
         }
     }
     /// 目的：一条工具结果：回应某个调用 id（协议要求与助手消息里的调用成对出现）。
     pub fn tool(call_id: &str, content: impl Into<String>) -> Msg {
         Msg {
-            tool_call_id: call_id.to_string(),
-            ..Msg::plain("tool", content)
+            answering: call_id.to_string(),
+            ..Msg::plain(Role::Tool, content)
         }
     }
-    fn plain(role: &str, content: impl Into<String>) -> Msg {
+    fn plain(role: Role, content: impl Into<String>) -> Msg {
         Msg {
-            role: role.to_string(),
+            role,
             content: content.into(),
-            tool_calls: Vec::new(),
-            tool_call_id: String::new(),
+            calls: Vec::new(),
+            answering: String::new(),
         }
     }
 }
@@ -288,7 +312,7 @@ pub struct Completion {
     pub raw: String,
     /// 目的：供应商返回的思维链（非流式响应也可提供）。
     pub reasoning: String,
-    /// 目的：结束原因原样（供应商没给 = 空串）：stop / length / content_filter / tool_calls …
+    /// 目的：结束原因原样（供应商没给 = 空串）：stop / length / content_filter …
     pub finish: String,
     /// 目的：原生工具调用（按供应商给的顺序；手写信封模式恒为空）。
     pub calls: Vec<ToolCall>,

@@ -1,13 +1,13 @@
-//! 目的：可取消的 OpenAI 兼容流式 HTTP 适配器。
-//! 管：一次模型调用的出站流、SSE 解析、分层超时与取消关闭。
-//! 不管：端点候选与重试归类（endpoint）、通道构造（http_chat）、会话状态与行落盘（会话单元）。
+//! 目的：可取消的流式 HTTP 适配器（SSE 分行、超时、取消关闭）。
+//! 管：一次模型调用的出站流、SSE 分行、分层超时与取消关闭；把每个数据块交给协议实现解析。
+//! 不管：端点候选与重试归类（endpoint）、通道构造（http_chat）、字段名与 JSON 形状（detail/protocol）、会话状态与行落盘（会话单元）。
 //! 联动：http_chat 调它；预算来自 llm::api::CompleteOpts；TLS 装配与代理由 kernel 的 `io/net` 统一决定（经 `api::net` 注入）。
 
 use super::endpoint::{Attempt, retryable_status};
 use super::http_agent::redact;
-use crate::units::business::llm::api::{
-    Cancelled, Chunk, CompleteOpts, Completion, TokenUsage, ToolCall,
-};
+use crate::units::business::llm::api::{Cancelled, Chunk, CompleteOpts, Completion};
+use crate::units::business::llm::domain::stream::StreamAcc;
+use crate::units::business::llm::ports::{EventStep, Protocol};
 use futures_util::StreamExt;
 use std::time::Duration;
 
@@ -70,8 +70,9 @@ fn cancelled() -> Attempt<Completion> {
 }
 
 /// 目的：一次流式 POST：读 SSE、逐片回调正文/思维链并返回完整正文。
-/// 约束：兼容增量与累积快照；`on` 返回 false、取消位置位或超过容积上限时立即停止。
+/// 约束：分块解析归协议实现；`on` 返回 false、取消位置位或超过容积上限时立即停止。
 pub(crate) async fn stream_once(
+    proto: &dyn Protocol,
     url: &str,
     key: &str,
     body: &str,
@@ -128,7 +129,7 @@ pub(crate) async fn stream_once(
         return cancelled();
     }
     let mut stream = resp.bytes_stream();
-    let mut state = StreamState::default();
+    let mut acc = StreamAcc::default();
     let mut buf: Vec<u8> = Vec::new();
     let mut first_chunk = true;
     let mut done = false;
@@ -136,7 +137,7 @@ pub(crate) async fn stream_once(
         let wait = if first_chunk { first } else { idle };
         let next = tokio::select! {
             biased;
-            _ = wait_cancel(opts.cancel.as_deref()) => return state.cancelled(),
+            _ = wait_cancel(opts.cancel.as_deref()) => return Attempt::Ok(acc.cancelled_completion()),
             r = tokio::time::timeout(wait, stream.next()) => r,
         };
         match next {
@@ -146,7 +147,7 @@ pub(crate) async fn stream_once(
             }
             Err(_) => {
                 let msg = format!("流空闲超时（{} 秒）", idle.as_secs());
-                return if state.got_any {
+                return if acc.got_any {
                     Attempt::Fatal(msg)
                 } else {
                     Attempt::Retry(msg)
@@ -155,7 +156,7 @@ pub(crate) async fn stream_once(
             Ok(None) => break,
             Ok(Some(Err(e))) => {
                 let msg = redact(format!("读取流失败：{}", e), key);
-                return if state.got_any {
+                return if acc.got_any {
                     Attempt::Fatal(msg)
                 } else {
                     Attempt::Retry(msg)
@@ -164,12 +165,12 @@ pub(crate) async fn stream_once(
             Ok(Some(Ok(bytes))) => {
                 first_chunk = false;
                 buf.extend_from_slice(&bytes);
-                match feed(&mut buf, &mut state, on, opts.cancel.as_deref()) {
+                match feed(proto, &mut buf, &mut acc, on, opts.cancel.as_deref()) {
                     Feed::Continue => {}
                     Feed::Done => done = true,
-                    Feed::Cancelled => return state.cancelled(),
+                    Feed::Cancelled => return Attempt::Ok(acc.cancelled_completion()),
                 }
-                if state.content.len() + state.reasoning.len() > MAX_STREAM_CHARS {
+                if acc.content.len() + acc.reasoning.len() > MAX_STREAM_CHARS {
                     done = true;
                 }
             }
@@ -178,23 +179,15 @@ pub(crate) async fn stream_once(
     // 最后一行可能没有换行符（有些供应商不发结尾空行）。
     if !buf.is_empty() {
         buf.push(b'\n');
-        match feed(&mut buf, &mut state, on, opts.cancel.as_deref()) {
+        match feed(proto, &mut buf, &mut acc, on, opts.cancel.as_deref()) {
             Feed::Continue | Feed::Done => {}
-            Feed::Cancelled => return state.cancelled(),
+            Feed::Cancelled => return Attempt::Ok(acc.cancelled_completion()),
         }
     }
-    if state.content.is_empty() && state.reasoning.is_empty() && state.calls.is_empty() {
+    if acc.is_blank() {
         return Attempt::Retry("流式响应没有正文内容".to_string());
     }
-    Attempt::Ok(Completion {
-        raw: state.content,
-        reasoning: state.reasoning,
-        finish: state.finish,
-        calls: state.calls,
-        error: None,
-        cancelled: false,
-        usage: state.usage,
-    })
+    Attempt::Ok(acc.done_completion())
 }
 
 enum Feed {
@@ -203,33 +196,12 @@ enum Feed {
     Cancelled,
 }
 
-#[derive(Default)]
-struct StreamState {
-    content: String,
-    reasoning: String,
-    finish: String,
-    calls: Vec<ToolCall>,
-    usage: Option<TokenUsage>,
-    got_any: bool,
-}
-
-impl StreamState {
-    fn cancelled(self) -> Attempt<Completion> {
-        Attempt::Ok(Completion {
-            raw: self.content,
-            reasoning: self.reasoning,
-            finish: self.finish,
-            calls: self.calls,
-            error: None,
-            cancelled: true,
-            usage: self.usage,
-        })
-    }
-}
-
+/// 目的：把缓冲区里攒够的完整行进 SSE 一层拆开（空行、注释、data: 前缀、[DONE]），
+///    剩下的 JSON 交给协议实现；协议认不出的块跳过，不当错误。
 fn feed(
+    proto: &dyn Protocol,
     buf: &mut Vec<u8>,
-    state: &mut StreamState,
+    acc: &mut StreamAcc,
     on: &mut dyn FnMut(Chunk) -> bool,
     cancel: Option<&dyn Cancelled>,
 ) -> Feed {
@@ -257,95 +229,9 @@ fn feed(
         let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else {
             continue;
         };
-        // 供应商可以在最后一块只发 usage（没有 choices）；先收用量，再处理正文。
-        // 分块只报一部分字段：新值**并进**已有值，不拿半份覆盖整份。
-        if let Some(usage) = usage_of(&v) {
-            state.usage = Some(match state.usage {
-                Some(known) => known.widen(usage),
-                None => usage,
-            });
-        }
-        let Some(choice) = v.get("choices").and_then(|c| c.get(0)) else {
-            continue;
-        };
-        if let Some(f) = choice.get("finish_reason").and_then(|f| f.as_str())
-            && !f.is_empty()
-        {
-            state.finish = f.to_string();
-        }
-        let Some(delta) = choice.get("delta") else {
-            continue;
-        };
-        if let Some(arr) = delta.get("tool_calls").and_then(|t| t.as_array()) {
-            if !arr.is_empty() {
-                state.got_any = true;
-            }
-            for item in arr {
-                let idx = item
-                    .get("index")
-                    .and_then(|i| i.as_u64())
-                    .unwrap_or(state.calls.len() as u64) as usize;
-                while state.calls.len() <= idx {
-                    state.calls.push(ToolCall {
-                        id: String::new(),
-                        name: String::new(),
-                        args_json: String::new(),
-                    });
-                }
-                let slot = &mut state.calls[idx];
-                if let Some(id) = item.get("id").and_then(|i| i.as_str())
-                    && !id.is_empty()
-                {
-                    slot.id = id.to_string();
-                }
-                if let Some(f) = item.get("function") {
-                    if let Some(n) = f.get("name").and_then(|n| n.as_str())
-                        && !n.is_empty()
-                    {
-                        slot.name = n.to_string();
-                    }
-                    if let Some(a) = f.get("arguments").and_then(|a| a.as_str()) {
-                        slot.args_json.push_str(a);
-                    }
-                }
-            }
-        }
-        if let Some(t) = delta.get("content").and_then(|c| c.as_str())
-            && !t.is_empty()
-        {
-            state.got_any = true;
-            let piece = if t.len() > state.content.len() && t.starts_with(state.content.as_str()) {
-                t[state.content.len()..].to_string()
-            } else {
-                t.to_string()
-            };
-            if !piece.is_empty() {
-                state.content.push_str(&piece);
-                if !on(Chunk::Text(piece)) {
-                    return Feed::Cancelled;
-                }
-            }
-        }
-        let reasoning = delta
-            .get("reasoning_content")
-            .and_then(|c| c.as_str())
-            .or_else(|| delta.get("reasoning").and_then(|c| c.as_str()));
-        if let Some(r) = reasoning
-            && !r.is_empty()
-        {
-            state.got_any = true;
-            let piece =
-                if r.len() > state.reasoning.len() && r.starts_with(state.reasoning.as_str()) {
-                    r[state.reasoning.len()..].to_string()
-                } else {
-                    r.to_string()
-                };
-            if !piece.is_empty() {
-                state.reasoning.push_str(&piece);
-                if !on(Chunk::Reasoning(piece)) {
-                    return Feed::Cancelled;
-                }
-            }
+        match proto.event(&v, acc, on) {
+            EventStep::Continue => {}
+            EventStep::Stopped => return Feed::Cancelled,
         }
     }
     if is_cancelled(cancel) {
@@ -357,6 +243,7 @@ fn feed(
 
 /// 目的：非流式 POST；没有中间分片可重置，整次调用共用一个截止点。
 pub(crate) async fn attempt_async(
+    proto: &dyn Protocol,
     url: &str,
     key: &str,
     body: &str,
@@ -415,7 +302,7 @@ pub(crate) async fn attempt_async(
             };
         }
     };
-    match parse_content(&text) {
+    match proto.reply(&text) {
         Ok(c) => Attempt::Ok(c),
         // 2xx 但不是补全形状（SPA 回落的 HTML 首页等）：这里不是该 API，换下一个候选。
         Err(e) => Attempt::Retry(e),
@@ -437,169 +324,5 @@ async fn read_text(
         Err(_) => Err("读取响应体超时".to_string()),
         Ok(Err(e)) => Err(redact(format!("读取响应体失败：{}", e), key)),
         Ok(Ok(t)) => Ok(t),
-    }
-}
-
-/// 从响应/流数据块里取 usage（OpenAI 与 Anthropic 两种形状；缺的字段就是 None）。
-/// 归一的口径见函数体：两种形状的输入含义不同，prompt 必须是**这次请求的完整输入**。
-/// 全零 / 没有 usage = None：不把"供应商没报"伪装成精确的 0。
-fn usage_of(v: &serde_json::Value) -> Option<TokenUsage> {
-    let u = v.get("usage")?;
-    let n = |keys: &[&str]| keys.iter().find_map(|k| u.get(*k).and_then(|x| x.as_u64()));
-    // 缓存：Anthropic 形状给顶层两个字段；OpenAI 形状给 prompt_tokens_details.cached_tokens。
-    let cache_read = n(&["cache_read_input_tokens"]).or_else(|| {
-        u.get("prompt_tokens_details")
-            .and_then(|d| d.get("cached_tokens"))
-            .and_then(|x| x.as_u64())
-    });
-    let cache_creation = n(&["cache_creation_input_tokens"]);
-    // **两种形状的输入口径不同**：Anthropic 的 input_tokens 只是"没命中缓存的输入"，缓存读写单独报；
-    // OpenAI 的 prompt_tokens 已含命中缓存的部分（同时给两字段的转换层按 OpenAI 读）。
-    let anthropic = u.get("prompt_tokens").is_none() && u.get("input_tokens").is_some();
-    let prompt = if anthropic {
-        n(&["input_tokens"]).unwrap_or(0) + cache_read.unwrap_or(0) + cache_creation.unwrap_or(0)
-    } else {
-        n(&["prompt_tokens"]).unwrap_or(0)
-    };
-    let completion = n(&["completion_tokens", "output_tokens"]).unwrap_or(0);
-    // Anthropic 若也回了 total_tokens，那多半是不含缓存的旧口径：按归一后的 prompt 重算。
-    let total = if anthropic {
-        (prompt > 0 || completion > 0).then_some(prompt + completion)
-    } else {
-        n(&["total_tokens"])
-            .or_else(|| (prompt > 0 || completion > 0).then_some(prompt + completion))
-    };
-    if prompt == 0 && completion == 0 && total.unwrap_or(0) == 0 {
-        return None;
-    }
-    let mut usage = TokenUsage::new(prompt, completion, total);
-    usage.cache_read = cache_read;
-    usage.cache_creation = cache_creation;
-    Some(usage)
-}
-
-/// 解析补全响应：取 choices[0].message.content、finish_reason 与原生 tool_calls（后两者可能没有）。
-fn parse_content(text: &str) -> Result<Completion, String> {
-    let v: serde_json::Value =
-        serde_json::from_str(text).map_err(|e| format!("响应不是 JSON：{}", e))?;
-    let choice = v.get("choices").and_then(|c| c.get(0));
-    // 有些供应商在纯工具调用时 content 是 null（不是缺字段）：按空串处理，不算错。
-    let raw = choice
-        .and_then(|c| c.get("message"))
-        .and_then(|m| m.get("content"))
-        .and_then(|c| c.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let reasoning = choice
-        .and_then(|c| c.get("message"))
-        .and_then(|m| m.get("reasoning_content").or_else(|| m.get("reasoning")))
-        .and_then(|r| r.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let finish = choice
-        .and_then(|c| c.get("finish_reason"))
-        .and_then(|f| f.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let calls = choice
-        .and_then(|c| c.get("message"))
-        .and_then(|m| m.get("tool_calls"))
-        .and_then(|t| t.as_array())
-        .map(|arr| arr.iter().filter_map(native_call).collect::<Vec<_>>())
-        .unwrap_or_default();
-    if raw.is_empty() && reasoning.is_empty() && calls.is_empty() {
-        return Err("响应缺少 choices[0].message.content（也没有 tool_calls）".to_string());
-    }
-    Ok(Completion {
-        raw,
-        reasoning,
-        finish,
-        calls,
-        error: None,
-        cancelled: false,
-        usage: usage_of(&v),
-    })
-}
-
-/// 从一段 OpenAI 形状的 tool_calls 元素里取（id, name, arguments）。
-/// arguments 是**一段 JSON 文本**（供应商原样给），能不能解析留给上层如实报。
-fn native_call(v: &serde_json::Value) -> Option<ToolCall> {
-    let f = v.get("function")?;
-    let name = f.get("name").and_then(|n| n.as_str())?.to_string();
-    let id = v
-        .get("id")
-        .and_then(|i| i.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let args_json = f
-        .get("arguments")
-        .and_then(|a| a.as_str())
-        .unwrap_or("{}")
-        .to_string();
-    Some(ToolCall {
-        id,
-        name,
-        args_json,
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::usage_of;
-    use serde_json::json;
-
-    /// 目的：usage 归一成供应商形状能给的四个数——缓存读/写缺失就是 None，不伪造成 0。
-    #[test]
-    fn usage_of_reads_cache_fields_without_inventing_zeros() {
-        let openai = json!({"usage": {"prompt_tokens": 900, "completion_tokens": 30,
-            "prompt_tokens_details": {"cached_tokens": 800}}});
-        let u = usage_of(&openai).expect("有 usage");
-        assert_eq!(
-            (u.prompt_tokens, u.completion_tokens, u.total_tokens),
-            (900, 30, 930)
-        );
-        assert_eq!(u.cache_read, Some(800));
-        assert_eq!(u.cache_creation, None, "没报缓存写入就是 None");
-
-        // Anthropic 的 input_tokens 只是"没命中缓存的那部分"：prompt 必须把缓存读写加回来，
-        // 否则 total 会小得离谱（50+10=60 vs 真实 1560），自动压缩的阈值也就永远触发不了。
-        let anthropic = json!({"usage": {"input_tokens": 50, "output_tokens": 10,
-            "cache_read_input_tokens": 1200, "cache_creation_input_tokens": 300}});
-        let u = usage_of(&anthropic).expect("有 usage");
-        assert_eq!(
-            (u.prompt_tokens, u.completion_tokens, u.total_tokens),
-            (1550, 10, 1560)
-        );
-        assert_eq!(u.cache_read, Some(1200));
-        assert_eq!(u.cache_creation, Some(300));
-
-        let plain = json!({"usage": {"prompt_tokens": 7, "completion_tokens": 3}});
-        let u = usage_of(&plain).expect("有 usage");
-        assert_eq!((u.cache_read, u.cache_creation), (None, None));
-        assert!(
-            usage_of(&json!({"usage": {"prompt_tokens": 0, "completion_tokens": 0}})).is_none()
-        );
-    }
-
-    /// 目的：流式分块只报一部分字段时，后一块不把前一块已知的输入/缓存抹成 0。
-    #[test]
-    fn usage_chunks_merge_field_wise() {
-        let tail = usage_of(&json!({"usage": {"output_tokens": 10}})).expect("有 output");
-        let head = usage_of(&json!({"usage": {"input_tokens": 50,
-            "cache_read_input_tokens": 1200, "cache_creation_input_tokens": 300}}))
-        .expect("有 input");
-        let merged = tail.widen(head);
-        assert_eq!(
-            (
-                merged.prompt_tokens,
-                merged.completion_tokens,
-                merged.total_tokens
-            ),
-            (1550, 10, 1560)
-        );
-        assert_eq!(merged.cache_read, Some(1200));
-        assert_eq!(merged.cache_creation, Some(300));
-        // 反过来并也一样（谁先到都一样）。
-        assert_eq!(tail.widen(head).total_tokens, head.widen(tail).total_tokens);
     }
 }

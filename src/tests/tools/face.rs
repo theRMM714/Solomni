@@ -274,20 +274,20 @@ pub(crate) fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
         trace[1]
     );
 
-    // ③ 第二轮请求里：**一条**助手消息带两个 tool_calls，后面跟两条 role=tool（协议形状）
+    // ③ 第二轮请求里：**一条**助手消息带两个原生调用，后面跟两条 role=tool 的结果（协议形状）
     let msgs = seen.lock().expect("锁");
     let second = &msgs[1];
-    let with_calls: Vec<&Msg> = second.iter().filter(|m| !m.tool_calls.is_empty()).collect();
+    let with_calls: Vec<&Msg> = second.iter().filter(|m| !m.calls.is_empty()).collect();
     assert_eq!(
         with_calls.len(),
         1,
         "一次回复只推一条助手消息（多个调用都挂在它上面）：{:?}",
         second
             .iter()
-            .map(|m| (m.role.clone(), m.tool_calls.len()))
+            .map(|m| (m.role, m.calls.len()))
             .collect::<Vec<_>>()
     );
-    let calls = &with_calls[0].tool_calls;
+    let calls = &with_calls[0].calls;
     assert_eq!(calls.len(), 2, "两个调用都挂在这条助手消息上");
     assert_eq!(calls[0].id, "c1");
     assert_eq!(calls[0].name, "read");
@@ -302,10 +302,10 @@ pub(crate) fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
         second
     );
     assert_eq!(
-        results[0].tool_call_id, "c1",
+        results[0].answering, "c1",
         "结果靠 tool_call_id 回应它的调用"
     );
-    assert_eq!(results[1].tool_call_id, "c2");
+    assert_eq!(results[1].answering, "c2");
     assert!(
         results[0].content.contains("[工具结果] read") && results[0].content.contains("第一行"),
         "{:?}",

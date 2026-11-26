@@ -1,6 +1,6 @@
 //! 目的：真实通道——OpenAI 兼容 /chat/completions（可取消的流式请求）。
-//! 管：按通道（供应商 + 模型）建会话；流式分片解析；端点补全与回落；错误脱敏。
-//! 不管：端点候选逻辑（在 endpoint）；代理与 TLS（在 http_agent）；无通道时不回落假模型（前置条件失败）。
+//! 管：按通道（供应商 + 模型）建会话；端点补全与回落；错误脱敏；把请求体交给协议实现构造。
+//! 不管：wire 形状（在 detail/protocol）；端点候选逻辑（在 endpoint）；代理与 TLS（在 http_agent）；无通道时不回落假模型（前置条件失败）。
 //! 联动：实现 api::Chat 与 ports::ChatGateway；由 detail.rs 重导出 HttpGateway 供组合根装配；流机制在 detail/http_stream.rs。
 
 use super::endpoint::{Attempt, Memo, chat_candidates, memo_get, memo_set, resolve_candidates};
@@ -8,10 +8,12 @@ use crate::units::business::llm::api::Channel;
 use crate::units::business::llm::api::{
     BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg, ProbeOutcome, TokenUsage, ToolDecl,
 };
-use crate::units::business::llm::ports::ChatGateway;
+use crate::units::business::llm::ports::{ChatGateway, Protocol, Request};
+use std::sync::Arc;
 
 /// 目的：真实会话通道：拥有通道副本（含密钥；密钥不出适配层）。
 ///    resolved = 本会话首次命中的有效端点，后续轮次直接复用，不再重复探测。
+///    proto = 这条通道的 wire 形状（目前只有 OpenAI 兼容一种，见 detail/protocol.rs）。
 pub struct HttpChat {
     pub channel: Channel,
     pub provider_id: String,
@@ -22,102 +24,26 @@ pub struct HttpChat {
     memo_key: String,
     /// 最近一次调用供应商报的 usage（拿不到 = None）；会话状态栏与压缩判定读它。
     last_usage: Option<TokenUsage>,
-}
-
-/// 一条消息 → wire 形态。**协议字段按需出现**：手写信封通道的消息没有调用，
-/// 所以它的请求体按信封协议逐字节构造；只有原生通道的助手/工具消息才带上 tool_calls 与 tool_call_id。
-fn msg_json(m: &Msg) -> serde_json::Value {
-    let mut v = serde_json::json!({ "role": m.role, "content": m.content });
-    if !m.tool_calls.is_empty() {
-        v["tool_calls"] = serde_json::Value::Array(
-            m.tool_calls
-                .iter()
-                .map(|c| {
-                    serde_json::json!({
-                        "id": c.id,
-                        "type": "function",
-                        "function": { "name": c.name, "arguments": c.args_json },
-                    })
-                })
-                .collect(),
-        );
-    }
-    if !m.tool_call_id.is_empty() {
-        v["tool_call_id"] = serde_json::json!(m.tool_call_id);
-    }
-    v
-}
-
-/// 组一次 /chat/completions 的请求体。**真实会话与探针共用同一份形状**——
-/// 探针发出去的必须是线上真会发的东西，否则它测出来的结论代表不了线上行为。
-fn request_body(
-    model: &str,
-    stream: bool,
-    messages: serde_json::Value,
-    tools: Option<&[ToolDecl]>,
-    thinking: Option<&serde_json::Value>,
-) -> serde_json::Value {
-    let mut body = serde_json::json!({ "model": model, "stream": stream, "messages": messages });
-    // 流式请求也要 usage（状态栏与自动压缩要有精确数字）；不支持的供应商由 complete 回退掉。
-    if stream {
-        body["stream_options"] = serde_json::json!({ "include_usage": true });
-    }
-    // 原生工具调用：把工具声明带给供应商（"参数走结构化槽位"的全部秘密就在这一段）。
-    // 不声明 tools = 手写信封模式：模型照旧在正文里写信封，核心自己解析。
-    if let Some(tools) = tools
-        && !tools.is_empty()
-    {
-        body["tools"] = serde_json::Value::Array(tools.iter().map(decl_json).collect());
-        body["tool_choice"] = serde_json::json!("auto");
-    }
-    // 思考强度：登记处解析好的片段按模型映射原样合并；保留键在登记处已经拒收，这里再挡一次
-    //（覆盖 model / messages / stream / tools 会直接把这次请求弄坏）。
-    if let Some(extra) = thinking.and_then(|v| v.as_object()) {
-        for (k, v) in extra {
-            if !crate::units::business::llm::api::REQUEST_RESERVED_KEYS.contains(&k.as_str()) {
-                body[k] = v.clone();
-            }
-        }
-    }
-    body
-}
-
-/// 工具声明 → OpenAI 兼容的 function 形状（唯一一处映射，探测与正式请求共用）。
-fn decl_json(t: &ToolDecl) -> serde_json::Value {
-    serde_json::json!({
-        "type": "function",
-        "function": {
-            "name": t.name,
-            "description": t.description,
-            "parameters": t.parameters,
-        },
-    })
+    proto: Arc<dyn Protocol>,
 }
 
 /// 目的：一条最小请求——单条用户消息 + 可选工具声明（探测用；正式对话走 complete）。
 pub(crate) fn attempt_with_tools(
+    proto: &dyn Protocol,
     url: &str,
     key: &str,
     model: &str,
     user: &str,
     tools: Option<&[ToolDecl]>,
 ) -> Attempt<Completion> {
-    let mut body = serde_json::json!({
-        "model": model,
-        "stream": false,
-        "messages": [{ "role": "user", "content": user }],
-    });
-    if let Some(tools) = tools
-        && !tools.is_empty()
-    {
-        body["tools"] = serde_json::Value::Array(tools.iter().map(decl_json).collect());
-        body["tool_choice"] = serde_json::json!("auto");
-    }
+    let messages = serde_json::json!([{ "role": "user", "content": user }]);
+    let body = proto.request_raw(model, messages, tools).to_string();
     // 探针是一次性诊断，用默认预算（它不参与真实会话的设置）。
     attempt_with_cancel(
+        proto,
         url,
         key,
-        &body.to_string(),
+        &body,
         crate::kernel::api::types::DEFAULT_LLM_TIMEOUT_SECS,
         None,
     )
@@ -126,15 +52,17 @@ pub(crate) fn attempt_with_tools(
 /// 目的：发一段**合成好的 messages**（探针专用）：回放形状探测要发的不是普通消息，
 ///    而是含 tool_calls 与 role=tool 的历史。端点候选、脱敏与重试规则与真实请求完全一致。
 pub(crate) fn attempt_raw(
+    proto: &dyn Protocol,
     url: &str,
     key: &str,
     model: &str,
     messages: serde_json::Value,
     tools: Option<&[ToolDecl]>,
 ) -> Attempt<Completion> {
-    let body = request_body(model, false, messages, tools, None).to_string();
+    let body = proto.request_raw(model, messages, tools).to_string();
     // 探针是一次性诊断，用默认预算（它不参与真实会话的设置）。
     attempt_with_cancel(
+        proto,
         url,
         key,
         &body,
@@ -152,6 +80,7 @@ impl HttpChat {
     ) -> HttpChat {
         let memo_key = format!("{}|chat", channel.base_url);
         let resolved = memo_get(&memo, &memo_key);
+        let proto = super::protocol::for_channel(&channel);
         HttpChat {
             provider_id: channel.base_url.clone(),
             channel,
@@ -160,6 +89,7 @@ impl HttpChat {
             memo,
             memo_key,
             last_usage: None,
+            proto,
         }
     }
 }
@@ -179,10 +109,12 @@ impl HttpChat {
         let key = self.channel.api_key.clone();
         if opts.stream {
             let rt = super::http_stream::runtime()?;
+            let proto = self.proto.as_ref();
             resolve_candidates(
                 &candidates,
                 |url| {
                     rt.block_on(super::http_stream::stream_once(
+                        proto,
                         url,
                         &key,
                         body,
@@ -201,7 +133,16 @@ impl HttpChat {
             let cancel = opts.cancel.clone();
             resolve_candidates(
                 &candidates,
-                |url| attempt_with_cancel(url, &key, body, opts.timeout_secs, cancel.as_deref()),
+                |url| {
+                    attempt_with_cancel(
+                        self.proto.as_ref(),
+                        url,
+                        &key,
+                        body,
+                        opts.timeout_secs,
+                        cancel.as_deref(),
+                    )
+                },
                 |url, err, next| {
                     self.log.warn(
                         "http_chat::complete",
@@ -230,14 +171,13 @@ impl Chat for HttpChat {
         opts: CompleteOpts<'_>,
         on: &mut dyn FnMut(Chunk) -> bool,
     ) -> Completion {
-        let wire: Vec<serde_json::Value> = messages.iter().map(msg_json).collect();
-        let body_value = request_body(
-            &self.channel.model,
-            opts.stream,
-            serde_json::Value::Array(wire),
-            opts.tools,
-            opts.thinking.as_deref(),
-        );
+        let body_value = self.proto.request(&Request {
+            model: &self.channel.model,
+            messages,
+            stream: opts.stream,
+            tools: opts.tools,
+            thinking: opts.thinking.as_deref(),
+        });
         let body = body_value.to_string();
         let mut outcome = self.exchange(&body, &opts, on);
         // 兼容回退：只在首个 400/422 且错误点名字段时去掉 stream_options 重试一次。
@@ -251,10 +191,9 @@ impl Chat for HttpChat {
                 "供应商不接受 stream_options，去掉该参数重试；本次用量将按字符估算",
             );
             let mut retry = body_value.clone();
-            if let Some(obj) = retry.as_object_mut() {
-                obj.remove("stream_options");
+            if self.proto.drop_stream_usage(&mut retry) {
+                outcome = self.exchange(&retry.to_string(), &opts, on);
             }
-            outcome = self.exchange(&retry.to_string(), &opts, on);
         }
         match outcome {
             Ok((url, done)) => {
@@ -287,6 +226,7 @@ impl Chat for HttpChat {
 /// 非流式调用：没有中间分片可重置，整次调用共用 `timeout_secs`。
 /// 探针用 None；真实会话把停止位传进来，停止时请求同样立刻关闭。
 fn attempt_with_cancel(
+    proto: &dyn Protocol,
     url: &str,
     key: &str,
     body: &str,
@@ -295,6 +235,7 @@ fn attempt_with_cancel(
 ) -> Attempt<Completion> {
     match super::http_stream::runtime() {
         Ok(rt) => rt.block_on(super::http_stream::attempt_async(
+            proto,
             url,
             key,
             body,

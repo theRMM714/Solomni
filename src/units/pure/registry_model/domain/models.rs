@@ -18,6 +18,17 @@ pub enum ToolMode {
     Native,
 }
 
+/// 目的：思考参数片段**不得覆盖**的请求字段：这几串在主流协议里都承载请求结构本身（模型、消息、流开关、工具声明），
+///    被片段顺手盖掉会直接把请求弄坏。取**各家并集**的保守集合：多挡一个不会出错，少挡一个就是线上事故。
+/// 约束：登记处保存模型时挡一次（给用户明确报错），适配层合并前再挡一次（防绕过）。
+pub const RESERVED_REQUEST_KEYS: [&str; 6] = [
+    "model",
+    "messages",
+    "stream",
+    "stream_options",
+    "tools",
+    "tool_choice",
+];
 /// 目的：一条供应商通道（端点 + 密钥）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
@@ -41,7 +52,7 @@ pub struct ModelEntry {
     #[serde(default = "default_context_tokens")]
     pub context: u64,
     /// 目的：思考强度：这个模型支持哪些档、每档发什么请求体片段。
-    /// 约束：缺省 = 不发任何思考参数（随供应商默认）；片段不得覆盖协议字段（见 REQUEST_RESERVED_KEYS）。
+    /// 约束：缺省 = 不发任何思考参数（随供应商默认）；片段不得覆盖请求结构字段（见 RESERVED_REQUEST_KEYS）。
     #[serde(default, skip_serializing_if = "ThinkingSpec::is_empty")]
     pub thinking: ThinkingSpec,
 }

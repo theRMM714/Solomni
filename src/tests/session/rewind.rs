@@ -677,7 +677,7 @@ pub(crate) fn rewind_never_splits_a_reply() {
         history
     );
     assert!(
-        history.iter().all(|m| m.tool_call_id.is_empty()),
+        history.iter().all(|m| m.answering.is_empty()),
         "历史里不许出现没有对应助手消息的孤儿工具结果：{:?}",
         history
     );

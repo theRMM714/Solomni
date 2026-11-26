@@ -12,6 +12,6 @@ pub use crate::units::pure::registry_model::domain::agents::{
 #[allow(unused_imports)]
 pub use crate::units::pure::registry_model::domain::models::{
     DEFAULT_CONTEXT_TOKENS, ModelDraft, ModelEntry, ModelThinkingView, ModelView, Provider,
-    ProviderView, StorageSettings, ThinkingCatalog, ThinkingLevel, ThinkingSpec, ToolMode,
-    default_thinking_levels, validate_thinking_catalog,
+    ProviderView, RESERVED_REQUEST_KEYS, StorageSettings, ThinkingCatalog, ThinkingLevel,
+    ThinkingSpec, ToolMode, default_thinking_levels, validate_thinking_catalog,
 };
