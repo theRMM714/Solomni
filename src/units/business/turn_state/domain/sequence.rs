@@ -8,6 +8,7 @@ use std::sync::atomic::AtomicBool;
 
 use crate::kernel::api::types::Ask;
 use crate::units::business::agentloop::api::MemberTurn;
+use crate::units::business::session_model::api::Artifact;
 use crate::units::business::transcript::api::SessionEvent;
 use crate::units::business::turn_state::domain::decisions::GateTicket;
 use crate::units::business::turn_state::domain::flow::{
@@ -46,8 +47,9 @@ impl Sequence {
             self.at += 1;
             let next = &mut self.steps[self.at];
             next.set_next_line(line);
-            if let Some(text) = made {
-                next.intake(text);
+            if let Some(artifact) = made {
+                // 原样搬运：组合子不解释产物的内容，接不接得住由声明与装配期校验管。
+                next.intake(artifact);
             }
         }
     }
@@ -214,13 +216,116 @@ impl Flow for Sequence {
         self.steps.iter().any(|s| s.settles_inline(ask))
     }
 
-    fn intake(&mut self, text: String) {
+    fn intake(&mut self, artifact: Artifact) {
         if let Some(first) = self.steps.first_mut() {
-            first.intake(text);
+            first.intake(artifact);
         }
     }
 
-    fn output(&self) -> Option<String> {
+    fn output(&self) -> Option<Artifact> {
         self.current().and_then(|s| s.output())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    use crate::units::business::session_model::api::Artifact;
+
+    /// 目的：假流程：收下交来的产物（记进自己的格子），可以立刻收尾并交出产物。
+    struct Fake {
+        done: bool,
+        out: Option<Artifact>,
+        got: Arc<Mutex<Vec<Artifact>>>,
+    }
+
+    impl Flow for Fake {
+        fn set_cancel(&mut self, _cancel: Arc<AtomicBool>) {}
+        fn start(&mut self, _sink: &mut dyn FnMut(SessionEvent)) {}
+        fn resume(&mut self, _sink: &mut dyn FnMut(SessionEvent)) {}
+        fn step(&mut self, _sink: &mut dyn FnMut(SessionEvent)) {}
+        fn take_ask(&mut self) -> Option<MemberAsk> {
+            None
+        }
+        fn handback(&mut self, _ask: &MemberAsk, _turn: &MemberTurn) -> Handback {
+            Handback::Fed
+        }
+        fn feed(
+            &mut self,
+            _ask: &MemberAsk,
+            _turn: MemberTurn,
+            _sink: &mut dyn FnMut(SessionEvent),
+        ) {
+        }
+        fn pass_over(&mut self, _ask: &MemberAsk, _sink: &mut dyn FnMut(SessionEvent)) {}
+        fn failed(&mut self, _err: &str) {}
+        fn next_line(&self) -> u64 {
+            0
+        }
+        fn set_next_line(&mut self, _next: u64) {}
+        fn intake(&mut self, artifact: Artifact) {
+            self.got.lock().unwrap().push(artifact);
+        }
+        fn output(&self) -> Option<Artifact> {
+            self.out.clone()
+        }
+        fn is_done(&self) -> bool {
+            self.done
+        }
+    }
+
+    /// 目的：复合流程把上一段的产物原样交给下一段——种类与内容都不动，组合子不解释。
+    #[test]
+    fn the_composite_hands_the_artifact_over_untouched() {
+        let first = Arc::new(Mutex::new(Vec::new()));
+        let second = Arc::new(Mutex::new(Vec::new()));
+        let mut seq = Sequence::new(vec![
+            Box::new(Fake {
+                done: true,
+                out: Some(Artifact::Summary("讨论完的总结".to_string())),
+                got: Arc::clone(&first),
+            }),
+            Box::new(Fake {
+                done: false,
+                out: None,
+                got: Arc::clone(&second),
+            }),
+        ]);
+        seq.start(&mut |_| {});
+        assert!(first.lock().unwrap().is_empty(), "第一段不收自己的产物");
+        let seen = second.lock().unwrap();
+        assert_eq!(seen.len(), 1, "第二段收到一件");
+        assert_eq!(
+            seen[0],
+            Artifact::Summary("讨论完的总结".to_string()),
+            "种类与内容都原样"
+        );
+    }
+
+    /// 目的：外面交给整条流水线的需求只落在第一段（后面的段从上一段接手）。
+    #[test]
+    fn an_incoming_requirement_lands_on_the_first_step() {
+        let first = Arc::new(Mutex::new(Vec::new()));
+        let second = Arc::new(Mutex::new(Vec::new()));
+        let mut seq = Sequence::new(vec![
+            Box::new(Fake {
+                done: false,
+                out: None,
+                got: Arc::clone(&first),
+            }),
+            Box::new(Fake {
+                done: false,
+                out: None,
+                got: Arc::clone(&second),
+            }),
+        ]);
+        seq.intake(Artifact::Requirement("做一件小事".to_string()));
+        assert_eq!(
+            first.lock().unwrap().as_slice(),
+            &[Artifact::Requirement("做一件小事".to_string())]
+        );
+        assert!(second.lock().unwrap().is_empty(), "第二段还没轮到");
     }
 }

@@ -13,7 +13,7 @@ use crate::units::business::collab::service::discussion::AfterTurn;
 
 use crate::kernel::api::types::Ask;
 use crate::units::business::agentloop::api::MemberTurn;
-use crate::units::business::session_model::api::{loop_of, role};
+use crate::units::business::session_model::api::{Artifact, loop_of, role};
 use crate::units::business::transcript::api::SessionEvent;
 use crate::units::business::turn_state::api::{
     Flow, GateTicket, Handback, MemberAsk, Settle, WorkPlan,
@@ -90,9 +90,10 @@ impl Flow for CollabSession {
         self.roster = roster.to_vec();
     }
 
-    fn intake(&mut self, text: String) {
+    fn intake(&mut self, artifact: Artifact) {
         // 上一段交来的产物就是这一段的需求（讨论段的总结 → 执行段要做的需求）。
-        self.task = text;
+        // 两种产物在这一段处理一样：都当成要做的需求（收不收得住由 Loop::accepts 声明）。
+        self.task = artifact.text();
     }
 
     fn begin_with(&mut self, task: &str, sink: &mut dyn FnMut(SessionEvent)) {
@@ -100,8 +101,9 @@ impl Flow for CollabSession {
         CollabSession::set_task(self, task, sink);
     }
 
-    fn output(&self) -> Option<String> {
-        self.summary.clone()
+    fn output(&self) -> Option<Artifact> {
+        // 讨论段交出的总结就是下一段的需求；没有总结就是没交出东西。
+        self.summary.clone().map(Artifact::Summary)
     }
 
     fn is_done(&self) -> bool {

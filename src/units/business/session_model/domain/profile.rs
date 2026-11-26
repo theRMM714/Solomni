@@ -6,7 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::units::business::session_model::domain::mechanism::{flow_ids, loop_of, role};
+use crate::units::business::session_model::domain::artifact::Kind;
+use crate::units::business::session_model::domain::mechanism::{Loop, flow_ids, loop_of, role};
 
 /// 目的：产品自带的单机类型 id（一个 agent、没有流程）。
 /// 约束：只有产品自带的会话类型表与测试知道它——代码按声明分支，不按 id 分支。
@@ -293,10 +294,42 @@ impl Profiles {
                 }
                 flows.push(id);
             }
+            // 链上要接得上：第一段收得下用户需求，后一段收得下前一段交出的产物。
+            let steps: Vec<&'static Loop> = p.flows.iter().filter_map(|id| loop_of(id)).collect();
+            if let Err(why) = chain_problem(&steps) {
+                return Err(format!(
+                    "会话类型 {} 的流程串不起来：{}（systools/profiles.yaml）",
+                    p.id, why
+                ));
+            }
         }
         Ok(())
     }
 }
+
+/// 目的：一串流程段接不接得上：第一段要收得下用户需求，后一段要收得下前一段交出的产物。
+/// 参数：`steps` = 按执行顺序排好的段声明（已按 id 解析过）。
+/// 返回：`Ok(())` 表示这条链能串。
+/// 错误：文案点名哪一段、交什么、谁不收（调用方补上会话类型与文件位置）。
+pub(crate) fn chain_problem(steps: &[&'static Loop]) -> Result<(), String> {
+    let Some(first) = steps.first() else {
+        return Ok(());
+    };
+    if !first.accepts.contains(&Kind::Requirement) {
+        return Err(format!("第一段 {} 不收用户需求", first.id));
+    }
+    for pair in steps.windows(2) {
+        let (prev, next) = (pair[0], pair[1]);
+        let Some(made) = prev.produces else {
+            return Err(format!("{} 不交产物，后面却接了 {}", prev.id, next.id));
+        };
+        if !next.accepts.contains(&made) {
+            return Err(format!("{} 交出{}，{} 不收", prev.id, made.name(), next.id));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -460,5 +493,62 @@ mod tests {
         .validate()
         .unwrap_err();
         assert!(err.contains("会话类型表是空的"), "{}", err);
+    }
+    /// 目的：段声明里接不上的两种情形都在装配期被拦下（用合成段，不依赖产品表）。
+    #[test]
+    fn a_chain_that_does_not_hand_off_is_refused() {
+        const SILENT: Loop = Loop {
+            id: "silent",
+            flow: true,
+            cast: &[],
+            deny: &[],
+            ask: &[],
+            accepts: &[Kind::Requirement],
+            produces: None,
+        };
+        const TEXT: Loop = Loop {
+            id: "text",
+            flow: true,
+            cast: &[],
+            deny: &[],
+            ask: &[],
+            accepts: &[Kind::Requirement],
+            produces: Some(Kind::Summary),
+        };
+        const COLD: Loop = Loop {
+            id: "cold",
+            flow: true,
+            cast: &[],
+            deny: &[],
+            ask: &[],
+            accepts: &[],
+            produces: None,
+        };
+        const PICKY: Loop = Loop {
+            id: "picky",
+            flow: true,
+            cast: &[],
+            deny: &[],
+            ask: &[],
+            accepts: &[Kind::Requirement],
+            produces: None,
+        };
+        assert!(!chain_problem(&[&TEXT, &TEXT]).is_ok(), "第二段不收总结");
+        let err = chain_problem(&[&TEXT, &PICKY]).unwrap_err();
+        assert!(err.contains("text 交出上一段的总结"), "{}", err);
+        let err = chain_problem(&[&SILENT, &TEXT]).unwrap_err();
+        assert!(err.contains("不交产物"), "{}", err);
+        let err = chain_problem(&[&COLD]).unwrap_err();
+        assert!(err.contains("第一段"), "{}", err);
+    }
+
+    /// 目的：产品表里讨论段交出的总结，执行段收得下——这条链必须通过（否则协作类型装不起来）。
+    #[test]
+    fn the_product_chain_hands_the_summary_to_the_executor() {
+        let steps: Vec<&'static Loop> = vec!["discuss", "execute"]
+            .into_iter()
+            .filter_map(loop_of)
+            .collect();
+        assert_eq!(chain_problem(&steps), Ok(()));
     }
 }
