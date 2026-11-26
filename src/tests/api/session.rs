@@ -8,7 +8,7 @@ use super::super::{ops_with, single_work, slow_ops};
 use super::support::spawn;
 use crate::presentation::faces::Faces;
 use crate::units::business::runtime::api::{Acted, ActionCall, Caller};
-use crate::units::business::session_model::api::{CUSTOM, SINGLE};
+use crate::units::business::session_model::api::SINGLE;
 use crate::units::business::turn::turn::api::Output;
 use crate::units::business::work::api::{ConfigAgent, SessionEdit, WorkSpec};
 use crate::units::pure::registry_model::api::AgentMeta;
@@ -293,7 +293,6 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
     let (opened, _) = faces
         .work
         .create_work(WorkSpec {
-            flows: None,
             freshness: None,
             name: "组合".to_string(),
             kind: SINGLE.to_string(),
@@ -322,20 +321,20 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
     assert!(meta.agents[0].transient, "并出来的「组合」是临时 agent");
 }
 
-/// 目的：临时拼装——省略 kind、只给流程 id 建会话，落盘的类型是 custom，流程 id 记在元数据里。
+/// 目的：会话形状只由类型表定——表里没有的类型建不出来（没有现拼流程的旁路）。
 #[test]
-fn an_inline_assembly_creates_a_custom_session_type() {
+fn a_session_type_outside_the_table_cannot_be_created() {
     let (_h, faces) = ops_with(vec![module_of("a"), module_of("b")], Vec::new());
     let mut spec = super::super::doubles::collab_work("拼的", &["a", "b"], false, "做点事");
-    spec.kind = String::new();
-    spec.flows = Some(vec!["discuss".to_string()]);
-    let (opened, _) = faces.work.create_work(spec).expect("临时拼装建会话");
-    assert_eq!(opened.agents.len(), 2, "名单照给的进会话");
-    let (meta, _) = faces.history.open("拼的").expect("读 meta");
-    assert_eq!(meta.spec.kind, CUSTOM, "临时拼装落成 custom 类型");
-    assert_eq!(meta.spec.name, "临时组合", "类型名给界面渲染");
-    assert_eq!(meta.spec.flow_ids(), vec!["discuss"]);
-    assert!(meta.spec.driven(), "带流程 = 由流程驱动");
+    spec.kind = "custom".to_string();
+    let why = match faces.work.create_work(spec) {
+        Ok(_) => panic!("表里没有的类型必须拒绝"),
+        Err(e) => e,
+    };
+    assert!(
+        why.contains("会话类型表里没有「custom」这个类型"),
+        "错误要说清是类型表里没有：{why}"
+    );
 }
 #[test]
 fn editing_is_refused_while_a_session_is_generating() {

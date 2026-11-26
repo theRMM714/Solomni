@@ -1451,7 +1451,6 @@ fn creating_a_session_without_core_default_is_refused() {
 fn creating_a_proxy_without_core_default_is_refused() {
     let mut core = core_with_settings(InMemorySettings::without_core());
     let spec = WorkSpec {
-        flows: None,
         freshness: None,
         name: "no-core-proxy".to_string(),
         kind: PROXY.to_string(),

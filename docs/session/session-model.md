@@ -9,9 +9,9 @@
 
 ## 一、形态
 - **执行席按 agent 一会话**（含同 agent 串行）、**讨论回合开工具循环**（能只读核实、拿不到模块工具）、**讨论由核心驱动**（泵只决定"该问谁"，成员回合在它自己的会话里跑，核实行与回合标记都落进那个会话；主会话只留"谁说了什么"）。
-- **会话类型是落盘的声明，不是分支**：建会话时把类型表里那一条解析成 `SessionSpec`（`kind` / `name` / `role` / `flows` / `auto`）写进 `meta.yaml`，之后装配只看这份声明——有流程就按流程装配，没有就一个 agent 直接轮循环（`spec.driven()`）；代码里没有「形态枚举」，也不按 id 分支（「整块交给核心」看 `auto`，不看名字）。类型 id 同时是命令与落盘用的词（ASCII），`name` 只给界面显示，`hint` 是选类型时的一句说明。
-- **会话类型是数据**：一个会话类型就是一串流程 id，声明在 `systools/profiles.yaml`（自带 single / collab / proxy 三条；`flows` 为空 = 没有流程、直接轮循环）。每条写清 `id`（命令与落盘用）、`name`（界面显示）、`hint`（一句说明）、`flows`、`auto`（这个类型整块交给核心：没有名单也没有需求），以及**没有流程时**坐的静止机制 `mechanism`（如 `standard` / `proxy`，解析成它唯一那一席）。**席位不在这里报**：一个机制由哪些席位出演（`core: true` = 核心通道，不进成员表；其余是成员席，各报 `min` 员）是机制自己的声明，在 `src/units/business/session_model/domain/mechanism.rs` 的 `MECHANISMS`（新增机制在那里加一条，`flow: true` 的才能当流程）。装配期校验：id 唯一且不含空白、流程已注册且不重复出现、没有流程的类型要有静止机制且它不能是流程机制、有流程的类型不该再声明机制、每个流程至少各有一个核心席与成员席；各流程成员席人数取最大折成 `min_agents`：建会话时人数不够就直接拒绝，代拟名单由流程在建组时判（`session::domain::profile::Profiles`，加载在 `src/units/business/conversation/session/detail/yaml_profiles.rs`）。
-- **临时拼装**：流程也可以在请求里当场拼一条类型——`create_session` 省略 `kind`、给 `flows`（内联流程 id 数组；CLI 的 `collab` 命令用 `flows` 参数，写流程 id、逗号分隔）。它与预设走同一份白名单：只收已注册（`mechanism.rs` 的 `MECHANISMS`）的流程（`Profiles::check_inline`）；`inline_spec` 折成 `SessionSpec`，落盘 `kind` 记作 `custom`（显示名「临时组合」），装配与回档只看折出来的那份声明（`src/units/business/session_model/domain/profile.rs`）。
+- **会话类型是落盘的声明，不是分支**：建会话时把类型表里那一条解析成 `SessionSpec`（`kind` / `name` / `seat` / `flows` / `auto`）写进 `meta.yaml`，之后装配只看这份声明——有流程就按流程装配，没有就一个 agent 直接轮循环（`spec.driven()`）；代码里没有「形态枚举」，也不按 id 分支（「整块交给核心」看 `auto`，不看名字）。类型 id 同时是命令与落盘用的词（ASCII），`name` 只给界面显示，`hint` 是选类型时的一句说明。
+- **会话类型是数据**：一个会话类型就是一串流程 id，声明在 `systools/profiles.yaml`（自带 single / collab / proxy 三条；`flows` 为空 = 没有流程、直接轮循环）。每条写清 `id`（命令与落盘用）、`name`（界面显示）、`hint`（一句说明）、`flows`、`auto`（这个类型整块交给核心：没有名单也没有需求）、`agent_visible`（**agent** 能不能用 `create_session` 建它；默认 false = 只有人经呈现层能建，人的入口不受它限制），以及**没有流程时**坐的静止机制 `mechanism`（如 `standard` / `proxy`，解析成它唯一那一席）。**席位不在这里报**：一个机制由哪些席位出演（`core: true` = 核心通道，不进成员表；其余是成员席，各报 `min` 员）是机制自己的声明，在 `src/units/business/session_model/domain/mechanism.rs` 的 `MECHANISMS`（新增机制在那里加一条，`flow: true` 的才能当流程）。装配期校验：id 唯一且不含空白、流程已注册且不重复出现、没有流程的类型要有静止机制且它不能是流程机制、有流程的类型不该再声明机制、每个流程至少各有一个核心席与成员席；各流程成员席人数取最大折成 `min_agents`：建会话时人数不够就直接拒绝，代拟名单由流程在建组时判（`session::domain::profile::Profiles`，加载在 `src/units/business/conversation/session/detail/yaml_profiles.rs`）。
+- **形状只由类型表定**：没有现拼流程的旁路——`create_session` 的 `kind` 必填，表里没有的类型直接建不出来（`Work::create` 报「会话类型表里没有「…」这个类型」，`src/units/business/work/service/create.rs`）。两扇门共用同一份类型表，但收窄面不同：**人经呈现层**只按「表里有没有」判；**agent** 的 `create_session` 只收 `agent_visible: true` 的类型（`catalog_agents` 的 `scope=types` 也只列这一组，`src/units/business/proxy/service/proxy.rs` 的 `resolve_new_session` 按 `catalog.kinds` 校验）。
 - **agent 会话在第一个回合按需建**。
 - 主会话投影行带 `turn`（回档按回合同步截断）；工具面由机制席位合成（工具面、身份与越权校验同出一份声明）；压缩：`compact` 工具 + `compacted` 转录行 + 发送视图，按模型窗口百分比自动触发。
 
@@ -38,7 +38,7 @@ session/<工作名>/
 ```
 
 - **目录保留名**（`work` / `children` / `.proxy` / `.work` / `.work-root`）的名单在 `systools/names.yaml`：布局一改就改表，代码里不硬编码。
-- **缺省名由后端派生**：没显式给名字时，会话名 = 预设 id + 本机到分钟的时间戳（如 `single-20261124-2053`）；临时拼装没有预设 id 就取第一个流程 id，仍没有就退到 `work`；子会话是 `<父名>--<席位名>`，不另起时间戳。显式给了名字才用它，重名一律带 `-2` / `-3` 尾号（`src/units/business/runtime/service/action.rs` 的 `derived_session_name` + `unique_work_name`，时间戳来自 `src/kernel/detail/clock.rs` 的 `local_stamp`）。
+- **缺省名由后端派生**：没显式给名字时，会话名 = 预设 id + 本机到分钟的时间戳（如 `single-20261124-2053`）；没有预设 id 就退到 `work`；子会话是 `<父名>--<席位名>`，不另起时间戳。显式给了名字才用它，重名一律带 `-2` / `-3` 尾号（`src/units/business/runtime/service/action.rs` 的 `derived_session_name` + `unique_work_name`，时间戳来自 `src/kernel/detail/clock.rs` 的 `local_stamp`）。
 - `meta.yaml` 的 `agents` 是名单的唯一真相（代拟路径在用户确认那一刻写回）；`exec` 段是执行选型的唯一真相（档位 / 虚拟根名 / 定版 `pins`；缺段按默认读回）。会话级权限层在 `sandbox.ceiling`（根）/ `sandbox.narrowing`（子）。
 - agent 会话**在第一个讨论回合按需建**（名单确认时不预建），命名 `<工作>--<agent>`。
 - agent 会话是**普通会话**：独立上下文、独立转录、独立围栏，复用同一套会话机制；**不新增会话类型**。

@@ -280,9 +280,6 @@ impl WorkOps for FakeCore {
     fn session_types(&self) -> Result<Vec<SessionTypeView>, String> {
         Err("没装类型表".into())
     }
-    fn flow_ids(&self, _: &[String]) -> Result<Vec<String>, String> {
-        Err("没装流程表".into())
-    }
     fn ambient_workspace(
         &self,
         _: &std::path::Path,

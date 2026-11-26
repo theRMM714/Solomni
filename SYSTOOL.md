@@ -11,9 +11,9 @@
 | 系统工具与模块工具的分别：**系统工具**由核心实现（声明在上表的工具总表），**模块工具**由模块自己的外部命令实现；模块工具是动态动作（`module.<模块id>.<工具名>`），清单来自各模块 | `modules/*/module.yaml`；[MODULE_SPEC.md](MODULE_SPEC.md) |
 | 这个**身份有什么**：坐哪一席（核心 / 成员）+ 引用的系统工具 id + 提示词 + 是否给模块工具、能不能写、能不能发布 | `src/units/business/session_model/domain/mechanism.rs` 的 `SEATS` |
 | 工作区布局**固定占用的目录名**（agent 实例名不得占用） | `systools/names.yaml` |
-| 一个**会话类型**的 id 与显示名、按什么顺序跑哪些流程、是否整块交给核心（`auto`）、（没有流程的类型）坐哪个**静止机制** | `systools/profiles.yaml` |
+| 一个**会话类型**的 id 与显示名、按什么顺序跑哪些流程、是否整块交给核心（`auto`）、agent 能不能建它（`agent_visible`）、（没有流程的类型）坐哪个**静止机制** | `systools/profiles.yaml` |
 | 一个**机制**的席位：核心席与成员席各是哪些席位、各要几员 | `src/units/business/session_model/domain/mechanism.rs` 的 `MECHANISMS`（`flow: true` 的才是流程） |
-| 临时拼装的会话类型（请求里省略 `kind`、内联流程声明）落盘成什么 | 折成 `SessionSpec`，`kind` 记 `custom`（`src/units/business/session_model/domain/profile.rs` 的 `inline_spec`） |
+| 表里没有的会话类型为什么建不出来、agent 能建哪些类型 | 形状只由类型表定（`src/units/business/work/service/create.rs`）；agent 只看 `agent_visible`（`Profiles::agent_visible`，`catalog_agents` 的 `scope=types` 也照此过滤） |
 | 已确认但尚未实施的系统工具与验收条件，**不限席位**（非当前工具表、非测试缺口账） | [systool_gaps.yaml](systool_gaps.yaml) |
 | 席位引用了表里不存在的 id 为什么硬失败、席位面与 `callers` 为什么必须双向一致 | 装配期 `mechanism::problems(&ToolBook)` 与 `SystemTools::problems()`，由 `src/tests/detail/prompt.rs` 锁死 |
 

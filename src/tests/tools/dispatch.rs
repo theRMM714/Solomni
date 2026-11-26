@@ -19,7 +19,6 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
     let mut core = core_with(vec![a, b], gw(BTreeMap::new(), vec!["[]".into()]));
     // 跨模块同名工具不再冲突：信封里的 module 消歧（行为见 same_named_tools_in_two_modules_run_in_their_own_root）。
     let one_agent = WorkSpec {
-        flows: None,
         freshness: None,
         name: "w".to_string(),
         kind: SINGLE.to_string(),
@@ -43,7 +42,6 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
     );
     // 同一模块可以同时属于两个 agent（共用；各自独立沙箱与工具面）。
     let cross = WorkSpec {
-        flows: None,
         freshness: None,
         name: "cross".to_string(),
         kind: MEETING.to_string(),

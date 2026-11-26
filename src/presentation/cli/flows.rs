@@ -146,7 +146,6 @@ pub(super) fn single_flow(
         SessionAsk {
             name: None,
             kind: "single",
-            flows: None,
             agents: &picked,
             task: None,
             tier,
@@ -185,7 +184,6 @@ pub(super) fn proxy_flow(
         SessionAsk {
             name: None,
             kind: "proxy",
-            flows: None,
             agents: &[],
             task: None,
             tier,
@@ -208,26 +206,9 @@ pub(super) fn proxy_flow(
 }
 
 /// 目的：协作会话：给需求、点名单（或让核心代拟），之后一律按裁决卡推进。
-/// 约束：给 `flows` 就是**临时拼装**——按列出的流程 id 现拼（席位与人数由流程自己报），不走预设类型。
+/// 约束：形状只由会话类型表定——`collab` 就是表里的那一条，命令没有现拼流程的参数。
 pub(super) fn collab_flow(faces: &Faces, args: &Value, opts: &shell::Opts) {
     let names = text(args, "agents").unwrap_or_default();
-    let flow_arg = text(args, "flows").unwrap_or_default();
-    let ids: Vec<String> = flow_arg
-        .split(|c: char| c == ',' || c.is_whitespace())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect();
-    let flows = if ids.is_empty() {
-        None
-    } else {
-        match faces.work.flow_ids(&ids) {
-            Ok(d) => Some(d),
-            Err(e) => {
-                println!("[错误] {}", e);
-                return;
-            }
-        }
-    };
     let trimmed = names.trim();
     let delegate = trimmed.is_empty() || trimmed == "?";
     let task = match term::ask("需求>") {
@@ -258,13 +239,11 @@ pub(super) fn collab_flow(faces: &Faces, args: &Value, opts: &shell::Opts) {
         .unwrap_or(Tier::Host);
     let mut cursor = faces.events.head();
     // 代拟由形态派生（协作 + 没给名单 = 核心按需求拟名单）；CLI 只交点名结果。
-    let kind = if flows.is_some() { "" } else { "collab" };
     let sid = match create_session_action(
         faces,
         SessionAsk {
             name: None,
-            kind,
-            flows: flows.as_deref(),
+            kind: "collab",
             agents: &agents,
             task: Some(&task),
             tier,

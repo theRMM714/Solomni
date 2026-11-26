@@ -30,7 +30,7 @@
 - 流程面（`src/units/business/turn_state/domain/flow.rs` 的 `Flow` / `MemberAsk` / `Handback` / `WorkPlan`，归 `turn_state`）一改 → 每个流程的实现（协作在 `src/units/business/collab/service/flow.rs`）与驱动（`src/units/business/turn/turn/service/flow.rs`、`src/units/business/turn/turn/service/generation/collab.rs`）一起改。
 - 复合流程（`src/units/business/turn_state/domain/sequence.rs` 的 `Sequence`）一改 → 装配点（`src/units/business/work/service/create.rs`、`src/units/business/turn/turn/service/rebuild.rs`）与流程自己的 `intake` / `output` / `part` 一起看：前一段交出的产物就是后一段的需求。
 - 流程工厂面（`src/units/business/turn_state/domain/flows.rs` 的 `Flows` / `FlowSetup` / `sequence_of`）一改 → 各流程工厂的实现（协作在 `src/units/business/collab/service/flows.rs`）与组合根的注入（`src/units/business/runtime/service/core.rs`）一起改：装配点只问 id 要段，不认识具体流程。
-- 会话类型表（`src/units/business/session_model/domain/profile.rs` 的 `Profiles`，数据在 `systools/profiles.yaml`）一改 → 提示词册子的席位条目（`prompts/shared/mechanisms.yaml`）同跟；新增流程要在 `src/units/business/session_model/domain/mechanism.rs` 的 `MECHANISMS` 加一条（席位与人数在那里），席位换提示词或工具同改同一文件的 `SEATS`；临时拼装（省略 `kind`、内联流程 id）走同一份校验 `check_inline` 与折算函数 `inline_spec`，落盘类型 `custom`。
+- 会话类型表（`src/units/business/session_model/domain/profile.rs` 的 `Profiles`，数据在 `systools/profiles.yaml`）一改 → 提示词册子的席位条目（`prompts/shared/mechanisms.yaml`）同跟；新增流程要在 `src/units/business/session_model/domain/mechanism.rs` 的 `MECHANISMS` 加一条（席位与人数在那里），席位换提示词或工具同改同一文件的 `SEATS`；`agent_visible` 决定 agent 能经 `create_session` 建哪些类型（默认都不可见，人的入口不受限）。
 
 ## 本目录
 

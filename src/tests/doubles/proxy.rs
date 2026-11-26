@@ -67,6 +67,23 @@ impl FakeProxyHost {
                     tools: "envelope".to_string(),
                 },
             ],
+            // agent 能建的会话类型：只列进候选的（不在表里的名字当作不存在）。
+            kinds: vec![
+                dproxy::KindFact {
+                    id: "single".to_string(),
+                    name: "单机".to_string(),
+                    hint: String::new(),
+                    needs_task: false,
+                    auto: false,
+                },
+                dproxy::KindFact {
+                    id: "collab".to_string(),
+                    name: "会议".to_string(),
+                    hint: String::new(),
+                    needs_task: true,
+                    auto: false,
+                },
+            ],
         }
     }
 

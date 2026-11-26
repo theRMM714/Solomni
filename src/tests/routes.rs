@@ -292,9 +292,6 @@ impl WorkOps for FakeFaces {
     fn session_types(&self) -> Result<Vec<SessionTypeView>, String> {
         Ok(Vec::new())
     }
-    fn flow_ids(&self, _: &[String]) -> Result<Vec<String>, String> {
-        Ok(Vec::new())
-    }
     fn ambient_workspace(
         &self,
         _: &std::path::Path,

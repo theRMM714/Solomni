@@ -19,9 +19,7 @@ pub use crate::units::business::session_model::domain::persist::{
     PersistPolicy, SYSTEM_SID_SUGGEST, is_system_session, persist_policy_for,
 };
 #[allow(unused_imports)]
-pub use crate::units::business::session_model::domain::profile::{
-    Profiles, SessionSpec, inline_spec,
-};
+pub use crate::units::business::session_model::domain::profile::{Profiles, SessionSpec};
 // 只有测试知道产品自带类型的名字；生产代码按声明里的 auto / flows 分支，不认这些 id。
 #[cfg(test)]
-pub use crate::units::business::session_model::domain::profile::{CUSTOM, MEETING, PROXY, SINGLE};
+pub use crate::units::business::session_model::domain::profile::{MEETING, PROXY, SINGLE};

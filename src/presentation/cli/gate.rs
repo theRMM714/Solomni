@@ -428,12 +428,11 @@ pub(super) fn pick_guest(
 }
 
 /// 目的：一次建会话要交给动作表的决定（CLI 的交互结果 → `create_session` 的参数）。
-/// 约束：`name` 只在用户点名时给（缺省名归后端：预设 id + 本地到分钟）；`kind` 与 `flows` 二选一；
+/// 约束：`name` 只在用户点名时给（缺省名归后端：预设 id + 本地到分钟）；`kind` 必填；
 ///   `workspace` 是启动目录收成的工作区根（None = 会话用产品内 work/）。
 pub(crate) struct SessionAsk<'a> {
     pub(crate) name: Option<&'a str>,
     pub(crate) kind: &'a str,
-    pub(crate) flows: Option<&'a [String]>,
     pub(crate) agents: &'a [AgentMeta],
     pub(crate) task: Option<&'a str>,
     pub(crate) tier: Tier,
@@ -445,7 +444,6 @@ pub(crate) fn create_session_action(faces: &Faces, ask: SessionAsk<'_>) -> Resul
     let SessionAsk {
         name,
         kind,
-        flows,
         agents,
         task,
         tier,
@@ -463,19 +461,15 @@ pub(crate) fn create_session_action(faces: &Faces, ask: SessionAsk<'_>) -> Resul
             })
         })
         .collect();
-    // 预设类型给 kind；临时拼装给 flows（两者只能给一个，后端会再校验一遍）。
+    // 形状只由会话类型定：参数表里只有 kind，没有现拼流程的位置。
     let mut args = serde_json::json!({
         "agents": agents,
+        "kind": kind,
         "tier": tier.as_str(),
     });
     // 没点名就不带 name：缺省名归后端（同一处派生，Web / 代理建子会话也走它）。
     if let Some(n) = name.map(str::trim).filter(|n| !n.is_empty()) {
         args["name"] = serde_json::json!(n);
-    }
-    if let Some(flows) = flows {
-        args["flows"] = serde_json::json!(flows);
-    } else {
-        args["kind"] = serde_json::json!(kind);
     }
     if let Some(t) = task {
         args["task"] = serde_json::json!(t);

@@ -157,36 +157,16 @@ impl Handle {
         &self,
         args: &serde_json::Value,
     ) -> Result<d::NewSession, String> {
-        let wanted = args
+        // 形状只由会话类型定：kind 必填，没有它的会话建不出来（没有现拼流程的旁路）。
+        let kind = args
             .get("kind")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .trim()
             .to_string();
-        // 临时拼装：给了 flows 就不查预设类型（白名单在 work 的准备段校验）。
-        let flows: Option<Vec<String>> = match args.get("flows") {
-            Some(v) => {
-                let flows: Vec<_> = serde_json::from_value(v.clone())
-                    .map_err(|e| format!("flows 格式不对：{}", e))?;
-                if flows.is_empty() {
-                    return Err("临时拼装至少要有一个流程".to_string());
-                }
-                Some(flows)
-            }
-            None => None,
-        };
-        // 临时拼装时类型 id 留空——落盘声明由流程折成，入口不替它编一个名字。
-        let kind = if flows.is_some() {
-            if !wanted.is_empty() {
-                return Err("kind 与 flows 只能给一个（临时拼装省略 kind）".to_string());
-            }
-            String::new()
-        } else {
-            if wanted.is_empty() {
-                return Err("kind 不能为空（要会话类型表里的一个；临时拼装改用 flows）".to_string());
-            }
-            wanted
-        };
+        if kind.is_empty() {
+            return Err("kind 不能为空（要会话类型表里的一个）".to_string());
+        }
         let mut agents: Vec<crate::units::pure::registry_model::api::AgentMeta> = Vec::new();
         if let Some(arr) = args.get("agents").and_then(|v| v.as_array()) {
             for (i, a) in arr.iter().enumerate() {
@@ -246,7 +226,6 @@ impl Handle {
         }
         Ok(d::NewSession {
             kind,
-            flows,
             agents,
             task: args
                 .get("task")

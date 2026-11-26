@@ -170,7 +170,6 @@ pub(crate) fn single_work(
     modules: &[&str],
 ) -> crate::units::business::work::api::WorkSpec {
     crate::units::business::work::api::WorkSpec {
-        flows: None,
         freshness: None,
         name: name.to_string(),
         kind: crate::units::business::session_model::api::SINGLE.to_string(),

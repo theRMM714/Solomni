@@ -449,7 +449,6 @@ pub(crate) fn create_work_validates_user_choices() {
     let _ = core.lifecycle.history_delete(&mut core.turn, "零模块");
     // 单模式的**组合语义**：点名多个 = 并成一个临时组合（模块去重、保序；模型取核心默认）。
     let two_agents = WorkSpec {
-        flows: None,
         freshness: None,
         name: "x".to_string(),
         kind: SINGLE.to_string(),

@@ -89,6 +89,8 @@ pub enum CatalogScope {
     Agents,
     Modules,
     Models,
+    /// 目的：agent 能建的会话类型（只列 `agent_visible` 的那些）。
+    Types,
     All,
 }
 
@@ -98,9 +100,10 @@ impl CatalogScope {
             "agents" => Ok(Self::Agents),
             "modules" => Ok(Self::Modules),
             "models" => Ok(Self::Models),
+            "types" => Ok(Self::Types),
             "all" => Ok(Self::All),
             other => Err(format!(
-                "scope 只能是 agents / modules / models / all：{}",
+                "scope 只能是 agents / modules / models / types / all：{}",
                 other
             )),
         }
@@ -113,6 +116,9 @@ impl CatalogScope {
     }
     pub fn covers_models(self) -> bool {
         matches!(self, Self::Models | Self::All)
+    }
+    pub fn covers_types(self) -> bool {
+        matches!(self, Self::Types | Self::All)
     }
 }
 
@@ -260,6 +266,20 @@ pub struct Catalog {
     pub agents: Vec<crate::units::pure::registry_model::api::AgentView>,
     pub modules: Vec<ModuleFact>,
     pub models: Vec<ModelFact>,
+    /// 目的：agent 能建的会话类型（type 表里 `agent_visible` 的那些）。
+    pub kinds: Vec<KindFact>,
+}
+
+/// 目的：一个可建的会话类型（建会话选 kind 时的候选）。
+#[derive(Debug, Clone, Serialize)]
+pub struct KindFact {
+    pub id: String,
+    pub name: String,
+    pub hint: String,
+    /// 目的：有流程的类型要本次需求、名单可以先空着让核心拟；没有流程的直接开工。
+    pub needs_task: bool,
+    /// 目的：整块交给核心的类型（没有名单可写）。
+    pub auto: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -334,10 +354,9 @@ pub struct ControlState {
 /// 目的：建会话的规整载荷（工具层解析完交给宿主；宿主不再解析模型参数）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewSession {
-    /// 目的：会话类型名（会话类型表里的一个；装配时按它解析成落盘声明）；临时拼装固定是 `custom`。
+    /// 目的：会话类型名（会话类型表里的一个；装配时按它解析成落盘声明）。
+    /// 约束：形状只由类型表定——没有这个类型就建不出来（没有现拼流程的旁路）。
     pub kind: String,
-    /// 目的：临时拼装选的流程 id 列表（None = 按 `kind` 查会话类型表）；席位与人数由流程自己报。
-    pub flows: Option<Vec<String>>,
     pub agents: Vec<AgentMeta>,
     /// 目的：**这个会话的开头 / 本次需求**：single = 它的第一句（点火用的派发），collab = 本次需求。
     ///   建好就开始——不是"给某个 agent 的任务"（见宿主实现的 `create_session`）。
@@ -377,12 +396,10 @@ pub struct CatalogArgs {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateArgs {
-    /// 目的：会话类型名（会话类型表里的一个；代理不能往代理里套）；临时拼装时省略。
+    /// 目的：会话类型名（会话类型表里的一个；代理不能往代理里套）。
+    /// 约束：只用表里 `agent_visible` 的类型——解析期按 `catalog.kinds` 校验，别的名字一律当作不存在。
     #[serde(default)]
     pub kind: String,
-    /// 目的：临时拼装选的流程 id 列表（与 `kind` 二选一；id 是否在册在装配期校验）。
-    #[serde(default)]
-    pub flows: Option<Vec<String>>,
     /// 目的：每项是对象，形状在 parse_agents 里逐条校验（数组元素形状声明层表达不了）；省略 = 空（代理形态 / 代拟）。
     #[serde(default)]
     pub agents: Vec<serde_json::Value>,
@@ -455,25 +472,23 @@ pub fn catalog_scope(args: &CatalogArgs) -> Result<CatalogScope, String> {
 /// 目的：create_session——把模型给的名字/模块/模型与登记处事实核对后规整成载荷。
 ///   失败一律如实报错——调用方据此拒绝整次调用，不留半成品。
 pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSession, String> {
-    let wanted = args.kind.trim().to_string();
-    let flows = match args.flows.as_deref() {
-        Some([]) => return Err("临时拼装至少要有一个流程".to_string()),
-        Some(flows) => {
-            if !wanted.is_empty() {
-                return Err("kind 与 flows 只能给一个（临时拼装省略 kind）".to_string());
-            }
-            Some(flows.to_vec())
-        }
-        None => None,
-    };
-    let kind = if flows.is_some() {
-        String::new()
-    } else {
-        if wanted.is_empty() {
-            return Err("kind 不能为空（要会话类型表里的一个；临时拼装改用 flows）".to_string());
-        }
-        wanted
-    };
+    let kind = args.kind.trim().to_string();
+    if kind.is_empty() {
+        return Err("kind 不能为空（要一个 agent 能建的会话类型）".to_string());
+    }
+    // 能不能建只看表：不在候选里的名字当作不存在（不泄漏「有这个类型但你不能建」）。
+    if !catalog.kinds.iter().any(|k| k.id == kind) {
+        return Err(format!(
+            "没有这个会话类型：{}（catalog_agents scope=types 看可建的：{}）",
+            kind,
+            catalog
+                .kinds
+                .iter()
+                .map(|k| k.id.as_str())
+                .collect::<Vec<_>>()
+                .join("、")
+        ));
+    }
     let request_id = args.request_id.trim().to_string();
     if request_id.is_empty() {
         return Err("request_id 不能为空（幂等标识）".to_string());
@@ -560,7 +575,6 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
         .transpose()?;
     Ok(NewSession {
         kind,
-        flows,
         agents: resolved,
         task,
         request_id,
@@ -683,6 +697,12 @@ pub fn render_catalog(scope: CatalogScope, c: &Catalog) -> Result<String, String
         out.insert(
             "models".to_string(),
             serde_json::to_value(&c.models).map_err(|e| e.to_string())?,
+        );
+    }
+    if scope.covers_types() {
+        out.insert(
+            "kinds".to_string(),
+            serde_json::to_value(&c.kinds).map_err(|e| e.to_string())?,
         );
     }
     Ok(serde_json::Value::Object(out).to_string())

@@ -170,13 +170,23 @@ impl PromptSource for TestPrompts {
 
 /// 目的：测试用的**会话类型表**：走与产品同一条装配路径（读产品自带的 `systools/profiles.yaml`）。
 /// 约束：表改了这里跟着变——测试断言的是产品怎么被装配，不是另写一份类型表。
+///   唯一的追加是只给测试的形状 `execute`（只跑执行流程）：产品表里没有单执行流程的类型，
+///   而要单独钉执行段的用例需要它。
 pub(crate) fn test_profiles() -> crate::units::business::session_model::api::Profiles {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    crate::units::business::conversation::session::detail::yaml_profiles::YamlProfiles::new(
-        crate::tests::doubles::assets_at(&root),
-    )
-    .load()
-    .expect("内置会话类型表必须合法")
+    let mut book =
+        crate::units::business::conversation::session::detail::yaml_profiles::YamlProfiles::new(
+            crate::tests::doubles::assets_at(&root),
+        )
+        .load()
+        .expect("内置会话类型表必须合法");
+    book.profiles.push(
+        yaml_serde::from_str(
+            "id: execute\nname: 执行\nhint: 只跑执行流程（测试用）\nflows: [execute]\nagent_visible: true\n",
+        )
+        .expect("测试形状"),
+    );
+    book
 }
 
 pub(crate) fn test_prompts() -> Prompts {

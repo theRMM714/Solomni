@@ -491,7 +491,6 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
     let child = handle
         .call(|core| {
             let spec = d::NewSession {
-                flows: None,
                 freshness: None,
                 kind: SINGLE.to_string(),
                 agents: vec![AgentMeta {
@@ -610,7 +609,6 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
 pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
     let (handle, faces) = super::super::ops_with(vec![], vec![]);
     let spec = crate::units::business::work::api::WorkSpec {
-        flows: None,
         freshness: None,
         name: "w-user-proxy".to_string(),
         kind: PROXY.to_string(),
@@ -706,7 +704,6 @@ pub(crate) fn proxy_session_exposes_context_usage() {
             .expect("起核心线程");
     let faces = Faces::from_handle(&handle);
     let spec = crate::units::business::work::api::WorkSpec {
-        flows: None,
         freshness: None,
         name: "w-proxy-ctx".to_string(),
         kind: PROXY.to_string(),
@@ -753,7 +750,6 @@ pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
             let proxy = proxy.clone();
             move |core| {
                 let spec = d::NewSession {
-                    flows: None,
                     freshness: None,
                     kind: SINGLE.to_string(),
                     agents: vec![AgentMeta {
