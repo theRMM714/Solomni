@@ -221,6 +221,7 @@ session/<工作名>/
 | 节点没过 | `node_rework` / `node_say`（同上） |
 
 - 工具层那一问（围栏装不上）自带 `kind = fence` 与 `payload`，选项是 `fence_unfenced_once` / `fence_abort`（见 [docs/kernel/README.md](../kernel/README.md)）。
+- **策略提出的那一问**：流程段可以在 `Loop.ask` 里声明「这一段里哪些动作要用户点头」，引擎把这一次调用翻成一张 `kind = policy` 的卡（`src/units/business/agentloop/domain/policy.rs` 的 `ask_card`：`name` 是 agent，`body` 是策略给的理由，`detail` 写明段与角色，选项固定 `allow` / `deny`），走同一条队、同一套落盘。**只有答了 `allow` 才执行**；`deny`、没人答、被停止、构不出选项，以及这一趟没有可回答的前端，一律当没放行——回执写明这一次没有执行（`src/units/business/agentloop/engine/tools.rs` 的 `gate`）。
 
 ### 泵的状态机
 

@@ -51,6 +51,14 @@ pub fn problems(book: &ToolBook) -> Vec<String> {
         if l.flow && !(has_core && has_member) {
             out.push(format!("流程段 {} 要同时有核心角色与成员角色", l.id));
         }
+        for id in l.ask {
+            if !book.contains_key(*id) {
+                out.push(format!(
+                    "流程段 {} 要用户点头的动作在总表里没有：{}",
+                    l.id, id
+                ));
+            }
+        }
         for ability in l.deny {
             if !matches!(*ability, FS_READ | FS_WRITE | EXEC | SHARED_WRITE) {
                 out.push(format!(

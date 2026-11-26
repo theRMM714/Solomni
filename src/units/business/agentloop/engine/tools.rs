@@ -71,18 +71,9 @@ pub(crate) fn run_branch(
             String::new(),
             crate::units::business::tools::api::refuse(name),
         )
-    } else if let crate::units::business::agentloop::domain::policy::Verdict::Deny(why) =
-        ctx.policy.decide(
-            &crate::units::business::agentloop::domain::policy::ToolRequest {
-                tool: name,
-                sources: &ctx.face.source_ids,
-                loop_id: &ctx.face.loop_id,
-                role: &ctx.face.role,
-            },
-        )
-    {
-        // 在面内、但这一段不给用：回执说清是哪一段抑制了哪一组能力（授权归策略，来源只管在场）。
-        (String::new(), refuse(why))
+    } else if let Some(outcome) = authorized(ctx, name, *ask) {
+        // 在面内、但这一段不给用（或问了没点头）：回执说清原因；拒绝路径不产生任何副作用。
+        (String::new(), outcome)
     } else if crate::units::business::tools::api::is_builtin(name) {
         // 门禁看的是"这一批调用发出时模型还能看到的观察"：批前快照，同批 read 不授权后面的 write。
         let facts = gate_facts.to_vec();
@@ -148,6 +139,70 @@ pub(crate) fn run_branch(
         Vec::new()
     };
     (label, outcome, branch, facts, shell)
+}
+
+/// 目的：授权判定——这一次调用准不准、要不要先问一次；没拿到点头就如实拒绝（fail-closed）。
+/// 参数：`ctx` = 这一回合的工具面与身份；`name` = 要调的工具 id（已在面内）；`ask` = 会话的提问端口（没有就是没有前端）。
+/// 返回：`None` = 放行；`Some(回执)` = 不执行，回执说明原因。
+/// 约束：顺序固定为「在场（face_has，调用方已判）→ 授权（这里）→ 分发」；授权不写观察账本、不提交共享区。
+fn authorized(
+    ctx: &MemberTools,
+    name: &str,
+    ask: Option<&dyn crate::kernel::ports::AskUser>,
+) -> Option<ToolOutcome> {
+    use crate::units::business::agentloop::domain::policy::ToolRequest;
+    let req = ToolRequest {
+        tool: name,
+        sources: &ctx.face.source_ids,
+        loop_id: &ctx.face.loop_id,
+        role: &ctx.face.role,
+    };
+    gate(ctx.policy.decide(&req), &req, &ctx.face.sandbox.agent, ask)
+}
+
+/// 目的：把策略的结论落成结果：准 → 放行；不准 → 拒绝；要问 → 问一次，只有「允许这一次」才放行。
+/// 参数：`agent` = 撞上这一问的 agent 实例名（卡片信封第二段）。
+/// 约束：唯独 `Chosen(OPT_ALLOW)` 放行；拒绝、没人答、停止、构不出选项、没有前端一律不执行。
+fn gate(
+    verdict: crate::units::business::agentloop::domain::policy::Verdict,
+    req: &crate::units::business::agentloop::domain::policy::ToolRequest<'_>,
+    agent: &str,
+    ask: Option<&dyn crate::kernel::ports::AskUser>,
+) -> Option<ToolOutcome> {
+    use crate::kernel::api::types::AskOutcome;
+    use crate::units::business::agentloop::domain::policy::{OPT_ALLOW, Verdict, ask_card};
+    match verdict {
+        Verdict::Allow => None,
+        Verdict::Deny(why) => Some(refuse(why)),
+        Verdict::Ask { why } => {
+            let card = ask_card(agent, req, &why);
+            let Some(port) = ask else {
+                return Some(refuse(format!(
+                    "这一问没人能答（这一趟没有可回答的前端）：{}；{} 没有执行。",
+                    card.title, req.tool
+                )));
+            };
+            match port.ask(&card) {
+                AskOutcome::Chosen(id) if id == OPT_ALLOW => None,
+                AskOutcome::Chosen(_) => Some(refuse(format!(
+                    "你这一次没有同意（{}）：{} 没有执行。",
+                    card.title, req.tool
+                ))),
+                AskOutcome::NoAnswer => Some(refuse(format!(
+                    "这一问没人答（{}）：{} 没有执行——没人点头就当没放行。",
+                    card.title, req.tool
+                ))),
+                AskOutcome::Stopped => Some(refuse(format!(
+                    "这一问被停止（{}）：{} 没有执行。",
+                    card.title, req.tool
+                ))),
+                AskOutcome::NoOptions => Some(refuse(format!(
+                    "这一问构不出可答的选项（{}）：{} 没有执行。",
+                    card.title, req.tool
+                ))),
+            }
+        }
+    }
 }
 
 /// 目的：写工具落地后**自动提交**——路径取自这次调用真正写过的文件（观察账本的分支副本，见 Observations::take_written）。
@@ -863,5 +918,143 @@ pub(crate) fn dispatch_external(
             let why = format!("模块 {} 未声明工具 {}", module, inv.name);
             (module.clone(), deny(&ctx.face, why))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kernel::api::types::{Ask, AskOutcome};
+    use crate::kernel::ports::AskUser;
+    use crate::units::business::agentloop::domain::policy::{
+        OPT_ALLOW, OPT_DENY, ToolRequest, Verdict,
+    };
+
+    /// 目的：按固定答复回话的提问端口——同时记下问过哪几张卡。
+    struct Answering {
+        /// 这一次的答复。
+        reply: AskOutcome,
+        /// 问过的卡片标题（断言"该问才问"）。
+        seen: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl Answering {
+        /// 目的：造一个只会回 \`reply\` 的端口。
+        fn new(reply: AskOutcome) -> Answering {
+            Answering {
+                reply,
+                seen: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl AskUser for Answering {
+        fn ask(&self, ask: &Ask) -> AskOutcome {
+            self.seen.lock().expect("锁没坏").push(ask.title.clone());
+            self.reply.clone()
+        }
+        fn halt(&self, _why: &str) {}
+    }
+
+    /// 目的：答了「允许这一次」才放行——这是唯一的放行路径。
+    #[test]
+    fn an_allowed_answer_lets_the_call_through() {
+        let sources: Vec<String> =
+            vec![crate::units::business::session_model::api::SOURCE_AGENT.to_string()];
+        let req = ToolRequest {
+            tool: crate::units::business::tools::api::WRITE,
+            sources: &sources,
+            loop_id: "asking",
+            role: "solo",
+        };
+        let port = Answering::new(AskOutcome::Chosen(OPT_ALLOW.to_string()));
+        let verdict = Verdict::Ask {
+            why: "要你点头".to_string(),
+        };
+        assert!(gate(verdict, &req, "甲", Some(&port)).is_none());
+        assert_eq!(port.seen.lock().expect("锁没坏").len(), 1, "该问且只问一次");
+    }
+
+    /// 目的：答「不允许」就不执行，回执说清是哪一问没通过。
+    #[test]
+    fn a_refused_answer_stops_the_call() {
+        let sources: Vec<String> =
+            vec![crate::units::business::session_model::api::SOURCE_AGENT.to_string()];
+        let req = ToolRequest {
+            tool: crate::units::business::tools::api::WRITE,
+            sources: &sources,
+            loop_id: "asking",
+            role: "solo",
+        };
+        let port = Answering::new(AskOutcome::Chosen(OPT_DENY.to_string()));
+        let verdict = Verdict::Ask {
+            why: "要你点头".to_string(),
+        };
+        let out = gate(verdict, &req, "甲", Some(&port)).expect("不许放行");
+        assert!(!out.ok);
+        assert!(out.output.contains("没有执行"), "{}", out.output);
+    }
+
+    /// 目的：没人答就当没放行（不静默执行）。
+    #[test]
+    fn nobody_answering_stops_the_call() {
+        let sources: Vec<String> =
+            vec![crate::units::business::session_model::api::SOURCE_AGENT.to_string()];
+        let req = ToolRequest {
+            tool: crate::units::business::tools::api::WRITE,
+            sources: &sources,
+            loop_id: "asking",
+            role: "solo",
+        };
+        let port = Answering::new(AskOutcome::NoAnswer);
+        let verdict = Verdict::Ask {
+            why: "要你点头".to_string(),
+        };
+        let out = gate(verdict, &req, "甲", Some(&port)).expect("不许放行");
+        assert!(!out.ok);
+        assert!(out.output.contains("没人点头"), "{}", out.output);
+    }
+
+    /// 目的：没有前端就不问、也不执行。
+    #[test]
+    fn with_no_frontend_the_call_never_runs() {
+        let sources: Vec<String> =
+            vec![crate::units::business::session_model::api::SOURCE_AGENT.to_string()];
+        let req = ToolRequest {
+            tool: crate::units::business::tools::api::WRITE,
+            sources: &sources,
+            loop_id: "asking",
+            role: "solo",
+        };
+        let verdict = Verdict::Ask {
+            why: "要你点头".to_string(),
+        };
+        let out = gate(verdict, &req, "甲", None).expect("不许放行");
+        assert!(!out.ok);
+        assert!(out.output.contains("没有可回答的前端"), "{}", out.output);
+    }
+
+    /// 目的：策略直接拒绝的动作不去问用户（问了也放行不了）。
+    #[test]
+    fn a_denied_policy_never_asks() {
+        let sources: Vec<String> =
+            vec![crate::units::business::session_model::api::SOURCE_AGENT.to_string()];
+        let req = ToolRequest {
+            tool: crate::units::business::tools::api::WRITE,
+            sources: &sources,
+            loop_id: "discuss",
+            role: "discussant",
+        };
+        let port = Answering::new(AskOutcome::Chosen(OPT_ALLOW.to_string()));
+        let out = gate(
+            Verdict::Deny("这一段不给写".to_string()),
+            &req,
+            "甲",
+            Some(&port),
+        )
+        .expect("不许放行");
+        assert!(!out.ok);
+        assert!(out.output.contains("这一段不给写"), "{}", out.output);
+        assert!(port.seen.lock().expect("锁没坏").is_empty(), "不许问");
     }
 }
