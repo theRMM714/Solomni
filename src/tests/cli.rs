@@ -24,7 +24,6 @@ fn cli_session_creation_goes_through_the_action_table() {
         cli::SessionAsk {
             name: Some("cli-1"),
             kind: "single",
-            flows: None,
             agents: &picked,
             task: None,
             tier: Tier::Host,
@@ -39,7 +38,6 @@ fn cli_session_creation_goes_through_the_action_table() {
             cli::SessionAsk {
                 name: None,
                 kind: "乱来",
-                flows: None,
                 agents: &picked,
                 task: None,
                 tier: Tier::Host,
@@ -65,7 +63,6 @@ fn cli_takes_the_backend_derived_session_name() {
         cli::SessionAsk {
             name: None,
             kind: "single",
-            flows: None,
             agents: &picked,
             task: None,
             tier: Tier::Host,

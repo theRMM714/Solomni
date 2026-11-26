@@ -29,29 +29,10 @@ impl Work {
                     roster: !auto,
                     needs_task: !p.flows.is_empty(),
                     min_agents: self.flows.book().min_agents(&p.flows),
+                    agent_visible: p.agent_visible,
                 }
             })
             .collect()
-    }
-
-    /// 目的：临时拼装的白名单：只认已注册的流程 id，重复给同一个 id 如实拒绝。
-    /// 约束：名字来自机制的流程登记（`session::api` 的 `flow_ids`），不另立一份清单。
-    pub(crate) fn flow_ids(&self, ids: &[String]) -> Result<Vec<String>, String> {
-        let mut out: Vec<String> = Vec::new();
-        for id in ids {
-            if out.contains(id) {
-                return Err(format!("临时拼装里同一个流程出现了两次：{}", id));
-            }
-            if crate::units::business::session_model::api::mechanism_of(id).is_none() {
-                return Err(format!(
-                    "会话类型表里没有这个流程：{}（已注册的流程：{}）",
-                    id,
-                    crate::units::business::session_model::api::flow_ids().join(" / ")
-                ));
-            }
-            out.push(id.clone());
-        }
-        Ok(out)
     }
 
     /// 目的：上下文「继续」是否该出现——判据只在后端（前端不按末条/类型猜）。

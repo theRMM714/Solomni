@@ -30,6 +30,23 @@ fn facts() -> Catalog {
             name: "GPT".to_string(),
             tools: "native".to_string(),
         }],
+        // 只有这两个类型对 agent 可见（proxy 之类不在候选里）。
+        kinds: vec![
+            KindFact {
+                id: "single".to_string(),
+                name: "单机".to_string(),
+                hint: String::new(),
+                needs_task: false,
+                auto: false,
+            },
+            KindFact {
+                id: "collab".to_string(),
+                name: "会议".to_string(),
+                hint: String::new(),
+                needs_task: true,
+                auto: false,
+            },
+        ],
     }
 }
 
@@ -170,64 +187,34 @@ fn resolve_new_session_checks_against_the_catalog() {
     );
 }
 
-/// 临时拼装：省略 kind、只给流程 id 建会话；kind 与 flows 只能给一个。
+/// 会话形状只由类型表定：kind 必填，且只能是对 agent 可见的那些；现拼流程那条路已经不存在。
 #[test]
-fn resolve_new_session_accepts_an_inline_assembly() {
+fn resolve_new_session_only_accepts_visible_types() {
     let c = facts();
-    let inline: CreateArgs = serde_json::from_value(serde_json::json!({
+    let missing: CreateArgs = serde_json::from_value(serde_json::json!({
         "flows": ["discuss"],
         "agents": [{"ref": "a"}],
         "task": "先讨论",
         "request_id": "r7"
     }))
     .unwrap();
-    let spec = resolve_new_session(&inline, &c).expect("临时拼装合法");
-    assert_eq!(
-        spec.kind, "",
-        "临时拼装没有预设类型：类型 id 留空，靠流程说话"
+    assert!(
+        resolve_new_session(&missing, &c)
+            .unwrap_err()
+            .contains("kind 不能为空"),
+        "没有 kind 就没有形状（临时拼装已删）"
     );
-    assert_eq!(spec.flows.as_ref().map(Vec::len), Some(1));
-    assert_eq!(spec.flows.unwrap()[0], "discuss");
 
-    let both: CreateArgs = serde_json::from_value(serde_json::json!({
-        "kind": "collab",
-        "flows": ["discuss"],
+    let unknown: CreateArgs = serde_json::from_value(serde_json::json!({
+        "kind": "proxy",
         "agents": [{"ref": "a"}],
         "task": "做事",
         "request_id": "r8"
     }))
     .unwrap();
-    assert!(
-        resolve_new_session(&both, &c)
-            .unwrap_err()
-            .contains("只能给一个"),
-        "预设与临时拼装不能同时给"
-    );
-
-    let none: CreateArgs = serde_json::from_value(serde_json::json!({
-        "flows": [],
-        "agents": [{"ref": "a"}],
-        "task": "做事",
-        "request_id": "r9"
-    }))
-    .unwrap();
-    assert!(
-        resolve_new_session(&none, &c)
-            .unwrap_err()
-            .contains("至少要有一个流程")
-    );
-
-    let barren: CreateArgs = serde_json::from_value(serde_json::json!({
-        "agents": [{"ref": "a"}],
-        "task": "做事",
-        "request_id": "r10"
-    }))
-    .unwrap();
-    assert!(
-        resolve_new_session(&barren, &c)
-            .unwrap_err()
-            .contains("kind 不能为空")
-    );
+    let err = resolve_new_session(&unknown, &c).unwrap_err();
+    assert!(err.contains("没有这个会话类型"), "{}", err);
+    assert!(err.contains("single"), "拒绝时列出能建的那些：{}", err);
 }
 /// 授权是硬条件：没授权 / 越范围 / 超期 / 模型或会话不在授权内都拒绝。
 #[test]

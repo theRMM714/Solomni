@@ -84,10 +84,28 @@ impl Core {
         } else {
             Vec::new()
         };
+        // 能建哪些会话类型只看类型表：只把 `agent_visible` 的给模型（别的名字当作不存在）。
+        let kinds = if scope.covers_types() {
+            self.work
+                .session_types()
+                .into_iter()
+                .filter(|t| t.agent_visible)
+                .map(|t| d::KindFact {
+                    id: t.kind,
+                    name: t.name,
+                    hint: t.hint,
+                    needs_task: t.needs_task,
+                    auto: !t.roster,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         Ok(d::Catalog {
             agents,
             modules,
             models,
+            kinds,
         })
     }
 

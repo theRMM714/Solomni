@@ -443,16 +443,8 @@ pub(crate) fn derived_session_name(spec: &d::NewSession) -> String {
     let kind = spec.kind.trim();
     let label = if !kind.is_empty() {
         kind.to_string()
-    } else if let Some(flow) = spec
-        .flows
-        .as_ref()
-        .and_then(|f| f.first())
-        .map(|f| f.trim())
-        .filter(|f| !f.is_empty())
-    {
-        flow.to_string()
     } else {
-        // 既没有预设也没有流程（临时拼装缺流程、纯机器请求）：退回请求号，再不行用通用词。
+        // 纯机器请求没给类型：退回请求号，再不行用通用词。
         let request = spec.request_id.trim();
         if request.is_empty() {
             "work".to_string()
@@ -561,7 +553,6 @@ impl Core {
         let work = WorkSpec {
             name,
             kind,
-            flows: spec.flows.clone(),
             agents,
             task,
             delegate,

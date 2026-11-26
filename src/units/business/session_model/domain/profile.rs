@@ -1,5 +1,5 @@
 //! 目的：会话类型表——一个会话类型就是一串要跑的流程（或一个静止机制）；装配期的规则校验在这里。
-//! 管：`Profiles` / `Profile` / `SessionSpec` 的形状与校验（流程已注册、静止机制在册、人数够）；
+//! 管：`Profiles` / `Profile` / `SessionSpec` 的形状与校验（流程已注册、静止机制在册、人数够、agent 能建哪些）；
 //!   会话创建时把选中的类型**解析成** `SessionSpec` 落进 meta，装配只看那份声明。
 //! 不管：yaml 解析（在 `detail/yaml_profiles.rs`）；机制与席位的声明（在 `domain/mechanism.rs`）；会话装配（在 `turn` 的重建里）。
 //! 联动：组合根装载并在装配期调用 `validate`；创建期按 `min_agents` 校验名单。
@@ -24,11 +24,6 @@ pub const PROXY: &str = "proxy";
 /// 约束：产品自带类型表里的代理项声明它；代码按声明里的 `auto` 判定，不认这个名字。
 #[cfg(test)]
 pub const PROXY_MECHANISM: &str = "proxy";
-/// 目的：临时拼装用的会话类型 id（没落进类型表，声明随会话一起落盘）。
-pub const CUSTOM: &str = "custom";
-/// 目的：临时拼装的显示名（界面与转录里按这个名字显示，不用 id）。
-pub const CUSTOM_NAME: &str = "临时组合";
-
 /// 目的：一条会话落盘的**解析后声明**：哪一类会话、没有流程时坐哪个席位、按顺序跑哪些流程。
 /// 约束：装配只看这份声明（不按类型名分岔）；`flows` 空 = 没有调度者，直接轮循环。
 ///   有流程的会话没有静止席位（`seat` 为空）——身份由流程按回合给席位。
@@ -88,19 +83,6 @@ impl SessionSpec {
     }
 }
 
-/// 目的：把临时拼装的流程 id 包成落盘声明（类型 id 固定 `custom`，没有静止席位——身份由流程给）。
-/// 参数：`flows` = 已通过 `Profiles::check_inline` 校验的流程 id。
-/// 返回：可以直接落进 `SessionMeta` 的声明。
-pub fn inline_spec(flows: Vec<String>) -> SessionSpec {
-    SessionSpec {
-        kind: CUSTOM.to_string(),
-        name: CUSTOM_NAME.to_string(),
-        seat: String::new(),
-        flows,
-        auto: false,
-    }
-}
-
 /// 目的：一个会话类型：一串要跑的流程（空 = 没有流程，直接轮循环）与它的静止机制。
 #[derive(Debug, Clone, Deserialize)]
 pub struct Profile {
@@ -121,6 +103,10 @@ pub struct Profile {
     /// 目的：整块交给核心代理的类型（没有名单、没有需求；核心在该会话里自己决定做什么）。
     #[serde(default)]
     pub auto: bool,
+    /// 目的：这个类型能不能由 **agent** 建（`create_session` 的 kind 可选它）。
+    /// 约束：默认 false——没标 = 只有人经呈现层能建；人的入口不受它限制。
+    #[serde(default)]
+    pub agent_visible: bool,
 }
 
 /// 目的：会话类型总表（`systools/profiles.yaml` 的顶层形状）。
@@ -168,7 +154,7 @@ impl Profiles {
             .unwrap_or_else(|| kind.to_string())
     }
 
-    /// 目的：这个类型是不是表里的一个预设（临时拼装另走校验，不算预设）。
+    /// 目的：这个类型是不是表里的一个预设。
     pub fn known(&self, kind: &str) -> bool {
         self.profiles.iter().any(|p| p.id == kind)
     }
@@ -264,31 +250,6 @@ impl Profiles {
         }
         Ok(())
     }
-
-    /// 目的：临时拼装的校验：流程都注册过且不重复、每段流程的席位都在机制表里。
-    /// 参数：`flows` = 调用方内联的流程 id。
-    /// 返回：`Ok(())` 表示这场临时拼装可以拿去装配。
-    /// 错误：文案点名「临时拼装」与出问题的那一项。
-    pub fn check_inline(&self, flows: &[String]) -> Result<(), String> {
-        if flows.is_empty() {
-            return Err("临时拼装至少要有一个流程".to_string());
-        }
-        let mut seen: Vec<&str> = Vec::new();
-        for id in flows {
-            if mechanism_of(id).is_none() {
-                return Err(format!(
-                    "临时拼装的流程没注册：{}（已注册：{}）",
-                    id,
-                    flow_ids().join(" / ")
-                ));
-            }
-            if seen.contains(&id.as_str()) {
-                return Err(format!("临时拼装里同一个流程出现了两次：{}", id));
-            }
-            seen.push(id);
-        }
-        Ok(())
-    }
 }
 #[cfg(test)]
 mod tests {
@@ -304,6 +265,7 @@ mod tests {
                     mechanism: "standard".to_string(),
                     flows: Vec::new(),
                     auto: false,
+                    agent_visible: true,
                 },
                 Profile {
                     id: MEETING.to_string(),
@@ -312,6 +274,7 @@ mod tests {
                     mechanism: String::new(),
                     flows: vec!["discuss".to_string(), "execute".to_string()],
                     auto: false,
+                    agent_visible: true,
                 },
                 Profile {
                     id: PROXY.to_string(),
@@ -320,6 +283,7 @@ mod tests {
                     mechanism: PROXY_MECHANISM.to_string(),
                     flows: Vec::new(),
                     auto: true,
+                    agent_visible: false,
                 },
             ],
         }
@@ -412,34 +376,23 @@ mod tests {
     }
 
     #[test]
-    fn an_inline_assembly_is_checked_against_the_same_whitelist() {
+    fn only_the_types_marked_visible_are_open_to_agents() {
         let p = base();
-        // 合法：现拼一段讨论。
-        p.check_inline(&["discuss".to_string()])
-            .expect("注册过的流程可以直接拼");
-
-        // 空表：临时拼装至少要有一段流程。
-        let err = p.check_inline(&[]).unwrap_err();
-        assert!(err.contains("至少要有一个流程"), "{}", err);
-
-        // 没注册的流程。
-        let err = p.check_inline(&["review".to_string()]).unwrap_err();
-        assert!(err.contains("没注册：review"), "{}", err);
-
-        // 同一段流程拼两次。
-        let err = p
-            .check_inline(&["discuss".to_string(), "discuss".to_string()])
-            .unwrap_err();
-        assert!(err.contains("同一个流程出现了两次"), "{}", err);
-
-        // 折出来的声明：类型记作 custom，没有静止机制，流程原样带上。
-        let spec = inline_spec(vec!["discuss".to_string(), "execute".to_string()]);
-        assert_eq!(spec.kind, CUSTOM);
-        assert_eq!(spec.name, CUSTOM_NAME);
-        assert_eq!(spec.seat, "");
-        assert_eq!(spec.flow_ids(), vec!["discuss", "execute"]);
-        assert!(spec.driven());
-        assert_eq!(p.min_agents(&spec.flow_ids()), 2);
+        let ids: Vec<&str> = p
+            .profiles
+            .iter()
+            .filter(|x| x.agent_visible)
+            .map(|x| x.id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            vec![SINGLE, MEETING],
+            "没标 agent_visible 的类型不给 agent 建"
+        );
+        assert!(
+            p.known(PROXY),
+            "不可见不等于不存在：人的入口按 known 判，仍能建它"
+        );
     }
 
     #[test]

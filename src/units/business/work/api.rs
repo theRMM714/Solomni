@@ -21,10 +21,8 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct WorkSpec {
     pub name: String,
-    /// 目的：会话类型名（表里的预设，如 单机 / 会议 / 代理；创建时解析成 `SessionSpec` 落盘）；临时拼装时不用。
+    /// 目的：会话类型名（表里的预设，如 单机 / 会议 / 代理；创建时解析成 `SessionSpec` 落盘）。
     pub kind: String,
-    /// 目的：临时拼装的流程 id（Some = 不走预设，按这几个流程建；装配前过白名单校验）。
-    pub flows: Option<Vec<String>>,
     pub agents: Vec<AgentMeta>,
     /// 目的：协作：本次需求（必填）。
     pub task: Option<String>,
@@ -494,8 +492,6 @@ pub trait WorkOps: Send + Sync {
     /// 目的：会话类型表给界面看的那份（选类型时的名字与说明、要不要名单与需求）。
     /// 约束：按 systools/profiles.yaml 的声明顺序；界面渲染它，不自己复制类型知识。
     fn session_types(&self) -> Result<Vec<SessionTypeView>, String>;
-    /// 目的：临时拼装的白名单：只认已注册的流程 id，重复给同一个 id 如实拒绝。
-    fn flow_ids(&self, ids: &[String]) -> Result<Vec<String>, String>;
     /// 目的：把启动目录收成外部工作区根（"在哪个目录启动就用哪个目录"，建会话前判一次）。
     /// 约束：与建会话时的 `resolve` 同一条阶梯但**不探可写**；不建目录、不落盘。
     ///   Err 是「为什么不能当工作区」的整句文案，调用方据此回退到产品内 work/ 并说明。
@@ -519,4 +515,6 @@ pub struct SessionTypeView {
     pub needs_task: bool,
     /// 目的：这个类型的流程至少要几个 agent（选名单的地方按它凑人；没有流程就是 0）。
     pub min_agents: usize,
+    /// 目的：agent 能不能建这个类型（false = 只给人用；核心代理的 `create_session` 看不见它）。
+    pub agent_visible: bool,
 }

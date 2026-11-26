@@ -280,7 +280,7 @@ tools:
         type: string
         required: true
         non_empty: true
-        desc: 要读的范围：agents（已存 agent）/ modules（模块公地）/ models（可用模型）/ all（全部）
+        desc: 要读的范围：agents（已存 agent）/ modules（模块公地）/ models（可用模型）/ types（agent 能建的会话类型）/ all（全部）
   create_session:
     capability: none              # 不碰文件：建的是会话，不是路径
     callers: [user, core_proxy]   # 谁能调它：user（经呈现层）/ 席位 id；与机制席位的工具面双向一致
@@ -288,19 +288,15 @@ tools:
       建一场工作（会话类型 + 名单 + 本次需求）：类型来自 systools/profiles.yaml；
       无流程类型（如 single）= 一个 agent 直接干活，有流程类型（如 collab）按声明流程跑；proxy 类型无名单，决定权整块交核心。
       人经呈现层：先建会话、用户后续发言推进；核心代理：**建好就开工**——无流程时 task = 第一句，有流程时 task = 本次需求。
-      临时拼装：省略 kind、用 flows 给一串在册流程 id。
       会话落在父会话 children/ 下、与父共用 work/。授权与父会话由会话类型提供，不接受模型自授；
       创建失败不留半成品；同一 request_id 重放不重复创建、不重复开工。
     params:
       kind:
         type: string
-        desc: 会话类型（systools/profiles.yaml 里的一条 id，如 single / collab / proxy）；没有流程的类型直接一个 agent 干活，有流程的类型按声明的流程跑。省略 = 临时拼装，此时必须给 flows
-      flows:
-        type: array
         desc: |-
-          临时拼装用的流程 id 列表（与 kind 二选一），按执行顺序写，如 ["discuss","execute"]。
-          流程 id 必须已注册（discuss / execute）；席位与人数由机制自己报，不用在这里写席位名单。
-          给了 flows 时不需要 kind（落盘类型记作 custom）
+          会话类型 id（systools/profiles.yaml 里的一条）：没有流程的类型直接一个 agent 干活，
+          有流程的类型按声明的流程跑。必填；能建哪些用 catalog_agents 的 scope=types 查（只列 agent 可见的类型）。
+          表里没有的类型建不出来（错误照实说没有这个类型）。
       agents:
         type: array
         desc: |-

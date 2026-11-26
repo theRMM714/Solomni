@@ -174,7 +174,6 @@ pub(crate) fn work(name: &str, kind: &str, modules: &[&str]) -> WorkSpec {
         }]
     };
     WorkSpec {
-        flows: None,
         freshness: None,
         name: name.to_string(),
         kind: kind.to_string(),
@@ -274,12 +273,12 @@ pub(crate) fn installed_dep(
     }
 }
 
-/// 目的：只跑执行流程的临时拼装规格（执行席只要 1 个 agent，含需求）。
+/// 目的：只跑执行流程的工作规格（执行席只要 1 个 agent，含需求）。
+/// 约束：形状来自测试类型表里追加的 `execute`（见 `test_profiles`）；产品表里没有只跑执行流程的类型。
 pub(crate) fn execute_work(name: &str, modules: &[&str], task: &str) -> WorkSpec {
     // 每个模块一个 agent：执行流程按负责人派节点，名字要能与脚本对上。
-    let mut w = work(name, "", modules);
+    let mut w = work(name, "execute", modules);
     w.agents = agents_of(modules);
-    w.flows = Some(vec!["execute".to_string()]);
     w.task = Some(task.to_string());
     w
 }
