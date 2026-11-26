@@ -112,5 +112,6 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
         // 核实环境不换席（席位在装配时定死），模块表也恒空。
         modules: Vec::new(),
         prompt: Arc::clone(&spec.prompt),
+        policy: crate::units::business::agentloop::domain::policy::default_policy(),
     }))
 }

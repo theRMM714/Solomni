@@ -37,6 +37,9 @@ pub struct Loop {
     pub flow: bool,
     /// 目的：这一段的角色位（按声明顺序；核心角色与成员角色都在这里）。
     pub cast: &'static [Cast],
+    /// 目的：这一段抑制哪些能力组（`fs-read` / `fs-write` / `exec` / `shared-write`）：在场但这一段不给用。
+    /// 约束：只影响授权（`Policy`），不影响发放——工具仍在面上，调用时回一条拒绝回执。
+    pub deny: &'static [&'static str],
 }
 
 /// 目的：核心代理角色：把用户的话转成对其它会话的动作（开、发、看、停）。
@@ -92,9 +95,14 @@ pub const ROLES: &[Role] = &[
 ];
 
 /// 目的：讨论段：核心代理主持、讨论角色表态（讨论角色至少两人）。
+/// 约束：讨论段抑制写面与共享区写（讨论只表态与核实），读面与执行面照常。
 const DISCUSS: Loop = Loop {
     id: "discuss",
     flow: true,
+    deny: &[
+        crate::units::business::session_model::domain::tools::FS_WRITE,
+        crate::units::business::session_model::domain::tools::SHARED_WRITE,
+    ],
     cast: &[
         Cast {
             role: CORE_PROXY.id,
@@ -113,6 +121,7 @@ const DISCUSS: Loop = Loop {
 /// 约束：会话控制那 6 个是 **system 工具**：由会话类型声明、建会话时展开进 meta，不挂在任何角色位上。
 const EXECUTE: Loop = Loop {
     id: "execute",
+    deny: &[],
     flow: true,
     cast: &[
         Cast {
@@ -136,6 +145,7 @@ const EXECUTE: Loop = Loop {
 /// 目的：单机段：一个 agent 直接干活（静止身份，没有机制动作）。
 const STANDARD: Loop = Loop {
     id: "standard",
+    deny: &[],
     flow: false,
     cast: &[Cast {
         role: SOLO.id,
@@ -147,6 +157,7 @@ const STANDARD: Loop = Loop {
 /// 目的：代理段：核心代理一个角色（会话控制工具由会话类型声明，不在这里）。
 const PROXY: Loop = Loop {
     id: "proxy",
+    deny: &[],
     flow: false,
     cast: &[Cast {
         role: CORE_PROXY.id,

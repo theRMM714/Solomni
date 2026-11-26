@@ -291,6 +291,8 @@ pub(crate) struct MemberTools {
     pub modules: Vec<crate::units::business::catalog::modules::api::Module>,
     /// 目的：提示词面（换席时现拼说明块的素材）：**不持它的端口**（R12）。
     pub prompt: Arc<dyn crate::units::business::prompt::api::Prompt>,
+    /// 目的：授权端口：这一次调用准不准（装配时注入默认策略；与"在不在场上"分开）。
+    pub policy: Arc<dyn crate::units::business::agentloop::domain::policy::Policy>,
 }
 
 /// 目的：核心操作回路里「先核实」的那半个环境——判定一个名字是不是只读核实工具、把它跑一次。

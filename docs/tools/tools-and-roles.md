@@ -65,12 +65,12 @@ Loop { id: "discuss", flow: true, cast: &[Cast { role: "core_proxy", .. }, Cast 
 | `profile` | 会话类型声明的系统工具（代理类型的六个会话控制动作） | 会话 meta 里的 `system_tools`（建会话时按类型表展开） |
 
 - 会话类型表（`systools/profiles.yaml`）的 `sources` 决定挂哪几个：`single` = `[agent, module, workspace]`、`collab` = `[agent, module, workspace, loop]`、`proxy` = `[profile]`（六个系统工具）。
-- **来源只回答"它在不在场"，不回答"准不准"**：越权（面里没有）由装配后的面拦，准不准归权限端口；这条分界让"可见但需批准"将来能存在。
+- **来源只回答"它在不在场"，不回答"准不准"**：越权（面里没有）由装配后的面拦，准不准归权限端口；这条分界让"可见但需批准"能作为同一个端口上的第三种结论加进来（当前只有准 / 不准）。
 - **装配不做解析**：面里只有 id，执行时按 id 找实现（模块 / 服务 / 系统工具各一处），找不到如实回执「没有这个工具」。
 
 - **为什么 `shell` 在 `agent` 来源的读面里**：围栏恒为「私有沙箱 rw + 模块目录只读 + 主机只读根只读」，共享区主副本永不进容器——它改不到共享区，发不发不构成安全问题（`src/units/business/tools/domain/fence.rs`）。
-- **写面不看角色**：能力组只属于 agent，同一个 agent 换到哪一席，交出的文件面都相同。核心席（`planner` / `orchestrator` / `core_proxy`）只做核实与判定，压住它调写面与发布面的是**权限端口**（按会话类型声明抑制），不是来源。
-- 越权防线分两段：**来源合成的面**决定这一刻有哪些工具，**权限端口**决定其中哪些还能用（`Deny` 的不执行、`Ask` 的先问）。两段缺一不可。
+- **写面不看角色**：能力组只属于 agent，同一个 agent 换到哪一席，交出的文件面都相同。核心席（`planner` / `orchestrator` / `core_proxy`）只做核实与判定，压住它调写面与发布面的是**授权端口**（按流程段声明的抑制表判），不是来源。
+- 越权防线分两段：**来源合成的面**决定这一刻有哪些工具（在不在场），**授权端口**决定其中哪些还能用（准不准）。两段缺一不可：面里没有的调用一律拒绝（`face_has`），面里有而这一段抑制的由端口拒绝——两道判定都在 `src/units/business/agentloop/engine/tools.rs` 的 `run_branch` 里，先于任何执行。
 
 - **注入口径（唯一）**：**总表不进提示词**。每回合由核心查"这一回合的身份能用的工具"：信封通道把说明与参数作为一条系统消息注入；原生通道由**声明槽**下发（名字 / 说明 / JSON Schema），不再重复文字清单，只保留 patch 这类声明表达不了的写法。
 - **回执预算（唯一）**：所有工具回执（read / grep / list / shell / 模块工具 / 核心操作的只读核实）送回模型前受**两级预算**。第一级是单条静态上限 16k 字符（开头约 1/4、结尾约 3/4），超出时把正文换成「开头 + 结尾」。第二级按**本批**剩余上下文收紧：`ResultBudget` 取 `min(16k, (窗口 - 已用 - reserve) × 4 × 50% / 本批调用数)`，`reserve = min(2000 token, 窗口 / 10)`；算出的每条上限低于 1000 字符即视为上下文枯竭，**整批预检失败、任何工具都不执行**（避免 shell 已产生副作用却看不到回执）。只要没枯竭，生产者在生成回执时就按本批上限截断：read 只显示能放下的行，并只把实际显示的行记成观察事实；shell / 模块工具与核心操作的只读核实同受此限；会话层再用同一预算兜底，已按更大上限截过的回执允许二次收缩。截断加 `result.truncated`（原始字符数、实际保留数、本批上限）与 `result.truncated.context`（提示先压缩会话或分页读取）两条 `Note`；文件类续读给 read 的 offset/limit，执行类给「缩小命令输出 / 写到文件再 read」。实现唯一在 `src/units/business/tools/domain/budget.rs`，本机与虚拟机档都经过它；read 的续读 offset、shell 的状态行 / 末行都在尾部，因此保留。
@@ -111,6 +111,12 @@ Loop { id: "discuss", flow: true, cast: &[Cast { role: "core_proxy", .. }, Cast 
 - 核心代理回合坐 `core_proxy`：它的机制动作是空的，工具全来自会话类型的 `system_tools`。
 
 - 代码里**没有任何**"哪个角色能调哪个工具"的名单，加一个工具只改一处（工具总表）；要让它出现在某个面上，由对应来源自己交 id。
+
+- 授权判定的约束：
+
+- **在不在场与准不准是两个端口**：来源只交 id（`ToolSource::offer`），准不准问 `Policy::decide`（`src/units/business/agentloop/domain/policy.rs`），请求带工具 id、交它的来源、当前段与角色。默认实现 `LoopPolicy` 只按段判：段声明抑制哪几组能力（`Loop.deny`，可选 `fs-read` / `fs-write` / `exec` / `shared-write`），这一段里那几组工具就不能调，回执说清是哪一段抑制了哪一组能力。当前只有 `Allow` / `Deny` 两种结论。
+- **抑制写在段上，不写工具名**：`deny` 写能力组，能力组到 id 的映射只有一份（`policy::ids_of`，与来源发放共用），所以加一个写工具不需要动任何抑制声明。
+- **引擎每次调用都过一遍授权**：`src/units/business/agentloop/engine/tools.rs` 的 `run_branch` 先按面判在场，再问 `Policy`，然后才进内置 / shell / 模块 / 核心自有工具四条执行路（授权拒绝不产生副作用、不当表态）。
 
 - 越权判定的约束：
 

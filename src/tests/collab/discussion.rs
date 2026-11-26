@@ -211,6 +211,58 @@ pub(crate) fn discussion_member_cannot_call_a_builtin_outside_its_seat_face() {
     );
 }
 
+/// 目的：讨论段的**抑制表**（授权端口 Policy）真的挡在派发路径上：write 在工具面里（agent 能力组默认给），
+///   但讨论段声明抑制 fs-write，所以如实拒绝、不落盘，回执说清是哪一段抑制了哪一组能力。
+#[test]
+pub(crate) fn discussion_member_cannot_write_even_though_its_agent_has_the_ability() {
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"note.txt\",\"content\":\"x\"}}"
+                .to_string(),
+            "{\"type\":\"say\",\"text\":\"我写不了，换个路子\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
+    member.insert(
+        "b".to_string(),
+        vec![
+            "{\"type\":\"say\",\"text\":\"我也看过了\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
+    let mut core = core_with(
+        vec![module_of("a"), module_of("b")],
+        gw(
+            member,
+            vec![
+                "结论：由 a 按需求把事做完。".to_string(),
+                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做\",\"status\":\"pass\"}]}}".to_string(),
+            ],
+        ),
+    );
+    let sid = core
+        .create_work(collab_work("w", &["a", "b"], false, "做个东西"))
+        .unwrap()
+        .sid;
+    let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
+    assert!(
+        events.iter().any(|e| matches!(e, SessionEvent::ToolCall(t)
+            if !t.ok && t.name == "write" && t.output.contains("不发给 discussant 的 fs-write 能力"))),
+        "讨论段抑制的写入该被授权端口挡下并说清理由：{:?}",
+        events
+    );
+    assert!(
+        !events.iter().any(|e| matches!(e, SessionEvent::ToolCall(t)
+            if t.ok && t.name == "write")),
+        "被抑制的写入不能执行：{:?}",
+        events
+    );
+}
 /// 目的：讨论回合**拿不到干活的手段**：模块工具被如实拒绝，且不当表态吸收。
 #[test]
 pub(crate) fn discussion_member_cannot_use_module_tools() {
