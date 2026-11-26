@@ -12,7 +12,7 @@ pub(super) fn guard(cmd: &mut Command) {
     {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
-        // 父进程没了就收信号：核心被强杀时，QEMU / 共享进程不该继续攥着镜像。
+        // 父进程没了就收信号：核心被强杀时，长驻子进程不该继续攥着资源。
         #[cfg(target_os = "linux")]
         {
             unsafe {

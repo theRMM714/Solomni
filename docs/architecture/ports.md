@@ -11,6 +11,8 @@
 - 纯逻辑（信封解析、引擎循环、协作状态派生、提示词渲染）**刻意不抽象**：不是 IO、没有可替换实现，就不加 trait。
 - 端口只有一个持有者：**定义它的那个单元的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `FenceHost` / `PathCodec` / `SessionHost`）全项目共享；`TurnHost` 由 `turn` 声明（`src/units/turn/turn/api.rs`）、由 `runtime` 实现（`src/units/runtime/service/handle.rs`）——业务声明它需要宿主代做什么，最顶层（`runtime`）来实现。
 - 新增端口前先问一句：**这是 IO 或可替换点吗**？不是就别加 trait（`tests/gates/structure/capability.js`）。
+- **IO 原语不画端口**：出站网络（TLS 装配与出站策略）与长驻子进程（起、抽干 stderr、入账、收场）各只有一份实现，落在 `src/kernel/detail/io/net/` 与 `src/kernel/detail/procs/`，单元经 `kernel::api::net` / `kernel::api::process` 直接取用；加 trait 只多一层转发，平台差异由后端文件（`io/net/backend/{unix,windows}.rs`、`procs/{unix,windows}.rs`）吃掉，也不做成端口。
+- 反过来，`ProcessRunner` 与 `SessionHost` **仍是端口**：它们包的是围栏安装、trace、按行协议这些业务语义，不是 syscall 面；`spawn` 起的是单元的自主长驻子进程，不经围栏，两者的边界见 [../kernel/README.md](../kernel/README.md)。
 - 端口的输入、输出、错误、取消、超时、重复调用与资源清理语义是**架构契约**：生产适配器与测试替身遵守同一份（R3、R11）。
 
 ## 二、端口清单

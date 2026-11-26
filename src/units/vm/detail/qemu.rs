@@ -3,14 +3,14 @@
 //! 不管：共享后端的额外参数（detail/share_ninep.rs）、镜像判定与挂载清单（domain/guest.rs）。
 //! 联动：端口在 ports.rs；由组合根构造、service.rs 持有。
 
-use crate::kernel::detail::procs::{self, Entry, ProcessBook};
+use crate::kernel::api::process::{Spawn, Stream, spawn};
+use crate::kernel::detail::procs::ProcessBook;
 use crate::units::vm::domain::guest::{GuestArch, GuestImage, GuestOs, GuestRun, GuestSpec};
 use crate::units::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
-use std::collections::VecDeque;
 use std::io::BufReader;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// 目的：**无围栏** guest 命令（供给编排 / apt / 下载工具链）的外层等待预算。
@@ -85,86 +85,14 @@ impl QemuEngine {
         self
     }
 
-    /// 目的：把 QEMU 的 stderr 收成管道并持续抽干——裸字节直写 CP936 控制台会把 UTF-8 文本解成乱码。
-    /// 返回：最近几行（启动失败时拼进错误，别丢 QEMU 自己说的话）。
-    /// 约束：管道必须一直抽，否则写满会把 QEMU 卡住。
-    fn supervise_stderr(
-        &self,
-        child: &mut Child,
-    ) -> std::sync::Arc<std::sync::Mutex<VecDeque<String>>> {
-        let tail = std::sync::Arc::new(std::sync::Mutex::new(VecDeque::new()));
-        let Some(stderr) = child.stderr.take() else {
-            return tail;
-        };
-        let kept = std::sync::Arc::clone(&tail);
-        let log = self.log.clone();
-        std::thread::spawn(move || {
-            let mut buf = [0u8; 4096];
-            let mut pending: Vec<u8> = Vec::new();
-            let mut reader = std::io::BufReader::new(stderr);
-            loop {
-                use std::io::Read;
-                match reader.read(&mut buf) {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        pending.extend_from_slice(&buf[..n]);
-                        while let Some(at) = pending.iter().position(|b| *b == b'\n') {
-                            let line: Vec<u8> = pending.drain(..=at).collect();
-                            emit_stderr_line(&line, log.as_deref(), &kept);
-                        }
-                    }
-                }
-            }
-            if !pending.is_empty() {
-                emit_stderr_line(&pending, log.as_deref(), &kept);
-            }
-        });
-        tail
-    }
-}
-
-/// 目的：QEMU 的一行 stderr 去哪——日志、控制台与最近几行各一份。
-fn emit_stderr_line(
-    raw: &[u8],
-    log: Option<&(dyn crate::kernel::ports::Log + Send + Sync)>,
-    tail: &std::sync::Arc<std::sync::Mutex<VecDeque<String>>>,
-) {
-    let text = decode_stderr_line(raw);
-    if text.is_empty() {
-        return;
-    }
-    if let Some(log) = log {
-        log.warn("vm::qemu", &text);
-    }
-    eprintln!("[虚拟机] qemu：{}", text);
-    if let Ok(mut q) = tail.lock() {
-        q.push_back(text);
-        while q.len() > 20 {
-            q.pop_front();
-        }
-    }
-}
-
-/// 目的：把一行 stderr 字节解成可读文本——QEMU 的 Windows 错误文本是 UTF-8，按 UTF-8 宽容解码即可。
-fn decode_stderr_line(raw: &[u8]) -> String {
-    String::from_utf8_lossy(raw)
-        .trim_end_matches(['\r', '\n'])
-        .trim()
-        .to_string()
 }
 
 /// 目的：启动失败时把 QEMU 最近说的话拼进错误（没有就空串）。
-fn last_words(tail: &std::sync::Mutex<VecDeque<String>>) -> String {
-    let Ok(q) = tail.lock() else {
-        return String::new();
-    };
-    if q.is_empty() {
+fn last_words(tail: &[String]) -> String {
+    if tail.is_empty() {
         return String::new();
     }
-    format!(
-        "；QEMU：{}",
-        q.iter().cloned().collect::<Vec<_>>().join("；")
-    )
+    format!("；QEMU：{}", tail.join("；"))
 }
 
 /// 目的：guest 内存大小（MiB）——`-m` 与共享内存后端（vhost-user 要）必须同一尺寸，所以只写一处。
@@ -365,41 +293,33 @@ impl VmEngine for QemuEngine {
             args.insert(0, "-L".to_string());
         }
         args.extend(share.engine_args.iter().cloned());
-        let mut cmd = Command::new(&exe);
-        cmd.args(&args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            // stderr 收成管道再逐行转出来：QEMU 的 Windows 错误文本是 UTF-8，裸字节直写 CP936 控制台会变乱码。
-            .stderr(Stdio::piped());
-        // 父死子亡（Unix）与独立进程组：核心被强杀时不许 QEMU 继续攥着镜像。
-        procs::guard(&mut cmd);
-        let mut child = procs::spawn(cmd).map_err(|e| format!("起不了 QEMU（{}）：{}", exe, e))?;
-        // 管道必须一直抽干（写满会把 QEMU 卡住）；同时留最近几行给启动失败用。
-        let said = self.supervise_stderr(&mut child);
-        // 作业对象（Windows）/ 守门进程（macOS）：核心一死，它跟着死；挂不上只如实少一层兜底，不阻断启动。
-        let launched = procs::attach(&child, "guest");
-        let pid = child.id();
-        if let Some(book) = &self.book {
-            book.record(Entry {
-                pid,
-                since: procs::now_ts(),
-                purpose: "guest".to_string(),
-                owner: spec.lease.clone(),
-                marker: format!("solomni:{}", spec.lease),
-                created: launched.created,
-                guard_note: launched.guard_note,
-            });
-        }
+        // 起 QEMU：父死子亡、独立进程组、长命线程、stderr 常驻抽干与登记入账都在这一处办完。
+        // stderr 逐行转出来（带进日志与控制台）：裸字节直写 CP936 控制台会把 UTF-8 文本解成乱码。
+        let log = self.log.clone();
+        let mut daemon = spawn(
+            Spawn::new(&exe)
+                .args(&args)
+                .stderr(Stream::Piped)
+                .tail(20)
+                .echo_stderr(move |line| {
+                    if let Some(log) = &log {
+                        log.warn("vm::qemu", line);
+                    }
+                    eprintln!("[虚拟机] qemu：{}", line);
+                })
+                .purpose("guest")
+                .owner(spec.lease.as_str())
+                .marker(format!("solomni:{}", spec.lease))
+                .book(self.book.clone()),
+        )?;
         drop(listener);
-        let stream = match connect_within(port, Duration::from_secs(30), Some(&mut child)) {
+        let stream = match connect_within(port, Duration::from_secs(30), Some(&mut daemon)) {
             Ok(s) => s,
             Err(e) => {
                 // 连不上就把刚拉起的 QEMU 与刚建的可写层都收掉，别留孤儿。
-                if let Some(book) = &self.book {
-                    book.forget(pid);
-                }
-                let _ = child.kill();
-                let _ = child.wait();
+                // QEMU 一到就被判死时，它最后说的几句话是唯一能分辨"加速器不可用"的证据。
+                let said = daemon.stderr_tail(20);
+                daemon.stop();
                 if let Some(path) = &overlay {
                     let _ = std::fs::remove_file(path);
                 }
@@ -421,14 +341,12 @@ impl VmEngine for QemuEngine {
             .map_err(|e| format!("给 QGA 通道设读超时失败：{}", e))?;
         let writer = stream.try_clone().map_err(|e| e.to_string())?;
         let mut handle = QemuHandle {
-            child: Some(child),
+            daemon: Some(daemon),
             reader: BufReader::new(stream),
             writer,
             port,
             seed,
             overlay,
-            book: self.book.clone(),
-            pid,
         };
         // agent 要等内核起来才通；投种子时（首启装 agent）不等，交给编排轮询，其余情况先等到就绪再挂载/回命令。
         if spec.seed.is_none() {
@@ -629,28 +547,16 @@ mod tests {
             .set_read_timeout(Some(Duration::from_secs(2)))
             .expect("读超时");
         let mut handle = QemuHandle {
-            child: None,
+            daemon: None,
             reader: BufReader::new(first.try_clone().expect("clone")),
             writer: first,
             port,
             seed: None,
             overlay: None,
-            book: None,
-            pid: 0,
         };
         assert!(handle.ping(), "被 RST 的那条连接要能靠重连救回来");
         server.join().expect("服务器线程");
     }
-    /// 目的：QEMU 的一行 stderr 按 UTF-8 宽容解码——中文系统错误不再被 CP936 解成乱码；坏字节也不炸。
-    #[test]
-    fn qemu_stderr_lines_decode_as_utf8() {
-        let chinese = "qemu-system-x86_64.exe: warning: failed to WSAEventSelect(): 在一个非套接字上尝试了一个操作。";
-        assert_eq!(decode_stderr_line(chinese.as_bytes()), chinese);
-        assert_eq!(decode_stderr_line(b"line\r\n"), "line");
-        assert!(decode_stderr_line(&[0xff, 0xfe, b'x']).contains('x'));
-        assert_eq!(decode_stderr_line(b"   "), "");
-    }
-
     /// 目的：便携包的固件目录认 `bin/` 的兄弟 `share/qemu`；没有就给 None（不瞎指）。
     #[test]
     fn firmware_dir_is_beside_bin() {

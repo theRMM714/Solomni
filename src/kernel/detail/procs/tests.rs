@@ -132,7 +132,7 @@ fn reconcile_never_kills_a_process_it_cannot_identify() {
 }
 
 /// 目的：长驻子进程**按进程**父死子亡，不能按线程——Web 每请求一线程，请求一完线程就退；
-///   若在请求线程上直接 spawn，PR_SET_PDEATHSIG 会把 QEMU / 共享守护进程一并 SIGKILL。
+///   若在请求线程上直接 spawn，PR_SET_PDEATHSIG 会把长驻子进程一并 SIGKILL。
 /// 约束：只在 Linux 上可判（父死子亡只有它由内核信号给；macOS 走守门进程、Windows 走作业对象）；跑完收掉子进程。
 #[cfg(target_os = "linux")]
 #[test]

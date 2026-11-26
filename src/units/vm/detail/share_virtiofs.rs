@@ -6,11 +6,11 @@
 use crate::units::vm::domain::guest::{GuestImage, GuestMount, sh_quote};
 use crate::units::vm::ports::{ShareBackend, ShareGuard, SharePlan};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::kernel::detail::procs::{self, Entry, ProcessBook};
+use crate::kernel::api::process::{Daemon, Spawn, spawn};
+use crate::kernel::detail::procs::ProcessBook;
 use crate::units::vm::domain::exec::VIRTIOFSD_BIN;
 
 /// 目的：virtiofs 共享后端（QEMU 的 vhost-user-fs；Linux / macOS 宿主可用，Windows 宿主没有）。
@@ -73,22 +73,9 @@ impl ShareBackend for VirtioFsShare {
             let sock = socket_path();
             // 先把套接字与子进程交给凭据：中途任一步失败，Drop 都会把它们一起收掉，不留残留。
             guard.paths.push(sock.clone());
-            let child = spawn_virtiofsd(&exe, &m.host, &sock, m.read_only)?;
-            // 作业对象（Windows）/ 守门进程（macOS）：核心一死，守护进程跟着死；挂不上只少一层兜底。
-            let launched = procs::attach(&child, "share:virtiofs");
-            if let Some(book) = &guard.book {
-                let sock_txt = sock.display().to_string();
-                book.record(Entry {
-                    pid: child.id(),
-                    since: procs::now_ts(),
-                    purpose: "share:virtiofs".to_string(),
-                    owner: m.guest.clone(),
-                    marker: format!("--socket-path {}", sock_txt),
-                    created: launched.created,
-                    guard_note: launched.guard_note,
-                });
-            }
-            guard.children.push(child);
+            // 起进程这一步把所有兜底与登记一起办好（父死子亡、独立进程组、长命线程、账上那条）。
+            let daemon = spawn_virtiofsd(&exe, &m.host, &sock, m.read_only, guard.book.clone(), &m.guest)?;
+            guard.children.push(daemon);
             // QEMU 的 chardev 是客户端：必须等守护进程真在监听，引擎才能连上。
             wait_socket(
                 &sock,
@@ -144,42 +131,44 @@ fn socket_path() -> PathBuf {
 
 /// 目的：起一个 virtiofsd——Rust 版 CLI（--shared-dir / --socket-path；C 版的 -o source= 不支持）。
 /// 约束：--sandbox namespace 是上游默认的隔离方式（挂载命名空间里只剩共享目录）；日志压到 warn，经 stderr 丢弃。
+///   `--sandbox namespace` 会 fork 出真正的守护进程（与发起进程同组）：靠进程组整组收，
+///   父死子亡盯住发起进程——它一死，沙箱命名空间里的守护进程随之结束。
 fn spawn_virtiofsd(
     exe: &Path,
     shared_dir: &Path,
     sock: &Path,
     read_only: bool,
-) -> Result<Child, String> {
-    let mut cmd = Command::new(exe);
-    cmd.arg("--shared-dir")
+    book: Option<std::sync::Arc<ProcessBook>>,
+    guest: &str,
+) -> Result<Daemon, String> {
+    let mut spec = Spawn::new(exe)
+        .arg("--shared-dir")
         .arg(shared_dir)
         .arg("--socket-path")
         .arg(sock)
         .arg("--sandbox")
         .arg("namespace")
         .arg("--log-level")
-        .arg("warn");
+        .arg("warn")
+        .purpose("share:virtiofs")
+        .owner(guest)
+        // 对账时靠这一段在命令行里认出"还是我们起的那一个"。
+        .marker(format!("--socket-path {}", sock.display()))
+        .book(book);
     if read_only {
-        cmd.arg("--readonly");
+        spec = spec.arg("--readonly");
     }
-    let what = exe.display().to_string();
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    // 独立进程组 + 父死子亡：--sandbox namespace 会 fork 出真正的守护进程（与发起进程同组），
-    // 收尾按组杀；父死子亡盯住发起进程——它一死，沙箱命名空间里的守护进程随之结束。
-    procs::guard(&mut cmd);
-    procs::spawn(cmd).map_err(|e| format!("起不了 virtiofsd（{}）：{}", what, e))
+    spawn(spec)
 }
 
 /// 目的：等守护进程把套接字建出来；它提前退出就如实报错（不干等）。
-fn wait_socket(sock: &Path, child: &mut Child, budget: Duration) -> Result<(), String> {
+fn wait_socket(sock: &Path, child: &mut Daemon, budget: Duration) -> Result<(), String> {
     let deadline = Instant::now() + budget;
     loop {
         if sock.exists() {
             return Ok(());
         }
-        if let Ok(Some(st)) = child.try_wait() {
+        if let Some(st) = child.try_wait() {
             return Err(format!("virtiofsd 提前退出（{:?}）", st.code()));
         }
         if Instant::now() >= deadline {
@@ -192,20 +181,17 @@ fn wait_socket(sock: &Path, child: &mut Child, budget: Duration) -> Result<(), S
 /// 目的：共享凭据——持会话期间的所有 virtiofsd 进程与它们的套接字；释放即杀进程、删套接字（幂等）。
 #[derive(Default)]
 pub struct VirtioFsGuard {
-    children: Vec<Child>,
+    children: Vec<Daemon>,
     paths: Vec<PathBuf>,
-    /// 长驻子进程的账（有就在收尾时逐条注销）。
+    /// 长驻子进程的账（起进程时交给句柄，收尾时由它注销）。
     book: Option<std::sync::Arc<ProcessBook>>,
 }
 
 impl VirtioFsGuard {
     fn cleanup(&mut self) {
-        for mut c in self.children.drain(..) {
-            if let Some(book) = &self.book {
-                book.forget(c.id());
-            }
-            // 先杀整个进程组（含 sandbox 下 fork 出的守护进程），再收尸。
-            crate::kernel::api::process::kill_tree(&mut c);
+        for mut daemon in self.children.drain(..) {
+            // 先杀整个进程组（含 sandbox 下 fork 出的守护进程）、再收尸、顺手销账——都在句柄里。
+            daemon.stop();
         }
         for p in self.paths.drain(..) {
             let _ = std::fs::remove_file(&p);

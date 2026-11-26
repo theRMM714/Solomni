@@ -1,8 +1,9 @@
-//! 目的：长驻子进程的账与回收——谁在跑、属于谁、什么时候起的；核心没了也不留孤儿。
-//! 管：登记表（`data/state/processes.json`）、父死子亡的接线与结论（Linux 内核信号 / macOS 守门进程 / Windows 作业对象）、
+//! 目的：长驻子进程的施工面与账——起、记账、回收；谁在跑、属于谁、什么时候起的，核心没了也不留孤儿。
+//! 管：起进程的唯一施工面（`spawn::Spawn` → `daemon::Daemon`：进程组、父死子亡、长命线程、stderr 抽干）、
+//!   登记表（`data/state/processes.json`）、父死子亡的接线与结论（Linux 内核信号 / macOS 守门进程 / Windows 作业对象）、
 //!   进程身份（Unix 命令行标记 / Windows 创建时间）、存活探测与终止、启动时对账。
-//! 不管：进程怎么起（各适配器自己 new Command）、业务语义（purpose / owner 只是标签，不参与决策）。
-//! 联动：vm 的引擎、共享适配器与常驻服务的守门进程在起进程处登记；组合根启动时对一次账，`--doctor` 与 `/api/processes` 把它读出来；
+//! 不管：命令行怎么拼、就绪判据、优雅停机语义与重启策略（在单元）、业务语义（purpose / owner 只是标签，不参与决策）。
+//! 联动：单元经 `api::process::spawn` 起长驻进程并拿回 `Daemon`；组合根启动时对一次账，`--doctor` 与 `/api/processes` 把它读出来；
 //!   macOS 的父死子亡由本文件的守门模式实现，入口层只做 argv 分发（`main.rs` / `guard::proc_watch`）。
 
 use std::path::{Path, PathBuf};
@@ -17,6 +18,9 @@ use windows as platform;
 mod unix;
 #[cfg(not(windows))]
 use unix as platform;
+
+pub mod daemon;
+pub mod spawn;
 
 /// 目的：对账时对一条登记的身份结论——是我们就收，认不出就只报，其余销账。
 struct Ownership {
@@ -173,33 +177,33 @@ impl ProcessBook {
     }
 }
 
-/// 目的：给要起的子进程上"父死子亡"的保险（在 spawn 之前调）。
+/// 目的：给要起的子进程上"父死子亡"的保险（在 `spawn_raw` 之前调；调用方走 `spawn.rs`）。
 /// 约束：所有 Unix 都开独立进程组（收整棵树时不用牵连自己）；父死子亡只有 Linux 由内核给
 ///   （`PR_SET_PDEATHSIG`——macOS 的 libc 没有它），macOS 由 spawn 之后起的守门进程负责（见 `watch`）；
 ///   Windows 在 spawn 之后经作业对象绑（见 `bind`）。
-pub fn guard(cmd: &mut Command) {
+pub(crate) fn guard(cmd: &mut Command) {
     platform::guard(cmd);
 }
 
-/// 目的：起一个我们亲手管的长驻子进程——在专门的长命线程上 spawn。
+/// 目的：在专门的长命线程上 spawn（`spawn.rs` 的施工面底下就是这一层）。
 /// 约束：PR_SET_PDEATHSIG 绑的是**发起 spawn 的那个线程**，不是进程；在每请求一线程（Web）或短命
-///   工作线程上起 QEMU / 共享守护进程，线程一退就会把它们一并 SIGKILL。挪到长命线程上，父死子亡
+///   工作线程上起长驻子进程，线程一退就会把它们一并 SIGKILL。挪到长命线程上，父死子亡
 ///   仍按进程成立（核心真死了它才死），也不会误杀活着的会话。Windows 走作业对象、macOS 走守门进程
 ///   （都与发起线程无关；Windows 直接 spawn，Unix 共用这一条路径，经长命线程没有副作用）。
-pub fn spawn(cmd: Command) -> std::io::Result<Child> {
+pub(crate) fn spawn_raw(cmd: Command) -> std::io::Result<Child> {
     platform::spawn(cmd)
 }
 
 /// 目的：一把起进程之后要记下的事实：身份（Windows 创建时间）与父死子亡兜底的结论。
-pub struct Launched {
+pub(crate) struct Launched {
     pub created: Option<u64>,
     pub guard_note: Option<String>,
 }
 
-/// 目的：给刚起的子进程挂上"父死子亡"这一层（Windows 作业对象 / macOS 守门进程；Linux 在 spawn 之前由内核信号兜）。
+/// 目的：给刚起的子进程挂上"父死子亡"这一层（Windows 作业对象 / macOS 守门进程；Linux 由 `guard` 里的内核信号兜）。
 /// 约束：挂不上只如实报一条、**不阻断启动**——这层兜底缺失时核心被强杀会留下这个进程，
 ///   所以把原因交给调用方记进账：`--doctor` 与界面据此把该条标成"会留孤儿"。
-pub fn attach(child: &Child, purpose: &str) -> Launched {
+pub(crate) fn attach(child: &Child, purpose: &str) -> Launched {
     let guard_note = match bind(child).and_then(|()| watch(child)) {
         Ok(()) => None,
         Err(e) => {

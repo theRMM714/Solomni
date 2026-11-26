@@ -101,6 +101,7 @@
 - **internal**（单元内部）：`service` 不引本单元 `detail` 或 `kernel::detail`；`service` 不直接做 IO（`std::fs` / `Command` / 网络 / `canonicalize`）、不读环境变量（`std::env::var` 族）、不自己探测路径（`Path::is_dir` / `is_file` / `exists` / `read_dir`，经端口调用的不算）；同能力的方法族之间不成环；覆盖 `api`（含 `api.rs` 与 `api/` 子目录）/ `service` / `domain` / `detail` 四个分区；
 - **resourceNames**（介质名）：`.home` / `.vm` / `data` / `logs` / `session` / `runtimes` / `prompts` / `systools` 只在 `src/kernel/domain/layout.rs` 拼；业务代码写 `.join("<介质名>")` 即报错，改走 `kernel::api::layout` 的对应函数（`tests/gates/structure/resource-names.js`）；
 - **rootEntries**（根目录条目）：仓库根只许受版本管理的骨架条目；产品介质一律写 `data/`，旧位置（`.home` / `.vm` / `logs` / `session` / `runtimes`）出现即报错；`modules/<id>/userdata` 也算越界（源码树不长数据）（`tests/gates/structure/root-entries.js`）；
+- **kernelProducts**（内核无产品名）：`src/kernel` 下任何 `.rs`（含注释与测试）不得出现 `qemu` / `smbd` / `virtiofsd`——内核只提供通用机制，产品名与它的 argv、配置文件名留在单元里；命中即失败、零豁免（`tests/gates/structure/kernel-products.js`）；
 - **diskOwners**（盘主）：一块盘一个主——`layout::<介质>()` 只许主人单元、组合根与内核调用，别的单元走主人单元 api / 端口；主人表与 `layout.rs` 双向比对，改了名不登记即报错（`tests/gates/structure/disk-owners.js`）；
 - **toolPaths**（外部工具位置）：设置里的 `qemu_path` / `virtiofsd_path` / `smbd_path` 只在定义（catalog）、解析（provision）、写入（runtime）、装配（work、entry）读；别处要工具位置问 `provision::api::vm_tools` / `vm_tools_report`（`tests/gates/structure/tool-paths.js`）；
 - **fileSize**（文件粒度）：按角色分档判行数（实现 / 测试用例 / 测试支撑）与内联测试块，软线只回执、硬线失败，无 `EXEMPT`（`tests/gates/structure/size.js`）；
