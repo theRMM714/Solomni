@@ -54,7 +54,10 @@ mod tests {
     fn a_set_variable_round_trips_and_an_unset_one_is_none() {
         // SAFETY：测试进程里独占一个只在本用例出现的名字，读写都在同一线程内完成。
         unsafe { std::env::set_var("SOLOMNI_ENV_SURFACE_PROBE", "值-✓") };
-        assert_eq!(super::var("SOLOMNI_ENV_SURFACE_PROBE").as_deref(), Some("值-✓"));
+        assert_eq!(
+            super::var("SOLOMNI_ENV_SURFACE_PROBE").as_deref(),
+            Some("值-✓")
+        );
         assert_eq!(
             super::os("SOLOMNI_ENV_SURFACE_PROBE").map(|v| v.to_string_lossy().into_owned()),
             Some("值-✓".to_string())

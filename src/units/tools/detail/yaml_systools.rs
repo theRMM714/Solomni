@@ -3,7 +3,7 @@
 //! 不管：表本体与校验规则（在 `domain`）；目录与读盘（在 `assets`）；装配（在入口层组合根）。
 //! 联动：实现 `ports::SystoolsSource`；它属于工具单元（放提示词单元会让 `prompt → tools` 成环，见 docs/architecture/layers.md）。
 
-use crate::units::assets::api::{Assets, Doc};
+use crate::units::resource::assets::api::{Assets, Doc};
 use crate::units::tools::api::{SystemTools, ToolBook};
 use crate::units::tools::ports::SystoolsSource;
 use serde::Deserialize;

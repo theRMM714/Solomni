@@ -97,7 +97,10 @@ pub(crate) fn serve_until(
         }
     };
     let mut server = net::serve(port, MAX_BODY_BYTES, handler)?;
-    log.info("web::serve", &format!("转录中心启动，端口 {}", server.port()));
+    log.info(
+        "web::serve",
+        &format!("转录中心启动，端口 {}", server.port()),
+    );
     println!("Solomni 转录中心：{}（只监听本机）", server.url());
     while !stop() {
         std::thread::sleep(Duration::from_millis(100));

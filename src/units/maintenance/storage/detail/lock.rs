@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 /// 目的：锁文件路径。
 fn path(root: &Path) -> PathBuf {
-    crate::units::vmstore::api::paths(root).storage_lock()
+    crate::units::resource::vmstore::api::paths(root).storage_lock()
 }
 
 /// 目的：尝试拿回收锁；已有另一个回收在跑给 None。

@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use crate::units::sessions::ports::SessionDirs;
+use crate::units::resource::sessions::ports::SessionDirs;
 
 /// 目的：无状态的目录判定（会话根由 service 持有）。
 pub struct FsSessionDirs;

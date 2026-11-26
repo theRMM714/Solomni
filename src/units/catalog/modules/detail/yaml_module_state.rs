@@ -5,7 +5,7 @@
 
 use crate::units::catalog::modules::domain::state::EnabledState;
 use crate::units::catalog::modules::ports::ModuleStateStore;
-use crate::units::home::api::{Doc, Home};
+use crate::units::resource::home::api::{Doc, Home};
 use std::sync::Arc;
 
 /// 目的：启停覆盖的文件存储（组合根构造）。

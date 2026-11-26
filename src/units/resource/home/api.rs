@@ -3,7 +3,7 @@
 //! 不管：yaml 解码与校验（在各业务单元）；目录路径（由组合根经 `FsHome::new` 给）。
 //! 联动：实现见 `service.rs`；catalog 的三个 yaml 适配器消费本面。
 
-pub use crate::units::home::domain::doc::Doc;
+pub use crate::units::resource::home::domain::doc::Doc;
 
 /// 目的：登记处的唯一读写面。
 /// 约束：只经值对话（R16）——入参是 `Doc`，出参是原样文本；不把宿主绝对路径交给调用方。

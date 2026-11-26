@@ -12,6 +12,7 @@ const fs = require("fs");
 const path = require("path");
 const { rel } = require("../../lib/fsutil.js");
 const { stripTestModules } = require("./dependency.js");
+const { unitOfPath } = require("./unitpath.js");
 const { maskComments } = require("../../lib/rust-mask.js");
 
 const LAYOUT = "src/kernel/domain/layout.rs";
@@ -46,7 +47,7 @@ function isTestFile(f) {
 function unitOf(file) {
   const segs = file.split("/");
   if (segs[0] !== "src") return null;
-  if (segs[1] === "units" && segs.length >= 3) return segs[2].replace(/\.rs$/, "");
+  if (segs[1] === "units" && segs.length >= 3) return unitOfPath(file);
   if (segs[1] === "kernel") return "kernel";
   if (segs[1] === "entry" || segs[1] === "entry.rs") return "entry";
   return "main";

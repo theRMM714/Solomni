@@ -5,8 +5,8 @@
 
 use std::path::PathBuf;
 
-use crate::units::sessions::api::Sessions;
-use crate::units::sessions::ports::SessionDirs;
+use crate::units::resource::sessions::api::Sessions;
+use crate::units::resource::sessions::ports::SessionDirs;
 
 /// 目的：会话盘单元的唯一实现。
 pub struct SessionsService {

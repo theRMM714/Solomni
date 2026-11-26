@@ -250,7 +250,7 @@ impl Provision for ProvisionService {
             return Err("还有 guest 在跑：先停止所有虚拟机会话，再还原虚拟根".to_string());
         }
         let dir = crate::units::vm::api::resolve_guest(&self.root, guest)?;
-        let lock = crate::units::vmstore::api::paths(&self.root).build_lock(guest);
+        let lock = crate::units::resource::vmstore::api::paths(&self.root).build_lock(guest);
         // 抢住构建锁并持到重建完成：判断与动手之间不留空档，崩溃残留的锁文件也不挡路。
         let Some(_lease) = self
             .host
@@ -477,7 +477,7 @@ pub(crate) fn run(
     }
     // 显式点名 vs 全量补齐：运行期编排的失败在两种情形下处置不同（见下面 guest-runtime 分支）。
     let explicit = !ids.is_empty();
-    let cache = crate::units::vmstore::api::paths(pipeline.root).downloads();
+    let cache = crate::units::resource::vmstore::api::paths(pipeline.root).downloads();
     pipeline.host.mkdir_all(&cache)?;
     let mut ledger = pipeline.ledger.snapshot();
     for dep in picked {

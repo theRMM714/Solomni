@@ -4,7 +4,7 @@
 //! 联动：实现 ports::SecretStore；由组合根装配（一份 `Home` 与登记处共用）。
 
 use crate::units::catalog::secrets::ports::SecretStore;
-use crate::units::home::api::{Doc, Home};
+use crate::units::resource::home::api::{Doc, Home};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;

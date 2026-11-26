@@ -84,7 +84,6 @@ impl QemuEngine {
         self.log = Some(log);
         self
     }
-
 }
 
 /// 目的：启动失败时把 QEMU 最近说的话拼进错误（没有就空串）。

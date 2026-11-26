@@ -16,7 +16,7 @@ struct StateFile {
 
 /// 目的：状态文件路径。
 pub fn path(root: &Path) -> std::path::PathBuf {
-    crate::units::vmstore::api::paths(root).storage_state()
+    crate::units::resource::vmstore::api::paths(root).storage_state()
 }
 
 /// 目的：读上次回收；没有或坏文件给 None。

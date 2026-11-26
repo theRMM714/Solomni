@@ -13,19 +13,19 @@
 const fs = require("fs");
 const path = require("path");
 const { stripTestModules } = require("./dependency.js");
-const { PURE, unitDir } = require("./unitpath.js");
+const { BUCKETS, unitDir } = require("./unitpath.js");
 
 const TABLE = "layers.yaml";
 const RINGS = new Map([[0, "地基"], [1, "纯"], [2, "状态与机制"], [3, "用例"]]);
 
-/** 盘上的单元名：src/units/ 下的目录加上 src/units/pure/ 下的目录（环 1 的路径编码）。 */
+/** 盘上的单元名：src/units/ 下的扁平单元，加上桶（pure / resource）里再收一层的单元。 */
 const dirsOf = (root) => {
   const base = path.join(root, "src", "units");
   const out = [];
   for (const e of fs.readdirSync(base, { withFileTypes: true })) {
     if (!e.isDirectory()) continue;
-    if (e.name !== PURE) { out.push(e.name); continue; }
-    for (const p of fs.readdirSync(path.join(base, PURE), { withFileTypes: true })) if (p.isDirectory()) out.push(p.name);
+    if (!BUCKETS.has(e.name)) { out.push(e.name); continue; }
+    for (const p of fs.readdirSync(path.join(base, e.name), { withFileTypes: true })) if (p.isDirectory()) out.push(p.name);
   }
   return out.sort();
 };
@@ -83,8 +83,9 @@ function shapeProblems(root, tiers, dirs) {
   return problems;
 }
 
-/** 依赖边：单元 A 的文件引用了 crate::units::[pure::]B（剔除注释与测试模块）。
+/** 依赖边：单元 A 的文件引用了 crate::units::[桶::]B（剔除注释与测试模块）。
  *  同一对边只记首个命中文件与引用处数；forward 记「这条边全是 pub use 再导出」。 */
+const EDGE = new RegExp("crate::units::(?:" + [...BUCKETS].join("|") + "::)?([a-z_][a-z0-9_]*)", "g");
 function edgesOf(root, dirs) {
   const edges = new Map();
   for (const cap of dirs) {
@@ -93,9 +94,9 @@ function edgesOf(root, dirs) {
       for (const raw of text.split(/\r?\n/)) {
         if (!raw.trim() || raw.trim().startsWith("//")) continue;
         const forward = /^\s*pub\s+use\b/.test(raw);
-        for (const m of raw.matchAll(/crate::units::(?:pure::)?([a-z_][a-z0-9_]*)/g)) {
+        for (const m of raw.matchAll(EDGE)) {
           const to = m[1];
-          if (to === cap || to === "pure") continue;
+          if (to === cap || BUCKETS.has(to)) continue;
           const key = cap + ">" + to;
           const hit = edges.get(key);
           if (hit) {

@@ -217,11 +217,7 @@ pub fn spawn(spec: Spawn) -> Result<Daemon, String> {
 
 /// 目的：把 stderr 一直抽干——管道写满会把子进程卡住，这是必须常驻的一根线。
 /// 约束：逐行转写（裸字节直写控制台在非 UTF-8 代码页下是乱码）；收尾时把没有换行的残行也交出去。
-fn drain_stderr<R: Read + Send + 'static>(
-    stderr: R,
-    tail: Tail,
-    echo: Option<Echo>,
-) {
+fn drain_stderr<R: Read + Send + 'static>(stderr: R, tail: Tail, echo: Option<Echo>) {
     std::thread::spawn(move || {
         let mut reader = std::io::BufReader::new(stderr);
         let mut buf = [0u8; 4096];

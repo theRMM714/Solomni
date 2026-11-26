@@ -18,9 +18,7 @@ pub(crate) fn ureq_tls() -> Option<ureq::tls::TlsConfig> {
 }
 
 /// 目的：把平台的 TLS 装配注入 reqwest 构建器；配置失败如实返回原因。
-pub fn reqwest_builder(
-    builder: reqwest::ClientBuilder,
-) -> Result<reqwest::ClientBuilder, String> {
+pub fn reqwest_builder(builder: reqwest::ClientBuilder) -> Result<reqwest::ClientBuilder, String> {
     platform::reqwest_builder(builder)
 }
 

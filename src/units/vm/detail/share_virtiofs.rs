@@ -75,7 +75,14 @@ impl ShareBackend for VirtioFsShare {
             // 先把套接字与子进程交给凭据：中途任一步失败，Drop 都会把它们一起收掉，不留残留。
             guard.paths.push(sock.clone());
             // 起进程这一步把所有兜底与登记一起办好（父死子亡、独立进程组、长命线程、账上那条）。
-            let daemon = spawn_virtiofsd(&exe, &m.host, &sock, m.read_only, guard.book.clone(), &m.guest)?;
+            let daemon = spawn_virtiofsd(
+                &exe,
+                &m.host,
+                &sock,
+                m.read_only,
+                guard.book.clone(),
+                &m.guest,
+            )?;
             guard.children.push(daemon);
             // QEMU 的 chardev 是客户端：必须等守护进程真在监听，引擎才能连上。
             wait_socket(

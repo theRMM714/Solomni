@@ -54,8 +54,7 @@ fn probe() -> Capability {
 /// 约束：改不动或清不干净都报 fs=false；profile 名在 PROFILE_PREFIX 之下，--fence-clean 覆盖得到它。
 pub(crate) fn self_check() -> Result<(), String> {
     let sid = container_sid(&format!("{}FenceSelfCheck", PROFILE_PREFIX))?;
-    let scratch =
-        env::temp_dir().join(format!("solomni-fence-selfcheck-{}", std::process::id()));
+    let scratch = env::temp_dir().join(format!("solomni-fence-selfcheck-{}", std::process::id()));
     let outcome = self_check_scratch(sid, &scratch);
     free_sid(sid);
     outcome

@@ -156,8 +156,8 @@ impl SessionHost for ProcessSessions {
             spawn = spawn.env(k, v);
         }
         // 起进程这一步已经把父死子亡、独立进程组、长命线程与登记入账一起办好了。
-        let mut daemon = procs::spawn::spawn(spawn)
-            .map_err(|e| format!("服务进程启动失败：{}", e))?;
+        let mut daemon =
+            procs::spawn::spawn(spawn).map_err(|e| format!("服务进程启动失败：{}", e))?;
         // 取不到管道就没有会话可用：句柄一丢就收掉守门进程与账上那条，不留半步。
         let (Some(stdin), Some(stdout)) = (daemon.take_stdin(), daemon.take_stdout()) else {
             return Err("无法取得服务进程的 stdin / stdout".to_string());

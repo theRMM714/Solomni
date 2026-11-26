@@ -4,8 +4,8 @@
 //! 联动：呈现层的转录中心（`src/presentation/web.rs`）与虚拟机的首启种子服务（`src/units/vm/detail/`）都经这里开户。
 
 use std::io::Read;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -136,11 +136,7 @@ fn answer(mut request: tiny_http::Request, max_body: usize, handler: &Handler) {
         .take(max_body as u64 + 1)
         .read_to_string(&mut body);
     let reply = match read {
-        Ok(_) if body.len() <= max_body => handler(Call {
-            method,
-            path,
-            body,
-        }),
+        Ok(_) if body.len() <= max_body => handler(Call { method, path, body }),
         _ => Answer::new(400, "请求体过大或不是 UTF-8")
             .header("Content-Type", "text/plain; charset=utf-8"),
     };

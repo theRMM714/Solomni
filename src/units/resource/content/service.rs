@@ -3,9 +3,11 @@
 //! 不管：路径形状（在 `domain/paths.rs`）；文件系统调用（在 `detail/`）。
 //! 联动：端口在 `ports.rs`；被 `api::Content` 的调用方消费（组合根、`catalog` 的模块清单）。
 
-use crate::units::content::api::{Content, ContentInstall, InstallPlan, Installed, ModuleArea};
-use crate::units::content::domain::paths::ContentPaths;
-use crate::units::content::ports::ContentFs;
+use crate::units::resource::content::api::{
+    Content, ContentInstall, InstallPlan, Installed, ModuleArea,
+};
+use crate::units::resource::content::domain::paths::ContentPaths;
+use crate::units::resource::content::ports::ContentFs;
 use std::path::PathBuf;
 
 pub struct ContentService {
@@ -56,7 +58,7 @@ impl ContentInstall for ContentService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::units::content::detail::fs_content::FsContentFs;
+    use crate::units::resource::content::detail::fs_content::FsContentFs;
 
     #[test]
     fn ensure_userdata_creates_the_private_area() {

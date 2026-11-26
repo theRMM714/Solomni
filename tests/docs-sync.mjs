@@ -6,7 +6,8 @@
  * - gate-steps：tests/gates/steps.js 的 listModel()（与 `node run-tests.js --list --json` 同源），取 "T0 " 前缀步骤；
  * - success-markers：tests/lib/markers.js 的 MARKERS（标记的唯一声明）；
  * - layer-table：layers.yaml 的分层表（能力分层的唯一权威，文档里的表不手写）；
- * - mutation-scope：各单元 `tests/specs/<unit>.yaml` 的 `mutation` 块（突变范围的唯一声明处）。
+ * - mutation-scope：各单元 `tests/specs/<unit>.yaml` 的 `mutation` 块（突变范围的唯一声明处）；
+ * - dependency-map：单元之间的依赖边，取自 `tests/gates/structure/layers.js` 的 parseLayers + edgesOf（与 Structure.html 同源）。
  * 用法：node tests/docs-sync.mjs [--check|--write]；默认 --check（CI / --docs 用）。
  */
 import fs from "node:fs";
@@ -130,6 +131,98 @@ function renderMutationScope() {
   ].join("\n");
 }
 
+/** 依赖边：单元之间的边只有一处来源（layers.js 的 edgesOf），环级聚合与单元级边表都由它推。 */
+const BT = String.fromCharCode(96);
+function dependencyFacts() {
+  const { parseLayers, dirsOf, edgesOf } = require("./gates/structure/layers.js");
+  const { tiers, problems } = parseLayers(ROOT);
+  if (problems.length) throw new Error(problems.join("；"));
+  const same = [];
+  const crossPairs = [];
+  for (const [key, hit] of edgesOf(ROOT, dirsOf(ROOT))) {
+    const parts = key.split(">");
+    const from = parts[0];
+    const to = parts[1];
+    const a = tiers.get(from);
+    const b = tiers.get(to);
+    if (a === undefined || b === undefined) continue;
+    if (a === b) same.push({ ring: a, from: from, to: to, refs: hit.refs });
+    else crossPairs.push({ from: from, to: to, refs: hit.refs, fromRing: a, toRing: b });
+  }
+  const byRing = new Map();
+  for (const e of crossPairs) {
+    const k = e.fromRing + ">" + e.toRing;
+    const got = byRing.get(k) || { from: e.fromRing, to: e.toRing, refs: 0, pairs: 0 };
+    got.refs += e.refs;
+    got.pairs++;
+    byRing.set(k, got);
+  }
+  return { tiers: tiers, same: same, crossPairs: crossPairs, byRing: [...byRing.values()] };
+}
+
+const RING_LABEL = { 0: "环 0 · kernel", 1: "环 1 · 纯", 2: "环 2 · 状态与机制", 3: "环 3 · 用例" };
+const ringName = (n) => RING_LABEL[n] || "环 " + n;
+const byCount = (a, b) => b.refs - a.refs || (a.from < b.from ? -1 : a.from > b.from ? 1 : 0);
+const unitCell = (name) => BT + name + BT;
+
+/** 环级：跨环边只有向内一条路，聚合后的单元对数与引用处数由代码现算。 */
+function renderDependencyRings() {
+  const { tiers, byRing } = dependencyFacts();
+  const rings = [...new Set(tiers.values())].sort((a, b) => a - b);
+  const countOf = (r) => [...tiers.values()].filter((v) => v === r).length;
+  const links = byRing.slice().sort((a, b) => a.from - b.from || a.to - b.to);
+  const fence = BT + BT + BT;
+  const rows = links.map((l) => "| " + ringName(l.from) + " | " + ringName(l.to) + " | " + l.pairs + " | " + l.refs + " |");
+  const refs = links.reduce((n, l) => n + l.refs, 0);
+  const pairs = links.reduce((n, l) => n + l.pairs, 0);
+  return [
+    "<!-- BEGIN:dependency-rings -->",
+    fence + "mermaid",
+    "flowchart RL",
+    ...rings.map((r) => "  R" + r + '["' + ringName(r) + (r === 0 ? "" : "<br/>" + countOf(r) + " 个单元") + '"]'),
+    ...links.map((l) => "  R" + l.from + ' -->|"' + l.refs + " 处 / " + l.pairs + ' 对"| R' + l.to),
+    fence,
+    "",
+    "| 从 | 到 | 单元对 | 引用处 |",
+    "| --- | --- | --- | --- |",
+    ...rows,
+    "",
+    "> " + links.length + " 种跨环边、" + pairs + " 对单元、" + refs + " 处引用；本段由 " + unitCell("tests/gates/structure/layers.js") + " 现算（" + unitCell("node tests/docs-sync.mjs --write") + "），不手写。",
+    "<!-- END:dependency-rings -->",
+  ].join("\n");
+}
+
+/** 同环：rank 由同环边现算，边必须指向 rank 更低的单元（同环无环）。 */
+function renderDependencySame() {
+  const { same } = dependencyFacts();
+  const rows = same.slice().sort((a, b) => a.ring - b.ring || byCount(a, b))
+    .map((e) => "| " + ringName(e.ring) + " | " + unitCell(e.from) + " | " + unitCell(e.to) + " | " + e.refs + " |");
+  return [
+    "<!-- BEGIN:dependency-same -->",
+    "| 环 | 从 | 到 | 引用处 |",
+    "| --- | --- | --- | --- |",
+    ...rows,
+    "",
+    "> " + rows.length + " 对同环边；同环没有层，只有先后（rank 由这些边现算），所以这张表就是 rank 的原料。",
+    "<!-- END:dependency-same -->",
+  ].join("\n");
+}
+
+/** 跨环：每一种「从哪个环到哪个环」都在这里，条数即 H1 的证据面。 */
+function renderDependencyCross() {
+  const { crossPairs } = dependencyFacts();
+  const rows = crossPairs.slice().sort((a, b) => a.fromRing - b.fromRing || byCount(a, b))
+    .map((e) => "| " + unitCell(e.from) + " | " + unitCell(e.to) + " | " + ringName(e.fromRing) + " → " + ringName(e.toRing) + " | " + e.refs + " |");
+  return [
+    "<!-- BEGIN:dependency-cross -->",
+    "| 从 | 到 | 方向 | 引用处 |",
+    "| --- | --- | --- | --- |",
+    ...rows,
+    "",
+    "> " + rows.length + " 对跨环边；方向一律向内（外层 → 内层），向上与同环逆序由 " + unitCell("tests/gates/structure/layers.js") + " 判红，本表只记现状。",
+    "<!-- END:dependency-cross -->",
+  ].join("\n");
+}
 const TARGETS = [
   { file: "README.md", marker: "platform-status", source: "platform-status", lang: "zh" },
   { file: "README_EN.md", marker: "platform-status-en", source: "platform-status", lang: "en" },
@@ -139,6 +232,9 @@ const TARGETS = [
   { file: "docs/testing/execution-ci.md", marker: "success-markers", source: "success-markers" },
   { file: "docs/testing/execution-ci.md", marker: "mutation-scope", source: "mutation-scope" },
   { file: "docs/architecture/layers.md", marker: "layer-table", source: "layer-table" },
+  { file: "docs/architecture/dependency-map.md", marker: "dependency-rings", source: "dependency-rings" },
+  { file: "docs/architecture/dependency-map.md", marker: "dependency-same", source: "dependency-same" },
+  { file: "docs/architecture/dependency-map.md", marker: "dependency-cross", source: "dependency-cross" },
 ];
 
 function render(target, payload) {
@@ -150,6 +246,9 @@ function render(target, payload) {
   if (target.source === "gate-steps") return payload;
   if (target.source === "success-markers") return payload;
   if (target.source === "mutation-scope") return payload;
+  if (target.source === "dependency-rings") return payload;
+  if (target.source === "dependency-same") return payload;
+  if (target.source === "dependency-cross") return payload;
   throw new Error("未知来源：" + target.source);
 }
 
@@ -161,6 +260,9 @@ function main() {
     "success-markers": renderSuccessMarkers(),
     "mutation-scope": renderMutationScope(),
     "layer-table": renderLayerTable(),
+    "dependency-rings": renderDependencyRings(),
+    "dependency-same": renderDependencySame(),
+    "dependency-cross": renderDependencyCross(),
   };
   const problems = [];
   let changed = 0;

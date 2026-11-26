@@ -165,7 +165,8 @@ impl ShareBackend for SmbShare {
         });
         // 卡住时不能让我们干等：超时就报错走人，句柄随手丢掉——helper 与账上那条一起收。
         let first = rx.recv_timeout(Duration::from_secs(10)).map_err(|_| {
-            "等 SMB helper 的 LISTENING 超时（helper 自己的输出见上方 [虚拟机] smbd 行）".to_string()
+            "等 SMB helper 的 LISTENING 超时（helper 自己的输出见上方 [虚拟机] smbd 行）"
+                .to_string()
         })?;
         let addr = first
             .strip_prefix("LISTENING ")

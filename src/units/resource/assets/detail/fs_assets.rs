@@ -3,7 +3,7 @@
 //! 不管：介质名与文案（在 `domain` / `service`）。
 //! 联动：由组合根注入 `service::AssetsService`；契约见 docs/assets/README.md。
 
-use crate::units::assets::ports::AssetFiles;
+use crate::units::resource::assets::ports::AssetFiles;
 use std::path::{Path, PathBuf};
 
 /// 目的：本机文件系统上的随包只读内容。

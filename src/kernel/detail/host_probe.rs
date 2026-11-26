@@ -3,8 +3,8 @@
 //! 不管：任何业务动作（不执行程序、不安装、不改配置）；事实怎么解释（调用方定）。
 //! 联动：端口在 `src/kernel/ports.rs`；由入口层的组合根构造（`src/entry/`）。
 
-use crate::kernel::domain::platform::{EXE_SUFFIX, PATH_LIST_SEPARATOR};
 use crate::kernel::detail::io::env;
+use crate::kernel::domain::platform::{EXE_SUFFIX, PATH_LIST_SEPARATOR};
 use crate::kernel::ports::{HostMetadata, HostProbe};
 use std::path::{Path, PathBuf};
 

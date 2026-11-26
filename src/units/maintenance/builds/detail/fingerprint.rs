@@ -5,7 +5,7 @@
 
 use crate::units::catalog::modules::api::{BuildDecl, Module};
 use crate::units::maintenance::builds::ports::{BuildHome, BuildStates, BuiltRecord, SourceDigest};
-use crate::units::vmstore::api;
+use crate::units::resource::vmstore::api;
 use std::path::{Path, PathBuf};
 
 /// 目的：构建状态的落点（`.vm/build-state/<模块>.json`）——本机档与各虚拟根共用一份，靠 `target` 区分。

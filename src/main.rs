@@ -397,10 +397,10 @@ fn main() {
     }
     // **会话类型表**（systools/profiles.yaml）：一个会话类型就是一串流程与它的静止机制。
     // 它是会话类型的唯一声明处：提示词册子的会话类型、机制册的校验都以它为口径；装配期就校验。
-    let assets: std::sync::Arc<dyn units::assets::api::Assets> =
-        std::sync::Arc::new(units::assets::service::AssetsService::new(
+    let assets: std::sync::Arc<dyn units::resource::assets::api::Assets> =
+        std::sync::Arc::new(units::resource::assets::service::AssetsService::new(
             &root,
-            Box::new(units::assets::detail::FsAssetFs),
+            Box::new(units::resource::assets::detail::FsAssetFs),
         ));
     let profiles = match units::conversation::session::detail::yaml_profiles::YamlProfiles::new(
         std::sync::Arc::clone(&assets),
@@ -535,7 +535,7 @@ fn main() {
         Arc::new(units::vm::service::VmService::new(
             Arc::new(
                 units::vm::detail::QemuEngine::with_overlay_dir(
-                    units::vmstore::api::paths(&root).overlays(),
+                    units::resource::vmstore::api::paths(&root).overlays(),
                 )
                 .with_book(std::sync::Arc::clone(&book))
                 .with_log(log.clone()),

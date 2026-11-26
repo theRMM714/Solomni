@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-pub use crate::units::vmstore::domain::paths::Paths;
+pub use crate::units::resource::vmstore::domain::paths::Paths;
 
 /// 目的：产品根 → `data/.vm` 的布局。
 /// 参数：`root` = 产品安装根。

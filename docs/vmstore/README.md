@@ -1,12 +1,12 @@
 # vmstore（虚拟机盘资源）
 
 > 定位：`data/.vm` 这块盘的唯一主人——构建缓存、下载缓存、可写层、构建状态、虚拟根、便携引擎、安装台账、回收状态与回收锁的落点。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/vmstore/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/resource/vmstore/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)。
 
 ## 管什么 / 不管什么
 
-- 管：`.vm` 下每个子目录与文件名的拼法，以及路径段的安全化——同一个虚拟根在卷、锁、元数据上必须落到**同一个 stem**（`src/units/vmstore/domain/paths.rs` 的 `safe_segment`）。
+- 管：`.vm` 下每个子目录与文件名的拼法，以及路径段的安全化——同一个虚拟根在卷、锁、元数据上必须落到**同一个 stem**（`src/units/resource/vmstore/domain/paths.rs` 的 `safe_segment`）。
 - 不管：这些落点上发生的事——构建在 `builds`、依赖补齐在 `provision`、空间盘点在 `storage`、引擎与会话可写层在 `vm`。
 - 不管：介质名 `.vm` 本身（唯一权威是 `src/kernel/domain/layout.rs`）；台账目录 `data/state` 的其它文件（归台账机制）。
 
@@ -24,7 +24,7 @@
 
 ## 一、布局
 
-- 全部落点都由 `src/units/vmstore/domain/paths.rs` 派生；下表是它们的形状与用盘方。
+- 全部落点都由 `src/units/resource/vmstore/domain/paths.rs` 派生；下表是它们的形状与用盘方。
 
 | 落点 | 谁用 | 内容 |
 | --- | --- | --- |
@@ -45,7 +45,7 @@
 ## 二、为什么只做路径所有权
 
 - 这些落点的读写分散在四个单元的 detail 适配器里，各自都已经持有产品根；把 IO 也收进来会要求它们改构造签名并把整条调用链换成异步/回锁的新形态——那是**行为变更**，不是本阶段的目标。
-- 本单元先拿走**唯一容易漂移的东西**：名字与形状。改名或加一层目录只改 `src/units/vmstore/domain/paths.rs` 一处；卷、锁、元数据共用同一个 `safe_segment`，不会再出现"构建按收过的名字建、盘点按原名找"这类对不上的路径。
+- 本单元先拿走**唯一容易漂移的东西**：名字与形状。改名或加一层目录只改 `src/units/resource/vmstore/domain/paths.rs` 一处；卷、锁、元数据共用同一个 `safe_segment`，不会再出现"构建按收过的名字建、盘点按原名找"这类对不上的路径。
 - 存在性与锁的**语义**仍归用盘方：`builds` 走 `src/units/maintenance/builds/detail/cache.rs` 的有界等锁（构建必须串行），`storage` 走 `src/units/maintenance/storage/detail/paths.rs` 的 `lock_held`——只问内核「此刻有人持着吗」（盘点与回收不删正在被用的卷）；两者判据不同，所以留两个策略。
 
 ## 三、待办（本阶段没做，别当成已完成）
