@@ -15,8 +15,8 @@ contracts/fence: 0
 contracts/note: 0
 detail/clock: 0
 detail/fs_meta: 0
+detail/io: 0
 detail/lock: 0
-detail/outbound: 0
 detail/procs: 0
 detail/unpack: 0
 domain/layout: 0

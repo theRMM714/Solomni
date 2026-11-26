@@ -1,18 +1,14 @@
 //! 目的：llm 出站 HTTP 的 ureq 代理与 TLS 机制封装。
-//! 管：按预算构建 Agent、TLS 后端选择、错误分类与脱敏、统一判状态（保留供应商原话）。
+//! 管：按预算构建 Agent、错误分类与脱敏、统一判状态（保留供应商原话）。
 //! 不管：请求内容与端点选择（在 endpoint / http_chat）；日志与转录。
-//! 联动：http_stream、model_catalog 复用；entry/probes/https.rs 也用 TLS 后端与错误分类；代理与 TLS 底层在 kernel/outbound。
+//! 联动：http_stream、model_catalog 复用；entry/probes/https.rs 也用错误分类；出站代理与 TLS 装配在 kernel 的 `io/net`（经 `api::net` 取）。
 
-/// 目的：构建带连接/总超时的代理；TLS 后端按平台显式装配（实现在 kernel/outbound）。
+/// 目的：构建带连接/总超时的代理；TLS 后端按平台装配（实现在 kernel 的 `io/net`）。
 pub fn agent(connect_secs: u64, total_secs: u64) -> ureq::Agent {
-    crate::kernel::detail::outbound::agent(connect_secs, total_secs)
+    crate::kernel::api::net::agent(connect_secs, total_secs)
 }
 
 /// 目的：这条构建实际用的 TLS 后端（编译期事实）：探针与自检据此如实报出来，不靠人猜。
-pub fn tls_backend() -> &'static str {
-    crate::kernel::detail::outbound::tls_backend()
-}
-
 /// 本进程**取不到系统 TLS 凭证**时的稳定错误码（Windows schannel 的 `SEC_E_NO_CREDENTIALS`）。
 /// 判据只认码，不认文案：错误消息是本地化的，按文案匹配会在别的语言环境下失灵。
 /// 现场：沙箱把工作区外的用户凭证存储挡住时，连 curl.exe 都握不了手；放开沙箱后同一条链路立刻通。

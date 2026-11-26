@@ -10,7 +10,6 @@ pub mod http_agent;
 pub mod http_chat;
 pub mod http_probe;
 pub(crate) mod http_stream;
-pub(crate) mod http_tls;
 pub mod model_catalog;
 pub mod repair;
 pub(crate) mod tls_error;

@@ -19,7 +19,7 @@ impl HttpFetch {
     /// 目的：按（连接超时, 总超时）建实现；代理从环境变量拾取（交给 ureq 默认配置）。
     pub fn new(connect_secs: u64, total_secs: u64) -> HttpFetch {
         HttpFetch {
-            agent: crate::kernel::detail::outbound::agent(connect_secs, total_secs),
+            agent: crate::kernel::api::net::agent(connect_secs, total_secs),
         }
     }
 }
