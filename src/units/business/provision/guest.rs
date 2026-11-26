@@ -1,0 +1,354 @@
+//! 目的：虚拟根的运行期编排——把 guest 编到可用，并把它**真有的**运行能力写进画像。
+//! 管：启动 / 等 agent / 执行 / 收尾的顺序，首启与维护启动的分工，标记文件（.qga-ready / .runtimes-ready）与 guest.yaml 的客户端 / 运行能力声明。
+//! 不管：清单、下载与作业状态（service.rs）；guest 引擎本身（vm 能力）；运行包库（runtimes/ 与包库扫描）。
+//! 联动：由 service.rs 的 guest-runtime 分支调用；vm 能力经 ::api 注入（组合根或 --provision 入口装配）；契约见 RUNTIME_SPEC.md。
+
+use super::domain::{Dep, deps, links, source_url, under};
+use crate::kernel::api::layout;
+use crate::kernel::ports::HostProbe;
+use crate::units::business::vm::api::{
+    GuestArch, GuestClients, GuestImage, GuestRun, GuestSpec, SeedDocs, Vm, classify_base,
+};
+use std::path::Path;
+use std::time::Duration;
+
+/// 目的：首启 cloud-init 的 user-data——装 qemu-guest-agent 并让它随 virtio-serial 端口出现而启动。
+pub(crate) const USER_DATA: &str = "#cloud-config\nruncmd:\n  - >-\n    dpkg -s qemu-guest-agent >/dev/null 2>&1 || (apt-get update -o Acquire::Languages=none &&\n    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends qemu-guest-agent);\n    systemctl enable qemu-guest-agent >/dev/null 2>&1; systemctl start qemu-guest-agent >/dev/null 2>&1; true\n";
+
+/// 目的：首启 cloud-init 的 meta-data（固定 instance-id，避免每次启动重跑）。
+pub(crate) const META_DATA: &str =
+    "instance-id: solomni-provision\nlocal-hostname: solomni-guest\n";
+
+/// 目的：guest 的 Node 用固定版本官方二进制安装。
+/// 约束：版本 / URL / sha256 的唯一真相在 links.yaml；升级时同 diff 改那两行与这里的版本常量。
+pub(crate) const NODE_TOP: &str = "node-v24.11.0-linux-x64";
+pub(crate) const NODE_ROOT: &str = "/opt/solomni/toolchains/node/24.11.0";
+pub(crate) const NODE_KEY: &str = "toolchain.node.24.11.0.linux-x86_64";
+pub(crate) const NODE_SHA_KEY: &str = "toolchain.node.24.11.0.linux-x86_64.sha256";
+
+/// 目的：Linux 维护启动前的网络预置——Linux 磁盘根不走 cloud-init 首启（agent 打包进镜像），网卡没人配。
+/// 约束：QEMU 用户网络（slirp）固定 10.0.2.0/24，网关 `.2`、DNS `.3`；先用镜像自带的 systemd-networkd 走 DHCP，
+///   再按 slirp 的固定网段做静态兜底。Windows 虚拟根由首启 cloud-init 把网络写进镜像，不需要这一段。
+pub(crate) const NET_UP: &str = "mkdir -p /etc/systemd/network; printf '[Match]\\nName=en* eth*\\n\\n[Network]\\nDHCP=yes\\n' > /etc/systemd/network/10-solomni.network; systemctl enable --now systemd-networkd >/dev/null 2>&1 || true; systemctl enable --now systemd-resolved >/dev/null 2>&1 || true; IF=$(ls /sys/class/net | grep -v '^lo$' | head -1); ip link set \"$IF\" up 2>/dev/null || true; ip addr show \"$IF\" 2>/dev/null | grep -q '10\\.0\\.2\\.' || { ip addr add 10.0.2.15/24 dev \"$IF\" 2>/dev/null || true; ip route add default via 10.0.2.2 dev \"$IF\" 2>/dev/null || true; }; grep -q '10\\.0\\.2\\.3' /etc/resolv.conf 2>/dev/null || { rm -f /etc/resolv.conf; printf 'nameserver 10.0.2.3\\n' > /etc/resolv.conf; }; ";
+
+/// 目的：让 apt 先取压缩索引（xz / gz）——Debian 的 InRelease 里也列着未压缩的 Packages / Sources，
+///   不指定顺序时 apt 会抓那份（几十 MB，还常在 CDN 上缺文件），既费空间又可能 404。
+pub(crate) const APT_COMPRESSED: &str = "echo 'Acquire::CompressionTypes::Order { \"xz\"; \"gz\"; };' > /etc/apt/apt.conf.d/99solomni-compressed; ";
+
+/// 目的：错误回执只留尾段，避免把整段 apt / curl 输出塞进错误消息。
+pub(crate) fn tail_text(s: &str, n: usize) -> String {
+    let count = s.chars().count();
+    s.chars().skip(count.saturating_sub(n)).collect()
+}
+
+/// 目的：一次 guest 运行（命令交给 guest 的 /bin/sh；带标准 PATH，供给编排里的 g++ / ld / curl 才找得到）。
+/// 约束：PATH 写在 shell 命令里，不放进 QGA env（guest-exec 的 env 由 QGA 处理，空 env 最稳）。
+pub(crate) fn sh(command: &str) -> GuestRun {
+    GuestRun {
+        command: format!(
+            "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; {command}"
+        ),
+        args_json: "{}".to_string(),
+        env: Vec::new(),
+        cwd: String::new(),
+        timeout_secs: 30,
+        output_limit: crate::units::business::vm::api::OutputLimit::Head,
+    }
+}
+
+/// 目的：这次维护启动要装的运行包——Windows 虚拟根的共享客户端是 SMB，要 cifs-utils；Linux 虚拟根走 9p/virtiofs，不需要。
+/// 约束：C/C++ 用 Debian 原生 GCC（与 guest 的 libc / libstdc++ 匹配）；Node 走下面的官方二进制。
+pub(crate) fn required_pkgs(is_windows: bool) -> &'static str {
+    if is_windows {
+        "python3 cifs-utils gcc g++ make libc6-dev xz-utils"
+    } else {
+        "python3 gcc g++ make libc6-dev xz-utils"
+    }
+}
+
+/// 目的：镜像声明的共享客户端（写回 guest.yaml 时按它列，按固定顺序）。
+pub(crate) fn clients_of(c: &GuestClients) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    if c.nine_p {
+        out.push("9p");
+    }
+    if c.virtio_fs {
+        out.push("virtiofs");
+    }
+    if c.cifs {
+        out.push("cifs");
+    }
+    out
+}
+
+/// 目的：按镜像画像重写 guest.yaml——客户端按这次编排确认的写，运行能力只列**自证过**的那些。
+/// 参数：runtimes = 编排在 guest 里逐个自证可用的能力名（没列 = 镜像里确实没有）；clients = 这次确认可用的共享客户端。
+pub(crate) fn write_guest_yaml(
+    base: &Path,
+    image: &GuestImage,
+    runtimes: &[String],
+    clients: &[&str],
+) -> Result<(), String> {
+    // arch 要用 guest.yaml 认的写法（amd64 / arm64），不是平台三元组（x86_64 / aarch64）。
+    let arch = match image.arch {
+        GuestArch::Amd64 => "amd64",
+        GuestArch::Arm64 => "arm64",
+    };
+    let list = runtimes.join(", ");
+    let clients = clients.join(", ");
+    let text = format!(
+        "# 由产品生成：命令通道 QGA；共享客户端 {clients}；运行能力 [{list}]（运行期编排装好并逐个自证过的；\n# 这里没列的 = 镜像里确实没有。虚拟机档的选型诊断据此认定列出的能力已满足，不必再往 runtimes/ 放包）。\n\nid: {id}\narch: {arch}\nos: {os}\nagent: qga\nclients: [{clients}]\nruntimes: [{list}]\n",
+        clients = clients,
+        list = list,
+        id = image.id,
+        arch = arch,
+        os = image.os.as_str()
+    );
+    std::fs::write(layout::guest_spec(base), text).map_err(|e| format!("写 guest.yaml 失败：{}", e))
+}
+
+/// 目的：找清单里**本机** QEMU 的真实落点（运行期编排要用它起 guest）。
+/// 参数：host_os = 宿主平台名（清单条目按它筛，条目 id 形如 vm.qemu.linux）。
+pub(crate) fn qemu_path(root: &Path, host_os: &str) -> Result<std::path::PathBuf, String> {
+    let id = format!("vm.qemu.{host_os}");
+    deps()?
+        .into_iter()
+        .find(|d| d.id == id)
+        .map(|d| under(root, &d.probe))
+        .ok_or_else(|| format!("清单里没有 {id}（先补齐 QEMU）"))
+}
+
+/// 目的：guest 内安装固定版本 Node 的 shell 片段（下载 / 校验 / 解包 / 软链到 /usr/local/bin）。
+/// 错误：links.yaml 缺 URL 或 sha256 时如实拒绝（不静默换版本 / 不跳过校验）。
+pub(crate) fn node_install_script() -> Result<String, String> {
+    let all = links()?;
+    let url = source_url(NODE_KEY, &all)?;
+    let sha = all
+        .get(NODE_SHA_KEY)
+        .ok_or_else(|| format!("links.yaml 缺 {}", NODE_SHA_KEY))?;
+    Ok(format!(
+        "set -e; \
+         rm -rf {root}; mkdir -p {root} /usr/local/bin; \
+         curl -fsSL --retry 3 --retry-all-errors -o /tmp/solomni-node.tar.xz '{url}'; \
+         echo '{sha}  /tmp/solomni-node.tar.xz' | sha256sum -c -; \
+         tar -xJf /tmp/solomni-node.tar.xz -C {root}; \
+         ln -sfn {root}/{top}/bin/node /usr/local/bin/node; \
+         ln -sfn {root}/{top}/bin/npm /usr/local/bin/npm; \
+         ln -sfn {root}/{top}/bin/npx /usr/local/bin/npx; \
+         rm -f /tmp/solomni-node.tar.xz; sync",
+        root = NODE_ROOT,
+        top = NODE_TOP,
+        url = url,
+        sha = sha
+    ))
+}
+
+/// 目的：把虚拟根编到可用——先确保 agent 在场（Windows 首启装、Linux 随镜像打包），随后维护启动装运行包。
+/// 参数：root = 产品根；dep = guest-runtime 清单条目；probe = 宿主机文件探针（组合根注入）；
+///   vm = vm 入站面（None = 组合根没注入，如实拒绝）；force = 用户显式点名这一条（重跑维护启动，不再被 `.runtimes-ready` 挡住）；
+///   on_line = 进度行。
+/// 约束：同一租约 "provision"，每次启动前先销毁旧的；装完才写标记，失败不写（下次重试）。
+/// 约束：只声明**自证过**的能力——python / node / cc 三者都通才写进画像；失败不写标记（下次重试）。
+pub(crate) fn install_guest_runtime(
+    root: &Path,
+    dep: &Dep,
+    probe: &dyn HostProbe,
+    vm: Option<&(dyn Vm + Send + Sync)>,
+    force: bool,
+    on_line: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    let vm = vm.ok_or_else(|| "guest 运行期编排需要 vm 能力（组合根未注入）".to_string())?;
+    let base = under(root, &dep.install);
+    let image = classify_base(&base, probe)
+        .map_err(|why| format!("虚拟根不可用（{why}）：先跑 solomni --provision --ensure --yes"))?;
+    // Node 预装用官方 linux-x86_64 二进制；arm64 guest 暂不伪装成支持。
+    if image.arch != GuestArch::Amd64 {
+        return Err("基础工具链预装目前只支持 amd64 guest（Node 官方包只有 x86_64）；arm64 请走 runtimes/ 扩展".to_string());
+    }
+    // Windows 虚拟根里没有 agent，要靠首启 cloud-init 装；Linux 虚拟根的 agent 由 guest-rootfs 装进磁盘镜像。
+    let is_windows = dep.os == "windows";
+    let qemu = qemu_path(root, &dep.os)?;
+    if !qemu.is_file() {
+        return Err(format!(
+            "QEMU 不在场（{}）：先跑 solomni --provision --ensure --yes",
+            qemu.display()
+        ));
+    }
+    let engine_path = qemu.to_string_lossy().into_owned();
+    let lease = "provision".to_string();
+    let qga_marker = base.join(".qga-ready");
+    let runtimes_marker = base.join(".runtimes-ready");
+
+    // 首启（只有 Windows 虚拟根要）：cloud-init 从宿主小 HTTP 取 user-data，装 qemu-guest-agent。
+    if is_windows && !qga_marker.is_file() {
+        on_line("首启 guest：cloud-init 装 qemu-guest-agent");
+        let spec = GuestSpec {
+            lease: lease.clone(),
+            image: image.clone(),
+            mounts: Vec::new(),
+            net: true,
+            engine_path: Some(engine_path.clone()),
+            share_path: None,
+            // 编排不要挂载：只经 QGA 在 guest 里装东西，所以固定用内部 none 档（无挂载、无同步）。
+            shares: vec!["none"],
+            seed: Some(SeedDocs {
+                user_data: USER_DATA.to_string(),
+                meta_data: META_DATA.to_string(),
+            }),
+            // 供给编排要改的就是基础镜像本身（装 agent / 装运行包），不能写进会被丢掉的可写层。
+            isolated: false,
+            cache_disk: None,
+        };
+        if let Err(e) = vm.guest_start(&spec) {
+            return Err(format!("首启 guest 起不来：{}", e));
+        }
+        if !vm.guest_wait_agent(&lease, Duration::from_secs(20 * 60)) {
+            vm.guest_stop(&lease);
+            return Err("等首启 guest 的 qemu-guest-agent 超时".to_string());
+        }
+        // agent 活着之后顺手关掉 cloud-init；失败不影响"agent 已确认"这个事实。
+        let _ = vm.guest_run(&lease, &sh("touch /etc/cloud/cloud-init.disabled; sync"));
+        vm.guest_stop(&lease);
+        std::fs::write(&qga_marker, "QGA guest-sync 通过（产品 Rust 编排）\n")
+            .map_err(|e| format!("写 {} 失败：{}", qga_marker.display(), e))?;
+        on_line("guest 里的 qemu-guest-agent 已确认");
+    }
+
+    // 维护启动：装运行包并逐个自证，然后把客户端与运行能力写进画像。
+    // 触发条件：还没自证过；或磁盘根还没把 cifs-utils 装上（客户端声明要跟着走）。
+    let clients: Vec<&'static str> = if is_windows {
+        vec!["cifs"]
+    } else {
+        clients_of(&image.clients)
+    };
+    let clients_pending = is_windows && !image.clients.cifs;
+    // 已有运行标记但 Windows 画像缺 cifs = 不是当前基线；只拒绝，不自动修补旧资产。
+    if clients_pending && runtimes_marker.is_file() {
+        return Err(format!(
+            "guest 画像不是当前 Windows 基线（缺 cifs 客户端）：删除 {} 后重新 --provision --ensure --yes；不自动修补",
+            base.display()
+        ));
+    }
+    if force || !runtimes_marker.is_file() {
+        on_line(&format!(
+            "维护启动：经 QGA 装基础工具链（apt {}；Node 用固定版本官方二进制）并逐个自证",
+            required_pkgs(is_windows)
+        ));
+        let spec = GuestSpec {
+            lease: lease.clone(),
+            image: image.clone(),
+            mounts: Vec::new(),
+            net: true,
+            engine_path: Some(engine_path),
+            share_path: None,
+            shares: vec!["none"],
+            seed: None,
+            isolated: false,
+            cache_disk: None,
+        };
+        if let Err(e) = vm.guest_start(&spec) {
+            return Err(format!("维护启动起不来：{}", e));
+        }
+        if !vm.guest_wait_agent(&lease, Duration::from_secs(15 * 60)) {
+            vm.guest_stop(&lease);
+            return Err("等维护启动的 qemu-guest-agent 超时".to_string());
+        }
+        // 镜像里可能残留不完整的 apt lists（首启中途中断过）：整份刷新一遍再装，避免「包明明在却算不可安装」。
+        // Linux 磁盘根没有 cloud-init 首启（agent 打包进镜像），网卡没人配：先按 QEMU 用户网络配网（Windows 不需要）。
+        let net = if is_windows { "" } else { NET_UP };
+        let py_probe = "mkdir -p /usr/local/bin; command -v python >/dev/null 2>&1 || ln -sf /usr/bin/python3 /usr/local/bin/python; python -V >/dev/null 2>&1";
+        let mut python_ok = vm.guest_run(&lease, &sh(py_probe)).ok;
+        // 索引与安装分两步：各给一条进度行——一步跑几分钟时界面不会停在同一条上。
+        on_line("刷新 apt 索引…");
+        let index_cmd = format!(
+            "{net}{apt} sed -i 's/^Types: deb deb-src/Types: deb/' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+             rm -rf /var/lib/apt/lists /var/cache/apt/archives; mkdir -p /var/lib/apt/lists; \
+             DEBIAN_FRONTEND=noninteractive apt-get update -o Acquire::Languages=none || true",
+            apt = APT_COMPRESSED,
+            net = net
+        );
+        let index_out = vm.guest_run(&lease, &sh(&index_cmd));
+        on_line(&format!(
+            "安装基础工具链（apt {}）…",
+            required_pkgs(is_windows)
+        ));
+        // C/C++ 用 Debian 原生 GCC / G++；Node 从官方二进制装。
+        let install_cmd = format!(
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {req} curl ca-certificates; \
+             apt-get clean; rm -rf /var/cache/apt/archives/*; sync",
+            req = required_pkgs(is_windows)
+        );
+        let install_out = vm.guest_run(&lease, &sh(&install_cmd));
+        // 失败回执同时带索引与安装两段；判据仍是安装命令（索引段沿用本地缓存也算成功）。
+        let apt_out = crate::kernel::api::types::ToolOutcome::new(
+            install_out.ok,
+            format!("{}\n{}", index_out.output, install_out.output),
+        );
+        if !python_ok {
+            python_ok = apt_out.ok && vm.guest_run(&lease, &sh(py_probe)).ok;
+        }
+        // Node：固定版本官方二进制，校验 sha256 后解到 /opt/solomni/toolchains；失败就如实失败（不静默降级）。
+        on_line("安装 Node（固定版本官方二进制）…");
+        let node_script = node_install_script()?;
+        let node_run = if apt_out.ok {
+            vm.guest_run(&lease, &sh(&node_script))
+        } else {
+            crate::kernel::api::types::ToolOutcome::new(false, apt_out.output.clone())
+        };
+        on_line("自证 python / node / C-C++…");
+        let node_ok = node_run.ok
+            && vm
+                .guest_run(&lease, &sh("node --version >/dev/null 2>&1"))
+                .ok;
+        // Debian 的 gcc/g++ 以裸名调用时会把 libexec 按相对路径找（QGA 环境尤其明显）：
+        // 用 /usr/local/bin 的包装固定成绝对路径，并让 make / cc 也走同一份。
+        let wrapper_cmd = "mkdir -p /usr/local/bin; \
+             printf '#!/bin/sh\\nexec /usr/bin/gcc -B/usr/bin \"$@\"\\n' > /usr/local/bin/gcc; \
+             printf '#!/bin/sh\\nexec /usr/bin/g++ -B/usr/bin \"$@\"\\n' > /usr/local/bin/g++; \
+             printf '#!/bin/sh\\nexec /usr/bin/gcc -B/usr/bin \"$@\"\\n' > /usr/local/bin/cc; \
+             printf '#!/bin/sh\\nexec /usr/bin/g++ -B/usr/bin \"$@\"\\n' > /usr/local/bin/c++; \
+             chmod 0755 /usr/local/bin/gcc /usr/local/bin/g++ /usr/local/bin/cc /usr/local/bin/c++; sync";
+        let wrapper_run = if apt_out.ok {
+            vm.guest_run(&lease, &sh(wrapper_cmd))
+        } else {
+            crate::kernel::api::types::ToolOutcome::new(false, apt_out.output.clone())
+        };
+        let cc_run = vm.guest_run(
+            &lease,
+            &sh("set -e; command -v gcc; command -v g++; gcc --version | head -1; g++ --version | head -1; g++ -print-prog-name=cc1plus; printf '#include <iostream>\nint main(){return 0;}\n' > /tmp/solomni-cc.cpp; g++ -std=c++17 /tmp/solomni-cc.cpp -o /tmp/solomni-cc; /tmp/solomni-cc"),
+        );
+        let cc_ok = apt_out.ok && wrapper_run.ok && cc_run.ok;
+        vm.guest_stop(&lease);
+        if !python_ok || !node_ok || !cc_ok {
+            return Err(format!(
+                "guest 基础工具链没装成（python={python_ok} node={node_ok} cc={cc_ok}）\napt 尾段：{}\nnode 尾段：{}\nwrapper 尾段：{}\ncc 尾段：{}",
+                tail_text(&apt_out.output, 1200),
+                tail_text(&node_run.output, 1200),
+                tail_text(&wrapper_run.output, 1200),
+                tail_text(&cc_run.output, 1200)
+            ));
+        }
+        // cc 是模块能力名；gcc 是 build.needs 使用的可执行名（两者都如实声明，避免构建期误判缺包）。
+        let proven = vec![
+            "python".to_string(),
+            "node".to_string(),
+            "cc".to_string(),
+            "gcc".to_string(),
+        ];
+        write_guest_yaml(&base, &image, &proven, &clients)?;
+        std::fs::write(
+            &runtimes_marker,
+            format!(
+                "产品 Rust 编排：python / node（固定版本）/ cc + gcc（Debian GCC）已逐个自证可用；共享客户端 [{}]\n",
+                clients.join(", ")
+            ),
+        )
+        .map_err(|e| format!("写 {} 失败：{}", runtimes_marker.display(), e))?;
+        if !qga_marker.is_file() {
+            // 用户自备的虚拟根没有 .qga-ready：维护启动能通就说明 agent 在场——如实落这条事实。
+            let _ = std::fs::write(&qga_marker, "维护启动已确认 qemu-guest-agent 在场\n");
+        }
+        on_line("guest 基础工具链已装好（python / node / cc + gcc 都自证可用）");
+    }
+    Ok(())
+}

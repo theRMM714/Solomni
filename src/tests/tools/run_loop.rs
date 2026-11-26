@@ -1,12 +1,12 @@
 //! 目的：钉工具循环无调用上限，与内置工具「读过」的证据链。
 //! 管：清单参数声明与执行、拒绝未声明/书外工具、无调用上限、grep 行号与大小写、直接会话文件工具、原生模式失败行、模块目录写拒绝、edit 范围与整读要求。
 //! 不管：工具面发放（face.rs）。
-//! 联动：src/units/tools/、session 事实与账本。
+//! 联动：src/units/business/tools/、session 事实与账本。
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::agentloop::api::run_batch;
-use crate::units::session_model::api::SINGLE;
+use crate::units::business::agentloop::api::run_batch;
+use crate::units::business::session_model::api::SINGLE;
 #[test]
 pub(crate) fn tool_loop_rejects_undeclared_tool() {
     let runner = Arc::new(RecordingRunner {
@@ -301,20 +301,20 @@ pub(crate) fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did()
     let sb = test_sandbox("a1", &[]);
     let note = s(&["demo", "a1", "note.txt"]);
     io.seed(&["demo", "a1", "note.txt"], "第一段\n要改的句子\n第三段\n");
-    let mut obs = crate::units::tools::api::Observations::default();
+    let mut obs = crate::units::business::tools::api::Observations::default();
     let exec = test_tools_svc_with(
         Arc::new(SilentRunner),
         Arc::clone(&io),
         Arc::new(NoFenceHost),
     );
-    let edit = |obs: &mut crate::units::tools::api::Observations, args: &str| {
+    let edit = |obs: &mut crate::units::business::tools::api::Observations, args: &str| {
         let full = format!("{{\"path\":\"{}\",{}}}", note, args);
         let done = exec.run_builtin(
             &sb,
             &test_systools().tools,
             std::mem::take(obs),
             None,
-            crate::units::tools::api::ResultBudget::full(),
+            crate::units::business::tools::api::ResultBudget::full(),
             "edit",
             &full,
         );
@@ -409,7 +409,7 @@ pub(crate) fn builtin_edit_refuses_files_it_cannot_see_whole() {
         ),
     ] {
         io.seed(&["demo", "a1", "note.txt"], "abc");
-        let mut obs = crate::units::tools::api::Observations::default();
+        let mut obs = crate::units::business::tools::api::Observations::default();
         let exec = test_tools_svc_with(
             Arc::new(SilentRunner),
             Arc::clone(&io),
@@ -420,7 +420,7 @@ pub(crate) fn builtin_edit_refuses_files_it_cannot_see_whole() {
             &test_systools().tools,
             std::mem::take(&mut obs),
             None,
-            crate::units::tools::api::ResultBudget::full(),
+            crate::units::business::tools::api::ResultBudget::full(),
             "edit",
             &args,
         );
@@ -445,20 +445,21 @@ pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
         Arc::clone(&io),
         Arc::new(NoFenceHost),
     );
-    let run = |obs: &mut crate::units::tools::api::Observations, tool: &str, args: String| {
-        let done = exec.run_builtin(
-            &sb,
-            &test_systools().tools,
-            std::mem::take(obs),
-            None,
-            crate::units::tools::api::ResultBudget::full(),
-            tool,
-            &args,
-        );
-        *obs = done.observations;
-        done.outcome
-    };
-    let mut obs = crate::units::tools::api::Observations::default();
+    let run =
+        |obs: &mut crate::units::business::tools::api::Observations, tool: &str, args: String| {
+            let done = exec.run_builtin(
+                &sb,
+                &test_systools().tools,
+                std::mem::take(obs),
+                None,
+                crate::units::business::tools::api::ResultBudget::full(),
+                tool,
+                &args,
+            );
+            *obs = done.observations;
+            done.outcome
+        };
+    let mut obs = crate::units::business::tools::api::Observations::default();
     // 新建文件：不需要"读过"什么
     let made = run(
         &mut obs,
@@ -477,7 +478,7 @@ pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
     );
     assert!(again.ok, "{}", again.output);
     // 只读到一段 = 证据不足：整份覆盖被拒，并指出改法
-    let mut obs2 = crate::units::tools::api::Observations::default();
+    let mut obs2 = crate::units::business::tools::api::Observations::default();
     let partial = run(
         &mut obs2,
         "read",
@@ -522,7 +523,7 @@ pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
     );
     assert!(ok.ok, "{}", ok.output);
     // 读过之后文件被别人改过：指纹不符 → 拒绝凭记忆覆盖
-    let mut obs3 = crate::units::tools::api::Observations::default();
+    let mut obs3 = crate::units::business::tools::api::Observations::default();
     run(&mut obs3, "read", format!("{{\"path\":\"{}\"}}", note));
     io.seed(&["demo", "a1", "note.txt"], "别人改过的内容");
     let stale = run(
@@ -561,7 +562,7 @@ pub(crate) fn exhausted_budget_skips_the_whole_batch() {
         ),
         (None, "read".to_string(), "{\"path\":\"a\"}".to_string()),
     ];
-    let budget = crate::units::tools::api::ResultBudget::for_batch(20_000, 19_800, 2);
+    let budget = crate::units::business::tools::api::ResultBudget::for_batch(20_000, 19_800, 2);
     assert!(budget.exhausted(), "构造前提：预算已枯竭");
     let done = run_batch(&mut tools, &plan, None, &cancel, budget);
     assert_eq!(done.len(), 2, "每个调用都要有回执");
@@ -595,13 +596,13 @@ pub(crate) fn read_respects_the_batch_budget_and_records_only_what_it_shows() {
         Arc::clone(&io),
         Arc::new(NoFenceHost),
     );
-    let budget = crate::units::tools::api::ResultBudget::for_batch(20_000, 17_500, 1);
+    let budget = crate::units::business::tools::api::ResultBudget::for_batch(20_000, 17_500, 1);
     assert_eq!(budget.limit(), 1_000, "构造前提：这一批只给 1000 字符");
     assert!(!budget.exhausted(), "构造前提：还没枯竭，read 应当执行");
     let done = exec.run_builtin(
         &sb,
         &test_systools().tools,
-        crate::units::tools::api::Observations::default(),
+        crate::units::business::tools::api::Observations::default(),
         None,
         budget,
         "read",
@@ -643,7 +644,7 @@ pub(crate) fn module_and_service_params_share_one_header() {
         ),
     );
     let service_sections = vec!["- m0.svc.echo\nx（integer，必填）".to_string()];
-    let notes = crate::units::tools::api::tool_notes(
+    let notes = crate::units::business::tools::api::tool_notes(
         &test_prompts(),
         &test_sandbox("m0", &["m0"]),
         std::slice::from_ref(&m),
@@ -665,7 +666,7 @@ pub(crate) fn module_and_service_params_share_one_header() {
     );
 
     // 只有服务参数时同样只出现一个标题，也不能退回"没声明参数"的空态。
-    let only_service = crate::units::tools::api::tool_notes(
+    let only_service = crate::units::business::tools::api::tool_notes(
         &test_prompts(),
         &test_sandbox("m0", &["m0"]),
         &[],
@@ -689,7 +690,7 @@ pub(crate) fn module_and_service_params_share_one_header() {
 
 #[test]
 pub(crate) fn service_ops_are_scoped_to_the_agent_module_face() {
-    use crate::units::agentloop::api::{ServiceOp, service_ops_for_modules};
+    use crate::units::business::agentloop::api::{ServiceOp, service_ops_for_modules};
     let op = |tool: &str| ServiceOp {
         tool: tool.to_string(),
         service: "svc".to_string(),
@@ -714,7 +715,7 @@ pub(crate) fn service_ops_are_scoped_to_the_agent_module_face() {
 /// 约束：账本取**批前快照**，读结果要等这一批回填进转录后才算模型看过。
 #[test]
 pub(crate) fn read_in_the_same_batch_does_not_authorize_write() {
-    use crate::units::llm::api::ToolCall;
+    use crate::units::business::llm::api::ToolCall;
     let io = Arc::new(InMemorySysIo::new());
     io.seed(&["w", "a", "base.md"], "base\n");
     let path = abs(&["w", "a", "base.md"]);
@@ -761,7 +762,7 @@ pub(crate) fn read_in_the_same_batch_does_not_authorize_write() {
     }
     let exec = run_execution(std::slice::from_mut(&mut m), "任务", &test_prompts());
     let trace = exec.traces.get("a").expect("工具记录");
-    let writes: Vec<&crate::units::transcript::api::ToolCallView> =
+    let writes: Vec<&crate::units::business::transcript::api::ToolCallView> =
         trace.iter().filter(|v| v.name == "write").collect();
     assert_eq!(writes.len(), 2, "两批各写一次：{trace:?}");
     assert!(
@@ -780,7 +781,7 @@ pub(crate) fn read_in_the_same_batch_does_not_authorize_write() {
 /// 约束：只拦 tracked 且当前内容与基线不同的路径；新文件与删除不在这一道门里。
 #[test]
 pub(crate) fn work_commit_refuses_unobserved_tracked_changes() {
-    use crate::units::llm::api::ToolCall;
+    use crate::units::business::llm::api::ToolCall;
     let io = Arc::new(InMemorySysIo::new());
     let store = Arc::new(InMemoryWorkStore::new());
     let ws = test_workspace_store(Arc::new(InMemoryWorkspace::new()), store.clone());
@@ -813,14 +814,17 @@ pub(crate) fn work_commit_refuses_unobserved_tracked_changes() {
         sb.private = abs(&["w", "a"]);
         t.face.sandbox = sb.clone();
         t.face.fence = crate::kernel::api::fence::FencePlan::for_session(&sb, &[], false);
-        t.handlers =
-            crate::units::workspace::api::work_handlers(&ws, &sb, &["work_commit".to_string()]);
+        t.handlers = crate::units::business::workspace::api::work_handlers(
+            &ws,
+            &sb,
+            &["work_commit".to_string()],
+        );
         t.face.allowed.push("work_commit".to_string());
         t.workspace = Some(Arc::clone(&ws));
     }
     let exec = run_execution(std::slice::from_mut(&mut m), "任务", &test_prompts());
     let trace = exec.traces.get("a").expect("工具记录");
-    let commits: Vec<&crate::units::transcript::api::ToolCallView> =
+    let commits: Vec<&crate::units::business::transcript::api::ToolCallView> =
         trace.iter().filter(|v| v.name == "work_commit").collect();
     assert_eq!(commits.len(), 1, "一次提交：{trace:?}");
     assert!(

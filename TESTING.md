@@ -14,7 +14,7 @@
 - 风险区按代码划分，不按测试层：产品代码 80%、平台/进程适配 60%、安全策略 100%；PR 新增 Rust 行 90%、安全变更行 100%（`tests/coverage-policy.json`、`tests/coverage.mjs`）；这些数字只用于报告回执，不是合并判据。安全的行为矩阵必须 100%（`src/tests/permission.rs`、`src/kernel/detail/confine/tests.rs`）；OS 强制后端归平台桶，由三平台真机探针（`tests/<平台>/`）与定期突变审计调查覆盖；两者都不参与验收判定。E2E 不设行覆盖率，旅程清单必须全过（`tests/cross-platform/e2e/browser.cjs`）。
 
 - 测试只钉**可观察行为**：入站面（`units/<单元>/<子业务>/api.rs` 的入站对象）、端口契约、内核真实实例与 E2E 旅程。`service` / `domain` / `detail` 的自由函数、内部结构与状态机**不单独写用例**——实现会频繁搬迁，钉住它的用例最先腐烂；这些行为改由驱动能力面或旅程的用例覆盖。
-- **不做内部实现测试**：`src/tests/**` 只能经 `units/<单元>/<子业务>::api`、`::ports` 或组合根 `crate::entry::assembly` 取实现，出现 `::service` / `::domain` / `::detail` 即失败（门禁 `structure/tests-api`，豁免只有替身层 `doubles` / `fakes` / `prelude` / `builders` / `detail` / `helpers`）。这条用机器判，不靠评审记忆。
+- **不做内部实现测试**：`src/tests/**` 只能经 `units/<单元>/<子业务>::api`、`::ports` 或组合根 `crate::entry::assembly` 取实现，出现 `::service` / `::domain` / `::detail` 即失败（门禁 `structure/tests-api`，豁免只有替身层 `doubles` / `fakes` / `prelude` / `builders` / `detail` / `helpers`，以及按名豁免的 8 个适配器边界用例——记账在 `tests/gaps.yaml` 的 `tests.impl-partition-imports`，名单只减不增）。这条用机器判，不靠评审记忆。
 - 测试清单只有一处声明：`tests/specs/<单元>.yaml`（一条用例一行：`id` / `tier` / `note`；突变范围也用同一个文件的 `mutation` 块声明 `schedule` 与 `files`，由门禁 `structure/mutation` 判路径存在与归属）。`src/tests` 下每个带 `#[test]` 的模块、`tests/journeys/index.js` 的每段旅程都必须被声明，反向声明也必须落到实现——任一处对不上即失败（门禁 `structure/specs`）。`node run-tests.js --plan` 看会跑什么，`--unit` / `--tier` / `--journey` 选子集。
 
 - 内核（`src/kernel/**`）的内联测试用**真实实例**（临时目录、真实进程、真文件系统），不引用 `crate::tests` 的业务替身（门禁 `structure/kernel-tests`）：底层稳定，替身只会把"替身的行为"当成内核的事实。

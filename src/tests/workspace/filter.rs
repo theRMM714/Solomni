@@ -1,9 +1,9 @@
 //! 目的：工作区过滤规则（`.workignore`）的语义——内容面与检索面共用的唯一名单。
 //! 管：目录名命中整棵子树、取反、目录专属、锚定、空规则与非法行、以及播种的默认名单。
 //! 不管：目录遍历与剪枝（见 `tests::detail::fs` 的 `list_visible` 用例）；`.gitignore`（只在 grep 的检索面生效）。
-//! 联动：`src/units/workspace/domain/path_filter.rs`；工具面由 `work_ignore` 维护同一份文件。
+//! 联动：`src/units/business/workspace/domain/path_filter.rs`；工具面由 `work_ignore` 维护同一份文件。
 
-use crate::units::workspace::api::{MAX_RULE_CHARS, Rules, WORKIGNORE_SEED, check_rule};
+use crate::units::business::workspace::api::{MAX_RULE_CHARS, Rules, WORKIGNORE_SEED, check_rule};
 use std::path::Path;
 
 fn rules(text: &str) -> Rules {

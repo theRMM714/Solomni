@@ -4,7 +4,7 @@
 //! 联动：`src/kernel/ports.rs` 与 `src/units/packages/ports.rs`。
 
 use super::*;
-use crate::units::session_model::api::MEETING;
+use crate::units::business::session_model::api::MEETING;
 
 /// 目的：记录型围栏端口：记录按会话（`lease_releases`）与按次（`released` / `leases`）两类释放请求。
 pub(crate) struct RecordingFence {
@@ -189,34 +189,39 @@ pub(crate) fn work(name: &str, kind: &str, modules: &[&str]) -> WorkSpec {
 }
 
 /// 目的：假依赖补齐面——清单为空、动作不能真跑（runtime 只读它的虚拟根清单；测试不碰网络与下载）。
-pub(crate) fn test_provision() -> Arc<dyn crate::units::provision::api::Provision + Send + Sync> {
+pub(crate) fn test_provision()
+-> Arc<dyn crate::units::business::provision::api::Provision + Send + Sync> {
     test_provision_with(Vec::new())
 }
 
 /// 目的：同上，但报一份给定的清单（不解析产品根：兜底路径原样回清单里的 probe）。
 pub(crate) fn test_provision_with(
-    deps: Vec<crate::units::provision::api::DepStatus>,
-) -> Arc<dyn crate::units::provision::api::Provision + Send + Sync> {
+    deps: Vec<crate::units::business::provision::api::DepStatus>,
+) -> Arc<dyn crate::units::business::provision::api::Provision + Send + Sync> {
     test_provision_with_root(deps, None)
 }
 
 /// 目的：同上，并给出产品根——验"设置里没登记时采用项目内已装的那一个"要把 probe 落成绝对路径。
 pub(crate) fn test_provision_with_root(
-    deps: Vec<crate::units::provision::api::DepStatus>,
+    deps: Vec<crate::units::business::provision::api::DepStatus>,
     root: Option<&std::path::Path>,
-) -> Arc<dyn crate::units::provision::api::Provision + Send + Sync> {
+) -> Arc<dyn crate::units::business::provision::api::Provision + Send + Sync> {
     struct FixedProvision(
-        Vec<crate::units::provision::api::DepStatus>,
+        Vec<crate::units::business::provision::api::DepStatus>,
         Option<std::path::PathBuf>,
     );
-    impl crate::units::provision::api::Provision for FixedProvision {
-        fn status(&self) -> Result<Vec<crate::units::provision::api::DepStatus>, String> {
+    impl crate::units::business::provision::api::Provision for FixedProvision {
+        fn status(&self) -> Result<Vec<crate::units::business::provision::api::DepStatus>, String> {
             Ok(self.0.clone())
         }
-        fn guest_bases(&self) -> Result<Vec<crate::units::provision::api::GuestBase>, String> {
+        fn guest_bases(
+            &self,
+        ) -> Result<Vec<crate::units::business::provision::api::GuestBase>, String> {
             Ok(Vec::new())
         }
-        fn processes(&self) -> Result<Vec<crate::units::provision::api::ProcInfo>, String> {
+        fn processes(
+            &self,
+        ) -> Result<Vec<crate::units::business::provision::api::ProcInfo>, String> {
             Ok(Vec::new())
         }
         fn job(&self) -> crate::units::pure::exec_model::api::JobState {
@@ -237,20 +242,25 @@ pub(crate) fn test_provision_with_root(
         }
         fn tool_location(
             &self,
-            tool: crate::units::provision::api::HostTool,
+            tool: crate::units::business::provision::api::HostTool,
             registered: &str,
-        ) -> crate::units::vm::api::ToolPath {
+        ) -> crate::units::business::vm::api::ToolPath {
             // 与生产同一份解析：登记值优先，其余按已装好的那条依赖的 probe 回绝对路径。
             let root = self.1.clone().unwrap_or_default();
-            crate::units::provision::domain::tool_location(tool, registered, &root, &self.0)
+            crate::units::business::provision::domain::tool_location(
+                tool, registered, &root, &self.0,
+            )
         }
     }
     Arc::new(FixedProvision(deps, root.map(std::path::Path::to_path_buf)))
 }
 
 /// 目的：一条"已装在项目内"的依赖（`probe` 是相对产品根的写法，与清单同构）。
-pub(crate) fn installed_dep(id: &str, probe: &str) -> crate::units::provision::api::DepStatus {
-    crate::units::provision::api::DepStatus {
+pub(crate) fn installed_dep(
+    id: &str,
+    probe: &str,
+) -> crate::units::business::provision::api::DepStatus {
+    crate::units::business::provision::api::DepStatus {
         id: id.to_string(),
         guest: None,
         present: true,
@@ -290,5 +300,5 @@ pub(crate) fn scripted(s: Vec<String>) -> BoxedChat {
 pub(crate) struct SharedScript {
     pub(crate) q: Arc<Mutex<Vec<String>>>,
     // 需要验“精确上下文用量”时注入；None = 这条通道拿不到 usage。
-    pub(crate) usage: Option<crate::units::llm::api::TokenUsage>,
+    pub(crate) usage: Option<crate::units::business::llm::api::TokenUsage>,
 }

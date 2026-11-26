@@ -5,15 +5,15 @@
 > "哪个席位用哪份提示词、拿哪些工具"见 [tools-and-roles.md](../tools/tools-and-roles.md) 的「提示词按席位分配」；
 > 模块自己的能力摘要（`brief`）与工具用法（`system`）见 [MODULE_SPEC.md](../../MODULE_SPEC.md)。
 
-册子按**共享 / 席位**两个目录切分；目录枚举与读盘归 `assets`（`prompts/` 的唯一主人），加载经 `PromptSource` 端口（`units/prompt/ports.rs`，实现在 `units/prompt/detail/yaml_prompts.rs`），
-`{{key}}` 渲染与"缺键即报错"在 `units/prompt/domain/prompt.rs`（纯逻辑，不读文件）。
+册子按**共享 / 席位**两个目录切分；目录枚举与读盘归 `assets`（`prompts/` 的唯一主人），加载经 `PromptSource` 端口（`units/business/prompt/ports.rs`，实现在 `units/business/prompt/detail/yaml_prompts.rs`），
+`{{key}}` 渲染与"缺键即报错"在 `units/business/prompt/domain/prompt.rs`（纯逻辑，不读文件）。
 键的完整清单就是下面这张表——**本表由结构审查的 docsTruth 门禁（`tests/gates/structure/docsTruth.js`）与盘上的册子双向比对**（gate id 见 `node run-tests.js --list`）：加了键没改表、表里的键已不存在，都是硬失败。
 
 ## 一、结构与键
 
 | 文件 | 键 | 用途 |
 | --- | --- | --- |
-| `shared/mechanisms.yaml` | `mechanisms[].seats` / `mechanisms[].text` | **机制说明按适用席位分发**：一个回合的身份块把**适用该席位**的条目按声明顺序拼起来（`{{mechanism}}`）。`seats` 匹配的是**席位 id**（声明在 `src/units/session_model/domain/mechanism.rs` 的 `SEATS`）——对应关系全在数据里，代码只做匹配（`CoreTexts::mechanisms_for`）；谁在哪个机制里坐什么席位由同一文件的 `MECHANISMS` 报 |
+| `shared/mechanisms.yaml` | `mechanisms[].seats` / `mechanisms[].text` | **机制说明按适用席位分发**：一个回合的身份块把**适用该席位**的条目按声明顺序拼起来（`{{mechanism}}`）。`seats` 匹配的是**席位 id**（声明在 `src/units/business/session_model/domain/mechanism.rs` 的 `SEATS`）——对应关系全在数据里，代码只做匹配（`CoreTexts::mechanisms_for`）；谁在哪个机制里坐什么席位由同一文件的 `MECHANISMS` 报 |
 | `shared/protocol.yaml` | `chat_protocol` | 讨论约定（讨论席与执行席一起注入，可自由演化） |
 | `shared/tools.yaml` | `env_hosts` / `env_guests` / `envs[].host\|guest\|text` | **工作环境按环境分发**：本机档按宿主平台（`env_hosts`：linux / windows / macos），虚拟机档按 guest 的 os（`env_guests`）；每条只写 host 或 guest 之一，装载时校验全表覆盖（不静默漏发一份环境）。文本变量：work_name / agent / work_root / sandbox_root / module_roots / path_rules——虚拟机档给的是 **guest 内路径**；路径规矩只有一处（`texts.yaml` 的 `path_rules`，`env_block` 用它渲染后插进每个环境块） |
 | | `patch_guide` | 自由格式补丁的写法（每块以 `*** End File` 收尾、SEARCH 要整行一致、一次可多块、整体原子） |
@@ -38,16 +38,16 @@
 
 ## 二、怎么被装载、怎么被取用
 
-- `PromptSource` 端口（`units/prompt/ports.rs`，实现在 `detail/yaml_prompts.rs`）按文件装配成
+- `PromptSource` 端口（`units/business/prompt/ports.rs`，实现在 `detail/yaml_prompts.rs`）按文件装配成
   `Prompts`：各文件的**顶层键合并**成 `core:` 的内容（键在两份文件里重复 = 装配错误，不静默覆盖）；
-- **册子只由 `prompt` 单元持有一次**（`units/prompt/service.rs`）：组合根 `prompt::service::load()` 得到
+- **册子只由 `prompt` 单元持有一次**（`units/business/prompt/service.rs`）：组合根 `prompt::service::load()` 得到
   `Arc<dyn Prompt>`，协调业务持它、协作会话与它**共享同一份**；
 - **别的单元不点字段路径**，取用只有一条路：**按名字取一段**——`Prompt::text(Segment::…)`（原文）
-  或 `Prompt::render(Segment::…, vars)`（渲染）；名字表是 `units/prompt/domain/prompt.rs` 的 `Segment`——
+  或 `Prompt::render(Segment::…, vars)`（渲染）；名字表是 `units/business/prompt/domain/prompt.rs` 的 `Segment`——
   **加一段提示词 = 册子加键 + 这里加变体**（缺了编译不过）。运行时回执不由本单元返回。
-- 渲染（`{{key}}` 替换、缺键 / 缺变量即报错）在 `units/prompt/domain/prompt.rs`（纯逻辑，不读文件）；
-- **工具总表与机制席位不在这份册子里**：`systools/tools.yaml`（工具是什么）与 `src/units/session_model/domain/mechanism.rs` 的 `SEATS`（身份有什么）
-  由 `units/tools/detail/yaml_systools.rs` 的 `YamlSystools` 装配成 `SystemTools`，**与册子分开注入**——
+- 渲染（`{{key}}` 替换、缺键 / 缺变量即报错）在 `units/business/prompt/domain/prompt.rs`（纯逻辑，不读文件）；
+- **工具总表与机制席位不在这份册子里**：`systools/tools.yaml`（工具是什么）与 `src/units/business/session_model/domain/mechanism.rs` 的 `SEATS`（身份有什么）
+  由 `units/business/tools/detail/yaml_systools.rs` 的 `YamlSystools` 装配成 `SystemTools`，**与册子分开注入**——
   挂进册子会让提示词反过来依赖工具，两边成环（见 [layers.md](../architecture/layers.md)）；
 - **组装（哪一回合发哪几段）留在各业务**：身份块归 `session`、工具说明归 `tools`、清单文本归 `registry` / `workspace`
   ——prompt 只给"段"，不替它们拼（否则它反过来要认识会话与工具）。

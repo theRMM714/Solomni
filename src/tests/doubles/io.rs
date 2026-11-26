@@ -1,7 +1,7 @@
 //! 目的：内存文件系统与脚本会话替身——内置文件工具的读写落在内存里。
 //! 管：读写与越界拒绝、删除、脚本化的会话宿主。
 //! 不管：工作区（`workspace.rs`）、路径夹具（`fixtures.rs`）。
-//! 联动：`src/units/tools/ports.rs` 的 `SysIo` 与 `src/kernel/ports.rs` 的 `SessionHost`。
+//! 联动：`src/units/business/tools/ports.rs` 的 `SysIo` 与 `src/kernel/ports.rs` 的 `SessionHost`。
 
 use super::*;
 
@@ -108,7 +108,7 @@ impl SysIo for InMemorySysIo {
             .get(&key)
             .cloned()
             .ok_or_else(|| format!("读取失败：{} 不存在", key))?;
-        let hash = crate::units::workspace::api::content_hash(text.as_bytes());
+        let hash = crate::units::business::workspace::api::content_hash(text.as_bytes());
         Ok(FileRead {
             bytes: text.len(),
             text,
@@ -123,7 +123,7 @@ impl SysIo for InMemorySysIo {
         path: &std::path::Path,
         offset: u32,
         limit: u32,
-    ) -> Result<crate::units::tools::ports::FilePage, String> {
+    ) -> Result<crate::units::business::tools::ports::FilePage, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -145,13 +145,13 @@ impl SysIo for InMemorySysIo {
             .take(limit.max(1) as usize)
             .copied()
             .collect();
-        Ok(crate::units::tools::ports::FilePage {
+        Ok(crate::units::business::tools::ports::FilePage {
             text: selected.join("\n"),
             bytes: text.len(),
             lossy: self.lossy,
             window_cut: false,
             line_cut: false,
-            hash: crate::units::workspace::api::content_hash(text.as_bytes()),
+            hash: crate::units::business::workspace::api::content_hash(text.as_bytes()),
             total_lines: total,
         })
     }
@@ -166,19 +166,19 @@ impl SysIo for InMemorySysIo {
             .lock()
             .expect("锁")
             .get(&key)
-            .map(|text| crate::units::workspace::api::content_hash(text.as_bytes())))
+            .map(|text| crate::units::business::workspace::api::content_hash(text.as_bytes())))
     }
     fn list(
         &self,
         path: &std::path::Path,
-    ) -> Result<Vec<crate::units::tools::ports::DirEntry>, String> {
+    ) -> Result<Vec<crate::units::business::tools::ports::DirEntry>, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
         // 内存替身：把已 seed 的路径按"父目录等于该目录"筛出来（只报直接子项）。
         let dir = path.to_string_lossy().into_owned();
         let files = self.files.lock().expect("锁");
-        let mut out: Vec<crate::units::tools::ports::DirEntry> = Vec::new();
+        let mut out: Vec<crate::units::business::tools::ports::DirEntry> = Vec::new();
         for (k, v) in files.iter() {
             let Some((parent, name)) = k.rsplit_once(['/', '\\']) else {
                 continue;
@@ -186,7 +186,7 @@ impl SysIo for InMemorySysIo {
             if parent != dir.trim_end_matches(['/', '\\']) {
                 continue;
             }
-            out.push(crate::units::tools::ports::DirEntry {
+            out.push(crate::units::business::tools::ports::DirEntry {
                 name: name.to_string(),
                 is_dir: false,
                 bytes: v.len() as u64,
@@ -260,14 +260,16 @@ impl SysIo for InMemorySysIo {
         &self,
         root: &std::path::Path,
         rules: Option<&str>,
-        opts: crate::units::tools::ports::WalkOpts,
-    ) -> Result<Vec<crate::units::tools::ports::WalkEntry>, String> {
-        use crate::units::tools::ports::WalkEntry;
+        opts: crate::units::business::tools::ports::WalkOpts,
+    ) -> Result<Vec<crate::units::business::tools::ports::WalkEntry>, String> {
+        use crate::units::business::tools::ports::WalkEntry;
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
         let compiled = match (opts.ignore, rules) {
-            (true, Some(text)) => Some(crate::units::workspace::api::Rules::compile(root, text)?),
+            (true, Some(text)) => Some(crate::units::business::workspace::api::Rules::compile(
+                root, text,
+            )?),
             _ => None,
         };
         let base = root
@@ -305,8 +307,8 @@ impl SysIo for InMemorySysIo {
         &self,
         path: &std::path::Path,
         each: &mut dyn FnMut(u32, &str),
-    ) -> Result<crate::units::tools::ports::ScanSummary, String> {
-        use crate::units::tools::ports::ScanSummary;
+    ) -> Result<crate::units::business::tools::ports::ScanSummary, String> {
+        use crate::units::business::tools::ports::ScanSummary;
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -340,11 +342,13 @@ impl SysIo for InMemorySysIo {
     fn mutate(
         &self,
         path: &std::path::Path,
-        expect: &crate::units::tools::ports::Expect,
-        mutation: crate::units::tools::ports::Mutation,
-    ) -> Result<crate::units::tools::ports::WriteReceipt, crate::units::tools::ports::WriteFault>
-    {
-        use crate::units::tools::ports::{WriteFault, WriteReceipt};
+        expect: &crate::units::business::tools::ports::Expect,
+        mutation: crate::units::business::tools::ports::Mutation,
+    ) -> Result<
+        crate::units::business::tools::ports::WriteReceipt,
+        crate::units::business::tools::ports::WriteFault,
+    > {
+        use crate::units::business::tools::ports::{WriteFault, WriteReceipt};
         if let Some(m) = self.failure_for(path) {
             return Err(WriteFault::io(path, &m));
         }
@@ -353,7 +357,7 @@ impl SysIo for InMemorySysIo {
         let current = files.get(&key).cloned();
         check_memory_expect(path, expect, current.as_deref())?;
         let (text, changed, replaced) = memory_mutation(path, current.as_deref(), mutation)?;
-        let version = crate::units::workspace::api::content_hash(text.as_bytes());
+        let version = crate::units::business::workspace::api::content_hash(text.as_bytes());
         let total_lines = text.lines().count() as u32;
         files.insert(key, text);
         Ok(WriteReceipt {
@@ -366,10 +370,12 @@ impl SysIo for InMemorySysIo {
 
     fn transact(
         &self,
-        ops: Vec<crate::units::tools::ports::WriteOp>,
-    ) -> Result<Vec<crate::units::tools::ports::WriteReceipt>, crate::units::tools::ports::WriteFault>
-    {
-        use crate::units::tools::ports::{WriteFault, WriteReceipt};
+        ops: Vec<crate::units::business::tools::ports::WriteOp>,
+    ) -> Result<
+        Vec<crate::units::business::tools::ports::WriteReceipt>,
+        crate::units::business::tools::ports::WriteFault,
+    > {
+        use crate::units::business::tools::ports::{WriteFault, WriteReceipt};
         let mut files = self.files.lock().expect("锁");
         let mut next = files.clone();
         let mut seen = std::collections::BTreeSet::new();
@@ -389,7 +395,7 @@ impl SysIo for InMemorySysIo {
             check_memory_expect(&op.path, &op.expect, current.as_deref())?;
             let (text, changed, replaced) =
                 memory_mutation(&op.path, current.as_deref(), op.mutation)?;
-            let version = crate::units::workspace::api::content_hash(text.as_bytes());
+            let version = crate::units::business::workspace::api::content_hash(text.as_bytes());
             let total_lines = text.lines().count() as u32;
             next.insert(key, text);
             receipts.push(WriteReceipt {
@@ -407,10 +413,10 @@ impl SysIo for InMemorySysIo {
 /// 目的：内存替身的 CAS 校验（与 `FsSysIo` 同一语义）。
 fn check_memory_expect(
     path: &std::path::Path,
-    expect: &crate::units::tools::ports::Expect,
+    expect: &crate::units::business::tools::ports::Expect,
     current: Option<&str>,
-) -> Result<(), crate::units::tools::ports::WriteFault> {
-    use crate::units::tools::ports::{Expect, WriteFault};
+) -> Result<(), crate::units::business::tools::ports::WriteFault> {
+    use crate::units::business::tools::ports::{Expect, WriteFault};
     match expect {
         Expect::Absent => {
             if current.is_some() {
@@ -420,7 +426,7 @@ fn check_memory_expect(
         Expect::Version(want) => match current {
             None => return Err(WriteFault::missing(path)),
             Some(text) => {
-                let now = crate::units::workspace::api::content_hash(text.as_bytes());
+                let now = crate::units::business::workspace::api::content_hash(text.as_bytes());
                 if &now != want {
                     return Err(WriteFault::stale(path, want, &now));
                 }
@@ -434,14 +440,18 @@ fn check_memory_expect(
 fn memory_mutation(
     path: &std::path::Path,
     current: Option<&str>,
-    mutation: crate::units::tools::ports::Mutation,
+    mutation: crate::units::business::tools::ports::Mutation,
 ) -> Result<
-    (String, Vec<crate::units::tools::api::LineRange>, usize),
-    crate::units::tools::ports::WriteFault,
+    (
+        String,
+        Vec<crate::units::business::tools::api::LineRange>,
+        usize,
+    ),
+    crate::units::business::tools::ports::WriteFault,
 > {
-    use crate::units::tools::api::LineRange;
-    use crate::units::tools::domain::systool::{LiteralFault, apply_literal_edit};
-    use crate::units::tools::ports::{Mutation, WriteFault};
+    use crate::units::business::tools::api::LineRange;
+    use crate::units::business::tools::domain::systool::{LiteralFault, apply_literal_edit};
+    use crate::units::business::tools::ports::{Mutation, WriteFault};
     match mutation {
         Mutation::Replace(text) => {
             let total = text.lines().count() as u32;

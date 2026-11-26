@@ -11,6 +11,7 @@ const fs = require("fs");
 const path = require("path");
 const { stripTestModules } = require("./dependency.js");
 const { parseInboundText } = require("../../lib/presentation.js");
+const { BUCKETS } = require("./unitpath.js");
 
 const MANIFEST = "docs/presentation/inbound.yaml";
 const SRC = "src/presentation";
@@ -25,10 +26,10 @@ const ROOTS = new Set([
 // 分区段：单元路径截到它为止才是「单元」——::api 之前那段才是子单元名。
 const PARTITIONS = ["api", "service", "domain", "detail", "ports"];
 
-/** 目的：把 use 路径折成入站面单元名（\`work\` / \`catalog/registry\`）；桶（pure / resource）那层不算单元名。 */
+/** 目的：把 use 路径折成入站面单元名（\`work\` / \`catalog/registry\`）；桶那层不算单元名（桶名以 unitpath.js 为准）。 */
 function unitOf(rest) {
   const seg = rest.split("::");
-  if (seg[0] === "pure" || seg[0] === "resource") seg.shift();
+  if (BUCKETS.has(seg[0])) seg.shift();
   if (seg.length >= 2 && !PARTITIONS.includes(seg[1])) return seg[0] + "/" + seg[1];
   return seg[0];
 }

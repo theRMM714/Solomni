@@ -4,15 +4,15 @@
 //! 联动：入站面来自 `src/units/*/api.rs`；事件词汇与 `src/presentation/web/` 并列共用；模块声明见 `src/presentation.rs`。
 
 use crate::presentation::faces::Faces;
+use crate::units::business::runtime::api::{Acted, ActionCall, Caller};
+use crate::units::business::system::api::System;
+use crate::units::business::tools::api::Op;
+use crate::units::business::transcript::api::{DecisionCard, DecisionWaiter, SessionEvent};
+use crate::units::business::turn::turn::api::Output;
 use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::pure::registry_model::api::ModelView;
 use crate::units::pure::registry_model::api::ProviderView;
-use crate::units::runtime::api::{Acted, ActionCall, Caller};
-use crate::units::system::api::System;
-use crate::units::tools::api::Op;
-use crate::units::transcript::api::{DecisionCard, DecisionWaiter, SessionEvent};
-use crate::units::turn::turn::api::Output;
 
 /// 目的：输入框下方命令列表的一行：补全用的写法（含前导 `/`）与一句说明。
 /// 约束：行类型放在这一层——`catalog` 只投影命令表，`term` 只管画，两边都不认识对方。

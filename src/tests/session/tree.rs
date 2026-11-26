@@ -5,7 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::session_model::api::{MEETING, PROXY, SINGLE, SessionSpec};
+use crate::units::business::session_model::api::{MEETING, PROXY, SINGLE, SessionSpec};
 
 /// 目的：共享 guest 的子会话也能改配置；写回该 agent 的唯一名单，而不是留一份会漂的副本。
 #[test]
@@ -226,7 +226,7 @@ pub(crate) fn stopped_session_offers_enable_instead_of_continue() {
 /// 约束：归档不是终态——「恢复归档」翻回 active，但**不唤醒**（不产生模型调用）。
 #[test]
 pub(crate) fn archive_hides_dispatch_and_restore_brings_it_back() {
-    use crate::units::proxy::api::ControlAction;
+    use crate::units::business::proxy::api::ControlAction;
     let hist = Arc::new(InMemoryHistory::new());
     seed_session(
         &hist,
@@ -284,8 +284,8 @@ pub(crate) fn archive_hides_dispatch_and_restore_brings_it_back() {
 /// 约束：同一段转录加一条 notice，重建出的对话条数与角色序列与不加时完全一致。
 #[test]
 pub(crate) fn notice_lines_stay_out_of_the_model_dialogue() {
+    use crate::units::business::turn::turn::api::replay_dialogue;
     use crate::units::pure::registry_model::api::ToolMode;
-    use crate::units::turn::turn::api::replay_dialogue;
     let events = |with_notice: bool| {
         let mut lines =
             vec![serde_json::json!({"id": 0, "kind": "user", "speaker": "用户", "line": "问一"})];
@@ -327,8 +327,8 @@ pub(crate) fn notice_lines_stay_out_of_the_model_dialogue() {
 /// 约束：「继续」是重开一轮，不是把半句当发言续写（见 docs/session/session-model.md）。
 #[test]
 pub(crate) fn cut_lines_stay_out_of_the_model_dialogue() {
+    use crate::units::business::turn::turn::api::replay_dialogue;
     use crate::units::pure::registry_model::api::ToolMode;
-    use crate::units::turn::turn::api::replay_dialogue;
     let events = |with_cut: bool| {
         let mut lines =
             vec![serde_json::json!({"id": 0, "kind": "user", "speaker": "用户", "line": "问一"})];
@@ -370,8 +370,8 @@ pub(crate) fn cut_lines_stay_out_of_the_model_dialogue() {
 /// 目的：根编辑不覆盖子收窄；子只能再收窄，不能换更高档。
 #[test]
 pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
+    use crate::units::business::workspace::api::{ScopeMode, SharedEdit};
     use crate::units::pure::permission::api::{PermissionLayer, ProfileId};
-    use crate::units::workspace::api::{ScopeMode, SharedEdit};
     let hist = Arc::new(InMemoryHistory::new());
     let mut core = core_with_all(
         vec![module_of("a")],
@@ -529,7 +529,7 @@ pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
 /// 目的：guest 租约按档位与代理根派生：虚拟机档的子树共用顶层租约，代理根自己没有 guest。
 #[test]
 pub(crate) fn guest_lease_follows_the_tier_and_the_proxy_root() {
-    use crate::units::conversation::session::api::guest_lease;
+    use crate::units::business::conversation::session::api::guest_lease;
     use crate::units::pure::exec_model::api::ExecSpec;
     use crate::units::pure::exec_model::api::Tier;
     let meta = |name: &str, parent: Option<&str>, tier: Tier, kind: &str| SessionMeta {

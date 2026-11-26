@@ -1,11 +1,11 @@
-//! 目的：构建子业务的行为用例——只经 `units/maintenance/builds/api.rs` 的面。
+//! 目的：构建子业务的行为用例——只经 `units/business/maintenance/builds/api.rs` 的面。
 //! 管：目标名、入口判据（在场才跳过）、没有 build 段时的两种结局（跳过 / 如实拒收）。
 //! 不管：真实编译产物与缓存卷（虚拟机档，见 T5 旅程 `vm` 与缺口账）；指纹算法。
-//! 联动：src/units/maintenance/builds/api.rs；装配见 src/entry/assembly.rs。
+//! 联动：src/units/business/maintenance/builds/api.rs；装配见 src/entry/assembly.rs。
 
 use super::prelude::*;
-use crate::units::catalog::modules::api::ToolDecl;
-use crate::units::maintenance::builds::api::{Builds, Target};
+use crate::units::business::catalog::modules::api::ToolDecl;
+use crate::units::business::maintenance::builds::api::{Builds, Target};
 
 /// 目的：组合根装出来的真实构建入站面（落点在 `target/test-scratch`，不碰用户目录）。
 fn service(tag: &str) -> impl Builds {

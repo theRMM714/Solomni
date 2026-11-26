@@ -5,13 +5,17 @@
 
 use crate::presentation::faces::Faces;
 
-use crate::units::runtime::api::{Acted, ActionCall, ActionOps, ActionView, Caller, RuntimeOps};
-use crate::units::session_model::api::{HistoryView, MEETING, SINGLE, SessionMeta, SessionSpec};
-use crate::units::transcript::api::DecisionQueue;
-use crate::units::turn::turn::api::{Advance, Output};
-use crate::units::turn::turn::api::{Events, TurnOps};
-use crate::units::turn_state::api::HistoryOps;
-use crate::units::work::api::{
+use crate::units::business::runtime::api::{
+    Acted, ActionCall, ActionOps, ActionView, Caller, RuntimeOps,
+};
+use crate::units::business::session_model::api::{
+    HistoryView, MEETING, SINGLE, SessionMeta, SessionSpec,
+};
+use crate::units::business::transcript::api::DecisionQueue;
+use crate::units::business::turn::turn::api::{Advance, Output};
+use crate::units::business::turn::turn::api::{Events, TurnOps};
+use crate::units::business::turn_state::api::HistoryOps;
+use crate::units::business::work::api::{
     AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, RuntimeReport,
     SessionConfig, SessionEdit, SessionTypeView, SessionView, TierChoices, WorkOpened, WorkOps,
     WorkSpec,
@@ -19,9 +23,9 @@ use crate::units::work::api::{
 
 use crate::presentation::web::routes::{self, ROUTES};
 use crate::presentation::web::{self, FenceInfo};
-use crate::units::catalog::modules::api::{ModulesOps, Roster};
-use crate::units::catalog::registry::api::AppSettings;
-use crate::units::catalog::registry::api::RegistryOps;
+use crate::units::business::catalog::modules::api::{ModulesOps, Roster};
+use crate::units::business::catalog::registry::api::AppSettings;
+use crate::units::business::catalog::registry::api::RegistryOps;
 use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::registry_model::api::AgentView;
 use crate::units::pure::registry_model::api::ModelView;
@@ -96,48 +100,54 @@ impl FakeStorage {
     }
 }
 
-impl crate::units::maintenance::storage::api::Storage for FakeStorage {
-    fn report(&self) -> Result<crate::units::maintenance::storage::api::SpaceReport, String> {
+impl crate::units::business::maintenance::storage::api::Storage for FakeStorage {
+    fn report(
+        &self,
+    ) -> Result<crate::units::business::maintenance::storage::api::SpaceReport, String> {
         self.guard()?;
-        Ok(crate::units::maintenance::storage::api::SpaceReport::default())
+        Ok(crate::units::business::maintenance::storage::api::SpaceReport::default())
     }
     fn gc(
         &self,
         _apply: bool,
-    ) -> Result<crate::units::maintenance::storage::api::GcReport, String> {
+    ) -> Result<crate::units::business::maintenance::storage::api::GcReport, String> {
         self.guard()?;
-        Ok(crate::units::maintenance::storage::api::GcReport::default())
+        Ok(crate::units::business::maintenance::storage::api::GcReport::default())
     }
     fn ensure_headroom(
         &self,
         _protect: Option<&str>,
-    ) -> Result<crate::units::maintenance::storage::api::GcReport, String> {
+    ) -> Result<crate::units::business::maintenance::storage::api::GcReport, String> {
         self.guard()?;
-        Ok(crate::units::maintenance::storage::api::GcReport::default())
+        Ok(crate::units::business::maintenance::storage::api::GcReport::default())
     }
     fn clean(
         &self,
-        _req: &crate::units::maintenance::storage::api::CleanRequest,
-    ) -> Result<crate::units::maintenance::storage::api::CleanOutcome, String> {
+        _req: &crate::units::business::maintenance::storage::api::CleanRequest,
+    ) -> Result<crate::units::business::maintenance::storage::api::CleanOutcome, String> {
         self.guard()?;
         Ok(
-            crate::units::maintenance::storage::api::CleanOutcome::Report(
-                crate::units::maintenance::storage::api::GcReport::default(),
+            crate::units::business::maintenance::storage::api::CleanOutcome::Report(
+                crate::units::business::maintenance::storage::api::GcReport::default(),
             ),
         )
     }
     fn job(&self) -> crate::units::pure::exec_model::api::JobState {
         Default::default()
     }
-    fn set_policy(&self, _policy: crate::units::maintenance::storage::api::StoragePolicy) {}
-    fn policy(&self) -> crate::units::maintenance::storage::api::StoragePolicy {
-        crate::units::maintenance::storage::api::StoragePolicy::default()
+    fn set_policy(
+        &self,
+        _policy: crate::units::business::maintenance::storage::api::StoragePolicy,
+    ) {
+    }
+    fn policy(&self) -> crate::units::business::maintenance::storage::api::StoragePolicy {
+        crate::units::business::maintenance::storage::api::StoragePolicy::default()
     }
 }
 
 /// 目的：假补齐面的清单——一条在场、一条没装（`pending` 只该含后者）。
-fn fake_deps() -> Vec<crate::units::provision::api::DepStatus> {
-    use crate::units::provision::api::DepStatus;
+fn fake_deps() -> Vec<crate::units::business::provision::api::DepStatus> {
+    use crate::units::business::provision::api::DepStatus;
     let dep = |id: &str, present: bool| DepStatus {
         id: id.to_string(),
         guest: None,
@@ -153,14 +163,16 @@ fn fake_deps() -> Vec<crate::units::provision::api::DepStatus> {
     vec![dep("vm.qemu.linux", true), dep("vm.virtiofsd.linux", false)]
 }
 
-impl crate::units::provision::api::Provision for FakeProvision {
-    fn status(&self) -> Result<Vec<crate::units::provision::api::DepStatus>, String> {
+impl crate::units::business::provision::api::Provision for FakeProvision {
+    fn status(&self) -> Result<Vec<crate::units::business::provision::api::DepStatus>, String> {
         self.guard().map(|_| fake_deps())
     }
-    fn guest_bases(&self) -> Result<Vec<crate::units::provision::api::GuestBase>, String> {
+    fn guest_bases(
+        &self,
+    ) -> Result<Vec<crate::units::business::provision::api::GuestBase>, String> {
         self.guard().map(|_| Vec::new())
     }
-    fn processes(&self) -> Result<Vec<crate::units::provision::api::ProcInfo>, String> {
+    fn processes(&self) -> Result<Vec<crate::units::business::provision::api::ProcInfo>, String> {
         self.guard().map(|_| Vec::new())
     }
     fn job(&self) -> crate::units::pure::exec_model::api::JobState {
@@ -178,10 +190,10 @@ impl crate::units::provision::api::Provision for FakeProvision {
     }
     fn tool_location(
         &self,
-        tool: crate::units::provision::api::HostTool,
+        tool: crate::units::business::provision::api::HostTool,
         registered: &str,
-    ) -> crate::units::vm::api::ToolPath {
-        crate::units::provision::domain::tool_location(
+    ) -> crate::units::business::vm::api::ToolPath {
+        crate::units::business::provision::domain::tool_location(
             tool,
             registered,
             std::path::Path::new(""),
@@ -194,7 +206,7 @@ impl crate::units::provision::api::Provision for FakeProvision {
 }
 
 fn fake_ops(fail: Option<&str>) -> Faces {
-    fake_ops_on(fail, crate::units::turn::turn::api::event_bus())
+    fake_ops_on(fail, crate::units::business::turn::turn::api::event_bus())
 }
 
 /// 目的：同上，但用调用方给的写面事件台（测试要自己播种一条唤醒长轮询）。
@@ -210,8 +222,8 @@ fn fake_ops_on(fail: Option<&str>, bus: Arc<dyn Events>) -> Faces {
         actions: f.clone(),
         events: bus,
         log: Arc::new(super::doubles::NoopLogOps),
-        residents: Arc::new(crate::units::residents::api::NoResidents),
-        secrets: Arc::new(crate::units::catalog::secrets::api::NoSecrets),
+        residents: Arc::new(crate::units::business::residents::api::NoResidents),
+        secrets: Arc::new(crate::units::business::catalog::secrets::api::NoSecrets),
         provision: Arc::new(FakeProvision::new(fail)),
         storage: Arc::new(FakeStorage::new(fail)),
         toolchains: serde_json::Value::Null,
@@ -271,7 +283,7 @@ fn meta(name: &str) -> SessionMeta {
         node: None,
         delegation: None,
         thinking: None,
-        run: crate::units::session_model::api::RunState::Active,
+        run: crate::units::business::session_model::api::RunState::Active,
         workspace: None,
     }
 }
@@ -296,9 +308,11 @@ impl WorkOps for FakeFaces {
             WorkOpened {
                 sid: "w1".to_string(),
                 agents: vec!["甲".to_string()],
-                facts: vec![crate::units::transcript::api::SessionEvent::Notice(
-                    "开好了".to_string(),
-                )],
+                facts: vec![
+                    crate::units::business::transcript::api::SessionEvent::Notice(
+                        "开好了".to_string(),
+                    ),
+                ],
             },
             7,
         ))
@@ -322,20 +336,20 @@ impl WorkOps for FakeFaces {
             guest: None,
             guests: Vec::new(),
             net: false,
-            thinking: crate::units::work::api::ThinkingView {
+            thinking: crate::units::business::work::api::ThinkingView {
                 level: None,
                 default_level: None,
                 label: "未设置".to_string(),
                 options: Vec::new(),
                 note: String::new(),
             },
-            permission: crate::units::work::api::PermissionView {
+            permission: crate::units::business::work::api::PermissionView {
                 profile: crate::units::pure::permission::api::ProfileId::Offline,
                 label: "离线".to_string(),
                 summary: "测试".to_string(),
-                shared: crate::units::work::api::PermissionSharedView {
-                    read: crate::units::workspace::api::ScopeMode::All,
-                    write: crate::units::workspace::api::ScopeMode::All,
+                shared: crate::units::business::work::api::PermissionSharedView {
+                    read: crate::units::business::workspace::api::ScopeMode::All,
+                    write: crate::units::business::workspace::api::ScopeMode::All,
                     deny: Vec::new(),
                 },
                 narrowed: false,
@@ -385,9 +399,9 @@ impl WorkOps for FakeFaces {
         _sid: &str,
         _limit: usize,
         _before: Option<u64>,
-    ) -> Result<crate::units::workspace::api::WorkLog, String> {
+    ) -> Result<crate::units::business::workspace::api::WorkLog, String> {
         self.guard()?;
-        use crate::units::workspace::api::{CommitSummary, WorkLog, WorkLogEntry};
+        use crate::units::business::workspace::api::{CommitSummary, WorkLog, WorkLogEntry};
         Ok(WorkLog {
             head: Some(CommitSummary {
                 id: 1,
@@ -415,9 +429,9 @@ impl WorkOps for FakeFaces {
         &self,
         _sid: &str,
         _commit: u64,
-    ) -> Result<crate::units::workspace::api::CommitDetail, String> {
+    ) -> Result<crate::units::business::workspace::api::CommitDetail, String> {
         self.guard()?;
-        use crate::units::workspace::api::{ChangeKind, ChangeView, CommitDetail};
+        use crate::units::business::workspace::api::{ChangeKind, ChangeView, CommitDetail};
         Ok(CommitDetail {
             id: 1,
             parent: None,
@@ -440,9 +454,9 @@ impl WorkOps for FakeFaces {
         _sid: &str,
         _commit: u64,
         path: &str,
-    ) -> Result<crate::units::workspace::api::CommitFileView, String> {
+    ) -> Result<crate::units::business::workspace::api::CommitFileView, String> {
         self.guard()?;
-        Ok(crate::units::workspace::api::CommitFileView {
+        Ok(crate::units::business::workspace::api::CommitFileView {
             path: path.to_string(),
             hash: "h".to_string(),
             size: 2,
@@ -475,7 +489,7 @@ impl WorkOps for FakeFaces {
                 permission_profile: "offline".to_string(),
                 permission_label: "离线".to_string(),
                 context_freshness: false,
-                thinking: crate::units::work::api::ThinkingView {
+                thinking: crate::units::business::work::api::ThinkingView {
                     level: None,
                     default_level: None,
                     label: "未设置".to_string(),
@@ -565,9 +579,12 @@ impl TurnOps for FakeFaces {
         self.guard()?;
         Ok(Advance { head: 10 })
     }
-    fn compact(&self, _sid: &str) -> Result<crate::units::turn::turn::api::Advance, String> {
+    fn compact(
+        &self,
+        _sid: &str,
+    ) -> Result<crate::units::business::turn::turn::api::Advance, String> {
         self.guard()?;
-        Ok(crate::units::turn::turn::api::Advance { head: 0 })
+        Ok(crate::units::business::turn::turn::api::Advance { head: 0 })
     }
     fn is_running(&self, _sid: &str) -> bool {
         self.running.load(Ordering::Relaxed)
@@ -592,7 +609,7 @@ impl RuntimeOps for FakeFaces {
             permission_profile: "offline".to_string(),
             permission_label: "离线".to_string(),
             context_freshness: false,
-            thinking: crate::units::work::api::ThinkingView {
+            thinking: crate::units::business::work::api::ThinkingView {
                 level: None,
                 default_level: None,
                 label: "未设置".to_string(),
@@ -615,7 +632,7 @@ impl RuntimeOps for FakeFaces {
     fn rewind(
         &self,
         _sid: &str,
-        _target: crate::units::lifecycle::api::RewindTarget,
+        _target: crate::units::business::lifecycle::api::RewindTarget,
     ) -> Result<Vec<serde_json::Value>, String> {
         self.guard()?;
         Ok(vec![json!({ "type": "line", "line": "重放" })])
@@ -734,17 +751,17 @@ impl RegistryOps for FakeFaces {
     fn probe_replay_shape(
         &self,
         _id: &str,
-    ) -> Result<crate::units::llm::api::ReplayReport, String> {
+    ) -> Result<crate::units::business::llm::api::ReplayReport, String> {
         self.guard()?;
-        Ok(crate::units::llm::api::ReplayReport {
+        Ok(crate::units::business::llm::api::ReplayReport {
             shapes: vec![
-                crate::units::llm::api::ReplayShape {
+                crate::units::business::llm::api::ReplayShape {
                     name: "baseline-text".to_string(),
                     accepted: true,
                     understood: true,
                     detail: "finish_reason=stop".to_string(),
                 },
-                crate::units::llm::api::ReplayShape {
+                crate::units::business::llm::api::ReplayShape {
                     name: "content-empty".to_string(),
                     accepted: false,
                     understood: false,
@@ -753,9 +770,12 @@ impl RegistryOps for FakeFaces {
             ],
         })
     }
-    fn probe_model_tools(&self, _id: &str) -> Result<crate::units::llm::api::ProbeOutcome, String> {
+    fn probe_model_tools(
+        &self,
+        _id: &str,
+    ) -> Result<crate::units::business::llm::api::ProbeOutcome, String> {
         self.guard()?;
-        Ok(crate::units::llm::api::ProbeOutcome::Supported {
+        Ok(crate::units::business::llm::api::ProbeOutcome::Supported {
             detail: "替身说支持".to_string(),
         })
     }
@@ -775,7 +795,7 @@ impl HistoryOps for FakeFaces {
             parent: None,
             workspace: None,
             workspace_missing: false,
-            run: crate::units::session_model::api::RunState::Active,
+            run: crate::units::business::session_model::api::RunState::Active,
         }])
     }
     fn open(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
@@ -822,7 +842,7 @@ fn fence() -> FenceInfo {
 }
 
 fn call(ops: &Faces, method: &str, url: &str, body: &str) -> (u16, String) {
-    let log: Arc<dyn crate::units::runtime::api::LogOps + Send + Sync> =
+    let log: Arc<dyn crate::units::business::runtime::api::LogOps + Send + Sync> =
         Arc::new(super::doubles::NoopLogOps);
     let (code, _headers, text) = web::route(ops, &fence(), &log, method, url, body);
     (code, text)
@@ -895,7 +915,7 @@ fn sample_body(route: &routes::Route) -> &'static str {
 #[test]
 fn every_catalogued_route_has_a_handler() {
     // 长轮询要有事件才立刻返回（否则真等 20 秒），播种一条即可。
-    let bus = crate::units::turn::turn::api::event_bus();
+    let bus = crate::units::business::turn::turn::api::event_bus();
     bus.seed_for_test("w1");
     let ops = fake_ops_on(None, bus);
     for route in ROUTES {
@@ -1098,7 +1118,7 @@ fn demo_scripts_only_call_catalogued_paths() {
 #[test]
 fn assets_are_served_only_from_the_embedded_table() {
     let ops = fake_ops(None);
-    let log: Arc<dyn crate::units::runtime::api::LogOps + Send + Sync> =
+    let log: Arc<dyn crate::units::business::runtime::api::LogOps + Send + Sync> =
         Arc::new(super::doubles::NoopLogOps);
     let get = |url: &str| web::route(&ops, &fence(), &log, "GET", url, "");
 
@@ -1259,7 +1279,7 @@ fn session_action_boundaries_are_explicit() {
 /// 不解回来就永远匹配不到任何事件——长轮询只能干等到超时，客户端拿到空批。
 #[test]
 fn events_sid_filter_decodes_percent_escapes() {
-    let bus = crate::units::turn::turn::api::event_bus();
+    let bus = crate::units::business::turn::turn::api::event_bus();
     bus.seed_for_test("工作--甲");
     let ops = fake_ops_on(None, bus);
     // 「工作--甲」的 encodeURIComponent 结果（前端就是这么发的）。
@@ -1280,7 +1300,7 @@ fn events_sid_filter_decodes_percent_escapes() {
 
 #[test]
 fn success_shapes_are_pinned_per_route() {
-    let bus = crate::units::turn::turn::api::event_bus();
+    let bus = crate::units::business::turn::turn::api::event_bus();
     bus.seed_for_test("w1");
     let ops = fake_ops_on(None, bus);
     let cases: Vec<(&str, &str, &str, u16, &str)> = vec![
@@ -1474,7 +1494,7 @@ fn web_serve_returns_when_interrupted() {
 /// CLI 的选项选择：序号与选项 id 原文都认——两者都是那张卡上**用户看得见**的东西。
 #[test]
 fn cli_picks_an_option_by_index_or_id() {
-    use crate::units::transcript::api::DecisionCard;
+    use crate::units::business::transcript::api::DecisionCard;
     let card: DecisionCard = serde_json::from_value(json!({
         "id": "d1",
         "envelope": { "role": "tools", "name": "甲" },

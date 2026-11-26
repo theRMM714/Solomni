@@ -49,7 +49,7 @@ pub(crate) fn before_root(args: &[String]) -> Option<i32> {
         return Some(super::probes::print_fence_env(args, i));
     }
     // 机制验证（机器可读，探针与测试驱动）：不装围栏、不写任何权限项，只如实报"这次能不能强制住"。
-    // 未授权时段的拒绝执行（见 units/tools/detail/proc_tools.rs）就靠这一份结论。
+    // 未授权时段的拒绝执行（见 units/business/tools/detail/proc_tools.rs）就靠这一份结论。
     if let Some(i) = args.iter().position(|a| a == "--fence-verify") {
         return Some(super::probes::fence_verify(args, i));
     }

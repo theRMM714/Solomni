@@ -23,7 +23,7 @@ pub fn https_check(args: &[String], i: usize) -> i32 {
         Err(e) => {
             println!(
                 "[HTTPS] {} {} {}",
-                crate::units::llm::detail::http_agent::classify(&e),
+                crate::units::business::llm::detail::http_agent::classify(&e),
                 backend,
                 e
             );

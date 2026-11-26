@@ -1,14 +1,14 @@
 //! 目的：协作讨论的可见性与停止——每句成员发言立刻可见，停下不丢会话。
 //! 管：讨论期间的读、停止语义、落盘时序。
 //! 不管：单人生成（`events.rs`）、协作回合内部（`src/tests/collab/`）。
-//! 联动：`src/units/runtime/api/handle.rs`。
+//! 联动：`src/units/business/runtime/api/handle.rs`。
 
 use super::super::builders::shown_contains;
 use super::super::doubles::{collab_work, module_of};
 use super::super::gated_ops;
-use crate::units::collab::api::OPT_BEGIN;
-use crate::units::transcript::api::SessionEvent;
-use crate::units::turn::turn::api::Output;
+use crate::units::business::collab::api::OPT_BEGIN;
+use crate::units::business::transcript::api::SessionEvent;
+use crate::units::business::turn::turn::api::Output;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};

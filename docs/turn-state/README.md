@@ -1,7 +1,7 @@
 # turn_state（回合状态与裁决机制）
 
 > 定位：回合状态与裁决机制——在世表与运行态、裁决队、流程插件契约与工厂、提问桥、落盘与队列两个端口面（环 2）。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/turn_state/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/turn_state/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -11,9 +11,9 @@
 - 管：流程插件契约——`Flow`（推一步 / 取走让出的一步 / 交回处置 / 处置自己发的关卡）、`MemberAsk`、`Handback`、`Settle`、`WorkPlan`，以及按 id 造流程的工厂 `Flows` / `FlowSetup` 与串段器 `sequence_of` / `Sequence`。
 - 管：提问桥 `session_ask`——工具层的 `AskUser` 端口实现：登记卡、外送并落盘、停会话都走该会话同一条道。
 - 管：两个端口面 `History`（直连面，由会话单元实现）与 `HistoryOps`（队列面，由 runtime 的队列代理实现），以及在世会话的状态与流程契约。
-- 不管：回合驱动与生成（准入、重建、生成线程在 `src/units/turn/`）。
-- 不管：任何具体流程的状态机（协作在 `src/units/collab/`）。
-- 不管：落盘实现（`src/units/conversation/session/service.rs` 与 `detail/`）、会话身份与声明（`src/units/session_model/`）、呈现与命令队列（`presentation` / `runtime`）。
+- 不管：回合驱动与生成（准入、重建、生成线程在 `src/units/business/turn/`）。
+- 不管：任何具体流程的状态机（协作在 `src/units/business/collab/`）。
+- 不管：落盘实现（`src/units/business/conversation/session/service.rs` 与 `detail/`）、会话身份与声明（`src/units/business/session_model/`）、呈现与命令队列（`presentation` / `runtime`）。
 
 ## 入站契约与状态归属
 
@@ -35,10 +35,10 @@
 
 ## 改动本单元时必须同步
 
-- 改 `Turn` 的字段或访问器 → `src/units/turn/turn/service/{facts,admit,rebuild,turn,flow}.rs`（直取点）、`src/units/runtime/service/core.rs`、`docs/turn/README.md`。
-- 改 `Flow` 契约 → 协作各流程实现（`src/units/collab/service/`）、`src/units/turn/turn/service/flow.rs`、`docs/collab/README.md`。
-- 改裁决队 → `src/units/runtime/service/handle.rs`、`src/presentation/cli/gate.rs`、`docs/session/session-model.md` 的「请用户裁决」。
-- 改 `History` / `HistoryOps` → 会话单元的实现（`src/units/conversation/session/service.rs`）、`src/units/runtime/service/contracts.rs`、`src/presentation/faces.rs`。
+- 改 `Turn` 的字段或访问器 → `src/units/business/turn/turn/service/{facts,admit,rebuild,turn,flow}.rs`（直取点）、`src/units/business/runtime/service/core.rs`、`docs/turn/README.md`。
+- 改 `Flow` 契约 → 协作各流程实现（`src/units/business/collab/service/`）、`src/units/business/turn/turn/service/flow.rs`、`docs/collab/README.md`。
+- 改裁决队 → `src/units/business/runtime/service/handle.rs`、`src/presentation/cli/gate.rs`、`docs/session/session-model.md` 的「请用户裁决」。
+- 改 `History` / `HistoryOps` → 会话单元的实现（`src/units/business/conversation/session/service.rs`）、`src/units/business/runtime/service/contracts.rs`、`src/presentation/faces.rs`。
 
 ## 本目录
 

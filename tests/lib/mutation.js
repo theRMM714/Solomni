@@ -12,15 +12,10 @@ const SCHEDULES = ["weekly", "none"];
 /** 路径里出现这些字符说明写成了 glob：突变范围要具体文件，路径一搬走门禁才会判红。 */
 const GLOB = /[*?[\]]/;
 
-/** 单元管到哪棵子树：kernel 单元对 `src/kernel/`，其它单元对自己的单元目录（角色桶在 `pure/`、`resource/` 下）。 */
-function unitPrefix(unit) {
-  return unit === "kernel" ? "src/kernel/" : "src/units/" + unit + "/";
-}
-
-/** 单元的全部合法子树：环 1 的单元搬家后路径多一层 pure/，两种前缀都认。 */
+/** 单元的全部合法子树：单元住在三个角色桶之一（pure / resource / business），前缀按桶各认一份。 */
 function unitPrefixes(unit) {
   if (unit === "kernel") return ["src/kernel/"];
-  return ["src/units/" + unit + "/", "src/units/pure/" + unit + "/", "src/units/resource/" + unit + "/"];
+  return ["src/units/pure/" + unit + "/", "src/units/resource/" + unit + "/", "src/units/business/" + unit + "/"];
 }
 
 /**
@@ -98,4 +93,4 @@ function collect(root, opts) {
   return { problems: [], scope, unit, units, files };
 }
 
-module.exports = { SCHEDULES, unitPrefix, unitPrefixes, validate, collect };
+module.exports = { SCHEDULES, unitPrefixes, validate, collect };

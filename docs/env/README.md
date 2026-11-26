@@ -1,7 +1,7 @@
 # env（环境事实）
 
 > 定位：环境事实的唯一派生者——权限面、沙箱清单、一席的围栏 / 进程环境 / 工具链根与 guest 租约，全部由入参算出。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/turn/env/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/turn/env/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -12,7 +12,7 @@
 - 管：全局策略——`api::network_allowed` 读设置里的网络开关，`api::host_read_roots` 把用户填的宿主只读根逐条去空白、丢掉空项后转成路径；两处都只有这一个出处。
 - 不管：事实取得——`SessionMeta` / `WorkRoots` / `Roster` / `PackagePlan` / `AppSettings` 都由调用方先取好，本单元无端口、无 IO。
 - 不管：落盘与进程——不写文件、不启停 guest、不碰围栏授权台账（`tools` 的 `release_by_lease`）。
-- 不管：机制侧怎么用——围栏与模块变量由调用方逐字段拷成值（`MemberEnvParts`）后再由 `agentloop` 的装配机装进工具面（`src/units/agentloop/domain/assembly.rs`）。
+- 不管：机制侧怎么用——围栏与模块变量由调用方逐字段拷成值（`MemberEnvParts`）后再由 `agentloop` 的装配机装进工具面（`src/units/business/agentloop/domain/assembly.rs`）。
 
 ## 入站契约与状态归属
 
@@ -22,19 +22,19 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 - 所属单元：`turn`（环 3）；本页的子业务同单元的 `turn` 子业务直接调用，不经 `api`。
 - 本子业务经 `::api` 用到：`catalog`（`modules` / `packages` / `registry`）、`exec_model`、`kernel`、`permission`、`registry_model`、`session_model`、`workspace`
-- 谁在用本子业务：`entry`、`runtime`（`src/units/runtime/service/env.rs` 的三条薄入口：guest 诊断准备与两席沙箱 / 权限）、`turn`（`src/units/turn/turn/service/facts.rs` 取事实后转调派生函数）、`work`
+- 谁在用本子业务：`entry`、`runtime`（`src/units/business/runtime/service/env.rs` 的三条薄入口：guest 诊断准备与两席沙箱 / 权限）、`turn`（`src/units/business/turn/turn/service/facts.rs` 取事实后转调派生函数）、`work`
 
 ## 一、事实进、结果出
 
 - 围栏只有一处算法：`FencePlan::for_session` 先按沙箱与本席的宿主读根建底，再把包根并成只读子树授予，末尾 `normalize()` 排序去重；packages 侧不再各自拼围栏。
-- 工具链根按档位分流：只有 `Tier::Host` 才带 `base_roots`，`Tier::Vm` 只留包根，同样排序去重——`src/units/turn/env/domain/env.rs` 的 `member` 是唯一判定点。
+- 工具链根按档位分流：只有 `Tier::Host` 才带 `base_roots`，`Tier::Vm` 只留包根，同样排序去重——`src/units/business/turn/env/domain/env.rs` 的 `member` 是唯一判定点。
 - 两条链各有唯一顺序：网络档位 = 全局默认 → 根 ceiling → 逐层 narrowing（`permissions`）；共享区归属 = 全局默认 → 根覆盖 → 逐层收窄 → 全局硬黑名单（`shared_scope`）。换顺序就会放宽本该收紧的面。
-- 全局策略也只有一处算法：网络开关直接取 `sandbox.policy.network`；宿主只读根逐条 `trim`、丢掉空串、其余转 `PathBuf`——空白项与空串不算根，判定点只有 `src/units/turn/env/domain/env.rs` 的 `network_allowed` / `host_read_roots`。
+- 全局策略也只有一处算法：网络开关直接取 `sandbox.policy.network`；宿主只读根逐条 `trim`、丢掉空串、其余转 `PathBuf`——空白项与空串不算根，判定点只有 `src/units/business/turn/env/domain/env.rs` 的 `network_allowed` / `host_read_roots`。
 
 ## 改动本单元时必须同步
 
-- `src/units/turn/turn/service/facts.rs` → 取事实与转调都在这里（`guest_scope` / 沙箱 / 权限 / 一席环境）：事实从哪来变了必须同改，`env` 的入站签名保持不变；`src/units/runtime/service/env.rs` 只留三条薄入口（guest 诊断准备与测试用的沙箱 / 权限）。
-- `src/units/turn/env/api.rs` → 新增入站项要同步 [`unit-map.md`](unit-map.md) 与本页「入站契约」。
+- `src/units/business/turn/turn/service/facts.rs` → 取事实与转调都在这里（`guest_scope` / 沙箱 / 权限 / 一席环境）：事实从哪来变了必须同改，`env` 的入站签名保持不变；`src/units/business/runtime/service/env.rs` 只留三条薄入口（guest 诊断准备与测试用的沙箱 / 权限）。
+- `src/units/business/turn/env/api.rs` → 新增入站项要同步 [`unit-map.md`](unit-map.md) 与本页「入站契约」。
 - `src/tests/env.rs` → 五条用例钉住权限链、共享区、租约、一席环境与模块挂载：改派生规则必须同改断言。
 
 ## 本目录

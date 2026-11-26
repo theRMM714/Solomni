@@ -1,7 +1,7 @@
 # prompt（提示词册）
 
 > 定位：册子的唯一持有者——按名字给段，不替业务拼回合。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/prompt/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/prompt/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -25,7 +25,7 @@
 ## 改动本单元时必须同步
 
 - 册子只被本单元持有一次（组合根装载后把 `Arc<dyn Prompt>` 注入协调业务）。
-- 缺文件 / 缺键 = 装载失败；`{{key}}` 缺变量 = 渲染时 panic（按装配错误处理）。禁止静默兜底文案（`src/units/prompt/service.rs`）。
+- 缺文件 / 缺键 = 装载失败；`{{key}}` 缺变量 = 渲染时 panic（按装配错误处理）。禁止静默兜底文案（`src/units/business/prompt/service.rs`）。
 - 键清单一改 → `prompts/`、本目录 `prompts.md`、`src/tests/prompt.rs`。
 
 ## 本目录

@@ -10,12 +10,12 @@
 ## 一、有 IO 的单元不是 IO 单元
 - 业务单元的 IO 是**副作用**：副作用只能经 `kernel::api` 的原语发出去，业务单元只留自己的语义（argv、就绪判据、重试、错误文案）。
 - 把「碰了 IO 的单元」收进一个 `src/units/io/` 会吞掉大半个仓库，变成 [boundaries.md](boundaries.md) 明令禁止的 DTO 中转站：上层每加一种用法都要在中转站加一个形状。
-- 角色桶只收**同角色**的单元：`src/units/pure/`（环 1）与 `src/units/resource/`（盘主），见第三节。
+- 角色桶只收**同角色**的单元：`src/units/pure/`（环 1）、`src/units/resource/`（盘主）与 `src/units/business/`（其余业务单元），见第三节。
 
 ## 二、原语清单
 | 类别 | 唯一实现 | 取用面 | 直接调用的例外 |
 | --- | --- | --- | --- |
-| 出站网络（TLS 策略、代理预算） | `src/kernel/detail/io/net/backend.rs`（平台分叉在 `src/kernel/detail/io/net/backend/unix.rs` 与 `src/kernel/detail/io/net/backend/windows.rs`）、`src/kernel/detail/io/net/outbound.rs` | `kernel::api::net`：`agent` / `configure_reqwest` / `tls_backend` | `src/units/llm/detail/http_stream.rs` 自建 `reqwest::Client`（流式必须 async），TLS 仍经 `configure_reqwest` |
+| 出站网络（TLS 策略、代理预算） | `src/kernel/detail/io/net/backend.rs`（平台分叉在 `src/kernel/detail/io/net/backend/unix.rs` 与 `src/kernel/detail/io/net/backend/windows.rs`）、`src/kernel/detail/io/net/outbound.rs` | `kernel::api::net`：`agent` / `configure_reqwest` / `tls_backend` | `src/units/business/llm/detail/http_stream.rs` 自建 `reqwest::Client`（流式必须 async），TLS 仍经 `configure_reqwest` |
 | 入站回环 HTTP | `src/kernel/detail/io/net/loopback.rs` | `kernel::api::net`：`serve` → `Loopback`（`port` / `url` / `stop`），handler 收 `Call` 回 `Answer` | 无：屏与单元都走这个面 |
 | 回环 TCP | `src/kernel/detail/io/net/tcp.rs` | `kernel::api::net`：`reserve_port` / `await_loopback` | 内核中继 `src/kernel/detail/container/windows/relay.rs` 绑 `127.0.0.2`（同一条回环上的另一个地址），`dial` 不外露 |
 | 进程环境 | `src/kernel/detail/io/env.rs` | `kernel::api::env`：`var` / `temp_dir` / `current_exe`（其余访问器只在核心里用） | `src/main.rs`、`src/entry/`、`src/presentation/`：启动参数与终端能力探测是原始输入，不收 |
@@ -33,6 +33,7 @@
 | --- | --- | --- |
 | `src/units/pure/` | 环 1 的纯单元 | 环 1 与目录双向一致（`tests/gates/structure/layers.js` 的 `shapeProblems`） |
 | `src/units/resource/` | 盘主单元：`home` / `assets` / `content` / `sessions` / `vmstore` | 盘面主人表与 `layout.rs` 双向比对（`tests/gates/structure/disk-owners.js`） |
+| `src/units/business/` | 其余业务单元：有副作用、有状态或编排用例（环 2 与环 3 都住这里） | 每个单元恰好住一个桶、顶层只许三个桶（`tests/gates/structure/unit-buckets.js`） |
 
 - 桶编码**角色**，不编码环号：环只由 `layers.yaml` 决定，换环只改一行表，不引发全量改名。
 - 认单元名一律走 `tests/gates/structure/unitpath.js`（`unitOfPath` / `unitOfModule` / `unitDir` / `unitPrefix`），禁止按路径位次假设。

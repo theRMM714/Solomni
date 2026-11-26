@@ -55,21 +55,21 @@
 
 ## 三、设计取舍的窄 allow 清单
 
-- 有些 lint 指出的是**有意的设计取舍**，不是没修。这些一律**就近窄 allow + 写清理由**，不允许宽范围放行（`src/units/collab/service/collab.rs`）。下表只列设计取舍类 allow；测试装配用的空实现、字段级 `dead_code` 等不在此列：
+- 有些 lint 指出的是**有意的设计取舍**，不是没修。这些一律**就近窄 allow + 写清理由**，不允许宽范围放行（`src/units/business/collab/service/collab.rs`）。下表只列设计取舍类 allow；测试装配用的空实现、字段级 `dead_code` 等不在此列：
 
 | lint | 位置 | 为什么是取舍而不是缺陷 |
 | --- | --- | --- |
-| `too_many_arguments` | `src/units/collab/service/collab.rs` 的 `start`、`src/units/collab/service/slate.rs` 的 `restore`、`src/units/agentloop/domain/session.rs` 的 `new` / `restore`、`src/units/runtime/service/core.rs` 的 `Core::new`、`src/units/work/service/guest_job.rs` 的 `new` | 全是**组合根注入的构造函数**：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读 |
-| `too_many_arguments` | `src/units/agentloop/engine/core_op.rs` 的 `core_operation`、`src/units/agentloop/engine/round.rs` 的 `converse_with`、`src/units/collab/service/discussion.rs` 的 `turn_with`、`src/units/collab/service/synthesis.rs` 的 `Execution::review`、`src/units/agentloop/engine/driver.rs` 的 `discussion_turn`、`src/units/collab/service/collab.rs` 的 `judge_clear` / `review_nodes` | 同一组参数（身份 / 工具面 / 通道 / 消息 / 出口 / 对照表 / 重填说明）：它们必须一路透传，收口成参数对象只是把参数挪个地方（`turn_with` 只服务内存测试通道） |
-| `dead_code` | `src/units/runtime/api.rs` 的 `WorkOps::create_work` / `exists` 与 `TurnOps::is_running` 与 `LogOps::warn` | **入站契约是发布给前端的接口面**：二进制 crate 里暂时没有生产调用点的接口方法会被 `dead_code` 误报（`is_running` 是运行态的**权威查询**——`SessionView.running` 只是事件台对账副本，最终一致；`warn` 供呈现层降级提示） |
-| `dead_code` | `src/units/transcript/domain/events.rs` 的 `enum SessionEvent` | 事件词汇里的字段**不全在 bin 的生产路径被读**（例如 `Push` 的 `kind` / `payload`、`Usage` 的用量与 `Rewound` 的行只被呈现层与状态派生读）；词汇就是线格式，字段随契约保留，删掉会让呈现侧拿不到事实 |
-| `dead_code` | `src/kernel/ports.rs` 的 `FenceCase` / `FenceVerdict` / `FenceGate::decide`，`src/units/tools/service/fence.rs` 的 `ToolFenceGate::decide` / `strict_refusal` / `unfenced_note`，`src/units/collab/domain/gates.rs` 的 `Pending::ToolAsk` | 围栏裁决只在 Windows 生效；非 Windows 保留同一执行端口形状（`ProcessRunner::run` 的 `gate` 参数），调用方才不用处处按平台分叉。这些项在 Windows 生产路径使用，只在非 Windows 的 bin 目标没有调用点，`dead_code` 是误报 |
-| `too_many_arguments` | `src/units/turn_state/domain/turn.rs` 的 `Turn::new`、`src/units/turn/turn/service/facts.rs` 的 `build_single` | 会话装配把"这一席的工具面 / 这一场单 agent 会话"一次说全（模块 / 沙箱 / 缺包 / 网络 / 形态 / 角色 / 档位）：`Turn::new` 是组合根注入的构造函数，`facts.rs` 取完事实后转交 `agentloop` 的装配机；收口成参数对象只是把参数挪个地方 |
-| `too_many_arguments` | `src/units/turn/turn/service/turn.rs` 的 `single_say` | **测试用同步入口**（`#[cfg(test)]`）：会话 / 文本 / 回合 IO / 取消 / 短暂事件出口 / 登记处 / 探针是同一段语义的同一批输入，收口成参数对象只是把它们挪个位置（同 `continue_flow` 的取舍） |
+| `too_many_arguments` | `src/units/business/collab/service/collab.rs` 的 `start`、`src/units/business/collab/service/slate.rs` 的 `restore`、`src/units/business/agentloop/domain/session.rs` 的 `new` / `restore`、`src/units/business/runtime/service/core.rs` 的 `Core::new`、`src/units/business/work/service/guest_job.rs` 的 `new` | 全是**组合根注入的构造函数**：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读 |
+| `too_many_arguments` | `src/units/business/agentloop/engine/core_op.rs` 的 `core_operation`、`src/units/business/agentloop/engine/round.rs` 的 `converse_with`、`src/units/business/collab/service/discussion.rs` 的 `turn_with`、`src/units/business/collab/service/synthesis.rs` 的 `Execution::review`、`src/units/business/agentloop/engine/driver.rs` 的 `discussion_turn`、`src/units/business/collab/service/collab.rs` 的 `judge_clear` / `review_nodes` | 同一组参数（身份 / 工具面 / 通道 / 消息 / 出口 / 对照表 / 重填说明）：它们必须一路透传，收口成参数对象只是把参数挪个地方（`turn_with` 只服务内存测试通道） |
+| `dead_code` | `src/units/business/runtime/api.rs` 的 `WorkOps::create_work` / `exists` 与 `TurnOps::is_running` 与 `LogOps::warn` | **入站契约是发布给前端的接口面**：二进制 crate 里暂时没有生产调用点的接口方法会被 `dead_code` 误报（`is_running` 是运行态的**权威查询**——`SessionView.running` 只是事件台对账副本，最终一致；`warn` 供呈现层降级提示） |
+| `dead_code` | `src/units/business/transcript/domain/events.rs` 的 `enum SessionEvent` | 事件词汇里的字段**不全在 bin 的生产路径被读**（例如 `Push` 的 `kind` / `payload`、`Usage` 的用量与 `Rewound` 的行只被呈现层与状态派生读）；词汇就是线格式，字段随契约保留，删掉会让呈现侧拿不到事实 |
+| `dead_code` | `src/kernel/ports.rs` 的 `FenceCase` / `FenceVerdict` / `FenceGate::decide`，`src/units/business/tools/service/fence.rs` 的 `ToolFenceGate::decide` / `strict_refusal` / `unfenced_note`，`src/units/business/collab/domain/gates.rs` 的 `Pending::ToolAsk` | 围栏裁决只在 Windows 生效；非 Windows 保留同一执行端口形状（`ProcessRunner::run` 的 `gate` 参数），调用方才不用处处按平台分叉。这些项在 Windows 生产路径使用，只在非 Windows 的 bin 目标没有调用点，`dead_code` 是误报 |
+| `too_many_arguments` | `src/units/business/turn_state/domain/turn.rs` 的 `Turn::new`、`src/units/business/turn/turn/service/facts.rs` 的 `build_single` | 会话装配把"这一席的工具面 / 这一场单 agent 会话"一次说全（模块 / 沙箱 / 缺包 / 网络 / 形态 / 角色 / 档位）：`Turn::new` 是组合根注入的构造函数，`facts.rs` 取完事实后转交 `agentloop` 的装配机；收口成参数对象只是把参数挪个地方 |
+| `too_many_arguments` | `src/units/business/turn/turn/service/turn.rs` 的 `single_say` | **测试用同步入口**（`#[cfg(test)]`）：会话 / 文本 / 回合 IO / 取消 / 短暂事件出口 / 登记处 / 探针是同一段语义的同一批输入，收口成参数对象只是把它们挪个位置（同 `continue_flow` 的取舍） |
 | `too_many_arguments` | `src/tests/doubles/` 的 `core_with_pkgs_probe` | 测试装配要逐项控制端口（模块 / 通道 / 执行器 / 目录 / 历史 / IO / 包库 / 宿主探测）；收口成参数对象只会把同一批替身挪个位置，读起来更绕 |
-| `large_enum_variant` | `src/units/turn_state/domain/live.rs` 的 `enum Session` | 两变体大小差得远，但装箱只换来一次间接寻址，却把"会话本体可直接移动"这个形状改掉 |
-| `module_inception` | `src/units/turn.rs` 的 `pub mod turn` | 单元与子业务是**两级归层结构**（`src/units/turn/turn/`）：单元是归环单位、子业务是切分单位，同名不是重复嵌套；改子业务名要连带动 `docs/turn/README.md` 与全仓 66 处 `turn::turn` 路径，只改名不减语义 |
-| `unused_imports` | `src/units/catalog/registry/api.rs` 的 `pub use …domain::providers::ModelThinkingView` | 视图 DTO 的字段类型：生产在 domain 内构造，`api` 面是给呈现侧与装配替身（`src/tests/routes.rs`）命名的发布面；二进制 crate 没有外部消费者，rustc 把它误报成未用导入，删掉就得让用例绕过 `api` 去碰 `domain` |
+| `large_enum_variant` | `src/units/business/turn_state/domain/live.rs` 的 `enum Session` | 两变体大小差得远，但装箱只换来一次间接寻址，却把"会话本体可直接移动"这个形状改掉 |
+| `module_inception` | `src/units/business/turn.rs` 的 `pub mod turn` | 单元与子业务是**两级归层结构**（`src/units/business/turn/turn/`）：单元是归环单位、子业务是切分单位，同名不是重复嵌套；改子业务名要连带动 `docs/turn/README.md` 与全仓 66 处 `turn::turn` 路径，只改名不减语义 |
+| `unused_imports` | `src/units/business/catalog/registry/api.rs` 的 `pub use …domain::providers::ModelThinkingView` | 视图 DTO 的字段类型：生产在 domain 内构造，`api` 面是给呈现侧与装配替身（`src/tests/routes.rs`）命名的发布面；二进制 crate 没有外部消费者，rustc 把它误报成未用导入，删掉就得让用例绕过 `api` 去碰 `domain` |
 
 - 新增 allow 必须同时更新本表；理由说不清的就不该 allow（`run-tests.js`）。
 
@@ -80,16 +80,16 @@
 
 | 位置 | 处数 | 为什么必然成立 |
 | --- | --- | --- |
-| `src/units/collab/service/{collab,pump,turn_io}.rs`、`src/units/agentloop/engine/round.rs`、`src/units/lifecycle/service/rewind.rs` | 14 | 协作状态机的 `disc` / 任务链 / 工具上下文：进入这段之前刚判过存在，`expect("disc 已确认存在")` 与其后的 `expect("上臂已判存在")` 是同一判断的延续；`rewind.rs` 的两处（`l.get("tool")` 与其后跳过被总结行的同一判断）同理 |
-| `src/units/prompt/{domain/prompt.rs,domain/refs.rs,service.rs}` | 4 | 模板变量缺失 = **装配错误**（`prompts/` 或调用方写错），不在用户输入路径上；启动即炸好过渲染出半截文案 |
+| `src/units/business/collab/service/{collab,pump,turn_io}.rs`、`src/units/business/agentloop/engine/round.rs`、`src/units/business/lifecycle/service/rewind.rs` | 14 | 协作状态机的 `disc` / 任务链 / 工具上下文：进入这段之前刚判过存在，`expect("disc 已确认存在")` 与其后的 `expect("上臂已判存在")` 是同一判断的延续；`rewind.rs` 的两处（`l.get("tool")` 与其后跳过被总结行的同一判断）同理 |
+| `src/units/business/prompt/{domain/prompt.rs,domain/refs.rs,service.rs}` | 4 | 模板变量缺失 = **装配错误**（`prompts/` 或调用方写错），不在用户输入路径上；启动即炸好过渲染出半截文案 |
 | `src/kernel/detail/process.rs` | 3 | `Command` 已声明 `Stdio::piped()`，`child.stdin` / `stdout` / `stderr` 的 `take()` 必为 `Some` |
 | `src/kernel/detail/confine/macos.rs` | 2 | `CString::new` 的两个入参是不含 NUL 的字面量与临时路径 |
-| `src/units/tools/service/systool.rs` | 1 | `pending.get(path)` 的键由上一行同一函数算出 |
-| `src/units/agentloop/engine/tools.rs` | 2 | 每个工具调用在上一行都被配对写入了执行结果 |
-| `src/units/residents/service.rs` | 1 | `running.get_mut(&k)` 的键在同一函数内刚查过存在 |
-| `src/units/provision/service.rs` | 3 | 三个待写路径都由同一函数 `join` 出来，必带父目录 |
-| `src/units/turn_state/domain/decisions.rs` | 1 | `queue.pop_front()` 前刚取过队首 |
-| `src/units/vm/detail/share_virtiofs.rs` | 1 | `children.last_mut()` 前刚 `push` 过 |
+| `src/units/business/tools/service/systool.rs` | 1 | `pending.get(path)` 的键由上一行同一函数算出 |
+| `src/units/business/agentloop/engine/tools.rs` | 2 | 每个工具调用在上一行都被配对写入了执行结果 |
+| `src/units/business/residents/service.rs` | 1 | `running.get_mut(&k)` 的键在同一函数内刚查过存在 |
+| `src/units/business/provision/service.rs` | 3 | 三个待写路径都由同一函数 `join` 出来，必带父目录 |
+| `src/units/business/turn_state/domain/decisions.rs` | 1 | `queue.pop_front()` 前刚取过队首 |
+| `src/units/business/vm/detail/share_virtiofs.rs` | 1 | `children.last_mut()` 前刚 `push` 过 |
 | `src/kernel/detail/procs.rs` | 1 | 起进程启动线程失败即无法继续（进程级不可恢复错误） |
 
 - 新增 panic 面必须同时更新本表；说不清「判据在哪一行」的，应返回 `Result`（`run-tests.js`）。

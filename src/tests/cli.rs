@@ -7,8 +7,8 @@ use super::doubles::module_of;
 use super::ops_with;
 use super::prelude::*;
 use crate::presentation::cli;
+use crate::units::business::session_model::api::SINGLE;
 use crate::units::pure::exec_model::api::Tier;
-use crate::units::session_model::api::SINGLE;
 
 /// 建会话在 CLI 上走**动作表**：同一份声明、同一处授权（未知形态在分发处被拒）。
 #[test]
@@ -160,8 +160,8 @@ fn waiting_list_is_built_line_by_line() {
 /// 约束：停止不套用发起方声明的默认项；等待方被解开、会话随后不再被派发。
 #[test]
 fn eof_answers_a_pending_card_by_stopping_instead_of_hanging() {
-    use crate::units::collab::api::Pending;
-    use crate::units::turn_state::api::SlotWake;
+    use crate::units::business::collab::api::Pending;
+    use crate::units::business::turn_state::api::SlotWake;
 
     let (handle, faces) = ops_with(vec![module_of("a")], Vec::new());
     let sid = "cli-eof-1";

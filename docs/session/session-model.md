@@ -1,7 +1,7 @@
 # 会话模型与上下文压缩
 
 > 定位：一次工作里有哪些会话、它们怎么对话、怎么同步、上下文怎么压的唯一权威。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/agentloop/domain/session.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/agentloop/domain/session.rs`
 
 ## 适用与判据
 - 会话形态、回合、派发、回档与压缩以本文为准（`docs/session/session-model.md`）。
@@ -10,8 +10,8 @@
 ## 一、形态
 - **执行席按 agent 一会话**（含同 agent 串行）、**讨论回合开工具循环**（能只读核实、拿不到模块工具）、**讨论由核心驱动**（泵只决定"该问谁"，成员回合在它自己的会话里跑，核实行与回合标记都落进那个会话；主会话只留"谁说了什么"）。
 - **会话类型是落盘的声明，不是分支**：建会话时把类型表里那一条解析成 `SessionSpec`（`kind` / `name` / `role` / `flows` / `auto`）写进 `meta.yaml`，之后装配只看这份声明——有流程就按流程装配，没有就一个 agent 直接轮循环（`spec.driven()`）；代码里没有「形态枚举」，也不按 id 分支（「整块交给核心」看 `auto`，不看名字）。类型 id 同时是命令与落盘用的词（ASCII），`name` 只给界面显示，`hint` 是选类型时的一句说明。
-- **会话类型是数据**：一个会话类型就是一串流程 id，声明在 `systools/profiles.yaml`（自带 single / collab / proxy 三条；`flows` 为空 = 没有流程、直接轮循环）。每条写清 `id`（命令与落盘用）、`name`（界面显示）、`hint`（一句说明）、`flows`、`auto`（这个类型整块交给核心：没有名单也没有需求），以及**没有流程时**坐的静止机制 `mechanism`（如 `standard` / `proxy`，解析成它唯一那一席）。**席位不在这里报**：一个机制由哪些席位出演（`core: true` = 核心通道，不进成员表；其余是成员席，各报 `min` 员）是机制自己的声明，在 `src/units/session_model/domain/mechanism.rs` 的 `MECHANISMS`（新增机制在那里加一条，`flow: true` 的才能当流程）。装配期校验：id 唯一且不含空白、流程已注册且不重复出现、没有流程的类型要有静止机制且它不能是流程机制、有流程的类型不该再声明机制、每个流程至少各有一个核心席与成员席；各流程成员席人数取最大折成 `min_agents`：建会话时人数不够就直接拒绝，代拟名单由流程在建组时判（`session::domain::profile::Profiles`，加载在 `src/units/conversation/session/detail/yaml_profiles.rs`）。
-- **临时拼装**：流程也可以在请求里当场拼一条类型——`create_session` 省略 `kind`、给 `flows`（内联流程 id 数组；CLI 的 `collab` 命令用 `flows` 参数，写流程 id、逗号分隔）。它与预设走同一份白名单：只收已注册（`mechanism.rs` 的 `MECHANISMS`）的流程（`Profiles::check_inline`）；`inline_spec` 折成 `SessionSpec`，落盘 `kind` 记作 `custom`（显示名「临时组合」），装配与回档只看折出来的那份声明（`src/units/session_model/domain/profile.rs`）。
+- **会话类型是数据**：一个会话类型就是一串流程 id，声明在 `systools/profiles.yaml`（自带 single / collab / proxy 三条；`flows` 为空 = 没有流程、直接轮循环）。每条写清 `id`（命令与落盘用）、`name`（界面显示）、`hint`（一句说明）、`flows`、`auto`（这个类型整块交给核心：没有名单也没有需求），以及**没有流程时**坐的静止机制 `mechanism`（如 `standard` / `proxy`，解析成它唯一那一席）。**席位不在这里报**：一个机制由哪些席位出演（`core: true` = 核心通道，不进成员表；其余是成员席，各报 `min` 员）是机制自己的声明，在 `src/units/business/session_model/domain/mechanism.rs` 的 `MECHANISMS`（新增机制在那里加一条，`flow: true` 的才能当流程）。装配期校验：id 唯一且不含空白、流程已注册且不重复出现、没有流程的类型要有静止机制且它不能是流程机制、有流程的类型不该再声明机制、每个流程至少各有一个核心席与成员席；各流程成员席人数取最大折成 `min_agents`：建会话时人数不够就直接拒绝，代拟名单由流程在建组时判（`session::domain::profile::Profiles`，加载在 `src/units/business/conversation/session/detail/yaml_profiles.rs`）。
+- **临时拼装**：流程也可以在请求里当场拼一条类型——`create_session` 省略 `kind`、给 `flows`（内联流程 id 数组；CLI 的 `collab` 命令用 `flows` 参数，写流程 id、逗号分隔）。它与预设走同一份白名单：只收已注册（`mechanism.rs` 的 `MECHANISMS`）的流程（`Profiles::check_inline`）；`inline_spec` 折成 `SessionSpec`，落盘 `kind` 记作 `custom`（显示名「临时组合」），装配与回档只看折出来的那份声明（`src/units/business/session_model/domain/profile.rs`）。
 - **agent 会话在第一个回合按需建**。
 - 主会话投影行带 `turn`（回档按回合同步截断）；工具面由机制席位合成（工具面、身份与越权校验同出一份声明）；压缩：`compact` 工具 + `compacted` 转录行 + 发送视图，按模型窗口百分比自动触发。
 
@@ -38,7 +38,7 @@ session/<工作名>/
 ```
 
 - **目录保留名**（`work` / `children` / `.proxy` / `.work` / `.work-root`）的名单在 `systools/names.yaml`：布局一改就改表，代码里不硬编码。
-- **缺省名由后端派生**：没显式给名字时，会话名 = 预设 id + 本机到分钟的时间戳（如 `single-20261124-2053`）；临时拼装没有预设 id 就取第一个流程 id，仍没有就退到 `work`；子会话是 `<父名>--<席位名>`，不另起时间戳。显式给了名字才用它，重名一律带 `-2` / `-3` 尾号（`src/units/runtime/service/action.rs` 的 `derived_session_name` + `unique_work_name`，时间戳来自 `src/kernel/detail/clock.rs` 的 `local_stamp`）。
+- **缺省名由后端派生**：没显式给名字时，会话名 = 预设 id + 本机到分钟的时间戳（如 `single-20261124-2053`）；临时拼装没有预设 id 就取第一个流程 id，仍没有就退到 `work`；子会话是 `<父名>--<席位名>`，不另起时间戳。显式给了名字才用它，重名一律带 `-2` / `-3` 尾号（`src/units/business/runtime/service/action.rs` 的 `derived_session_name` + `unique_work_name`，时间戳来自 `src/kernel/detail/clock.rs` 的 `local_stamp`）。
 - `meta.yaml` 的 `agents` 是名单的唯一真相（代拟路径在用户确认那一刻写回）；`exec` 段是执行选型的唯一真相（档位 / 虚拟根名 / 定版 `pins`；缺段按默认读回）。会话级权限层在 `sandbox.ceiling`（根）/ `sandbox.narrowing`（子）。
 - agent 会话**在第一个讨论回合按需建**（名单确认时不预建），命名 `<工作>--<agent>`。
 - agent 会话是**普通会话**：独立上下文、独立转录、独立围栏，复用同一套会话机制；**不新增会话类型**。
@@ -49,9 +49,9 @@ session/<工作名>/
 - **外部工作区绑定**：根会话可在创建时把共享区主副本绑定到产品目录之外的绝对路径；绑定写进 `meta.yaml` 的 `workspace` 段，整棵子树只读继承，**创建后不可改**。CLI 启动的会话默认就把**启动目录**绑成外部工作区（在哪个目录启动就绑哪个；`ambient` 与 `resolve` 共用一条阶梯但不探可写，启动目录是产品根 / 不可达 / 不是目录时回退产品内 `work/` 并打印原因，`--no-workspace` 关闭这次启动的自动绑定）。`.work/` 与各 agent 沙箱永远留在会话目录内，外部目录里不出现本产品的状态；`.work-root` 只是布局投影，打开 / 重建时按 meta 刷新。
 - **虚拟机档的挂载布局**：起 guest 时把**会话树根**（`data/session/<工作名>`，各 agent 私沙与 `.work` 的父目录）与**外部工作区根**（仅外部绑定时）各挂一条稳定挂载，另加模块树根——三根互不包含，guest 内的路径写法由同一座路径桥给出；外部根是 UNC / 网络路径时只有虚拟机档支持（guest 内写成 `/solomni-host/unc/<server>/<share>/…`；本机档因容器围栏拒绝网络工作区）；挂载只表达可见范围，共享区主副本不进按次允许集（容器里的进程要读先 `work_pull`）。
 - **环境属于顶层工作**：`exec`（档位 / 虚拟根 / 定版）由人建主会话时决定，整棵子树只读继承；核心代理建子会话时不能自选环境。**同一 agent 全树只有一份名单**：子会话编辑模块 / 模型时写回这份名单，guest 装配按整棵树重新聚合；只改模型 / 权限不重建 guest，改模块 / 环境才重建。
-- 会话权限是**根 ceiling + 子会话逐层 narrowing**：根写 sandbox.ceiling，子写 sandbox.narrowing；子只能换更低档、只能收窄，父编辑只改 ceiling 并与子 narrowing 求交，不覆盖子收窄（`src/units/pure/permission/domain/permission.rs`）。共享区归属单独一层：根写 `shared`、子只能更窄（`src/units/workspace/domain/scope.rs`）。
-- **共享区是版本化工作区**：共享区根（默认 `work/`，或外部工作区）与版本库 `.work/` 都锚在顶层工作上；agent 只写自己的沙箱，`work_pull` 拉取；写工具落地后由核心把整棵沙箱自动记进该 agent 的**存档线**（`refs/agents/<agent>/saves`，不动共享区，只服务回档 / 删除 / 留档 / 恢复）；shell / 模块工具这类不经过写工具的改动，在同一工具批次结束时由核心扫一遍沙箱采纳进同一条存档线（逐条点名没采纳的路径；Windows 本机档容器自己的运行缓存——`AppData/Local/Packages/<容器名>/` 与 `Packages/<容器名>/`，容器名以 `Solomni.Agent.` 开头——不是产物，扫描时跳过，`src/units/workspace/service/sync.rs`），要发布时先用 `work_commit` 把显式路径记进**工作线**（`refs/agents/<agent>`，本地提交、不判别人的基线），再用 `work_push` 与主线三方合并（干净则主线落一条提交并物化共享区，冲突整次拒绝并点名路径）；`work_versions` 看三方，`work_resolve` 显式选边，`work_status` 看状态。
-- 文本、图片、视频与其它二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限）；`work_versions` 给 hash、大小与扩展名媒体类型提示；文本可人工合并后用 `take=local`，图片 / 视频 / 二进制只能选边，不做自动合并（`src/units/workspace/service.rs`）。
+- 会话权限是**根 ceiling + 子会话逐层 narrowing**：根写 sandbox.ceiling，子写 sandbox.narrowing；子只能换更低档、只能收窄，父编辑只改 ceiling 并与子 narrowing 求交，不覆盖子收窄（`src/units/pure/permission/domain/permission.rs`）。共享区归属单独一层：根写 `shared`、子只能更窄（`src/units/business/workspace/domain/scope.rs`）。
+- **共享区是版本化工作区**：共享区根（默认 `work/`，或外部工作区）与版本库 `.work/` 都锚在顶层工作上；agent 只写自己的沙箱，`work_pull` 拉取；写工具落地后由核心把整棵沙箱自动记进该 agent 的**存档线**（`refs/agents/<agent>/saves`，不动共享区，只服务回档 / 删除 / 留档 / 恢复）；shell / 模块工具这类不经过写工具的改动，在同一工具批次结束时由核心扫一遍沙箱采纳进同一条存档线（逐条点名没采纳的路径；Windows 本机档容器自己的运行缓存——`AppData/Local/Packages/<容器名>/` 与 `Packages/<容器名>/`，容器名以 `Solomni.Agent.` 开头——不是产物，扫描时跳过，`src/units/business/workspace/service/sync.rs`），要发布时先用 `work_commit` 把显式路径记进**工作线**（`refs/agents/<agent>`，本地提交、不判别人的基线），再用 `work_push` 与主线三方合并（干净则主线落一条提交并物化共享区，冲突整次拒绝并点名路径）；`work_versions` 看三方，`work_resolve` 显式选边，`work_status` 看状态。
+- 文本、图片、视频与其它二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限）；`work_versions` 给 hash、大小与扩展名媒体类型提示；文本可人工合并后用 `take=local`，图片 / 视频 / 二进制只能选边，不做自动合并（`src/units/business/workspace/service.rs`）。
 - **会话权限层**只有网络两档：meta.yaml 的 sandbox.ceiling（根）与 sandbox.narrowing（子）只写 profile（offline / online），缺省继承 settings.yaml 的 sandbox.defaults；共享区归属是三态（all / none / 路径数组）+ 黑名单，写在 meta.yaml 的 `shared`，缺省继承 settings.yaml 的 sandbox.scope，sandbox.policy.deny 是硬底线，会话只能追加、不能清空。语义见 [docs/permission/README.md](../permission/README.md) 与 [docs/workspace/README.md](../workspace/README.md)。
 - **出站网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、macOS 放行 `network-outbound`、Linux `net=false` 用 seccomp 拒绝非本地 socket（`net=true` 不装网络过滤器，不限制入站/绑定）。
 - Windows 只放行公网出站，不授 private network / loopback（回环默认全禁；要容器内连宿主端口只能走中继，见 [docs/kernel/README.md](../kernel/README.md)）；Windows 未授权 `windows.write_acl` 时容器不装，网络不生效。
@@ -70,7 +70,7 @@ session/<工作名>/
 ### 计数与提醒（讨论阶段）
 
 - **模型调用次数没有上限**：子会话继续核实就继续跑，直到模型不再发起调用、或用户点「停止」。
-- 不上"到顶直接收尾"这类天花板——它会把"还想接着核实"误判成"必须收尾"，执行席因此干到一半被掐断（`src/units/agentloop/engine/round.rs`）。
+- 不上"到顶直接收尾"这类天花板——它会把"还想接着核实"误判成"必须收尾"，执行席因此干到一半被掐断（`src/units/business/agentloop/engine/round.rs`）。
 
 - 留下的只有**提醒次数**：这一轮对它提醒过几次（默认 3，可设置）。
 
@@ -82,7 +82,7 @@ session/<工作名>/
 
 ### 系统消息
 
-- 系统注入的东西（提醒、压缩边界、工具围栏降级这类**不是用户说的、也不是模型说的**内容）必须有**系统消息**这一种转录行（`src/units/transcript/domain/events.rs`），不能在转录与前端里长得像"用户发的"。
+- 系统注入的东西（提醒、压缩边界、工具围栏降级这类**不是用户说的、也不是模型说的**内容）必须有**系统消息**这一种转录行（`src/units/business/transcript/domain/events.rs`），不能在转录与前端里长得像"用户发的"。
 
 - 结构化信号随行落档（`system: true`），呈现层据此换样式，**不靠匹配文本**；进上下文时按它该有的角色进去（提醒是给模型的指令），但**用户看到的是系统行**。
 
@@ -95,7 +95,7 @@ session/<工作名>/
 
 - **派发行**是系统行里的一种（`system: true` + `task: true`）：核心给某个 agent 派的活。
 
-- 界面上它和别的系统行一样是核心说的话——**不得显示成"用户"**（`src/units/transcript/domain/events.rs`）；上下文里它以 **user 角色**转发：派活是一次**回合**，而会话协议要求请求里至少有一条 user 消息，一条 user 都没有的请求会被供应商**整条拒收**（全 system 的请求返回 400）。
+- 界面上它和别的系统行一样是核心说的话——**不得显示成"用户"**（`src/units/business/transcript/domain/events.rs`）；上下文里它以 **user 角色**转发：派活是一次**回合**，而会话协议要求请求里至少有一条 user 消息，一条 user 都没有的请求会被供应商**整条拒收**（全 system 的请求返回 400）。
 - 讨论席同理——它每次都用一条 user 回合（opener / step）开场。
 - 两处口径都随行落档，所以**重建/回放产出发出去的那同一条消息**（见 [六](#六节点执行只有一条管道)）。
 
@@ -136,11 +136,11 @@ session/<工作名>/
 
 - **讨论不由泵自己调模型，而是"泵只决定、核心驱动"**——与任务链的节点派发**同一套路**。
 
-- 理由是会话归属：生成期间协作会话被**移出核心表**（own-and-return），它碰不到表里的 agent 会话；而 agent 会话必须留在表里，用户才能随时进去发言。所以**驱动权归核心**（它同时看得到两边）（`src/units/turn/turn/service/flow.rs`）。
+- 理由是会话归属：生成期间协作会话被**移出核心表**（own-and-return），它碰不到表里的 agent 会话；而 agent 会话必须留在表里，用户才能随时进去发言。所以**驱动权归核心**（它同时看得到两边）（`src/units/business/turn/turn/service/flow.rs`）。
 
-- **驱动只认流程面**：核心驱动（`src/units/turn/turn/service/flow.rs` 与 `src/units/turn/turn/service/generation/collab.rs`）与具体流程之间只隔一层 `session::api::Flow`——开场 / 推进一步（`start` / `step`）、取走让出的一步（`take_ask` 交出 `MemberAsk`）、交回处置（`handback` 判为 `Handback`，再由 `feed` / `pass_over` 落地）、处置自己发的关卡（`settle` 把出队的票交回流程，`settles_inline` 决定这一关要不要就地收尾）。可派的活（`WorkPlan`：哪些节点该派、谁在跑、节点的提示词与返工提示、开跑与收工的记账、开工事件）也走这层面，节点派发与改需求不再下行认具体流程；其余通用动作（撤回同意、改需求的沙箱改写、行号、子会话的默认作答）同样是流程面的默认方法。协作的实现只有 `src/units/collab/service/flow.rs` 一处；换一套流程只换一个实现，驱动不动。
-- **流程可以串起来**：会话类型表里的 `flows` 是一串，装配期用 `turn_state::api::sequence_of`（`src/units/turn_state/domain/sequence.rs` 的 `Sequence`）串成一条——前一段 `is_done` 就把自己的 `output` 交给下一段的 `intake`（行号一路传下去），驱动仍只认一条 `Flow`。业务面（`part` / `part_mut`）指向**当前这一段**，所以派节点、改需求这类动作不必知道自己是第几段。会话级事实由驱动同时通知每一段（`adopt_roster`：代拟的名单一确认，后面那一段也要认得出谁能出演）。协作就是这样拆成两段的：`discuss` 交出的总结成为 `execute` 的需求。
-- **装配按类型表点菜**：新建与重建都只问类型表要 `flows` 的 id，经组合根注入的流程工厂（`turn_state::api::Flows` + `FlowSetup`，`src/units/turn_state/domain/flows.rs`）逐段造出来再串起来；`work` 与 `turn` 因此不出现任何具体流程的类型（`src/units/work/service/create.rs`、`src/units/turn/turn/service/rebuild.rs`）。
+- **驱动只认流程面**：核心驱动（`src/units/business/turn/turn/service/flow.rs` 与 `src/units/business/turn/turn/service/generation/collab.rs`）与具体流程之间只隔一层 `session::api::Flow`——开场 / 推进一步（`start` / `step`）、取走让出的一步（`take_ask` 交出 `MemberAsk`）、交回处置（`handback` 判为 `Handback`，再由 `feed` / `pass_over` 落地）、处置自己发的关卡（`settle` 把出队的票交回流程，`settles_inline` 决定这一关要不要就地收尾）。可派的活（`WorkPlan`：哪些节点该派、谁在跑、节点的提示词与返工提示、开跑与收工的记账、开工事件）也走这层面，节点派发与改需求不再下行认具体流程；其余通用动作（撤回同意、改需求的沙箱改写、行号、子会话的默认作答）同样是流程面的默认方法。协作的实现只有 `src/units/business/collab/service/flow.rs` 一处；换一套流程只换一个实现，驱动不动。
+- **流程可以串起来**：会话类型表里的 `flows` 是一串，装配期用 `turn_state::api::sequence_of`（`src/units/business/turn_state/domain/sequence.rs` 的 `Sequence`）串成一条——前一段 `is_done` 就把自己的 `output` 交给下一段的 `intake`（行号一路传下去），驱动仍只认一条 `Flow`。业务面（`part` / `part_mut`）指向**当前这一段**，所以派节点、改需求这类动作不必知道自己是第几段。会话级事实由驱动同时通知每一段（`adopt_roster`：代拟的名单一确认，后面那一段也要认得出谁能出演）。协作就是这样拆成两段的：`discuss` 交出的总结成为 `execute` 的需求。
+- **装配按类型表点菜**：新建与重建都只问类型表要 `flows` 的 id，经组合根注入的流程工厂（`turn_state::api::Flows` + `FlowSetup`，`src/units/business/turn_state/domain/flows.rs`）逐段造出来再串起来；`work` 与 `turn` 因此不出现任何具体流程的类型（`src/units/business/work/service/create.rs`、`src/units/business/turn/turn/service/rebuild.rs`）。
 - **关卡归发起它的流程**：队列只认卡、卡号与选项（`Gate`），不解释 `kind` 是哪一关；回答出队后驱动把 `GateTicket` 交回流程面的 `settle`，由流程自己落定并说要不要接着推进（`Settle`）。所以 `runtime` 与 `turn` 里不再有「这是代拟名单那一关」这类判断。
 
 ### 看不见的回合：运行态与逐片外送
@@ -160,13 +160,13 @@ session/<工作名>/
 - "这一刻在不在跑"是短暂事件（`Working`）；**"这段工作还该不该继续被驱动"是持久事实**，落在 `meta.yaml` 的 `run` 段（`active` / `stopped` / `archived`，缺省 `active`）：
 
 - **`stopped`**：已停止（**历史态**）。此后的**派发与唤醒一律被拒**（"取会话去生成"那道闸 `Core::dispatch_gate` 两者都拦）；正在跑的那次会被**级联停掉**。界面按历史态渲染它：输入区收起，只留「启用会话」——启用是显式的恢复动作，只恢复会话（含虚拟机 guest），**不产生模型调用**。停着的时候**不给「继续」**：派发会被拒，那个按钮只会是假入口。
-- 真正"接着走"由上下文继续负责（见下），它只在会话**活跃**且有真实断点时出现：单 agent 上一轮被打断时给「继续」，协作泵没走完时给「恢复协作」；没有断点、正在跑、代理、`stopped` 与 `archived` 都不显示（`Work::continue_action`，`src/units/work/service/views.rs`）。
-- **`archived`**：已归档。从会话列表收起，**派发与唤醒一律被拒**；归档那一下整棵子树里还有在生成的就先**中断**再归档，不留半个状态。它不是终态：「恢复归档」把整棵子树翻回 `active`，**不唤醒、不产生模型调用**；彻底收尾只有删除（拒绝在 `SessionMeta::dispatch_refusal`，`src/units/session_model/domain/history.rs`；归档 / 恢复走 `control_session` 的 `archive` / `restore`，`src/units/runtime/service/bridge.rs`）。
+- 真正"接着走"由上下文继续负责（见下），它只在会话**活跃**且有真实断点时出现：单 agent 上一轮被打断时给「继续」，协作泵没走完时给「恢复协作」；没有断点、正在跑、代理、`stopped` 与 `archived` 都不显示（`Work::continue_action`，`src/units/business/work/service/views.rs`）。
+- **`archived`**：已归档。从会话列表收起，**派发与唤醒一律被拒**；归档那一下整棵子树里还有在生成的就先**中断**再归档，不留半个状态。它不是终态：「恢复归档」把整棵子树翻回 `active`，**不唤醒、不产生模型调用**；彻底收尾只有删除（拒绝在 `SessionMeta::dispatch_refusal`，`src/units/business/session_model/domain/history.rs`；归档 / 恢复走 `control_session` 的 `archive` / `restore`，`src/units/business/runtime/service/bridge.rs`）。
 - 判据只有一处（`SessionMeta::dispatch_refusal`）：转达、观察、控制与叫醒都问它，不各写一份。
 - 重启 / 回档后照样成立（它就是 meta 的一部分，不属于"这一刻"的短暂态）。
 - **启用 / 继续分开**：历史回放只读，已停止的活动视图同样收起输入区，这两种状态都只有「启用会话」；它由 `activate_session` 走两段式（核心准备 → 调用方线程起 guest → 核心提交），不跑模型、不写转录。启用后 `SessionView.continue` 才决定是否显示上下文继续；前端不自己判断末条或协作泵。
-- **「继续」不替用户发言**：末条已是用户发言，就直接拿现有对话问模型——`TurnOps::continue_flow` 调 `single_generation(sid, None)`（`src/units/runtime/service/contracts.rs`），转录里**不会多出一句"用户：继续"**；要新增用户发言的只有 `say`。末条是 AI 发言时只提醒「请先发言再继续」，不发请求（`Turn::prepare_single`，`src/units/turn/turn/service/turn.rs`）。
-- 「继续」在服务端**同步跑完整轮**才回包（`TurnOps::continue_flow`，`src/units/turn/turn/api.rs`）：回包要等回答结束。界面因此不能等回包再启用视图；已停止 / 已归档的恢复不走它（走 `activate_session` / `restore`）。
+- **「继续」不替用户发言**：末条已是用户发言，就直接拿现有对话问模型——`TurnOps::continue_flow` 调 `single_generation(sid, None)`（`src/units/business/runtime/service/contracts.rs`），转录里**不会多出一句"用户：继续"**；要新增用户发言的只有 `say`。末条是 AI 发言时只提醒「请先发言再继续」，不发请求（`Turn::prepare_single`，`src/units/business/turn/turn/service/turn.rs`）。
+- 「继续」在服务端**同步跑完整轮**才回包（`TurnOps::continue_flow`，`src/units/business/turn/turn/api.rs`）：回包要等回答结束。界面因此不能等回包再启用视图；已停止 / 已归档的恢复不走它（走 `activate_session` / `restore`）。
 - **中断 ≠ 停止**：界面上的「中断」只取消在跑的生成、作废等裁决的队，**运行态保持 `active`**（会话照常可派发、可唤醒）；「停止会话」才把整棵子树落成 `stopped`。
 - 用户点「停止」= 先把整棵子树落成 `stopped`、再中断正在跑的生成（**顺序不能反**：反了的话，被停会话收尾写的那条"这一轮结束"会先把父会话叫醒）。
 - **停止要取消在途请求，不是只置一个标志**：LLM 出站适配器在等待响应/下一个数据块时轮询取消位，置位即关闭连接；生成循环在解析载荷、执行任何工具**之前**再检查一次取消。已流到一半的 tool_call 不执行；已经写出来的正文留在转录里并标「（已中断）」，但不进模型上下文（不算这一轮的回答）。
@@ -195,16 +195,16 @@ session/<工作名>/
 
 - **消息与选项由发起方（底层）给**：怎么问、几个选项、每个选项做什么都由发起方实现；通道不解释内容。
 - **选项行为靠稳定 id 映射**：文案可改、可本地化，id 是契约（回答按 id 分派，改文案不改行为）。
-- **没有"不可选"的选项**：**禁止置灰**（`src/presentation/web/assets/app/features/transcript/cards.js` 的 `renderCard`）——置灰会让会话卡在那里没人点得到东西。选项集里每一条都必须是真能执行的；构不出可用选项时**不发起裁决**，改为**停掉这个会话 + 落一条警告**（写清哪一环做不下去、要补什么）。卡片一旦推出，选项集**不可变**：要改只能作废这一条（界面如实标"已作废"）再推新的（`src/units/turn_state/domain/ask.rs`），绝不静默改写用户已经看到的选项（`src/units/turn_state/domain/ask.rs`）。
-- **必须阻塞**（`src/units/turn_state/domain/ask.rs`）：发起方阻塞等回答，**不设超时**——不点不继续。终止只有三件：用户回答 / 用户按停止（解成**拒绝**，不是放行）/ 会话被删除；停会话时**整队作废**，等待方一律按"停止 = 拒绝"解开（`src/units/turn_state/domain/ask.rs`）。
+- **没有"不可选"的选项**：**禁止置灰**（`src/presentation/web/assets/app/features/transcript/cards.js` 的 `renderCard`）——置灰会让会话卡在那里没人点得到东西。选项集里每一条都必须是真能执行的；构不出可用选项时**不发起裁决**，改为**停掉这个会话 + 落一条警告**（写清哪一环做不下去、要补什么）。卡片一旦推出，选项集**不可变**：要改只能作废这一条（界面如实标"已作废"）再推新的（`src/units/business/turn_state/domain/ask.rs`），绝不静默改写用户已经看到的选项（`src/units/business/turn_state/domain/ask.rs`）。
+- **必须阻塞**（`src/units/business/turn_state/domain/ask.rs`）：发起方阻塞等回答，**不设超时**——不点不继续。终止只有三件：用户回答 / 用户按停止（解成**拒绝**，不是放行）/ 会话被删除；停会话时**整队作废**，等待方一律按"停止 = 拒绝"解开（`src/units/business/turn_state/domain/ask.rs`）。
 - **队列**：同一会话同时只问一条——**多席并发按先来后到排队**，**只有队首那张可见、可答**（排在后面的还不能答：它的答案会被"卡号不是队首"挡下）。界面与快照都让"谁在等、前面还排着几条"可见：推的卡片事件与 `/api/state` 的 `pending` 里都带 `waiting`——队首之后还在等的那几张，按先来后到，每条带**自己的卡号与这一关的重建材料**（界面只看它的信封与标题，材料归机制）。
 - **回答只有一条命令**（动作 `answer_card`，带上卡片 id + 选项 id（可带附言））；回答要**校验选项 id 属于当时那张卡的选项集**（防旧卡的答案被用来放行新的请求）。
 - **落盘**：卡片（`DecisionCard`）、回答（`DecisionAnswer`：谁答的、选了哪个 id、附言）与**整队作废**（`DecisionVoid`：作废了哪几张、为什么）都按上表落盘。
 - `/api/state` 的 `pending` 是同一份事实的快照形态（重启后由转录重建）。
-- **已答过的不得重问**；作废过的也不复活（那一关还挂在状态上时，`继续` 才**续一张新卡**接着问）（`src/units/turn_state/domain/ask.rs`）。
+- **已答过的不得重问**；作废过的也不复活（那一关还挂在状态上时，`继续` 才**续一张新卡**接着问）（`src/units/business/turn_state/domain/ask.rs`）。
 - 工具层那一类（`tool_ask`）与工具级确认一样**不重建**：它等在工作线程上，重启后那个等待方已经不在。
 - 会话被删除时整条队随会话一起没了——等待方与转录都不复存在，没有"留着作废记录"的地方。
-- **落地的形状**（线格式）：卡是 `{id, envelope{role,name}, message{title,body,detail}, options[{id,label}]}`；推的事件与快照的 `pending` 是**同一份 JSON**（多一个 `type: "decision_card"`、`gate`、机制载荷与 `waiting[{id,envelope,title,gate,payload}]`），回答是 `{type:"decision_answer", card, by, option, note}`，整队作废是 `{type:"decision_void", cards[], reason}`。选项 id 是契约（改文案不改行为）；协作机制的关卡声明与九个选项 id 在 `src/units/collab/domain/gates.rs`，别的机制另立自己的表。
+- **落地的形状**（线格式）：卡是 `{id, envelope{role,name}, message{title,body,detail}, options[{id,label}]}`；推的事件与快照的 `pending` 是**同一份 JSON**（多一个 `type: "decision_card"`、`gate`、机制载荷与 `waiting[{id,envelope,title,gate,payload}]`），回答是 `{type:"decision_answer", card, by, option, note}`，整队作废是 `{type:"decision_void", cards[], reason}`。选项 id 是契约（改文案不改行为）；协作机制的关卡声明与九个选项 id 在 `src/units/business/collab/domain/gates.rs`，别的机制另立自己的表。
 
 - **没人答时的收场**：由**发起方**在自己那张卡上声明一个**选项 id**（`Ask.on_unanswered`）——通道不解释它的含义，只在"没人答"时按它收场，并如实标为"不是用户答的"；不声明就按 fail-closed（这一趟不执行）。
 - **"没人答"与"用户停止"是两回事**：停止 = 拒绝，不套用默认项。"没有可选项 = 停会话 + 落警告"是另一件事，两个都要有。
@@ -219,7 +219,7 @@ session/<工作名>/
 - **围栏这类底层**：按选项做它自己的事（例如"本轮无围栏跑一次"）。
 - **改需求不是裁决**：它是会话级动作（会话视图的能力位 `can_update_task`），用户自己点；没有"本次需求"的会话**根本不渲染**这个按钮，会话工作中不可点。
 
-**关卡归发起方机制**：会话只装 `kind`、载荷与卡（`src/units/transcript/domain/events.rs` 的 `Gate`）；下表是协作的关卡。
+**关卡归发起方机制**：会话只装 `kind`、载荷与卡（`src/units/business/transcript/domain/events.rs` 的 `Gate`）；下表是协作的关卡。
 
 | 关卡 | 选项 id |
 | --- | --- |
@@ -287,11 +287,11 @@ session/<工作名>/
 - **流式增量是短暂事件**：`delta` / `tool_call` 不落盘，历史只记定稿后的行；行上的判定走结构化字段（如降级的 `degraded: true`），呈现层不匹配行文本。
 - **工具调用形态**（`ToolMode`：`envelope` 手写信封 / `native` 原生调用）是**登记处的事实**（`models.yaml` 的 `tools`），**不钉在会话里**：每次生成前重新解析，变了就就地刷新系统提示并给用户一句通知；**两套形态互斥**。
 - 一次回复在上下文里是「一条助手消息 + N 条结果」，两种形状由唯一的构造函数 `session::api::reply_msgs` 按当前形态产出——"重建与实时逐条一致"因此是结构保证。
-- **工具声明里的 `parallel` 决定并发**（缺省 false = 独占）：一次回复里**连续**的可并发调用合成一批并发跑，其余各自独占；工具行、结果消息与账本合并**一律按原始调用顺序**——并发只影响执行，不影响上下文里的顺序（`src/units/agentloop/domain/session.rs`）。
+- **工具声明里的 `parallel` 决定并发**（缺省 false = 独占）：一次回复里**连续**的可并发调用合成一批并发跑，其余各自独占；工具行、结果消息与账本合并**一律按原始调用顺序**——并发只影响执行，不影响上下文里的顺序（`src/units/business/agentloop/domain/session.rs`）。
 - **观察账本**（`systool::Observations`）是**进程内状态，不落盘**：记"本次会话读过 / 由核心写过哪些文件、当时的内容指纹与覆盖行区间"，并随工具行进 `ToolCallView.observations`；每条事实带格式版本（`OBSERVATION_FORMAT`）与来源，格式不符或损坏的事实降级为"没有观察"。它是**先读后改门禁**的依据：受管文件（主线或该 agent 工作线里的路径）整份覆盖要求当前上下文里有这一版的全文覆盖，单处 `edit` 要求有这一版，`replace_all` 要求全文，`patch` 的 Add 覆盖同 `write`、Update 只要这一版。
 - **只认产生调用之前已发出的行**：同批并行调用互不授权；压缩按 `up_to` 丢弃事实；回档清空；按落盘重建的会话从转录里压缩点之后的观察事实重建账本。读台账（过期占位符的输入）与观察账本**同水位**：同一个 `reply` 过滤、同样随压缩丢弃、随回档清空，由同一次转录扫描一起重建。
-- **覆盖面按行记**：完整读 = `Full`；`offset` / `limit` 截过的读 = 看到的那段行区间（机制层按行窗口流式扫完整份，超过 1MB 也能直接读后半段，行区间按绝对行号记）；单行被显示上限截断、`lossy`、越界空读都不记；成功 `write` / `patch Add` 记 `Full`，成功 `edit` / `patch Update` 只记改动行（相邻/重叠区间合并成一段）。同一版本的多次分段读按并集授权：合起来覆盖 `1..=total` 就等价于完整读。版本是整份内容的 SHA-256（不是截断前缀），当前版本变了就是过期，必须重读（`src/units/tools/api.rs` 的 `ObservationFact`；判定见 `src/tests/tools/gate.rs` 与 `src/tests/workspace/work.rs`）。
-- **检查与落盘在同一把锁里**：门禁只决定"需要哪种证据"，真正写盘时 `SysIo::mutate` 在按路径的跨进程文件锁里重读当前内容、再比一次版本（`Expect::Version` / `Expect::Absent`），对不上就整份拒绝并返回 `FS_STALE_VERSION` / `FS_ALREADY_EXISTS`，不会把检查之后的别人改动覆盖回去；锁目录由组合根注入（`home/locks`），测试替身可用进程内锁。拒绝时按路径记一条 `warn` 审计（错误码、需求、观察/当前版本，不含文件正文）；一批补丁只取一次工作区快照。写盘走同目录临时文件 + 原子替换；`patch` 的多文件改动走 `transact`，先全部校验/暂存再发布，任一文件失败就回滚已发布的文件（`src/units/tools/detail/sys_io.rs`）。
+- **覆盖面按行记**：完整读 = `Full`；`offset` / `limit` 截过的读 = 看到的那段行区间（机制层按行窗口流式扫完整份，超过 1MB 也能直接读后半段，行区间按绝对行号记）；单行被显示上限截断、`lossy`、越界空读都不记；成功 `write` / `patch Add` 记 `Full`，成功 `edit` / `patch Update` 只记改动行（相邻/重叠区间合并成一段）。同一版本的多次分段读按并集授权：合起来覆盖 `1..=total` 就等价于完整读。版本是整份内容的 SHA-256（不是截断前缀），当前版本变了就是过期，必须重读（`src/units/business/tools/api.rs` 的 `ObservationFact`；判定见 `src/tests/tools/gate.rs` 与 `src/tests/workspace/work.rs`）。
+- **检查与落盘在同一把锁里**：门禁只决定"需要哪种证据"，真正写盘时 `SysIo::mutate` 在按路径的跨进程文件锁里重读当前内容、再比一次版本（`Expect::Version` / `Expect::Absent`），对不上就整份拒绝并返回 `FS_STALE_VERSION` / `FS_ALREADY_EXISTS`，不会把检查之后的别人改动覆盖回去；锁目录由组合根注入（`home/locks`），测试替身可用进程内锁。拒绝时按路径记一条 `warn` 审计（错误码、需求、观察/当前版本，不含文件正文）；一批补丁只取一次工作区快照。写盘走同目录临时文件 + 原子替换；`patch` 的多文件改动走 `transact`，先全部校验/暂存再发布，任一文件失败就回滚已发布的文件（`src/units/business/tools/detail/sys_io.rs`）。
 - **受管边界**：只有 tracked 路径受门禁（主线 head 树 ∪ 该 agent 工作线 head 树）；新建与未受管文件不要求先读。不透明写者（shell / 模块工具）写后只进存档线、批末采纳，账本不自动更新，它们改过的受管路径因此会过期；未读改动在 `work_commit` 发布口被硬拒。
 - 会话的旁路配置记录（`{"type":"config"}`）只在编辑提交时追加：供呈现与审计，**不进模型上下文**，回放与状态派生跳过它。
 - 执行计划本身**从不落盘**（含真实路径，只在运行时派生）；网络与围栏要求是全局策略，不在会话里。
@@ -307,7 +307,7 @@ session/<工作名>/
 
 - **模块工具只在执行回合给**：讨论回合拿不到"干活"的手段——不是"被拒绝"，是**没有**。
 - **这一份工具面是随回合注入的**：核心查"这一回合的身份能用的工具"。信封通道把那一份（说明 + 参数）作为一条系统消息放进该回合的上下文；原生通道由**声明槽**下发名字 / 说明 / JSON Schema，不再重复文字清单（只保留 patch 这类声明表达不了的写法）。**整本工具总表不进提示词**——列了必然被拒的工具等于请模型去撞墙（细则见 [tools-and-roles.md](../tools/tools-and-roles.md) 二）。
-- 机制席位（src/units/session_model/domain/mechanism.rs 的 SEATS）**只声明需求**（发哪些工具、能不能写、能不能发布、带哪段提示词）；这一席的面由会话的**唯一装配机**现拼（src/units/agentloop/domain/assemble.rs 的 `assemble` → `FaceInput` / `SeatFace`）：发放（提示词块与原生声明槽）与越权校验同出一份清单，代码里不另写名单。回合只携带**席位**（`TurnRun.seat`）：每回合驱动换席时由会话现拼这一席的面并还原（AgentSession::enter_seat → MemberTools::install_seat）；节点 / 单 agent 回合在准备段就把席位装进会话，不沿用会话出生时的面（见 [tools-and-roles.md](../tools/tools-and-roles.md) 三）。
+- 机制席位（src/units/business/session_model/domain/mechanism.rs 的 SEATS）**只声明需求**（发哪些工具、能不能写、能不能发布、带哪段提示词）；这一席的面由会话的**唯一装配机**现拼（src/units/business/agentloop/domain/assemble.rs 的 `assemble` → `FaceInput` / `SeatFace`）：发放（提示词块与原生声明槽）与越权校验同出一份清单，代码里不另写名单。回合只携带**席位**（`TurnRun.seat`）：每回合驱动换席时由会话现拼这一席的面并还原（AgentSession::enter_seat → MemberTools::install_seat）；节点 / 单 agent 回合在准备段就把席位装进会话，不沿用会话出生时的面（见 [tools-and-roles.md](../tools/tools-and-roles.md) 三）。
 - **派发三类来源同一条路径**：这一回合的工具面里，系统工具走 `ToolExec::run_builtin`，模块工具走 `dispatch_external`，**核心自有工具**（代理工具等）问注入的 `ToolHandler` 谁认领它——三类同一条路径（`src/kernel/ports.rs` 的 `ToolHandler`，见 [architecture/README.md](../architecture/README.md) §二）。加一类工具只注册一个 handler，不改循环。
 
 ### 四之一、会话参数与对话分开
@@ -349,9 +349,9 @@ session/<工作名>/
 - 跨会话同步：主会话回档时，**整棵子树**（子会话、孙会话……）按同一个**回合 id** 收窗——每个会话截到"最后一个 `turn ≤ T` 的行"，并写同一个 `mark` id（同一份 `shared` / `heads` / `label`）；恢复时按这个 id 在各会话里找到标记并一起截断、一起物化。
 - **删除不可恢复，但会先报账**：删除点之后还存在的留档引用（`refs/archive/<mark>`）会在同一次删除里作废；后端先拒绝并报出数量与标记，界面据此二次确认，确认后才带 `force` 重放。作废只删引用，文件已经落到删除点，未提交内容在 `lost` 里。
 
-- 实现位置：`src/units/lifecycle/service/rewind.rs`（`lifecycle` 单元，见 [docs/lifecycle/README.md](../lifecycle/README.md)）；本节的判据与顺序以那里为准。
+- 实现位置：`src/units/business/lifecycle/service/rewind.rs`（`lifecycle` 单元，见 [docs/lifecycle/README.md](../lifecycle/README.md)）；本节的判据与顺序以那里为准。
 
-- **按行精确物化共享区**：每个提交记录带 `(agent, line)` 锚（用户投喂锚在主会话当时的行号，agent 提交锚在它自己会话的行号）。回档时按"各会话的保留行"逐个提交比对，取最后一个"所有锚都还没越过保留行"的提交点再物化（**没有锚的提交不参与选点**：外部同步与用户投喂都带锚，无锚说明来历不明，算进"之前"会让留档永远停在外来提交上）；删除额外丢弃不再可达的提交并把各 agent 的基线对齐到该点，恢复同样丢弃留档之后的提交（回到留档操作前的线）。行锚由每席的 `MemberTools.line` 随转录推进（成员工具面由 `src/units/agentloop/domain/assembly.rs` 装配，`line` 随会话持有）：显式 `work_commit` / `work_push` 经 `ToolCtx` 拿到它，写工具落地后的自动快照与批次末的沙箱采纳都读同一处（采纳的提交记 `source=external`、作者仍是该 agent，所以留档同样能把它退掉）。
+- **按行精确物化共享区**：每个提交记录带 `(agent, line)` 锚（用户投喂锚在主会话当时的行号，agent 提交锚在它自己会话的行号）。回档时按"各会话的保留行"逐个提交比对，取最后一个"所有锚都还没越过保留行"的提交点再物化（**没有锚的提交不参与选点**：外部同步与用户投喂都带锚，无锚说明来历不明，算进"之前"会让留档永远停在外来提交上）；删除额外丢弃不再可达的提交并把各 agent 的基线对齐到该点，恢复同样丢弃留档之后的提交（回到留档操作前的线）。行锚由每席的 `MemberTools.line` 随转录推进（成员工具面由 `src/units/business/agentloop/domain/assembly.rs` 装配，`line` 随会话持有）：显式 `work_commit` / `work_push` 经 `ToolCtx` 拿到它，写工具落地后的自动快照与批次末的沙箱采纳都读同一处（采纳的提交记 `source=external`、作者仍是该 agent，所以留档同样能把它退掉）。
 
 - 被折叠 / 被截断的行不进发送视图，也不进压缩摘要的输入；`truncate_events` 是"活动窗口"的唯一算术，界面按 `rewind` 事件画折叠分界（见「上下文压缩」）。
 
@@ -404,10 +404,10 @@ session/<工作名>/
 
 > **读过的内容被改了，就别再拿旧内容当事实。** 与压缩同属"改发送视图、不动转录"。
 
-- **读事实随工具行落盘**：成功的非截断 `read` 在工具行的观察事实里记"覆盖区间 + 读来源"（工作树 / 路径 / 当时的整份指纹 / 行数）；发送视图用的读事实由它派生，不再单独落一份。整份读派生一条 `1..=total_lines`，`offset` / `limit` 截过的分段读**每段派生一条**——大文件只能分段读，但读过的那几段照样会被占位符照看。空文件、越界段、`lossy` 与单行截断都不产生读事实（派生规则见 `src/units/tools/api.rs` 的 `ObservationFact::read_facts`，用例 `src/tests/tools/gate.rs`）。
+- **读事实随工具行落盘**：成功的非截断 `read` 在工具行的观察事实里记"覆盖区间 + 读来源"（工作树 / 路径 / 当时的整份指纹 / 行数）；发送视图用的读事实由它派生，不再单独落一份。整份读派生一条 `1..=total_lines`，`offset` / `limit` 截过的分段读**每段派生一条**——大文件只能分段读，但读过的那几段照样会被占位符照看。空文件、越界段、`lossy` 与单行截断都不产生读事实（派生规则见 `src/units/business/tools/api.rs` 的 `ObservationFact::read_facts`，用例 `src/tests/tools/gate.rs`）。
 - **开关与保底都是落盘事实**：`meta.context_freshness`（默认关）与 `meta.freshness_keep_percent`（默认 80，范围 0–90；0 = 不保底，100 等于永不替换所以不允许）。关 = 只记事实、发送视图原样；开 = 发送前判一次过期。两个值都写在**工作根** meta 上、子会话沿根继承；落盘是为了回放与实时产出同一条请求。
 - **判定按内容，结论分三态**：指纹相同 = `SameVersion`；路径已不在对照物里 = `Changed`；否则取新旧两份正文，把"读过的那几行"当成连续行窗口在新内容里找——找到 = `Shifted`（版本变了但那段内容还在，头部插行导致的移位也算），找不到 = `Changed`（`Workspace::judge_reads`）。
-- **两个消费者对 `Shifted` 刻意取不同答案**：占位符只换 `Changed`——模型看到的旧内容仍然可信，只是行号可能移位，没必要付一次缓存失效；写门禁只认 `SameVersion`——整份覆盖授权不能抹掉没看见的改动（版本变了就必须重读）。同一份读在两个地方可能得到不同结论，这是设计而不是不一致（两个策略分别落在 `src/units/agentloop/engine/driver.rs` 的 `freshness_now` 与 `src/units/tools/api.rs` 的 `SessionWriteGate`）。
+- **两个消费者对 `Shifted` 刻意取不同答案**：占位符只换 `Changed`——模型看到的旧内容仍然可信，只是行号可能移位，没必要付一次缓存失效；写门禁只认 `SameVersion`——整份覆盖授权不能抹掉没看见的改动（版本变了就必须重读）。同一份读在两个地方可能得到不同结论，这是设计而不是不一致（两个策略分别落在 `src/units/business/agentloop/engine/driver.rs` 的 `freshness_now` 与 `src/units/business/tools/api.rs` 的 `SessionWriteGate`）。
 - **过期只换那一条工具结果**：整条换成 `[已过期：<path> 第a-b、c-d行，读取后文件已修改；需要时重新 read]`；同一条工具结果里的多段读按消息归并成一个占位符（相邻/重叠区间合并，隔开的用顿号分开）。按**正文**定位消息（压缩会移走旧消息、下标会漂），正文找不到就跳过。
 - **保底 = 只替换前缀之后**：先按字符数（≈4 字符 / token）估出发送视图总量，前 `freshness_keep_percent`% 的消息原样保留、只替换其后的过期读——KV 缓存是位置绑定的前缀缓存，保住前缀才保得住命中。这个估算只用来切前缀，不参与用量与计费口径。
 - **省得不够就不换**：一次替换省下的正文不到 8000 字符（≈2K tokens）时整次回退、原样发送——换一次要付一次缓存失效，不值。判定失败、没有工作区、开关关、省得不够，都原样发送——不静默丢内容。

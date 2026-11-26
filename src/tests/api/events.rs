@@ -1,14 +1,14 @@
 //! 目的：事实总线与历史——生成把事实推上总线，历史合并是转录加总线尾巴。
 //! 管：序号、去重、回档后的重置事实、停止在生成中生效。
 //! 不管：压缩（`compaction.rs`）、协作讨论（`collab.rs`）。
-//! 联动：`src/units/runtime/api/handle.rs` 与 `src/units/session/api`。
+//! 联动：`src/units/business/runtime/api/handle.rs` 与 `src/units/session/api`。
 
 use super::super::doubles::module_of;
 use super::super::{single_work, slow_ops};
 use super::support::spawn;
 use crate::presentation::faces::Faces;
-use crate::units::transcript::api::SessionEvent;
-use crate::units::turn::turn::api::Output;
+use crate::units::business::transcript::api::SessionEvent;
+use crate::units::business::turn::turn::api::Output;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -124,7 +124,10 @@ fn rewind_pushes_a_reset_fact_and_history_merge_ignores_superseded_batches() {
     // ① 删除到第 0 行：盘上转录清空；事件台必须给一条 rewound（活动视图为空）。
     let replayed = faces
         .runtime
-        .rewind(&sid, crate::units::lifecycle::api::RewindTarget::Delete(0))
+        .rewind(
+            &sid,
+            crate::units::business::lifecycle::api::RewindTarget::Delete(0),
+        )
         .expect("回档到第 0 行");
     assert!(replayed.is_empty(), "删除到 0 的活动视图应为空");
 
@@ -181,7 +184,7 @@ fn rewind_pushes_a_reset_fact_and_history_merge_ignores_superseded_batches() {
         .runtime
         .rewind(
             &sid2,
-            crate::units::lifecycle::api::RewindTarget::Archive(0),
+            crate::units::business::lifecycle::api::RewindTarget::Archive(0),
         )
         .expect("留档");
     assert!(
@@ -271,7 +274,7 @@ fn stop_takes_effect_while_generation_is_still_running() {
 
 #[test]
 fn archive_stops_a_running_turn_before_rewinding() {
-    use crate::units::lifecycle::api::RewindTarget;
+    use crate::units::business::lifecycle::api::RewindTarget;
     let (_handle, faces, ticks) = slow_ops(vec![module_of("a")]);
     let sid = faces
         .work

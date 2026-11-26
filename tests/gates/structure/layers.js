@@ -18,7 +18,7 @@ const { BUCKETS, unitDir } = require("./unitpath.js");
 const TABLE = "layers.yaml";
 const RINGS = new Map([[0, "地基"], [1, "纯"], [2, "状态与机制"], [3, "用例"]]);
 
-/** 盘上的单元名：src/units/ 下的扁平单元，加上桶（pure / resource）里再收一层的单元。 */
+/** 盘上的单元名：三个角色桶（pure / resource / business）里各再收一层的单元。 */
 const dirsOf = (root) => {
   const base = path.join(root, "src", "units");
   const out = [];

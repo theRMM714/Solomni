@@ -1,7 +1,7 @@
 //! 目的：租约的并发准入——到上限拒绝、跨租约真并行。
 //! 管：准入计数、表锁范围。
 //! 不管：执行本身。
-//! 联动：`src/units/vm/api.rs`。
+//! 联动：`src/units/business/vm/api.rs`。
 
 use super::super::prelude::*;
 

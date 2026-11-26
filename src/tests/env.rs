@@ -4,21 +4,23 @@
 //! 联动：`src/units/env/domain/env.rs`；`runtime/service/env.rs` 取事实后转调。
 
 use crate::tests::doubles::module_of;
-use crate::units::catalog::modules::api::Roster;
-use crate::units::catalog::packages::api::PackagePlan;
-use crate::units::catalog::registry::api::AppSettings;
+use crate::units::business::catalog::modules::api::Roster;
+use crate::units::business::catalog::packages::api::PackagePlan;
+use crate::units::business::catalog::registry::api::AppSettings;
+use crate::units::business::session_model::api::{MEETING, RunState, SINGLE, SessionMeta};
+use crate::units::business::turn::env::api::{
+    MemberFacts, SandboxesFacts, SeatAccess, host_read_roots, member, network_allowed, permissions,
+    sandboxes, shared_scope,
+};
+use crate::units::business::workspace::api::{
+    Sandbox, ScopeMode, SharedEdit, SharedScope, WorkRoots,
+};
 use crate::units::pure::exec_model::api::ExecSpec;
 use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::permission::api::{
     PermissionDefaults, PermissionLayer, ProfileId, SessionSandbox,
 };
 use crate::units::pure::registry_model::api::AgentMeta;
-use crate::units::session_model::api::{MEETING, RunState, SINGLE, SessionMeta};
-use crate::units::turn::env::api::{
-    MemberFacts, SandboxesFacts, SeatAccess, host_read_roots, member, network_allowed, permissions,
-    sandboxes, shared_scope,
-};
-use crate::units::workspace::api::{Sandbox, ScopeMode, SharedEdit, SharedScope, WorkRoots};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;

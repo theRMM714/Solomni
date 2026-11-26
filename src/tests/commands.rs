@@ -1,10 +1,10 @@
 //! 目的：命令面门禁——`systools/commands.yaml` 是唯一声明，投影成 op 书后由同一套解析器消费。
 //! 管：op 书自洽（重名、位置序号、枚举、相位与执行者）、手册覆盖、两相分派认得每条命令、启动相不再自写旗语词法。
 //! 不管：手册排版（`src/tests/cli.rs`）与命令行为（各业务测试）。
-//! 联动：`systools/commands.yaml`、`src/units/tools/domain/op.rs`、`src/presentation/cli/boot.rs`、`src/presentation/cli.rs`。
+//! 联动：`systools/commands.yaml`、`src/units/business/tools/domain/op.rs`、`src/presentation/cli/boot.rs`、`src/presentation/cli.rs`。
 
 use crate::presentation::cli::catalog;
-use crate::units::tools::api::{CommandBook, Op, OpBook, Phase, Runtime};
+use crate::units::business::tools::api::{CommandBook, Op, OpBook, Phase, Runtime};
 use std::sync::OnceLock;
 
 /// 启动相的分派实现（只按名字取字段；旗语与位置参数由声明解析）。

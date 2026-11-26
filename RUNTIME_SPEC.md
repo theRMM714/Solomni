@@ -1,6 +1,6 @@
 # 运行包契约（RUNTIME_SPEC）
 > 定位：运行包作者要遵守的契约：一个包长什么样、清单怎么写、两种 kind 怎么装配、什么被拒收。
-> 效力：契约｜核对：2026-11-25｜依据：`src/units/catalog/packages/domain/manifest.rs`
+> 效力：契约｜核对：2026-11-25｜依据：`src/units/business/catalog/packages/domain/manifest.rs`
 
 ## 结构
 ```text

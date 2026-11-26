@@ -1,6 +1,6 @@
 # 登记处契约（REGISTRY_SPEC）
 > 定位：`data/.home/` 下四份 yaml 的格式与字段、缺字段与非法输入怎么办、密钥边界在哪；不回答实现与探测行为。
-> 效力：契约｜核对：2026-11-25｜依据：`src/units/catalog/registry/domain/providers.rs`
+> 效力：契约｜核对：2026-11-25｜依据：`src/units/business/catalog/registry/domain/providers.rs`
 
 ## 结构
 ```text

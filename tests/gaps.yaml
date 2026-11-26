@@ -181,7 +181,7 @@
     回执不再声称失败原因：围栏拒绝发生在工具子进程内部（ACL / Landlock / seatbelt / 容器 SID），
     守门进程只看得到退出码与被本地化的 OS 文案，任何平台都没有「本次确被围栏拒绝」的机器可读事实，
     因此回执只交退出码与信号（`shell.exit` / `shell.signal` 等稳定码），可达范围与网络状态只进
-    工具行的结构化事实（`ShellFacts`，`src/units/tools/domain/shell.rs`），界面可见、模型不可见。
+    工具行的结构化事实（`ShellFacts`，`src/units/business/tools/domain/shell.rs`），界面可见、模型不可见。
     代价是**模型侧没有可靠信号**：围栏里的越界失败与普通失败在模型眼里一样，
     模型不会知道「可达哪里」；直接补固定提示会退回「任何非零退出都像越界」的老问题。
   how: |
@@ -349,3 +349,26 @@
   accept: |
     两类入站服务受同一份准入；错误信息点名用途；`node run-tests.js` 全绿。
   blocked_by: 缺少实现（本期只做服务面，不做准入）
+- id: tests.impl-partition-imports
+  scope: global
+  level: T2
+  why: |
+    单元搬进 `src/units/business/` 后，`structure/tests-api` 的正则才真正匹配到三段路径
+    （旧正则对两段平铺路径 `crate::units::<单元>::domain` 从不命中，属既有盲区）。
+    暴露出的存量是 8 个适配器边界用例直接引用 `::service` / `::domain` / `::detail`：
+    `src/tests/api/guest.rs`（`vm::domain::diagnose`）、`src/tests/mcp.rs`（`residents::detail::McpAdapter`）、
+    `src/tests/permission.rs`（`workspace::domain::workspace::Place`）、`src/tests/provision/ports.rs`
+    （`HttpFetch` / `RealHost` / `BookProcs`）、`src/tests/provision/service.rs`（`fetch` / `guest_image` / `host` /
+    `install` / `ledger` / `procs` / `domain` / `service`）、`src/tests/routes.rs`（`provision::domain::tool_location`）、
+    `src/tests/runtime.rs`（`workspace::detail::FsWorkspace`）、`src/tests/setup.rs`（`system::detail::setup` 四件）。
+    本期只做目录收口，不为收敛它们扩各单元的 `api` 面（那是契约变更），故按名豁免、记账在此。
+  how: |
+    1) 能走 `::api` 的直接换（`workspace::api` 已重导出 `Place`、`WorkRoots` 等）；
+    2) 真实适配器接线搬到 `src/tests/builders/`（已是装配层），用例只拿装好的实例，不认适配器类型路径；
+    3) 纯适配器边界用例（`provision/ports.rs`、`provision/service.rs`、`setup.rs`）整体并入 `src/tests/detail/`——
+       那里是「真实适配器边界」的既有归宿；
+    4) 每清掉一个文件，同步删 `tests/gates/structure/tests-api.js` 的 `ADAPTER_CASES` 中对应一行。
+  accept: |
+    `ADAPTER_CASES` 清空并删除该常量；`structure/tests-api` 对 `src/tests` 零豁免（替身层除外）；
+    `node run-tests.js --audit=structure` 全绿。
+  blocked_by: 缺少实现（需要先扩 provision / system / residents 的 api 面或搬用例）

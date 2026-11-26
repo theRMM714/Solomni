@@ -8,7 +8,7 @@
 
 - 管：agent 的存档形态 `Agent` 与入档草稿 `AgentDraft`、会话名单的唯一形状 `AgentMeta`（R15）、视图 `AgentView` 与名单聚合 `Agents`（`BTreeMap<String, Agent>`）、拟名条目 `RosterPick`；名字规则 `validate_name` / `check_reserved`；名录渲染与点名 `agent_meta` / `listing` / `views` / `pick`。
 - 管：供应商与模型的值形态 `Provider` / `ModelEntry` / `ModelDraft`、工具调用形态 `ToolMode`、思考档位 `ThinkingLevel` / `ThinkingCatalog` / `ThinkingSpec`、缓存预算 `StorageSettings`、三张视图 `ProviderView` / `ModelView` / `ModelThinkingView` 与思考目录校验 `validate_thinking_catalog`。
-- 不管：名单落地与唯一实例命名（`src/units/catalog/registry/domain/picks.rs` 的 `resolve_picks` / `unique_instance_name` / `model_listing` 要读 modules 的 `Roster`）；设置状态与通道解析（`src/units/catalog/registry/domain/providers.rs` 的 `AppSettings` / `SandboxSettings` / `Settings` 与 `resolve`）；四份 yaml 的读写（`src/units/catalog/registry/detail/yaml_settings.rs`）；登记处的写用例与端口（`src/units/catalog/registry/service.rs` / `ports.rs`）。
+- 不管：名单落地与唯一实例命名（`src/units/business/catalog/registry/domain/picks.rs` 的 `resolve_picks` / `unique_instance_name` / `model_listing` 要读 modules 的 `Roster`）；设置状态与通道解析（`src/units/business/catalog/registry/domain/providers.rs` 的 `AppSettings` / `SandboxSettings` / `Settings` 与 `resolve`）；四份 yaml 的读写（`src/units/business/catalog/registry/detail/yaml_settings.rs`）；登记处的写用例与端口（`src/units/business/catalog/registry/service.rs` / `ports.rs`）。
 - 不管：不碰 IO、不持端口、不持有状态——环 1 的判据见 [layers.md](../architecture/layers.md) 的 H2。
 
 ## 入站契约与状态归属
@@ -34,7 +34,7 @@
 - 改 `AgentMeta` 字段（R15 的会话名单形状）→ `docs/session/session-model.md`、会话 `meta` 读写、`src/tests/session/`。
 - 改 `Agent` / `AgentDraft` 字段或名字规则 → `REGISTRY_SPEC.md`（字段与拒收规则的唯一权威）、`src/tests/registry.rs`、`docs/registry/README.md`。
 - 改 `ModelEntry` / `ThinkingSpec` / `ToolMode` 字段或视图形状 → `REGISTRY_SPEC.md`、`src/tests/registry.rs`、`docs/registry/README.md` 与 `src/presentation/web/assets/app/`（设置页表单）。
-- 改 `RosterPick` 的变体 → 拟名单的提示词与解析（`src/units/conversation/slate/`）。
+- 改 `RosterPick` 的变体 → 拟名单的提示词与解析（`src/units/business/conversation/slate/`）。
 
 ## 本目录
 

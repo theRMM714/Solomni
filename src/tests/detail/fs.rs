@@ -5,8 +5,10 @@
 
 use super::*;
 use crate::tests::doubles::test_workspace_store;
-use crate::units::session_model::api::{MEETING, SINGLE, SessionSpec};
-use crate::units::workspace::api::{ChangeKind, CommitAnchor, WORKIGNORE, WORKIGNORE_SEED};
+use crate::units::business::session_model::api::{MEETING, SINGLE, SessionSpec};
+use crate::units::business::workspace::api::{
+    ChangeKind, CommitAnchor, WORKIGNORE, WORKIGNORE_SEED,
+};
 
 fn meta(name: &str) -> SessionMeta {
     SessionMeta {
@@ -33,7 +35,7 @@ fn meta(name: &str) -> SessionMeta {
         node: None,
         delegation: None,
         thinking: None,
-        run: crate::units::session_model::api::RunState::Active,
+        run: crate::units::business::session_model::api::RunState::Active,
         workspace: None,
     }
 }
@@ -231,8 +233,8 @@ fn fs_sys_io_reads_utf8_flags_lossy_and_truncation_and_creates_parents() {
     let io = FsSysIo::default();
     io.mutate(
         &f,
-        &crate::units::tools::ports::Expect::Absent,
-        crate::units::tools::ports::Mutation::Replace("你好，世界".to_string()),
+        &crate::units::business::tools::ports::Expect::Absent,
+        crate::units::business::tools::ports::Mutation::Replace("你好，世界".to_string()),
     )
     .expect("写要自动建父目录");
     let r = io.read(&f).expect("读回");
@@ -278,7 +280,7 @@ fn fs_sys_io_reads_utf8_flags_lossy_and_truncation_and_creates_parents() {
 /// 目的：目录遍历按 .gitignore / .workignore 与隐藏、二进制剪枝，流式按行扫描从磁盘读，前 8 KiB 含 NUL 判二进制。
 #[test]
 fn fs_sys_io_walks_a_tree_and_scans_lines_from_disk() {
-    use crate::units::tools::ports::WalkOpts;
+    use crate::units::business::tools::ports::WalkOpts;
     let root = scratch("fs-sysio-walk");
     std::fs::create_dir_all(root.join("src")).expect("建目录");
     std::fs::create_dir_all(root.join("node_modules").join("pkg")).expect("建目录");
@@ -394,7 +396,7 @@ fn fs_sys_io_read_page_reads_a_late_window_and_counts_the_whole_file() {
     assert_eq!(page.bytes, text.len());
     assert_eq!(
         page.hash,
-        crate::units::workspace::api::content_hash(text.as_bytes()),
+        crate::units::business::workspace::api::content_hash(text.as_bytes()),
         "版本仍是整份文件"
     );
     assert!(!page.lossy && !page.line_cut && !page.window_cut);
@@ -444,8 +446,8 @@ fn fs_sys_io_read_page_reads_a_late_window_and_counts_the_whole_file() {
 /// 写盘是 CAS：版本对不上就不写；新建不覆盖；编辑在锁内重新找锚点。
 #[test]
 fn fs_sys_io_mutate_is_compare_and_swap_and_edit_rechecks_the_anchor() {
-    use crate::units::tools::api::LineRange;
-    use crate::units::tools::ports::{Expect, Mutation};
+    use crate::units::business::tools::api::LineRange;
+    use crate::units::business::tools::ports::{Expect, Mutation};
 
     let root = scratch("fs-sysio-mutate");
     let io = FsSysIo::default();
@@ -528,7 +530,7 @@ fn fs_sys_io_mutate_is_compare_and_swap_and_edit_rechecks_the_anchor() {
 /// 事务：先全部校验/暂存，再发布；后面失败时前面的文件不能留下。
 #[test]
 fn fs_sys_io_transact_commits_together_or_not_at_all() {
-    use crate::units::tools::ports::{Expect, Mutation, WriteOp};
+    use crate::units::business::tools::ports::{Expect, Mutation, WriteOp};
 
     let root = scratch("fs-sysio-transact");
     let io = FsSysIo::default();
@@ -592,11 +594,11 @@ fn fs_sys_io_transact_commits_together_or_not_at_all() {
     assert!(!c.exists(), "事务失败不能留下第 1 个文件");
 
     // 回滚原语：有备份就写回，没有备份就删掉。
-    crate::units::tools::detail::sys_io::rollback(&a, Some("备份".as_bytes()))
+    crate::units::business::tools::detail::sys_io::rollback(&a, Some("备份".as_bytes()))
         .expect("写回备份内容");
     assert_eq!(std::fs::read_to_string(&a).expect("读回"), "备份");
     std::fs::write(&c, "新").expect("造新文件");
-    crate::units::tools::detail::sys_io::rollback(&c, None).expect("删掉新文件");
+    crate::units::business::tools::detail::sys_io::rollback(&c, None).expect("删掉新文件");
     assert!(!c.exists());
 
     let _ = std::fs::remove_dir_all(&root);
@@ -709,7 +711,7 @@ fn fs_history_nests_children_inside_their_parent_dir() {
 /// 目的：写路径的跨进程锁由锁目录承载——同路径第二个实例拿不到锁就报 FS_LOCKED，放锁后可重试。
 #[test]
 fn fs_sys_io_write_lock_is_cross_instance_and_releases() {
-    use crate::units::workspace::api::content_hash;
+    use crate::units::business::workspace::api::content_hash;
 
     let root = scratch("fs-sysio-lock");
     let path = root.join("a.txt");
@@ -726,8 +728,8 @@ fn fs_sys_io_write_lock_is_cross_instance_and_releases() {
     let err = tight
         .mutate(
             &path,
-            &crate::units::tools::ports::Expect::Version(version.clone()),
-            crate::units::tools::ports::Mutation::Replace("b".to_string()),
+            &crate::units::business::tools::ports::Expect::Version(version.clone()),
+            crate::units::business::tools::ports::Mutation::Replace("b".to_string()),
         )
         .expect_err("另一个实例还持锁时必须失败");
     assert_eq!(err.code, "FS_LOCKED", "{}", err.message);
@@ -741,8 +743,8 @@ fn fs_sys_io_write_lock_is_cross_instance_and_releases() {
     let receipt = tight
         .mutate(
             &path,
-            &crate::units::tools::ports::Expect::Version(version),
-            crate::units::tools::ports::Mutation::Replace("b".to_string()),
+            &crate::units::business::tools::ports::Expect::Version(version),
+            crate::units::business::tools::ports::Mutation::Replace("b".to_string()),
         )
         .expect("放锁后应能写");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "b");

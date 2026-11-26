@@ -6,9 +6,9 @@
 use super::super::prelude::*;
 use crate::presentation::faces::Faces;
 
-use crate::units::proxy::api as d;
-use crate::units::proxy::api::ProxyTools;
-use crate::units::session_model::api::{PROXY, SINGLE};
+use crate::units::business::proxy::api as d;
+use crate::units::business::proxy::api::ProxyTools;
+use crate::units::business::session_model::api::{PROXY, SINGLE};
 
 fn rig() -> (Arc<FakeProxyHost>, ProxyTools) {
     let host = Arc::new(FakeProxyHost::new());
@@ -58,8 +58,8 @@ pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
         assert!(!schema.desc.trim().is_empty(), "{} 缺说明", name);
         assert!(schema.params.is_some(), "{} 缺参数契约", name);
     }
-    let seat = crate::units::session_model::api::seat("core_proxy").expect("代理席在册");
-    let face: Vec<String> = crate::units::agentloop::api::seat_face(seat)
+    let seat = crate::units::business::session_model::api::seat("core_proxy").expect("代理席在册");
+    let face: Vec<String> = crate::units::business::agentloop::api::seat_face(seat)
         .into_iter()
         .map(|s| s.to_string())
         .collect();
@@ -86,8 +86,8 @@ pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
         "core_proxy 是席位，不是工具"
     );
     for role in ["discussant", "solo", "executor", "planner", "orchestrator"] {
-        let seat = crate::units::session_model::api::seat(role).expect("席位在册");
-        let rface: Vec<String> = crate::units::agentloop::api::seat_face(seat)
+        let seat = crate::units::business::session_model::api::seat(role).expect("席位在册");
+        let rface: Vec<String> = crate::units::business::agentloop::api::seat_face(seat)
             .into_iter()
             .map(|s| s.to_string())
             .collect();
@@ -440,7 +440,7 @@ pub(crate) fn declaration_shape_is_enforced_before_semantics() {
 ///   工具行落进它自己的转录。这条钉住“代理会话就是普通成员会话 + 派发去特例”的整条链。
 #[test]
 pub(crate) fn the_proxy_session_runs_a_turn_through_the_generic_loop() {
-    use crate::units::turn::turn::api::Output;
+    use crate::units::business::turn::turn::api::Output;
 
     let (handle, faces) = super::super::ops_with(
         vec![],
@@ -467,7 +467,7 @@ pub(crate) fn the_proxy_session_runs_a_turn_through_the_generic_loop() {
 /// 目的：子会话停下 → 通知代理（只写一条通知行，**不转发子会话转录**）。
 #[test]
 pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript() {
-    use crate::units::catalog::modules::api::ModuleManifest;
+    use crate::units::business::catalog::modules::api::ModuleManifest;
     let module = Module {
         manifest: ModuleManifest {
             build: None,
@@ -534,7 +534,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
 ///   反过来，普通 agent 会话也不会沾上代理席的话。
 #[test]
 pub(crate) fn the_proxy_identity_is_the_role_prompt() {
-    use crate::units::catalog::modules::api::ModuleManifest;
+    use crate::units::business::catalog::modules::api::ModuleManifest;
 
     let module = Module {
         manifest: ModuleManifest {
@@ -609,7 +609,7 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
 #[test]
 pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
     let (handle, faces) = super::super::ops_with(vec![], vec![]);
-    let spec = crate::units::work::api::WorkSpec {
+    let spec = crate::units::business::work::api::WorkSpec {
         flows: None,
         freshness: None,
         name: "w-user-proxy".to_string(),
@@ -695,16 +695,17 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
 /// 目的：代理会话是 `Session::Single`，有一条持续对话，所以也要显示上下文用量（窗口取核心默认模型）。
 #[test]
 pub(crate) fn proxy_session_exposes_context_usage() {
-    use crate::units::llm::api::TokenUsage;
+    use crate::units::business::llm::api::TokenUsage;
     let gateway = ScriptGateway::new(
         BTreeMap::new(),
         vec!["{\"type\":\"say\",\"text\":\"代理在\"}".to_string()],
     )
     .with_usage(TokenUsage::new(700, 50, Some(750)));
-    let handle = crate::units::runtime::api::Handle::spawn(core_with_gateway(vec![], gateway))
-        .expect("起核心线程");
+    let handle =
+        crate::units::business::runtime::api::Handle::spawn(core_with_gateway(vec![], gateway))
+            .expect("起核心线程");
     let faces = Faces::from_handle(&handle);
-    let spec = crate::units::work::api::WorkSpec {
+    let spec = crate::units::business::work::api::WorkSpec {
         flows: None,
         freshness: None,
         name: "w-proxy-ctx".to_string(),
@@ -720,7 +721,11 @@ pub(crate) fn proxy_session_exposes_context_usage() {
     let sid = faces.work.create_work(spec).expect("建代理会话").0.sid;
     faces
         .turn
-        .say(&sid, "开始", crate::units::turn::turn::api::Output::Final)
+        .say(
+            &sid,
+            "开始",
+            crate::units::business::turn::turn::api::Output::Final,
+        )
         .expect("代理一轮");
     let views = faces
         .work

@@ -1,7 +1,7 @@
 //! 目的：路径与工具夹具——绝对根、路径书写形式与内置工具调用的现成素材。
 //! 管：测试根、路径期望值、工具调用与模块工具声明、沙箱与提示词素材。
 //! 不管：替身本身（其余同目录文件）。
-//! 联动：`src/kernel/ports.rs` 的路径模型与 `src/units/tools/domain/`。
+//! 联动：`src/kernel/ports.rs` 的路径模型与 `src/units/business/tools/domain/`。
 
 use super::*;
 
@@ -27,13 +27,13 @@ pub(crate) fn s(parts: &[&str]) -> String {
 /// 目的：什么都不修的修复端口（严格要求合法信封）：测试基线，也是"宁缺毋滥"部署的对照实现。
 pub(crate) struct NoRepair;
 
-impl crate::units::llm::ports::EnvelopeRepair for NoRepair {
+impl crate::units::business::llm::ports::EnvelopeRepair for NoRepair {
     fn repair(
         &self,
         _raw: &str,
-        _kind: &crate::units::llm::api::Malformed,
-    ) -> crate::units::llm::api::RepairOutcome {
-        crate::units::llm::api::RepairOutcome {
+        _kind: &crate::units::business::llm::api::Malformed,
+    ) -> crate::units::business::llm::api::RepairOutcome {
+        crate::units::business::llm::api::RepairOutcome {
             repaired: None,
             what: Vec::new(),
         }
@@ -42,13 +42,13 @@ impl crate::units::llm::ports::EnvelopeRepair for NoRepair {
 
 /// 目的：一次内置工具调用（空账本）：只关心工具行为本身的用例用它；关心"改动前有没有读过"的用例自带 Observations 再调它。这里直接走 tools 的 domain（测试层允许）：生产路径是 `ToolExec::run_builtin`。
 pub(crate) fn run_builtin(
-    sb: &crate::units::workspace::api::Sandbox,
-    io: &dyn crate::units::tools::ports::SysIo,
+    sb: &crate::units::business::workspace::api::Sandbox,
+    io: &dyn crate::units::business::tools::ports::SysIo,
     name: &str,
     args_json: &str,
 ) -> crate::kernel::api::types::ToolOutcome {
-    let mut obs = crate::units::tools::api::Observations::default();
-    crate::units::tools::service::systool::execute(
+    let mut obs = crate::units::business::tools::api::Observations::default();
+    crate::units::business::tools::service::systool::execute(
         sb,
         &test_systools().tools,
         io,
@@ -60,8 +60,8 @@ pub(crate) fn run_builtin(
 }
 
 /// 目的：测试用模块工具声明：只给启动命令（参数契约在需要的用例里另行声明）。
-pub(crate) fn decl(command: &str) -> crate::units::catalog::modules::api::ToolDecl {
-    crate::units::catalog::modules::api::ToolDecl {
+pub(crate) fn decl(command: &str) -> crate::units::business::catalog::modules::api::ToolDecl {
+    crate::units::business::catalog::modules::api::ToolDecl {
         command: command.to_string(),
         desc: String::new(),
         params: None,
@@ -73,19 +73,22 @@ pub(crate) fn decl(command: &str) -> crate::units::catalog::modules::api::ToolDe
 pub(crate) fn decl_with(
     command: &str,
     params_yaml: &str,
-) -> crate::units::catalog::modules::api::ToolDecl {
+) -> crate::units::business::catalog::modules::api::ToolDecl {
     let mut d = decl(command);
     d.params = Some(yaml_serde::from_str(params_yaml).expect("测试参数声明要能解析"));
     d
 }
 
 /// 目的：测试沙箱：work 共享区 + agent 私有区 + 指定模块目录（都是绝对路径）。
-pub(crate) fn test_sandbox(agent: &str, modules: &[&str]) -> crate::units::workspace::api::Sandbox {
+pub(crate) fn test_sandbox(
+    agent: &str,
+    modules: &[&str],
+) -> crate::units::business::workspace::api::Sandbox {
     let mut map = BTreeMap::new();
     for id in modules {
         map.insert(id.to_string(), abs(&["mods", id]));
     }
-    crate::units::workspace::api::Sandbox {
+    crate::units::business::workspace::api::Sandbox {
         work_name: "demo".to_string(),
         session: "demo".to_string(),
         agent: agent.to_string(),
@@ -96,7 +99,11 @@ pub(crate) fn test_sandbox(agent: &str, modules: &[&str]) -> crate::units::works
         permissions: Default::default(),
         scope: Default::default(),
         path_codec: None,
-        filter_rules: abs(&["demo", ".work", crate::units::workspace::api::WORKIGNORE]),
+        filter_rules: abs(&[
+            "demo",
+            ".work",
+            crate::units::business::workspace::api::WORKIGNORE,
+        ]),
     }
 }
 
@@ -104,13 +111,13 @@ pub(crate) fn test_sandbox(agent: &str, modules: &[&str]) -> crate::units::works
 pub(crate) fn test_sandbox_readonly(
     agent: &str,
     modules: &[&str],
-) -> crate::units::workspace::api::Sandbox {
+) -> crate::units::business::workspace::api::Sandbox {
     test_sandbox(agent, modules)
 }
 
 /// 目的：测试用会话参数：agent 名 + 该 agent 的沙箱（无模块）。身份块由它现渲染。
-pub(crate) fn test_params(agent: &str) -> crate::units::agentloop::api::SessionParams {
-    crate::units::agentloop::api::SessionParams::from_workspace(
+pub(crate) fn test_params(agent: &str) -> crate::units::business::agentloop::api::SessionParams {
+    crate::units::business::agentloop::api::SessionParams::from_workspace(
         agent,
         &test_sandbox(agent, &[]),
         &[],
@@ -120,10 +127,10 @@ pub(crate) fn test_params(agent: &str) -> crate::units::agentloop::api::SessionP
 
 /// 目的：测试用工具说明块素材（patch 语法 + 给定的模块工具）。
 pub(crate) fn test_notes(
-    sb: &crate::units::workspace::api::Sandbox,
-    modules: &[crate::units::catalog::modules::api::Module],
-) -> crate::units::tools::api::ToolNotes {
-    crate::units::tools::api::tool_notes(&test_prompts(), sb, modules, &[])
+    sb: &crate::units::business::workspace::api::Sandbox,
+    modules: &[crate::units::business::catalog::modules::api::Module],
+) -> crate::units::business::tools::api::ToolNotes {
+    crate::units::business::tools::api::tool_notes(&test_prompts(), sb, modules, &[])
 }
 
 /// 目的：内存会话历史：供测试断言落盘与回放。

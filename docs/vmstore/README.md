@@ -46,7 +46,7 @@
 
 - 这些落点的读写分散在四个单元的 detail 适配器里，各自都已经持有产品根；把 IO 也收进来会要求它们改构造签名并把整条调用链换成异步/回锁的新形态——那是**行为变更**，不是本阶段的目标。
 - 本单元先拿走**唯一容易漂移的东西**：名字与形状。改名或加一层目录只改 `src/units/resource/vmstore/domain/paths.rs` 一处；卷、锁、元数据共用同一个 `safe_segment`，不会再出现"构建按收过的名字建、盘点按原名找"这类对不上的路径。
-- 存在性与锁的**语义**仍归用盘方：`builds` 走 `src/units/maintenance/builds/detail/cache.rs` 的有界等锁（构建必须串行），`storage` 走 `src/units/maintenance/storage/detail/paths.rs` 的 `lock_held`——只问内核「此刻有人持着吗」（盘点与回收不删正在被用的卷）；两者判据不同，所以留两个策略。
+- 存在性与锁的**语义**仍归用盘方：`builds` 走 `src/units/business/maintenance/builds/detail/cache.rs` 的有界等锁（构建必须串行），`storage` 走 `src/units/business/maintenance/storage/detail/paths.rs` 的 `lock_held`——只问内核「此刻有人持着吗」（盘点与回收不删正在被用的卷）；两者判据不同，所以留两个策略。
 
 ## 三、待办（本阶段没做，别当成已完成）
 

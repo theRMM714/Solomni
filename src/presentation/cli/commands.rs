@@ -271,31 +271,31 @@ pub(super) fn resident_list(faces: &Faces, json: bool) -> i32 {
 /// 约束：正文由工具进程写出、原样打印；说明按稳定码从目录渲染，不在这里拼句子。
 pub(super) fn print_receipt(faces: &Faces, v: &Value) {
     let lang = match faces.registry.settings() {
-        Ok(s) => crate::units::runtime::api::i18n::pick(&s.lang),
-        Err(_) => crate::units::runtime::api::i18n::Lang::source(),
+        Ok(s) => crate::units::business::runtime::api::i18n::pick(&s.lang),
+        Err(_) => crate::units::business::runtime::api::i18n::Lang::source(),
     };
     let body = v.get("output").and_then(|s| s.as_str()).unwrap_or("");
-    let notes: Vec<crate::units::runtime::api::Note> = v
+    let notes: Vec<crate::units::business::runtime::api::Note> = v
         .get("notes")
         .and_then(|n| serde_json::from_value(n.clone()).ok())
         .unwrap_or_default();
     let severity = v
         .get("severity")
         .and_then(|s| {
-            serde_json::from_value::<crate::units::runtime::api::Severity>(s.clone()).ok()
+            serde_json::from_value::<crate::units::business::runtime::api::Severity>(s.clone()).ok()
         })
         .unwrap_or(if v.get("ok").and_then(|b| b.as_bool()).unwrap_or(true) {
-            crate::units::runtime::api::Severity::Info
+            crate::units::business::runtime::api::Severity::Info
         } else {
-            crate::units::runtime::api::Severity::Error
+            crate::units::business::runtime::api::Severity::Error
         });
-    let text = crate::units::runtime::api::i18n::render_receipt(lang, body, &notes);
+    let text = crate::units::business::runtime::api::i18n::render_receipt(lang, body, &notes);
     if !text.trim().is_empty() {
         println!("{}", text);
     }
     println!(
         "[{}]",
-        crate::units::runtime::api::i18n::label(lang, severity)
+        crate::units::business::runtime::api::i18n::label(lang, severity)
     );
 }
 
@@ -411,9 +411,9 @@ pub(super) fn work_cmd(faces: &Faces, args: &Value, json: bool) -> i32 {
                     println!(
                         "  {:<7} {:<10} {}",
                         match ch.kind {
-                            crate::units::workspace::api::ChangeKind::Add => "新增",
-                            crate::units::workspace::api::ChangeKind::Modify => "修改",
-                            crate::units::workspace::api::ChangeKind::Delete => "删除",
+                            crate::units::business::workspace::api::ChangeKind::Add => "新增",
+                            crate::units::business::workspace::api::ChangeKind::Modify => "修改",
+                            crate::units::business::workspace::api::ChangeKind::Delete => "删除",
                         },
                         ch.size,
                         ch.path

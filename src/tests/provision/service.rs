@@ -1,21 +1,21 @@
 //! 目的：清单语义、台账、取数续传与安装编排的用例。
 //! 管：service 的编排与 domain 规则（清单解析、身份判定、缓存与哈希、状态与安装、续传）。
 //! 不管：guest 镜像与文件系统权限位（见 `image.rs`）、端口实现（见 `ports.rs`）。
-//! 联动：被测实现是 `units::provision::{service,domain}`。
+//! 联动：被测实现是 `units::business::provision::{service,domain}`。
 
-use crate::units::provision::api::Provision;
-use crate::units::provision::detail::fetch::HttpFetch;
-use crate::units::provision::detail::guest_image::*;
-use crate::units::provision::detail::host::RealHost;
-use crate::units::provision::detail::install::HostInstallers;
-use crate::units::provision::detail::ledger::{
+use crate::units::business::provision::api::Provision;
+use crate::units::business::provision::detail::fetch::HttpFetch;
+use crate::units::business::provision::detail::guest_image::*;
+use crate::units::business::provision::detail::host::RealHost;
+use crate::units::business::provision::detail::install::HostInstallers;
+use crate::units::business::provision::detail::ledger::{
     FileLedger, probe_present, read_ledger, record_installed,
 };
-use crate::units::provision::detail::procs::BookProcs;
-use crate::units::provision::domain::*;
-use crate::units::provision::ports::Fetcher;
-use crate::units::provision::service::*;
-use crate::units::provision::service::{
+use crate::units::business::provision::detail::procs::BookProcs;
+use crate::units::business::provision::domain::*;
+use crate::units::business::provision::ports::Fetcher;
+use crate::units::business::provision::service::*;
+use crate::units::business::provision::service::{
     run as run_pipeline, verify_cached as verify_cached_pinned,
 };
 use crate::units::pure::exec_model::api::JobState;
@@ -38,7 +38,10 @@ pub(super) fn adapters(root: &Path) -> ProvisionDeps {
         ledger: Arc::new(FileLedger::new(root)),
         installers: Arc::new(HostInstallers),
         images: Arc::new(
-            crate::units::provision::detail::guest_image::Ext4Images::new(root, Arc::clone(&fetch)),
+            crate::units::business::provision::detail::guest_image::Ext4Images::new(
+                root,
+                Arc::clone(&fetch),
+            ),
         ),
         procs: Arc::new(BookProcs::new(root)),
         fetch,
@@ -59,7 +62,7 @@ pub(super) fn run(
     ids: &[String],
     cancel: &AtomicBool,
     on_line: &mut dyn FnMut(&str),
-    vm: Option<&(dyn crate::units::vm::api::Vm + Send + Sync)>,
+    vm: Option<&(dyn crate::units::business::vm::api::Vm + Send + Sync)>,
 ) -> Result<(), String> {
     let deps = adapters(root);
     let pipeline = Pipeline {
@@ -86,7 +89,7 @@ pub(super) fn verify_cached(
 }
 
 pub(super) fn sha256_file(path: &Path) -> Result<String, String> {
-    crate::units::provision::detail::fetch::sha256_file(path)
+    crate::units::business::provision::detail::fetch::sha256_file(path)
 }
 
 /// 目的：造一条任意 kind 的清单条目（组别名/缺项判定的用例夹具）。

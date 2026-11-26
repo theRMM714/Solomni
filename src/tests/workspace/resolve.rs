@@ -5,12 +5,12 @@
 
 use super::super::prelude::*;
 use super::support::*;
-use crate::units::session_model::api::SINGLE;
+use crate::units::business::session_model::api::SINGLE;
 
 /// 目的：两边都改时，人工合并后用 take=local 推进基线，提交成功且主副本拿到合并结果。
 #[test]
 pub(crate) fn work_resolve_local_marks_merged_result_and_commit_succeeds() {
-    use crate::units::workspace::api::ResolveAction;
+    use crate::units::business::workspace::api::ResolveAction;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -50,7 +50,7 @@ pub(crate) fn work_resolve_local_marks_merged_result_and_commit_succeeds() {
 /// 目的：上游删文件时，take=upstream 删本地并清基线；take=local 清基线、让本地成为新增。
 #[test]
 pub(crate) fn work_resolve_handles_upstream_deletion_by_side() {
-    use crate::units::workspace::api::{ResolveAction, ResolveTake};
+    use crate::units::business::workspace::api::{ResolveAction, ResolveTake};
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -110,7 +110,7 @@ pub(crate) fn work_resolve_handles_upstream_deletion_by_side() {
 /// 目的：本地没改过时 take=local 必须拒绝；head token 过期也必须拒绝，且都不留改动。
 #[test]
 pub(crate) fn work_resolve_local_rejects_unmerged_and_stale_head() {
-    use crate::units::workspace::api::{ResolveAction, ResolveRequest, ResolveTake};
+    use crate::units::business::workspace::api::{ResolveAction, ResolveRequest, ResolveTake};
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -158,7 +158,7 @@ pub(crate) fn work_resolve_local_rejects_unmerged_and_stale_head() {
 /// 目的：take=local 在“本地缺失 / 没有基线”时给出显式警告，但仍按既有契约执行。
 #[test]
 pub(crate) fn work_resolve_local_warns_when_local_missing_or_no_base() {
-    use crate::units::workspace::api::ResolveWarningKind;
+    use crate::units::business::workspace::api::ResolveWarningKind;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
@@ -189,9 +189,9 @@ pub(crate) fn work_resolve_local_warns_when_local_missing_or_no_base() {
 /// 目的：take=upstream 覆盖前把本地版本备份到 lost/；work_lost 能列出并按当前 hash 恢复。
 #[test]
 pub(crate) fn work_resolve_upstream_backs_up_and_work_lost_restores() {
-    use crate::units::workspace::api::content_hash;
-    use crate::units::workspace::api::{ResolveAction, ResolveTake};
-    use crate::units::workspace::ports::WorkStore;
+    use crate::units::business::workspace::api::content_hash;
+    use crate::units::business::workspace::api::{ResolveAction, ResolveTake};
+    use crate::units::business::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -266,7 +266,7 @@ pub(crate) fn work_resolve_upstream_backs_up_and_work_lost_restores() {
 /// 目的：上游删除时 take=upstream 也要先备份本地版本，再删沙箱文件。
 #[test]
 pub(crate) fn work_resolve_upstream_backs_up_before_removing_local() {
-    use crate::units::workspace::api::{ResolveAction, ResolveTake};
+    use crate::units::business::workspace::api::{ResolveAction, ResolveTake};
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -356,7 +356,7 @@ pub(crate) fn commit_ids_stay_monotonic_after_discard_and_restore() {
 /// 目的：提交收尾失败留下 pending；下一次 status 先恢复，再给出新 head。
 #[test]
 pub(crate) fn abandoned_commit_pending_is_recovered_by_next_status() {
-    use crate::units::workspace::ports::WorkStore;
+    use crate::units::business::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
@@ -389,7 +389,7 @@ pub(crate) fn abandoned_commit_pending_is_recovered_by_next_status() {
 /// 目的：一次失败后立即重放成功时，提交按成功返回。
 #[test]
 pub(crate) fn commit_pending_recovers_immediately_when_the_failure_clears() {
-    use crate::units::workspace::ports::WorkStore;
+    use crate::units::business::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
@@ -439,7 +439,7 @@ pub(crate) fn abandoned_restore_pending_is_recovered_by_next_head_read() {
 /// 目的：discard 先物化再删提交；崩溃后不会留下 dangling head，下一次操作补完删除。
 #[test]
 pub(crate) fn abandoned_discard_pending_keeps_head_valid_and_is_recovered() {
-    use crate::units::workspace::ports::WorkStore;
+    use crate::units::business::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let id1 = ws.work_commit_user("w", "a.txt", b"1", 1, 0).unwrap();
@@ -460,7 +460,7 @@ pub(crate) fn abandoned_discard_pending_keeps_head_valid_and_is_recovered() {
 /// 目的：对象回收只删不可达对象；只被 agent 基线引用的对象、以及可达提交树的对象都要保留。
 #[test]
 pub(crate) fn work_gc_keeps_index_and_commit_objects_and_removes_the_rest() {
-    use crate::units::workspace::ports::WorkStore;
+    use crate::units::business::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let root = ws.roots("w", &[]).unwrap().store;
@@ -484,7 +484,10 @@ pub(crate) fn work_gc_keeps_index_and_commit_objects_and_removes_the_rest() {
     assert_eq!(dry.ignored_files, 1);
     assert!(
         store
-            .read_object(&root, &crate::units::workspace::api::content_hash(b"g1"))
+            .read_object(
+                &root,
+                &crate::units::business::workspace::api::content_hash(b"g1")
+            )
             .is_ok()
     );
 
@@ -494,13 +497,19 @@ pub(crate) fn work_gc_keeps_index_and_commit_objects_and_removes_the_rest() {
     assert_eq!(applied.removed_ignored, 1);
     assert!(
         store
-            .read_object(&root, &crate::units::workspace::api::content_hash(b"g1"))
+            .read_object(
+                &root,
+                &crate::units::business::workspace::api::content_hash(b"g1")
+            )
             .is_err(),
         "g1 应被回收"
     );
     assert!(
         store
-            .read_object(&root, &crate::units::workspace::api::content_hash(b"g2"))
+            .read_object(
+                &root,
+                &crate::units::business::workspace::api::content_hash(b"g2")
+            )
             .is_ok(),
         "基线引用的 g2 必须保留"
     );
@@ -595,7 +604,7 @@ pub(crate) fn agent_sandboxes_from_a_work_are_read_only_for_the_shared_area() {
 /// 约束：留档/回档不删提交，删引用才省空间。
 #[test]
 pub(crate) fn work_gc_reclaims_commits_only_after_refs_drop() {
-    use crate::units::workspace::ports::WorkStore;
+    use crate::units::business::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "a.md", b"1", 1, 0).unwrap();

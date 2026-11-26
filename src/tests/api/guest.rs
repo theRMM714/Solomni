@@ -1,30 +1,33 @@
 //! 目的：guest 诊断动作——只给人，报告原样带出，缺 guest 如实拒绝。
 //! 管：目录可见性、报告字段映射、缺 lease 的错误。
 //! 不管：虚拟机档实现（`src/tests/vm/`）、动作分发（`tools.rs`）。
-//! 联动：`src/units/vm/domain/diagnose.rs` 与 `src/units/runtime/api/action.rs`。
+//! 联动：`src/units/business/vm/domain/diagnose.rs` 与 `src/units/business/runtime/api/action.rs`。
 
 use super::super::builders::{agent_meta, seed_session, vm_spec};
 use super::super::doubles::InMemoryHistory;
 use super::super::doubles::module_of;
 use super::super::{ops_with, ops_with_vm};
-use crate::units::runtime::api::{Acted, ActionCall, Caller};
-use crate::units::session_model::api::{PROXY, SINGLE};
-use crate::units::turn::turn::api::Output;
+use crate::units::business::runtime::api::{Acted, ActionCall, Caller};
+use crate::units::business::session_model::api::{PROXY, SINGLE};
+use crate::units::business::turn::turn::api::Output;
 use std::sync::Arc;
 
 struct DiagnosingVm {
-    report: crate::units::vm::api::GuestDiagnosis,
+    report: crate::units::business::vm::api::GuestDiagnosis,
 }
 
-impl crate::units::vm::api::Vm for DiagnosingVm {
-    fn guest_start(&self, _spec: &crate::units::vm::api::GuestSpec) -> Result<(), String> {
+impl crate::units::business::vm::api::Vm for DiagnosingVm {
+    fn guest_start(
+        &self,
+        _spec: &crate::units::business::vm::api::GuestSpec,
+    ) -> Result<(), String> {
         Ok(())
     }
 
     fn guest_run(
         &self,
         _lease: &str,
-        _run: &crate::units::vm::api::GuestRun,
+        _run: &crate::units::business::vm::api::GuestRun,
     ) -> crate::kernel::api::types::ToolOutcome {
         crate::kernel::api::types::ToolOutcome::new(false, "替身不跑命令".to_string())
     }
@@ -32,7 +35,7 @@ impl crate::units::vm::api::Vm for DiagnosingVm {
     fn guest_run_fenced(
         &self,
         _lease: &str,
-        _run: &crate::units::vm::api::GuestRun,
+        _run: &crate::units::business::vm::api::GuestRun,
         _fence: &crate::kernel::api::fence::FencePlan,
     ) -> crate::kernel::api::types::ToolOutcome {
         crate::kernel::api::types::ToolOutcome::new(false, "替身不跑命令".to_string())
@@ -67,13 +70,13 @@ impl crate::units::vm::api::Vm for DiagnosingVm {
     fn guest_diagnose(
         &self,
         _lease: &str,
-    ) -> Result<crate::units::vm::api::GuestDiagnosis, String> {
+    ) -> Result<crate::units::business::vm::api::GuestDiagnosis, String> {
         Ok(self.report.clone())
     }
 }
 
-fn sample_diagnosis(lease: &str) -> crate::units::vm::api::GuestDiagnosis {
-    use crate::units::vm::domain::diagnose as va;
+fn sample_diagnosis(lease: &str) -> crate::units::business::vm::api::GuestDiagnosis {
+    use crate::units::business::vm::domain::diagnose as va;
     va::GuestDiagnosis {
         lease: lease.to_string(),
         uptime_secs: 1234.5,
@@ -189,7 +192,7 @@ fn guest_diagnose_returns_the_guest_report_and_names_missing_guests() {
         Default::default(),
     );
     seed_session(&hist, "p", PROXY, Vec::new(), vm_spec());
-    let vm: Arc<dyn crate::units::vm::api::Vm + Send + Sync> = Arc::new(DiagnosingVm {
+    let vm: Arc<dyn crate::units::business::vm::api::Vm + Send + Sync> = Arc::new(DiagnosingVm {
         report: sample_diagnosis("vmw"),
     });
     let (_h, faces) = ops_with_vm(vec![module_of("a")], Arc::clone(&hist), vm);

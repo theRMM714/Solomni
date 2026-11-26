@@ -1,13 +1,13 @@
 # residents（常驻服务）
 
 > 定位：模块声明的常驻外部服务（按行 JSON-RPC 一类，当前 MCP stdio）的统一管理——拉起、发现操作、调用、停止、按租约回收。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/residents/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/residents/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
 - 管：常驻服务的注册表与运行态（启动 / 停止、崩溃检测、租约回收）、操作发现与调用的统一入口（`api::ResidentOps`）、协议适配器端口（`ports::ServiceAdapter`）。
-- 不管：任何具体协议（当前 MCP stdio 在 `src/units/residents/detail/mcp.rs`，只由组合根构造）。
+- 不管：任何具体协议（当前 MCP stdio 在 `src/units/business/residents/detail/mcp.rs`，只由组合根构造）。
 - 不管：进程与围栏机制（在 kernel）。
 - 不管：**启停有效值与落盘（归 `modules`）**；模块声明与契约（在 `modules`）。
 

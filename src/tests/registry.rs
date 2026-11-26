@@ -5,7 +5,7 @@
 
 use super::builders::*;
 use super::prelude::*;
-use crate::units::session_model::api::{MEETING, SINGLE};
+use crate::units::business::session_model::api::{MEETING, SINGLE};
 
 #[test]
 pub(crate) fn settings_resolves_model_to_channel() {
@@ -281,7 +281,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
 // ---------- 模块清单（内存来源） ----------
 #[test]
 pub(crate) fn a_probe_writes_back_only_conclusive_results() {
-    use crate::units::llm::api::ProbeOutcome;
+    use crate::units::business::llm::api::ProbeOutcome;
     use crate::units::pure::registry_model::api::ToolMode;
     let fresh = |outcome: ProbeOutcome| {
         let mut core = core_with_gateway(

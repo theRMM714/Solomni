@@ -1,7 +1,7 @@
 # 单元地图 · vm
 
 > 定位：vm（虚拟机档）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-25｜依据：`src/units/vm/api.rs`
+> 效力：契约｜核对：2026-11-25｜依据：`src/units/business/vm/api.rs`
 
 > 本文是 **vm** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -9,22 +9,22 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/units/vm/api.rs` | 入站面：`Vm` 用例 trait（guest 生命周期与 `guest_diagnose` 只读诊断）与档位、计划、入口诊断、就绪检测的重导出 |
-| `src/units/vm/service/job.rs` | 销毁任务 `GuestStop`：按租约清单逐条 `guest_stop`（幂等），只装参数不做事，`run` 由调用方线程执行 |
-| `src/units/vm/service/plan.rs` | 运行计划派生：宿主 / guest 包选型、模块可用性与路径翻译器；纯函数，root / 宿主探针 / 包库 / 模块声明都走形参 |
-| `src/units/vm/service.rs` | 用例与端口持有者：持 `VmEngine` / `ShareBackend`（R12），按租约管理 guest（每租约一把锁：跨租约并行、同一租约串行）；`guest_diagnose` 用只读系统允许集走 helper 诊断模式并如实区分失败原因 |
-| `src/units/vm/ports.rs` | 出站端口：`VmEngine` / `GuestVm` / `GuestChannel`（起 / 跑 / 销毁 guest）与 `ShareBackend` / `SharePlan`（宿主↔guest 共享） |
-| `src/units/vm/domain/diagnose.rs` | guest 只读诊断的纯逻辑：报告结构（键与 helper 输出一一对应）、`parse_report` 的合法性判定，以及失败原因文案（没有活 guest / 非 Linux guest / 通道不通 / helper 不可用 / 缺 python3 / 超时 / 执行失败 / 输出不可解析） |
-| `src/units/vm/domain/exec.rs` | 执行档位诊断、执行计划派生（消费 `PackagePlan`）、承载判定、就绪检测与并发准入（纯逻辑；hypervisor 提示与类型用 kernel 平台事实） |
-| `src/units/vm/domain/guest.rs` | guest 镜像判定（`GuestImage`）、挂载清单、prefix 软链与 system 叠写脚本、`GuestRun` 的按次超时与输出上限选项（传输/内存护栏，模型可见的截断在宿主预算；纯逻辑，宿主架构用 kernel 平台事实） |
-| `src/units/vm/domain/paths.rs` | 宿主 ↔ guest 路径桥（恒等 / 镜像根，可逆；盘符与 UNC 各有单射编码，纯逻辑） |
-| `src/units/vm/domain/tool.rs` | 外部工具的位置事实（`ToolPath` / `VmTools` / `ToolSource`）：登记值与项目内补齐那份的优先序，以及"这次用的是哪一份"的如实标注（纯值，不解析路径、不判可执行） |
-| `src/units/vm/detail/guest_helper.rs` | Linux guest 内执行助手：脚本文本、装进 guest、按 host 翻好的允许集走 Landlock + no_new_privs、按策略 `timeout_secs` 杀树；缺失/装不上 fail-closed |
-| `src/units/vm/detail/qemu.rs` | `VmEngine` 的 QEMU 实现：基础参数（加速器、内存、内核、串口与 QGA、首启种子；加速器与可执行名用 kernel 平台事实）、按需用 qemu-img 建每租约可写层、启动与销毁 |
-| `src/units/vm/detail/qemu/qga.rs` | `GuestChannel` / `GuestVm` 的 QGA 通道实现：一次 boot 的连接与重连、JSON 收发、guest 命令回执（按次超时与输出上限护栏）、文件搬运与收尾 |
-| `src/units/vm/detail/qemu/seed.rs` | 首启种子的小 HTTP 服务（cloud-init NoCloud net）：只认 `/user-data` 与 `/meta-data`，随 boot 收掉 |
-| `src/units/vm/detail/copy.rs` | `ShareBackend` 的 QGA 复制实现（仅开发/应急）：建目录脚本与宿主侧 tar 打包/解包（按趟同步；不参与用户链，实时共享是 `share_smb.rs` / `share_virtiofs.rs`） |
-| `src/units/vm/detail/share_ninep.rs` | `ShareBackend` 的 9p 实现：-fsdev / -device 参数与 guest 端 mount 脚本 |
-| `src/units/vm/detail/share_none.rs` | `ShareBackend` 的内部无共享实现：空计划、无同步，只给供给编排 |
-| `src/units/vm/detail/share_virtiofs.rs` | `ShareBackend` 的 virtiofs 实现：起停 virtiofsd（vhost-user 守护进程，按进程组清理，收树经 `kernel::api::kill_tree`）、-chardev / vhost-user-fs-pci 参数与 guest 端 mount 脚本 |
-| `src/units/vm/detail/share_smb.rs` | `ShareBackend` 的 SMB 实现：探测/起停用户态 smbd helper（匿名共享，凭据随租约回收）、guestfwd 隧道参数与 guest 端 mount -t cifs 脚本 |
+| `src/units/business/vm/api.rs` | 入站面：`Vm` 用例 trait（guest 生命周期与 `guest_diagnose` 只读诊断）与档位、计划、入口诊断、就绪检测的重导出 |
+| `src/units/business/vm/service/job.rs` | 销毁任务 `GuestStop`：按租约清单逐条 `guest_stop`（幂等），只装参数不做事，`run` 由调用方线程执行 |
+| `src/units/business/vm/service/plan.rs` | 运行计划派生：宿主 / guest 包选型、模块可用性与路径翻译器；纯函数，root / 宿主探针 / 包库 / 模块声明都走形参 |
+| `src/units/business/vm/service.rs` | 用例与端口持有者：持 `VmEngine` / `ShareBackend`（R12），按租约管理 guest（每租约一把锁：跨租约并行、同一租约串行）；`guest_diagnose` 用只读系统允许集走 helper 诊断模式并如实区分失败原因 |
+| `src/units/business/vm/ports.rs` | 出站端口：`VmEngine` / `GuestVm` / `GuestChannel`（起 / 跑 / 销毁 guest）与 `ShareBackend` / `SharePlan`（宿主↔guest 共享） |
+| `src/units/business/vm/domain/diagnose.rs` | guest 只读诊断的纯逻辑：报告结构（键与 helper 输出一一对应）、`parse_report` 的合法性判定，以及失败原因文案（没有活 guest / 非 Linux guest / 通道不通 / helper 不可用 / 缺 python3 / 超时 / 执行失败 / 输出不可解析） |
+| `src/units/business/vm/domain/exec.rs` | 执行档位诊断、执行计划派生（消费 `PackagePlan`）、承载判定、就绪检测与并发准入（纯逻辑；hypervisor 提示与类型用 kernel 平台事实） |
+| `src/units/business/vm/domain/guest.rs` | guest 镜像判定（`GuestImage`）、挂载清单、prefix 软链与 system 叠写脚本、`GuestRun` 的按次超时与输出上限选项（传输/内存护栏，模型可见的截断在宿主预算；纯逻辑，宿主架构用 kernel 平台事实） |
+| `src/units/business/vm/domain/paths.rs` | 宿主 ↔ guest 路径桥（恒等 / 镜像根，可逆；盘符与 UNC 各有单射编码，纯逻辑） |
+| `src/units/business/vm/domain/tool.rs` | 外部工具的位置事实（`ToolPath` / `VmTools` / `ToolSource`）：登记值与项目内补齐那份的优先序，以及"这次用的是哪一份"的如实标注（纯值，不解析路径、不判可执行） |
+| `src/units/business/vm/detail/guest_helper.rs` | Linux guest 内执行助手：脚本文本、装进 guest、按 host 翻好的允许集走 Landlock + no_new_privs、按策略 `timeout_secs` 杀树；缺失/装不上 fail-closed |
+| `src/units/business/vm/detail/qemu.rs` | `VmEngine` 的 QEMU 实现：基础参数（加速器、内存、内核、串口与 QGA、首启种子；加速器与可执行名用 kernel 平台事实）、按需用 qemu-img 建每租约可写层、启动与销毁 |
+| `src/units/business/vm/detail/qemu/qga.rs` | `GuestChannel` / `GuestVm` 的 QGA 通道实现：一次 boot 的连接与重连、JSON 收发、guest 命令回执（按次超时与输出上限护栏）、文件搬运与收尾 |
+| `src/units/business/vm/detail/qemu/seed.rs` | 首启种子的小 HTTP 服务（cloud-init NoCloud net）：只认 `/user-data` 与 `/meta-data`，随 boot 收掉 |
+| `src/units/business/vm/detail/copy.rs` | `ShareBackend` 的 QGA 复制实现（仅开发/应急）：建目录脚本与宿主侧 tar 打包/解包（按趟同步；不参与用户链，实时共享是 `share_smb.rs` / `share_virtiofs.rs`） |
+| `src/units/business/vm/detail/share_ninep.rs` | `ShareBackend` 的 9p 实现：-fsdev / -device 参数与 guest 端 mount 脚本 |
+| `src/units/business/vm/detail/share_none.rs` | `ShareBackend` 的内部无共享实现：空计划、无同步，只给供给编排 |
+| `src/units/business/vm/detail/share_virtiofs.rs` | `ShareBackend` 的 virtiofs 实现：起停 virtiofsd（vhost-user 守护进程，按进程组清理，收树经 `kernel::api::kill_tree`）、-chardev / vhost-user-fs-pci 参数与 guest 端 mount 脚本 |
+| `src/units/business/vm/detail/share_smb.rs` | `ShareBackend` 的 SMB 实现：探测/起停用户态 smbd helper（匿名共享，凭据随租约回收）、guestfwd 隧道参数与 guest 端 mount -t cifs 脚本 |

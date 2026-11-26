@@ -5,7 +5,7 @@
 
 use super::super::prelude::*;
 
-pub(crate) type WorkFace = Arc<dyn crate::units::workspace::api::Workspace + Send + Sync>;
+pub(crate) type WorkFace = Arc<dyn crate::units::business::workspace::api::Workspace + Send + Sync>;
 
 /// 目的：装配一个只用内存端口的工作区入站面：目录布局 + 版本库都是内存替身。
 pub(crate) fn work_ws() -> (WorkFace, Arc<InMemoryWorkspace>, Arc<InMemoryWorkStore>) {
@@ -20,8 +20,8 @@ pub(crate) fn commit_req(
     deletes: &[&str],
     message: &str,
     time: i64,
-) -> crate::units::workspace::api::CommitRequest {
-    crate::units::workspace::api::CommitRequest {
+) -> crate::units::business::workspace::api::CommitRequest {
+    crate::units::business::workspace::api::CommitRequest {
         paths: paths.iter().map(|s| s.to_string()).collect(),
         deletes: deletes.iter().map(|s| s.to_string()).collect(),
         message: message.to_string(),
@@ -32,9 +32,9 @@ pub(crate) fn commit_req(
 
 pub(crate) fn resolve_req(
     paths: &[&str],
-    take: crate::units::workspace::api::ResolveTake,
-) -> crate::units::workspace::api::ResolveRequest {
-    crate::units::workspace::api::ResolveRequest {
+    take: crate::units::business::workspace::api::ResolveTake,
+) -> crate::units::business::workspace::api::ResolveRequest {
+    crate::units::business::workspace::api::ResolveRequest {
         paths: paths.iter().map(|s| s.to_string()).collect(),
         take,
         expect_head: None,
@@ -46,8 +46,8 @@ pub(crate) fn push_req(
     message: &str,
     time: i64,
     line: u64,
-) -> crate::units::workspace::api::PushRequest {
-    crate::units::workspace::api::PushRequest {
+) -> crate::units::business::workspace::api::PushRequest {
+    crate::units::business::workspace::api::PushRequest {
         message: message.to_string(),
         time,
         line,
@@ -61,13 +61,13 @@ pub(crate) fn sync_at(
     paths: &[&str],
     time: i64,
     line: u64,
-) -> Result<crate::units::workspace::api::SyncReport, String> {
+) -> Result<crate::units::business::workspace::api::SyncReport, String> {
     let paths: Vec<String> = paths.iter().map(|s| s.to_string()).collect();
     ws.work_sync(
         work,
         &paths,
         time,
-        crate::units::workspace::api::CommitAnchor {
+        crate::units::business::workspace::api::CommitAnchor {
             agent: String::new(),
             session: String::new(),
             line,
@@ -83,7 +83,7 @@ pub(crate) fn push(
     message: &str,
     time: i64,
     line: u64,
-) -> Result<crate::units::workspace::api::PushReport, String> {
+) -> Result<crate::units::business::workspace::api::PushReport, String> {
     ws.work_push(
         work,
         agent,
@@ -97,10 +97,10 @@ pub(crate) fn resolve_local_req(
     ws: &WorkFace,
     work: &str,
     paths: &[&str],
-) -> crate::units::workspace::api::ResolveRequest {
-    crate::units::workspace::api::ResolveRequest {
+) -> crate::units::business::workspace::api::ResolveRequest {
+    crate::units::business::workspace::api::ResolveRequest {
         paths: paths.iter().map(|s| s.to_string()).collect(),
-        take: crate::units::workspace::api::ResolveTake::Local,
+        take: crate::units::business::workspace::api::ResolveTake::Local,
         expect_head: ws.work_head(work).unwrap(),
     }
 }

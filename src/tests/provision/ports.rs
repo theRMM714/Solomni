@@ -1,12 +1,12 @@
 //! 目的：provision 端口实现的用例——宿主文件系统、台账、取数与进程账。
 //! 管：`detail::host` / `detail::ledger` / `detail::fetch` / `detail::procs` 的契约。
 //! 不管：编排与镜像（见 `service.rs`、`image.rs`）。
-//! 联动：被测实现是 `units::provision::detail` 的各端口适配器。
+//! 联动：被测实现是 `units::business::provision::detail` 的各端口适配器。
 
-use crate::units::provision::detail::fetch::HttpFetch;
-use crate::units::provision::detail::host::RealHost;
-use crate::units::provision::detail::procs::BookProcs;
-use crate::units::provision::ports::{Fetcher, HostFs, Procs};
+use crate::units::business::provision::detail::fetch::HttpFetch;
+use crate::units::business::provision::detail::host::RealHost;
+use crate::units::business::provision::detail::procs::BookProcs;
+use crate::units::business::provision::ports::{Fetcher, HostFs, Procs};
 use std::fs;
 
 /// 目的：宿主落点端口的契约——建、查、删都能在临时根上往返，静默失败即不成立。

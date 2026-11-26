@@ -1,6 +1,6 @@
 //! 目的：一份生效权限——只剩网络开关；文件面由围栏按固定规则推导，共享区路径归属在 workspace。
 //! 管：`PermissionSet` 的构造与父子两层合并（根可换档，子只能更严）。
-//! 不管：声明形状（`profile.rs`）、共享区范围（units/workspace/domain/scope.rs）。
+//! 不管：声明形状（`profile.rs`）、共享区范围（units/business/workspace/domain/scope.rs）。
 //! 联动：workspace 装配 `Sandbox`、tools 派生围栏都读它（docs/permission/README.md）。
 
 use serde::Serialize;

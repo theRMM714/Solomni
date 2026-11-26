@@ -14,7 +14,7 @@
   └──▶ 环 3 用例 ──▶ 环 2 状态与机制 ──▶ 环 1 纯 ──▶ 环 0 kernel
 ```
 
-- **环是架构地位，路径只编码「角色」**。谁在哪个环只由 `layers.yaml` 决定；路径只回答「这一类单元是什么」：环 1 的纯单元住 `src/units/pure/<单元>/`，盘主单元住 `src/units/resource/<单元>/`，其余单元平铺 `src/units/<单元>/`。两个桶各自双向判：`src/units/pure/` 下的目录必须正好是环 1，环 1 的单元也必须住在这里（判据：`tests/gates/structure/layers.js` 的 `shapeProblems`）；`src/units/resource/` 只收盘主，盘面归属由主人表判（判据：`tests/gates/structure/disk-owners.js`，口径见 [io.md](io.md)）。桶编号角色、不编号环——换环只改一行表，不会引发全量改名，也不会出现「路径与表两个权威」。门禁认单元名一律走 `tests/gates/structure/unitpath.js`（`unitOfPath` / `unitOfModule` / `unitDir` / `BUCKETS`），禁止位次假设。
+- **环是架构地位，路径只编码「角色」**。谁在哪个环只由 `layers.yaml` 决定；路径只回答「这一类单元是什么」，三桶各收一类角色：环 1 的纯单元住 `src/units/pure/<单元>/`，盘主单元住 `src/units/resource/<单元>/`，其余业务单元（有副作用、有状态或编排用例）住 `src/units/business/<单元>/`，顶层不再有平铺单元——`business` 同时住环 2 与环 3 的单元，正是「桶不编码环」的证据。三桶各自双向判：`src/units/pure/` 下的目录必须正好是环 1，环 1 的单元也必须住在这里（判据：`tests/gates/structure/layers.js` 的 `shapeProblems`）；`src/units/resource/` 只收盘主，盘面归属由主人表判（判据：`tests/gates/structure/disk-owners.js`，口径见 [io.md](io.md)）；每个单元恰好住一个桶、`src/units/` 下只许三个桶（判据：`tests/gates/structure/unit-buckets.js`）。桶编号角色、不编号环——换环只改一行表，不会引发全量改名，也不会出现「路径与表两个权威」。门禁认单元名一律走 `tests/gates/structure/unitpath.js`（`unitOfPath` / `unitOfModule` / `unitDir` / `BUCKETS`），禁止位次假设。
 - **环 1 的判据是「无 IO、无状态、无端口、可穷举测试」**，不是「没有业务语义」。权限判定、任务链推演这类有领域词但全部可穷举的规则就该在环 1；否则它们无家可归，只能被各切片复制一遍（违反 R13）；纯层判据由 `tests/gates/structure/layers.js` 的 `pureProblems` 机器判定。按**概念**切（transcript、session-model、registry-model），不按类型切。
 - **环 2 与环 3 的区别是「有没有流程」**：环 2 持有状态或与外界打交道（存储、进程、通道、登记处）；环 3 是一个用例一条流程（work、lifecycle、turn-flow、collab…），流程、事务、补偿留在用例，适配器只做翻译与一行调用。
 - **同环有先后，但不是层**：机制栈天然有序（agentloop → tools → workspace；work → vm）。这个先后由同环边算成 rank，只回执、不设预算；门禁只要求同环边指向 rank 更低的单元，即同环无环。
@@ -60,7 +60,7 @@
 - **同环互用只有三种正当处置**：合并成一个单元、把被引的形状下沉到环 1、端口反转（内层声明、外层实现）。
 
 ## 四、单元与子业务的分工
-- 单元是**归环与门禁的单位**（`layers.yaml` 一行一个，rank 与扇出按它算，`src/units/[桶/]<单元>/` 与 `src/units/[桶/]<单元>.rs` 成对出现；环 1 必须住 `pure`、盘主必须住 `resource`，见上文与 [io.md](io.md)）。
+- 单元是**归环与门禁的单位**（`layers.yaml` 一行一个，rank 与扇出按它算，`src/units/<桶>/<单元>/` 与 `src/units/<桶>/<单元>.rs` 成对出现；环 1 必须住 `pure`、盘主必须住 `resource`、其余住 `business`，见上文与 [io.md](io.md)）。
 - 子业务是**业务功能的垂直切分**：`<单元>/<子业务>/`、`docs/<子业务>/`、`src/tests/<子业务>.rs` 都按它走（R10）。
 - 合并单元只搬目录、不改子业务内部的分区与 `super::` 语义；单元不写实现，只声明子业务。
 - **状态不参与归环**：环只回答「能依赖谁」，状态归谁见 [state.md](state.md)。

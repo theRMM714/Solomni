@@ -1,7 +1,7 @@
 //! 目的：命令队列——把一份核心状态搬到它自己的线程上，命令按到达顺序逐条执行。
 //! 管：线程的起与退、命令的「取 / 交 / 回包」、一条命令 panic 不带走整个核心。
 //! 不管：核心状态是什么（由调用方给）、停止与取消（`JobRegistry` 承担、不进队列）、命令的业务语义。
-//! 联动：由 `src/kernel/api.rs` 重导出；核心手柄（`src/units/runtime/api/handle.rs`）持有一个 `Actor<Core>`。
+//! 联动：由 `src/kernel/api.rs` 重导出；核心手柄（`src/units/business/runtime/api/handle.rs`）持有一个 `Actor<Core>`。
 
 use crate::kernel::ports::Log;
 use std::panic::{AssertUnwindSafe, catch_unwind};

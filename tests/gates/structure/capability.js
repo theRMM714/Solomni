@@ -35,7 +35,7 @@ const PATH_PROBE = /\.(is_dir|is_file|exists|read_dir|symlink_metadata)\s*\(/;
 const PORT_PROBE = /\b(?:probe|host|io|dirs|sessions|fs|files)\s*\.\s*(?:is_dir|is_file|exists|read_dir|symlink_metadata)\s*\(/g;
 
 /** 单元内的实现分区：api / service / domain / detail；其余（单元根 X.rs、guest.rs 这类）不归这些判据管。
- *  单元与子业务之间可以多一层目录（如 units/conversation/session/domain），判据取路径里第一个分区段。 */
+ *  单元与子业务之间可以多一层目录（如 units/business/conversation/session/domain），判据取路径里第一个分区段。 */
 function scopeOf(f) {
   const parts = f.split("/");
   if (parts[0] !== "src" || parts[1] !== "units" || parts.length < 4) return null;

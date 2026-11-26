@@ -5,10 +5,10 @@
 
 use crate::kernel::api::net::{self, Answer, Call};
 use crate::presentation::faces::Faces;
-use crate::units::runtime::api::{Acted, ActionCall, Caller};
-use crate::units::transcript::api::SessionEvent;
-use crate::units::turn::turn::api::Output;
-use crate::units::workspace::api::MAX_ASSET_BYTES;
+use crate::units::business::runtime::api::{Acted, ActionCall, Caller};
+use crate::units::business::transcript::api::SessionEvent;
+use crate::units::business::turn::turn::api::Output;
+use crate::units::business::workspace::api::MAX_ASSET_BYTES;
 pub(crate) mod assets;
 mod host_fs;
 pub mod routes;
@@ -169,7 +169,7 @@ const POLL_TICK: Duration = Duration::from_millis(300);
 pub(crate) fn route(
     faces: &Faces,
     fence: &FenceInfo,
-    log: &Arc<dyn crate::units::runtime::api::LogOps + Send + Sync>,
+    log: &Arc<dyn crate::units::business::runtime::api::LogOps + Send + Sync>,
     method: &str,
     url: &str,
     body: &str,
@@ -271,7 +271,7 @@ pub(crate) fn route(
                         && let Ok(s) = faces.registry.settings()
                     {
                         faces.storage.set_policy(
-                            crate::units::maintenance::storage::api::StoragePolicy::from(
+                            crate::units::business::maintenance::storage::api::StoragePolicy::from(
                                 &s.storage,
                             ),
                         );
@@ -368,7 +368,7 @@ pub(crate) fn route(
             Ok((meta, events)) => {
                 let (live, head) = faces.events.tail_excluding(&name, &events);
                 // 状态栏的 shell 快照按转录派生：回放 / 重建 / 重启后前端不再"没有 chip 可画"。
-                let shell = crate::units::agentloop::api::last_shell(&events);
+                let shell = crate::units::business::agentloop::api::last_shell(&events);
                 ok_json(
                     json!({ "meta": meta, "events": events, "live": live, "head": head, "shell": shell }),
                 )
@@ -455,9 +455,9 @@ pub(crate) fn route(
                 Ok(v) => v,
                 Err(e) => return complaint(400, e),
             };
-            let kind = match crate::units::maintenance::storage::api::CleanKind::parse(&str_field(
-                &req, "kind",
-            )) {
+            let kind = match crate::units::business::maintenance::storage::api::CleanKind::parse(
+                &str_field(&req, "kind"),
+            ) {
                 Ok(k) => k,
                 Err(e) => return complaint(400, e),
             };
@@ -477,7 +477,7 @@ pub(crate) fn route(
                 .get("confirm")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            let req = crate::units::maintenance::storage::api::CleanRequest {
+            let req = crate::units::business::maintenance::storage::api::CleanRequest {
                 kind,
                 id,
                 module,
@@ -646,7 +646,7 @@ fn state_json(faces: &Faces, fence: &FenceInfo) -> Result<serde_json::Value, Str
         .map(|v| serde_json::to_value(&v).unwrap_or_else(|_| json!({})))
         .collect();
     let settings = faces.registry.settings()?;
-    let lang = crate::units::runtime::api::i18n::pick(&settings.lang);
+    let lang = crate::units::business::runtime::api::i18n::pick(&settings.lang);
     Ok(json!({
         "modules": roster.modules.iter().map(|m| json!({
             "id": m.manifest.id,
@@ -686,8 +686,8 @@ fn state_json(faces: &Faces, fence: &FenceInfo) -> Result<serde_json::Value, Str
         // 回执说明的界面词表：语言按设置协商，模板源文本由后端给（前端只做参数替换）。
         "i18n": {
             "lang": lang.tag(),
-            "available": crate::units::runtime::api::i18n::available(),
-            "messages": crate::units::runtime::api::i18n::messages(lang)
+            "available": crate::units::business::runtime::api::i18n::available(),
+            "messages": crate::units::business::runtime::api::i18n::messages(lang)
                 .into_iter()
                 .collect::<std::collections::BTreeMap<_, _>>(),
         },
