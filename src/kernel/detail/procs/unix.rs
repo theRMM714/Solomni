@@ -4,6 +4,7 @@
 //! 联动：由 `src/kernel/detail/procs.rs` 在非 Windows 目标选中。
 
 use super::*;
+use crate::kernel::detail::io::env;
 use std::process::Command;
 
 /// 目的：Unix 起独立进程组；Linux 另挂内核级父死子亡信号。
@@ -89,7 +90,7 @@ pub(super) fn watch(child: &Child) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         use std::os::unix::process::CommandExt;
-        let started = std::env::current_exe()
+        let started = env::current_exe()
             .map_err(|e| format!("取不到本程序路径（{}）", e))
             .and_then(|exe| {
                 let mut cmd = Command::new(exe);

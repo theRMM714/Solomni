@@ -5,6 +5,7 @@
 
 use super::UNFENCED_GUEST_RUN_SECS;
 use super::seed::SeedServer;
+use crate::kernel::api::net;
 use crate::kernel::api::process::Daemon;
 use crate::kernel::api::types::ToolOutcome;
 use crate::kernel::domain::receipt::{ShellEnd, shell_receipt};
@@ -15,28 +16,19 @@ use std::net::TcpStream;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+/// 目的：在预算内等 QGA 通道可连；QEMU 一到就被判死时把它的退出码带出去。
 pub(super) fn connect_within(
     port: u16,
     budget: Duration,
     mut child: Option<&mut Daemon>,
 ) -> Result<TcpStream, String> {
-    let deadline = Instant::now() + budget;
-    loop {
-        match TcpStream::connect(("127.0.0.1", port)) {
-            Ok(s) => return Ok(s),
-            Err(e) => {
-                if let Some(proc) = child.as_deref_mut()
-                    && let Some(status) = proc.try_wait()
-                {
-                    return Err(format!("QEMU 进程已退出（{}）：{}", status, e));
-                }
-                if Instant::now() >= deadline {
-                    return Err(format!("等 QGA 通道超时（端口 {}）：{}", port, e));
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-        }
-    }
+    let mut gone = || {
+        child
+            .as_mut()
+            .and_then(|proc| proc.try_wait())
+            .map(|status| format!("QEMU 进程已退出（{}）", status))
+    };
+    net::await_loopback(port, "QGA 通道", budget, &mut gone)
 }
 
 pub(super) struct QemuHandle {

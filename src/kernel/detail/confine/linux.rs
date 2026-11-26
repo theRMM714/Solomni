@@ -8,6 +8,7 @@
 
 use super::{Capability, FENCE_FAILED, FenceVerdict, shell_command};
 use crate::kernel::contracts::fence::{Access, FencePlan};
+use crate::kernel::detail::io::env;
 use crate::kernel::detail::launch::interpreter_dirs;
 use std::ffi::CString;
 use std::os::raw::c_int;
@@ -354,7 +355,7 @@ fn landlock_confines() -> bool {
 /// 子进程退出码：0 = 读到了（没约束）、1 = 被挡住（机制有效）、2 = 装不上（无法判定）。
 fn landlock_confines_probe() -> bool {
     let canary =
-        std::env::temp_dir().join(format!("solomni-landlock-selfcheck-{}", std::process::id()));
+        env::temp_dir().join(format!("solomni-landlock-selfcheck-{}", std::process::id()));
     if std::fs::write(&canary, "canary").is_err() {
         return false;
     }

@@ -4,9 +4,10 @@
 //! 联动：容器名与 SID 派生在 container.rs；ACE 的读法在 acl.rs；台账写事务在 store.rs。
 
 use super::super::*;
+use crate::kernel::detail::io::env;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::MetadataExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use windows_sys::Win32::Security::Isolation::DeleteAppContainerProfile;
 use windows_sys::Win32::Security::PSID;
 
@@ -45,10 +46,10 @@ pub(crate) fn record_profile(root: &Path, name: &str, lease: &str) {
 /// 目的：本程序建过的容器 profile 名（Windows 把包目录名转小写，按前缀不区分大小写筛）。
 /// 约束：profile 可能来自没有台账的路径（探针、夹具的台账被删、进程被杀），所以按名字前缀扫。
 pub(crate) fn our_profile_names() -> Result<Vec<String>, String> {
-    let root = match std::env::var_os("LOCALAPPDATA") {
-        Some(v) => PathBuf::from(v).join("Packages"),
-        None => return Err("取不到 LOCALAPPDATA（容器 profile 的存储根）".to_string()),
+    let Some(root) = env::local_app_data() else {
+        return Err("取不到 LOCALAPPDATA（容器 profile 的存储根）".to_string());
     };
+    let root = root.join("Packages");
     let entries = match std::fs::read_dir(&root) {
         Ok(e) => e,
         // 没有 Packages 目录 = 本机没有容器 profile。

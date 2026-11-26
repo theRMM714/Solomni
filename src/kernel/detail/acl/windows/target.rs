@@ -4,6 +4,7 @@
 //! 联动：confine 的 prepare_fence 用这份清单逐条授权（解释器目录由调用方算好、经 launch 解析）。
 
 use super::*;
+use crate::kernel::detail::io::env;
 use crate::kernel::domain::layout;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -86,7 +87,7 @@ pub(crate) fn grant_targets(plan: &FencePlan, root: Option<&Path>) -> Vec<GrantT
     // 回环中继档：中继进程就是本产品自己的可执行文件，要在容器里跑起来 → 单文件只读（不递归、不继承）。
     // 只给这一个文件，不给它所处的目录树：能执行不等于能替换自己。父目录的读属性由下面的父目录补全顺带拿到。
     if plan.net.is_local()
-        && let Ok(exe) = std::env::current_exe()
+        && let Ok(exe) = env::current_exe()
     {
         leaves.push(GrantTarget {
             path: exe,

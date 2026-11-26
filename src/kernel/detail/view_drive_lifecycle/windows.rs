@@ -4,6 +4,7 @@
 //! 联动：由 `src/kernel/detail/view_drive_lifecycle.rs` 按平台选中。
 
 use super::super::view_drive;
+use crate::kernel::detail::io::env;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
@@ -52,7 +53,7 @@ fn install_exit_hook(root: &Path) {
 
 /// 目的：分配本实例的视图盘；返回是否真的分配了。
 pub(super) fn begin(root: &Path) -> bool {
-    if !enabled(std::env::var("SOLOMNI_VIEW_DRIVE").ok().as_deref()) {
+    if !enabled(env::var("SOLOMNI_VIEW_DRIVE").as_deref()) {
         return false;
     }
     match view_drive::ensure_view_drive(root) {

@@ -4,6 +4,7 @@
 //! 联动：`kernel::contracts::note`（码与轻重）；会话的消息构造、CLI 与 Web 的展示都从这里取文本。
 
 use crate::kernel::contracts::note::{Note, Severity, codes};
+use crate::kernel::detail::io::env;
 use fluent_bundle::{FluentArgs, FluentBundle, FluentResource};
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -86,7 +87,7 @@ pub fn pick_with(settings: &str, env: &str) -> Lang {
 
 /// 目的：同上，环境变量从进程里读。
 pub fn pick(settings: &str) -> Lang {
-    pick_with(settings, &std::env::var(ENV_LANG).unwrap_or_default())
+    pick_with(settings, &env::var(ENV_LANG).unwrap_or_default())
 }
 
 /// 目的：取某语言的目录——今天只有 zh-CN 一份；加语言时在这里按标签分派。

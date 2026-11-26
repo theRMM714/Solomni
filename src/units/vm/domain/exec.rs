@@ -305,7 +305,7 @@ pub const COPY_SHARE_ENV: &str = "SOLOMNI_VM_SHARE";
 /// 目的：这个进程是否显式打开了 copy 应急通道。
 /// 约束：只在入口层读一次；普通用户进程不设置它，copy 因此不装配、不参与选档。
 pub fn copy_share_enabled() -> bool {
-    let raw = std::env::var(COPY_SHARE_ENV).ok();
+    let raw = crate::kernel::api::env::var(COPY_SHARE_ENV);
     copy_share_setting(raw.as_deref())
 }
 

@@ -4,6 +4,7 @@
 //! 联动：由 confine 的 Windows 后端（prepare_fence / run_fenced）调用；失败如实返回而非假装成功。
 
 use crate::kernel::contracts::fence::{Access, FENCE_FAILED, FencePlan, Reach};
+use crate::kernel::detail::io::env;
 use std::ffi::c_void;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -194,8 +195,8 @@ pub(crate) fn wide(path: &Path) -> Vec<u16> {
 
 /// 目的：系统 shell 的绝对路径（容器里显式给镜像路径比让系统搜索可靠）。
 pub(crate) fn system_shell() -> PathBuf {
-    if let Some(root) = std::env::var_os("SystemRoot") {
-        let p = PathBuf::from(root).join("System32").join("cmd.exe");
+    if let Some(root) = env::system_root() {
+        let p = root.join("System32").join("cmd.exe");
         if p.is_file() {
             return p;
         }

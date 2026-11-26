@@ -3,6 +3,7 @@
 //! 不管：PATH 怎么改（path.rs）、围栏授权（fence.rs）。
 //! 联动：path.rs 在改 PATH 前先调用 ensure，保证 PATH 指向的入口存在。
 
+use crate::kernel::api::env;
 use std::path::{Path, PathBuf};
 
 /// 目的：shim 的落点：产品根的 bin 目录（与 .tools 等产品内目录同级）。
@@ -22,7 +23,7 @@ pub(crate) fn render(exe: &Path, root: &Path) -> String {
 
 /// 目的：本程序的 exe 路径；取不到时退回产品根下的 solomni.exe（shim 仍可解释执行）。
 pub(crate) fn exe_path(root: &Path) -> PathBuf {
-    std::env::current_exe().unwrap_or_else(|_| root.join("solomni.exe"))
+    env::current_exe().unwrap_or_else(|_| root.join("solomni.exe"))
 }
 
 /// 目的：确保 shim 存在且内容是最新的。

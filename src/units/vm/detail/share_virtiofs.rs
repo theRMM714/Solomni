@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use crate::kernel::api::env;
 use crate::kernel::api::process::{Daemon, Spawn, spawn};
 use crate::kernel::detail::procs::ProcessBook;
 use crate::units::vm::domain::exec::VIRTIOFSD_BIN;
@@ -122,7 +123,7 @@ pub(crate) fn virtiofs_plan(mounts: &[GuestMount], engine_args: Vec<String>) -> 
 fn socket_path() -> PathBuf {
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
+    env::temp_dir().join(format!(
         "solomni-virtiofs-{}-{}.sock",
         std::process::id(),
         n

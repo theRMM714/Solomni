@@ -8,6 +8,7 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use crate::kernel::api::env;
 use crate::units::provision::ports::Fetcher;
 
 /// 目的：HTTP 的 Fetcher 实现——一个 ureq agent 走完全部请求（连接与代理配置只建一次）。
@@ -57,7 +58,7 @@ pub(crate) fn download(
 
 /// 目的：下载候选——上游 URL 在前；配了 SOLOMNI_GH_MIRROR 时再加一条前缀镜像（只对 GitHub 资产）。
 pub(crate) fn source_candidates(upstream: &str) -> Vec<String> {
-    let mirror = std::env::var("SOLOMNI_GH_MIRROR").unwrap_or_default();
+    let mirror = env::var("SOLOMNI_GH_MIRROR").unwrap_or_default();
     let mut out = vec![upstream.to_string()];
     if let Some(m) = mirror_of(upstream, &mirror) {
         out.push(m);

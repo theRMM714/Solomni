@@ -3,12 +3,12 @@
 //! 不管：共享后端的额外参数（detail/share_ninep.rs）、镜像判定与挂载清单（domain/guest.rs）。
 //! 联动：端口在 ports.rs；由组合根构造、service.rs 持有。
 
+use crate::kernel::api::net;
 use crate::kernel::api::process::{Spawn, Stream, spawn};
 use crate::kernel::detail::procs::ProcessBook;
 use crate::units::vm::domain::guest::{GuestArch, GuestImage, GuestOs, GuestRun, GuestSpec};
 use crate::units::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
 use std::io::BufReader;
-use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -237,9 +237,9 @@ impl VmEngine for QemuEngine {
                     .to_string(),
             );
         };
-        let listener =
-            TcpListener::bind("127.0.0.1:0").map_err(|e| format!("占不到 QGA 端口：{}", e))?;
-        let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+        // 先占住一个空闲回环端口、把 QGA 地址给 QEMU，出生后再放开——它要自己 bind 这个端口。
+        let qga = net::reserve_port()?;
+        let port = qga.port();
         let opts = format!("host=127.0.0.1,port={},server=on,wait=off", port);
         let exe = spec
             .engine_path
@@ -312,7 +312,7 @@ impl VmEngine for QemuEngine {
                 .marker(format!("solomni:{}", spec.lease))
                 .book(self.book.clone()),
         )?;
-        drop(listener);
+        qga.release();
         let stream = match connect_within(port, Duration::from_secs(30), Some(&mut daemon)) {
             Ok(s) => s,
             Err(e) => {
@@ -602,13 +602,13 @@ mod tests {
             "{}",
             server.url()
         );
-        let (s1, b1) = http_get(server.port, "/user-data");
+        let (s1, b1) = http_get(server.port(), "/user-data");
         assert_eq!(s1, 200);
         assert!(b1.contains("#cloud-config"), "{}", b1);
-        let (s2, b2) = http_get(server.port, "/meta-data");
+        let (s2, b2) = http_get(server.port(), "/meta-data");
         assert_eq!(s2, 200);
         assert!(b2.contains("instance-id"), "{}", b2);
-        let (s3, _) = http_get(server.port, "/nope");
+        let (s3, _) = http_get(server.port(), "/nope");
         assert_eq!(s3, 404);
         server.stop();
     }

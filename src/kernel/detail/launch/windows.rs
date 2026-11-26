@@ -3,6 +3,7 @@
 //! 不管：围栏授权与台账；环境白名单的公共部分（在门面）。
 //! 联动：由 `src/kernel/detail/confine/paths.rs` 按平台选中。
 
+use crate::kernel::detail::io::env;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -75,8 +76,8 @@ pub(crate) const NODE_REALPATH_FLAGS: &str = "--preserve-symlinks --preserve-sym
 
 /// 目的：命令用 node 时要补的环境（`NODE_OPTIONS` 跳过 realpath）；不是 node 就是 `None`。
 fn node_realpath_env(command: &str) -> Option<(OsString, OsString)> {
-    let path_var = std::env::var_os("PATH").unwrap_or_default();
-    let pathext = std::env::var("PATHEXT").ok();
+    let path_var = env::path_var().unwrap_or_default();
+    let pathext = env::pathext();
     node_realpath_env_in(command, &path_var, pathext.as_deref())
 }
 

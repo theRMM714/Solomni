@@ -1,5 +1,5 @@
 # 呈现层每屏入站面：唯一权威。每一屏（一个 .rs）只许取这里登记过的单元，取多了门禁就红。
-# 单元写法：单元名（work）或 单元/子业务（catalog/registry）；kernel 是环 0 的入站面，默认没人许取。
+# 单元写法：单元名（work）或 单元/子业务（catalog/registry）；kernel 是环 0 的入站面，默认没人许取——只有需要机制（如 web.rs 的入站回环服务）时才逐屏登记。
 # 没有登记的屏 = 这一屏不直接取单元（只吃 Faces 的字段）：新增一屏先正常写，红了再回来登记。
 # 门禁：tests/gates/structure/presentation-inbound.js（T0 结构审查）双向比对——清单外的 import 报外溢，
 # 清单里有但源码没取报过期；呈现层内部还有一条：只许取根（presentation.rs / faces.rs / cli.rs / web.rs），
@@ -8,7 +8,7 @@
 # 根级：面袋与两个渠道入口
 src/presentation/faces.rs: catalog/modules catalog/registry catalog/secrets maintenance/storage provision residents runtime turn/turn turn_state vm work
 src/presentation/cli.rs: exec_model registry_model runtime system tools transcript turn/turn
-src/presentation/web.rs: agentloop maintenance/storage runtime transcript turn/turn workspace
+src/presentation/web.rs: agentloop kernel maintenance/storage runtime transcript turn/turn workspace
 
 # 终端渠道：解析、启动相、命令手册、会话流、裁决、渲染
 src/presentation/cli/argv.rs: tools

@@ -112,8 +112,10 @@ function direction(root) {
         if (own && (other === "cli" || other === "web") && own !== other) channelCross.add(f + " -> " + t);
       }
       if ((FORBIDDEN[layer] || []).includes(targetLayer)) reverse.add(f + " -> " + t);
-      // 呈现层只认入站面：某个单元的 ::api（顶层编排 runtime 也不例外）。
-      const presOk = t.startsWith("crate::units::") && t.endsWith("::api");
+      // 呈现层只认入站面：某个单元的 ::api（顶层编排 runtime 也不例外），以及内核的 api 面——
+      // 呈现层也要绑回环端口、读环境这类原语，而它们只有内核一份实现，不许在屏里再写一套。
+      const presOk =
+        (t.startsWith("crate::units::") && t.endsWith("::api")) || t.startsWith("crate::kernel::api");
       if (layer === "presentation" && !presOk && targetLayer !== "presentation") presentation.add(f + " -> " + t);
       // 业务之间只经对方的 api 交流（R1）；跨单元引用 ::ports / ::domain / ::detail 一律不许。
       if (layer === "units" && targetLayer === "units") {
