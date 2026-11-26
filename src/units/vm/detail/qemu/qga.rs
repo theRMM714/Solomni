@@ -5,6 +5,7 @@
 
 use super::UNFENCED_GUEST_RUN_SECS;
 use super::seed::SeedServer;
+use crate::kernel::api::clock;
 use crate::kernel::api::net;
 use crate::kernel::api::process::Daemon;
 use crate::kernel::api::types::ToolOutcome;
@@ -132,10 +133,7 @@ impl QemuHandle {
     }
 
     fn sync(&mut self) -> Result<(), String> {
-        let id = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(1);
+        let id = clock::now_nanos();
         self.send(&serde_json::json!({"execute":"guest-sync","arguments":{"id":id}}))?;
         for _ in 0..64 {
             let v = self.recv()?;
@@ -201,10 +199,7 @@ impl QemuHandle {
                 // 系统级只读诊断：helper 在 Landlock restrict 之后走诊断模式（不 spawn 命令）。
                 "diagnose": access.diagnose,
             });
-            let n = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(1);
+            let n = clock::now_nanos();
             let path = format!("/tmp/solomni-fence-{}-{}.json", std::process::id(), n);
             if let Err(why) = self.put_file(&path, policy.to_string().as_bytes()) {
                 return fail(&format!("把 per-agent 围栏写进 guest 失败：{}", why));

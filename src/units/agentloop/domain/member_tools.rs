@@ -3,6 +3,7 @@
 //! 不管：工具总表与席位声明（在 tools 能力与 `session::domain::mechanism`）；工具执行（在 `units::tools`）。
 //! 联动：由 `session.rs` 装配进会话；执行经 `crate::units::tools::api::ToolExec`。
 
+use crate::kernel::api::clock;
 use crate::units::tools::api::{ShellFacts, ToolExec};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -51,7 +52,7 @@ impl ShellSlot {
         *g = Some(ShellLive {
             command: command.to_string(),
             cwd: cwd.to_string(),
-            started_at: now_secs(),
+            started_at: clock::now_secs(),
             finished_at: None,
             elapsed_secs: None,
             fence_prep_secs: None,
@@ -71,7 +72,7 @@ impl ShellSlot {
         let Some(s) = g.as_mut() else {
             return;
         };
-        let end = now_secs();
+        let end = clock::now_secs();
         s.finished_at = Some(end);
         match facts {
             Some(facts) => {
@@ -100,13 +101,6 @@ impl ShellSlot {
     pub fn get(&self) -> Option<ShellLive> {
         self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
-}
-
-fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 /// 目的：从转录派生最近一次 shell 的状态（回放 / 重建用）：命令、cwd、耗时、成败、退出码与回执预览。
