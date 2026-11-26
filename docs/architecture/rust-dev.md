@@ -9,10 +9,10 @@
 ## 一、模块布局
 
 - 模块入口一律用与目录同名的文件，不得再出现 `mod.rs`（`tests/gates/structure/module-files.js`）。
-- 入口与子模块目录并列，入口只做子模块声明与重导出，实现留在子模块里（`src/units/maintenance/builds.rs`）：
+- 入口与子模块目录并列，入口只做子模块声明与重导出，实现留在子模块里（`src/units/business/maintenance/builds.rs`）：
 
 ```text
-units/maintenance/
+units/business/maintenance/
 ├── builds.rs            # 子业务入口：声明 api / ports / service / detail
 ├── builds/
 │   ├── api.rs
@@ -49,7 +49,7 @@ units/maintenance/
 
 - 路径一律用 `PathBuf` / `Path` 组件拼接：**不得把 `/` 或 `\` 写进字符串再拼**（`src/kernel/domain/path.rs`）。
 - **对外**（提示词、工具参数、回执、API）一律用 `/` 书写形式（Windows 反斜杠在 JSON 字符串里是非法转义），由 `src/kernel/domain/path.rs` 的 `slash` 统一给出。
-- 编码：读严格 UTF-8、非法字节如实标注（**不猜编码**）；写一律 UTF-8；为工具子进程强制 UTF-8 环境（`src/units/tools/detail/sys_io.rs`）。
+- 编码：读严格 UTF-8、非法字节如实标注（**不猜编码**）；写一律 UTF-8；为工具子进程强制 UTF-8 环境（`src/units/business/tools/detail/sys_io.rs`）。
 - 不假设平台：不写死盘符；模块工具的命令由模块作者声明，系统 `shell` 按平台选 sh / PowerShell。
 - 平台差异按机制分后端：门面 `<机制>.rs` 零平台分支，实现落在 `<机制>/{windows,linux,macos,unix,other}.rs` 或平台目录（`src/kernel/detail/process.rs`、`src/kernel/detail/confine/`）；共享常量与纯事实只在 `src/kernel/domain/platform.rs`。cfg 的位置由 `structure/cfg-boundaries` 零豁免判定（本文第三节）。
 - 某平台没有接入的部分**就是没有**——文档与界面照实说。

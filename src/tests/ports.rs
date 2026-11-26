@@ -12,20 +12,20 @@ use super::doubles::{
 use crate::kernel::api::fence::FencePlan;
 use crate::kernel::ports::{FenceHost, ProcessRunner};
 use crate::kernel::ports::{Log, NoopLog};
-use crate::units::catalog::modules::ports::ModuleSource;
-use crate::units::catalog::packages::ports::PackageSource;
-use crate::units::catalog::registry::api::Settings;
-use crate::units::catalog::registry::ports::SettingsStore;
-use crate::units::conversation::session::ports::HistoryStore;
-use crate::units::llm::api::{Channel, Chat, CompleteOpts, Msg};
-use crate::units::llm::ports::{ChatGateway, ModelCatalog};
-use crate::units::prompt::ports::PromptSource;
+use crate::units::business::catalog::modules::ports::ModuleSource;
+use crate::units::business::catalog::packages::ports::PackageSource;
+use crate::units::business::catalog::registry::api::Settings;
+use crate::units::business::catalog::registry::ports::SettingsStore;
+use crate::units::business::conversation::session::ports::HistoryStore;
+use crate::units::business::llm::api::{Channel, Chat, CompleteOpts, Msg};
+use crate::units::business::llm::ports::{ChatGateway, ModelCatalog};
+use crate::units::business::prompt::ports::PromptSource;
+use crate::units::business::session_model::api::{MEETING, SINGLE, SessionMeta, SessionSpec};
+use crate::units::business::tools::ports::SysIo;
+use crate::units::business::workspace::ports::Workdirs;
 use crate::units::pure::exec_model::api::ExecSpec;
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::pure::registry_model::api::Provider;
-use crate::units::session_model::api::{MEETING, SINGLE, SessionMeta, SessionSpec};
-use crate::units::tools::ports::SysIo;
-use crate::units::workspace::ports::Workdirs;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -73,7 +73,7 @@ fn meta(name: &str) -> SessionMeta {
         node: None,
         delegation: None,
         thinking: None,
-        run: crate::units::session_model::api::RunState::Active,
+        run: crate::units::business::session_model::api::RunState::Active,
         workspace: None,
     }
 }
@@ -295,8 +295,8 @@ fn workspace_double_prepares_writes_lists_and_propagates_failure() {
 /// 目的：内存版本库替身与真实适配器同一份资产流式契约：扫描、写入校验、复制、超限与缺失。
 #[test]
 fn work_store_double_streams_assets_and_rejects_oversize_or_mismatch() {
-    use crate::units::workspace::api::content_hash;
-    use crate::units::workspace::ports::WorkStore;
+    use crate::units::business::workspace::api::content_hash;
+    use crate::units::business::workspace::ports::WorkStore;
     let s = InMemoryWorkStore::new();
     let root = abs(&["w", "a"]);
     let other = abs(&["w", "b"]);
@@ -374,7 +374,7 @@ fn work_store_double_streams_assets_and_rejects_oversize_or_mismatch() {
 /// 目的：版本库替身与真实适配器同一份过滤契约：`list_visible` 按 `.workignore` 剪枝，`read_text` 缺文件给 None。
 #[test]
 fn work_store_double_lists_visible_files_and_reads_small_text() {
-    use crate::units::workspace::ports::WorkStore;
+    use crate::units::business::workspace::ports::WorkStore;
     let s = InMemoryWorkStore::new();
     let root = abs(&["w", "work"]);
     for rel in ["README.md", "src/main.rs", "node_modules/pkg/index.js"] {
@@ -428,8 +428,8 @@ fn sys_io_double_reads_writes_and_propagates_failure() {
     assert!(!r.lossy && !r.cut, "替身不做解码猜测，也不截断");
     io.mutate(
         &f,
-        &crate::units::tools::ports::Expect::Version(r.hash.clone()),
-        crate::units::tools::ports::Mutation::Replace("改写".to_string()),
+        &crate::units::business::tools::ports::Expect::Version(r.hash.clone()),
+        crate::units::business::tools::ports::Mutation::Replace("改写".to_string()),
     )
     .expect("写成功");
     assert_eq!(
@@ -450,8 +450,8 @@ fn sys_io_double_reads_writes_and_propagates_failure() {
     let fault = bad
         .mutate(
             &f,
-            &crate::units::tools::ports::Expect::Absent,
-            crate::units::tools::ports::Mutation::Replace("x".to_string()),
+            &crate::units::business::tools::ports::Expect::Absent,
+            crate::units::business::tools::ports::Mutation::Replace("x".to_string()),
         )
         .unwrap_err();
     assert_eq!(fault.code, "FS_IO");
@@ -460,7 +460,7 @@ fn sys_io_double_reads_writes_and_propagates_failure() {
 
 #[test]
 fn sys_io_double_walks_by_rules_scans_lines_and_reads_small() {
-    use crate::units::tools::ports::WalkOpts;
+    use crate::units::business::tools::ports::WalkOpts;
     let io = InMemorySysIo::new();
     io.seed(&["w", "a.txt"], "one\ntwo\n");
     io.seed(&["w", "sub", "b.txt"], "x\n");
@@ -533,8 +533,8 @@ fn sys_io_double_walks_by_rules_scans_lines_and_reads_small() {
 
 #[test]
 fn sys_io_double_mutate_enforces_expectations_and_transact_is_all_or_nothing() {
-    use crate::units::tools::api::LineRange;
-    use crate::units::tools::ports::{Expect, Mutation, WriteOp};
+    use crate::units::business::tools::api::LineRange;
+    use crate::units::business::tools::ports::{Expect, Mutation, WriteOp};
 
     let io = InMemorySysIo::new();
     let f = abs(&["w", "note.txt"]);
@@ -597,7 +597,7 @@ fn sys_io_double_mutate_enforces_expectations_and_transact_is_all_or_nothing() {
 
 #[test]
 fn sys_io_double_transact_rejects_the_same_path_twice() {
-    use crate::units::tools::ports::{Expect, Mutation, WriteOp};
+    use crate::units::business::tools::ports::{Expect, Mutation, WriteOp};
     let io = InMemorySysIo::new();
     let f = abs(&["w", "same.txt"]);
     let err = io

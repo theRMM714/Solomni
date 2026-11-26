@@ -1,16 +1,16 @@
 //! 目的：钉收敛后的权限模型——两档网络开关、共享区路径归属、固定授予的围栏，以及工作区提交工具的消费。
 //! 管：档位与父子收窄、共享区三态与覆盖/收窄/黑名单、沙箱落点、围栏规格、提交与读作用域过滤。
 //! 不管：平台真机验收（tests/<平台>/）；确认队列本身（见 src/tests/session/）。
-//! 联动：src/units/pure/permission/、src/units/workspace/domain/scope.rs、docs/permission/README.md。
+//! 联动：src/units/pure/permission/、src/units/business/workspace/domain/scope.rs、docs/permission/README.md。
 
 use crate::tests::doubles::{
     InMemoryWorkStore, InMemoryWorkspace, abs, test_sandbox, test_workspace, test_workspace_store,
 };
+use crate::units::business::workspace::api::{ScopeMode, SharedEdit, SharedScope, validate_entry};
+use crate::units::business::workspace::domain::workspace::Place;
 use crate::units::pure::permission::api::{
     PermissionDefaults, PermissionLayer, PermissionSet, ProfileId, SessionSandbox,
 };
-use crate::units::workspace::api::{ScopeMode, SharedEdit, SharedScope, validate_entry};
-use crate::units::workspace::domain::workspace::Place;
 
 fn paths(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
@@ -213,7 +213,7 @@ fn external_shared_root_is_not_a_shell_write_surface() {
 #[test]
 fn work_status_filters_paths_outside_read_scope() {
     use crate::kernel::ports::{ToolCtx, ToolHandler};
-    use crate::units::workspace::api::{CommitRequest, PushRequest, WorkHandler};
+    use crate::units::business::workspace::api::{CommitRequest, PushRequest, WorkHandler};
 
     let dirs = std::sync::Arc::new(InMemoryWorkspace::new());
     let store = std::sync::Arc::new(InMemoryWorkStore::new());
@@ -291,7 +291,7 @@ fn work_status_filters_paths_outside_read_scope() {
 #[test]
 fn work_lost_is_scoped_by_read_permission() {
     use crate::kernel::ports::{ToolCtx, ToolHandler};
-    use crate::units::workspace::api::WorkHandler;
+    use crate::units::business::workspace::api::WorkHandler;
 
     let dirs = std::sync::Arc::new(InMemoryWorkspace::new());
     let store = std::sync::Arc::new(InMemoryWorkStore::new());
@@ -342,7 +342,7 @@ fn work_lost_is_scoped_by_read_permission() {
 #[test]
 fn work_versions_and_resolve_are_scoped_by_read_permission() {
     use crate::kernel::ports::{ToolCtx, ToolHandler};
-    use crate::units::workspace::api::WorkHandler;
+    use crate::units::business::workspace::api::WorkHandler;
     let ws = test_workspace(std::sync::Arc::new(InMemoryWorkspace::new()));
     let scope = SharedScope {
         read: ScopeMode::Paths(paths(&["docs"])),
@@ -377,7 +377,7 @@ fn work_versions_and_resolve_are_scoped_by_read_permission() {
 #[test]
 fn no_write_scope_refuses_commit_and_push() {
     use crate::kernel::ports::{ToolCtx, ToolHandler};
-    use crate::units::workspace::api::WorkHandler;
+    use crate::units::business::workspace::api::WorkHandler;
     let ws = test_workspace(std::sync::Arc::new(InMemoryWorkspace::new()));
     let scope = SharedScope {
         write: ScopeMode::None,
@@ -417,27 +417,30 @@ fn entries_must_be_clean_relative_paths() {
     assert!(why.contains("shared.read"), "{}", why);
 
     // 黑名单命中：空表 = 不拦；"." = 整棵拦截；按组件匹配。
-    assert!(!crate::units::workspace::api::hit(&[], "docs/x"));
-    assert!(crate::units::workspace::api::hit(
+    assert!(!crate::units::business::workspace::api::hit(&[], "docs/x"));
+    assert!(crate::units::business::workspace::api::hit(
         &paths(&["docs"]),
         "docs/x"
     ));
-    assert!(crate::units::workspace::api::hit(&paths(&["docs"]), "docs"));
-    assert!(!crate::units::workspace::api::hit(
+    assert!(crate::units::business::workspace::api::hit(
+        &paths(&["docs"]),
+        "docs"
+    ));
+    assert!(!crate::units::business::workspace::api::hit(
         &paths(&["docs"]),
         "docsx/y"
     ));
-    assert!(crate::units::workspace::api::hit(
+    assert!(crate::units::business::workspace::api::hit(
         &paths(&["."]),
         "anything"
     ));
     // 两侧空白与尾部分隔符削掉；组件内部的空格是合法目录名，原样保留。
     assert_eq!(
-        crate::units::workspace::api::normalize("  docs\\sub\\ "),
+        crate::units::business::workspace::api::normalize("  docs\\sub\\ "),
         "docs/sub"
     );
     assert_eq!(
-        crate::units::workspace::api::normalize("docs/ 子 目录"),
+        crate::units::business::workspace::api::normalize("docs/ 子 目录"),
         "docs/ 子 目录"
     );
 }

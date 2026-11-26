@@ -1,11 +1,11 @@
 //! 目的：钉本回合工具面、原生通道与并发（含写入屏障）的契约。
 //! 管：模式变更无需重建会话、仅本回合工具、原生多结构化调用、拒绝手写信封、并行读保序、写调用屏障、模块工具声明式并发、租约排他与并行读。
 //! 不管：内置工具参数契约（run_loop.rs）。
-//! 联动：src/units/tools/、llm 信封。
+//! 联动：src/units/business/tools/、llm 信封。
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::session_model::api::SINGLE;
+use crate::units::business::session_model::api::SINGLE;
 /// 目的：**改形态不必重建会话**：会话里存的是**参数**（`SessionParams`），身份块每次调用现渲染。
 ///   判据：同一个会话（没被重建）在建好之后，把登记处里的形态探测成 native——
 ///   下一回合的请求已经换了一套调用约定，而对话（此前说过的话）一条没丢。
@@ -131,7 +131,7 @@ pub(crate) fn only_this_turns_tools_are_advertised() {
 ///   「以为能用」之间空转。
 #[test]
 pub(crate) fn a_refusal_lists_only_this_turns_face() {
-    use crate::units::llm::api::ToolCall;
+    use crate::units::business::llm::api::ToolCall;
     let io = Arc::new(InMemorySysIo::new());
     let mut m = native_member(
         "a",
@@ -191,7 +191,7 @@ pub(crate) fn a_refusal_lists_only_this_turns_face() {
 
 #[test]
 pub(crate) fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
-    use crate::units::llm::api::ToolCall;
+    use crate::units::business::llm::api::ToolCall;
     let io = Arc::new(InMemorySysIo::new());
     io.seed(&["demo", "work", "note.txt"], "第一行\n第二行\n");
     let note = s(&["demo", "work", "note.txt"]);
@@ -349,7 +349,7 @@ pub(crate) fn native_mode_refuses_a_hand_written_envelope() {
 ///   第一个文件故意慢：它会**后完成**，但结果仍必须排在前面（上下文里不许乱序）。
 #[test]
 pub(crate) fn declared_parallel_reads_overlap_and_results_keep_the_call_order() {
-    use crate::units::llm::api::ToolCall;
+    use crate::units::business::llm::api::ToolCall;
     let io = Arc::new(InMemorySysIo::new().slow(40));
     io.seed(&["demo", "a", "a.txt"], "A1\nA2\n");
     io.seed(&["demo", "work", "b.txt"], "B1\nB2\n");
@@ -395,7 +395,7 @@ pub(crate) fn declared_parallel_reads_overlap_and_results_keep_the_call_order() 
 /// 目的：写入类独占执行：它是并发批次之间的**屏障**，并且能看到并发批次**合并后**的账本。
 #[test]
 pub(crate) fn a_writing_call_is_a_barrier_and_sees_the_merged_ledger() {
-    use crate::units::llm::api::ToolCall;
+    use crate::units::business::llm::api::ToolCall;
     let io = Arc::new(InMemorySysIo::new().slow(30));
     io.seed(&["demo", "a", "a.txt"], "原文\n");
     let a = s(&["demo", "a", "a.txt"]);
@@ -441,7 +441,7 @@ pub(crate) fn a_writing_call_is_a_barrier_and_sees_the_merged_ledger() {
 /// 目的：模块工具的可并发性是**模块作者在 module.yaml 里的声明**：声明了才并发，没声明一律串行。
 #[test]
 pub(crate) fn module_tools_are_concurrent_only_when_declared() {
-    use crate::units::llm::api::ToolCall;
+    use crate::units::business::llm::api::ToolCall;
     /// 原生形态 + 模块 m0 声明外部工具 scan（线上名 m0_scan）；parallel 决定它是否可并发。
     fn scan_member(runner: Arc<dyn ProcessRunner>, parallel: bool) -> WithTools {
         let steps = vec![
@@ -539,7 +539,7 @@ pub(crate) fn module_lease_serializes_exclusive_calls_but_allows_parallel_reader
                         None,
                         parallel,
                         None,
-                        crate::units::tools::api::ResultBudget::full(),
+                        crate::units::business::tools::api::ResultBudget::full(),
                     );
                 });
             }
@@ -564,7 +564,7 @@ pub(crate) fn module_lease_serializes_exclusive_calls_but_allows_parallel_reader
 
 #[test]
 pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
-    use crate::units::llm::api::ProbeOutcome;
+    use crate::units::business::llm::api::ProbeOutcome;
     // 一开始登记处说"不支持原生"：会话按手写信封装配（系统提示也就教信封）
     let outcome = Arc::new(Mutex::new(ProbeOutcome::Unsupported {
         detail: "先不支持".to_string(),
@@ -674,7 +674,7 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
 ///   声明在工具总表里（机制席位的悬空引用由装配期 `SystemTools::problems()` 与 `src/tests/detail/` 锁死）。
 #[test]
 pub(crate) fn work_versioning_tools_are_granted_to_the_working_roles_only() {
-    use crate::units::tools::api::Tools;
+    use crate::units::business::tools::api::Tools;
     let tools = test_tools_svc();
     let book = tools.book();
     let ids = [
@@ -689,8 +689,8 @@ pub(crate) fn work_versioning_tools_are_granted_to_the_working_roles_only() {
         assert!(book.contains_key(id), "{} 必须在工具总表里", id);
     }
     let face = |id: &str| -> Vec<String> {
-        let seat = crate::units::session_model::api::seat(id).expect("席位在册");
-        crate::units::agentloop::api::seat_face(seat)
+        let seat = crate::units::business::session_model::api::seat(id).expect("席位在册");
+        crate::units::business::agentloop::api::seat_face(seat)
             .into_iter()
             .map(|s| s.to_string())
             .collect()
@@ -716,7 +716,7 @@ pub(crate) fn work_versioning_tools_are_granted_to_the_working_roles_only() {
     for (name, schema) in book.iter() {
         assert_eq!(
             schema.publish,
-            crate::units::workspace::api::is_work_tool(name),
+            crate::units::business::workspace::api::is_work_tool(name),
             "{} 的发布面标记与 workspace 的动作面不一致",
             name
         );

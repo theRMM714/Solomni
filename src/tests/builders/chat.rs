@@ -1,7 +1,7 @@
 //! 目的：通道替身——记录调用参数、按脚本回话或失败，覆盖流式、截断、中止与原生调用。
 //! 管：Reasoning/Trunc/Abort/Probe/Native 各类网关与脚本。
 //! 不管：内存替身库（`doubles/`）、runner（`runners.rs`）。
-//! 联动：`src/units/llm/ports.rs` 的 `ChatGateway` 与 `Chat`。
+//! 联动：`src/units/business/llm/ports.rs` 的 `ChatGateway` 与 `Chat`。
 
 use super::*;
 
@@ -55,7 +55,7 @@ impl ChatGateway for ReasoningGateway {
     fn probe_tools(
         &self,
         _channel: &Channel,
-    ) -> Result<crate::units::llm::api::ProbeOutcome, String> {
+    ) -> Result<crate::units::business::llm::api::ProbeOutcome, String> {
         Err("测试替身没有真实供应商，测不了工具调用支持".to_string())
     }
 
@@ -103,7 +103,10 @@ pub(crate) struct TruncGateway {
 }
 
 impl ChatGateway for TruncGateway {
-    fn probe_tools(&self, _c: &Channel) -> Result<crate::units::llm::api::ProbeOutcome, String> {
+    fn probe_tools(
+        &self,
+        _c: &Channel,
+    ) -> Result<crate::units::business::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(&self, _c: &Channel, _id: &str) -> BoxedChat {
@@ -142,7 +145,10 @@ pub(crate) struct AbortGateway {
 }
 
 impl ChatGateway for AbortGateway {
-    fn probe_tools(&self, _c: &Channel) -> Result<crate::units::llm::api::ProbeOutcome, String> {
+    fn probe_tools(
+        &self,
+        _c: &Channel,
+    ) -> Result<crate::units::business::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(&self, _c: &Channel, _id: &str) -> BoxedChat {
@@ -159,11 +165,14 @@ impl ChatGateway for AbortGateway {
 
 /// 目的：固定探测结论的网关：专测"结论怎么落到登记处"这一层策略（事实本身由适配器测）。
 pub(crate) struct ProbeGateway {
-    pub(crate) outcome: Arc<Mutex<crate::units::llm::api::ProbeOutcome>>,
+    pub(crate) outcome: Arc<Mutex<crate::units::business::llm::api::ProbeOutcome>>,
 }
 
 impl ChatGateway for ProbeGateway {
-    fn probe_tools(&self, _c: &Channel) -> Result<crate::units::llm::api::ProbeOutcome, String> {
+    fn probe_tools(
+        &self,
+        _c: &Channel,
+    ) -> Result<crate::units::business::llm::api::ProbeOutcome, String> {
         Ok(self.outcome.lock().expect("锁").clone())
     }
     fn member_channel(&self, _c: &Channel, _id: &str) -> BoxedChat {
@@ -176,7 +185,7 @@ impl ChatGateway for ProbeGateway {
 
 /// 目的：原生通道的脚本替身：一步 = 一次"原生工具调用"或一段文本； 同时记录每次请求带过来的工具声明与消息（用来断言"声明真的发出去了、结果真的回填了"）。
 pub(crate) enum NativeStep {
-    Calls(Vec<crate::units::llm::api::ToolCall>),
+    Calls(Vec<crate::units::business::llm::api::ToolCall>),
     Text(String),
 }
 
@@ -261,7 +270,7 @@ pub(crate) fn native_member(
     WithTools {
         member: m,
         tools: Some(MemberTools {
-            face: crate::units::agentloop::api::ToolFace {
+            face: crate::units::business::agentloop::api::ToolFace {
                 mode: crate::units::pure::registry_model::api::ToolMode::Native,
                 seat: "solo".to_string(),
                 modules,
@@ -269,7 +278,7 @@ pub(crate) fn native_member(
                 guest_lease: String::new(),
                 sandbox: sb.clone(),
                 tools_this_turn: test_prompts()
-                    .text(crate::units::prompt::api::Segment::ToolsThisTurn)
+                    .text(crate::units::business::prompt::api::Segment::ToolsThisTurn)
                     .to_string(),
                 builtin_tools: test_systools().tools,
                 unavailable: BTreeMap::new(),
@@ -278,7 +287,7 @@ pub(crate) fn native_member(
                 runtime_path: None,
                 runtime_roots: Vec::new(),
                 // 测试替身按"执行席"发放全部内置工具（机制席位的越权校验另有专门用例）。
-                allowed: crate::units::tools::api::names(),
+                allowed: crate::units::business::tools::api::names(),
                 with_modules: true,
                 notes: crate::tests::doubles::test_notes(&sb, &[]),
             },
@@ -286,10 +295,10 @@ pub(crate) fn native_member(
             log: Arc::new(crate::kernel::ports::NoopLog),
             tools: test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
             vm: test_vm(),
-            residents: Arc::new(crate::units::residents::api::NoResidents),
+            residents: Arc::new(crate::units::business::residents::api::NoResidents),
             // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
             workspace: None,
-            observations: crate::units::tools::api::Observations::default(),
+            observations: crate::units::business::tools::api::Observations::default(),
             shell_live: None,
             reply_seq: 0,
             line: Default::default(),
@@ -309,16 +318,22 @@ pub(crate) struct NativeGateway {
 }
 
 impl ChatGateway for NativeGateway {
-    fn probe_tools(&self, _c: &Channel) -> Result<crate::units::llm::api::ProbeOutcome, String> {
-        Ok(crate::units::llm::api::ProbeOutcome::Supported {
+    fn probe_tools(
+        &self,
+        _c: &Channel,
+    ) -> Result<crate::units::business::llm::api::ProbeOutcome, String> {
+        Ok(crate::units::business::llm::api::ProbeOutcome::Supported {
             detail: "替身".to_string(),
         })
     }
 
     /// 目的：保存闸门要同时看回放形状：这个替身固定报「协议形状被接受」。
-    fn probe_replay(&self, _c: &Channel) -> Result<crate::units::llm::api::ReplayReport, String> {
-        Ok(crate::units::llm::api::ReplayReport {
-            shapes: vec![crate::units::llm::api::ReplayShape {
+    fn probe_replay(
+        &self,
+        _c: &Channel,
+    ) -> Result<crate::units::business::llm::api::ReplayReport, String> {
+        Ok(crate::units::business::llm::api::ReplayReport {
+            shapes: vec![crate::units::business::llm::api::ReplayShape {
                 name: "content-empty".to_string(),
                 accepted: true,
                 understood: true,
@@ -359,15 +374,15 @@ pub(crate) fn native_core(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
-        Arc::new(crate::units::maintenance::builds::api::NoBuilds),
+        Arc::new(crate::units::business::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         crate::tests::doubles::test_host_probe(),
-        Arc::new(crate::units::residents::api::NoResidents),
-        Arc::new(crate::units::catalog::secrets::api::NoSecrets),
+        Arc::new(crate::units::business::residents::api::NoResidents),
+        Arc::new(crate::units::business::catalog::secrets::api::NoSecrets),
         crate::tests::doubles::test_profiles(),
     )
 }

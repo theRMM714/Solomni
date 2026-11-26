@@ -3,11 +3,11 @@
 //! 不管：生产装配（两者都不装配）。
 //! 联动：docs/testing/doubles.md、tests/doubles。
 
-use crate::units::llm::api::Channel;
-use crate::units::llm::api::{Chat, Chunk, CompleteOpts, Msg};
-use crate::units::llm::api::{Verb, parse};
-use crate::units::llm::detail::fake_chat::{DemoGateway, FakeChat};
-use crate::units::llm::ports::ChatGateway;
+use crate::units::business::llm::api::Channel;
+use crate::units::business::llm::api::{Chat, Chunk, CompleteOpts, Msg};
+use crate::units::business::llm::api::{Verb, parse};
+use crate::units::business::llm::detail::fake_chat::{DemoGateway, FakeChat};
+use crate::units::business::llm::ports::ChatGateway;
 
 /// 故意指向不可路由地址（TEST-NET-1）：任何真实拨号都会失败或超时——「没有网络依赖」因此可观察。
 fn unreachable_channel() -> Channel {

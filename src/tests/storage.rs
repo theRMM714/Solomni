@@ -3,7 +3,7 @@
 //! 不管：构建怎么跑（builds.rs）、guest 生命周期（vm.rs）。
 //! 联动：契约见 docs/storage/README.md；入口 node run-tests.js。
 
-use crate::units::maintenance::storage::api::{
+use crate::units::business::maintenance::storage::api::{
     CleanKind, CleanOutcome, CleanRequest, StoragePolicy,
 };
 
@@ -11,7 +11,7 @@ use crate::units::maintenance::storage::api::{
 fn service_with_active(
     root: &std::path::Path,
     active_log: Option<std::path::PathBuf>,
-) -> impl crate::units::maintenance::storage::api::Storage {
+) -> impl crate::units::business::maintenance::storage::api::Storage {
     crate::entry::assembly::storage(
         root,
         crate::tests::doubles::test_provision(),
@@ -22,7 +22,9 @@ fn service_with_active(
 }
 
 /// 目的：不需要模拟运行日志时的简写。
-fn service(root: &std::path::Path) -> impl crate::units::maintenance::storage::api::Storage {
+fn service(
+    root: &std::path::Path,
+) -> impl crate::units::business::maintenance::storage::api::Storage {
     service_with_active(root, None)
 }
 
@@ -37,14 +39,14 @@ fn clean_requires_confirmation_and_real_service() {
     };
     let root = crate::tests::scratch("storage-confirm");
     let svc = service(&root);
-    assert!(crate::units::maintenance::storage::api::Storage::clean(&svc, &req).is_err());
+    assert!(crate::units::business::maintenance::storage::api::Storage::clean(&svc, &req).is_err());
     let _ = CleanOutcome::Report(Default::default());
 }
 
 /// 目的：盘点能读出卷的实际大小与模块元数据；到上限回收删除最旧卷。
 #[test]
 fn report_and_gc_delete_the_oldest_volume_in_a_scratch_root() {
-    use crate::units::maintenance::storage::api::Storage;
+    use crate::units::business::maintenance::storage::api::Storage;
     let root = crate::tests::scratch("storage-gc");
     let cache = crate::kernel::domain::layout::vm(&root).join("build-cache");
     std::fs::create_dir_all(&cache).unwrap();
@@ -90,7 +92,7 @@ fn report_and_gc_delete_the_oldest_volume_in_a_scratch_root() {
 /// 目的：有构建锁的卷不进候选；按模块清理只写排队标记。
 #[test]
 fn active_volume_is_protected_and_module_cleanup_is_queued() {
-    use crate::units::maintenance::storage::api::Storage;
+    use crate::units::business::maintenance::storage::api::Storage;
     let root = crate::tests::scratch("storage-active");
     let cache = crate::kernel::domain::layout::vm(&root).join("build-cache");
     std::fs::create_dir_all(&cache).unwrap();
@@ -128,7 +130,7 @@ fn active_volume_is_protected_and_module_cleanup_is_queued() {
 /// 目的：手动“清理整类”日志是全清——历史日志删完，只留当前进程正在写的那一份。
 #[test]
 fn clean_logs_deletes_all_but_the_active_file() {
-    use crate::units::maintenance::storage::api::Storage;
+    use crate::units::business::maintenance::storage::api::Storage;
     let root = crate::tests::scratch("storage-logs-clean");
     let logs = crate::kernel::domain::layout::logs(&root);
     std::fs::create_dir_all(&logs).unwrap();
@@ -186,7 +188,7 @@ fn clean_logs_deletes_all_but_the_active_file() {
 /// 目的：没有运行中的日志时，手动清理把 logs 下全部日志删光。
 #[test]
 fn clean_logs_without_a_running_file_deletes_everything() {
-    use crate::units::maintenance::storage::api::Storage;
+    use crate::units::business::maintenance::storage::api::Storage;
     let root = crate::tests::scratch("storage-logs-all");
     let logs = crate::kernel::domain::layout::logs(&root);
     std::fs::create_dir_all(&logs).unwrap();
@@ -231,7 +233,7 @@ impl crate::kernel::ports::Log for PurgingLog {
 /// 目的：不是产品清单构造的虚拟根不能“还原”，避免把用户自备 guest 删掉却重建不出来。
 #[test]
 fn reset_refuses_a_guest_not_in_the_manifest() {
-    use crate::units::provision::api::Provision;
+    use crate::units::business::provision::api::Provision;
     let root = crate::tests::scratch("storage-reset-unknown");
     let svc = crate::entry::assembly::provision(&root);
     let mut lines = Vec::new();
@@ -246,7 +248,7 @@ fn reset_refuses_a_guest_not_in_the_manifest() {
 /// 目的：模块产物盘点读安装根的 `modules/<id>/build`；数据根里的同名目录不算（构建产物回写模块目录）。
 #[test]
 fn module_outputs_are_read_from_the_module_source_tree() {
-    use crate::units::maintenance::storage::api::Storage;
+    use crate::units::business::maintenance::storage::api::Storage;
     let root = crate::tests::scratch("storage-outputs");
     let src = crate::kernel::domain::layout::modules_src(&root)
         .join("demo")

@@ -1,23 +1,23 @@
 //! 目的：会话视图与动作——会话创建、设置、权限档、思考档、工作名与配置快照。
 //! 管：动作入参校验、视图字段、会话编辑在生成中的拒绝、档位切换的落盘。
 //! 不管：压缩（`compaction.rs`）、动作目录本身（`tools.rs`）。
-//! 联动：`src/units/runtime/api/action.rs` 与 `src/units/session/api`。
+//! 联动：`src/units/business/runtime/api/action.rs` 与 `src/units/session/api`。
 
 use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work, slow_ops};
 use super::support::spawn;
 use crate::presentation::faces::Faces;
+use crate::units::business::runtime::api::{Acted, ActionCall, Caller};
+use crate::units::business::session_model::api::{CUSTOM, SINGLE};
+use crate::units::business::turn::turn::api::Output;
+use crate::units::business::work::api::{ConfigAgent, SessionEdit, WorkSpec};
 use crate::units::pure::registry_model::api::AgentMeta;
-use crate::units::runtime::api::{Acted, ActionCall, Caller};
-use crate::units::session_model::api::{CUSTOM, SINGLE};
-use crate::units::turn::turn::api::Output;
-use crate::units::work::api::{ConfigAgent, SessionEdit, WorkSpec};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[test]
 fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
-    use crate::units::lifecycle::api::RewindTarget;
+    use crate::units::business::lifecycle::api::RewindTarget;
     let mut member = std::collections::BTreeMap::new();
     member.insert(
         "a".to_string(),
@@ -27,12 +27,13 @@ fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
             "第三句".to_string(),
         ],
     );
-    let handle =
-        crate::units::runtime::api::Handle::spawn(super::super::doubles::core_with_gateway(
+    let handle = crate::units::business::runtime::api::Handle::spawn(
+        super::super::doubles::core_with_gateway(
             vec![module_of("a")],
             super::super::doubles::ScriptGateway::new(member, vec![]),
-        ))
-        .expect("起核心线程");
+        ),
+    )
+    .expect("起核心线程");
     let faces = crate::presentation::faces::Faces::from_handle(&handle);
     let mut st = faces.registry.settings().expect("读设置");
     st.compact_at_percent = 0;
@@ -49,7 +50,7 @@ fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
         .say(
             &sid,
             "先说一句",
-            crate::units::turn::turn::api::Output::Final,
+            crate::units::business::turn::turn::api::Output::Final,
         )
         .expect("第一轮");
     faces
@@ -61,7 +62,7 @@ fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
         .say(
             &sid,
             "留档之后再说",
-            crate::units::turn::turn::api::Output::Final,
+            crate::units::business::turn::turn::api::Output::Final,
         )
         .expect("第二轮");
 
@@ -80,14 +81,14 @@ fn delete_past_an_archive_reports_the_casualties_and_needs_a_confirm() {
         .say(
             &sid,
             "删完继续",
-            crate::units::turn::turn::api::Output::Final,
+            crate::units::business::turn::turn::api::Output::Final,
         )
         .expect("删除后还能继续");
 }
 
 #[test]
 fn provider_usage_is_exposed_in_session_view_and_persisted() {
-    use crate::units::llm::api::TokenUsage;
+    use crate::units::business::llm::api::TokenUsage;
     let mut member = std::collections::BTreeMap::new();
     member.insert(
         "a".to_string(),
@@ -95,7 +96,7 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
     );
     let gateway = super::super::doubles::ScriptGateway::new(member, vec![])
         .with_usage(TokenUsage::new(900, 120, Some(1020)));
-    let handle = crate::units::runtime::api::Handle::spawn(
+    let handle = crate::units::business::runtime::api::Handle::spawn(
         super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
     )
     .expect("起核心线程");
@@ -108,7 +109,11 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
         .sid;
     faces
         .turn
-        .say(&sid, "做一下", crate::units::turn::turn::api::Output::Final)
+        .say(
+            &sid,
+            "做一下",
+            crate::units::business::turn::turn::api::Output::Final,
+        )
         .expect("一轮");
 
     let views = faces
@@ -136,7 +141,7 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
         }),
         "流水里要有 usage 事件"
     );
-    let last = crate::units::agentloop::api::last_usage(&events).expect("读回用量");
+    let last = crate::units::business::agentloop::api::last_usage(&events).expect("读回用量");
     assert_eq!(last.total_tokens, 1020);
 
     // 跨回合累加：第二轮的用量叠在 meta 的同一本账上，不覆盖也不清零。
@@ -145,7 +150,7 @@ fn provider_usage_is_exposed_in_session_view_and_persisted() {
         .say(
             &sid,
             "再做一件",
-            crate::units::turn::turn::api::Output::Final,
+            crate::units::business::turn::turn::api::Output::Final,
         )
         .expect("第二轮");
     let views = faces
@@ -250,7 +255,7 @@ fn restore_work_commit_is_non_destructive_and_records_a_notice() {
 
 #[test]
 fn unique_work_name_falls_back_and_appends_a_suffix() {
-    use crate::units::agentloop::api::unique_work_name;
+    use crate::units::business::agentloop::api::unique_work_name;
     let (_h, faces) = ops_with(vec![module_of("a")], Vec::new());
     let exists = |n: &str| faces.work.exists(n).expect("查占用");
     assert_eq!(unique_work_name("", "single", exists), "single");

@@ -1,10 +1,10 @@
-//! 目的：隐秘字段能力的行为用例——只经 `units/catalog/secrets/api.rs` 的面。
+//! 目的：隐秘字段能力的行为用例——只经 `units/business/catalog/secrets/api.rs` 的面。
 //! 管：声明视图、置值 / 清值 / 注入项、回执脱敏，以及未知模块与未声明字段的拒收。
 //! 不管：`.home/secrets.yaml` 的落盘形态（由组合根的 `secrets` 装配路径承载）；提示词侧的"值不进转录"。
-//! 联动：src/units/catalog/secrets/api.rs；装配见 src/entry/assembly.rs。
+//! 联动：src/units/business/catalog/secrets/api.rs；装配见 src/entry/assembly.rs。
 
 use super::prelude::*;
-use crate::units::catalog::modules::api::SecretDecl;
+use crate::units::business::catalog::modules::api::SecretDecl;
 
 /// 目的：一个声明了 `token` 字段的模块（只声明标识与 env 名，值永不进清单）。
 fn demo_modules() -> Vec<Module> {
@@ -21,12 +21,12 @@ fn demo_modules() -> Vec<Module> {
 
 /// 目的：装好的入站面 + 可观察的存储替身。
 fn demo() -> (
-    Arc<dyn crate::units::catalog::secrets::api::SecretOps + Send + Sync>,
+    Arc<dyn crate::units::business::catalog::secrets::api::SecretOps + Send + Sync>,
     Arc<InMemorySecretStore>,
 ) {
     let store = Arc::new(InMemorySecretStore::new());
     let modules = test_modules(Arc::new(VecSource(demo_modules())));
-    let port: Arc<dyn crate::units::catalog::secrets::ports::SecretStore + Send + Sync> =
+    let port: Arc<dyn crate::units::business::catalog::secrets::ports::SecretStore + Send + Sync> =
         store.clone();
     let ops = crate::entry::assembly::secrets_with(modules, port).expect("装隐秘字段入站面");
     (ops, store)

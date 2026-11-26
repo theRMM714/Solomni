@@ -6,10 +6,10 @@
 use super::prelude::*;
 use crate::kernel::api::fence::SandboxRequirements;
 use crate::kernel::detail::confine::Capability;
-use crate::units::catalog::registry::api::SandboxEnforceLevel::BestEffort;
+use crate::units::business::catalog::registry::api::SandboxEnforceLevel::BestEffort;
 #[cfg(windows)]
-use crate::units::catalog::registry::api::SandboxEnforceLevel::Require;
-use crate::units::catalog::registry::ports::SettingsStore;
+use crate::units::business::catalog::registry::api::SandboxEnforceLevel::Require;
+use crate::units::business::catalog::registry::ports::SettingsStore;
 use crate::{GateOutcome, MissingCause, MissingPart};
 use std::collections::BTreeMap;
 use std::io::Cursor;
@@ -182,7 +182,7 @@ fn first_run_decline_does_not_write_best_effort() {
     assert!(!app.sandbox.policy.windows.write_acl);
     assert_eq!(
         app.sandbox.policy.enforce.filesystem,
-        crate::units::catalog::registry::api::SandboxEnforceLevel::Require,
+        crate::units::business::catalog::registry::api::SandboxEnforceLevel::Require,
         "选不启用不能偷偷把强制等级降掉"
     );
 }
@@ -303,7 +303,7 @@ fn gate_degrade_is_per_process_and_does_not_write_settings() {
     assert!(!app.sandbox.policy.windows.write_acl, "本次降级不许落盘");
     assert_eq!(
         app.sandbox.policy.enforce.filesystem,
-        crate::units::catalog::registry::api::SandboxEnforceLevel::Require,
+        crate::units::business::catalog::registry::api::SandboxEnforceLevel::Require,
         "本次降级不改设置里的强制等级"
     );
 }
@@ -503,7 +503,7 @@ fn grant_write_acl_records_the_authorization_on_disk() {
     assert!(after.app.sandbox.policy.windows.write_acl);
     assert_eq!(
         after.app.sandbox.policy.enforce.filesystem,
-        crate::units::catalog::registry::api::SandboxEnforceLevel::BestEffort,
+        crate::units::business::catalog::registry::api::SandboxEnforceLevel::BestEffort,
         "只改授权，不动强制等级"
     );
     let _ = std::fs::remove_dir_all(&dir);

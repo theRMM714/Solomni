@@ -37,7 +37,7 @@ const RULES = [
     pattern: /ureq::Agent::config_builder|ureq::AgentBuilder|reqwest::Client::builder/g,
     impl: [NET + "/outbound.rs", NET + "/backend.rs"],
     allow: {
-      "src/units/llm/detail/http_stream.rs":
+      "src/units/business/llm/detail/http_stream.rs":
         "流式栈必须 async（reqwest 自建 client），TLS 仍取 kernel::api::net::configure_reqwest",
     },
   },

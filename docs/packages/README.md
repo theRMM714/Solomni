@@ -1,7 +1,7 @@
 # packages（运行包）
 
 > 定位：运行包契约、包库扫描、目标筛选与选包计划。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/catalog/packages/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/catalog/packages/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；作者契约见 [RUNTIME_SPEC.md](../../RUNTIME_SPEC.md)，分层与业务边界见 [boundaries.md](../architecture/boundaries.md)。
 
 ## 管什么 / 不管什么
@@ -12,7 +12,7 @@
 ## 入站契约与状态归属
 
 - 入站面：`api::Packages`（`library` / `runtimes_dir` / `base`）+ 纯逻辑入口（`plan_host` / `plan_guest` / `diagnoses` 等）。
-- 出站端口：`PackageSource` **只由 `src/units/catalog/packages/service.rs` 持有**（R12）。
+- 出站端口：`PackageSource` **只由 `src/units/business/catalog/packages/service.rs` 持有**（R12）。
 - 状态归属：本单元不落盘；包库事实来自 `data/runtimes/`，选包计划交给调用方。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
@@ -22,8 +22,8 @@
 
 ## 一、边界
 
-- `PackageSource` 只由 `src/units/catalog/packages/service.rs` 持有（R12）；`src/units/catalog/packages/detail/fs_packages.rs` 只做目录遍历与 yaml 解析。
-- `src/units/catalog/packages/domain/manifest.rs` 只认清单事实与目标载荷；`src/units/catalog/packages/domain/plan.rs` 只做选型与诊断，不读盘、不起进程。
+- `PackageSource` 只由 `src/units/business/catalog/packages/service.rs` 持有（R12）；`src/units/business/catalog/packages/detail/fs_packages.rs` 只做目录遍历与 yaml 解析。
+- `src/units/business/catalog/packages/domain/manifest.rs` 只认清单事实与目标载荷；`src/units/business/catalog/packages/domain/plan.rs` 只做选型与诊断，不读盘、不起进程。
 - 目标由调用方给：`Target::host()` / `Target::guest(platform)`；包不声明自己服务哪一档。
 - `vm` 只经 `packages::api` 拿 `PackagePlan` / `PlannedPackage`，不再持有包库。
 - 包库不预置、不分发；`files` 里的 sha256 用于可复现，不用于信任。

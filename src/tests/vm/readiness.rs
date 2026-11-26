@@ -1,7 +1,7 @@
 //! 目的：承载判定与就绪说明同源——能不能选、缺什么，用一把尺子。
 //! 管：tier_readiness、vm_capability、已验平台表。
 //! 不管：共享后端在场（`share.rs`）。
-//! 联动：`src/units/vm/domain/tier.rs`。
+//! 联动：`src/units/business/vm/domain/tier.rs`。
 
 use super::super::prelude::*;
 
@@ -9,7 +9,7 @@ use super::super::prelude::*;
 #[test]
 pub(crate) fn vm_capability_is_machine_only_while_session_readiness_needs_base() {
     use crate::tests::doubles::FixedProbe;
-    use crate::units::vm::api::{VmInputs, vm_capability};
+    use crate::units::business::vm::api::{VmInputs, vm_capability};
     let qemu = std::path::PathBuf::from("/opt/qemu-system-x86_64");
     let mut probe = FixedProbe {
         hypervisor: true,
@@ -20,9 +20,9 @@ pub(crate) fn vm_capability_is_machine_only_while_session_readiness_needs_base()
         .exes
         .push(if cfg!(windows) { "smbd" } else { "virtiofsd" }.to_string());
     let q = qemu.to_string_lossy().into_owned();
-    let tools = crate::units::vm::api::VmTools {
-        qemu: crate::units::vm::api::ToolPath::new(Some(&q), None),
-        share: crate::units::vm::api::ToolPath::default(),
+    let tools = crate::units::business::vm::api::VmTools {
+        qemu: crate::units::business::vm::api::ToolPath::new(Some(&q), None),
+        share: crate::units::business::vm::api::ToolPath::default(),
     };
     let cap = vm_capability(&VmInputs {
         tools: &tools,

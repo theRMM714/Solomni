@@ -1,18 +1,18 @@
 //! 目的：动作目录与分发——模块工具、登记处动作、模型保存的人机边界。
 //! 管：调用者校验、目录可见性、两种结果形状、原生与信封模型保存。
 //! 不管：会话动作的字段（`session.rs`）、guest 诊断（`guest.rs`）。
-//! 联动：`src/units/runtime/api/action.rs` 与 `src/units/registry/api`。
+//! 联动：`src/units/business/runtime/api/action.rs` 与 `src/units/registry/api`。
 
 use super::super::doubles::InMemoryHistory;
 use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work};
 use super::support::spawn;
 use crate::presentation::faces::Faces;
-use crate::units::runtime::api::Handle;
-use crate::units::runtime::api::{Acted, ActionCall, Caller};
-use crate::units::session_model::api::MEETING;
-use crate::units::transcript::api::SessionEvent;
-use crate::units::turn::turn::api::Output;
+use crate::units::business::runtime::api::Handle;
+use crate::units::business::runtime::api::{Acted, ActionCall, Caller};
+use crate::units::business::session_model::api::MEETING;
+use crate::units::business::transcript::api::SessionEvent;
+use crate::units::business::turn::turn::api::Output;
 use std::sync::Arc;
 
 #[test]
@@ -104,7 +104,7 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
         .expect("核心推荐");
     assert_eq!(agents.len(), 1, "回包只给名单（渲染那一步的契约不变）");
     let (batches, _head, _oldest) = handle.events().snapshot(
-        Some(crate::units::session_model::api::SYSTEM_SID_SUGGEST),
+        Some(crate::units::business::session_model::api::SYSTEM_SID_SUGGEST),
         0,
     );
     assert!(
@@ -122,7 +122,7 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
             .session_views(&[])
             .expect("会话视图")
             .iter()
-            .any(|v| v.sid == crate::units::session_model::api::SYSTEM_SID_SUGGEST),
+            .any(|v| v.sid == crate::units::business::session_model::api::SYSTEM_SID_SUGGEST),
         "系统会话不进会话列表（前端因此不会为它建标签页）"
     );
 }

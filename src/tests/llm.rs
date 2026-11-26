@@ -1,52 +1,64 @@
 //! 目的：钉 llm 单元的信封解析/修复与模型目录、端点回落。
 //! 管：干净/降级/包裹 JSON 解析、文本可缺、配平提取、坏信封修复与分类、工具解析、流式在信封括号停止、抑制分片、目录与端点候选。
 //! 不管：前端路由（routes.rs）。
-//! 联动：src/units/llm/。
+//! 联动：src/units/business/llm/。
 
 use super::builders::*;
 use super::prelude::*;
-use crate::units::session_model::api::SINGLE;
+use crate::units::business::session_model::api::SINGLE;
 
 #[test]
 pub(crate) fn envelope_parse_clean() {
-    let r = crate::units::llm::api::parse("{\"type\":\"ask\",\"text\":\"要 A 还是 B？\"}");
-    assert!(matches!(r.verb, crate::units::llm::api::Verb::Ask));
+    let r =
+        crate::units::business::llm::api::parse("{\"type\":\"ask\",\"text\":\"要 A 还是 B？\"}");
+    assert!(matches!(
+        r.verb,
+        crate::units::business::llm::api::Verb::Ask
+    ));
     assert_eq!(r.text, "要 A 还是 B？");
     assert!(!r.degraded);
 }
 
 #[test]
 pub(crate) fn envelope_degraded_keeps_raw() {
-    let r = crate::units::llm::api::parse("这不是 JSON");
+    let r = crate::units::business::llm::api::parse("这不是 JSON");
     assert!(r.degraded);
     assert_eq!(r.text, "这不是 JSON");
 }
 
 #[test]
 pub(crate) fn envelope_wrapped_json_still_parses() {
-    let r = crate::units::llm::api::parse("好的：{\"type\":\"agree\",\"text\":\"同意\"} 以上。");
-    assert!(matches!(r.verb, crate::units::llm::api::Verb::Agree));
+    let r = crate::units::business::llm::api::parse(
+        "好的：{\"type\":\"agree\",\"text\":\"同意\"} 以上。",
+    );
+    assert!(matches!(
+        r.verb,
+        crate::units::business::llm::api::Verb::Agree
+    ));
     assert!(!r.degraded);
 }
 
 #[test]
 pub(crate) fn envelope_text_may_be_omitted() {
-    let r = crate::units::llm::api::parse("{\"type\":\"agree\"}");
+    let r = crate::units::business::llm::api::parse("{\"type\":\"agree\"}");
     assert!(
-        matches!(r.verb, crate::units::llm::api::Verb::Agree),
+        matches!(r.verb, crate::units::business::llm::api::Verb::Agree),
         "缺 text 不影响表态"
     );
     assert_eq!(r.text, "", "缺 text = 空串");
     assert!(!r.degraded);
-    let say = crate::units::llm::api::parse("{\"type\":\"say\"}");
+    let say = crate::units::business::llm::api::parse("{\"type\":\"say\"}");
     assert!(
-        matches!(say.verb, crate::units::llm::api::Verb::Say) && !say.degraded,
+        matches!(say.verb, crate::units::business::llm::api::Verb::Say) && !say.degraded,
         "缺 text 的发言仍是干净信封"
     );
     assert!(say.text.is_empty());
     // 缺 name 的工具信封仍是 malformed 信号，不被缺省 text 收编成发言。
-    let bad = crate::units::llm::api::parse("{\"type\":\"tool\",\"args\":{}}");
-    assert!(matches!(bad.verb, crate::units::llm::api::Verb::Tool));
+    let bad = crate::units::business::llm::api::parse("{\"type\":\"tool\",\"args\":{}}");
+    assert!(matches!(
+        bad.verb,
+        crate::units::business::llm::api::Verb::Tool
+    ));
     assert!(bad.tools.iter().any(|t| t.malformed.is_some()));
 }
 
@@ -146,7 +158,7 @@ pub(crate) fn malformed_tool_envelope_becomes_a_failed_tool_line() {
     crate::tests::lifecycle::rewind(
         &mut core2,
         &sid,
-        crate::units::lifecycle::api::RewindTarget::Delete(4),
+        crate::units::business::lifecycle::api::RewindTarget::Delete(4),
     )
     .unwrap();
     let rebuilt = core2.single_history(&sid).expect("重建后应在内存里");
@@ -161,7 +173,7 @@ pub(crate) fn malformed_tool_envelope_becomes_a_failed_tool_line() {
 #[test]
 pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix() {
     // 类别是可判定的确切事实：模型据此能直接改对，而不是被笼统告知"JSON 不合法"。
-    use crate::units::llm::api::{Malformed, parse};
+    use crate::units::business::llm::api::{Malformed, parse};
     // ① 字符串里直接换行（真实事故：write 的 content 里裸换行 → 整段 JSON 非法）
     let r = parse(
         "{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":\"第一行\n第二行\"}}",
@@ -185,11 +197,13 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
     let r = parse("好。{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\"}");
     assert_eq!(
         r.tools.first().cloned().expect("信号").malformed,
-        Some(Malformed::Unclosed(crate::units::llm::api::Tail {
-            missing: "}".to_string(),
-            in_string: false,
-            envelopes: 1,
-        }))
+        Some(Malformed::Unclosed(
+            crate::units::business::llm::api::Tail {
+                missing: "}".to_string(),
+                in_string: false,
+                envelopes: 1,
+            }
+        ))
     );
     // 断在字符串中间：状态要说清"内容没写完"（补引号会拿到半截内容）
     let r = parse(
@@ -237,7 +251,7 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
         other => panic!("应判为语法错：{:?}", other),
     }
     // 四类各有各的修法（不是同一条笼统提示）
-    let control = crate::units::llm::api::malformed_report(&Malformed::RawControl {
+    let control = crate::units::business::llm::api::malformed_report(&Malformed::RawControl {
         ch: '\n',
         line: 3,
         tail: None,
@@ -252,7 +266,7 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
         "要教模型把换行写成反斜杠 n：{}",
         control
     );
-    let shape = crate::units::llm::api::malformed_report(&Malformed::Shape(
+    let shape = crate::units::business::llm::api::malformed_report(&Malformed::Shape(
         "missing field name".to_string(),
     ));
     assert!(
@@ -265,14 +279,14 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
         "字段不合法也要示范 calls 数组形态：{}",
         shape
     );
-    let tab = crate::units::llm::api::malformed_report(&Malformed::RawControl {
+    let tab = crate::units::business::llm::api::malformed_report(&Malformed::RawControl {
         ch: '\t',
         line: 1,
         tail: None,
     });
     // 只差收尾括号：要说清"还差 }"（而不是误导成"内容过长"）
-    let brace = crate::units::llm::api::malformed_report(&Malformed::Unclosed(
-        crate::units::llm::api::Tail {
+    let brace = crate::units::business::llm::api::malformed_report(&Malformed::Unclosed(
+        crate::units::business::llm::api::Tail {
             missing: "}".to_string(),
             in_string: false,
             envelopes: 1,
@@ -290,16 +304,16 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
         brace
     );
     // 断在字符串中间才是"内容没写完"，这时才谈分次写
-    let cut = crate::units::llm::api::malformed_report(&Malformed::Unclosed(
-        crate::units::llm::api::Tail {
+    let cut = crate::units::business::llm::api::malformed_report(&Malformed::Unclosed(
+        crate::units::business::llm::api::Tail {
             missing: "}\"}".to_string(),
             in_string: true,
             envelopes: 1,
         },
     ));
     // 一段回复里起了两段信封：要说清"只发一段"，而不是让它去补末尾括号（真实事故的形状）
-    let multi = crate::units::llm::api::malformed_report(&Malformed::Unclosed(
-        crate::units::llm::api::Tail {
+    let multi = crate::units::business::llm::api::malformed_report(&Malformed::Unclosed(
+        crate::units::business::llm::api::Tail {
             missing: "}}".to_string(),
             in_string: false,
             envelopes: 2,
@@ -328,8 +342,8 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
 
 #[test]
 pub(crate) fn envelope_tool_parses_name_and_args() {
-    let r = crate::units::llm::api::parse(TOOL_CALL);
-    assert_eq!(r.verb, crate::units::llm::api::Verb::Tool);
+    let r = crate::units::business::llm::api::parse(TOOL_CALL);
+    assert_eq!(r.verb, crate::units::business::llm::api::Verb::Tool);
     let inv = r.tools.first().cloned().expect("应有调用申请");
     assert_eq!(inv.name, "scan");
     assert!(
@@ -338,7 +352,7 @@ pub(crate) fn envelope_tool_parses_name_and_args() {
     );
     assert!(inv.args_json.contains("keyword"));
     // 带 module 的信封：trim 后非空才是 Some（空串按省略处理）。
-    let with_mod = crate::units::llm::api::parse(
+    let with_mod = crate::units::business::llm::api::parse(
         "{\"type\":\"tool\",\"module\":\" reviewer \",\"name\":\"read_txt\",\"args\":{}}",
     );
     assert_eq!(
@@ -351,7 +365,7 @@ pub(crate) fn envelope_tool_parses_name_and_args() {
             .as_deref(),
         Some("reviewer")
     );
-    let blank_mod = crate::units::llm::api::parse(
+    let blank_mod = crate::units::business::llm::api::parse(
         "{\"type\":\"tool\",\"module\":\"  \",\"name\":\"read_txt\",\"args\":{}}",
     );
     assert!(
@@ -364,10 +378,10 @@ pub(crate) fn envelope_tool_parses_name_and_args() {
             .is_none()
     );
     // name 缺失 = 工具信封但不合法 → **独立的 malformed 信号**（不再按原文发言收录）。
-    let bad = crate::units::llm::api::parse("{\"type\":\"tool\",\"args\":{}}");
+    let bad = crate::units::business::llm::api::parse("{\"type\":\"tool\",\"args\":{}}");
     assert_eq!(
         bad.verb,
-        crate::units::llm::api::Verb::Tool,
+        crate::units::business::llm::api::Verb::Tool,
         "看得出是想发工具信封"
     );
     assert!(
@@ -382,14 +396,16 @@ pub(crate) fn envelope_tool_parses_name_and_args() {
     );
     assert!(bad.text.is_empty(), "非法信封的 JSON 也不进 text");
     // 真的"没有信封"仍然是 degraded say（原文收录）。
-    let plain = crate::units::llm::api::parse("没有信封的发言");
+    let plain = crate::units::business::llm::api::parse("没有信封的发言");
     assert!(plain.degraded && plain.tools.is_empty() && plain.text == "没有信封的发言");
     // 信封之外的正文才进 text（永不把信封 JSON 当文本）；只剩信封时 text 为空串。
     assert!(
-        crate::units::llm::api::parse(TOOL_CALL).text.is_empty(),
+        crate::units::business::llm::api::parse(TOOL_CALL)
+            .text
+            .is_empty(),
         "只剩信封 → text 空"
     );
-    let prose = crate::units::llm::api::parse(
+    let prose = crate::units::business::llm::api::parse(
         "先看一眼。{\"type\":\"tool\",\"name\":\"scan\",\"args\":{}}后记",
     );
     assert_eq!(prose.text, "先看一眼。后记", "信封之外的正文进 text");
@@ -403,7 +419,7 @@ pub(crate) fn envelope_tool_parses_name_and_args() {
 #[test]
 pub(crate) fn streaming_stops_at_the_envelope_brace() {
     // 正文开头照常流；一旦出现 "{"（信封开始）就不再外送后续片段。
-    use crate::units::agentloop::api::stream_piece;
+    use crate::units::business::agentloop::api::stream_piece;
     let (send, acc) = stream_piece("", "我先看看。");
     assert_eq!(send, "我先看看。");
     let (send, acc) = stream_piece(&acc, "{\"type\":\"tool\"}");
@@ -423,7 +439,7 @@ pub(crate) fn streaming_stops_at_the_envelope_brace() {
 
 #[test]
 pub(crate) fn suppressed_stream_pieces_do_not_emit_delta_events() {
-    use crate::units::agentloop::api::delta_visible;
+    use crate::units::business::agentloop::api::delta_visible;
     assert!(delta_visible("start", ""), "start 用来重置本轮流，必须外送");
     assert!(delta_visible("text", "正文"));
     assert!(delta_visible("reasoning", "想一想"));
@@ -535,12 +551,12 @@ pub(crate) fn an_aborted_generation_never_executes_a_repairable_envelope() {
     // 取消标志在生成开始前就已置位 = 用户按下了「停止」：引擎据此收尾，
     // 不再发起下一次调用（工具调用没有上限兜底，这条出口必须自己站住）。
     let events = {
-        let io = crate::units::agentloop::api::TurnIo {
+        let io = crate::units::business::agentloop::api::TurnIo {
             llm: Default::default(),
             ask: None,
         };
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        let mut noop = |_e: crate::units::transcript::api::SessionEvent| {};
+        let mut noop = |_e: crate::units::business::transcript::api::SessionEvent| {};
         core.turn
             .single_say(
                 &sid,
@@ -576,12 +592,12 @@ pub(crate) fn a_cancelled_generation_never_executes_a_valid_tool_envelope() {
         core_with_io_gateway(vec![module_of("a")], AbortGateway { raw }, Arc::clone(&io));
     let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = {
-        let io = crate::units::agentloop::api::TurnIo {
+        let io = crate::units::business::agentloop::api::TurnIo {
             llm: Default::default(),
             ask: None,
         };
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        let mut noop = |_e: crate::units::transcript::api::SessionEvent| {};
+        let mut noop = |_e: crate::units::business::transcript::api::SessionEvent| {};
         core.turn
             .single_say(
                 &sid,
@@ -602,7 +618,7 @@ pub(crate) fn a_cancelled_generation_never_executes_a_valid_tool_envelope() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            crate::units::transcript::api::SessionEvent::Transcript(lines)
+            crate::units::business::transcript::api::SessionEvent::Transcript(lines)
                 if lines.iter().any(|l| l.kind == "notice" && l.line.contains("[停止]"))
         )),
         "取消要留下可回档的 [停止] 行：{:?}",
@@ -614,7 +630,7 @@ pub(crate) fn a_cancelled_generation_never_executes_a_valid_tool_envelope() {
 ///   但**不进对话**——点「继续」是从断点重开一轮，不是把这半句当发言续写。
 #[test]
 pub(crate) fn an_interrupted_generation_keeps_the_half_sentence_as_a_cut_line() {
-    use crate::units::transcript::api::SessionEvent;
+    use crate::units::business::transcript::api::SessionEvent;
     let io = Arc::new(InMemorySysIo::new());
     let mut core = core_with_io_gateway(
         vec![module_of("a")],
@@ -625,7 +641,7 @@ pub(crate) fn an_interrupted_generation_keeps_the_half_sentence_as_a_cut_line() 
     );
     let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     let events = {
-        let io = crate::units::agentloop::api::TurnIo {
+        let io = crate::units::business::agentloop::api::TurnIo {
             llm: Default::default(),
             ask: None,
         };
@@ -878,7 +894,9 @@ pub(crate) fn envelope_multi_call_runs_every_call_and_rebuilds_identically() {
     crate::tests::lifecycle::rewind(
         &mut core2,
         &sid,
-        crate::units::lifecycle::api::RewindTarget::Delete(transcript_rows(&events).len() as u64),
+        crate::units::business::lifecycle::api::RewindTarget::Delete(
+            transcript_rows(&events).len() as u64,
+        ),
     )
     .unwrap();
     let rebuilt = core2.single_history(&sid).unwrap();

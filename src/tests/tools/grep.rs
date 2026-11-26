@@ -1,7 +1,7 @@
 //! 目的：内置 `grep` 的行为契约——目录递归、忽略规则与隐藏 / 二进制剪枝、glob、上下文、files_only、字面匹配与非法输入。
 //! 管：`grep` 的输出形态与剪枝结论；规则来源是版本库目录里的 `.workignore`。
 //! 不管：工具面发放（`src/tests/tools/face.rs`）与派发（`src/tests/tools/dispatch.rs`），也不管过滤规则本身的匹配语义（`src/tests/workspace/filter.rs`）。
-//! 联动：被测实现在 `src/units/tools/service/grep.rs`，夹具是 `src/tests/doubles/io.rs` 的 `InMemorySysIo`。
+//! 联动：被测实现在 `src/units/business/tools/service/grep.rs`，夹具是 `src/tests/doubles/io.rs` 的 `InMemorySysIo`。
 
 use super::super::prelude::*;
 

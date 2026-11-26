@@ -1,7 +1,7 @@
 /**
  * 外部工具位置门禁：设置里那几个工具路径只有一个读者圈——位置解析（provision）与它的装配方。
- * 判据：`src` 里除 `units/catalog`（定义与校验）、`units/provision`（解析）、`units/runtime`（写入）、
- *   `units/work`（装配）与组合根 `entry` 之外，不得读 `qemu_path` / `virtiofsd_path` / `smbd_path`；
+ * 判据：`src` 里除 `units/business/catalog`（定义与校验）、`units/business/provision`（解析）、`units/business/runtime`（写入）、
+ *   `units/business/work`（装配）与组合根 `entry` 之外，不得读 `qemu_path` / `virtiofsd_path` / `smbd_path`；
  *   别处要工具位置就问 `provision::api::vm_tools`，别再各解一遍（各自解析正是三条路各说各话的来源）。
  * 注释里提到字段名不算命中：先剥测试模块，再用 tests/lib/rust-mask.js 抹注释（保留字面量）。
  * 零豁免：命中即失败，没有基线文件可销账。
@@ -14,7 +14,7 @@ const { stripTestModules } = require("./dependency.js");
 const { maskComments } = require("../../lib/rust-mask.js");
 
 /** 允许读这几个字段的目录：定义 / 校验、解析、写入、装配。 */
-const ALLOWED = ["src/units/catalog/", "src/units/provision/", "src/units/runtime/", "src/units/work/", "src/entry/"];
+const ALLOWED = ["src/units/business/catalog/", "src/units/business/provision/", "src/units/business/runtime/", "src/units/business/work/", "src/entry/"];
 /** 字段访问（`.qemu_path` 这种），不是字段声明。 */
 const FIELD = /\.(qemu_path|virtiofsd_path|smbd_path)\b/g;
 /** 测试自己的夹具，不按产品口径判。 */

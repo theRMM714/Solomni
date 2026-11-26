@@ -33,6 +33,7 @@ const S = {
   rootEntries: require("./structure/root-entries.js"),
   diskOwners: require("./structure/disk-owners.js"),
   ioOwners: require("./structure/io-owners.js"),
+  unitBuckets: require("./structure/unit-buckets.js"),
   toolPaths: require("./structure/tool-paths.js"),
   webLayers: require("./structure/webLayers.js"),
   size: require("./structure/size.js"),
@@ -186,6 +187,18 @@ const GATES = [
     },
   },
   {
+    id: "structure/unit-buckets",
+    lane: "structure",
+    step: "T0 结构审查",
+    kind: "text",
+    inputs: ["src/units/**", "layers.yaml"],
+    run: (root, ctx) => {
+      const r = S.unitBuckets.unitBuckets(root);
+      ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
+      return r.problems;
+    },
+  },
+  {
     id: "structure/io-owners",
     lane: "structure",
     step: "T0 结构审查",
@@ -298,7 +311,7 @@ const GATES = [
   { id: "docs/root-router", lane: "docs", step: "T0 文档审查", kind: "text", inputs: ["*.md", "AGENTS.md"], run: (root) => D.rootRouter.rootRouter(root) },
   { id: "docs/index", lane: "docs", step: "T0 文档审查", kind: "text", inputs: ["docs/**/README.md", "docs/README.md"], run: (root) => D.unitIndex.unitIndex(root) },
   { id: "docs/templates", lane: "docs", step: "T0 文档审查", kind: "spawn", inputs: ["docs/templates/**", "docs/**/*.md"], run: (root) => D.templates.templates(root) },
-  { id: "docs/generated", lane: "docs", step: "T0 文档审查", kind: "spawn", inputs: ["docs/**/*.md", "src/units/vm/domain/exec.rs", "tests/**/gaps.yaml"], run: (root) => D.generated.generated(root) },
+  { id: "docs/generated", lane: "docs", step: "T0 文档审查", kind: "spawn", inputs: ["docs/**/*.md", "src/units/business/vm/domain/exec.rs", "tests/**/gaps.yaml"], run: (root) => D.generated.generated(root) },
 ];
 
 /** 车道 = 有序 id 列表（顺序即报告里问题的顺序；改动顺序会让 detail 字符串变化）。 */
@@ -337,6 +350,7 @@ const LANE_ORDER = {
     "structure/capability-internal",
     "structure/root-entries",
     "structure/disk-owners",
+    "structure/unit-buckets",
     "structure/io-owners",
     "structure/kernel-products",
     "structure/env-surface",

@@ -1,10 +1,10 @@
 //! 目的：命令契约的统一形状与文本解析器的用例——同一份声明派生写法、手册、补全与校验。
 //! 管：`OpBook` 覆盖全部命令、`usage` 由声明派生、`parse` 的每条词法规则、`complete` 与 `problems` 的自洽。
 //! 不管：命令怎么执行（各执行者自己的测试）、手册怎么排版（`src/tests/cli.rs`）。
-//! 联动：`systools/commands.yaml`、`src/units/tools/domain/op.rs`。
+//! 联动：`systools/commands.yaml`、`src/units/business/tools/domain/op.rs`。
 
-use crate::units::catalog::modules::api::{Param, ParamType};
-use crate::units::tools::api::{
+use crate::units::business::catalog::modules::api::{Param, ParamType};
+use crate::units::business::tools::api::{
     CommandBook, Executor, Op, OpBook, Phase, Runtime, ToolSchema, complete_op, op_usage, parse_op,
 };
 use serde_json::json;
@@ -118,14 +118,14 @@ fn booleans_are_presence_only() {
     assert_eq!(parsed("help", &["--no-all"]), json!({"all": false}));
     assert!(matches!(
         parse_op(&op("help"), &["--all=yes"]),
-        Err(crate::units::tools::api::ArgFault::FlagNeedsValue(_))
+        Err(crate::units::business::tools::api::ArgFault::FlagNeedsValue(_))
     ));
 }
 
 /// R5 错误：缺值 / 未知 / 重复 / 类型不符 / 越界 / 枚举外与动作面共用同一套错误。
 #[test]
 fn faults_share_the_action_face_vocabulary() {
-    use crate::units::tools::api::ArgFault;
+    use crate::units::business::tools::api::ArgFault;
     let help = op("help");
     let gc = op("gc");
     assert!(matches!(
@@ -170,7 +170,7 @@ fn faults_share_the_action_face_vocabulary() {
 /// R6 确认门槛：`--yes` 只对声明了 confirm 的命令收；其余命令里它是未知旗语，也不进参数表。
 #[test]
 fn yes_is_a_gate_not_a_parameter() {
-    use crate::units::tools::api::ArgFault;
+    use crate::units::business::tools::api::ArgFault;
     assert_eq!(
         parsed("work", &["s1", "--yes"]),
         json!({"session": "s1", "action": "log", "yes": true})
@@ -212,7 +212,7 @@ fn optional_value_flags_may_come_bare() {
 /// R8 短旗是闭集：只留 -h / -v（入口层摘走），其余单破折号一律当未知旗语；裸 `-` 是普通值。
 #[test]
 fn short_flags_are_a_closed_set() {
-    use crate::units::tools::api::ArgFault;
+    use crate::units::business::tools::api::ArgFault;
     assert!(matches!(
         parse_op(&op("help"), &["-a"]),
         Err(ArgFault::UnknownFlag(f)) if f == "-a"

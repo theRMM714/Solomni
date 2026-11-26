@@ -15,8 +15,8 @@
 
 - **归环是必填身份**：单元必须在 `layers.yaml` 里有一行，跨单元边只能指向**严格更低的环**，同环只按 rank 先后（`tests/gates/structure/layers.js`）。环号不回答「是不是业务」，它只回答「能依赖谁」。
 - **机制不因调用方多而升格**：日志、路径、进程、围栏、平台差异归一化这类没有领域词、没有用户可见后果的机制，留在 `kernel` 或所属单元的 `detail/`，不按第 2 条算作业务；第 2 条只用来判断「已有自己用例」的单元是否值得独立。
-- **已判例（代理工具族 → `proxy`）**：判据 1 成立——六工具有自有协议（`src/units/proxy/domain/proxy.rs` 的载荷、授权判据与回执形状）与用户可见后果（代用户建会话、转达、控会话）。判据 2 目前只有 `runtime` 一个调用方，它成立的方式是**端口反转**：`proxy` 声明宿主契约 `ProxyHost`（`src/units/proxy/api.rs`），由 `runtime` 的 `ProxyBridge` 实现（`src/units/runtime/service/bridge.rs`）、只在 `src/units/runtime/service/handle.rs` 的 `inject_proxy_handler` 装配——`runtime` 对它的依赖因此止于 `::api`，真实会话状态仍在 `runtime` / `turn` 一侧。
-- **已判例（顶层编排 → `runtime`）**：判据 1 成立——编排有自己的领域词（启用工作、改需求、回档、停止、动作分发）、自有协议（`src/units/runtime/api.rs` 的 `RuntimeOps` / `ActionOps` / `ActionCall` / `Acted`）与用户可见后果（一条命令把几个下层用例按序跑完）；判据 2 成立——入口（`src/main.rs` 的 `Handle::spawn`）与呈现层（`src/presentation/faces.rs` 的 `Faces`）是两个调用方，两个渠道共用同一份编排。它**不搬**下层用例的身体：方法体只是「按序调几个下层用例 + 状态聚合」。
+- **已判例（代理工具族 → `proxy`）**：判据 1 成立——六工具有自有协议（`src/units/business/proxy/domain/proxy.rs` 的载荷、授权判据与回执形状）与用户可见后果（代用户建会话、转达、控会话）。判据 2 目前只有 `runtime` 一个调用方，它成立的方式是**端口反转**：`proxy` 声明宿主契约 `ProxyHost`（`src/units/business/proxy/api.rs`），由 `runtime` 的 `ProxyBridge` 实现（`src/units/business/runtime/service/bridge.rs`）、只在 `src/units/business/runtime/service/handle.rs` 的 `inject_proxy_handler` 装配——`runtime` 对它的依赖因此止于 `::api`，真实会话状态仍在 `runtime` / `turn` 一侧。
+- **已判例（顶层编排 → `runtime`）**：判据 1 成立——编排有自己的领域词（启用工作、改需求、回档、停止、动作分发）、自有协议（`src/units/business/runtime/api.rs` 的 `RuntimeOps` / `ActionOps` / `ActionCall` / `Acted`）与用户可见后果（一条命令把几个下层用例按序跑完）；判据 2 成立——入口（`src/main.rs` 的 `Handle::spawn`）与呈现层（`src/presentation/faces.rs` 的 `Faces`）是两个调用方，两个渠道共用同一份编排。它**不搬**下层用例的身体：方法体只是「按序调几个下层用例 + 状态聚合」。
 - **状态不参与这条判据**——它只在本文件第二节回答「这块状态归谁」。
 
 ## 二、状态归谁
@@ -25,7 +25,7 @@
 - 没有参与方拥有、且 ≥2 个参与方共同依赖 → 归**依赖图上最高的那个使用方**（`turn_state` 的会话在世表、运行态、创建占位与裁决队，`runtime` 的作业登记）：由它持有、只经自己的 `api` 暴露，不许为这块状态另造一个横跨所有层的单元；命令队列本身是机制，在 `src/kernel/domain/actor.rs`；
 - 只被一个参与方用、自己又没有不变式 → 它是**派生值**，留在 owner 的 `domain/`，现算。
 
-- **持状态的单元只能写自己的状态**；别人的状态只经 `api` 拿（R4）（`src/units/runtime/service/core.rs` 只持有 `turn_state` / `session_model` / `work` / `lifecycle` 等单元的入站对象并薄转发，不代写它们的状态）。
+- **持状态的单元只能写自己的状态**；别人的状态只经 `api` 拿（R4）（`src/units/business/runtime/service/core.rs` 只持有 `turn_state` / `session_model` / `work` / `lifecycle` 等单元的入站对象并薄转发，不代写它们的状态）。
 
 ## 三、三分法（正交：只决定它持有什么、依赖谁）
 
@@ -44,10 +44,10 @@
 - **纯交付**（HTTP 路由、终端渲染）→ `presentation/{cli,web}/`，**不是单元**；
 - **只服务单一调用方的脚本 / 编排** → 它自己的 `service.rs`；
 - **DTO 中转站**（把两个单元的类型拼一起的适配业务）→ 新的水平层，禁止（`node run-tests.js` 的 T0 结构审查）。
-- **动作表不等于分发器**：`runtime` 的 `ActionOps::act` 是**入口分发**（查表 → 校验 → 授权 → 审计，`src/units/runtime/service/action.rs`），执行体仍在各单元的用例里；把它写成什么都干的「万能分发器」等于把下层用例搬进顶层。
+- **动作表不等于分发器**：`runtime` 的 `ActionOps::act` 是**入口分发**（查表 → 校验 → 授权 → 审计，`src/units/business/runtime/service/action.rs`），执行体仍在各单元的用例里；把它写成什么都干的「万能分发器」等于把下层用例搬进顶层。
 - **聚合面不是业务**：`Faces`（`src/presentation/faces.rs`）只做装配——回答「这块屏幕取哪几个面」，不得长判定；判定与编排留在 `runtime`，机制留在各单元的 `detail/`。
-- **把可变借用当参数传**：账本这类纯值按值进出——交一份、拿回更新后的那份，不借别人的 `&mut`（`src/units/tools/api.rs` 的 `Recorded`；R16）。
-- **把环境包当参数传**：把端口、状态与值拼成一个结构递给别的单元，等于传活对象；改成只传值 + 少量窄端口（`src/units/agentloop/domain/member_tools.rs`、R16）：该文件里的 `ToolFace` 是抽出来的值面，端口与活状态仍留在 `MemberTools`；核实用例只借一个窄端口 `CoreVerify`，不把 `MemberTools` 写进 api 签名。`agentloop` 的 `api` 不转出 `MemberTools`：装配入口（`src/units/agentloop/domain/assembly.rs` 的 `single_session` / `rebuild_single` / `proxy_session`）只收端口与值，核实环境经 `verify_tools(&VerifySpec)`（`src/units/agentloop/domain/verify.rs`）取。
+- **把可变借用当参数传**：账本这类纯值按值进出——交一份、拿回更新后的那份，不借别人的 `&mut`（`src/units/business/tools/api.rs` 的 `Recorded`；R16）。
+- **把环境包当参数传**：把端口、状态与值拼成一个结构递给别的单元，等于传活对象；改成只传值 + 少量窄端口（`src/units/business/agentloop/domain/member_tools.rs`、R16）：该文件里的 `ToolFace` 是抽出来的值面，端口与活状态仍留在 `MemberTools`；核实用例只借一个窄端口 `CoreVerify`，不把 `MemberTools` 写进 api 签名。`agentloop` 的 `api` 不转出 `MemberTools`：装配入口（`src/units/business/agentloop/domain/assembly.rs` 的 `single_session` / `rebuild_single` / `proxy_session`）只收端口与值，核实环境经 `verify_tools(&VerifySpec)`（`src/units/business/agentloop/domain/verify.rs`）取。
 
 ## 五、粒度上限
 
@@ -77,7 +77,7 @@
 - **R7**：**不留兼容层**：项目是 GREEN FIELD，**只维护当前唯一实现**——旧实现直接删，不留转发壳或历史说明 <!-- hygiene-ignore -->
 - **R8**：**文档同步**：改结构必须同一次改 `docs/architecture/` 对应细则 / `docs/<单元>/unit-map.md` / 相关细则 / `AGENTS.md` 路由表
 - **R9**：**跨平台与路径**：一律 `PathBuf` 组件拼接；对外用 `/`；不假设平台
-- **R10**：**测试跟着业务分区走**：`units/<单元>/<子业务>/` ↔ `src/tests/<子业务>.rs`（用例多的按域分成子目录，一域一个文件），单文件 ≤ 2000 行；用例只经 `::api` / `::ports` / 组合根 `crate::entry::assembly`，出现 `::service` / `::domain` / `::detail` 即失败（`tests/gates/structure/tests-api.js`）。
+- **R10**：**测试跟着业务分区走**：`units/<单元>/<子业务>/` ↔ `src/tests/<子业务>.rs`（用例多的按域分成子目录，一域一个文件），单文件 ≤ 2000 行；用例只经 `::api` / `::ports` / 组合根 `crate::entry::assembly`，出现 `::service` / `::domain` / `::detail` 即失败（`tests/gates/structure/tests-api.js`）。（存量 8 个适配器边界用例按名豁免，记账在 `tests/gaps.yaml` 的 `tests.impl-partition-imports`）
 - **R11**：**测试入口 = 生产入口**：禁止 `#[cfg(test)]` 专用语义入口（门禁 `structure/cfg-boundaries`）
 - **R12**：**端口只有一个持有者**：定义它的那个单元的 `service.rs`；别人只拿 `api` 面。**例外**：`kernel` 的机制端口是全项目共享的机制接口
 - **R13**：**跨单元的同形重复不许存在**：要么收进唯一所有者，要么独立成一个业务（见「判据」第 2 条）
@@ -104,6 +104,7 @@
 - **kernelProducts**（内核无产品名）：`src/kernel` 下任何 `.rs`（含注释与测试）不得出现 `qemu` / `smbd` / `virtiofsd`——内核只提供通用机制，产品名与它的 argv、配置文件名留在单元里；命中即失败、零豁免（`tests/gates/structure/kernel-products.js`）；
 - **envSurface**（环境面）：`std::env::` 只许在 `src/kernel/detail/io/env.rs`、`src/main.rs`、`src/entry/`、`src/presentation/` 出现（呈现面是终端能力探测）；其余一律经 `kernel::api::env`，`std::env::consts` 与 `split_paths` 不在判据内（`tests/gates/structure/env-surface.js`）；
 - **diskOwners**（盘主）：一块盘一个主——`layout::<介质>()` 只许主人单元、组合根与内核调用，别的单元走主人单元 api / 端口；主人表与 `layout.rs` 双向比对，改了名不登记即报错（`tests/gates/structure/disk-owners.js`）；
+- **unitBuckets**（单元桶）：`src/units/` 下只许 `pure` / `resource` / `business` 三个桶，每个单元恰好住一个桶，桶的模块根声明与桶内目录双向一致，并与 `layers.yaml` 的单元清单双向比对；在顶层新加一个平铺单元即失败（`tests/gates/structure/unit-buckets.js`）；
 - **ioOwners**（IO 面）：入站监听、回环客户端、出站装配各只有一份实现（`src/kernel/detail/io/net/`）；命中点只能落在实现文件或表里逐条登记过的例外（容器内回环中继绑 `127.0.0.2`、流式栈自建 `reqwest` client），其余一律经 `kernel::api::net`（`tests/gates/structure/io-owners.js`，口径见 [io.md](io.md)）；
 - **toolPaths**（外部工具位置）：设置里的 `qemu_path` / `virtiofsd_path` / `smbd_path` 只在定义（catalog）、解析（provision）、写入（runtime）、装配（work、entry）读；别处要工具位置问 `provision::api::vm_tools` / `vm_tools_report`（`tests/gates/structure/tool-paths.js`）；
 - **fileSize**（文件粒度）：按角色分档判行数（实现 / 测试用例 / 测试支撑）与内联测试块，软线只回执、硬线失败，无 `EXEMPT`（`tests/gates/structure/size.js`）；

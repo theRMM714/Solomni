@@ -1,10 +1,10 @@
 //! 目的：会话与名单的测试脚手架——造成员、造名单、造会话与一次编辑提交。
 //! 管：工具声明样本、坏信封、成员装配、名单与 meta 落盘、编辑提交。
 //! 不管：事件视图（`events.rs`）、通道（`chat.rs`）。
-//! 联动：`src/units/runtime/api.rs` 与 `src/units/modules/api.rs`。
+//! 联动：`src/units/business/runtime/api.rs` 与 `src/units/modules/api.rs`。
 
 use super::*;
-use crate::units::session_model::api::SessionSpec;
+use crate::units::business::session_model::api::SessionSpec;
 
 pub(crate) fn chain_node(id: &str, deps: &[&str]) -> crate::units::pure::taskchain::api::TaskNode {
     crate::units::pure::taskchain::api::TaskNode {
@@ -63,7 +63,7 @@ pub(crate) fn member_with_tools(
     WithTools {
         member: m,
         tools: Some(MemberTools {
-            face: crate::units::agentloop::api::ToolFace {
+            face: crate::units::business::agentloop::api::ToolFace {
                 mode: crate::units::pure::registry_model::api::ToolMode::Envelope,
                 seat: "solo".to_string(),
                 modules,
@@ -71,7 +71,7 @@ pub(crate) fn member_with_tools(
                 guest_lease: String::new(),
                 sandbox: test_sandbox("m0", &[]),
                 tools_this_turn: test_prompts()
-                    .text(crate::units::prompt::api::Segment::ToolsThisTurn)
+                    .text(crate::units::business::prompt::api::Segment::ToolsThisTurn)
                     .to_string(),
                 builtin_tools: test_systools().tools,
                 unavailable: BTreeMap::new(),
@@ -84,7 +84,7 @@ pub(crate) fn member_with_tools(
                 runtime_path: None,
                 runtime_roots: Vec::new(),
                 // 测试替身按"执行席"发放全部内置工具（机制席位的越权校验另有专门用例）。
-                allowed: crate::units::tools::api::names(),
+                allowed: crate::units::business::tools::api::names(),
                 with_modules: true,
                 notes: crate::tests::doubles::test_notes(&test_sandbox("m0", &[]), &[]),
             },
@@ -96,10 +96,10 @@ pub(crate) fn member_with_tools(
                 Arc::new(NoFenceHost),
             ),
             vm: test_vm(),
-            residents: Arc::new(crate::units::residents::api::NoResidents),
+            residents: Arc::new(crate::units::business::residents::api::NoResidents),
             // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
             workspace: None,
-            observations: crate::units::tools::api::Observations::default(),
+            observations: crate::units::business::tools::api::Observations::default(),
             shell_live: None,
             reply_seq: 0,
             line: Default::default(),

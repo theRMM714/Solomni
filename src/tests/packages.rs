@@ -5,8 +5,8 @@
 
 use super::builders::*;
 use super::prelude::*;
-use crate::units::catalog::packages::api as pkgs;
-use crate::units::catalog::packages::api::{Facts, Library, PinPolicy, Problem};
+use crate::units::business::catalog::packages::api as pkgs;
+use crate::units::business::catalog::packages::api::{Facts, Library, PinPolicy, Problem};
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};

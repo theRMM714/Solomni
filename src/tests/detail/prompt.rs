@@ -8,8 +8,8 @@ use super::*;
 /// 这一份面同时喂三处：回合注入的工具块、原生声明槽、越权校验——所以判据只有它一个。
 #[test]
 fn a_seat_face_comes_from_the_mechanism_declaration() {
-    use crate::units::agentloop::api::{resolve, seat_face};
-    use crate::units::session_model::api::seat;
+    use crate::units::business::agentloop::api::{resolve, seat_face};
+    use crate::units::business::session_model::api::seat;
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let st = YamlSystools::new(assets_at(&root))
         .load()
@@ -105,8 +105,8 @@ fn names_table_lists_directory_reserved_names() {
 /// 总表与机制面必须自洽：悬空引用 / 缺能力都会被挡下（不靠人看）。
 #[test]
 fn system_tools_and_mechanism_faces_are_self_consistent() {
-    use crate::units::conversation::session::api::mechanism_problems;
-    use crate::units::session_model::api::seat;
+    use crate::units::business::conversation::session::api::mechanism_problems;
+    use crate::units::business::session_model::api::seat;
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let st = YamlSystools::new(assets_at(&root))
         .load()
@@ -123,7 +123,8 @@ fn system_tools_and_mechanism_faces_are_self_consistent() {
     );
     // 越权判据只有一处：**这一回合的工具面**（机制按席位合成），给了的放行、没给的不放行。
     let has = |id: &str, tool: &str| {
-        crate::units::agentloop::api::seat_face(seat(id).expect("席位在册")).contains(&tool)
+        crate::units::business::agentloop::api::seat_face(seat(id).expect("席位在册"))
+            .contains(&tool)
     };
     assert!(has("discussant", "read"), "讨论席该能读");
     assert!(!has("discussant", "create_session"), "没给的工具必须不放行");
@@ -153,7 +154,7 @@ fn mechanism_book_covers_every_seat_in_play() {
     let prompts = YamlPrompts::new(assets_at(&root))
         .load()
         .expect("读提示词册");
-    use crate::units::session_model::api::SEATS;
+    use crate::units::business::session_model::api::SEATS;
     // 会话类型表在装载时已校验机制与流程；这里只锁机制册的适用席位都在声明里。
     let role_ids: Vec<&str> = SEATS.iter().map(|s| s.id).collect();
     assert!(!prompts.core.mechanisms.is_empty(), "机制册不能为空");

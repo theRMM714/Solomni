@@ -1,14 +1,14 @@
 //! 目的：压缩与恢复——发送视图换成一篇滚动摘要，删掉压缩行即回到全量。
 //! 管：自动/手动触发、保留尾巴、预算与百分比、模型解析、重启与回档。
 //! 不管：会话编辑（`session.rs`）、历史合并（`events.rs`）。
-//! 联动：`src/units/session/domain/session.rs` 与 `src/units/runtime/api/handle.rs`。
+//! 联动：`src/units/session/domain/session.rs` 与 `src/units/business/runtime/api/handle.rs`。
 
 use super::super::doubles::{model_draft, module_of};
 use super::super::single_work;
 use crate::presentation::faces::Faces;
-use crate::units::runtime::api::{ActionCall, Caller};
-use crate::units::transcript::api::SessionEvent;
-use crate::units::turn::turn::api::Output;
+use crate::units::business::runtime::api::{ActionCall, Caller};
+use crate::units::business::transcript::api::SessionEvent;
+use crate::units::business::turn::turn::api::Output;
 use std::sync::Arc;
 
 #[test]
@@ -30,7 +30,7 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
         inner: super::super::doubles::ScriptGateway::new(member, vec![]),
         seen: Arc::clone(&seen),
     };
-    let handle = crate::units::runtime::api::Handle::spawn(
+    let handle = crate::units::business::runtime::api::Handle::spawn(
         super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
     )
     .expect("起核心线程");
@@ -50,7 +50,7 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
         .say(
             &sid,
             "先做第一件事",
-            crate::units::turn::turn::api::Output::Final,
+            crate::units::business::turn::turn::api::Output::Final,
         )
         .expect("说一句");
 
@@ -89,7 +89,11 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
     // 再走一轮：发送视图里**只剩一份摘要**（第二次那份），上一份已被取代。
     faces
         .turn
-        .say(&sid, "继续", crate::units::turn::turn::api::Output::Final)
+        .say(
+            &sid,
+            "继续",
+            crate::units::business::turn::turn::api::Output::Final,
+        )
         .expect("压完再走一轮");
     let after = seen.lock().expect("锁").clone();
     let last = after.last().expect("至少问过一次").clone();
@@ -121,7 +125,7 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
         inner: super::super::doubles::ScriptGateway::new(member, vec![]),
         seen: Arc::clone(&seen),
     };
-    let handle = crate::units::runtime::api::Handle::spawn(
+    let handle = crate::units::business::runtime::api::Handle::spawn(
         super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
     )
     .expect("起核心线程");
@@ -144,12 +148,16 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
         .say(
             &sid,
             "先做第一件事",
-            crate::units::turn::turn::api::Output::Final,
+            crate::units::business::turn::turn::api::Output::Final,
         )
         .expect("第一轮");
     faces
         .turn
-        .say(&sid, "接着做", crate::units::turn::turn::api::Output::Final)
+        .say(
+            &sid,
+            "接着做",
+            crate::units::business::turn::turn::api::Output::Final,
+        )
         .expect("第二轮（开头该自动压一次）");
 
     let all = seen.lock().expect("锁").clone();
@@ -188,7 +196,7 @@ fn compaction_keeps_the_recent_tail_and_the_new_user_line() {
         inner: super::super::doubles::ScriptGateway::new(member, vec![]),
         seen: Arc::clone(&seen),
     };
-    let handle = crate::units::runtime::api::Handle::spawn(
+    let handle = crate::units::business::runtime::api::Handle::spawn(
         super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
     )
     .expect("起核心线程");
@@ -209,7 +217,7 @@ fn compaction_keeps_the_recent_tail_and_the_new_user_line() {
         .say(
             &sid,
             "第一句话",
-            crate::units::turn::turn::api::Output::Final,
+            crate::units::business::turn::turn::api::Output::Final,
         )
         .expect("第一轮");
     faces
@@ -217,7 +225,7 @@ fn compaction_keeps_the_recent_tail_and_the_new_user_line() {
         .say(
             &sid,
             "第二句话",
-            crate::units::turn::turn::api::Output::Final,
+            crate::units::business::turn::turn::api::Output::Final,
         )
         .expect("第二轮（开头该压一次）");
 
@@ -248,12 +256,13 @@ fn manual_compaction_reports_when_there_is_nothing_to_compact() {
         "a".to_string(),
         vec!["{\"type\":\"say\",\"text\":\"收到\"}".to_string()],
     );
-    let handle =
-        crate::units::runtime::api::Handle::spawn(super::super::doubles::core_with_gateway(
+    let handle = crate::units::business::runtime::api::Handle::spawn(
+        super::super::doubles::core_with_gateway(
             vec![module_of("a")],
             super::super::doubles::ScriptGateway::new(member, vec![]),
-        ))
-        .expect("起核心线程");
+        ),
+    )
+    .expect("起核心线程");
     let faces = Faces::from_handle(&handle);
     let mut st = faces.registry.settings().expect("读设置");
     st.compact_at_percent = 0;
@@ -268,7 +277,11 @@ fn manual_compaction_reports_when_there_is_nothing_to_compact() {
         .sid;
     faces
         .turn
-        .say(&sid, "你好", crate::units::turn::turn::api::Output::Final)
+        .say(
+            &sid,
+            "你好",
+            crate::units::business::turn::turn::api::Output::Final,
+        )
         .expect("第一轮");
     faces.turn.compact(&sid).expect("手动压缩");
     let (batches, _, _) = handle.events().snapshot(Some(&sid), 0);
@@ -303,7 +316,7 @@ fn slash_compact_message_runs_the_command_instead_of_the_model() {
         inner: super::super::doubles::ScriptGateway::new(member, vec![]),
         seen: Arc::clone(&seen),
     };
-    let handle = crate::units::runtime::api::Handle::spawn(
+    let handle = crate::units::business::runtime::api::Handle::spawn(
         super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
     )
     .expect("起核心线程");
@@ -324,7 +337,7 @@ fn slash_compact_message_runs_the_command_instead_of_the_model() {
         .say(
             &sid,
             "先说一句",
-            crate::units::turn::turn::api::Output::Final,
+            crate::units::business::turn::turn::api::Output::Final,
         )
         .expect("第一轮");
     let acted = faces
@@ -338,7 +351,7 @@ fn slash_compact_message_runs_the_command_instead_of_the_model() {
         .expect("斜杠命令该走动作");
     assert!(matches!(
         acted,
-        crate::units::runtime::api::Acted::Advanced(_)
+        crate::units::business::runtime::api::Acted::Advanced(_)
     ));
 
     let (batches, _, _) = handle.events().snapshot(Some(&sid), 0);
@@ -368,12 +381,13 @@ fn compact_action_takes_only_session_id() {
             "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"摘要\"}}".to_string(),
         ],
     );
-    let handle =
-        crate::units::runtime::api::Handle::spawn(super::super::doubles::core_with_gateway(
+    let handle = crate::units::business::runtime::api::Handle::spawn(
+        super::super::doubles::core_with_gateway(
             vec![module_of("a")],
             super::super::doubles::ScriptGateway::new(member, vec![]),
-        ))
-        .expect("起核心线程");
+        ),
+    )
+    .expect("起核心线程");
     let faces = Faces::from_handle(&handle);
     let mut st = faces.registry.settings().expect("读设置");
     st.compact_at_percent = 0;
@@ -391,7 +405,7 @@ fn compact_action_takes_only_session_id() {
         .say(
             &sid,
             "先说一句",
-            crate::units::turn::turn::api::Output::Final,
+            crate::units::business::turn::turn::api::Output::Final,
         )
         .expect("第一轮");
     faces
@@ -424,12 +438,13 @@ fn lowering_keep_percent_applies_to_live_manual_compaction() {
             "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"摘要\"}}".to_string(),
         ],
     );
-    let handle =
-        crate::units::runtime::api::Handle::spawn(super::super::doubles::core_with_gateway(
+    let handle = crate::units::business::runtime::api::Handle::spawn(
+        super::super::doubles::core_with_gateway(
             vec![module_of("a")],
             super::super::doubles::ScriptGateway::new(member, vec![]),
-        ))
-        .expect("起核心线程");
+        ),
+    )
+    .expect("起核心线程");
     let faces = Faces::from_handle(&handle);
     let mut st = faces.registry.settings().expect("读设置");
     st.compact_at_percent = 0;
@@ -447,7 +462,7 @@ fn lowering_keep_percent_applies_to_live_manual_compaction() {
         .say(
             &sid,
             "先说一句",
-            crate::units::turn::turn::api::Output::Final,
+            crate::units::business::turn::turn::api::Output::Final,
         )
         .expect("第一轮");
     // 活会话是在 keep=15 时建的；这里设为 0，手动压缩必须按新值重算。
@@ -546,7 +561,7 @@ fn deleting_the_compaction_line_restores_the_full_send_view() {
         inner: super::super::doubles::ScriptGateway::new(member, vec![]),
         seen: Arc::clone(&seen),
     };
-    let handle = crate::units::runtime::api::Handle::spawn(
+    let handle = crate::units::business::runtime::api::Handle::spawn(
         super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
     )
     .expect("起核心线程");
@@ -567,7 +582,7 @@ fn deleting_the_compaction_line_restores_the_full_send_view() {
         .say(
             &sid,
             "先说一句",
-            crate::units::turn::turn::api::Output::Final,
+            crate::units::business::turn::turn::api::Output::Final,
         )
         .expect("第一轮");
     faces.turn.compact(&sid).expect("手动压缩");
@@ -586,12 +601,16 @@ fn deleting_the_compaction_line_restores_the_full_send_view() {
         .runtime
         .rewind(
             &sid,
-            crate::units::lifecycle::api::RewindTarget::Delete(marker),
+            crate::units::business::lifecycle::api::RewindTarget::Delete(marker),
         )
         .expect("删除压缩记录行");
     faces
         .turn
-        .say(&sid, "继续", crate::units::turn::turn::api::Output::Final)
+        .say(
+            &sid,
+            "继续",
+            crate::units::business::turn::turn::api::Output::Final,
+        )
         .expect("删除后再问一轮");
 
     let all = seen.lock().expect("锁").clone();
@@ -608,7 +627,7 @@ fn deleting_the_compaction_line_restores_the_full_send_view() {
 
 #[test]
 fn auto_compaction_uses_provider_usage_when_it_is_available() {
-    use crate::units::llm::api::TokenUsage;
+    use crate::units::business::llm::api::TokenUsage;
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut member = std::collections::BTreeMap::new();
     member.insert(
@@ -625,7 +644,7 @@ fn auto_compaction_uses_provider_usage_when_it_is_available() {
             .with_usage(TokenUsage::new(18_000, 2_000, Some(20_000))),
         seen: Arc::clone(&seen),
     };
-    let handle = crate::units::runtime::api::Handle::spawn(
+    let handle = crate::units::business::runtime::api::Handle::spawn(
         super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
     )
     .expect("起核心线程");
@@ -643,11 +662,19 @@ fn auto_compaction_uses_provider_usage_when_it_is_available() {
         .sid;
     faces
         .turn
-        .say(&sid, "第一句", crate::units::turn::turn::api::Output::Final)
+        .say(
+            &sid,
+            "第一句",
+            crate::units::business::turn::turn::api::Output::Final,
+        )
         .expect("第一轮");
     faces
         .turn
-        .say(&sid, "第二句", crate::units::turn::turn::api::Output::Final)
+        .say(
+            &sid,
+            "第二句",
+            crate::units::business::turn::turn::api::Output::Final,
+        )
         .expect("第二轮该先压一次");
 
     let all = seen.lock().expect("锁").clone();
@@ -719,7 +746,7 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
         &[serde_json::json!({"type": "transcript", "lines": [line(next + 3, "user", "之后的新内容")]})],
     )
     .expect("落之后的新行");
-    let shown = |msgs: &[crate::units::llm::api::Msg]| {
+    let shown = |msgs: &[crate::units::business::llm::api::Msg]| {
         msgs.iter()
             .map(|m| format!("{}:{}", m.role, m.content))
             .collect::<Vec<_>>()
@@ -737,7 +764,7 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
         core.registry.as_ref(),
         core.probe.as_ref(),
     ) {
-        Ok(crate::units::turn::turn::api::Prepared::Run { session, .. }) => session,
+        Ok(crate::units::business::turn::turn::api::Prepared::Run { session, .. }) => session,
         Ok(_) => panic!("重建后该是可直接跑的一轮"),
         Err(e) => panic!("重建失败：{e}"),
     };
@@ -769,7 +796,7 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
     crate::tests::lifecycle::rewind(
         &mut core,
         &sid,
-        crate::units::lifecycle::api::RewindTarget::Delete(next),
+        crate::units::business::lifecycle::api::RewindTarget::Delete(next),
     )
     .expect("回档到压缩点之前");
     let back = core.turn.take_single(&sid).expect("取回回档后的会话");
@@ -783,7 +810,7 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
 
 #[test]
 fn the_compaction_call_is_counted_in_cumulative_usage() {
-    use crate::units::llm::api::TokenUsage;
+    use crate::units::business::llm::api::TokenUsage;
     let mut member = std::collections::BTreeMap::new();
     member.insert(
         "a".to_string(),
@@ -795,7 +822,7 @@ fn the_compaction_call_is_counted_in_cumulative_usage() {
     );
     let gateway = super::super::doubles::ScriptGateway::new(member, vec![])
         .with_usage(TokenUsage::new(900, 120, Some(1020)));
-    let handle = crate::units::runtime::api::Handle::spawn(
+    let handle = crate::units::business::runtime::api::Handle::spawn(
         super::super::doubles::core_with_gateway(vec![module_of("a")], gateway),
     )
     .expect("起核心线程");
@@ -815,7 +842,7 @@ fn the_compaction_call_is_counted_in_cumulative_usage() {
         .say(
             &sid,
             "先做第一件事",
-            crate::units::turn::turn::api::Output::Final,
+            crate::units::business::turn::turn::api::Output::Final,
         )
         .expect("说一句");
     let totals = faces

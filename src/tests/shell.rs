@@ -6,7 +6,7 @@
 use super::doubles::module_of;
 use super::prelude::*;
 use crate::presentation::cli::shell;
-use crate::units::catalog::modules::api::{Param, ParamType, Roster, ToolDecl};
+use crate::units::business::catalog::modules::api::{Param, ParamType, Roster, ToolDecl};
 
 fn param(ty: ParamType, desc: &str) -> Param {
     Param {

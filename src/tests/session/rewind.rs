@@ -5,7 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::session_model::api::{MEETING, SINGLE};
+use crate::units::business::session_model::api::{MEETING, SINGLE};
 
 #[test]
 pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
@@ -71,7 +71,7 @@ pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
     let replayed = crate::tests::lifecycle::rewind(
         &mut core,
         &sid,
-        crate::units::lifecycle::api::RewindTarget::Delete(1),
+        crate::units::business::lifecycle::api::RewindTarget::Delete(1),
     )
     .unwrap();
     let lines = replay_lines(&replayed);
@@ -113,8 +113,8 @@ pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
 /// 目的：留档：只标记并折叠尾部，文件字节一个不少，新行从最大 id 续号；恢复把标记及其后真的删掉。
 #[test]
 pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
-    use crate::units::agentloop::api::next_line_id;
-    use crate::units::lifecycle::api::RewindTarget;
+    use crate::units::business::agentloop::api::next_line_id;
+    use crate::units::business::lifecycle::api::RewindTarget;
     let say = |t: &str| serde_json::json!({"type": "say", "text": t}).to_string();
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![say("答一"), say("答二")]);
@@ -189,7 +189,7 @@ pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
         "标签取折叠区间里最后一条内容行"
     );
     assert_eq!(
-        crate::units::agentloop::api::truncate_events(&raw)
+        crate::units::business::agentloop::api::truncate_events(&raw)
             .iter()
             .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
             .flatten()
@@ -222,7 +222,7 @@ pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
 /// 目的：删除：真的把标记点之后的字节从文件里删掉（不是只截视图）。
 #[test]
 pub(crate) fn delete_rewrites_the_file_for_real() {
-    use crate::units::lifecycle::api::RewindTarget;
+    use crate::units::business::lifecycle::api::RewindTarget;
     let say = |t: &str| serde_json::json!({"type": "say", "text": t}).to_string();
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![say("答一"), say("答二")]);
@@ -318,7 +318,7 @@ pub(crate) fn rewind_keeps_only_lines_before_the_mark() {
     let replayed = crate::tests::lifecycle::rewind(
         &mut core,
         &sid,
-        crate::units::lifecycle::api::RewindTarget::Delete(2),
+        crate::units::business::lifecycle::api::RewindTarget::Delete(2),
     )
     .unwrap();
     assert_eq!(
@@ -335,7 +335,7 @@ pub(crate) fn rewind_keeps_only_lines_before_the_mark() {
     let replayed = crate::tests::lifecycle::rewind(
         &mut core,
         &sid,
-        crate::units::lifecycle::api::RewindTarget::Delete(0),
+        crate::units::business::lifecycle::api::RewindTarget::Delete(0),
     )
     .unwrap();
     assert!(
@@ -389,7 +389,7 @@ pub(crate) fn repeated_delete_to_zero_keeps_derived_state_in_sync() {
     crate::tests::lifecycle::rewind(
         &mut core,
         &sid,
-        crate::units::lifecycle::api::RewindTarget::Delete(0),
+        crate::units::business::lifecycle::api::RewindTarget::Delete(0),
     )
     .unwrap();
     assert!(core.single_history(&sid).unwrap().is_empty(), "对话清空");
@@ -399,7 +399,7 @@ pub(crate) fn repeated_delete_to_zero_keeps_derived_state_in_sync() {
     let again = crate::tests::lifecycle::rewind(
         &mut core,
         &sid,
-        crate::units::lifecycle::api::RewindTarget::Delete(0),
+        crate::units::business::lifecycle::api::RewindTarget::Delete(0),
     )
     .expect("重复删除到 0 不应 panic");
     assert!(again.is_empty(), "清空后重复回档仍是空视图");
@@ -478,7 +478,7 @@ pub(crate) fn rebuilt_context_keeps_tool_result() {
     crate::tests::lifecycle::rewind(
         &mut core2,
         &sid,
-        crate::units::lifecycle::api::RewindTarget::Delete(3),
+        crate::units::business::lifecycle::api::RewindTarget::Delete(3),
     )
     .unwrap();
     let h = core2.single_history(&sid).expect("重建后应在内存里");
@@ -611,7 +611,7 @@ pub(crate) fn rebuild_reads_the_structured_shell_facts() {
 /// 目的：回档**按回复原子**：截在一次回复中间时整条回复一起丢，绝不留下"孤儿工具结果"。
 #[test]
 pub(crate) fn rewind_never_splits_a_reply() {
-    use crate::units::llm::api::ToolCall;
+    use crate::units::business::llm::api::ToolCall;
     let hist = Arc::new(InMemoryHistory::new());
     let io = Arc::new(InMemorySysIo::new());
     io.seed(&["w", "a", "a.txt"], "A1\n");
@@ -660,7 +660,7 @@ pub(crate) fn rewind_never_splits_a_reply() {
     let replayed = crate::tests::lifecycle::rewind(
         &mut core,
         &sid,
-        crate::units::lifecycle::api::RewindTarget::Delete(2),
+        crate::units::business::lifecycle::api::RewindTarget::Delete(2),
     )
     .unwrap();
     assert_eq!(
@@ -686,8 +686,8 @@ pub(crate) fn rewind_never_splits_a_reply() {
 /// 目的：侧栏顺序 = **树序**：父会话紧跟它的子会话（顺序与缩进同源，不会再错位）。
 #[test]
 pub(crate) fn history_list_is_ordered_as_a_tree() {
-    let hv =
-        |name: &str, parent: Option<&str>, ts: i64| crate::units::session_model::api::HistoryView {
+    let hv = |name: &str, parent: Option<&str>, ts: i64| {
+        crate::units::business::session_model::api::HistoryView {
             name: name.to_string(),
             kind: MEETING.to_string(),
             flows: true,
@@ -699,9 +699,10 @@ pub(crate) fn history_list_is_ordered_as_a_tree() {
             workspace: None,
             workspace_missing: false,
             run: RunState::Active,
-        };
+        }
+    };
     // 顶层 A(10) 比 B(5) 新；A 下两个子会话（甲=9 比 乙=8 新）。
-    let got = crate::units::conversation::session::api::tree_order(vec![
+    let got = crate::units::business::conversation::session::api::tree_order(vec![
         hv("A", None, 10),
         hv("B", None, 5),
         hv("A--甲", Some("A"), 9),

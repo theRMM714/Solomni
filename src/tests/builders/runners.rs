@@ -275,11 +275,11 @@ impl ProcessRunner for AskingRunner {
             detail: "模块目录（C:/mods/a）授不上：写 DACL 失败（错误码 5）".to_string(),
             options: vec![
                 (
-                    crate::units::tools::domain::fence::OPT_FENCE_UNFENCED.to_string(),
+                    crate::units::business::tools::domain::fence::OPT_FENCE_UNFENCED.to_string(),
                     "本轮无围栏跑一次".to_string(),
                 ),
                 (
-                    crate::units::tools::domain::fence::OPT_FENCE_ABORT.to_string(),
+                    crate::units::business::tools::domain::fence::OPT_FENCE_ABORT.to_string(),
                     "放弃这次调用".to_string(),
                 ),
             ],

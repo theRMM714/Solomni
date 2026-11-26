@@ -3,13 +3,13 @@
 //! 不管：任何判定与编排（在 `runtime` 与各单元）；字段之外的装配顺序（在 `src/main.rs`）。
 //! 联动：`src/main.rs` 造出手柄后调 `Faces::from_handle`，再补上 `provision` / `storage` / `toolchains`；`src/presentation/{cli,web}` 各屏只取需要的字段。
 
-use crate::units::catalog::modules::api::ModulesOps;
-use crate::units::catalog::registry::api::RegistryOps;
-use crate::units::runtime::api::{ActionOps, Handle, LogOps, RuntimeOps};
-use crate::units::turn::turn::api::EventFeed;
-use crate::units::turn::turn::api::TurnOps;
-use crate::units::turn_state::api::HistoryOps;
-use crate::units::work::api::WorkOps;
+use crate::units::business::catalog::modules::api::ModulesOps;
+use crate::units::business::catalog::registry::api::RegistryOps;
+use crate::units::business::runtime::api::{ActionOps, Handle, LogOps, RuntimeOps};
+use crate::units::business::turn::turn::api::EventFeed;
+use crate::units::business::turn::turn::api::TurnOps;
+use crate::units::business::turn_state::api::HistoryOps;
+use crate::units::business::work::api::WorkOps;
 use std::sync::Arc;
 
 /// 目的：呈现层的入站面集合：每一屏只依赖它需要的那一面，不再有一个装着全部会话命令的桶。
@@ -33,17 +33,17 @@ pub struct Faces {
     /// 目的：日志面：呈现层只经它埋点（**不持有端口对象**）。
     pub log: Arc<dyn LogOps + Send + Sync>,
     /// 目的：常驻服务的统一管理面（组合根注入的同一份，经核心手柄转发）。
-    pub residents: Arc<dyn crate::units::residents::api::ResidentOps + Send + Sync>,
+    pub residents: Arc<dyn crate::units::business::residents::api::ResidentOps + Send + Sync>,
     /// 目的：隐秘字段的统一管理面（组合根注入的同一份，经核心手柄转发）。
-    pub secrets: Arc<dyn crate::units::catalog::secrets::api::SecretOps + Send + Sync>,
+    pub secrets: Arc<dyn crate::units::business::catalog::secrets::api::SecretOps + Send + Sync>,
     /// 目的：依赖补齐的统一面（组合根注入；默认未接入，如实失败不假装可用）。
-    pub provision: Arc<dyn crate::units::provision::api::Provision + Send + Sync>,
+    pub provision: Arc<dyn crate::units::business::provision::api::Provision + Send + Sync>,
     /// 目的：存储空间的统一面（组合根注入；默认空实现，测试可替换）。
-    pub storage: Arc<dyn crate::units::maintenance::storage::api::Storage + Send + Sync>,
+    pub storage: Arc<dyn crate::units::business::maintenance::storage::api::Storage + Send + Sync>,
     /// 目的：基础工具链的启动事实（组合根注入；测试替身为 null）。
     pub toolchains: serde_json::Value,
     /// 目的：虚拟机档外部工具的现状（登记值 / 项目内那份 / 这次用哪份 / 能不能用）；组合根注入，测试替身为空表。
-    pub vm_tools: Arc<dyn Fn() -> Vec<crate::units::vm::api::ToolReport> + Send + Sync>,
+    pub vm_tools: Arc<dyn Fn() -> Vec<crate::units::business::vm::api::ToolReport> + Send + Sync>,
 }
 
 impl Faces {
@@ -61,8 +61,8 @@ impl Faces {
             log: Arc::new(h.clone()),
             residents: Arc::clone(&h.residents),
             secrets: Arc::clone(&h.secrets),
-            provision: Arc::new(crate::units::provision::api::NoProvision),
-            storage: Arc::new(crate::units::maintenance::storage::api::NoStorage),
+            provision: Arc::new(crate::units::business::provision::api::NoProvision),
+            storage: Arc::new(crate::units::business::maintenance::storage::api::NoStorage),
             toolchains: serde_json::Value::Null,
             vm_tools: Arc::new(Vec::new),
         }

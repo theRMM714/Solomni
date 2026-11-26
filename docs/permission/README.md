@@ -48,7 +48,7 @@
 - 共享区是**主副本**：任何外部进程都读不到、写不到它；agent 只写沙箱，改动经 `work_pull` / `work_commit` / `work_push`。
 - 「这次会话能读 / 能提交共享区的哪些路径」是 workspace 的 `SharedScope`（三态 all / none / 路径数组 + 黑名单），字段在会话 `meta.yaml` 的 `shared`，全局默认在 `settings.yaml` 的 `sandbox.scope`。
 - 它约束的是**内置文件工具与工作工具**的路径归属（谁能拉、谁能提交），不是围栏里的 ACL——因此没有任何按会话的 ACL 授予与对账（依据见 [docs/workspace/README.md](../workspace/README.md)）。
-- 语义与校验在本单元之外：`src/units/workspace/domain/scope.rs`。
+- 语义与校验在本单元之外：`src/units/business/workspace/domain/scope.rs`。
 
 ## 四、执行落点恒为私有沙箱
 
@@ -68,7 +68,7 @@
 
 - 根写 `sandbox.ceiling`，子写 `sandbox.narrowing`；effective = 全局默认 → 根 ceiling → 沿祖先链每层 narrowing。
 - 子只能换更低档：`apply_narrowing` 用 `rank()` 比较，比父宽即报错（`src/units/pure/permission/domain/permission/base.rs`）。
-- 共享区的收窄与档位无关，在 workspace 的 `SharedEdit` 里独立校验（`src/units/workspace/domain/scope.rs`）：子只能更窄，父编辑只改 ceiling、不覆盖子收窄。
+- 共享区的收窄与档位无关，在 workspace 的 `SharedEdit` 里独立校验（`src/units/business/workspace/domain/scope.rs`）：子只能更窄，父编辑只改 ceiling、不覆盖子收窄。
 - 档位切换是根级动作：整棵 work tree 有会话在生成时拒绝（先停再切）；切换从下一次求合并起生效。
 
 ## 七、安全验收

@@ -5,7 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::session_model::api::SINGLE;
+use crate::units::business::session_model::api::SINGLE;
 
 /// 目的：设置是流式的**上限**：设置关掉时，调用方要流式也拿不到（全局通用）。
 #[test]
@@ -120,12 +120,11 @@ pub(crate) fn single_mode_accepts_multi_module_agent_and_converses() {
 /// 目的：**落盘策略由会话种类定、判定只有一处**：短暂事件任何会话都不留；系统会话（`#` 开头）一条都不留。
 #[test]
 pub(crate) fn persist_policy_is_decided_by_the_session_kind() {
-    use crate::units::session_model::api::{PersistPolicy, is_system_session};
-    use crate::units::transcript::api::SessionEvent;
-    let line = SessionEvent::Transcript(vec![crate::units::transcript::api::LineView::system(
-        "",
-        "x".to_string(),
-    )]);
+    use crate::units::business::session_model::api::{PersistPolicy, is_system_session};
+    use crate::units::business::transcript::api::SessionEvent;
+    let line = SessionEvent::Transcript(vec![
+        crate::units::business::transcript::api::LineView::system("", "x".to_string()),
+    ]);
     let delta = SessionEvent::Delta {
         speaker: "a".to_string(),
         kind: "text".to_string(),

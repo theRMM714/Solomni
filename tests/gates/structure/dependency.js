@@ -36,7 +36,7 @@ function direction(root) {
   const problems = [];
 
   // 归一：单元路径截到「分区段」为止——::api / ::service / ::domain / ::detail / ::ports 是唯一合法入口与内部的判据段，
-  // 分区段之前可以有任意层子业务（如 units/conversation/session/domain）。截断到分区段才能既认出 ::api，又认出 ::ports。
+  // 分区段之前可以有任意层子业务（如 units/business/conversation/session/domain）。截断到分区段才能既认出 ::api，又认出 ::ports。
   const PARTITIONS = ["api", "service", "domain", "detail", "ports"];
   const normTarget = (full) => {
     const parts = full.split("::");

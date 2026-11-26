@@ -1,7 +1,7 @@
 //! 目的：入站回环 HTTP 服务——只绑 127.0.0.1，请求体有界，停服务时能把线程收回来。
 //! 管：绑端口（含 0 = 让系统给一个）、每请求一线程、按上限读 UTF-8 body、回包、`stop` 与 Drop 的幂等收场。
 //! 不管：路由、状态码的含义与业务语义（都在 handler 里）；长轮询等多久（handler 自己决定）；坏 body（超限或不是 UTF-8）由这里直接回 400 纯文本，handler 见不到它——别在这里加产品自己的错误信封。
-//! 联动：呈现层的转录中心（`src/presentation/web.rs`）与虚拟机的首启种子服务（`src/units/vm/detail/`）都经这里开户。
+//! 联动：呈现层的转录中心（`src/presentation/web.rs`）与虚拟机的首启种子服务（`src/units/business/vm/detail/`）都经这里开户。
 
 use std::io::Read;
 use std::sync::Arc;

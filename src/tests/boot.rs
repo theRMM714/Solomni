@@ -1,21 +1,21 @@
 //! 目的：启动相命令的用例——操作数解析、回执分支与退出码，以及真实系统维护单元的装配面。
 //! 管：boot::run 的每一条命令与每种失败（人读 / --json）、System 的合成替身、真实装配的一次冒烟。
 //! 不管：命令表本身（commands.rs）、各单元的内部规则（各单元自己的用例）、入口分派（entry 的用例）。
-//! 联动：src/presentation/cli/boot.rs 与 src/units/system/{api,service}.rs；命令表见 systools/commands.yaml。
+//! 联动：src/presentation/cli/boot.rs 与 src/units/business/system/{api,service}.rs；命令表见 systools/commands.yaml。
 
 use serde_json::{Value, json};
 
 use crate::presentation::cli::boot;
-use crate::units::catalog::packages::api::BaseFacts;
-use crate::units::maintenance::builds::api::Built;
-use crate::units::maintenance::storage::api::{CleanOutcome, GcAction, GcReport};
-use crate::units::pure::exec_model::api::JobState;
-use crate::units::system::api::{
+use crate::units::business::catalog::packages::api::BaseFacts;
+use crate::units::business::maintenance::builds::api::Built;
+use crate::units::business::maintenance::storage::api::{CleanOutcome, GcAction, GcReport};
+use crate::units::business::system::api::{
     BuildRequest, EnsureRequest, Fault, FenceFacts, GcRequest, ResetRequest, System, WorkGcRequest,
     toolchain_json, toolchain_lines,
 };
-use crate::units::tools::api::{CommandBook, Op, OpBook};
-use crate::units::workspace::api::WorkGcReport;
+use crate::units::business::tools::api::{CommandBook, Op, OpBook};
+use crate::units::business::workspace::api::WorkGcReport;
+use crate::units::pure::exec_model::api::JobState;
 
 /// 目的：命令表里那一条——用例只按名字取，旗语与校验都由声明决定（表非法就直接失败）。
 pub(crate) fn op(name: &str) -> &'static Op {
@@ -158,7 +158,7 @@ impl System for Fake {
     }
     fn setup(
         &self,
-        mode: crate::units::system::api::SetupMode,
+        mode: crate::units::business::system::api::SetupMode,
         on_line: &mut dyn FnMut(&str),
     ) -> Result<Value, Fault> {
         if self.fault == Some("setup") {
@@ -583,7 +583,7 @@ fn toolchain_facts_render_for_both_audiences() {
     };
     facts.fallback.insert(
         "python".to_string(),
-        crate::units::catalog::packages::api::HostFallback {
+        crate::units::business::catalog::packages::api::HostFallback {
             path: std::path::PathBuf::from("/usr/bin/python3"),
             fenced: true,
             why: String::new(),
@@ -591,7 +591,7 @@ fn toolchain_facts_render_for_both_audiences() {
     );
     facts.fallback.insert(
         "cc".to_string(),
-        crate::units::catalog::packages::api::HostFallback {
+        crate::units::business::catalog::packages::api::HostFallback {
             path: std::path::PathBuf::from("/usr/bin/cc"),
             fenced: false,
             why: "没有写 ACL 的权限".to_string(),

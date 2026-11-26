@@ -8,7 +8,7 @@ use crate::tests::workspace::support::*;
 /// 目的：删除型冲突（本地删了、主线改了）被拒时，回执给的补救路径要真能走通。
 #[test]
 pub(crate) fn work_push_delete_vs_modify_is_rejected_with_a_working_remedy() {
-    use crate::units::workspace::ports::WorkStore;
+    use crate::units::business::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -42,8 +42,8 @@ pub(crate) fn work_push_delete_vs_modify_is_rejected_with_a_working_remedy() {
 /// 目的：补救路径①（接受主线版本再推）真能收敛：净改动为零，工作线保留提交。
 #[test]
 pub(crate) fn work_accept_upstream_after_a_delete_converges() {
-    use crate::units::workspace::api::ResolveTake;
-    use crate::units::workspace::ports::WorkStore;
+    use crate::units::business::workspace::api::ResolveTake;
+    use crate::units::business::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -89,8 +89,8 @@ pub(crate) fn work_accept_upstream_after_a_delete_converges() {
 /// 目的：补救路径②（撤回删除提交再拉主线版本）真能收敛：工作线退回主线祖先，不再领先。
 #[test]
 pub(crate) fn work_reset_before_the_delete_then_pull_converges() {
-    use crate::units::workspace::api::ResetRequest;
-    use crate::units::workspace::ports::WorkStore;
+    use crate::units::business::workspace::api::ResetRequest;
+    use crate::units::business::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -147,8 +147,8 @@ pub(crate) fn work_reset_before_the_delete_then_pull_converges() {
 /// 目的：`work_sync` 把用户在产品之外改的磁盘内容记成一条主线提交，不给 external 建工作线。
 #[test]
 pub(crate) fn work_sync_records_external_edits_on_the_main_line() {
-    use crate::units::workspace::api::WorkState;
-    use crate::units::workspace::ports::WorkStore;
+    use crate::units::business::workspace::api::WorkState;
+    use crate::units::business::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -283,7 +283,7 @@ pub(crate) fn work_archive_point_takes_a_sync_before_the_keep_line() {
 /// 目的：恢复把工作线放回留档时它自己的头——留档时被压制的工作线提交不会被丢掉。
 #[test]
 pub(crate) fn work_restore_archive_puts_the_work_line_back_to_its_archived_head() {
-    use crate::units::workspace::ports::WorkStore;
+    use crate::units::business::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");

@@ -1,7 +1,7 @@
 //! 目的：钉应用服务（会话中心与跨单元编排）的不变式。
 //! 管：VM 会话与外部 VM、双稳定挂载、工作区策略分层、绑定复核、宿主↔VM 编辑、删除保外部工作区、失败引导清理、思维链随工具行落档。
 //! 不管：各单元内部规则（按能力落各自文件）。
-//! 联动：src/units/runtime/、tests/doubles、平台探针。
+//! 联动：src/units/business/runtime/、tests/doubles、平台探针。
 
 mod proxy;
 use super::builders::*;
@@ -9,13 +9,13 @@ use super::prelude::*;
 // 只有非 macOS 的用例用得到这个面（macOS 上其余用例整体 cfg 掉）。
 #[cfg(not(target_os = "macos"))]
 use crate::presentation::faces::Faces;
-use crate::units::session_model::api::{MEETING, PROXY, SINGLE};
+use crate::units::business::session_model::api::{MEETING, PROXY, SINGLE};
 
 /// 造一台"根在给定目录、补齐面报给定清单"的核心（只为验外部工具路径的取法）。
 fn runtime_rooted(
     root: &std::path::Path,
     settings: InMemorySettings,
-    provision: Arc<dyn crate::units::provision::api::Provision + Send + Sync>,
+    provision: Arc<dyn crate::units::business::provision::api::Provision + Send + Sync>,
 ) -> Core {
     let gateway: Arc<dyn ChatGateway + Send + Sync> = Arc::new(gw(BTreeMap::new(), vec![]));
     let llm = test_llm(
@@ -31,7 +31,7 @@ fn runtime_rooted(
         test_packages(Arc::new(InMemoryPackages::empty())),
         provision,
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
-        Arc::new(crate::units::maintenance::builds::api::NoBuilds),
+        Arc::new(crate::units::business::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -42,8 +42,8 @@ fn runtime_rooted(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         crate::tests::doubles::test_host_probe(),
-        Arc::new(crate::units::residents::api::NoResidents),
-        Arc::new(crate::units::catalog::secrets::api::NoSecrets),
+        Arc::new(crate::units::business::residents::api::NoResidents),
+        Arc::new(crate::units::business::catalog::secrets::api::NoSecrets),
         crate::tests::doubles::test_profiles(),
     )
 }
@@ -70,7 +70,7 @@ fn runtime_for_vm(
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
-        Arc::new(crate::units::maintenance::builds::api::NoBuilds),
+        Arc::new(crate::units::business::maintenance::builds::api::NoBuilds),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -81,8 +81,8 @@ fn runtime_for_vm(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         probe,
-        Arc::new(crate::units::residents::api::NoResidents),
-        Arc::new(crate::units::catalog::secrets::api::NoSecrets),
+        Arc::new(crate::units::business::residents::api::NoResidents),
+        Arc::new(crate::units::business::catalog::secrets::api::NoSecrets),
         crate::tests::doubles::test_profiles(),
     )
 }
@@ -104,7 +104,7 @@ fn vm_capable_probe(
 #[test]
 pub(crate) fn creating_a_vm_session_does_not_block_the_core() {
     use crate::tests::doubles::FakeEngine;
-    use crate::units::runtime::api::Handle;
+    use crate::units::business::runtime::api::Handle;
     const BOOT: std::time::Duration = std::time::Duration::from_millis(400);
     let guest = crate::tests::test_guest("core-free");
     let probe = vm_capable_probe(&guest);
@@ -151,7 +151,7 @@ pub(crate) fn creating_a_vm_session_does_not_block_the_core() {
 #[test]
 pub(crate) fn a_failed_guest_boot_leaves_no_session_behind() {
     use crate::tests::doubles::FakeEngine;
-    use crate::units::runtime::api::Handle;
+    use crate::units::business::runtime::api::Handle;
     let guest = crate::tests::test_guest("boot-fail");
     let probe = vm_capable_probe(&guest);
     let engine = FakeEngine {
@@ -190,7 +190,7 @@ fn core_for_external_vm(
     tag: &str,
     engine: FakeEngine,
 ) -> (Core, std::path::PathBuf, std::path::PathBuf, String) {
-    use crate::units::workspace::detail::FsWorkspace;
+    use crate::units::business::workspace::detail::FsWorkspace;
     let root = crate::tests::scratch(tag);
     let product = root.join("product");
     let external = root.join("outside");
@@ -295,8 +295,8 @@ pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
 #[cfg(windows)]
 #[test]
 pub(crate) fn workspace_policy_splits_network_roots_by_tier() {
+    use crate::units::business::workspace::api::policy;
     use crate::units::pure::exec_model::api::Tier;
-    use crate::units::workspace::api::policy;
     use std::path::Path;
     use std::time::{Duration, Instant};
 
@@ -320,8 +320,8 @@ pub(crate) fn workspace_policy_splits_network_roots_by_tier() {
 /// 目的：加载复检在这台机器上也能跑：越界拒绝、产品外的目录放行、暂时不可达不挡（不因平台差异漏判）。
 #[test]
 pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
+    use crate::units::business::workspace::api::{product_root, recheck};
     use crate::units::pure::exec_model::api::Tier;
-    use crate::units::workspace::api::{product_root, recheck};
 
     let root = crate::tests::scratch("recheck-cross");
     let product = root.join("product");
@@ -343,8 +343,8 @@ pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
 /// 约束：`ambient` 与建会话的 `resolve` 共用一条阶梯，但**不探可写**：启动目录可不可写不阻塞建会话。
 #[test]
 pub(crate) fn ambient_workspace_takes_the_startup_directory_through_the_same_ladder() {
+    use crate::units::business::workspace::api::{ambient, product_root};
     use crate::units::pure::exec_model::api::Tier;
-    use crate::units::workspace::api::{ambient, product_root};
 
     let root = crate::tests::scratch("ambient-workspace");
     let product = root.join("product");
@@ -378,8 +378,8 @@ pub(crate) fn ambient_workspace_takes_the_startup_directory_through_the_same_lad
 #[cfg(windows)]
 #[test]
 pub(crate) fn loaded_binding_is_rechecked_against_the_tier() {
+    use crate::units::business::workspace::api::{product_root, recheck};
     use crate::units::pure::exec_model::api::Tier;
-    use crate::units::workspace::api::{product_root, recheck};
     use std::path::Path;
 
     let probe = crate::kernel::detail::HostProbeAdapter;
@@ -619,8 +619,9 @@ pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
         for ev in evs {
             if let Some(ls) = ev.get("lines").and_then(|l| l.as_array()) {
                 for l in ls {
-                    if let Ok(v) =
-                        serde_json::from_value::<crate::units::transcript::api::LineView>(l.clone())
+                    if let Ok(v) = serde_json::from_value::<
+                        crate::units::business::transcript::api::LineView,
+                    >(l.clone())
                     {
                         out.push((v.id, v.render(), v.turn));
                     }
@@ -686,7 +687,7 @@ pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
     crate::tests::lifecycle::rewind(
         &mut core,
         &sid,
-        crate::units::lifecycle::api::RewindTarget::Delete(line_id + 1),
+        crate::units::business::lifecycle::api::RewindTarget::Delete(line_id + 1),
     )
     .unwrap();
 
@@ -903,7 +904,7 @@ pub(crate) fn prose_then_tool_envelope_keeps_prose_line_and_rebuilds_identically
     crate::tests::lifecycle::rewind(
         &mut core2,
         &sid,
-        crate::units::lifecycle::api::RewindTarget::Delete(4),
+        crate::units::business::lifecycle::api::RewindTarget::Delete(4),
     )
     .unwrap(); // 保留全部 4 行
     let rebuilt = core2.single_history(&sid).expect("重建后应在内存里");
@@ -987,7 +988,7 @@ pub(crate) fn tool_envelope_after_prose_runs_and_json_never_shows() {
 ///   钉住这一条：实时与重建都要**每条调用各推一条回执**，不能实时只推第一条、重建却每条都推。
 #[test]
 pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
-    use crate::units::llm::api::ToolCall;
+    use crate::units::business::llm::api::ToolCall;
     let hist = Arc::new(InMemoryHistory::new());
     let io = Arc::new(InMemorySysIo::new());
     io.seed(&["w", "a", "a.txt"], "A1\nA2\n");
@@ -1062,7 +1063,7 @@ pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
     crate::tests::lifecycle::rewind(
         &mut core2,
         &sid,
-        crate::units::lifecycle::api::RewindTarget::Delete(rows),
+        crate::units::business::lifecycle::api::RewindTarget::Delete(rows),
     )
     .unwrap();
     let rebuilt = core2.single_history(&sid).unwrap();
@@ -1094,7 +1095,7 @@ pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
 /// 约束：正文必须同源——回放按 `tool_result_body` 现算，差一个字节就定位不到那条消息。
 #[test]
 pub(crate) fn read_facts_rebuild_identically_to_live() {
-    use crate::units::llm::api::ToolCall;
+    use crate::units::business::llm::api::ToolCall;
     let hist = Arc::new(InMemoryHistory::new());
     let io = Arc::new(InMemorySysIo::new());
     io.seed(&["w", "a", "a.txt"], "A1\nA2\n");
@@ -1172,7 +1173,7 @@ pub(crate) fn read_facts_rebuild_identically_to_live() {
 ///   这里的"改过"用沙箱副本对不上来构造（内存版本库里没存这份内容）；按内容比对的过期判定本身由 judge_reads 的用例钉住。
 #[test]
 pub(crate) fn stale_read_turns_into_a_placeholder_in_the_next_send_view() {
-    use crate::units::llm::api::ToolCall;
+    use crate::units::business::llm::api::ToolCall;
     let hist = Arc::new(InMemoryHistory::new());
     let io = Arc::new(InMemorySysIo::new());
     // 400 行 ≈ 12K 字符：整份一次读完（< MAX_READ_CHARS），换掉后省下的字符远超 8000。
@@ -1289,7 +1290,7 @@ pub(crate) fn stale_read_turns_into_a_placeholder_in_the_next_send_view() {
 /// 目的：大文件只能分段读时，每段读各自记账、各自判过期、各自出占位符——分段读不再是盲区。
 #[test]
 pub(crate) fn stale_read_of_a_large_file_is_replaced_segment_by_segment() {
-    use crate::units::llm::api::ToolCall;
+    use crate::units::business::llm::api::ToolCall;
     let hist = Arc::new(InMemoryHistory::new());
     let io = Arc::new(InMemorySysIo::new());
     // 400 行 ≈ 12K 字符；单次 read 的 14K 预算虽够，但这里显式分段读，构造 Ranges 覆盖。

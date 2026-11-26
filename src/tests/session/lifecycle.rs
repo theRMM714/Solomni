@@ -5,7 +5,7 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::session_model::api::SINGLE;
+use crate::units::business::session_model::api::SINGLE;
 
 #[test]
 pub(crate) fn create_work_persists_and_history_replays() {
@@ -118,9 +118,9 @@ pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
 ///   回调被闸门挡住时 `run()` 仍要立刻返回；回调里能看到会话已经删掉（先删目录的快分支前提）。
 #[test]
 pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
-    use crate::units::lifecycle::api::SessionDelete;
-    use crate::units::vm::api::GuestStop;
-    use crate::units::vm::api::Vm;
+    use crate::units::business::lifecycle::api::SessionDelete;
+    use crate::units::business::vm::api::GuestStop;
+    use crate::units::business::vm::api::Vm;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
@@ -140,7 +140,7 @@ pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
     let done = Arc::new(AtomicBool::new(false));
     let (gate_tx, gate_rx) = mpsc::channel::<()>();
     let gate_rx = Arc::new(Mutex::new(gate_rx));
-    let release: crate::units::lifecycle::api::ReleaseByLease = {
+    let release: crate::units::business::lifecycle::api::ReleaseByLease = {
         let gone = Arc::clone(&gone);
         let started = Arc::clone(&started);
         let done = Arc::clone(&done);
@@ -188,9 +188,9 @@ pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
 /// 目的：没有租约时不起后台撤权线程（空清单直接返回）。
 #[test]
 pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
-    use crate::units::lifecycle::api::SessionDelete;
-    use crate::units::vm::api::GuestStop;
-    use crate::units::vm::api::Vm;
+    use crate::units::business::lifecycle::api::SessionDelete;
+    use crate::units::business::vm::api::GuestStop;
+    use crate::units::business::vm::api::Vm;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     let store = Arc::new(InMemoryHistory::new());
@@ -204,7 +204,7 @@ pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
     let hist = test_history_of(Arc::clone(&store));
     let vm: Arc<dyn Vm + Send + Sync> = Arc::new(crate::tests::doubles::RecordingVm::default());
     let called = Arc::new(AtomicBool::new(false));
-    let release: crate::units::lifecycle::api::ReleaseByLease = {
+    let release: crate::units::business::lifecycle::api::ReleaseByLease = {
         let called = Arc::clone(&called);
         Arc::new(move |_lease: &str| {
             called.store(true, Ordering::SeqCst);
@@ -227,9 +227,9 @@ pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
 /// 目的：后台撤权失败要如实记日志（失败条目留在台账，下次重试）。
 #[test]
 pub(crate) fn session_delete_logs_background_release_failures() {
-    use crate::units::lifecycle::api::SessionDelete;
-    use crate::units::vm::api::GuestStop;
-    use crate::units::vm::api::Vm;
+    use crate::units::business::lifecycle::api::SessionDelete;
+    use crate::units::business::vm::api::GuestStop;
+    use crate::units::business::vm::api::Vm;
     use std::time::{Duration, Instant};
 
     let store = Arc::new(InMemoryHistory::new());
@@ -243,7 +243,7 @@ pub(crate) fn session_delete_logs_background_release_failures() {
     let hist = test_history_of(Arc::clone(&store));
     let vm: Arc<dyn Vm + Send + Sync> = Arc::new(crate::tests::doubles::RecordingVm::default());
     let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let release: crate::units::lifecycle::api::ReleaseByLease = {
+    let release: crate::units::business::lifecycle::api::ReleaseByLease = {
         let called = Arc::clone(&called);
         Arc::new(move |_lease: &str| {
             called.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -313,8 +313,9 @@ pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {
         )
         .unwrap();
     let history = core.history_handle();
-    let root_of =
-        |sid: &str| crate::units::conversation::session::api::work_root(history.as_ref(), sid);
+    let root_of = |sid: &str| {
+        crate::units::business::conversation::session::api::work_root(history.as_ref(), sid)
+    };
     assert_eq!(root_of(&top).unwrap(), top);
     assert_eq!(root_of(&mid).unwrap(), top, "第二层锚在顶");
     assert_eq!(root_of(&low).unwrap(), top, "第三层也锚在顶");

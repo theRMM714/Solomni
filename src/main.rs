@@ -25,21 +25,22 @@ use crate::presentation::faces::Faces;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use units::catalog::registry::api::Registry as _;
+use units::business::catalog::registry::api::Registry as _;
 
 /// 目的：命令表投影成的 op 书——入口分派、自洽检查与模块保留名都读它，只解析一次。
 /// 约束：命令表非法或声明互相矛盾都是装配错误：就地退出，不留一个「跑起来但手册是错的」进程。
-fn command_ops() -> &'static units::tools::api::OpBook {
-    static OPS: std::sync::OnceLock<units::tools::api::OpBook> = std::sync::OnceLock::new();
+fn command_ops() -> &'static units::business::tools::api::OpBook {
+    static OPS: std::sync::OnceLock<units::business::tools::api::OpBook> =
+        std::sync::OnceLock::new();
     OPS.get_or_init(|| {
-        let book = match units::tools::api::CommandBook::builtin() {
+        let book = match units::business::tools::api::CommandBook::builtin() {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("[装配失败] 命令表非法（systools/commands.yaml）：{}", e);
                 std::process::exit(1);
             }
         };
-        let ops = units::tools::api::OpBook::from_commands(book);
+        let ops = units::business::tools::api::OpBook::from_commands(book);
         let problems = ops.problems();
         if !problems.is_empty() {
             for problem in &problems {
@@ -122,7 +123,7 @@ fn main() {
     // 启动期的人读事实（工具链 / 围栏 / 进程 / 便携 / 沙箱授权）一律走 stderr；stdout 只留给命令结果（--json 可整段进管道）。
     // 基础 profile 缺失时**每次启动**都报：项目内 / 宿主回退 / 宿主也没有，并给补全命令。
     let base = entry::toolchains::base_facts(&root);
-    for line in units::system::api::toolchain_lines(&base) {
+    for line in units::business::system::api::toolchain_lines(&base) {
         eprintln!("[工具链] {}", line);
     }
     for w in &toolchains.warnings {
@@ -133,7 +134,7 @@ fn main() {
     if let Some(command) = flags.command.as_deref() {
         let Some(op) = command_ops()
             .find(command)
-            .filter(|op| op.phase == units::tools::api::Phase::Boot)
+            .filter(|op| op.phase == units::business::tools::api::Phase::Boot)
         else {
             eprintln!(
                 "[错误] 没有这个启动命令：{}（solomni --help 看全部）",
@@ -233,36 +234,40 @@ fn main() {
     eprintln!("[围栏] {}", fence_cap.note);
     let store = entry::assembly::settings_store(&root);
     let sessions = entry::assembly::sessions(&root);
-    let history = units::conversation::session::detail::fs_history::FsHistory::new(sessions.root());
-    let workspace = units::workspace::detail::FsWorkspace::new(sessions.root());
-    let workstore = units::workspace::detail::FsWorkStore::new();
+    let history =
+        units::business::conversation::session::detail::fs_history::FsHistory::new(sessions.root());
+    let workspace = units::business::workspace::detail::FsWorkspace::new(sessions.root());
+    let workstore = units::business::workspace::detail::FsWorkStore::new();
     // 运行包能力：依赖文件夹 runtimes/（一个包 = 一个文件夹 + package.yaml）。
-    let packages: Arc<dyn units::catalog::packages::api::Packages + Send + Sync> = Arc::new(
-        units::catalog::packages::service::PackagesService::with_base(
-            Arc::new(units::catalog::packages::detail::FsPackages::new(
-                entry::assembly::content(&root).runtimes(),
-            )),
-            base.clone(),
-        ),
-    );
+    let packages: Arc<dyn units::business::catalog::packages::api::Packages + Send + Sync> =
+        Arc::new(
+            units::business::catalog::packages::service::PackagesService::with_base(
+                Arc::new(units::business::catalog::packages::detail::FsPackages::new(
+                    entry::assembly::content(&root).runtimes(),
+                )),
+                base.clone(),
+            ),
+        );
     // 端点记忆：谁先通了就固定谁，后续会话不再反复探测候选。
-    let memo = units::llm::detail::endpoint::memo_new();
+    let memo = units::business::llm::detail::endpoint::memo_new();
     // **llm 单元**：三个出站端口（通道工厂 / 模型目录 / 信封修复）只由它的 service 持有（R12）；
     // 别人（登记处、协调业务、协作会话）只拿它的 `api::Llm` 面。
-    let gateway: Arc<dyn units::llm::ports::ChatGateway + Send + Sync> = Arc::new(
-        units::llm::detail::HttpGateway::with_log(Arc::clone(&log), Arc::clone(&memo)),
+    let gateway: Arc<dyn units::business::llm::ports::ChatGateway + Send + Sync> = Arc::new(
+        units::business::llm::detail::HttpGateway::with_log(Arc::clone(&log), Arc::clone(&memo)),
     );
-    let catalog: Arc<dyn units::llm::ports::ModelCatalog + Send + Sync> = Arc::new(
-        units::llm::detail::HttpModelCatalog::with_log(Arc::clone(&log), Arc::clone(&memo)),
-    );
-    let llm: Arc<dyn units::llm::api::Llm + Send + Sync> =
-        Arc::new(units::llm::service::LlmService::new(
+    let catalog: Arc<dyn units::business::llm::ports::ModelCatalog + Send + Sync> =
+        Arc::new(units::business::llm::detail::HttpModelCatalog::with_log(
+            Arc::clone(&log),
+            Arc::clone(&memo),
+        ));
+    let llm: Arc<dyn units::business::llm::api::Llm + Send + Sync> =
+        Arc::new(units::business::llm::service::LlmService::new(
             gateway,
             catalog,
-            Arc::new(units::llm::detail::UnambiguousRepair),
+            Arc::new(units::business::llm::detail::UnambiguousRepair),
         ));
     // **登记处子业务**：四份 yaml 的状态与用例都在它里面（runtime 只按 `Registry` 用它，看不见字段）。
-    let mut registry = match units::catalog::registry::service::RegistryService::new(
+    let mut registry = match units::business::catalog::registry::service::RegistryService::new(
         Arc::new(store),
         Arc::clone(&llm),
         Arc::clone(&log),
@@ -285,14 +290,14 @@ fn main() {
     );
     let requirements = kernel::api::fence::SandboxRequirements {
         filesystem: sandbox_cfg.policy.enforce.filesystem
-            == units::catalog::registry::api::SandboxEnforceLevel::Require,
+            == units::business::catalog::registry::api::SandboxEnforceLevel::Require,
         network: sandbox_cfg.policy.enforce.network
-            == units::catalog::registry::api::SandboxEnforceLevel::Require
+            == units::business::catalog::registry::api::SandboxEnforceLevel::Require
             && !sandbox_cfg.policy.network,
         process_tree: sandbox_cfg.policy.enforce.process_tree
-            == units::catalog::registry::api::SandboxEnforceLevel::Require,
+            == units::business::catalog::registry::api::SandboxEnforceLevel::Require,
         env_whitelist: sandbox_cfg.policy.enforce.env_whitelist
-            == units::catalog::registry::api::SandboxEnforceLevel::Require,
+            == units::business::catalog::registry::api::SandboxEnforceLevel::Require,
     };
     let sandbox_mode = Arc::new(kernel::api::fence::SandboxMode::new(
         requirements,
@@ -300,7 +305,8 @@ fn main() {
         fence_cap.net && (!kernel::api::platform::HAS_EXTERNAL_ACL_STEP || authorized),
         fence_cap.tree,
         true,
-        sandbox_cfg.policy.on_unavailable == units::catalog::registry::api::SandboxUnavailable::Ask,
+        sandbox_cfg.policy.on_unavailable
+            == units::business::catalog::registry::api::SandboxUnavailable::Ask,
     ));
     // 授权开关：工具进程与启动报告共用这一份（环境变量只在这里生效一次）。
     let write_allowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(authorized));
@@ -402,22 +408,24 @@ fn main() {
             &root,
             Box::new(units::resource::assets::detail::FsAssetFs),
         ));
-    let profiles = match units::conversation::session::detail::yaml_profiles::YamlProfiles::new(
+    let profiles =
+        match units::business::conversation::session::detail::yaml_profiles::YamlProfiles::new(
+            std::sync::Arc::clone(&assets),
+        )
+        .load()
+        {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[装配失败] {}", e);
+                std::process::exit(1);
+            }
+        };
+    let prompt_source = units::business::prompt::detail::yaml_prompts::YamlPrompts::new(
         std::sync::Arc::clone(&assets),
-    )
-    .load()
-    {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("[装配失败] {}", e);
-            std::process::exit(1);
-        }
-    };
-    let prompt_source =
-        units::prompt::detail::yaml_prompts::YamlPrompts::new(std::sync::Arc::clone(&assets));
+    );
     // **提示词单元**：册子只在这里装载一次、也只被它持有；runtime 与工具执行
     // （回执里的那些收尾标记）要的"段"都经它的入站面拿——不再各存一份拷贝。
-    let prompt = match units::prompt::service::load(&prompt_source) {
+    let prompt = match units::business::prompt::service::load(&prompt_source) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("[装配失败] {}", e);
@@ -426,8 +434,9 @@ fn main() {
     };
     // 工具总表与机制席位必须自洽（悬空引用 / 缺能力都是装配错误）：装配期就挡下，不拖到运行期。
     // 三张表归**工具单元**（加载器在它自己的 detail 里；装载后由它的 service 持有）。
-    let systools_source =
-        units::tools::detail::yaml_systools::YamlSystools::new(std::sync::Arc::clone(&assets));
+    let systools_source = units::business::tools::detail::yaml_systools::YamlSystools::new(
+        std::sync::Arc::clone(&assets),
+    );
 
     // 工具执行：外层拉起的守门进程就是本程序自己（围栏在它里面装）。
     let tools = kernel::detail::process::ProcTools::new(
@@ -437,22 +446,22 @@ fn main() {
     )
     .with_mode(std::sync::Arc::clone(&sandbox_mode));
     // 内置文件工具：纯 Rust 直接读写，不经过外部进程（编码问题不进本程序）。
-    let io = units::tools::detail::FsSysIo::with_lock_dir(layout::locks(&root));
+    let io = units::business::tools::detail::FsSysIo::with_lock_dir(layout::locks(&root));
     // **工具单元**：三张表由加载器读进来，三个出站端口（外部执行 / 内置读写 / 围栏释放）
     // 只由它的 service 持有（R12）。装配期就挡下"悬空引用 / 缺能力"。
     let fence_host: Arc<dyn kernel::ports::FenceHost + Send + Sync> =
         Arc::new(kernel::detail::confine::FenceHostAdapter::new(root.clone()));
-    let tools_svc = match units::tools::service::ToolsService::new(
+    let tools_svc = match units::business::tools::service::ToolsService::new(
         &systools_source,
         Arc::new(tools),
         Arc::new(io),
         Arc::clone(&fence_host),
     ) {
-        Ok(svc) if units::tools::api::Tools::problems(&svc).is_empty() => Arc::new(svc),
+        Ok(svc) if units::business::tools::api::Tools::problems(&svc).is_empty() => Arc::new(svc),
         Ok(svc) => {
             eprintln!(
                 "[装配失败] 系统工具总表不自洽：{}",
-                units::tools::api::Tools::problems(&svc).join("；")
+                units::business::tools::api::Tools::problems(&svc).join("；")
             );
             std::process::exit(1);
         }
@@ -461,13 +470,13 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let toolexec: Arc<dyn units::tools::api::ToolExec + Send + Sync> = tools_svc.clone();
-    let systools: Arc<dyn units::tools::api::Tools + Send + Sync> = tools_svc;
+    let toolexec: Arc<dyn units::business::tools::api::ToolExec + Send + Sync> = tools_svc.clone();
+    let systools: Arc<dyn units::business::tools::api::Tools + Send + Sync> = tools_svc;
 
     // 机制席位与工具总表必须双向自洽（席位面里的工具都在总表、callers 与席位面一一对应）：
     // 悬空引用是装配错误，与上面的工具总表自检同一条时机。
-    let mechanism_problems = units::conversation::session::api::mechanism_problems(
-        &units::tools::api::Tools::book(&*systools),
+    let mechanism_problems = units::business::conversation::session::api::mechanism_problems(
+        &units::business::tools::api::Tools::book(&*systools),
     );
     if !mechanism_problems.is_empty() {
         eprintln!(
@@ -479,19 +488,20 @@ fn main() {
 
     // 保留名表（内置工具名）由**组合根**问一次工具单元后交进去：清单校验归 modules，名字空间归 tools，
     // 两边不互相依赖。模块 id 还与产品命令词互斥（它是动作 id 前缀），命令词在这里并进同一份保留名。
-    let mut module_reserved = units::tools::api::Tools::reserved_modules(&*systools);
+    let mut module_reserved = units::business::tools::api::Tools::reserved_modules(&*systools);
     module_reserved.extend(command_ops().ids());
-    let source = units::catalog::modules::detail::FsModules::new(
-        units::catalog::modules::api::source_dir(&root),
-        units::tools::api::names(),
+    let source = units::business::catalog::modules::detail::FsModules::new(
+        units::business::catalog::modules::api::source_dir(&root),
+        units::business::tools::api::names(),
         module_reserved,
         entry::assembly::content(&root),
     );
     // **模块子业务**：清单来源与启停覆盖落盘只由它的 service 持有（R12）；它是模块事实的唯一上游。
-    let module_state =
-        units::catalog::modules::detail::YamlModuleState::new(entry::assembly::home_docs(&root));
-    let modules: Arc<dyn units::catalog::modules::api::Modules + Send + Sync> =
-        match units::catalog::modules::service::ModulesService::new(
+    let module_state = units::business::catalog::modules::detail::YamlModuleState::new(
+        entry::assembly::home_docs(&root),
+    );
+    let modules: Arc<dyn units::business::catalog::modules::api::Modules + Send + Sync> =
+        match units::business::catalog::modules::service::ModulesService::new(
             Arc::new(source),
             Arc::new(module_state),
         ) {
@@ -504,37 +514,41 @@ fn main() {
 
     // **虚拟机档单元**：运行包库来源、VM 引擎与共享后端这些出站端口只由它的 service 持有（R12）；用户共享后端按平台用户链装配，起 guest 时选。
     // copy 不在用户链；只有进程级开发/应急开关才补进持有列表（仍要显式候选）。
-    let order = units::vm::domain::exec::default_combos(std::env::consts::OS);
-    let mut shares: Vec<Arc<dyn units::vm::ports::ShareBackend + Send + Sync>> = Vec::new();
+    let order = units::business::vm::domain::exec::default_combos(std::env::consts::OS);
+    let mut shares: Vec<Arc<dyn units::business::vm::ports::ShareBackend + Send + Sync>> =
+        Vec::new();
     for combo in order.iter().filter(|c| c.engine == "qemu") {
-        let share: Arc<dyn units::vm::ports::ShareBackend + Send + Sync> = match combo.share {
-            "smb" => {
-                Arc::new(units::vm::detail::SmbShare::new().with_book(std::sync::Arc::clone(&book)))
-            }
-            "virtiofs" => Arc::new(
-                units::vm::detail::VirtioFsShare::new().with_book(std::sync::Arc::clone(&book)),
-            ),
-            "9p" => Arc::new(units::vm::detail::NinePShare::new()),
-            _ => continue,
-        };
+        let share: Arc<dyn units::business::vm::ports::ShareBackend + Send + Sync> =
+            match combo.share {
+                "smb" => Arc::new(
+                    units::business::vm::detail::SmbShare::new()
+                        .with_book(std::sync::Arc::clone(&book)),
+                ),
+                "virtiofs" => Arc::new(
+                    units::business::vm::detail::VirtioFsShare::new()
+                        .with_book(std::sync::Arc::clone(&book)),
+                ),
+                "9p" => Arc::new(units::business::vm::detail::NinePShare::new()),
+                _ => continue,
+            };
         if !shares.iter().any(|s| s.id() == share.id()) {
             shares.push(share);
         }
     }
-    if units::vm::api::copy_share_enabled() {
-        shares.push(Arc::new(units::vm::detail::CopyShare::new()));
+    if units::business::vm::api::copy_share_enabled() {
+        shares.push(Arc::new(units::business::vm::detail::CopyShare::new()));
         let note = format!(
             "{}={}：copy 共享仅用于开发/应急，性能不可用；本进程的 VM 会话会强制走它",
-            units::vm::api::COPY_SHARE_ENV,
+            units::business::vm::api::COPY_SHARE_ENV,
             "copy"
         );
         log.warn("main::vm_share", &note);
         eprintln!("[虚拟机] {}", note);
     }
-    let vm: Arc<dyn units::vm::api::Vm + Send + Sync> =
-        Arc::new(units::vm::service::VmService::new(
+    let vm: Arc<dyn units::business::vm::api::Vm + Send + Sync> =
+        Arc::new(units::business::vm::service::VmService::new(
             Arc::new(
-                units::vm::detail::QemuEngine::with_overlay_dir(
+                units::business::vm::detail::QemuEngine::with_overlay_dir(
                     units::resource::vmstore::api::paths(&root).overlays(),
                 )
                 .with_book(std::sync::Arc::clone(&book))
@@ -544,9 +558,11 @@ fn main() {
         ));
 
     // **工作区单元**：目录布局与版本库两个出站端口只由它的 service 持有（R12）。
-    let workspace: Arc<dyn units::workspace::api::Workspace + Send + Sync> = Arc::new(
-        units::workspace::service::WorkspaceService::new(Arc::new(workspace), Arc::new(workstore)),
-    );
+    let workspace: Arc<dyn units::business::workspace::api::Workspace + Send + Sync> =
+        Arc::new(units::business::workspace::service::WorkspaceService::new(
+            Arc::new(workspace),
+            Arc::new(workstore),
+        ));
 
     // **隐秘字段子业务**：值只落 data/.home/secrets.yaml；加载失败 = 装配失败（不静默空表）。
     let secrets = match entry::assembly::secrets(&root, Arc::clone(&modules)) {
@@ -558,23 +574,23 @@ fn main() {
     };
 
     // **常驻服务单元**：真实协议适配器（MCP stdio 走守门进程的长驻会话）+ 模块入站面 + 隐秘字段面。
-    let residents: Arc<dyn units::residents::api::ResidentOps + Send + Sync> = Arc::new(
+    let residents: Arc<dyn units::business::residents::api::ResidentOps + Send + Sync> = Arc::new(
         entry::assembly::residents(
-            vec![Arc::new(units::residents::detail::McpAdapter::new(
-                Arc::new(
-                    kernel::detail::ProcessSessions::new(
-                        std::env::current_exe().unwrap_or_default(),
-                        root.clone(),
-                        std::sync::Arc::clone(&write_allowed),
-                        std::sync::Arc::clone(&book),
-                    )
-                    .with_mode(std::sync::Arc::clone(&sandbox_mode)),
-                ),
-                std::sync::Arc::clone(&log),
-            ))
-                as Arc<
-                    dyn units::residents::ports::ServiceAdapter + Send + Sync,
-                >],
+            vec![
+                Arc::new(units::business::residents::detail::McpAdapter::new(
+                    Arc::new(
+                        kernel::detail::ProcessSessions::new(
+                            std::env::current_exe().unwrap_or_default(),
+                            root.clone(),
+                            std::sync::Arc::clone(&write_allowed),
+                            std::sync::Arc::clone(&book),
+                        )
+                        .with_mode(std::sync::Arc::clone(&sandbox_mode)),
+                    ),
+                    std::sync::Arc::clone(&log),
+                ))
+                    as Arc<dyn units::business::residents::ports::ServiceAdapter + Send + Sync>,
+            ],
             Arc::clone(&modules),
             Arc::clone(&secrets),
         )
@@ -587,18 +603,20 @@ fn main() {
 
     // 依赖补齐面先建出来：runtime 的核心（选虚拟根要读清单）与呈现层（setup 路由）各持同一份。
     // vm 用**补齐面专用**的那份：运行期编排显式点名内部 none，不能拿会话 vm 顶替（那边只有用户档）。
-    let provision: Arc<dyn units::provision::api::Provision + Send + Sync> =
+    let provision: Arc<dyn units::business::provision::api::Provision + Send + Sync> =
         Arc::new(entry::assembly::provision_with_guest_vm(&root));
     // **存储空间**：回收策略来自 settings；构建与呈现层共用同一份。
     // 装配与探针同一份（entry::assembly），真日志端口与正在写的日志由这里注入。
     let storage_service = Arc::new(entry::assembly::storage(
         &root,
         Arc::clone(&provision),
-        units::maintenance::storage::api::StoragePolicy::from(&registry.app_settings().storage),
+        units::business::maintenance::storage::api::StoragePolicy::from(
+            &registry.app_settings().storage,
+        ),
         std::sync::Arc::clone(&log),
         active_log,
     ));
-    let storage: Arc<dyn units::maintenance::storage::api::Storage + Send + Sync> =
+    let storage: Arc<dyn units::business::maintenance::storage::api::Storage + Send + Sync> =
         storage_service.clone();
     // **构建子业务**：创建会话前补编模块产物（本机档宿主、虚拟机档 guest）；执行器与 `--build` 同一条路——
     // **不申请容器身份**（构建是系统动作）：AppContainer 的临时目录写不了文件；可达范围仍由围栏规格给出。
@@ -610,10 +628,11 @@ fn main() {
     // 项目内基础工具链的只读安装根：构建与 shell 共用同一份（不按 agent 重复注入）。
     let base_roots = entry::toolchains::active_roots(&root);
     // 构建的三个端口各一个适配器：源指纹与构建状态共用一份本机档（BuildStore），缓存卷落盘（CacheOnDisk）。
-    let build_store =
-        Arc::new(units::maintenance::builds::detail::fingerprint::BuildStore::new(root.clone()));
-    let builds: Arc<dyn units::maintenance::builds::api::Builds + Send + Sync> =
-        Arc::new(units::maintenance::builds::service::BuildsService::new(
+    let build_store = Arc::new(
+        units::business::maintenance::builds::detail::fingerprint::BuildStore::new(root.clone()),
+    );
+    let builds: Arc<dyn units::business::maintenance::builds::api::Builds + Send + Sync> = Arc::new(
+        units::business::maintenance::builds::service::BuildsService::new(
             root.clone(),
             Arc::clone(&packages),
             Arc::clone(&vm),
@@ -621,16 +640,17 @@ fn main() {
             Arc::clone(&storage),
             build_store.clone(),
             build_store.clone(),
-            Arc::new(units::maintenance::builds::detail::cache::CacheOnDisk::new(
-                root.clone(),
-            )),
+            Arc::new(
+                units::business::maintenance::builds::detail::cache::CacheOnDisk::new(root.clone()),
+            ),
             Arc::new(build_runner),
-            Arc::new(units::tools::service::fence::ToolFenceGate),
+            Arc::new(units::business::tools::service::fence::ToolFenceGate),
             Arc::clone(&fence_host),
             Arc::new(kernel::detail::HostProbeAdapter),
             std::sync::Arc::clone(&log),
             base_roots.clone(),
-        ));
+        ),
+    );
     // **系统维护面**：启动相命令（`--doctor` / `--gc` / `--provision` …）在转录中心里也跑同一条执行路径——
     // 复用这里已经装好的端口：存储的后台作业状态在实例里，另装一套会让两边互相看不见。
     let system = match entry::assembly::system_with(
@@ -652,12 +672,12 @@ fn main() {
     };
     // 启动时要按有效启停拉起常驻服务：留一份手柄（进程级租约，不属于任何会话）。
     let residents_boot = Arc::clone(&residents);
-    let mut core = units::runtime::service::Core::new(
+    let mut core = units::business::runtime::service::Core::new(
         root.clone(),
         Box::new(registry),
-        Arc::new(units::conversation::session::service::SessionService::new(
-            Arc::new(history),
-        )),
+        Arc::new(
+            units::business::conversation::session::service::SessionService::new(Arc::new(history)),
+        ),
         workspace,
         Arc::clone(&vm),
         Arc::clone(&packages),
@@ -683,19 +703,19 @@ fn main() {
             std::process::exit(2);
         };
         match core.registry_mut().probe_model_tools(id) {
-            Ok(units::llm::api::ProbeOutcome::Supported { detail }) => {
+            Ok(units::business::llm::api::ProbeOutcome::Supported { detail }) => {
                 println!("[探测] 模型 {}：支持原生工具调用（{}）", id, detail);
                 println!("[探测] 已把 models.yaml 的 tools 写成 native");
                 std::process::exit(0);
             }
-            Ok(units::llm::api::ProbeOutcome::Unsupported { detail }) => {
+            Ok(units::business::llm::api::ProbeOutcome::Unsupported { detail }) => {
                 println!("[探测] 模型 {}：**不支持**原生工具调用（{}）", id, detail);
                 println!(
                     "[探测] 已把 models.yaml 的 tools 写成 envelope（手写信封照旧可用，能力没有任何损失）"
                 );
                 std::process::exit(0);
             }
-            Ok(units::llm::api::ProbeOutcome::Unknown { detail }) => {
+            Ok(units::business::llm::api::ProbeOutcome::Unknown { detail }) => {
                 println!("[探测] 模型 {}：无法判定（{}）", id, detail);
                 println!("[探测] 登记处**没有改动**：请自行决定填 native 还是 envelope");
                 std::process::exit(0);
@@ -727,7 +747,7 @@ fn main() {
                     };
                     println!("  {}  {:<16} {}", verdict, s.name, s.detail);
                 }
-                let names = |want: fn(&units::llm::api::ReplayShape) -> bool| -> String {
+                let names = |want: fn(&units::business::llm::api::ReplayShape) -> bool| -> String {
                     let got: Vec<&str> = report
                         .shapes
                         .iter()
@@ -761,7 +781,7 @@ fn main() {
     // 一次性命令（`runtime: none`）不分配（跑完就退）；细节与逃生口见 `view_drive_begin`。
     let view_drive = runtime_needed && view_drive_begin(&root);
     // 核心搬到它自己的执行线程：此后呈现层只持有**入站面**——拿不到核心本体，也拿不到任何核心锁。
-    let handle = match units::runtime::api::Handle::spawn(core) {
+    let handle = match units::business::runtime::api::Handle::spawn(core) {
         Ok(h) => h,
         Err(e) => {
             eprintln!("[装配失败] {}", e);
@@ -780,7 +800,7 @@ fn main() {
         storage_service.start_auto();
     }
     // 基础工具链事实：Web 端横幅与 CLI 启动报告读同一份。
-    faces.toolchains = units::system::api::toolchain_json(&base);
+    faces.toolchains = units::business::system::api::toolchain_json(&base);
     // 外部工具现状：与自检同一份解析（设置登记 + 项目内补齐），配置页只读这一份。
     faces.vm_tools = entry::assembly::vm_tools_report_reader(&root, Arc::clone(&provision));
 

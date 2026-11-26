@@ -1,7 +1,7 @@
 //! 目的：进程执行回执的纯装配——本机守门进程与 guest 命令通道共用同一份 shell 回执形状。
 //! 管：stdout 与 stderr 分区（`[stderr]` 头）、收尾状态转成结构化说明（退出码 / 超时 / 用户停止）。
 //! 不管：超时 / 取消的判定（由执行层给）；文案（在 `locales/<lang>.ftl`，由 `detail::i18n` 渲染）；
-//!   cwd 与耗时（由工具层追加）；输出截断（唯一预算在 `units::tools::domain::budget`）。
+//!   cwd 与耗时（由工具层追加）；输出截断（唯一预算在 `units::business::tools::domain::budget`）。
 //! 联动：kernel 的 ProcTools 与 vm 的 guest 通道实现调用；渲染见 `detail::i18n::render_receipt`。
 
 use crate::kernel::contracts::note::{Note, Severity, codes};
@@ -29,7 +29,7 @@ pub struct ShellReceipt {
 }
 
 /// 目的：把 stdout 与 stderr 拼成回执正文（**不含**状态说明与 cwd——那两类都由说明或工具层给）。
-/// 约束：这里**不截断**——超限只由工具预算一处处理（见 `units::tools::domain::budget`），
+/// 约束：这里**不截断**——超限只由工具预算一处处理（见 `units::business::tools::domain::budget`），
 ///   否则预算会再切一刀，标记自相矛盾且分段可能被劈开。空输出不再留开头的空行。
 pub fn shell_payload(out: &str, err: &str) -> String {
     let mut payload = out.to_string();

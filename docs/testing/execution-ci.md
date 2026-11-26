@@ -224,22 +224,22 @@ node run-tests.js --coverage
 <!-- BEGIN:mutation-scope -->
 | 单元 | 文件 | 调度 |
 | --- | --- | --- |
-| `catalog` | `src/units/catalog/registry/detail/yaml_settings.rs` | weekly |
-| `conversation` | `src/units/conversation/slate/service.rs` | weekly |
+| `catalog` | `src/units/business/catalog/registry/detail/yaml_settings.rs` | weekly |
+| `conversation` | `src/units/business/conversation/slate/service.rs` | weekly |
 | `kernel` | `src/kernel/detail/launch.rs` | weekly |
 | `kernel` | `src/kernel/detail/ledger.rs` | weekly |
 | `kernel` | `src/kernel/detail/unpack.rs` | weekly |
 | `kernel` | `src/kernel/domain/path.rs` | weekly |
-| `lifecycle` | `src/units/lifecycle/service/rewind.rs` | none |
-| `llm` | `src/units/llm/detail/repair.rs` | weekly |
+| `lifecycle` | `src/units/business/lifecycle/service/rewind.rs` | none |
+| `llm` | `src/units/business/llm/detail/repair.rs` | weekly |
 | `permission` | `src/units/pure/permission/domain/permission.rs` | weekly |
-| `tools` | `src/units/tools/domain/patch.rs` | none |
-| `vm` | `src/units/vm/domain/guest.rs` | weekly |
-| `vm` | `src/units/vm/domain/exec.rs` | weekly |
-| `vm` | `src/units/vm/service.rs` | weekly |
-| `workspace` | `src/units/workspace/domain/workstore.rs` | weekly |
-| `workspace` | `src/units/workspace/domain/workspace.rs` | weekly |
-| `workspace` | `src/units/workspace/service/commit.rs` | weekly |
+| `tools` | `src/units/business/tools/domain/patch.rs` | none |
+| `vm` | `src/units/business/vm/domain/guest.rs` | weekly |
+| `vm` | `src/units/business/vm/domain/exec.rs` | weekly |
+| `vm` | `src/units/business/vm/service.rs` | weekly |
+| `workspace` | `src/units/business/workspace/domain/workstore.rs` | weekly |
+| `workspace` | `src/units/business/workspace/domain/workspace.rs` | weekly |
+| `workspace` | `src/units/business/workspace/service/commit.rs` | weekly |
 
 > 7 个单元、周检 14 个文件；本表由 `tests/specs/*.yaml` 的 `mutation` 块生成（`node tests/docs-sync.mjs --write`），不手写。
 <!-- END:mutation-scope -->

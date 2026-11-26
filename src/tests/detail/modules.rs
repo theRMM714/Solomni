@@ -52,7 +52,7 @@ fn fs_modules_accepts_valid_folders_and_rejects_each_illegal_form_with_a_reason(
 
     let roster = FsModules::new(
         dir,
-        crate::units::tools::api::names(),
+        crate::units::business::tools::api::names(),
         vec!["taken".to_string()],
         content_at(&root),
     )
@@ -119,7 +119,7 @@ fn fs_modules_validates_service_and_secret_declarations() {
 
     let roster = FsModules::new(
         dir,
-        crate::units::tools::api::names(),
+        crate::units::business::tools::api::names(),
         Vec::new(),
         content_at(&root),
     )
@@ -163,7 +163,7 @@ fn fs_modules_reads_the_private_area_fact() {
 
     let roster = FsModules::new(
         dir.clone(),
-        crate::units::tools::api::names(),
+        crate::units::business::tools::api::names(),
         Vec::new(),
         content_at(&root),
     )

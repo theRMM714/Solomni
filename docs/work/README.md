@@ -1,7 +1,7 @@
 # work（工作用例）
 
 > 定位：工作是什么样——建工作的两段、改配、档案与视图、模型视图、运行报告、guest 生命周期、建议与激活。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/work/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/work/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -34,16 +34,16 @@
 
 - `prepare_*` 只做毫秒级的状态变换与占名（占名 `turn.mark_starting` 由调用方前后配对），慢步骤（起 guest、装运行包）由 `GuestBoot::run` 在调用方线程上跑。
 - `commit_*` 落盘、装配会话、开场事实；中途失败由 `abort_work` 撤销，已建的空工作区目录一起清掉。
-- 两段之间的对象是不透明结果（`PreparedWork` / `PreparedEdit` / `PreparedActivation`），调用方只能原样交给 `commit_*` 或 `abort_*`（判据在 `src/units/work/service/create.rs` 的 `abort_work` 与 `src/units/work/service/config.rs` 的 `commit_edit`：中间结果不提供读取口）。
+- 两段之间的对象是不透明结果（`PreparedWork` / `PreparedEdit` / `PreparedActivation`），调用方只能原样交给 `commit_*` 或 `abort_*`（判据在 `src/units/business/work/service/create.rs` 的 `abort_work` 与 `src/units/business/work/service/config.rs` 的 `commit_edit`：中间结果不提供读取口）。
 
 ## 改动本单元时必须同步
 
-- `src/units/work/api.rs` 的 DTO → `runtime` 的 `api.rs` 签名、`src/presentation/` 的视图消费方、`src/tests/routes.rs` 的路由表都要一起改。
-- `src/units/work/service/views.rs` → `SessionView` 的继续判据与文件视图是行为契约：改判据必须同改 `src/tests/api/session.rs`、`src/tests/routes.rs`、`src/tests/runtime/proxy.rs` 的断言。
-- `src/units/work/service/create.rs` → 建工作的顺序、日志 key 与失败撤销是行为契约：改一处必须同改 `src/tests/runtime.rs`、`src/tests/api/compaction.rs`、`src/tests/session/lifecycle.rs` 的断言与 e2e 的建工作旅程。
-- `src/units/work/service/guest_job.rs` → 稳定根判据与 guest 规格是行为契约：改一处必须同改 e2e 的 vm 档会话场景与 `SOLOMNI_VM_LIVE` 真机探针（`tests/cross-platform/gaps.yaml`）。
-- `src/units/work/domain.rs` → 纯判据（`merge_into_one` / `session_started` / `validate_work_name`）不碰入站面、不读盘、不发事件：行为由 e2e 的建工作与协作旅程覆盖（具体实现的用例已移除）。
-- `src/units/turn/turn/service/facts.rs` 的 `Turn::build_single`（装配落 `src/units/agentloop/domain/assembly.rs`）→ 本单元 `commit_work` 的唯一装配入口：改签名必须同改这里、[`docs/turn/unit-map.md`](../turn/unit-map.md) 的对应行与 `Turn` 的用例。
+- `src/units/business/work/api.rs` 的 DTO → `runtime` 的 `api.rs` 签名、`src/presentation/` 的视图消费方、`src/tests/routes.rs` 的路由表都要一起改。
+- `src/units/business/work/service/views.rs` → `SessionView` 的继续判据与文件视图是行为契约：改判据必须同改 `src/tests/api/session.rs`、`src/tests/routes.rs`、`src/tests/runtime/proxy.rs` 的断言。
+- `src/units/business/work/service/create.rs` → 建工作的顺序、日志 key 与失败撤销是行为契约：改一处必须同改 `src/tests/runtime.rs`、`src/tests/api/compaction.rs`、`src/tests/session/lifecycle.rs` 的断言与 e2e 的建工作旅程。
+- `src/units/business/work/service/guest_job.rs` → 稳定根判据与 guest 规格是行为契约：改一处必须同改 e2e 的 vm 档会话场景与 `SOLOMNI_VM_LIVE` 真机探针（`tests/cross-platform/gaps.yaml`）。
+- `src/units/business/work/domain.rs` → 纯判据（`merge_into_one` / `session_started` / `validate_work_name`）不碰入站面、不读盘、不发事件：行为由 e2e 的建工作与协作旅程覆盖（具体实现的用例已移除）。
+- `src/units/business/turn/turn/service/facts.rs` 的 `Turn::build_single`（装配落 `src/units/business/agentloop/domain/assembly.rs`）→ 本单元 `commit_work` 的唯一装配入口：改签名必须同改这里、[`docs/turn/unit-map.md`](../turn/unit-map.md) 的对应行与 `Turn` 的用例。
 
 ## 本目录
 

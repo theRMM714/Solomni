@@ -5,8 +5,8 @@
 
 use super::*;
 use crate::presentation::faces::Faces;
-use crate::units::runtime::api::Handle;
-use crate::units::work::api::{
+use crate::units::business::runtime::api::Handle;
+use crate::units::business::work::api::{
     AgentSuggestion, FilesView, RuntimeDiagnosis, RuntimeReport, SessionConfig, SessionEdit,
     SessionTypeView, SessionView, TierChoices, WorkOpened, WorkOps, WorkSpec,
 };
@@ -15,17 +15,17 @@ use crate::tests::doubles::{
     InMemorySettings, core_with_settings_modules, module_of, module_with_runtimes,
 };
 use crate::tests::ops_with;
-use crate::units::catalog::modules::api::{ModulesOps, Roster};
-use crate::units::catalog::packages::api::Problem;
-use crate::units::catalog::registry::api::{AppSettings, RegistryOps};
-use crate::units::collab::api::{CheckView, CollabEvent};
-use crate::units::llm::api::{ProbeOutcome, ReplayReport};
+use crate::units::business::catalog::modules::api::{ModulesOps, Roster};
+use crate::units::business::catalog::packages::api::Problem;
+use crate::units::business::catalog::registry::api::{AppSettings, RegistryOps};
+use crate::units::business::collab::api::{CheckView, CollabEvent};
+use crate::units::business::llm::api::{ProbeOutcome, ReplayReport};
+use crate::units::business::transcript::api::{ContextUsage, LineView, ToolCallView};
+use crate::units::business::transcript::api::{DecisionAnswer, DecisionEnvelope, DecisionMessage};
 use crate::units::pure::registry_model::api::Agent;
 use crate::units::pure::registry_model::api::AgentView;
 use crate::units::pure::registry_model::api::ModelDraft;
 use crate::units::pure::taskchain::api::{NodeStatus, TaskChain, TaskNode};
-use crate::units::transcript::api::{ContextUsage, LineView, ToolCallView};
-use crate::units::transcript::api::{DecisionAnswer, DecisionEnvelope, DecisionMessage};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -310,14 +310,14 @@ impl WorkOps for FakeCore {
         _: &str,
         _: usize,
         _: Option<u64>,
-    ) -> Result<crate::units::workspace::api::WorkLog, String> {
+    ) -> Result<crate::units::business::workspace::api::WorkLog, String> {
         Err("没装日志".into())
     }
     fn work_commit_view(
         &self,
         _: &str,
         _: u64,
-    ) -> Result<crate::units::workspace::api::CommitDetail, String> {
+    ) -> Result<crate::units::business::workspace::api::CommitDetail, String> {
         Err("没装提交".into())
     }
     fn work_commit_file(
@@ -325,7 +325,7 @@ impl WorkOps for FakeCore {
         _: &str,
         _: u64,
         _: &str,
-    ) -> Result<crate::units::workspace::api::CommitFileView, String> {
+    ) -> Result<crate::units::business::workspace::api::CommitFileView, String> {
         Err("没装提交文件".into())
     }
     fn exists(&self, _: &str) -> Result<bool, String> {
@@ -333,7 +333,7 @@ impl WorkOps for FakeCore {
     }
     fn session_views(
         &self,
-        _: &[crate::units::session_model::api::HistoryView],
+        _: &[crate::units::business::session_model::api::HistoryView],
     ) -> Result<Vec<SessionView>, String> {
         Err("没装会话总览".into())
     }

@@ -8,7 +8,7 @@ title: 登记处、模块、运行包、密钥
 mutation:
   schedule: weekly
   files:
-    - src/units/catalog/registry/detail/yaml_settings.rs
+    - src/units/business/catalog/registry/detail/yaml_settings.rs
 cases:
   - id: cargo/tests::detail::modules
     tier: T1

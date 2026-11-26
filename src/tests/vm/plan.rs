@@ -1,13 +1,15 @@
 //! 目的：运行计划派生规则的用例测试——宿主包选型、缺能力收口与"同一把尺子"。
 //! 管：`host_plan_for` 选包与 `unavailable_modules` 的判定一致性。
 //! 不管：包库本身的校验与目标筛选（`src/tests/packages.rs`）、guest 生命周期（`src/tests/vm/`）。
-//! 联动：被测实现见 `src/units/vm/service/plan.rs`，经 `vm::api` 导出。
+//! 联动：被测实现见 `src/units/business/vm/service/plan.rs`，经 `vm::api` 导出。
 
 use super::super::prelude::*;
 
 use crate::tests::doubles::FixedProbe;
-use crate::units::catalog::packages::api::{BaseFacts, Library, PinPolicy, Problem};
-use crate::units::vm::api::{MissingEntry, host_plan_for, plan_for_spec, unavailable_modules};
+use crate::units::business::catalog::packages::api::{BaseFacts, Library, PinPolicy, Problem};
+use crate::units::business::vm::api::{
+    MissingEntry, host_plan_for, plan_for_spec, unavailable_modules,
+};
 use std::collections::BTreeMap;
 
 /// 目的：本机档的包计划把缺的能力按模块收口；入口不在场时 `plan_for_spec` 如实给出诊断（规则在 vm，不在会话层）。

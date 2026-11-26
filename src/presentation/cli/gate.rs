@@ -1,7 +1,7 @@
 //! 目的：交互回合：跟随事件流、投降裁决卡、等安静与动作回显。
 //! 管：跟读游标、裁决卡的问与答、动作后的续读。
 //! 不管：生成本身（在 `runtime`）、渲染原语（`view`）。
-//! 联动：`cli/view.rs`、`cli/flows.rs`、`units/runtime`
+//! 联动：`cli/view.rs`、`cli/flows.rs`、`units/business/runtime`
 
 use super::*;
 use crate::presentation::faces::Faces;
@@ -408,8 +408,10 @@ pub(crate) fn pick_agents(faces: &Faces, names: &[String]) -> Result<Vec<AgentMe
 }
 
 /// 目的：虚拟机档的虚拟根怎么选——本机只有一个装齐的就自动用它；多个（或一个都没装齐）返回 None，由调用方如实说明。
-pub(super) fn pick_guest(guests: &[crate::units::provision::api::GuestBase]) -> Option<String> {
-    let ready: Vec<&crate::units::provision::api::GuestBase> =
+pub(super) fn pick_guest(
+    guests: &[crate::units::business::provision::api::GuestBase],
+) -> Option<String> {
+    let ready: Vec<&crate::units::business::provision::api::GuestBase> =
         guests.iter().filter(|g| g.ready).collect();
     match ready.as_slice() {
         [one] => Some(one.guest.clone()),
@@ -517,8 +519,8 @@ pub(crate) fn create_session_action(faces: &Faces, ask: SessionAsk<'_>) -> Resul
 mod tests {
     use super::*;
     use crate::kernel::api::types::Ask;
-    use crate::units::collab::api::Pending;
-    use crate::units::transcript::api::tool_ask;
+    use crate::units::business::collab::api::Pending;
+    use crate::units::business::transcript::api::tool_ask;
 
     /// 目的：用生产那一条派生造卡（工具层那一类：三段话与选项原样来自发起方）。
     fn card(title: &str, body: &str, detail: &str, options: &[(&str, &str)]) -> DecisionCard {
@@ -690,9 +692,9 @@ mod tests {
     #[test]
     fn interrupt_skips_a_card_while_eof_stops_it() {
         use crate::tests::doubles::{module_of, work};
-        use crate::units::collab::api::Pending;
-        use crate::units::session_model::api::SINGLE;
-        use crate::units::turn_state::api::SlotWake;
+        use crate::units::business::collab::api::Pending;
+        use crate::units::business::session_model::api::SINGLE;
+        use crate::units::business::turn_state::api::SlotWake;
 
         let (handle, faces) = crate::tests::ops_with(vec![module_of("a")], Vec::new());
         let sid = "cli-ctrl-c-1";
@@ -758,7 +760,7 @@ mod tests {
     /// 目的：本机有多个装齐的虚拟根时先取第一个并如实说明；只一个就自动用，一个都没就绪交调用方说明。
     #[test]
     fn pick_guest_names_the_options_and_takes_the_first() {
-        let guest = |name: &str, ready: bool| crate::units::provision::api::GuestBase {
+        let guest = |name: &str, ready: bool| crate::units::business::provision::api::GuestBase {
             guest: name.to_string(),
             label: name.to_string(),
             os: "linux".to_string(),

@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::presentation::faces::Faces;
-use crate::units::collab::api::CollabEvent;
+use crate::units::business::collab::api::CollabEvent;
 
 /// 目的：启动页副行：终端转录中心、版本与根路径。
 pub(super) fn startup_tagline() -> String {
@@ -122,14 +122,14 @@ pub(super) fn print_roster(faces: &Faces) {
         ));
     }
     // 虚拟机档的诊断：缺包之外（多版本未定版 / 定版不存在 / 路径冲突）会挡住「开始」，在这里如实说明。
-    let hard: Vec<crate::units::work::api::RuntimeDiagnosis> = report
+    let hard: Vec<crate::units::business::work::api::RuntimeDiagnosis> = report
         .diagnoses
         .iter()
         .filter(|d| {
             !matches!(
                 d,
-                crate::units::work::api::RuntimeDiagnosis::Package(
-                    crate::units::catalog::packages::api::Problem::Missing { .. }
+                crate::units::business::work::api::RuntimeDiagnosis::Package(
+                    crate::units::business::catalog::packages::api::Problem::Missing { .. }
                 )
             )
         })
@@ -138,7 +138,7 @@ pub(super) fn print_roster(faces: &Faces) {
     if !hard.is_empty() {
         term::say(&format!(
             "[档位诊断] {}（虚拟机档要先解决这些才能开始会话）",
-            crate::units::work::api::diagnose_text(&hard)
+            crate::units::business::work::api::diagnose_text(&hard)
         ));
     }
     for r in &report.rejected_packages {
@@ -281,7 +281,7 @@ fn render_rich(events: &[SessionEvent]) {
 }
 
 /// 目的：协作机制的富文本渲染：整理 / 待审 / 节点派发 / 回报 / 验收 / 交付（讨论结束与总结不打：它们有自己的转录行）。
-/// 约束：这是**协作机制自己的呈现**，会话层不认识这些变体（见 src/units/transcript/domain/events.rs 的 Push 契约）。
+/// 约束：这是**协作机制自己的呈现**，会话层不认识这些变体（见 src/units/business/transcript/domain/events.rs 的 Push 契约）。
 fn render_collab_rich(ce: &CollabEvent) {
     match ce {
         CollabEvent::Plan(plan) => {
@@ -435,7 +435,7 @@ fn check_mark(status: &str) -> (&'static str, theme::Ink) {
     }
 }
 
-fn render_lines(lines: &[crate::units::transcript::api::LineView]) {
+fn render_lines(lines: &[crate::units::business::transcript::api::LineView]) {
     for l in lines {
         if l.kind == "compacted" {
             let up_to = l
@@ -502,7 +502,7 @@ fn render_lines(lines: &[crate::units::transcript::api::LineView]) {
     }
 }
 
-fn print_tool(t: &crate::units::transcript::api::ToolCallView) {
+fn print_tool(t: &crate::units::business::transcript::api::ToolCallView) {
     let (glyph, ink) = if t.ok {
         ("✓", theme::Ink::Green)
     } else {

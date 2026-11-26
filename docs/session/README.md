@@ -1,7 +1,7 @@
 # session（会话）
 
 > 定位：会话用例与编排——历史落盘、会话树与一席的装配（单会话运行时在 `agentloop`，裁决队与流程面在 `turn_state`）。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/conversation/session/api.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/conversation/session/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -24,13 +24,13 @@
 
 ## 改动本单元时必须同步
 
-- 一条会话的运行时（`src/units/agentloop/domain/session.rs`）或回合引擎（`src/units/agentloop/engine/`）一改 → 装配入口（`src/units/agentloop/domain/assembly.rs`，在 `agentloop`）与驱动（`src/units/turn/`）同跟。
-- 行与事件词汇（`src/units/transcript/domain/events.rs`、`LineView` 字段）一改 → `collab` 的状态派生、`runtime` 的视图、`cli` / `web` 渲染、`src/tests/session/` 全跟。
-- 机制自己的事件与关卡（`Push` 的 `kind` / `payload`、`Gate`）改 → 对应机制的词汇文件（协作在 `src/units/collab/domain/events.rs` 与 `src/units/collab/domain/gates.rs`）与它的渲染；会话侧不跟着改。
-- 流程面（`src/units/turn_state/domain/flow.rs` 的 `Flow` / `MemberAsk` / `Handback` / `WorkPlan`，归 `turn_state`）一改 → 每个流程的实现（协作在 `src/units/collab/service/flow.rs`）与驱动（`src/units/turn/turn/service/flow.rs`、`src/units/turn/turn/service/generation/collab.rs`）一起改。
-- 复合流程（`src/units/turn_state/domain/sequence.rs` 的 `Sequence`）一改 → 装配点（`src/units/work/service/create.rs`、`src/units/turn/turn/service/rebuild.rs`）与流程自己的 `intake` / `output` / `part` 一起看：前一段交出的产物就是后一段的需求。
-- 流程工厂面（`src/units/turn_state/domain/flows.rs` 的 `Flows` / `FlowSetup` / `sequence_of`）一改 → 各流程工厂的实现（协作在 `src/units/collab/service/flows.rs`）与组合根的注入（`src/units/runtime/service/core.rs`）一起改：装配点只问 id 要段，不认识具体流程。
-- 会话类型表（`src/units/session_model/domain/profile.rs` 的 `Profiles`，数据在 `systools/profiles.yaml`）一改 → 提示词册子的席位条目（`prompts/shared/mechanisms.yaml`）同跟；新增流程要在 `src/units/session_model/domain/mechanism.rs` 的 `MECHANISMS` 加一条（席位与人数在那里），席位换提示词或工具同改同一文件的 `SEATS`；临时拼装（省略 `kind`、内联流程 id）走同一份校验 `check_inline` 与折算函数 `inline_spec`，落盘类型 `custom`。
+- 一条会话的运行时（`src/units/business/agentloop/domain/session.rs`）或回合引擎（`src/units/business/agentloop/engine/`）一改 → 装配入口（`src/units/business/agentloop/domain/assembly.rs`，在 `agentloop`）与驱动（`src/units/business/turn/`）同跟。
+- 行与事件词汇（`src/units/business/transcript/domain/events.rs`、`LineView` 字段）一改 → `collab` 的状态派生、`runtime` 的视图、`cli` / `web` 渲染、`src/tests/session/` 全跟。
+- 机制自己的事件与关卡（`Push` 的 `kind` / `payload`、`Gate`）改 → 对应机制的词汇文件（协作在 `src/units/business/collab/domain/events.rs` 与 `src/units/business/collab/domain/gates.rs`）与它的渲染；会话侧不跟着改。
+- 流程面（`src/units/business/turn_state/domain/flow.rs` 的 `Flow` / `MemberAsk` / `Handback` / `WorkPlan`，归 `turn_state`）一改 → 每个流程的实现（协作在 `src/units/business/collab/service/flow.rs`）与驱动（`src/units/business/turn/turn/service/flow.rs`、`src/units/business/turn/turn/service/generation/collab.rs`）一起改。
+- 复合流程（`src/units/business/turn_state/domain/sequence.rs` 的 `Sequence`）一改 → 装配点（`src/units/business/work/service/create.rs`、`src/units/business/turn/turn/service/rebuild.rs`）与流程自己的 `intake` / `output` / `part` 一起看：前一段交出的产物就是后一段的需求。
+- 流程工厂面（`src/units/business/turn_state/domain/flows.rs` 的 `Flows` / `FlowSetup` / `sequence_of`）一改 → 各流程工厂的实现（协作在 `src/units/business/collab/service/flows.rs`）与组合根的注入（`src/units/business/runtime/service/core.rs`）一起改：装配点只问 id 要段，不认识具体流程。
+- 会话类型表（`src/units/business/session_model/domain/profile.rs` 的 `Profiles`，数据在 `systools/profiles.yaml`）一改 → 提示词册子的席位条目（`prompts/shared/mechanisms.yaml`）同跟；新增流程要在 `src/units/business/session_model/domain/mechanism.rs` 的 `MECHANISMS` 加一条（席位与人数在那里），席位换提示词或工具同改同一文件的 `SEATS`；临时拼装（省略 `kind`、内联流程 id）走同一份校验 `check_inline` 与折算函数 `inline_spec`，落盘类型 `custom`。
 
 ## 本目录
 

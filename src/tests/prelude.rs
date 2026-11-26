@@ -5,53 +5,55 @@
 
 pub(crate) use super::doubles::*;
 
-pub use crate::units::collab::service::discussion::{Discussion, MAX_ROUNDS, Member, TurnOut};
+pub use crate::units::business::collab::service::discussion::{
+    Discussion, MAX_ROUNDS, Member, TurnOut,
+};
 
-pub use crate::units::llm::api::Channel;
+pub use crate::units::business::llm::api::Channel;
 
-pub use crate::units::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
+pub use crate::units::business::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
 
-pub use crate::units::llm::detail::fake_chat::FakeChat;
+pub use crate::units::business::llm::detail::fake_chat::FakeChat;
 
-pub use crate::units::llm::ports::ChatGateway;
+pub use crate::units::business::llm::ports::ChatGateway;
 
-pub use crate::units::prompt::api::{Prompt, Segment};
+pub use crate::units::business::prompt::api::{Prompt, Segment};
 
-pub use crate::units::prompt::domain::prompt::render;
+pub use crate::units::business::prompt::domain::prompt::render;
 
-pub use crate::units::catalog::registry::api::Settings;
+pub use crate::units::business::catalog::registry::api::Settings;
+pub use crate::units::business::session_model::api::{RunState, SessionMeta};
 pub use crate::units::pure::registry_model::api::AgentMeta;
 pub use crate::units::pure::registry_model::api::ModelDraft;
 pub use crate::units::pure::registry_model::api::ModelEntry;
 pub use crate::units::pure::registry_model::api::Provider;
-pub use crate::units::session_model::api::{RunState, SessionMeta};
 
 // 工具面活对象只在 `agentloop` 内构造与持有（`api` 不转出）：测试直接拿它来断言围栏与续号。
-pub use crate::units::agentloop::api::ModuleTools;
-pub(crate) use crate::units::agentloop::domain::member_tools::MemberTools;
+pub use crate::units::business::agentloop::api::ModuleTools;
+pub(crate) use crate::units::business::agentloop::domain::member_tools::MemberTools;
 
-pub use crate::units::conversation::session::ports::HistoryStore;
+pub use crate::units::business::conversation::session::ports::HistoryStore;
 
 pub use crate::kernel::ports::ProcessRunner;
-pub use crate::units::tools::api::ToolExec;
+pub use crate::units::business::tools::api::ToolExec;
 
-pub use crate::units::catalog::modules::api::Module;
+pub use crate::units::business::catalog::modules::api::Module;
 
+pub use crate::units::business::vm::api::{self as exec};
 pub use crate::units::pure::exec_model::api::ExecSpec;
-pub use crate::units::vm::api::{self as exec};
 
-pub use crate::units::catalog::modules::ports::ModuleSource;
-pub use crate::units::workspace::ports::Workdirs;
+pub use crate::units::business::catalog::modules::ports::ModuleSource;
+pub use crate::units::business::workspace::ports::Workdirs;
 
-pub use crate::units::transcript::api::SessionEvent;
-pub use crate::units::work::api::{ConfigAgent, SessionEdit, WorkSpec};
+pub use crate::units::business::transcript::api::SessionEvent;
+pub use crate::units::business::work::api::{ConfigAgent, SessionEdit, WorkSpec};
 
-pub use crate::units::collab::api::{CollabEvent, Pending};
+pub use crate::units::business::collab::api::{CollabEvent, Pending};
 
 /// 目的：裁决卡的选项 id（契约）：测试按它作答，不按文案。
-pub use crate::units::collab::api::{OPT_BEGIN, OPT_PLAN_SAY, OPT_SLATE_CONFIRM};
+pub use crate::units::business::collab::api::{OPT_BEGIN, OPT_PLAN_SAY, OPT_SLATE_CONFIRM};
 
-pub(crate) use crate::units::runtime::service::Core;
+pub(crate) use crate::units::business::runtime::service::Core;
 
 pub use crate::units::pure::exec_model::api::Tier;
 

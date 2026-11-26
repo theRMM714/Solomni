@@ -1,7 +1,7 @@
 # 单元地图 · secrets
 
 > 定位：secrets（隐秘字段）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-25｜依据：`src/units/catalog/secrets/api.rs`
+> 效力：契约｜核对：2026-11-25｜依据：`src/units/business/catalog/secrets/api.rs`
 
 > 本文是 **secrets** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -9,8 +9,8 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/units/catalog/secrets/api.rs` | 统一管理 API（`SecretOps`）与视图；未注入时的空实现 `NoSecrets` |
-| `src/units/catalog/secrets/ports.rs` | 存储端口（`SecretStore`） |
-| `src/units/catalog/secrets/service.rs` | 值缓存与按模块解析 / 脱敏（实现 `SecretOps`） |
-| `src/units/catalog/secrets/detail.rs` | 机制实现入口（只有组合根能构造） |
-| `src/units/catalog/secrets/detail/yaml_secrets.rs` | `.home` 目录下的 `secrets.yaml` 文件存储（实现 `SecretStore`；私密权限经 `fs_meta::restrict_private_file`） |
+| `src/units/business/catalog/secrets/api.rs` | 统一管理 API（`SecretOps`）与视图；未注入时的空实现 `NoSecrets` |
+| `src/units/business/catalog/secrets/ports.rs` | 存储端口（`SecretStore`） |
+| `src/units/business/catalog/secrets/service.rs` | 值缓存与按模块解析 / 脱敏（实现 `SecretOps`） |
+| `src/units/business/catalog/secrets/detail.rs` | 机制实现入口（只有组合根能构造） |
+| `src/units/business/catalog/secrets/detail/yaml_secrets.rs` | `.home` 目录下的 `secrets.yaml` 文件存储（实现 `SecretStore`；私密权限经 `fs_meta::restrict_private_file`） |
