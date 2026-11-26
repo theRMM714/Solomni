@@ -30,7 +30,7 @@
 | `src/kernel/domain/name.rs` | 会成为目录名的名字的两条纯规则：`validate_dir_name`（非空、无首尾空白、不含 Windows 非法字符与控制字符、不是设备保留名，主语只进报错）与 `dedup_suffix`（占用时依次试 `-2` / `-3`） |
 | `src/kernel/domain/layout.rs` | 产品根的布局名字（`.home` / `.vm` / `runtimes` / `guest.yaml`）与由根派生的四处路径：`home` / `vm` / `runtimes` / `guest_spec`，调用点不再各自拼字面量 |
 | `src/kernel/domain/receipt.rs` | host/guest 共用的 shell 回执装配：`ShellReceipt { payload, notes }`——stdout 与 `[stderr]` 区进正文、结束状态（退出码 / 信号 / 超时 / 用户停止）成说明；只装配不截断，预算在 `src/units/tools/domain/budget.rs` |
-| `src/kernel/detail/clock.rs` | 本地时间机制（门面）：`Local`（本机时区的年月日时分秒毫秒）与此刻的 `local_now`、到分钟流水戳 `local_stamp`（`YYYYMMDD-HHMM`）；按平台选中 `src/kernel/detail/clock/{windows,unix}.rs` |
+| `src/kernel/detail/clock.rs` | 时间机制（门面）：`Local`（本机时区的年月日时分秒毫秒）与此刻的 `local_now`、到分钟流水戳 `local_stamp`（`YYYYMMDD-HHMM`）、记时刻用的 `now_secs` / `now_ms`（自 Unix 纪元）；按平台选中 `src/kernel/detail/clock/{windows,unix}.rs` |
 | `src/kernel/detail/clock/windows.rs` | `clock` 的 Windows 后端：`GetLocalTime` 取本机时区的民用时间 |
 | `src/kernel/detail/clock/unix.rs` | `clock` 的非 Windows 后端：`localtime_r` 转本地民用时间，时区坏掉时退到 `gmtime_r` 的 UTC 值 |
 | `src/kernel/detail/file_log.rs` | `Log` 端口的文件实现：每次运行在 `data/logs/` 下按本地时间戳建文件并逐行追加（写经 `Mutex` 串行），时间字段取自 `clock` |

@@ -1,7 +1,8 @@
 /**
  * 单元内部结构门禁：四条硬判据。文件粒度（行数、内联测试）由 structure/size.js 一处判，这里不管。
  * 硬判据：① 同单元 service 不得引用本单元 detail 或 kernel::detail；② service 不得直接做 IO；
- *        ③ 同一单元的 service 方法族之间不得成环；④ 单元内 detail 之外的文件不得引用 kernel::detail。
+ *        ③ 同一单元的 service 方法族之间不得成环；④ 单元内 detail 之外的文件不得引用 kernel::detail；
+ *        ⑤ domain 不得自己取时（记时刻经 kernel::api::clock，耗时由调用方传入）。
  * 覆盖 api / service / domain / detail 四个分区（api 含 api.rs 与 api/ 子目录）。
  * 判据只看生产代码：先剔 #[cfg(test)] 模块，再用 tests/lib/rust-mask.js 抹掉注释与字面量，
  *   避免文档注释里提到 ureq / std::fs 就被算成 IO 调用。
@@ -28,6 +29,8 @@ const CANONICALIZE = /canonicalize\s*\(/;
 /** 路径探查同样是 IO：`path.is_dir()` / `volume.exists()` 直接问盘，`probe.is_dir()` 走端口。
  *  端口的形参名在这里是约定（`probe` / `host` / `io` / `dirs` / `sessions` / `fs` / `files`），
  *  连同 `self.<字段>.` 一并豁免；其余接收者一律算直接碰盘。 */
+/** 取时也是盘外事实：domain 是纯逻辑，自己读钟就没法用固定时刻测。 */
+const CLOCK_READ = /std::time::(?:SystemTime|Instant)::now\b|UNIX_EPOCH/;
 const PATH_PROBE = /\.(is_dir|is_file|exists|read_dir|symlink_metadata)\s*\(/;
 const PORT_PROBE = /\b(?:probe|host|io|dirs|sessions|fs|files)\s*\.\s*(?:is_dir|is_file|exists|read_dir|symlink_metadata)\s*\(/g;
 
@@ -116,6 +119,7 @@ function scan(root) {
   const serviceToDetail = new Set();
   const outsideDetailKernel = new Set();
   const serviceIo = new Set();
+  const domainClock = new Set();
   const serviceGraph = {};
   const files = walk(root);
   const nodes = new Set();
@@ -130,6 +134,11 @@ function scan(root) {
 
     if (scope !== "detail" && prod.includes("crate::kernel::detail")) {
       outsideDetailKernel.add(f + " -> crate::kernel::detail");
+    }
+
+    if (scope === "domain") {
+      const hit = prod.match(CLOCK_READ);
+      if (hit) domainClock.add(f + " -> " + hit[0]);
     }
 
     if (scope === "service") {
@@ -153,7 +162,13 @@ function scan(root) {
   }
   for (const n of nodes) serviceGraph[n] = serviceGraph[n] || new Set();
   const cycles = tarjanScc(serviceGraph).map((c) => c.map((n) => "src/" + n + ".rs").join(" ↔ "));
-  return { serviceToDetail: [...serviceToDetail].sort(), outsideDetailKernel: [...outsideDetailKernel].sort(), serviceIo: [...serviceIo].sort(), cycles };
+  return {
+    serviceToDetail: [...serviceToDetail].sort(),
+    outsideDetailKernel: [...outsideDetailKernel].sort(),
+    serviceIo: [...serviceIo].sort(),
+    domainClock: [...domainClock].sort(),
+    cycles,
+  };
 }
 
 function internal(root) {
@@ -165,6 +180,7 @@ function internal(root) {
   fail("service 不得引用本单元 detail 或 kernel::detail（抽端口，别直连实现）", actual.serviceToDetail);
   fail("detail 之外的单元文件不得引用 kernel::detail（由组合根注入端口）", actual.outsideDetailKernel);
   fail("service 不得直接做 IO（fs / Command / 网络 / canonicalize）；经端口或 detail", actual.serviceIo);
+  fail("domain 不得自己取时（记时刻经 kernel::api::clock；耗时要调用方传进来）", actual.domainClock);
   for (const c of actual.cycles) problems.push("单元内部：同单元 service 方法族成环：" + c);
   return { problems, notes: [] };
 }
