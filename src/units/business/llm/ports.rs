@@ -1,11 +1,13 @@
-//! 目的：llm 单元的出站端口——本单元要请人做的事。
-//! 管：ChatGateway / ModelCatalog / EnvelopeRepair 三个 trait 的定义。
-//! 不管：协议词汇与入站用例（在 api / service）；适配器实现（在 detail）。
-//! 联动：只由 service.rs 持有（R12）；实现见 detail/http_chat.rs、detail/model_catalog.rs、detail/repair.rs。
+//! 目的：llm 单元的出站端口——本单元要请人做的事，以及「供应商协议」这个可变机制的形状。
+//! 管：ChatGateway / ModelCatalog / EnvelopeRepair / Protocol 四个 trait 与协议端口要用的值类型。
+//! 不管：协议词汇与入站用例（在 api / service）；各协议的具体字段名（在 detail/protocol/*——**只在那里**）。
+//! 联动：只由 service.rs 与 detail 持有（R12）；实现见 detail/http_chat.rs、detail/protocol/、detail/model_catalog.rs、detail/repair.rs。
 
 use crate::units::business::llm::api::{
-    BoxedChat, Channel, Malformed, ProbeOutcome, RepairOutcome, ReplayReport,
+    BoxedChat, Channel, Chunk, Completion, Malformed, Msg, ProbeOutcome, RepairOutcome,
+    ReplayReport, ToolDecl,
 };
+use crate::units::business::llm::domain::stream::StreamAcc;
 
 /// 目的：供应商模型目录端口：列出一条通道当前可用的模型名（发现机制在适配层）。
 pub trait ModelCatalog {
@@ -39,4 +41,64 @@ pub trait ChatGateway {
 ///      默认真现在 `detail/repair.rs`（只做控制字符转义）；第三方实现满足本契约即可整体替换。
 pub trait EnvelopeRepair: Send + Sync {
     fn repair(&self, raw: &str, kind: &Malformed) -> RepairOutcome;
+}
+/// 目的：一次补全要发出去的全部输入（**协议无关**）：协议实现据此拼请求体。
+pub struct Request<'a> {
+    /// 目的：这次要发的模型名（调用方按登记处解析好的那一个）。
+    pub model: &'a str,
+    /// 目的：这次要发的消息（协议无关的四种角色）。
+    pub messages: &'a [Msg],
+    /// 目的：要不要流式（请求体里的开关由协议翻译）。
+    pub stream: bool,
+    /// 目的：要声明的工具；None = 本次不声明（手写信封，或本轮不需要工具）。
+    pub tools: Option<&'a [ToolDecl]>,
+    /// 目的：本轮要并入请求体的思考参数片段（None = 不发）。
+    pub thinking: Option<&'a serde_json::Value>,
+}
+
+/// 目的：一条流式分块处理完之后，流机制该怎么走。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventStep {
+    /// 继续读下一块。
+    Continue,
+    /// 调用方要求中止（回调返回 false）：停止读流，已产出的部分原样带回。
+    Stopped,
+}
+
+/// 目的：**供应商协议**端口：wire 形状的唯一落点。
+///    请求体怎么拼、回执怎么读、流式分块怎么解析、用量怎么归一——全在这里；流机制（端点、超时、
+///    取消、SSE 分行、重试）与调用方都不认识任何字段名。
+/// 约束：新增一种供应商协议 = 新增一个实现 + 一处选择，不改 api / 调用方 / 流机制。
+pub trait Protocol: Send + Sync {
+    /// 目的：思考片段不得覆盖的请求字段（与登记处同一份保守集合，合并前挡一次）。
+    fn reserved_keys(&self) -> &'static [&'static str];
+
+    /// 目的：拼一次补全的请求体（**正式会话与探针共用**：探针发出去的必须就是线上真会发的东西）。
+    fn request(&self, req: &Request<'_>) -> serde_json::Value;
+
+    /// 目的：拼一个「消息数组已经成型」的请求体（探针回放用：那些历史由 replay_histories 给出）。
+    fn request_raw(
+        &self,
+        model: &str,
+        messages: serde_json::Value,
+        tools: Option<&[ToolDecl]>,
+    ) -> serde_json::Value;
+
+    /// 目的：非流式回执 → 一次补全；不是这个协议的补全形状 = Err（流机制据此换候选端点）。
+    fn reply(&self, text: &str) -> Result<Completion, String>;
+
+    /// 目的：一条流式分块（已解析成 JSON 的 data 行）→ 写进累积状态，并决定下一步。
+    fn event(
+        &self,
+        value: &serde_json::Value,
+        acc: &mut StreamAcc,
+        on: &mut dyn FnMut(Chunk) -> bool,
+    ) -> EventStep;
+
+    /// 目的：把「流式要 usage」的参数从请求体里摘掉；返回摘掉了没有（没有 = 这个协议没这个参数，不用重试）。
+    fn drop_stream_usage(&self, body: &mut serde_json::Value) -> bool;
+
+    /// 目的：把「上一轮调用过工具」的历史表达成本协议的几种可判定写法（回放形状探测用）。
+    ///    第一项必须是**现在线上真在用的基线**；后续项是同一件事的其它写法。
+    fn replay_histories(&self, nonce: &str) -> Vec<(&'static str, serde_json::Value)>;
 }

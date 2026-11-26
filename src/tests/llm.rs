@@ -164,7 +164,7 @@ pub(crate) fn malformed_tool_envelope_becomes_a_failed_tool_line() {
     let rebuilt = core2.single_history(&sid).expect("重建后应在内存里");
     let key = |h: &[Msg]| {
         h.iter()
-            .map(|m| (m.role.clone(), m.content.clone()))
+            .map(|m| (m.role, m.content.clone()))
             .collect::<Vec<_>>()
     };
     assert_eq!(key(&rebuilt), key(&h), "重建上下文必须与实时历史逐条一致");
@@ -902,7 +902,7 @@ pub(crate) fn envelope_multi_call_runs_every_call_and_rebuilds_identically() {
     let rebuilt = core2.single_history(&sid).unwrap();
     let key = |h: &[Msg]| {
         h.iter()
-            .map(|m| (m.role.clone(), m.content.clone(), m.tool_calls.len()))
+            .map(|m| (m.role, m.content.clone(), m.calls.len()))
             .collect::<Vec<_>>()
     };
     assert_eq!(

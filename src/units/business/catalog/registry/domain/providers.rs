@@ -3,10 +3,11 @@
 //! 不管：供应商与模型的值形态（在 pure/registry_model/domain/models.rs）；yaml 持久化（在 detail/yaml_settings.rs）；登记处用例与写路径（在 service.rs）。
 //! 联动：被 registry/api.rs 重导出；service.rs 持有并写；llm 通道经 resolve 得到。
 
-use crate::units::business::llm::api::{Channel, REQUEST_RESERVED_KEYS};
+use crate::units::business::llm::api::Channel;
 use crate::units::pure::registry_model::api::{
     DEFAULT_CONTEXT_TOKENS, ModelEntry, ModelThinkingView, ModelView, Provider, ProviderView,
-    StorageSettings, ThinkingCatalog, ThinkingSpec, ToolMode, validate_thinking_catalog,
+    RESERVED_REQUEST_KEYS, StorageSettings, ThinkingCatalog, ThinkingSpec, ToolMode,
+    validate_thinking_catalog,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -22,7 +23,7 @@ pub fn thinking_fragment(raw: &serde_json::Value) -> Result<serde_json::Value, S
         }
         serde_json::Value::Object(o) => {
             for k in o.keys() {
-                if REQUEST_RESERVED_KEYS.contains(&k.as_str()) {
+                if RESERVED_REQUEST_KEYS.contains(&k.as_str()) {
                     return Err(format!("不能覆盖请求协议字段：{}", k));
                 }
             }

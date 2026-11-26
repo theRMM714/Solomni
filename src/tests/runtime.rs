@@ -910,7 +910,7 @@ pub(crate) fn prose_then_tool_envelope_keeps_prose_line_and_rebuilds_identically
     let rebuilt = core2.single_history(&sid).expect("重建后应在内存里");
     let key = |h: &[Msg]| {
         h.iter()
-            .map(|m| (m.role.clone(), m.content.clone()))
+            .map(|m| (m.role, m.content.clone()))
             .collect::<Vec<_>>()
     };
     assert_eq!(
@@ -1071,10 +1071,10 @@ pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
         h.iter()
             .map(|m| {
                 (
-                    m.role.clone(),
+                    m.role,
                     m.content.clone(),
-                    m.tool_calls.len(),
-                    m.tool_call_id.clone(),
+                    m.calls.len(),
+                    m.answering.clone(),
                 )
             })
             .collect::<Vec<_>>()
@@ -1082,10 +1082,10 @@ pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
     assert_eq!(
         key(&rebuilt),
         key(&live),
-        "重建上下文必须与实时历史逐条一致（含 tool_calls / tool_call_id）"
+        "重建上下文必须与实时历史逐条一致（含原生调用与它的回应 id）"
     );
     assert_eq!(
-        live.iter().filter(|m| !m.tool_calls.is_empty()).count(),
+        live.iter().filter(|m| !m.calls.is_empty()).count(),
         1,
         "一次回复只推一条助手消息"
     );
