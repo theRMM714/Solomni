@@ -20,16 +20,16 @@ impl InMemoryHistory {
         self
     }
 
-    /// 目的：直接改掉某条会话已落盘的 meta（测试夹具）：用来构造"落盘档位与当前判据不一致"的情形。例如虚拟机档现在一律不可选，但**已存在的**虚拟机档会话必须还能打开（记录是用户的）。
-    pub(crate) fn force_tier(&self, name: &str, tier: crate::units::pure::exec_model::api::Side) {
+    /// 目的：直接改掉某条会话已落盘的执行环境（测试夹具）：用来构造"记录已经在 guest 侧、而本机现在不提供 guest 侧"的情形——**已存在的**guest 侧会话必须还能打开并改自己的那几项（记录是用户的）。
+    /// 约束：声明与事实一起改，不造「声明说 guest、事实说本机」这种生产路径给不出的组合。
+    pub(crate) fn force_sandbox(
+        &self,
+        name: &str,
+        spec: &crate::units::pure::exec_model::api::TargetSpec,
+    ) {
         let mut metas = self.metas.lock().expect("锁");
         if let Some(m) = metas.get_mut(name) {
-            let (sandbox, facts) = crate::tests::builders::sandbox_of(
-                &crate::units::pure::exec_model::api::TargetSpec {
-                    side: tier,
-                    ..Default::default()
-                },
-            );
+            let (sandbox, facts) = crate::tests::builders::sandbox_of(spec);
             m.sandbox = sandbox;
             m.facts = facts;
         }

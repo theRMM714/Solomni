@@ -28,10 +28,17 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
         !core.session_config(&sid).unwrap().started,
         "单 agent 会话在用户开口之前还没内容：名字仍改得动"
     );
-    // 改：模块 a → b，模型指定 m，档位换虚拟机档。网络是全局策略，不在会话里改。虚拟机档现在一律不可选
-    // （guest 本体尚未接入），所以**先把它做成已存在的虚拟机档会话**——已在 vm 档的会话只校验它自己那几项。
-    hist.force_tier(&sid, Side::Guest);
+    // 改：模块 a → b，模型指定 m，执行环境留在 guest 侧。网络是全局策略，不在会话里改。本机不提供 guest 侧时
+    // 一律选不了，所以**先把它做成已存在的 guest 侧会话**——已在 guest 侧上的会话只校验它自己那几项。
     let guest = crate::tests::test_guest("edit-session-base");
+    hist.force_sandbox(
+        &sid,
+        &TargetSpec {
+            side: Side::Guest,
+            guest: Some(guest.clone()),
+            pins: BTreeMap::new(),
+        },
+    );
     core.edit_session(
         &sid,
         SessionEdit {
