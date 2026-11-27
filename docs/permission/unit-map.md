@@ -9,8 +9,9 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/units/pure/permission/api.rs` | 入站面：重导出网络档位类型与合并入口（其它单元只准用这里） |
-| `src/units/pure/permission/domain.rs` | 纯规则的入口：声明 `permission` 子模块 |
+| `src/units/pure/permission/api.rs` | 入站面：重导出网络档位类型、合并入口与共享区归属规则（其它单元只准用这里） |
+| `src/units/pure/permission/domain.rs` | 纯规则的入口：声明 `permission` 与 `shared_scope` 两个子模块 |
 | `src/units/pure/permission/domain/permission.rs` | `base` / `profile` 两个职责子模块的声明，并向 `api.rs` 重导出同一个调用面 |
 | `src/units/pure/permission/domain/permission/base.rs` | 生效态 `PermissionSet`（只有 `profile`）、`allows_network` 与根 / 子两层的合并（`apply_root` / `apply_narrowing`） |
 | `src/units/pure/permission/domain/permission/profile.rs` | 两档预设与声明层：`ProfileId` / `ProfileSpec` / `PermissionDefaults` / `PermissionLayer` / `SessionSandbox` |
+| `src/units/pure/permission/domain/shared_scope.rs` | 共享区路径归属规则：三态 `ScopeMode`（all / none / 路径数组，手写序列化）、`SharedScope`（读写判定、求交、收窄、合并全局硬底线）、`SharedEdit`（一层覆盖）、条目规范化 `hit` / `normalize` / `validate_entry`；只管规则，不解释策略参数（在 `workspace`） |

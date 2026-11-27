@@ -167,7 +167,7 @@ impl ToolExec for ToolsService {
         sb: &crate::units::business::workspace::api::Sandbox,
         builtin_tools: &ToolBook,
         observations: Observations,
-        gate: Option<&dyn crate::units::business::tools::api::WriteGate>,
+        gate: Option<&dyn crate::units::business::workbench::api::WriteGate>,
         budget: budget::ResultBudget,
         name: &str,
         args_json: &str,

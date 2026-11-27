@@ -199,7 +199,8 @@ pub(crate) fn work_pull_separates_local_changes_from_no_change() {
 /// 约束：expect_current 双向生效（不符就拒绝），恢复不写到带前缀的字面路径。
 #[test]
 pub(crate) fn work_lost_restores_a_reset_backup_to_the_original_path() {
-    use crate::units::business::versions::api::{ResetRequest, content_hash};
+    use crate::kernel::api::hash::content_hash;
+    use crate::units::business::versions::api::ResetRequest;
     use crate::units::business::versions::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();
@@ -265,7 +266,8 @@ pub(crate) fn work_lost_restores_a_reset_backup_to_the_original_path() {
 /// 约束：只有一份时按原路径直取（见上一条用例）。
 #[test]
 pub(crate) fn work_lost_asks_to_name_one_when_a_path_has_several_backups() {
-    use crate::units::business::versions::api::{ResetRequest, content_hash};
+    use crate::kernel::api::hash::content_hash;
+    use crate::units::business::versions::api::ResetRequest;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");

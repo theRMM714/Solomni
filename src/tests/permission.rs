@@ -6,11 +6,11 @@
 use crate::tests::doubles::{
     InMemoryWorkStore, InMemoryWorkspace, abs, test_sandbox, test_workspace, test_workspace_store,
 };
-use crate::units::business::workspace::api::{ScopeMode, SharedEdit, SharedScope, validate_entry};
 use crate::units::business::workspace::domain::workspace::Place;
 use crate::units::pure::permission::api::{
     PermissionDefaults, PermissionLayer, PermissionOverride, PermissionSet, ProfileId,
 };
+use crate::units::pure::permission::api::{ScopeMode, SharedEdit, SharedScope, validate_entry};
 
 fn paths(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
@@ -417,30 +417,30 @@ fn entries_must_be_clean_relative_paths() {
     assert!(why.contains("shared.read"), "{}", why);
 
     // 黑名单命中：空表 = 不拦；"." = 整棵拦截；按组件匹配。
-    assert!(!crate::units::business::workspace::api::hit(&[], "docs/x"));
-    assert!(crate::units::business::workspace::api::hit(
+    assert!(!crate::units::pure::permission::api::hit(&[], "docs/x"));
+    assert!(crate::units::pure::permission::api::hit(
         &paths(&["docs"]),
         "docs/x"
     ));
-    assert!(crate::units::business::workspace::api::hit(
+    assert!(crate::units::pure::permission::api::hit(
         &paths(&["docs"]),
         "docs"
     ));
-    assert!(!crate::units::business::workspace::api::hit(
+    assert!(!crate::units::pure::permission::api::hit(
         &paths(&["docs"]),
         "docsx/y"
     ));
-    assert!(crate::units::business::workspace::api::hit(
+    assert!(crate::units::pure::permission::api::hit(
         &paths(&["."]),
         "anything"
     ));
     // 两侧空白与尾部分隔符削掉；组件内部的空格是合法目录名，原样保留。
     assert_eq!(
-        crate::units::business::workspace::api::normalize("  docs\\sub\\ "),
+        crate::units::pure::permission::api::normalize("  docs\\sub\\ "),
         "docs/sub"
     );
     assert_eq!(
-        crate::units::business::workspace::api::normalize("docs/ 子 目录"),
+        crate::units::pure::permission::api::normalize("docs/ 子 目录"),
         "docs/ 子 目录"
     );
 }

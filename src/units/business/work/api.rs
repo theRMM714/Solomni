@@ -166,9 +166,9 @@ pub struct PermissionView {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PermissionSharedView {
     /// 目的：读范围。
-    pub read: crate::units::business::workspace::api::ScopeMode,
+    pub read: crate::units::pure::permission::api::ScopeMode,
     /// 目的：写范围（提交的准入门槛）。
-    pub write: crate::units::business::workspace::api::ScopeMode,
+    pub write: crate::units::pure::permission::api::ScopeMode,
     /// 目的：黑名单（全局硬底线 + 会话追加）。
     pub deny: Vec<String>,
 }
@@ -232,7 +232,7 @@ pub struct SessionEdit {
     pub permission: Option<crate::units::pure::permission::api::PermissionLayer>,
     /// 目的：会话级共享区归属（根覆盖 / 子收窄）。`None` = 保留现值。
     #[serde(default)]
-    pub shared: Option<crate::units::business::workspace::api::SharedEdit>,
+    pub shared: Option<crate::units::pure::permission::api::SharedEdit>,
 }
 
 /// 目的：上下文「继续」只在后端判断确实有断点时出现（单 agent 上一轮被打断 / 协作泵没走完）。

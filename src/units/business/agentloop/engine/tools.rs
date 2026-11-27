@@ -7,9 +7,10 @@ use super::decls::ToolDecls;
 pub(crate) use super::fence::CallDone;
 use crate::kernel::api::types::ToolOutcome;
 use crate::units::business::agentloop::api::ToolFace;
+use crate::units::business::agentloop::domain::gate::SessionWriteGate;
 use crate::units::business::agentloop::domain::member_tools::MemberTools;
 use crate::units::business::llm::api::ToolInvoke;
-use crate::units::business::tools::api::{Observations, SessionWriteGate, ShellFacts, ToolSchema};
+use crate::units::business::tools::api::{Observations, ShellFacts, ToolSchema};
 use crate::units::business::transcript::api::SessionEvent;
 
 /// 目的：分支执行体的结果形态，在 CallDone 前多带一份观察账本副本（并发批次按原序合并）。
@@ -90,7 +91,7 @@ pub(crate) fn run_branch(
             &ctx.face.builtin_tools,
             branch,
             gate.as_ref()
-                .map(|g| g as &dyn crate::units::business::tools::api::WriteGate),
+                .map(|g| g as &dyn crate::units::business::workbench::api::WriteGate),
             *budget,
             name,
             args_json,

@@ -3,11 +3,11 @@
 //! 不管：具体用例（commit / sync / history / resolve / lifecycle 各子模块）、`Versions` 的 trait 转发（facade）、落盘实现（detail）。
 //! 联动：`api::Versions` 的唯一实现在 facade.rs，逐条转发到同级子模块；组合根注入工作台（问"在哪儿"）与落盘适配器。
 
+use crate::kernel::api::hash::{content_hash, is_content_hash};
 use crate::units::business::versions::api::{
     Change, ChangeKind, FileVersion, MAX_ASSET_BYTES, VERSION_TEXT_LIMIT, media_hint,
 };
 use crate::units::business::versions::domain::freshness::lines_changed;
-use crate::units::business::versions::domain::hash::{content_hash, is_content_hash};
 use crate::units::business::versions::domain::workstore::{
     Commit, CommitAnchor, CommitLine, Conflict, ConflictAt, Index, LocalTakeVerdict, Pending,
     PendingIndex, PullVerdict, Ref, RefKind, Source, StatusState, Tree, Unchanged, backup_rel,
@@ -626,13 +626,13 @@ impl VersionService {
         for raw in paths {
             let rel = clean_rel(raw)?;
             let base = line.get(&rel).or_else(|| main.get(&rel)).map(|hash| {
-                crate::units::business::versions::api::GateFile {
+                crate::units::business::workbench::api::VersionRef {
                     hash: hash.clone(),
                     size: None,
                 }
             });
             let current = self.store.scan_under(&sandbox, &rel, None)?.map(|v| {
-                crate::units::business::versions::api::GateFile {
+                crate::units::business::workbench::api::VersionRef {
                     hash: v.hash,
                     size: Some(v.size),
                 }

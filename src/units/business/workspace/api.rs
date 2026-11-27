@@ -11,12 +11,9 @@ pub use crate::units::business::workspace::domain::path_filter::{
     MAX_RULE_BYTES, MAX_RULE_CHARS, MAX_RULE_LINES, Rules, WORKIGNORE, WORKIGNORE_SEED, check_rule,
 };
 
-/// 目的：共享区路径归属（读 / 写范围与黑名单）——\`permission\` 只管档位与网络，归属规则在这里。
-#[allow(unused_imports)] // 入站面：规则类型给调用方与测试取用
-pub use crate::units::business::workspace::domain::scope::{
-    ScopeMode, SharedEdit, SharedScope, edit_of, edit_params, hit, normalize, scope_from,
-    validate_entry,
-};
+/// 目的：把会话落盘的策略参数解释成生效归属——值类型与规则在 \`permission\`，参数形状只在本单元解释。
+#[allow(unused_imports)] // 入站面：参数函数给调用方与测试取用
+pub use crate::units::business::workspace::domain::scope::{edit_of, edit_params, scope_from};
 
 /// 目的：版本库共享类型（提交 / 拉取 / 推送 / 状态 / 差异 / 回退）——`tools`、呈现层与测试只从这里取。
 /// 约束：`WorkState` 等类型只在测试与呈现层命名，本 crate 的实现不直接用，故整组允许未使用告警。

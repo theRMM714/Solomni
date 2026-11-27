@@ -296,7 +296,7 @@ fn workspace_double_prepares_writes_lists_and_propagates_failure() {
 /// 目的：内存版本库替身与真实适配器同一份资产流式契约：扫描、写入校验、复制、超限与缺失。
 #[test]
 fn work_store_double_streams_assets_and_rejects_oversize_or_mismatch() {
-    use crate::units::business::versions::api::content_hash;
+    use crate::kernel::api::hash::content_hash;
     use crate::units::business::versions::ports::WorkStore;
     let s = InMemoryWorkStore::new();
     let root = abs(&["w", "a"]);

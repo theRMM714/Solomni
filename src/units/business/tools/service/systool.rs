@@ -3,17 +3,16 @@
 //! 不管：纯规则（参数校验、回执文案、观察账本、`ToolOutcome`）在 `domain/systool.rs`。
 //! 联动：引 `ports` 的 `SysIo` 做 IO；`domain/` 不引 `ports`（见 docs/architecture/boundaries.md 的「三分法」）。
 
-use crate::units::business::tools::api::{
-    Coverage, GateFile, GateItem, LineRange, Need, ObservationFact, ObservationSource,
-};
+use crate::units::business::tools::api::{Coverage, LineRange, ObservationFact, ObservationSource};
 use crate::units::business::tools::domain::systool::*;
 use crate::units::business::tools::ports::{Expect, Mutation, SysIo, WriteFault, WriteOp};
+use crate::units::business::workbench::api::{GateItem, Need, VersionRef};
 use crate::units::business::workspace::api::{Place, Sandbox};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 /// 目的：把门禁拒绝同时写进 output 与结构化说明（稳定错误码供 UI / 模型分流）。
 fn gate_note(
-    fault: &crate::units::business::tools::api::GateFault,
+    fault: &crate::units::business::workbench::api::GateFault,
     path: &str,
 ) -> crate::kernel::api::note::Note {
     crate::kernel::api::note::Note::new(fault.code(), crate::kernel::api::note::Severity::Error)
@@ -21,7 +20,7 @@ fn gate_note(
 }
 
 fn gate_fail(
-    fault: &crate::units::business::tools::api::GateFault,
+    fault: &crate::units::business::workbench::api::GateFault,
     path: &str,
 ) -> crate::kernel::api::types::ToolOutcome {
     let mut out = fail(fault.message(path));
@@ -47,7 +46,7 @@ pub fn execute(
     book: &crate::units::business::tools::api::ToolBook,
     io: &dyn SysIo,
     obs: &mut Observations,
-    gate: Option<&dyn crate::units::business::tools::api::WriteGate>,
+    gate: Option<&dyn crate::units::business::workbench::api::WriteGate>,
     name: &str,
     args_json: &str,
 ) -> ToolOutcome {
@@ -70,7 +69,7 @@ pub fn execute_with_budget(
     book: &crate::units::business::tools::api::ToolBook,
     io: &dyn SysIo,
     obs: &mut Observations,
-    gate: Option<&dyn crate::units::business::tools::api::WriteGate>,
+    gate: Option<&dyn crate::units::business::workbench::api::WriteGate>,
     budget: crate::units::business::tools::api::ResultBudget,
     name: &str,
     args_json: &str,
@@ -513,7 +512,7 @@ fn read(
 /// write：整份写入（同名文件被整份覆盖）。
 /// 覆盖已存在的文件必须先有"完整读过、且读后没被改过"的证据——否则拒绝，并让模型改用 edit。
 fn write(
-    gate: Option<&dyn crate::units::business::tools::api::WriteGate>,
+    gate: Option<&dyn crate::units::business::workbench::api::WriteGate>,
     io: &dyn SysIo,
     obs: &mut Observations,
     args: &serde_json::Value,
@@ -533,7 +532,7 @@ fn write(
                 spec
             ));
         }
-        Ok(Some(hash)) => Some(GateFile { hash, size: None }),
+        Ok(Some(hash)) => Some(VersionRef { hash, size: None }),
         Ok(None) => None,
     };
     if let Some(gate) = gate {
@@ -585,7 +584,7 @@ fn write(
 /// edit：按字面替换一处（默认要求唯一命中）。证据是 old_string 本身——它就是要改的那段原文，不需要先读过。
 /// 被截断或含非法 UTF-8 的文件一律不改（改写会把没读到的部分或原始字节一起弄丢）。
 fn edit(
-    gate: Option<&dyn crate::units::business::tools::api::WriteGate>,
+    gate: Option<&dyn crate::units::business::workbench::api::WriteGate>,
     io: &dyn SysIo,
     obs: &mut Observations,
     args: &serde_json::Value,
@@ -634,7 +633,7 @@ fn edit(
             ));
         };
         let need = if all { Need::Full } else { Need::Observed };
-        let current = GateFile {
+        let current = VersionRef {
             hash: got.hash.clone(),
             size: Some(got.bytes as u64),
         };
@@ -699,7 +698,7 @@ fn apply_patch(
     sb: &Sandbox,
     io: &dyn SysIo,
     obs: &mut Observations,
-    gate: Option<&dyn crate::units::business::tools::api::WriteGate>,
+    gate: Option<&dyn crate::units::business::workbench::api::WriteGate>,
     body: &str,
 ) -> ToolOutcome {
     use crate::units::business::tools::domain::patch::Block;
@@ -716,7 +715,7 @@ fn apply_patch(
     // 每个路径的磁盘基线：事务提交时在锁内再比一次（不能拿补丁算出的新内容当期望）。
     let mut expects: BTreeMap<PathBuf, Expect> = BTreeMap::new();
     // 门禁检查攒到全部块解析完再一次性做：一批补丁只取一次工作区快照。
-    let mut checks: Vec<(usize, String, String, Need, Option<GateFile>)> = Vec::new();
+    let mut checks: Vec<(usize, String, String, Need, Option<VersionRef>)> = Vec::new();
     let mut lines: Vec<String> = Vec::new();
     for (i, b) in blocks.iter().enumerate() {
         let n = i + 1;
@@ -740,7 +739,7 @@ fn apply_patch(
                 t.clone(),
                 false,
                 false,
-                crate::units::business::versions::api::content_hash(t.as_bytes()),
+                crate::kernel::api::hash::content_hash(t.as_bytes()),
             )),
             None => match io.read(&path) {
                 Ok(g) => Some((g.text, g.cut, g.lossy, g.hash)),
@@ -782,7 +781,7 @@ fn apply_patch(
                 Block::Add { .. } => Need::Full,
                 Block::Update { .. } => Need::Observed,
             };
-            let current = source.as_ref().map(|(_, _, _, hash)| GateFile {
+            let current = source.as_ref().map(|(_, _, _, hash)| VersionRef {
                 hash: hash.clone(),
                 size: None,
             });

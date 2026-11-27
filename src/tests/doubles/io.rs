@@ -108,7 +108,7 @@ impl SysIo for InMemorySysIo {
             .get(&key)
             .cloned()
             .ok_or_else(|| format!("读取失败：{} 不存在", key))?;
-        let hash = crate::units::business::versions::api::content_hash(text.as_bytes());
+        let hash = crate::kernel::api::hash::content_hash(text.as_bytes());
         Ok(FileRead {
             bytes: text.len(),
             text,
@@ -151,7 +151,7 @@ impl SysIo for InMemorySysIo {
             lossy: self.lossy,
             window_cut: false,
             line_cut: false,
-            hash: crate::units::business::versions::api::content_hash(text.as_bytes()),
+            hash: crate::kernel::api::hash::content_hash(text.as_bytes()),
             total_lines: total,
         })
     }
@@ -166,7 +166,7 @@ impl SysIo for InMemorySysIo {
             .lock()
             .expect("锁")
             .get(&key)
-            .map(|text| crate::units::business::versions::api::content_hash(text.as_bytes())))
+            .map(|text| crate::kernel::api::hash::content_hash(text.as_bytes())))
     }
     fn list(
         &self,
@@ -357,7 +357,7 @@ impl SysIo for InMemorySysIo {
         let current = files.get(&key).cloned();
         check_memory_expect(path, expect, current.as_deref())?;
         let (text, changed, replaced) = memory_mutation(path, current.as_deref(), mutation)?;
-        let version = crate::units::business::versions::api::content_hash(text.as_bytes());
+        let version = crate::kernel::api::hash::content_hash(text.as_bytes());
         let total_lines = text.lines().count() as u32;
         files.insert(key, text);
         Ok(WriteReceipt {
@@ -395,7 +395,7 @@ impl SysIo for InMemorySysIo {
             check_memory_expect(&op.path, &op.expect, current.as_deref())?;
             let (text, changed, replaced) =
                 memory_mutation(&op.path, current.as_deref(), op.mutation)?;
-            let version = crate::units::business::versions::api::content_hash(text.as_bytes());
+            let version = crate::kernel::api::hash::content_hash(text.as_bytes());
             let total_lines = text.lines().count() as u32;
             next.insert(key, text);
             receipts.push(WriteReceipt {
@@ -426,7 +426,7 @@ fn check_memory_expect(
         Expect::Version(want) => match current {
             None => return Err(WriteFault::missing(path)),
             Some(text) => {
-                let now = crate::units::business::versions::api::content_hash(text.as_bytes());
+                let now = crate::kernel::api::hash::content_hash(text.as_bytes());
                 if &now != want {
                     return Err(WriteFault::stale(path, want, &now));
                 }

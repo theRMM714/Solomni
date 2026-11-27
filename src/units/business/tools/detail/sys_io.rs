@@ -3,13 +3,13 @@
 //! 不管：编码猜测（不是本程序的事）；参数校验、回执文案与放行（在 `domain`）。
 //! 联动：实现 `ports::SysIo`，由 `main.rs` 构造注入 `service/`。
 
+use crate::kernel::api::hash::{Sha256, content_hash};
 use crate::kernel::api::lock::lock_within;
 use crate::units::business::tools::api::LineRange;
 use crate::units::business::tools::ports::{
     DirEntry, Expect, FilePage, FileRead, MAX_SCAN_LINE_BYTES, Mutation, ScanSummary, SysIo,
     WalkEntry, WalkOpts, WriteFault, WriteOp, WriteReceipt,
 };
-use crate::units::business::versions::api::{Sha256, content_hash};
 use crate::units::business::workspace::api::Rules;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;

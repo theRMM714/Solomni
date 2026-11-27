@@ -16,6 +16,7 @@
 | `src/units/business/agentloop/domain/session/prompt.rs` | 系统提示拼装：agent 与角色两条身份入口、模块提示、回合参数、环境块 |
 | `src/units/business/agentloop/domain/member_tools.rs` | 成员工具面：本回合可调的工具、观察账本与沙箱；只含值的 `ToolFace` 与核实用例端口 `CoreVerify`；shell 状态槽与按转录派生最近一次 shell（`last_shell`） |
 | `src/units/business/agentloop/domain/assemble.rs` | 工具面的**唯一装配机**：`assemble(FaceInput) -> SeatFace` 造 `TurnCtx`、按会话类型挂的 `ToolSource` 逐个问 `offer`、去重成面，再派发说明块与工作区工具执行者；段与角色在这里按声明表拍平（`FaceInput.loops` 查出角色位的动作交给 `loop` 来源）；另含纯派生 `face_of` / `service_ops_of` / `serviced_tools` |
+| `src/units/business/agentloop/domain/gate.rs` | 会话写入门禁 `SessionWriteGate`：把一席本轮的观察事实（读过的路径与版本）与 `versions` 的版本快照合成为 `workbench::api::WriteGate` 判定——未受管放行、未观察 / 过期 / 非全文拒绝；批量 `check_many` 只取一次快照，拒绝记 `warn` 审计 |
 | `src/units/business/agentloop/domain/explain.rs` | 工具面的解释（纯函数，不碰 IO、不执行）：按与装配同源的取数（来源逐个 `offer` 再合并）列出每个来源交了哪些 id、合并后的面、每个 id 的授权判定与理由（`Allow` / `Ask` / `Deny`，理由来自同一条段声明），以及面里存在但总表与模块工具表都没有的孤儿 id；给 `tools explain` 与人读诊断用 |
 | `src/units/business/agentloop/domain/sources.rs` | `ToolSource` 的五个实现：`AgentSource`（按能力组交文件面与执行面）、`ModuleSource`（交限定 id `<模块>.<工具>`）、`LoopSource`（只持有装配期拍平好的角色动作 id，运行期不查段表）、`WorkspaceSource`（有工作区且能写共享区时交 `work_*`）、`ProfileSource`（交会话类型声明的系统工具）；`build_sources` 按来源 id 造实例 |
 | `src/units/business/agentloop/domain/policy.rs` | 授权端口：`Policy::decide`（准不准，结论 `Allow` / `Ask` / `Deny`）与实现 `LoopPolicy`（装配期从段表拷下 `deny` / `ask`，运行期不查表；先按 `deny` 拒、再按 `ask` 抬起提问；`LoopPolicy::none()` 是不抑制的默认）、能力组到工具 id 的映射 `ids_of`（与发放共用）、`ask_card` 造那一张 `kind = policy` 的卡；职责与「在不在场」分开 |

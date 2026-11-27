@@ -4,10 +4,10 @@
 //! 联动：调用方是 engine::tools 的 run_branch / run_batch；观察事实形状见 tools::api::ObservationFact。
 
 use crate::kernel::api::types::ToolOutcome;
+use crate::units::business::agentloop::domain::gate::SessionWriteGate;
 use crate::units::business::agentloop::domain::member_tools::MemberTools;
-use crate::units::business::tools::api::{
-    ObservationFact, SessionWriteGate, ShellFacts, WriteGate,
-};
+use crate::units::business::tools::api::{ObservationFact, ShellFacts};
+use crate::units::business::workbench::api::{Need, WriteGate};
 
 /// 目的：一次调用的结果形态（标签，结果，观察事实，shell 结构化事实），只为把签名读短。
 pub(crate) type CallDone = (
@@ -77,11 +77,7 @@ pub(super) fn commit_refusal(
         if !changed {
             continue;
         }
-        if let Err(f) = gate.check(
-            &info.path,
-            crate::units::business::tools::api::Need::Observed,
-            info.current.as_ref(),
-        ) {
+        if let Err(f) = gate.check(&info.path, Need::Observed, info.current.as_ref()) {
             return Some(ToolOutcome::new(
                 false,
                 format!(

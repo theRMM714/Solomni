@@ -5,10 +5,10 @@
 //! 联动：沙箱恒可读写、模块目录恒只读由本文件固定；共享区的路径归属读 `domain::scope` 的 `SharedScope`，
 //!   网络与档位读 `permission` 的 `PermissionSet`，提示词的根读 `prompt` 的 `RefRoots`，路径组件用 kernel 的 `slash`。
 
-use super::scope::SharedScope;
 use crate::kernel::api::path::slash;
 use crate::units::business::prompt::api::RefRoots;
 use crate::units::pure::permission::api::PermissionSet;
+use crate::units::pure::permission::api::SharedScope;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
