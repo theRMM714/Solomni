@@ -7,4 +7,5 @@ pub mod diagnose;
 pub mod exec;
 pub mod guest;
 pub mod paths;
+pub mod policy;
 pub mod tool;
