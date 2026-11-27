@@ -264,10 +264,13 @@ pub(crate) struct MemberTools {
     pub exec: Arc<dyn crate::units::business::sandbox::api::Sandbox + Send + Sync>,
     /// 目的：常驻服务的统一管理面——模块的 `services` 操作经它调用（**不持它的端口**，R12）。
     pub residents: Arc<dyn crate::units::business::residents::api::ResidentOps + Send + Sync>,
-    /// 目的：版本库用例面——`work_*` 执行者按它造、写工具落地后的存档线也走它（**不持它的端口**，R12）。
-    /// 约束：None = 这一席没有工作区（核心核实用途、部分测试装配）；有工作区的席位必须给 Some，
-    ///   否则写入只落在沙箱、共享区永远不动（静默漏提交）。
-    pub versions: Option<Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>>,
+    /// 目的：这一席的回合边界钩子（版本化工作台才有）：写入门禁、准入、存档线、读过期判定都按它调。
+    /// 约束：None = 这一席没有工作台策略（核心核实用途、不版本化的策略）；引擎不认识版本库。
+    pub driver: Option<Arc<dyn crate::units::business::workbench::api::BenchDriver>>,
+    /// 目的：这一席的工作台策略（换席时重开共享区动作名单要用，与 `modules` 同一个理由）。
+    pub bench_policy: Option<Arc<dyn crate::units::business::workbench::api::BenchPolicy>>,
+    /// 目的：工作台策略参数（会话声明里那一段不透明 JSON）：换席重开计划时原样回传。
+    pub workspace_params: serde_json::Value,
     /// 目的：本次会话的观察账本（哪些文件完整读过 / 由核心写过）：改动前的证据（见 crate::units::business::tools::api::Observations）。
     pub observations: crate::units::business::tools::api::Observations,
     /// 目的：这个会话最近一次 shell 的实时状态（状态栏卡片）；没有 shell 的席位为 None。
@@ -355,7 +358,8 @@ impl MemberTools {
             bench: &self.face.bench,
             prompt: &*self.prompt,
             residents: &*self.residents,
-            versions: self.versions.as_ref(),
+            policy: self.bench_policy.clone(),
+            workspace_params: &self.workspace_params,
         });
         self.face.allowed = next.allowed;
         self.face.modules = next.modules;
@@ -364,6 +368,7 @@ impl MemberTools {
         self.face.loop_id = loop_id.to_string();
         self.face.role = next.role;
         self.handlers = next.handlers;
+        self.driver = next.driver;
     }
 
     /// 目的：取下一个回复 id（一次模型回复调用一次）。

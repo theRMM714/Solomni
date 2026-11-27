@@ -29,7 +29,7 @@ pub use crate::units::business::session_model::domain::tools::{
     SOURCE_PROFILE, SOURCE_WORKSPACE, ToolSource, TurnCtx,
 };
 #[allow(unused_imports)]
-pub use crate::units::business::session_model::domain::workspace::{LAYOUT_POLICY, WorkspaceDecl};
+pub use crate::units::business::session_model::domain::workspace::{DEFAULT_POLICY, WorkspaceDecl};
 // 只有测试知道产品自带类型的名字；生产代码按声明里的 auto / flows 分支，不认这些 id。
 #[cfg(test)]
 pub use crate::units::business::session_model::domain::profile::{MEETING, PROXY, SINGLE};

@@ -47,6 +47,7 @@ pub(crate) fn runtime_base_roots_are_only_put_on_host_member_tools() {
         &crate::units::business::sandbox::api::SandboxFacts::host(),
         &crate::units::business::sandbox::api::SandboxDecl::default(),
         "",
+        &crate::units::business::session_model::api::WorkspaceDecl::default(),
         &plan,
     );
     assert!(
@@ -67,6 +68,7 @@ pub(crate) fn runtime_base_roots_are_only_put_on_host_member_tools() {
             crate::units::business::sandbox::api::VM_POLICY,
         ),
         "guest",
+        &crate::units::business::session_model::api::WorkspaceDecl::default(),
         &plan,
     );
     assert!(

@@ -692,12 +692,29 @@ pub(crate) fn work_versioning_tools_are_granted_to_the_working_roles_only() {
     for id in ids {
         assert!(book.contains_key(id), "{} 必须在工具总表里", id);
     }
-    // 发放规则在**来源**里：有工作区 + 有共享区写入能力才交 work_*（谁不许调由权限端口判）。
+    // 发放规则在**策略**里：版本化策略在有 `shared-write` 能力组时交 work_*，没有就一个也不交；
+    // 来源只把策略给的名单原样交出来（谁不许调由权限端口判）。
     use crate::units::business::session_model::api::{SHARED_WRITE, ToolSource, TurnCtx};
-    let sources: Vec<Arc<dyn ToolSource>> = vec![Arc::new(
-        crate::units::business::agentloop::api::WorkspaceSource,
-    )];
+    use crate::units::business::workbench::api::PlanRequest;
+    let work = crate::tests::doubles::test_workspace(Arc::new(
+        crate::tests::doubles::InMemoryWorkspace::new(),
+    ));
+    let policy =
+        crate::units::business::versions::api::versioned_policy(Arc::clone(&work.versions));
+    let bench = crate::tests::doubles::test_sandbox("甲", &[]);
+    let params = serde_json::Value::Null;
     let abilities = vec![SHARED_WRITE.to_string()];
+    let plan = policy
+        .plan(&PlanRequest {
+            bench: Some(&bench),
+            abilities: &abilities,
+            params: &params,
+        })
+        .expect("版本化策略要给名单");
+    assert_eq!(plan.tools.len(), 11, "版本化策略交全部共享区动作");
+    let sources: Vec<Arc<dyn ToolSource>> = vec![Arc::new(
+        crate::units::business::agentloop::api::WorkspaceSource::new(&plan.tools),
+    )];
     let with_area = TurnCtx {
         loop_id: None,
         agent_id: "甲",
@@ -710,25 +727,18 @@ pub(crate) fn work_versioning_tools_are_granted_to_the_working_roles_only() {
     for id in ids {
         assert!(face.contains(&id.to_string()), "有工作区该有 {}", id);
     }
-    let no_area = TurnCtx {
-        workspace: None,
-        ..with_area
-    };
-    let (face, _) = crate::units::business::agentloop::api::face_of(&no_area, &sources);
+    // 有没有工作区由装配期判（没有就根本不问策略），来源只回答「这一份名单在不在」。
+    let none = policy
+        .plan(&PlanRequest {
+            bench: Some(&bench),
+            abilities: &[],
+            params: &params,
+        })
+        .expect("版本化策略对没有能力的席位给空名单");
     assert!(
-        face.is_empty(),
-        "没有工作区就一个共享区工具也不发：{:?}",
-        face
-    );
-    let no_ability = TurnCtx {
-        abilities: &[],
-        ..with_area
-    };
-    let (face, _) = crate::units::business::agentloop::api::face_of(&no_ability, &sources);
-    assert!(
-        face.is_empty(),
+        none.tools.is_empty(),
         "没有共享区写入能力就一个也不发：{:?}",
-        face
+        none.tools
     );
     // 只读、无副作用的并发；pull / commit / resolve 会改状态，不并发。
     assert!(book["work_status"].parallel && book["work_versions"].parallel);

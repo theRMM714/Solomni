@@ -21,6 +21,6 @@
 | `src/units/business/session_model/domain/decisions.rs` | 裁决通道端口 `AskDesk`（`later` 不阻塞 / `pending` / `head` / `drop_head`）：会话只认这四个方法，实现与队列在 `turn_state`（`src/units/business/turn_state/domain/ask.rs` 的 `DeskFace`） |
 | `src/units/business/session_model/domain/tools.rs` | 工具来源端口：`ToolSource`（来源 id + `offer(TurnCtx)`）、`TurnCtx`（这一回合的上下文：流程段、agent、能力组、会话类型、工作区；段与角色由装配期拍平进来源实例）、能力组与来源 id 常量 |
 | `src/units/business/session_model/domain/mechanism.rs` | 流程段与角色**声明**（唯一来源是 `systools/loops.yaml`）：`Role` / `Cast` / `Loop`（含实现名 `builder`、抑制能力组 `deny`、要点头的动作 `ask`、接什么产物 `accepts`、交什么产物 `produces`）、`Loops` 表与按 id 取段 / 角色 / 角色位 / 流程清单 / 成员角色 / 最少人数 |
-| `src/units/business/session_model/domain/workspace.rs` | 工作台声明 `WorkspaceDecl`（策略 id + 外部根 + 不透明参数）与 `LAYOUT_POLICY`：会话只说策略与参数，`params` 原样搬值、不解释字段；参数里有什么由工作台单元解释（`edit_of` / `edit_params`） |
+| `src/units/business/session_model/domain/workspace.rs` | 工作台声明 `WorkspaceDecl`（策略 id + 外部根 + 不透明参数）与缺省策略 id `DEFAULT_POLICY`（`versioned`）：会话只说策略与参数，`params` 原样搬值、不解释字段；策略清单与实现都在工作台单元，认不出的 id 在开会话时按「没有这个工作台策略」报出来 |
 | `src/units/business/session_model/domain/access.rs` | 权限链派生 `permissions`：全局默认 → 根 ceiling → 每层 narrowing，子会话只能更窄；不整包收设置，只收 `PermissionDefaults` |
 | `src/units/business/session_model/domain/persist.rs` | 留档策略：哪种会话留档、哪些事件算定稿（`PersistPolicy`）、系统会话识别与拟名单会话号 |

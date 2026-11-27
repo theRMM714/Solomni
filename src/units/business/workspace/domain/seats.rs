@@ -55,6 +55,8 @@ pub struct SeatFacts<'a> {
     pub modules: &'a [ModuleDir],
     /// 目的：每席的计划（顺序即工作面清单的顺序）。
     pub seats: &'a [SeatPlan],
+    /// 目的：这一场工作的工作区策略是不是把共享区当可写工作树（不版本化时是单树直写）。
+    pub shared_writable: bool,
 }
 
 /// 目的：按席位计划组装工作面清单；模块目录只对使用它的 agent 可达。
@@ -73,6 +75,12 @@ pub fn seat_benches(facts: &SeatFacts<'_>) -> Result<Benches, String> {
                 .get(&seat.agent)
                 .cloned()
                 .ok_or_else(|| format!("工作区没有给出 agent {} 的工作面路径", seat.agent))?,
+        };
+        // 不版本化的策略是单树直写：私有根就是那棵共享树，独立根不再参与（避免两棵内容分叉）。
+        let private = if facts.shared_writable {
+            facts.roots.shared.clone()
+        } else {
+            private
         };
         let mut modules = BTreeMap::new();
         let mut module_data = BTreeMap::new();
@@ -97,6 +105,7 @@ pub fn seat_benches(facts: &SeatFacts<'_>) -> Result<Benches, String> {
             scope,
             path_codec: facts.codec.clone(),
             filter_rules: facts.roots.store.join(WORKIGNORE),
+            shared_writable: facts.shared_writable,
         });
     }
     Ok(Benches {

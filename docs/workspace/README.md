@@ -8,8 +8,10 @@
 
 - 管：按会话铺局（`ensure_layout` / `discard_layout`）、共享区落文件（上传）、文件视图与用量、根（共享区根 / 会话树根 / 各 agent 私沙根）、根会话的外部工作区绑定投影（`.work-root`）与根策略。
 - 管：**工作面清单的唯一构造点**（`src/units/business/workspace/domain/seats.rs` 的 `seat_benches`）：调用方只交「每席要什么」（agent 名、模块目录、生效权限面、工作台声明链），本单元算出每席的私有根、模块目录、模块私有区与共享区归属，产出 `workbench::api::Benches`；缺私有根就地报「工作区没有给出 agent <名> 的工作面路径」。代理会话与普通会话走同一条路。
+- 管：**不版本化的工作台策略 `plain`**（`src/units/business/workspace/service/plain.rs`）：能力位为空、共享区可写、不发任何 `work_*`、不给回合钩子——一席直接在共享那棵树上写；与 `versions` 的 `versioned` 同属 `workbench::api::BenchPolicy`，会话只在声明里记策略 id（缺省 `versioned`，见 `src/units/business/session_model/domain/workspace.rs` 的 `DEFAULT_POLICY`）。
 - 管：**共享区归属的求值**（`src/units/business/workspace/domain/scope.rs` 的 `scope_from`）：全局默认 → 根覆盖 → 逐层收窄 → 全局硬黑名单，顺序错了就会放宽本该收紧的面；会话只在 `SessionMeta.workspace.params` 里存自己那层声明（`edit_of` / `edit_params` 是读写它的唯一入口）。
-- 不管：**版本化**——提交记录、三条线、推送合并、差异与解决、回档 / 留档 / 回收、`work_*` 十一个工具的处理器，全部在 [`docs/versions`](../versions/README.md)；本单元只回答「在哪儿」，不持版本库状态。
+- 不管：**版本化**——提交记录、三条线、推送合并、差异与解决、回档 / 留档 / 回收、`work_*` 十一个工具的处理器与 `versioned` 策略，全部在 [`docs/versions`](../versions/README.md)；本单元只回答「在哪儿」与不版本化那一档，不持版本库状态。
+- 不管：**哪个策略接进来**——策略表由组合根拼（`workbench::api::Policies::new`，首个即缺省），本单元只提供 `plain_policy`。
 - 不管：**建工作**——工作名、通道、guest 与两段事务都在 `work`（`prepare_work` / `commit_work` / `abort_work`），本单元只按已有会话把目录铺出来，不产生会话也不决定工作名；不管模块清单与 `module.yaml`（在 `modules`，本单元只消费它给的模块事实）、不执行工具（`tools`）、不写会话流水（`session`）、不决定谁能用哪些工具（`tools` 的总表与会话能力的流程段与角色）。
 
 ## 入站契约与状态归属
@@ -24,7 +26,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`exec_model`、`permission`、`prompt`、`workbench`
-- 谁在用我：`work`、`turn`、`versions`、`turn_state`、`collab`、`runtime`
+- 谁在用我：`work`、`turn`、`versions`、`turn_state`、`collab`、`runtime`、`main`（拼策略表）
 
 ## 改动本单元时必须同步
 

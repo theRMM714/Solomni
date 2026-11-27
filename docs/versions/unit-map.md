@@ -9,7 +9,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/units/business/versions/api.rs` | 入站面：`Versions`（版本化工作区的全部用例：拉取 / 提交 / 推送 / 同步 / 状态 / 过滤名单 / 版本视图 / 差异 / 冲突解决 / 回退 / 备份恢复 / 回档 / 回收 / 留档 / 删除）与共享 DTO；另导出 `WorkHandler` / `work_handlers`、资产契约（`FileVersion` / `MAX_ASSET_BYTES` / `VERSION_TEXT_LIMIT` / `media_hint`）、内容指纹与读取事实（其它能力只准用这里） |
+| `src/units/business/versions/api.rs` | 入站面：`Versions`（版本化工作区的全部用例：拉取 / 提交 / 推送 / 同步 / 状态 / 过滤名单 / 版本视图 / 差异 / 冲突解决 / 回退 / 备份恢复 / 回档 / 回收 / 留档 / 删除）与共享 DTO；另导出 `WorkHandler` / `work_handlers`、`versioned_policy` / `versioned_driver` / `SessionWriteGate`、资产契约（`FileVersion` / `MAX_ASSET_BYTES` / `VERSION_TEXT_LIMIT` / `media_hint`）、内容指纹与读取事实（其它能力只准用这里） |
 | `src/units/business/versions/ports.rs` | 出站端口：`WorkStore`（流式资产原语 + 按 `.workignore` 剪枝的清单 `list_visible` + 版本库小文本读 `read_text` / 写 `write_text` + 跨根复制 + 内容寻址对象 + 提交记录 + 拉取基线 + 待恢复事务 + 提交号 + 跨进程锁 + 对象枚举 / 删除） |
 | `src/units/business/versions/service.rs` | 门面与底座：`WorkStore` 只在这里（R12）；`VersionService` 的构造、实例级 gate、树回溯、恢复事务、提交号预留、待恢复事务、外部工作区冲突核校，以及跨会话写闸 `shared_guard`（锁文件路径问 `Workspace`） |
 | `src/units/business/versions/service/facade.rs` | `Versions` 的唯一 trait 实现：逐条转发到同级子模块（Rust 不允许 trait impl 分块） |
@@ -21,6 +21,8 @@
 | `src/units/business/versions/service/reset.rs` | 回退族：`work_reset` 的祖先链校验、`paths` 形态按基线铺回 / 删除、`to` 形态移线与重铺工作线跟踪的路径、覆盖前备份进 `lost/` |
 | `src/units/business/versions/service/lifecycle.rs` | 生命周期族：丢失文件、恢复、回收、回滚、归档、删除、归档恢复、还原点、提交后丢弃 |
 | `src/units/business/versions/service/ignore.rs` | 过滤名单族：`work_ignore` 的 list / add / remove、逐条越界校验、行数与字节上限、整份规则的可编译校验与原子写回（只动版本库目录里的 `.workignore`） |
+| `src/units/business/versions/service/driver.rs` | 回合边界的版本化动作与写门禁：`VersionedDriver`（`BenchDriver` 的实现，门禁 / 写前拦 / 写后自动存档 / 批末采纳与回执 / 过期读取判定）与门禁 `SessionWriteGate`（`WriteGate` 的实现：要观察过才准覆盖、压缩后失效） |
+| `src/units/business/versions/service/policies.rs` | `versioned` 工作台策略（`BenchPolicy` 的实现）：声明能力位 `VERSIONS_CAP`、共享区只读；带 `shared-write` 能力组时按 `SHARED_TOOLS` 整组发 11 个 `work_*` 并给出执行者与 `VersionedDriver` |
 | `src/units/business/versions/service/work_tools.rs` | 成员侧工作工具执行者：`WorkHandler` 认领 `work_pull` / `work_commit` / `work_push` / `work_sync` / `work_status` / `work_ignore` / `work_versions` / `work_diff` / `work_resolve` / `work_reset` / `work_lost`，参数解析与路径权限在这里收口；`work_handlers` 按工具面发放的 `allowed` 现取执行者 |
 | `src/units/business/versions/domain.rs` | 纯逻辑模块根：`asset` / `freshness` / `work_tools` / `workstore` 四个子模块与跨会话写闸持有物 `SharedGuard` |
 | `src/units/business/versions/domain/asset.rs` | 通用资产纯逻辑：分块扫描（指纹 / 大小 / NUL 与 UTF-8 判定 / 受限预览）、`FileVersion`、扩展名媒体类型提示与单文件上限 |

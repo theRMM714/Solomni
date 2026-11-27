@@ -23,10 +23,12 @@ use std::sync::{Arc, Mutex};
 
 mod commit;
 mod diff;
+pub(crate) mod driver;
 mod facade;
 mod history;
 mod ignore;
 mod lifecycle;
+pub(crate) mod policies;
 mod reset;
 mod resolve;
 mod sync;

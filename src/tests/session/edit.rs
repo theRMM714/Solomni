@@ -296,6 +296,7 @@ pub(crate) fn deleting_a_session_releases_its_fence_lease() {
         work.versions.clone(),
         test_vm(),
         test_policies(),
+        test_bench_policies_with(work.versions.clone()),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),

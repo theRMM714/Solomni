@@ -22,7 +22,7 @@ use crate::units::business::tools::api::{ToolExec, Tools};
 use crate::units::business::turn_state::api::{Flows, History};
 use crate::units::business::turn_state::domain::decisions::Gates;
 use crate::units::business::turn_state::domain::live::{Session, TurnState};
-use crate::units::business::versions::api::Versions;
+use crate::units::business::workbench::api::BenchPolicies;
 use crate::units::business::workspace::api::Workspace;
 
 /// 目的：回合状态本体：在世表与运行态（`TurnState`）连同装配一席要用的入站面，一处持有。
@@ -33,8 +33,8 @@ pub struct Turn {
     pub(crate) state: TurnState,
     /// 目的：工作区用例面：目录布局、沙箱寻址与文件寻址按它问。
     pub(crate) workspace: Arc<dyn Workspace + Send + Sync>,
-    /// 目的：版本库用例面：一席的 `work_*` 工具执行者与回档 / 归档按它造（版本化与控制台分层，故与工作区分开持有）。
-    pub(crate) versions: Arc<dyn Versions + Send + Sync>,
+    /// 目的：工作台策略表：一席的共享区动作、执行者与回合钩子按会话声明里的策略 id 从它开。
+    pub(crate) bench_policies: Arc<dyn BenchPolicies>,
     /// 目的：执行环境策略表：一席的执行面按这一会话的声明从它开来。
     pub(crate) policies: Arc<SandboxPolicies>,
     /// 目的：常驻服务管理面：已就绪服务的操作并入一席的工具面。
@@ -77,7 +77,7 @@ impl Turn {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         workspace: Arc<dyn Workspace + Send + Sync>,
-        versions: Arc<dyn Versions + Send + Sync>,
+        bench_policies: Arc<dyn BenchPolicies>,
         policies: Arc<SandboxPolicies>,
         residents: Arc<dyn ResidentOps + Send + Sync>,
         secrets: Arc<dyn SecretOps + Send + Sync>,
@@ -98,7 +98,7 @@ impl Turn {
         Turn {
             state: TurnState::new(),
             workspace,
-            versions,
+            bench_policies,
             policies,
             residents,
             secrets,
@@ -133,7 +133,7 @@ impl Turn {
             tools: Arc::clone(&self.tools),
             policies: Arc::clone(&self.policies),
             residents: Arc::clone(&self.residents),
-            versions: Arc::clone(&self.versions),
+            bench_policies: Arc::clone(&self.bench_policies),
             compact: Arc::clone(&self.compact),
             decls: Arc::clone(&self.decls),
         }

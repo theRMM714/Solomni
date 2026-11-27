@@ -125,10 +125,10 @@ impl Work {
             if raw.is_some() {
                 return Err("子会话不能自选工作区：沿父会话继承".to_string());
             }
-            return Ok(crate::units::business::session_model::api::WorkspaceDecl::layout());
+            return Ok(crate::units::business::session_model::api::WorkspaceDecl::default());
         }
         let Some(raw) = raw else {
-            return Ok(crate::units::business::session_model::api::WorkspaceDecl::layout());
+            return Ok(crate::units::business::session_model::api::WorkspaceDecl::default());
         };
         let product = crate::units::business::workspace::api::product_root(&self.root, probe);
         let root = crate::units::business::workspace::api::resolve(raw, side, &product, probe)?;
@@ -582,6 +582,7 @@ impl Work {
                     &lease,
                     &host_plan,
                     &meta.spec,
+                    &meta.workspace,
                 );
                 // 过期清理是**落盘事实**：装配时按 meta 装回开关与保底，默认关。
                 s.set_context_freshness(meta.context_freshness);

@@ -4,14 +4,20 @@
 //! 联动：执行经 tools 的 ToolExec 端口；回填顺序与转录行形状见 docs/session/session-model.md。
 
 use super::decls::ToolDecls;
-pub(crate) use super::fence::CallDone;
 use crate::kernel::api::types::ToolOutcome;
 use crate::units::business::agentloop::api::ToolFace;
-use crate::units::business::agentloop::domain::gate::SessionWriteGate;
 use crate::units::business::agentloop::domain::member_tools::MemberTools;
 use crate::units::business::llm::api::ToolInvoke;
 use crate::units::business::tools::api::{Observations, ShellFacts, ToolSchema};
 use crate::units::business::transcript::api::SessionEvent;
+
+/// 目的：一次调用的结果形态（标签，结果，观察事实，shell 结构化事实），只为把签名读短。
+pub(crate) type CallDone = (
+    String,
+    ToolOutcome,
+    Vec<crate::units::business::tools::api::ObservationFact>,
+    Option<ShellFacts>,
+);
 
 /// 目的：分支执行体的结果形态，在 CallDone 前多带一份观察账本副本（并发批次按原序合并）。
 pub(crate) type BranchDone = (
@@ -78,27 +84,42 @@ pub(crate) fn run_branch(
     } else if crate::units::business::tools::api::is_builtin(name) {
         // 门禁看的是"这一批调用发出时模型还能看到的观察"：批前快照，同批 read 不授权后面的 write。
         let facts = gate_facts.to_vec();
-        let gate = ctx.versions.as_ref().map(|ws| SessionWriteGate {
-            versions: ws.as_ref(),
-            work: &ctx.face.bench.work_name,
-            agent: &ctx.face.bench.agent,
-            facts: &facts,
-            worktree: &ctx.face.bench.agent,
-            log: Some(ctx.log.as_ref()),
+        // 审计口要交给门禁长期持有，类型收窄成不带 auto trait 的那一种（同一个对象）。
+        let audit: std::sync::Arc<dyn crate::kernel::ports::Log> =
+            std::sync::Arc::clone(&ctx.log) as std::sync::Arc<dyn crate::kernel::ports::Log>;
+        let audit = Some(audit);
+        let gate = ctx.driver.as_ref().and_then(|d| {
+            d.gate(&crate::units::business::workbench::api::GateRequest {
+                work: &ctx.face.bench.work_name,
+                agent: &ctx.face.bench.agent,
+                worktree: &ctx.face.bench.agent,
+                facts: &facts,
+                log: audit,
+            })
         });
         let done = ctx.tools.run_builtin(
             &ctx.face.bench,
             &ctx.face.builtin_tools,
             branch,
-            gate.as_ref()
-                .map(|g| g as &dyn crate::units::business::workbench::api::WriteGate),
+            gate.as_deref(),
             *budget,
             name,
             args_json,
         );
         let mut outcome = done.outcome;
         branch = done.observations;
-        commit_writes(ctx, &mut branch, &mut outcome);
+        let written = branch.take_written();
+        let removed = branch.take_removed();
+        if let Some(note) = ctx.driver.as_ref().and_then(|d| {
+            d.after_write(&crate::units::business::workbench::api::WriteDone {
+                bench: &ctx.face.bench,
+                written: &written,
+                removed: &removed,
+                line: ctx.line.load(std::sync::atomic::Ordering::Relaxed),
+            })
+        }) {
+            outcome.output.push_str(&note);
+        }
         (String::new(), outcome)
     } else if crate::units::business::tools::api::is_exec(name) {
         let (outcome, facts) = run_shell(ctx, name, args_json, *ask, cancel, *budget);
@@ -106,7 +127,15 @@ pub(crate) fn run_branch(
         (String::new(), outcome)
     } else if let Some(h) = handler_for(ctx, name) {
         // 核心自有工具：与内置、模块走**同一条派发路径**，不是循环里的特例。
-        if let Some(outcome) = super::fence::commit_refusal(ctx, name, args_json, gate_facts) {
+        let refusal = ctx.driver.as_ref().and_then(|d| {
+            d.before(&crate::units::business::workbench::api::CallRequest {
+                bench: &ctx.face.bench,
+                name,
+                args_json,
+                facts: gate_facts,
+            })
+        });
+        if let Some(outcome) = refusal {
             (String::new(), outcome)
         } else {
             let tctx = crate::kernel::ports::ToolCtx {
@@ -206,62 +235,42 @@ fn gate(
     }
 }
 
-/// 目的：写工具落地后**自动提交**——路径取自这次调用真正写过的文件（观察账本的分支副本，见 Observations::take_written）。
-/// 约束：准入在 workspace（逐路径 CAS）；基线过期 = 这次写入只留在沙箱、共享区不动，原因如实写回工具回执，
-///   由模型显式 work_pull 后再写——不降级（不替它合并，也不静默留下"写了但没提交"）。
-pub(crate) fn commit_writes(
+/// 目的：一批结束后让工作台策略采纳不透明写者（shell / 模块工具）的改动，回执挂在这一批最后一个跑成的那次调用后面。
+/// 约束：只有这一批里真的跑成过不透明工具才问策略；策略不带回合钩子（不版本化）时整段不做。
+fn adopt_batch(
     ctx: &MemberTools,
-    branch: &mut Observations,
-    outcome: &mut ToolOutcome,
+    plan: &[(Option<String>, String, String)],
+    done: &mut [Option<CallDone>],
+    facts: &[crate::units::business::tools::api::ObservationFact],
 ) {
-    let written = branch.take_written();
-    let removed = branch.take_removed();
-    if written.is_empty() && removed.is_empty() {
+    let Some(driver) = ctx.driver.as_ref() else {
+        return;
+    };
+    if ctx.face.bench.work_name.is_empty() {
         return;
     }
-    let Some(ws) = ctx.versions.as_ref() else {
-        return;
-    };
-    let rel = |abs: &std::path::PathBuf| -> Option<String> {
-        abs.strip_prefix(&ctx.face.bench.private)
-            .ok()
-            .map(crate::kernel::api::path::slash)
-    };
-    let mut paths: Vec<String> = written.iter().filter_map(rel).collect();
-    let mut deletes: Vec<String> = removed.iter().filter_map(rel).collect();
-    paths.sort();
-    paths.dedup();
-    deletes.sort();
-    deletes.dedup();
-    if paths.is_empty() && deletes.is_empty() {
-        return;
+    // 最后一个跑成的不透明工具：回执挂它的结果后面（下一次生成能看到的通道）。
+    let mut last: Option<usize> = None;
+    for (i, (module, tool, _)) in plan.iter().enumerate() {
+        if module.is_none() && !crate::units::business::tools::api::is_exec(tool) {
+            continue;
+        }
+        if matches!(&done[i], Some((_, o, _, _)) if o.ok) {
+            last = Some(i);
+        }
     }
-    let message = if paths.is_empty() {
-        "工具删除"
-    } else {
-        "工具写入"
+    let Some(i) = last else {
+        return;
     };
-    let req = crate::units::business::versions::api::CommitRequest {
-        paths,
-        deletes,
-        message: message.to_string(),
-        time: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0),
-        // 锚 = 这次工具调用所属的那一行：回档才能把这次写入和它的转录证据一起退掉。
+    let note = driver.after_batch(&crate::units::business::workbench::api::BatchDone {
+        bench: &ctx.face.bench,
+        facts,
         line: ctx.line.load(std::sync::atomic::Ordering::Relaxed),
-    };
-    if let Err(e) = ws.work_commit_auto(
-        &ctx.face.bench.work_name,
-        &ctx.face.bench.agent,
-        &ctx.face.bench.session,
-        &req,
-    ) {
-        outcome.output.push_str(&format!(
-            "\n\n[存档未完成] 这次改动没有记进存档：{}。文件已在你的沙箱里，但回档/删除时可能对不上",
-            e
-        ));
+    });
+    if let Some(note) = note
+        && let Some((_, outcome, _, _)) = &mut done[i]
+    {
+        outcome.output.push_str(&note);
     }
 }
 
@@ -524,7 +533,7 @@ pub(crate) fn run_batch(
             i += 1;
         }
     }
-    super::fence::adopt_sandbox(ctx, plan, &mut done, &gate_facts);
+    adopt_batch(ctx, plan, &mut done, &gate_facts);
     // 每一次调用都留一条**同形状的审计记录**（与呈现层的动作记录同一处格式化）：可查、可对账。
     for ((module, tool, _args), slot) in plan.iter().zip(done.iter()) {
         if let Some((_label, outcome, _facts, _shell)) = slot {

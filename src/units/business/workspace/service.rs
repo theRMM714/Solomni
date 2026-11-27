@@ -7,6 +7,7 @@ use crate::units::business::workspace::ports::Workdirs;
 use std::sync::Arc;
 
 mod facade;
+pub(crate) mod plain;
 pub(crate) mod roots;
 
 /// 目的：工作区单元——持目录布局端口，按布局用例答话。

@@ -305,7 +305,9 @@ pub(crate) fn native_member(
             exec: crate::units::business::tools::api::host_sandbox(exec_svc),
             residents: Arc::new(crate::units::business::residents::api::NoResidents),
             // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
-            versions: None,
+            driver: None,
+            bench_policy: None,
+            workspace_params: serde_json::Value::Null,
             observations: crate::units::business::tools::api::Observations::default(),
             shell_live: None,
             reply_seq: 0,
@@ -384,6 +386,7 @@ pub(crate) fn native_core(
         work.versions.clone(),
         test_vm(),
         test_policies(),
+        test_bench_policies_with(work.versions.clone()),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),

@@ -450,11 +450,11 @@ fn freshness_now(
         return None;
     }
     let tools = s.tools.as_ref()?;
-    let ws = tools.versions.as_ref()?;
+    let driver = tools.driver.as_ref()?;
     let reads: Vec<&crate::units::business::agentloop::api::ReadAt> = s.reads().iter().collect();
-    let queries: Vec<crate::units::business::versions::api::ReadQuery> = reads
+    let queries: Vec<crate::units::business::workbench::api::ReadQuery> = reads
         .iter()
-        .map(|r| crate::units::business::versions::api::ReadQuery {
+        .map(|r| crate::units::business::workbench::api::ReadQuery {
             path: r.fact.path.clone(),
             blob: r.fact.blob.clone(),
             from: r.fact.from,
@@ -467,16 +467,11 @@ fn freshness_now(
         return None;
     }
     // 占位符策略：只有内容真变了（Changed）才换；版本变了但那段内容还在（Shifted）照旧供着。
-    let stale: Vec<bool> = ws
-        .judge_reads(
-            &tools.face.bench.work_name,
-            &tools.face.bench.agent,
-            &queries,
-        )
-        .ok()?
-        .into_iter()
-        .map(|v| v.is_stale())
-        .collect();
+    let stale: Vec<bool> = driver.stale_reads(
+        &tools.face.bench.work_name,
+        &tools.face.bench.agent,
+        &queries,
+    )?;
     let judged: Vec<(&crate::units::business::agentloop::api::ReadAt, bool)> =
         reads.into_iter().zip(stale).collect();
     // 保底按**字符**算（与压缩估算同一口径：4 字符 ≈ 1 token）。

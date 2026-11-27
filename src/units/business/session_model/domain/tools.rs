@@ -41,6 +41,8 @@ pub struct TurnCtx<'a> {
     #[allow(dead_code)]
     pub profile: &'a str,
     /// 目的：工作区 id；没有工作区为空。
+    /// 约束：端口契约的字段，当前没有来源读它（共享区动作由工作台策略的 plan 发放）——留给按工作区策略分面的来源。
+    #[allow(dead_code)]
     pub workspace: Option<&'a str>,
 }
 

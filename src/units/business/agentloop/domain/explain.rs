@@ -4,6 +4,7 @@
 //! 联动：装配用 assemble 的 offers_of / merge_offers，判定用 policy::verdict_of，两处都不许另写一套。
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use serde::Serialize;
 
@@ -44,6 +45,10 @@ pub struct ExplainInput<'a> {
     pub modules: &'a [Module],
     /// 目的：常驻服务视图（只有已就绪的服务才有操作可交）。
     pub services: &'a [ServiceView],
+    /// 目的：这一席工作台策略（按它算共享区动作名单；没有工作区给 None）。
+    pub policy: Option<Arc<dyn crate::units::business::workbench::api::BenchPolicy>>,
+    /// 目的：工作台策略参数（会话声明里那一段不透明 JSON）。
+    pub workspace_params: &'a serde_json::Value,
     /// 目的：段与角色的声明表。
     pub loops: &'a Loops,
     /// 目的：工具总表（判「面里的 id 有没有形状」）。
@@ -125,7 +130,24 @@ pub fn explain(input: ExplainInput<'_>) -> ExplainReport {
         .cast_of(input.loop_id, input.role)
         .map(|cast| cast.tools.clone())
         .unwrap_or_default();
-    let sources = build_sources(input.source_ids, &table, input.system_tools, &loop_tools);
+    let shared = match (input.workspace_name.is_some(), input.policy.as_ref()) {
+        (true, Some(policy)) => policy
+            .plan(&crate::units::business::workbench::api::PlanRequest {
+                bench: None,
+                abilities: input.abilities,
+                params: input.workspace_params,
+            })
+            .map(|plan| plan.tools)
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    let sources = build_sources(
+        input.source_ids,
+        &table,
+        input.system_tools,
+        &loop_tools,
+        &shared,
+    );
     let offers = offers_of(&ctx, &sources);
     let (face, _) = merge_offers(&offers);
     let (deny, ask) = match input.loops.of(input.loop_id) {
@@ -325,6 +347,8 @@ mod tests {
             workspace_name: None,
             modules: &[],
             services: &[],
+            policy: None,
+            workspace_params: &serde_json::Value::Null,
             loops,
             book,
         }

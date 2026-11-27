@@ -71,10 +71,10 @@ pub(crate) fn work_gate_info_distinguishes_tracked_base_and_current() {
 #[test]
 pub(crate) fn session_gate_rejects_unobserved_and_stale_tracked_paths() {
     use crate::kernel::api::hash::content_hash;
-    use crate::units::business::agentloop::api::SessionWriteGate;
     use crate::units::business::tools::api::{
         Coverage, LineRange, ObservationFact, ObservationSource,
     };
+    use crate::units::business::versions::api::SessionWriteGate;
     use crate::units::business::workbench::api::{GateFault, Need, VersionRef, WriteGate};
 
     let (ws, _dirs, _store) = work_ws();
@@ -93,14 +93,7 @@ pub(crate) fn session_gate_rejects_unobserved_and_stale_tracked_paths() {
         source: ObservationSource::Read,
     };
     let check = |facts: &[ObservationFact], path: &str, need: Need| {
-        let gate = SessionWriteGate {
-            versions: &*ws.versions,
-            work: "w",
-            agent: "a",
-            facts,
-            worktree: "a",
-            log: None,
-        };
+        let gate = SessionWriteGate::new(&ws.versions, "w", "a", "a", facts, None);
         gate.check(path, need, None)
     };
 
@@ -178,14 +171,7 @@ pub(crate) fn session_gate_rejects_unobserved_and_stale_tracked_paths() {
         hash: edited_version,
         size: None,
     };
-    let gate = SessionWriteGate {
-        versions: &*ws.versions,
-        work: "w",
-        agent: "a",
-        facts: &after_edit,
-        worktree: "a",
-        log: None,
-    };
+    let gate = SessionWriteGate::new(&ws.versions, "w", "a", "a", &after_edit, None);
     assert_eq!(
         gate.check("base.md", Need::Full, Some(&edited)),
         Err(GateFault::NotFull { total: 2 }),
@@ -202,10 +188,10 @@ pub(crate) fn session_gate_rejects_unobserved_and_stale_tracked_paths() {
 #[test]
 pub(crate) fn compaction_drops_read_authorization() {
     use crate::kernel::api::hash::content_hash;
-    use crate::units::business::agentloop::api::SessionWriteGate;
     use crate::units::business::tools::api::{
         Coverage, ObservationFact, ObservationSource, Observations,
     };
+    use crate::units::business::versions::api::SessionWriteGate;
     use crate::units::business::workbench::api::{GateFault, Need, WriteGate};
 
     let (ws, _dirs, _store) = work_ws();
@@ -227,14 +213,7 @@ pub(crate) fn compaction_drops_read_authorization() {
     obs.note_fact(fact);
     obs.retain_from(11);
     assert!(obs.facts().is_empty(), "压缩点之前的读要一并丢掉");
-    let gate = SessionWriteGate {
-        versions: &*ws.versions,
-        work: "w",
-        agent: "a",
-        facts: obs.facts(),
-        worktree: "a",
-        log: None,
-    };
+    let gate = SessionWriteGate::new(&ws.versions, "w", "a", "a", obs.facts(), None);
     assert_eq!(
         gate.check("base.md", Need::Full, None),
         Err(GateFault::NotObserved),

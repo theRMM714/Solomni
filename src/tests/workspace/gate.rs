@@ -8,22 +8,16 @@ use super::support::*;
 /// 目的：门禁拒绝时写一条可追溯的审计记录，只记版本与路径、不记文件正文。
 #[test]
 pub(crate) fn gate_refusal_is_audited_without_file_content() {
-    use crate::units::business::agentloop::api::SessionWriteGate;
+    use crate::units::business::versions::api::SessionWriteGate;
     use crate::units::business::workbench::api::{GateFault, Need, WriteGate};
 
     let (ws, _dirs, _store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "base.md", b"one\ntwo\n", 1, 0)
         .unwrap();
-    let log = crate::tests::doubles::RecordingLog::new();
-    let gate = SessionWriteGate {
-        versions: &*ws.versions,
-        work: "w",
-        agent: "a",
-        facts: &[],
-        worktree: "a",
-        log: Some(&log),
-    };
+    let log = std::sync::Arc::new(crate::tests::doubles::RecordingLog::new());
+    let audit: std::sync::Arc<dyn crate::kernel::ports::Log> = log.clone();
+    let gate = SessionWriteGate::new(&ws.versions, "w", "a", "a", &[], Some(audit));
     let err = gate.check("base.md", Need::Observed, None);
     assert_eq!(err, Err(GateFault::NotObserved));
     assert!(
@@ -47,21 +41,14 @@ pub(crate) fn gate_refusal_is_audited_without_file_content() {
 /// 目的：一批写入只取一次快照，但每条仍按同一语义判定；返回第一条失败的序号。
 #[test]
 pub(crate) fn batch_gate_returns_the_first_failed_item() {
-    use crate::units::business::agentloop::api::SessionWriteGate;
+    use crate::units::business::versions::api::SessionWriteGate;
     use crate::units::business::workbench::api::{GateFault, GateItem, Need, WriteGate};
 
     let (ws, _dirs, _store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "base.md", b"one\ntwo\n", 1, 0)
         .unwrap();
-    let gate = SessionWriteGate {
-        versions: &*ws.versions,
-        work: "w",
-        agent: "a",
-        facts: &[],
-        worktree: "a",
-        log: None,
-    };
+    let gate = SessionWriteGate::new(&ws.versions, "w", "a", "a", &[], None);
     let items = [
         GateItem {
             path: "scratch.md",

@@ -20,6 +20,10 @@ pub use crate::units::business::workspace::service::roots::{
     ambient, policy, product_root, recheck, resolve,
 };
 
+/// 目的：不版本化的工作区策略（单树直写）——组合根接策略表时与 `versions` 的 versioned 一起接。
+#[allow(unused_imports)] // 入站面：策略给组合根取用
+pub use crate::units::business::workspace::service::plain::plain_policy;
+
 /// 目的：用户输入里 @ 引用要的根（共享区 + 本会话的路径翻译器）——协作 / 主持人的话用它改写。
 /// 参数：`boxes` = 这次工作的席位工作面清单。
 /// 约束：private 恒为 None——这些入口没有"自己的沙箱"（与说话人无关的共读文本）。

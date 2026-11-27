@@ -147,7 +147,7 @@ pub fn ids_of(ability: &str) -> &'static [&'static str] {
         FS_READ => &[t::READ, t::LIST, t::GREP],
         FS_WRITE => &[t::WRITE, t::EDIT, t::PATCH, t::DELETE],
         EXEC => &[t::SHELL],
-        SHARED_WRITE => crate::units::business::versions::api::WORK_TOOLS,
+        SHARED_WRITE => crate::units::business::workbench::api::SHARED_TOOLS,
         _ => &[],
     }
 }
@@ -252,7 +252,9 @@ mod tests {
             )
         };
         assert!(deny(crate::units::business::tools::api::WRITE));
-        assert!(deny(crate::units::business::versions::api::WORK_TOOLS[1]));
+        assert!(deny(
+            crate::units::business::workbench::api::SHARED_TOOLS[1]
+        ));
         assert!(!deny(crate::units::business::tools::api::READ));
         assert!(!deny(crate::units::business::tools::api::SHELL));
         let open = LoopPolicy::none();

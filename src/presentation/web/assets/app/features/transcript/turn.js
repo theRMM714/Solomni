@@ -5,7 +5,7 @@
 
 import { boxes } from './dom.js';
 import { turnWorthy, turnKey, turnText, turnReasoning } from './model.js';
-import { lineBlock, appendBody, foldBind, toolDetail, toolCard, reasoningBlock, rewindButton, flushScroll, sessionNote } from './parts.js';
+import { lineBlock, appendBody, foldBind, toolDetail, toolCard, reasoningBlock, canRewind, rewindButton, flushScroll, sessionNote } from './parts.js';
 
 let g, doc, state, ui, app;
 
@@ -87,9 +87,11 @@ function buildTurn(group, s) {
   const foot = doc.createElement('div');
   foot.className = 'turn-foot';
   if (typeof parts[0].id === 'number') {
-    const rb = rewindButton(parts[0].id);
-    rb.title = '回档到这一轮之前：留档（可恢复）或删除（不可恢复）';
-    foot.appendChild(rb);
+    const rb = rewindButton(parts[0].id, s);
+    if (rb) {
+      rb.title = '回档到这一轮之前：留档（可恢复）或删除（不可恢复）';
+      foot.appendChild(rb);
+    }
   }
   if (head.verb === 'agree' && head.speaker) {
     const w = ui.iconButton({ icon: 'close', label: '撤回同意', tip: '', cls: 'line-act' });
@@ -121,8 +123,9 @@ function appendFinalRow(l, s) {
   const bodyless = !String(l.text == null ? '' : l.text).trim();
   if (bodyless && !l.reasoning) return;
   const built = lineBlock(l, s, 'L' + l.id, false);
-  if (typeof l.id === 'number') built.node.appendChild(rewindButton(l.id));
-  if (typeof l.mark === 'number') {
+  const rb0 = typeof l.id === 'number' ? rewindButton(l.id, s) : null;
+  if (rb0) built.node.appendChild(rb0);
+  if (typeof l.mark === 'number' && canRewind(s)) {
     const rb = ui.iconButton({ icon: 'undo', label: '恢复留档', tip: '', cls: 'line-act' });
     rb.title = '恢复到这次留档之前（标记及其后的内容会被删除）';
     rb.onclick = () => app.restoreMark(l.mark);

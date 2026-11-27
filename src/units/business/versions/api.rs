@@ -9,15 +9,15 @@ pub use crate::units::business::versions::domain::asset::{
 
 pub use crate::units::business::versions::domain::freshness::ReadVerdict;
 
-pub use crate::units::business::workbench::api::{ReadFact, VersionRef};
+pub use crate::units::business::workbench::api::{ReadQuery, VersionRef};
 
 /// 目的：`work_*` 工具的名字、取参与回执拼装——`tools` 与 `turn` 只从这里取，不碰 domain。
 #[allow(unused_imports)]
 pub use crate::units::business::versions::domain::work_tools::{
     COMMIT, DIFF, IGNORE, IgnoreReport, LOST, PULL, PUSH, RESET, RESOLVE, STATUS, SYNC, VERSIONS,
-    WORK_TOOLS, is_work_tool, render_commit, render_diff, render_ignore, render_lost, render_pull,
-    render_push, render_reset, render_resolve, render_restore_lost, render_status, render_sync,
-    render_versions, str_arg, str_list,
+    is_work_tool, render_commit, render_diff, render_ignore, render_lost, render_pull, render_push,
+    render_reset, render_resolve, render_restore_lost, render_status, render_sync, render_versions,
+    str_arg, str_list,
 };
 
 #[allow(unused_imports)]
@@ -33,6 +33,18 @@ pub use crate::units::business::versions::domain::workstore::{
 #[allow(unused_imports)]
 pub use crate::units::business::versions::service::work_tools::{WorkHandler, work_handlers};
 
+/// 目的：版本化工作台的回合钩子——`workspace` 的 versioned 策略在 `plan` 里取它。
+#[allow(unused_imports)]
+pub use crate::units::business::versions::service::driver::versioned_driver;
+
+/// 目的：一次工具调用用的只读门禁——引擎从驱动取它，工具按它判「先读后改」。
+#[allow(unused_imports)]
+pub use crate::units::business::versions::service::driver::SessionWriteGate;
+
+/// 目的：版本化的工作区策略——组合根接策略表时与 `workspace` 的 plain 一起接。
+#[allow(unused_imports)]
+pub use crate::units::business::versions::service::policies::versioned_policy;
+
 /// 目的：一次写入门禁查询的结果：路径是否受管、当前内容与基线版本各是什么。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathGateInfo {
@@ -45,22 +57,6 @@ pub struct PathGateInfo {
     pub current: Option<VersionRef>,
     /// 目的：受管版本的基线：优先该 agent 工作线 head，其次主线 head；都没有 = None。
     pub base: Option<VersionRef>,
-}
-
-/// 目的：一条待判定的读取（一次 `read` 读到的行区间 + 当时的整份指纹）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReadQuery {
-    /// 目的：工作树内的相对路径（斜杠分隔）。
-    pub path: String,
-    /// 目的：读的那一刻整份内容的指纹。
-    pub blob: String,
-    /// 目的：读到的第一行（从 1 数起）。
-    pub from: u64,
-    /// 目的：读到的最后一行（含）。
-    pub to: u64,
-    /// 目的：这次读发生在该 agent 的私有沙箱里——对照物是沙箱当前内容，不是主副本。
-    /// 约束：沙箱里已经没这条路径 = 过期（读到的内容不在了，模型该重读）。
-    pub sandbox: bool,
 }
 
 /// 目的：沙箱里改了、却没被采纳的一条路径（模型据此先 pull 再重做）。

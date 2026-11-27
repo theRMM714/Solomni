@@ -683,6 +683,13 @@ fn main() {
             Arc::clone(&vm),
         ),
     ]);
+    // **工作台策略表**：版本化（主副本只读、共享区动作走 work_*）与不版本化（单树直写）两个策略；
+    // 会话 meta 只写策略 id，谁有什么能力由策略自己说。缺省取第一个。
+    let bench_policies: Arc<dyn units::business::workbench::api::BenchPolicies> =
+        Arc::new(units::business::workbench::api::Policies::new(vec![
+            units::business::versions::api::versioned_policy(Arc::clone(&versions)),
+            units::business::workspace::api::plain_policy(),
+        ]));
     // 启动时要按有效启停拉起常驻服务：留一份手柄（进程级租约，不属于任何会话）。
     let residents_boot = Arc::clone(&residents);
     let mut core = units::business::runtime::service::Core::new(
@@ -695,6 +702,7 @@ fn main() {
         versions,
         Arc::clone(&vm),
         policies,
+        bench_policies,
         Arc::clone(&packages),
         Arc::clone(&provision),
         Arc::clone(&modules),

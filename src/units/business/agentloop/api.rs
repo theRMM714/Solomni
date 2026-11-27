@@ -22,9 +22,6 @@ pub use crate::units::business::agentloop::domain::assembly::{
 pub use crate::units::business::agentloop::domain::explain::{
     ExplainInput, ExplainReport, SourceOffer, ToolLine, explain,
 };
-/// 目的：会话写入门禁的实现面；测试与组合根经此取，不经 `domain`。
-#[allow(unused_imports)]
-pub use crate::units::business::agentloop::domain::gate::SessionWriteGate;
 #[allow(unused_imports)]
 pub use crate::units::business::agentloop::domain::member_tools::{
     CoreVerify, ModuleTools, ServiceOp, ShellLive, ShellSlot, ToolFace, last_shell,

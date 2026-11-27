@@ -1,6 +1,7 @@
 //! 目的：工作台契约单元的入站面——其它单元与呈现层只准用这里。
 //! 管：一席工作面的形状与寻址语义（`Area` / `Bench` / `Benches`）、寻址根与用量（`WorkRoots` / `WorkFiles` /
-//!   `AreaUsage` / `WorkUsage` / `safe_file_name`）、过滤名单（`filter`）、版本身份与门禁端口（`gate` / `readfact`）。
+//!   `AreaUsage` / `WorkUsage` / `safe_file_name`）、过滤名单（`filter`）、版本身份与门禁端口（`gate` / `readfact`）、
+//!   观察事实（`observed`）与工作台策略契约（`policy`）。
 //! 不管：实现（`workspace` 的布局、`versions` 的版本库）；装配（组合根）。
 //! 联动：`tools` 按 `Bench` 定位读写、按 `WriteGate` 判写；`agentloop` 持 `Bench` 并实现门禁。
 
@@ -25,7 +26,20 @@ pub use crate::units::business::workbench::domain::gate::{
 };
 /// 目的：一次读的读取事实——门禁与过期判定都按它记账。
 #[allow(unused_imports)]
-pub use crate::units::business::workbench::domain::readfact::ReadFact;
+pub use crate::units::business::workbench::domain::readfact::{ReadFact, ReadQuery};
+
+#[allow(unused_imports)]
+// 入站面：观察事实的契约形状（工具记它、门禁按它判）
+pub use crate::units::business::workbench::domain::observed::{
+    Coverage, LineRange, OBSERVATION_FORMAT, ObservationFact, ObservationSource, normalize_ranges,
+};
+
+#[allow(unused_imports)]
+// 入站面：策略表与回合钩子（组合根注册、会话装配、引擎执行）
+pub use crate::units::business::workbench::domain::policy::{
+    BatchDone, BenchDriver, BenchPlan, BenchPolicies, BenchPolicy, CallRequest, GateRequest,
+    PLAIN_POLICY, PlanRequest, Policies, SHARED_TOOLS, VERSIONED_POLICY, VERSIONS_CAP, WriteDone,
+};
 
 #[allow(unused_imports)]
 pub use crate::units::business::workbench::domain::roots::{

@@ -8,11 +8,10 @@ use std::sync::Arc;
 
 use crate::units::business::agentloop::domain::member_tools::ModuleTools;
 use crate::units::business::session_model::api::{
-    EXEC, FS_READ, FS_WRITE, SHARED_WRITE, SOURCE_AGENT, SOURCE_LOOP, SOURCE_MODULE,
-    SOURCE_PROFILE, SOURCE_WORKSPACE, ToolSource, TurnCtx,
+    EXEC, FS_READ, FS_WRITE, SOURCE_AGENT, SOURCE_LOOP, SOURCE_MODULE, SOURCE_PROFILE,
+    SOURCE_WORKSPACE, ToolSource, TurnCtx,
 };
 use crate::units::business::tools::api::{DELETE, EDIT, GREP, LIST, PATCH, READ, SHELL, WRITE};
-use crate::units::business::versions::api::WORK_TOOLS;
 
 /// 目的：agent 自己的能力组来源：读面 / 工作面 / 执行各按能力组发放。
 pub struct AgentSource;
@@ -103,20 +102,28 @@ impl ToolSource for LoopSource {
     }
 }
 
-/// 目的：共享区（工作区）声明的工具来源：有工作区且 agent 有共享区写入能力才交 `work_*`。
-pub struct WorkspaceSource;
+/// 目的：共享区（工作区）声明的工具来源：交工作台策略给这一席的共享区动作（有工作区才问策略）。
+/// 约束：名单由策略在装配期算好；这里只回答在场，不判能力组、不看段。
+pub struct WorkspaceSource {
+    tools: Vec<String>,
+}
+
+impl WorkspaceSource {
+    /// 目的：按策略给这一席的共享区动作 id 造来源（空 = 这一席没有共享区动作）。
+    pub fn new(tools: &[String]) -> WorkspaceSource {
+        WorkspaceSource {
+            tools: tools.to_vec(),
+        }
+    }
+}
 
 impl ToolSource for WorkspaceSource {
     fn id(&self) -> &str {
         SOURCE_WORKSPACE
     }
 
-    fn offer(&self, ctx: &TurnCtx) -> Vec<String> {
-        if ctx.workspace.is_some() && ctx.has(SHARED_WRITE) {
-            WORK_TOOLS.iter().map(|t| t.to_string()).collect()
-        } else {
-            Vec::new()
-        }
+    fn offer(&self, _ctx: &TurnCtx) -> Vec<String> {
+        self.tools.clone()
     }
 }
 
@@ -137,12 +144,14 @@ impl ToolSource for ProfileSource {
 
 /// 目的：按会话类型声明的来源 id 造实例；未知 id 跳过（装配期 `Profiles::validate` 已拦下）。
 /// 参数：ids = 来源 id；table = 模块工具表（含已就绪服务）；system_tools = 会话 meta 里的 system 工具；
-///   loop_tools = 当前段当前角色的机制动作（装配期拍平，段表不在来源里查）。
+///   loop_tools = 当前段当前角色的机制动作（装配期拍平，段表不在来源里查）；
+///   shared_tools = 工作台策略给这一席的共享区动作（空 = 这一席没有）。
 pub fn build_sources(
     ids: &[String],
     table: &BTreeMap<String, ModuleTools>,
     system_tools: &[String],
     loop_tools: &[String],
+    shared_tools: &[String],
 ) -> Vec<Arc<dyn ToolSource>> {
     let mut out: Vec<Arc<dyn ToolSource>> = Vec::new();
     for id in ids {
@@ -150,7 +159,7 @@ pub fn build_sources(
             SOURCE_AGENT => out.push(Arc::new(AgentSource)),
             SOURCE_MODULE => out.push(Arc::new(ModuleSource::new(table))),
             SOURCE_LOOP => out.push(Arc::new(LoopSource::new(loop_tools))),
-            SOURCE_WORKSPACE => out.push(Arc::new(WorkspaceSource)),
+            SOURCE_WORKSPACE => out.push(Arc::new(WorkspaceSource::new(shared_tools))),
             SOURCE_PROFILE => out.push(Arc::new(ProfileSource {
                 tools: system_tools.to_vec(),
             })),
