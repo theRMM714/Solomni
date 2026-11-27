@@ -84,3 +84,13 @@ pub trait Vm: Send + Sync {
         Err("这台 guest 引擎没有诊断能力".to_string())
     }
 }
+
+/// 目的：虚拟机策略的实例（组合根登记进执行环境注册表）。
+pub fn vm_policy(
+    root: std::path::PathBuf,
+    probe: std::sync::Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
+) -> std::sync::Arc<dyn crate::units::business::sandbox::api::SandboxPolicy> {
+    std::sync::Arc::new(crate::units::business::vm::domain::policy::VmPolicy::new(
+        root, probe,
+    ))
+}
