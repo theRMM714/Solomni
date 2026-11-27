@@ -14,7 +14,7 @@ use crate::units::business::turn_state::domain::decisions::GateTicket;
 use crate::units::business::turn_state::domain::flow::{
     Flow, Handback, MemberAsk, Settle, WorkPlan,
 };
-use crate::units::business::workspace::api::Sandboxes;
+use crate::units::business::workbench::api::Benches;
 use crate::units::pure::registry_model::api::AgentMeta;
 
 /// 目的：一串按顺序跑的流程段：前一段收尾后产物交给下一段，行号接着上一段。
@@ -158,7 +158,7 @@ impl Flow for Sequence {
         }
     }
 
-    fn set_sandboxes(&mut self, sandboxes: Sandboxes) {
+    fn set_sandboxes(&mut self, sandboxes: Benches) {
         // 沙箱是会话级事实：每一段都要认得出路径（后一段不再是同一个对象）。
         for step in &mut self.steps {
             step.set_sandboxes(sandboxes.clone());

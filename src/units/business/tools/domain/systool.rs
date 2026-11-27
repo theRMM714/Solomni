@@ -5,7 +5,7 @@
 
 use crate::units::business::prompt::api::{Prompt, Segment};
 use crate::units::business::tools::api::{ArgFault, ToolSchema};
-use crate::units::business::workspace::api::Sandbox;
+use crate::units::business::workbench::api::Bench;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -170,7 +170,7 @@ pub struct ToolNotes {
 
 pub fn tool_notes(
     prompt: &dyn Prompt,
-    sb: &Sandbox,
+    sb: &Bench,
     modules: &[crate::units::business::catalog::modules::api::Module],
     service_param_sections: &[String],
 ) -> ToolNotes {

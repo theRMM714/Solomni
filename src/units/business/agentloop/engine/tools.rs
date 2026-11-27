@@ -80,14 +80,14 @@ pub(crate) fn run_branch(
         let facts = gate_facts.to_vec();
         let gate = ctx.versions.as_ref().map(|ws| SessionWriteGate {
             versions: ws.as_ref(),
-            work: &ctx.face.sandbox.work_name,
-            agent: &ctx.face.sandbox.agent,
+            work: &ctx.face.bench.work_name,
+            agent: &ctx.face.bench.agent,
             facts: &facts,
-            worktree: &ctx.face.sandbox.agent,
+            worktree: &ctx.face.bench.agent,
             log: Some(ctx.log.as_ref()),
         });
         let done = ctx.tools.run_builtin(
-            &ctx.face.sandbox,
+            &ctx.face.bench,
             &ctx.face.builtin_tools,
             branch,
             gate.as_ref()
@@ -110,8 +110,8 @@ pub(crate) fn run_branch(
             (String::new(), outcome)
         } else {
             let tctx = crate::kernel::ports::ToolCtx {
-                session: &ctx.face.sandbox.session,
-                agent: &ctx.face.sandbox.agent,
+                session: &ctx.face.bench.session,
+                agent: &ctx.face.bench.agent,
                 line: ctx.line.load(std::sync::atomic::Ordering::Relaxed),
             };
             (String::new(), h.run(&tctx, name, args_json))
@@ -158,7 +158,7 @@ fn authorized(
         loop_id: &ctx.face.loop_id,
         role: &ctx.face.role,
     };
-    gate(ctx.policy.decide(&req), &req, &ctx.face.sandbox.agent, ask)
+    gate(ctx.policy.decide(&req), &req, &ctx.face.bench.agent, ask)
 }
 
 /// 目的：把策略的结论落成结果：准 → 放行；不准 → 拒绝；要问 → 问一次，只有「允许这一次」才放行。
@@ -223,7 +223,7 @@ pub(crate) fn commit_writes(
         return;
     };
     let rel = |abs: &std::path::PathBuf| -> Option<String> {
-        abs.strip_prefix(&ctx.face.sandbox.private)
+        abs.strip_prefix(&ctx.face.bench.private)
             .ok()
             .map(crate::kernel::api::path::slash)
     };
@@ -253,9 +253,9 @@ pub(crate) fn commit_writes(
         line: ctx.line.load(std::sync::atomic::Ordering::Relaxed),
     };
     if let Err(e) = ws.work_commit_auto(
-        &ctx.face.sandbox.work_name,
-        &ctx.face.sandbox.agent,
-        &ctx.face.sandbox.session,
+        &ctx.face.bench.work_name,
+        &ctx.face.bench.agent,
+        &ctx.face.bench.session,
         &req,
     ) {
         outcome.output.push_str(&format!(
@@ -703,7 +703,7 @@ pub(crate) fn run_shell(
             return (ToolOutcome::new(false, e), None);
         }
     };
-    if ctx.face.sandbox.private.as_os_str().is_empty() {
+    if ctx.face.bench.private.as_os_str().is_empty() {
         return (
             ToolOutcome::new(
                 false,
@@ -713,8 +713,8 @@ pub(crate) fn run_shell(
         );
     }
     let mut fence =
-        crate::kernel::api::fence::FencePlan::for_call(&ctx.face.sandbox, None, &ctx.face.fence)
-            .at(&ctx.face.sandbox.private);
+        crate::kernel::api::fence::FencePlan::for_call(&ctx.face.bench, None, &ctx.face.fence)
+            .at(&ctx.face.bench.private);
     fence.extend_read_tree(ctx.face.runtime_roots.iter().cloned());
     // 要连宿主回环时才换网络档：容器侧起中继、按端口放行（宿主侧还会拒产品自己的端口）。
     // 能不能在本档这么做由执行面自己判（虚拟机档的 guest 回环不映射宿主端口）。
@@ -725,9 +725,9 @@ pub(crate) fn run_shell(
     }
     let started = std::time::Instant::now();
     // cwd 用**本环境写法**：本机档是宿主路径，虚拟机档是 guest 内路径（与文件工具、提示词同一座路径桥）。
-    let cwd_view = match ctx.face.sandbox.path_codec.as_ref() {
-        Some(codec) => codec.to_view(&ctx.face.sandbox.private),
-        None => ctx.face.sandbox.private.display().to_string(),
+    let cwd_view = match ctx.face.bench.path_codec.as_ref() {
+        Some(codec) => codec.to_view(&ctx.face.bench.private),
+        None => ctx.face.bench.private.display().to_string(),
     };
     let slot = ctx.shell_live.clone();
     if let Some(slot) = &slot {
@@ -738,7 +738,7 @@ pub(crate) fn run_shell(
         kind: crate::units::business::sandbox::api::ExecKind::Shell {
             script: &call.script,
         },
-        cwd: &ctx.face.sandbox.private,
+        cwd: &ctx.face.bench.private,
         fence,
         timeout: call.timeout,
         ask,
@@ -856,7 +856,7 @@ pub(crate) fn dispatch_external(
             // 每次调用按固定授予派生围栏：sh 与模块工具同一把尺子（模块目录恒只读，该模块 userdata 可写）。
             // 容器身份 = 会话 + agent + 受保护根集合（见 container_name）；租约就是会话 id，调用结束不释放。
             let fence = crate::kernel::api::fence::FencePlan::for_call(
-                &ctx.face.sandbox,
+                &ctx.face.bench,
                 Some(&module),
                 &ctx.face.fence,
             )

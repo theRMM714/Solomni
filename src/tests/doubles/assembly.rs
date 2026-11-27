@@ -84,7 +84,7 @@ impl TestWork {
         &self,
         session: &str,
         agents: &[String],
-    ) -> Result<crate::units::business::workspace::api::WorkFiles, String> {
+    ) -> Result<crate::units::business::workbench::api::WorkFiles, String> {
         self.layout.files(session, agents)
     }
 
@@ -92,7 +92,7 @@ impl TestWork {
         &self,
         session: &str,
         agents: &[String],
-    ) -> Result<crate::units::business::workspace::api::WorkUsage, String> {
+    ) -> Result<crate::units::business::workbench::api::WorkUsage, String> {
         self.layout.usage(session, agents)
     }
 
@@ -100,7 +100,7 @@ impl TestWork {
         &self,
         name: &str,
         agents: &[String],
-    ) -> Result<crate::units::business::workspace::api::WorkRoots, String> {
+    ) -> Result<crate::units::business::workbench::api::WorkRoots, String> {
         self.layout.roots(name, agents)
     }
 

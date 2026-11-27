@@ -133,7 +133,6 @@ impl Turn {
             tools: Arc::clone(&self.tools),
             policies: Arc::clone(&self.policies),
             residents: Arc::clone(&self.residents),
-            workspace: Arc::clone(&self.workspace),
             versions: Arc::clone(&self.versions),
             compact: Arc::clone(&self.compact),
             decls: Arc::clone(&self.decls),

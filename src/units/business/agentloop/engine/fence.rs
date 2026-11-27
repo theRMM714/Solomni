@@ -44,7 +44,7 @@ pub(super) fn commit_refusal(
     let deletes = strings("deletes");
     if paths.is_empty() {
         let report = ws
-            .work_status(&ctx.face.sandbox.work_name, &ctx.face.sandbox.agent, &[])
+            .work_status(&ctx.face.bench.work_name, &ctx.face.bench.agent, &[])
             .ok()?;
         paths = report.entries.into_iter().map(|e| e.path).collect();
     }
@@ -52,17 +52,16 @@ pub(super) fn commit_refusal(
     if paths.is_empty() {
         return None;
     }
-    let infos =
-        match ws.work_gate_info(&ctx.face.sandbox.work_name, &ctx.face.sandbox.agent, &paths) {
-            Ok(v) => v,
-            Err(e) => return Some(ToolOutcome::new(false, e)),
-        };
+    let infos = match ws.work_gate_info(&ctx.face.bench.work_name, &ctx.face.bench.agent, &paths) {
+        Ok(v) => v,
+        Err(e) => return Some(ToolOutcome::new(false, e)),
+    };
     let gate = SessionWriteGate {
         versions: ws.as_ref(),
-        work: &ctx.face.sandbox.work_name,
-        agent: &ctx.face.sandbox.agent,
+        work: &ctx.face.bench.work_name,
+        agent: &ctx.face.bench.agent,
         facts,
-        worktree: &ctx.face.sandbox.agent,
+        worktree: &ctx.face.bench.agent,
         log: Some(ctx.log.as_ref()),
     };
     for info in &infos {
@@ -103,7 +102,7 @@ pub(super) fn adopt_sandbox(
     let Some(ws) = ctx.versions.as_ref() else {
         return;
     };
-    if ctx.face.sandbox.work_name.is_empty() {
+    if ctx.face.bench.work_name.is_empty() {
         return;
     }
     // 最后一个跑成的不透明工具：回执挂它的结果后面（下一次生成能看到的通道）。
@@ -125,9 +124,9 @@ pub(super) fn adopt_sandbox(
         .unwrap_or(0);
     let line = ctx.line.load(std::sync::atomic::Ordering::Relaxed);
     let note = match ws.work_adopt_sandbox(
-        &ctx.face.sandbox.work_name,
-        &ctx.face.sandbox.agent,
-        &ctx.face.sandbox.session,
+        &ctx.face.bench.work_name,
+        &ctx.face.bench.agent,
+        &ctx.face.bench.session,
         time,
         line,
     ) {
@@ -165,8 +164,8 @@ fn adopt_note(
         }
         return out;
     };
-    let work = &ctx.face.sandbox.work_name;
-    let agent = &ctx.face.sandbox.agent;
+    let work = &ctx.face.bench.work_name;
+    let agent = &ctx.face.bench.agent;
     let infos = ws
         .work_gate_info(work, agent, &report.changed)
         .unwrap_or_default();

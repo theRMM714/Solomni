@@ -42,7 +42,7 @@ impl crate::units::business::llm::ports::EnvelopeRepair for NoRepair {
 
 /// 目的：一次内置工具调用（空账本）：只关心工具行为本身的用例用它；关心"改动前有没有读过"的用例自带 Observations 再调它。这里直接走 tools 的 domain（测试层允许）：生产路径是 `ToolExec::run_builtin`。
 pub(crate) fn run_builtin(
-    sb: &crate::units::business::workspace::api::Sandbox,
+    sb: &crate::units::business::workbench::api::Bench,
     io: &dyn crate::units::business::tools::ports::SysIo,
     name: &str,
     args_json: &str,
@@ -83,12 +83,12 @@ pub(crate) fn decl_with(
 pub(crate) fn test_sandbox(
     agent: &str,
     modules: &[&str],
-) -> crate::units::business::workspace::api::Sandbox {
+) -> crate::units::business::workbench::api::Bench {
     let mut map = BTreeMap::new();
     for id in modules {
         map.insert(id.to_string(), abs(&["mods", id]));
     }
-    crate::units::business::workspace::api::Sandbox {
+    crate::units::business::workbench::api::Bench {
         work_name: "demo".to_string(),
         session: "demo".to_string(),
         agent: agent.to_string(),
@@ -102,7 +102,7 @@ pub(crate) fn test_sandbox(
         filter_rules: abs(&[
             "demo",
             ".work",
-            crate::units::business::workspace::api::WORKIGNORE,
+            crate::units::business::workbench::api::WORKIGNORE,
         ]),
     }
 }
@@ -111,7 +111,7 @@ pub(crate) fn test_sandbox(
 pub(crate) fn test_sandbox_readonly(
     agent: &str,
     modules: &[&str],
-) -> crate::units::business::workspace::api::Sandbox {
+) -> crate::units::business::workbench::api::Bench {
     test_sandbox(agent, modules)
 }
 
@@ -128,7 +128,7 @@ pub(crate) fn test_params(agent: &str) -> crate::units::business::agentloop::api
 
 /// 目的：测试用工具说明块素材（patch 语法 + 给定的模块工具）。
 pub(crate) fn test_notes(
-    sb: &crate::units::business::workspace::api::Sandbox,
+    sb: &crate::units::business::workbench::api::Bench,
     modules: &[crate::units::business::catalog::modules::api::Module],
 ) -> crate::units::business::tools::api::ToolNotes {
     crate::units::business::tools::api::tool_notes(&test_prompts(), sb, modules, &[])

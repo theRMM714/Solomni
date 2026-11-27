@@ -271,7 +271,7 @@ pub(crate) fn member_with_service_tools(
         face: crate::units::business::agentloop::api::ToolFace {
             mode: crate::units::pure::registry_model::api::ToolMode::Envelope,
             modules,
-            sandbox: sb.clone(),
+            bench: sb.clone(),
             tools_this_turn: test_prompts()
                 .text(crate::units::business::prompt::api::Segment::ToolsThisTurn)
                 .to_string(),
@@ -299,7 +299,6 @@ pub(crate) fn member_with_service_tools(
         exec: crate::units::business::tools::api::host_sandbox(exec_svc),
         residents,
         // 工具面用例不接工作区：写工具落地后不自动提交。
-        workspace: None,
         versions: None,
         observations: Default::default(),
         shell_live: None,

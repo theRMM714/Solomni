@@ -751,14 +751,13 @@ pub(crate) fn read_in_the_same_batch_does_not_authorize_write() {
     );
     {
         let t = m.tools.as_mut().expect("工具环境");
-        let mut sb = t.face.sandbox.clone();
+        let mut sb = t.face.bench.clone();
         sb.work_name = "w".to_string();
         sb.session = "w".to_string();
         sb.shared = abs(&["w", "work"]);
         sb.private = abs(&["w", "a"]);
-        t.face.sandbox = sb.clone();
+        t.face.bench = sb.clone();
         t.face.fence = crate::kernel::api::fence::FencePlan::for_session(&sb, &[], false);
-        t.workspace = Some(ws.layout.clone());
         t.versions = Some(Arc::clone(&ws.versions));
     }
     let exec = run_execution(std::slice::from_mut(&mut m), "任务", &test_prompts());
@@ -808,12 +807,12 @@ pub(crate) fn work_commit_refuses_unobserved_tracked_changes() {
     );
     {
         let t = m.tools.as_mut().expect("工具环境");
-        let mut sb = t.face.sandbox.clone();
+        let mut sb = t.face.bench.clone();
         sb.work_name = "w".to_string();
         sb.session = "w".to_string();
         sb.shared = abs(&["w", "work"]);
         sb.private = abs(&["w", "a"]);
-        t.face.sandbox = sb.clone();
+        t.face.bench = sb.clone();
         t.face.fence = crate::kernel::api::fence::FencePlan::for_session(&sb, &[], false);
         t.handlers = crate::units::business::versions::api::work_handlers(
             &ws.versions,
@@ -821,7 +820,6 @@ pub(crate) fn work_commit_refuses_unobserved_tracked_changes() {
             &["work_commit".to_string()],
         );
         t.face.allowed.push("work_commit".to_string());
-        t.workspace = Some(ws.layout.clone());
         t.versions = Some(Arc::clone(&ws.versions));
     }
     let exec = run_execution(std::slice::from_mut(&mut m), "任务", &test_prompts());

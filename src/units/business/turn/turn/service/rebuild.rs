@@ -187,7 +187,7 @@ impl Turn {
                 let lease = guest_lease_for(self.history.as_ref(), meta)?;
                 let member = crate::units::business::agentloop::api::MemberSpec {
                     modules: &modules,
-                    sandbox: &sb,
+                    bench: &sb,
                     unavailable,
                     mode,
                     // 身份与段/角色**同一把尺子**（重建与实时不能各写一份）。
@@ -528,7 +528,7 @@ impl Turn {
         // 沙箱清单只有一处构造点：代理发言席也是一席，只是私有目录名与发言人不一致。
         let app = registry.app();
         let params = self.workspace_params_chain(meta)?;
-        let mut seats = crate::units::business::workspace::api::seat_sandboxes(
+        let mut seats = crate::units::business::workspace::api::seat_benches(
             &crate::units::business::workspace::api::SeatFacts {
                 work: &meta.name,
                 session: &meta.name,
@@ -560,7 +560,7 @@ impl Turn {
         params.seat_system = Some(crate::units::business::prompt::api::Segment::ProxySystem);
         let member = crate::units::business::agentloop::api::MemberSpec {
             modules: &[],
-            sandbox: &sb,
+            bench: &sb,
             unavailable: BTreeMap::new(),
             mode: tool_mode,
             loop_id: &meta.spec.loop_id,

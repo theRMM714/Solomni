@@ -212,7 +212,7 @@ pub struct ToolFace {
     pub modules: BTreeMap<String, ModuleTools>,
 
     /// 目的：本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 runtime）。
-    pub sandbox: crate::units::business::workspace::api::Sandbox,
+    pub bench: crate::units::business::workbench::api::Bench,
     /// 目的：工具说明块的标题模板（来自提示词段 `tools_this_turn`；变量 `{{tools}}`）。
     /// 约束：只存指令模板；运行时回执由各自产生它们的代码返回。
     pub tools_this_turn: String,
@@ -264,12 +264,9 @@ pub(crate) struct MemberTools {
     pub exec: Arc<dyn crate::units::business::sandbox::api::Sandbox + Send + Sync>,
     /// 目的：常驻服务的统一管理面——模块的 `services` 操作经它调用（**不持它的端口**，R12）。
     pub residents: Arc<dyn crate::units::business::residents::api::ResidentOps + Send + Sync>,
-    /// 目的：工作区用例面——写工具落地后把沙箱改动记进**该 agent 的存档线**（**不持它的端口**，R12）。
+    /// 目的：版本库用例面——`work_*` 执行者按它造、写工具落地后的存档线也走它（**不持它的端口**，R12）。
     /// 约束：None = 这一席没有工作区（核心核实用途、部分测试装配）；有工作区的席位必须给 Some，
     ///   否则写入只落在沙箱、共享区永远不动（静默漏提交）。
-    pub workspace: Option<Arc<dyn crate::units::business::workspace::api::Workspace + Send + Sync>>,
-    /// 目的：版本库用例面——`work_*` 执行者按它造、写工具落地后的存档线也走它（**不持它的端口**，R12）。
-    /// 约束：与 `workspace` 同生同灭（有工作区就有它）。
     pub versions: Option<Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>>,
     /// 目的：本次会话的观察账本（哪些文件完整读过 / 由核心写过）：改动前的证据（见 crate::units::business::tools::api::Observations）。
     pub observations: crate::units::business::tools::api::Observations,
@@ -323,7 +320,7 @@ impl CoreVerify for MemberTools {
         args: &str,
     ) -> crate::units::business::tools::api::ToolOutcome {
         let done = self.tools.run_builtin(
-            &self.face.sandbox,
+            &self.face.bench,
             &self.face.builtin_tools,
             std::mem::take(&mut self.observations),
             None,
@@ -347,18 +344,17 @@ impl MemberTools {
         let next = super::assemble::assemble(super::assemble::FaceInput {
             loop_id,
             role,
-            agent: &self.face.sandbox.agent,
-            workspace_name: Some(self.face.sandbox.work_name.as_str()).filter(|n| !n.is_empty()),
+            agent: &self.face.bench.agent,
+            workspace_name: Some(self.face.bench.work_name.as_str()).filter(|n| !n.is_empty()),
             abilities: &self.face.abilities,
             profile: &self.face.profile,
             source_ids: &self.face.source_ids,
             system_tools: &self.face.system_tools,
             loops: Some(self.decls.loops()),
             modules: &self.modules,
-            sandbox: &self.face.sandbox,
+            bench: &self.face.bench,
             prompt: &*self.prompt,
             residents: &*self.residents,
-            workspace: self.workspace.as_ref(),
             versions: self.versions.as_ref(),
         });
         self.face.allowed = next.allowed;

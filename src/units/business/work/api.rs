@@ -10,7 +10,7 @@ use crate::kernel::ports::{HostProbe, Log};
 use crate::units::business::session_model::api::HistoryView;
 use crate::units::business::transcript::api::{OptionView, SessionEvent};
 use crate::units::business::vm::api::{ExecPlan, GuestStop, Vm};
-use crate::units::business::workspace::api::Sandboxes;
+use crate::units::business::workbench::api::Benches;
 use crate::units::pure::registry_model::api::AgentMeta;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -341,7 +341,7 @@ pub struct FilesView {
     pub agents: Vec<FilesAgentView>,
     pub roots: FilesRootsView,
     /// 目的：工作区用量（文件数与总字节）：删除前如实交代"还有多少东西会被一起删"。
-    pub usage: crate::units::business::workspace::api::WorkUsage,
+    pub usage: crate::units::business::workbench::api::WorkUsage,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -380,7 +380,7 @@ pub struct GuestBoot {
     /// 目的：这条会话要拉起的 guest 规格里与会话有关的那几项。
     pub(crate) net: bool,
     pub(crate) plan: ExecPlan,
-    pub(crate) sandboxes: Sandboxes,
+    pub(crate) sandboxes: Benches,
     /// 目的：拉起之前先停掉同一租约已有的 guest（改配要重建）。
     pub(crate) restart: bool,
 }

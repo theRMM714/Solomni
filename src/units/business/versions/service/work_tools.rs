@@ -10,7 +10,7 @@ use crate::units::business::versions::api as dw;
 use crate::units::business::versions::api::{
     CommitRequest, DiffRequest, ResetRequest, ResolveRequest, ResolveTake,
 };
-use crate::units::business::workspace::api::Sandbox;
+use crate::units::business::workbench::api::Bench;
 use crate::units::pure::permission::api::SharedScope;
 use std::sync::Arc;
 
@@ -412,7 +412,7 @@ fn commit_id(args: &serde_json::Value, key: &str) -> Result<Option<u64>, String>
 /// 参数：versions = 版本库用例面；sb = 这一席的沙箱；allowed = 席位面发放的工具 id。
 pub fn work_handlers(
     versions: &Arc<dyn dw::Versions + Send + Sync>,
-    sb: &Sandbox,
+    sb: &Bench,
     allowed: &[String],
 ) -> Vec<Arc<dyn ToolHandler>> {
     if !allowed.iter().any(|t| dw::is_work_tool(t)) {

@@ -1,21 +1,20 @@
-//! 目的：把「一席要什么」变成一份沙箱——沙箱清单的唯一构造点（工作台内部模型只在这里落值）。
-//! 管：`seat_sandboxes`（工作名 / 会话名 / 每席的私有根、模块目录、权限面与共享区归属）。
-//! 不管：这些事实从哪来（在 `turn` 取齐）、策略注册与布局（在 service 与 `Workdirs`）。
+//! 目的：把「一席要什么」变成一份工作面——工作面清单的唯一构造点（工作台形状只在这里落值）。
+//! 管：`seat_benches`（工作名 / 会话名 / 每席的私有根、模块目录、权限面与共享区归属）。
+//! 不管：工作面与寻址的**形状与语义**（环 2 契约单元 `workbench`）；这些事实从哪来（在 `turn` 取齐）；策略注册与布局（在 service 与 `Workdirs`）。
 //! 联动：`turn` 取好工作根与每席计划后转调；代理会话与普通会话走同一条路，不再各造一份。
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::kernel::ports::PathCodec;
-use crate::units::business::workspace::domain::path_filter::WORKIGNORE;
+use crate::units::business::workbench::api::{Bench, Benches, WORKIGNORE, WorkRoots};
 use crate::units::business::workspace::domain::scope::scope_from;
-use crate::units::business::workspace::domain::workspace::{Sandbox, Sandboxes, WorkRoots};
 use crate::units::pure::permission::api::PermissionSet;
-use std::collections::BTreeMap;
 
 /// 目的：一个可用的模块目录（由调用方从清单解析好，工作台不认识清单类型）。
 #[derive(Debug, Clone)]
 pub struct ModuleDir {
-    /// 目的：模块 id（沙箱按它登记源码目录）。
+    /// 目的：模块 id（工作面按它登记源码目录）。
     pub id: String,
     /// 目的：模块源码目录（只读可达）。
     pub root: std::path::PathBuf,
@@ -26,7 +25,7 @@ pub struct ModuleDir {
 /// 目的：一席要的东西：谁、用哪些模块、权限面、以及沿链的工作台声明（最外层是根）。
 #[derive(Debug, Clone)]
 pub struct SeatPlan {
-    /// 目的：agent 名（沙箱的主人）。
+    /// 目的：agent 名（工作面的主人）。
     pub agent: String,
     /// 目的：这一席用到的模块 id。
     pub modules: Vec<String>,
@@ -38,11 +37,11 @@ pub struct SeatPlan {
     pub private: Option<std::path::PathBuf>,
 }
 
-/// 目的：组装沙箱清单所需的已取事实。
+/// 目的：组装工作面清单所需的已取事实。
 pub struct SeatFacts<'a> {
     /// 目的：顶层工作名（整棵树只有一个 work/）。
     pub work: &'a str,
-    /// 目的：会话名（写进每份沙箱）。
+    /// 目的：会话名（写进每份工作面）。
     pub session: &'a str,
     /// 目的：工作区端口给出的根（共享区、会话根、每个 agent 的私有根）。
     pub roots: &'a WorkRoots,
@@ -54,16 +53,17 @@ pub struct SeatFacts<'a> {
     pub hard_deny: &'a [String],
     /// 目的：清单里可用的模块目录。
     pub modules: &'a [ModuleDir],
-    /// 目的：每席的计划（顺序即沙箱清单的顺序）。
+    /// 目的：每席的计划（顺序即工作面清单的顺序）。
     pub seats: &'a [SeatPlan],
 }
 
-/// 目的：按席位计划组装沙箱清单；模块目录只对使用它的 agent 可达。
+/// 目的：按席位计划组装工作面清单；模块目录只对使用它的 agent 可达。
 /// 参数：`facts` = 已取好的工作名、工作区根、模块目录与每席计划。
-/// 错误：工作区没给出某席的私有根时逐字报「工作区没有给出 agent {名} 的沙箱路径」；
+/// 返回：一次工作的 `Benches`（共享区根、会话根与每席一份 `Bench`）。
+/// 错误：工作区没给出某席的私有根时逐字报「工作区没有给出 agent {名} 的工作面路径」；
 ///   声明链算不出共享区归属时把错误原样透出。
-pub fn seat_sandboxes(facts: &SeatFacts<'_>) -> Result<Sandboxes, String> {
-    let mut list: Vec<Sandbox> = Vec::new();
+pub fn seat_benches(facts: &SeatFacts<'_>) -> Result<Benches, String> {
+    let mut list: Vec<Bench> = Vec::new();
     for seat in facts.seats {
         let private = match &seat.private {
             Some(p) => p.clone(),
@@ -72,7 +72,7 @@ pub fn seat_sandboxes(facts: &SeatFacts<'_>) -> Result<Sandboxes, String> {
                 .agents
                 .get(&seat.agent)
                 .cloned()
-                .ok_or_else(|| format!("工作区没有给出 agent {} 的沙箱路径", seat.agent))?,
+                .ok_or_else(|| format!("工作区没有给出 agent {} 的工作面路径", seat.agent))?,
         };
         let mut modules = BTreeMap::new();
         let mut module_data = BTreeMap::new();
@@ -85,7 +85,7 @@ pub fn seat_sandboxes(facts: &SeatFacts<'_>) -> Result<Sandboxes, String> {
             }
         }
         let scope = scope_from(&seat.params, facts.base_scope, facts.hard_deny)?;
-        list.push(Sandbox {
+        list.push(Bench {
             work_name: facts.work.to_string(),
             session: facts.session.to_string(),
             agent: seat.agent.clone(),
@@ -99,7 +99,7 @@ pub fn seat_sandboxes(facts: &SeatFacts<'_>) -> Result<Sandboxes, String> {
             filter_rules: facts.roots.store.join(WORKIGNORE),
         });
     }
-    Ok(Sandboxes {
+    Ok(Benches {
         shared: facts.roots.shared.clone(),
         session_root: facts.roots.session_root.clone(),
         list,

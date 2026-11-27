@@ -13,7 +13,7 @@
 - 管：围栏可达范围的派生（`src/units/business/tools/domain/fence.rs` 的 `for_call` / `for_session` / `standalone`），以及**一席的工具运行环境**（`src/units/business/tools/domain/env.rs` 的 `member_env`：围栏计划、模块变量、PATH 入口与工具链根）与宿主只读根的规整（`host_read_roots`：逐条去空白、丢掉空项，空白与空串不算根）。
 - 不管：不放领域语义（角色是会话的身份，不是业务概念）；不选模型；不碰会话流水。
 - 不管：不决定用户**授权**哪些主机只读根——名单来自设置里的 `sandbox.policy.host_read_roots`，本单元只把声明规整成路径并写进围栏计划。
-- 不管：沙箱怎么来（在 `workspace`，`api::seat_sandboxes` 是唯一构造点）；包事实以「包根 + PATH 入口」两个值进来，本单元不认识包计划类型。
+- 不管：沙箱怎么来（在 `workspace`，`api::seat_benches` 是唯一构造点）；包事实以「包根 + PATH 入口」两个值进来，本单元不认识包计划类型。
 
 ## 入站契约与状态归属
 

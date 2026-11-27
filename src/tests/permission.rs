@@ -6,7 +6,7 @@
 use crate::tests::doubles::{
     InMemoryWorkStore, InMemoryWorkspace, abs, test_sandbox, test_workspace, test_workspace_store,
 };
-use crate::units::business::workspace::domain::workspace::Place;
+use crate::units::business::workbench::api::Area;
 use crate::units::pure::permission::api::{
     PermissionDefaults, PermissionLayer, PermissionOverride, PermissionSet, ProfileId,
 };
@@ -109,18 +109,15 @@ fn sandbox_places_are_fixed_except_the_shared_scope() {
     let mut sb = test_sandbox("a1", &["data"]);
     let shared = sb.shared.clone();
     let module = sb.modules.get("data").expect("模块目录").clone();
-    assert!(sb.can_read(&Place::Shared, &shared.join("docs").join("x")));
+    assert!(sb.can_read(&Area::Shared, &shared.join("docs").join("x")));
     assert!(
-        !sb.can_write(&Place::Shared),
+        !sb.can_write(&Area::Shared),
         "共享区主副本永不被直接写：改动经 work_commit"
     );
-    assert!(sb.can_write(&Place::Private), "沙箱恒可写");
-    assert!(sb.can_read(
-        &Place::Module("data".to_string()),
-        &module.join("script.py")
-    ));
+    assert!(sb.can_write(&Area::Private), "沙箱恒可写");
+    assert!(sb.can_read(&Area::Module("data".to_string()), &module.join("script.py")));
     assert!(
-        !sb.can_write(&Place::Module("data".to_string())),
+        !sb.can_write(&Area::Module("data".to_string())),
         "模块目录对 agent 整块只读（userdata 只给模块进程自己）"
     );
 
@@ -130,11 +127,11 @@ fn sandbox_places_are_fixed_except_the_shared_scope() {
         write: ScopeMode::All,
         deny: paths(&["docs/secret.txt"]),
     };
-    assert!(sb.can_read(&Place::Shared, &shared.join("docs").join("x")));
-    assert!(!sb.can_read(&Place::Shared, &shared.join("src").join("x")));
-    assert!(!sb.can_read(&Place::Shared, &shared.join("docs").join("secret.txt")));
+    assert!(sb.can_read(&Area::Shared, &shared.join("docs").join("x")));
+    assert!(!sb.can_read(&Area::Shared, &shared.join("src").join("x")));
+    assert!(!sb.can_read(&Area::Shared, &shared.join("docs").join("secret.txt")));
     sb.scope.read = ScopeMode::None;
-    assert!(!sb.can_read(&Place::Shared, &shared.join("docs").join("x")));
+    assert!(!sb.can_read(&Area::Shared, &shared.join("docs").join("x")));
 }
 
 /// 目的：围栏按固定规则推——私有区 + 模块私有区可写，模块源码目录只读，共享区永不进围栏。
@@ -206,7 +203,7 @@ fn external_shared_root_is_not_a_shell_write_surface() {
         "按次围栏不含共享根：{:?}",
         call.write_roots()
     );
-    assert!(!sb.can_write(&Place::Shared));
+    assert!(!sb.can_write(&Area::Shared));
 }
 
 /// 目的：work_status 的路径清单按读归属过滤，显式越界路径直接拒绝。

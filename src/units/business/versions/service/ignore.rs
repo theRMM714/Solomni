@@ -1,6 +1,6 @@
 //! 目的：`work_ignore` 用例——读写本工作的 `.workignore`（工作区过滤的唯一名单）。
 //! 管：op 分派（list / add / remove）、规则校验、行数与字节上限、改完的原子写回。
-//! 不管：规则语义与匹配（`domain::path_filter`）；工具参数与权限收口（`tools` 的工作区工具执行者）。
+//! 不管：规则语义与匹配（`workbench` 的 `domain/filter.rs`）；工具参数与权限收口（`tools` 的工作区工具执行者）。
 //! 联动：内容面（导入 / 未跟踪清单 / 提交展开）与检索面（grep）读同一份文件；`.gitignore` 不在这里改。
 
 use super::*;
@@ -22,7 +22,7 @@ impl VersionService {
         patterns: &[String],
     ) -> Result<IgnoreReport, String> {
         let (_, store) = self.work_roots(work)?;
-        let path = store.join(path_filter::WORKIGNORE);
+        let path = store.join(filter::WORKIGNORE);
         let mut lines: Vec<String> = self
             .work_rules(&store)?
             .lines()
@@ -40,7 +40,7 @@ impl VersionService {
                     return Err("add 要给至少一条规则（patterns）".to_string());
                 }
                 for p in patterns {
-                    path_filter::check_rule(p)?;
+                    filter::check_rule(p)?;
                     let rule = p.trim();
                     if lines.iter().any(|line| line.trim() == rule) {
                         continue;
@@ -67,22 +67,22 @@ impl VersionService {
 
         if op != LIST {
             let text = join_rules(&lines);
-            if text.len() > path_filter::MAX_RULE_BYTES {
+            if text.len() > filter::MAX_RULE_BYTES {
                 return Err(format!(
                     "过滤名单太长（{} 字节，上限 {}）：规则只放「不算工作区内容」的短名单",
                     text.len(),
-                    path_filter::MAX_RULE_BYTES
+                    filter::MAX_RULE_BYTES
                 ));
             }
-            if lines.len() > path_filter::MAX_RULE_LINES {
+            if lines.len() > filter::MAX_RULE_LINES {
                 return Err(format!(
                     "过滤名单行数太多（{} 行，上限 {}）",
                     lines.len(),
-                    path_filter::MAX_RULE_LINES
+                    filter::MAX_RULE_LINES
                 ));
             }
             // 语法校验：坏一行就整次拒绝——grep 与导入都按这份规则跑，不能留半份坏规则。
-            path_filter::Rules::compile(&store, &text)?;
+            filter::Rules::compile(&store, &text)?;
             // 同一个工作的规则写入串行：进程内闸 + 版本库跨进程锁，避免两个 agent 互相覆盖。
             let gate = self.gate(work);
             let _guard = gate.lock().unwrap_or_else(|e| e.into_inner());

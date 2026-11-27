@@ -10,7 +10,7 @@ use crate::units::business::llm::api::Channel;
 use crate::units::business::session_model::api::{AskDesk, SessionDecls, SessionMeta};
 use crate::units::business::turn_state::domain::flow::Flow;
 use crate::units::business::turn_state::domain::sequence::Sequence;
-use crate::units::business::workspace::api::Sandboxes;
+use crate::units::business::workbench::api::Benches;
 use crate::units::pure::registry_model::api::AgentMeta;
 
 /// 目的：造一段流程要的现场（每一段按 id 自己取用，本段不用的部分不消费）。
@@ -24,7 +24,7 @@ pub struct FlowSetup<'a> {
     /// 目的：是否代拟（显式传入，不从名单是否为空推断）。
     pub delegated: bool,
     /// 目的：本工作的沙箱清单（流程按 agent 名取）。
-    pub sandboxes: Sandboxes,
+    pub sandboxes: Benches,
     /// 目的：本会话的裁决通道**发起面**（各段共用同一条队的挂起口）。
     pub ask: Arc<dyn AskDesk>,
     /// 目的：重建现场：`Some` 就从转录恢复那一段，`None` 就是新建。

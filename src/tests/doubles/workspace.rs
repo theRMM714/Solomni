@@ -63,7 +63,7 @@ impl Workdirs for InMemoryWorkspace {
         &self,
         session: &str,
         agents: &[String],
-    ) -> Result<crate::units::business::workspace::api::WorkRoots, String> {
+    ) -> Result<crate::units::business::workbench::api::WorkRoots, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -72,7 +72,7 @@ impl Workdirs for InMemoryWorkspace {
         for a in agents {
             map.insert(a.clone(), abs(&[session, a]));
         }
-        Ok(crate::units::business::workspace::api::WorkRoots {
+        Ok(crate::units::business::workbench::api::WorkRoots {
             shared: abs(&[session, "work"]),
             session_root: abs(&[session]),
             agents: map,
@@ -99,7 +99,7 @@ impl Workdirs for InMemoryWorkspace {
         &self,
         session: &str,
         agents: &[String],
-    ) -> Result<crate::units::business::workspace::api::WorkFiles, String> {
+    ) -> Result<crate::units::business::workbench::api::WorkFiles, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -119,18 +119,18 @@ impl Workdirs for InMemoryWorkspace {
             got.sort();
             map.insert(a.clone(), got);
         }
-        Ok(crate::units::business::workspace::api::WorkFiles { work, agents: map })
+        Ok(crate::units::business::workbench::api::WorkFiles { work, agents: map })
     }
 
     fn usage(
         &self,
         session: &str,
         agents: &[String],
-    ) -> Result<crate::units::business::workspace::api::WorkUsage, String> {
+    ) -> Result<crate::units::business::workbench::api::WorkUsage, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
-        use crate::units::business::workspace::api::AreaUsage;
+        use crate::units::business::workbench::api::AreaUsage;
         let files = self.files.lock().expect("锁");
         let area = |prefix: &str| -> AreaUsage {
             let mut out = AreaUsage::default();
@@ -147,7 +147,7 @@ impl Workdirs for InMemoryWorkspace {
         for a in agents {
             map.insert(a.clone(), area(&format!("{}/{}/", session, a)));
         }
-        Ok(crate::units::business::workspace::api::WorkUsage::total(
+        Ok(crate::units::business::workbench::api::WorkUsage::total(
             work, map,
         ))
     }
@@ -323,7 +323,7 @@ impl WorkStore for InMemoryWorkStore {
             return Err(m.clone());
         }
         let rules =
-            crate::units::business::workspace::api::Rules::compile(root, rules.unwrap_or(""))?;
+            crate::units::business::workbench::api::Rules::compile(root, rules.unwrap_or(""))?;
         let mut out = self.list(root)?;
         out.retain(|rel| !rules.is_ignored(rel, false));
         Ok(out)

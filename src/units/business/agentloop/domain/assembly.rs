@@ -22,7 +22,7 @@ use crate::units::business::sandbox::api::GuestOs;
 use crate::units::business::tools::api::{ObservationFact, Observations};
 use crate::units::business::transcript::api::{ContextUsage, SessionEvent};
 use crate::units::business::versions::api::ReadFact;
-use crate::units::business::workspace::api::Sandbox;
+use crate::units::business::workbench::api::Bench;
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::pure::registry_model::api::ToolMode;
 
@@ -46,7 +46,7 @@ pub struct MemberSpec<'a> {
     /// 目的：这一席挂的模块（工具表与隐私注入项按它算）。
     pub modules: &'a [Module],
     /// 目的：这一席的沙箱（工作名、agent 实例名与生效权限）。
-    pub sandbox: &'a Sandbox,
+    pub bench: &'a Bench,
     /// 目的：本档位下缺运行包、不能执行工具的模块（机制侧据此拒绝执行）。
     pub unavailable: BTreeMap<String, Vec<String>>,
     /// 目的：工具形态（原生 / 信封）。
@@ -155,7 +155,7 @@ fn open_exec(
         ports
             .policies
             .open(&crate::units::business::sandbox::api::OpenRequest {
-                session: &spec.sandbox.session,
+                session: &spec.bench.session,
                 lease: spec.lease,
                 decl: spec.decl,
                 facts: &facts,
@@ -167,7 +167,7 @@ fn open_exec(
 
 /// 目的：装配一席的工具环境：把席位声明与端口面交给**会话唯一的装配机**（`domain::assemble`），再包成活的工具面对象。
 pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools {
-    let sb = spec.sandbox;
+    let sb = spec.bench;
     let seat = assemble_face(FaceInput {
         loop_id: spec.loop_id,
         role: spec.role,
@@ -179,17 +179,16 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
         system_tools: spec.system_tools,
         loops: Some(ports.decls.loops()),
         modules: spec.modules,
-        sandbox: sb,
+        bench: sb,
         prompt: &*ports.prompt,
         residents: &*ports.residents,
-        workspace: Some(&ports.workspace),
         versions: Some(&ports.versions),
     });
     MemberTools {
         face: ToolFace {
             mode: spec.mode,
             modules: seat.modules,
-            sandbox: sb.clone(),
+            bench: sb.clone(),
             tools_this_turn: ports.prompt.text(Segment::ToolsThisTurn).to_string(),
             builtin_tools: ports.systools.book(),
             unavailable: spec.unavailable.clone(),
@@ -215,7 +214,6 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
         // 执行面：按这一会话的声明开一个句柄（本机 / 虚拟机都是同一个端口，引擎只认它）。
         exec: open_exec(ports, spec), // 常驻服务的统一管理面：模块的 services 操作经它调用。
         residents: Arc::clone(&ports.residents),
-        workspace: Some(Arc::clone(&ports.workspace)),
         versions: Some(Arc::clone(&ports.versions)),
         observations: Observations::default(),
         shell_live: Some(Arc::clone(&spec.shell)),
@@ -263,7 +261,7 @@ pub fn single_session(
     // **会话参数**：身份块每回合由它现渲染（不存进消息列表）。
     let params = SessionParams::from_workspace(
         &a.name,
-        spec.member.sandbox,
+        spec.member.bench,
         spec.member.modules,
         spec.member.loop_id,
         spec.member.role,

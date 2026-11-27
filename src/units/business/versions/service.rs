@@ -15,8 +15,8 @@ use crate::units::business::versions::domain::workstore::{
     pull_verdict, split_backup, status_of, validate_paths,
 };
 use crate::units::business::versions::ports::WorkStore;
+use crate::units::business::workbench::api::filter;
 use crate::units::business::workspace::api::Workspace;
-use crate::units::business::workspace::api::path_filter;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -127,8 +127,8 @@ impl VersionService {
     fn work_rules(&self, store: &Path) -> Result<String, String> {
         Ok(self
             .store
-            .read_text(&store.join(path_filter::WORKIGNORE))?
-            .unwrap_or_else(|| path_filter::WORKIGNORE_SEED.to_string()))
+            .read_text(&store.join(filter::WORKIGNORE))?
+            .unwrap_or_else(|| filter::WORKIGNORE_SEED.to_string()))
     }
 
     /// 目的：一个沙箱里「算工作区内容」的文件清单（与导入用同一份 `.workignore` 剪枝）。

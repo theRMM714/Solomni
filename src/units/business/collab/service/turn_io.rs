@@ -85,7 +85,7 @@ impl CollabSession {
         let sb = self.sandboxes.list.first()?;
         crate::units::business::agentloop::api::verify_tools(
             &crate::units::business::agentloop::api::VerifySpec {
-                sandbox: sb,
+                bench: sb,
                 seat,
                 mode: self.core_mode,
                 net: self.settings.app.sandbox.policy.network,
@@ -120,7 +120,7 @@ impl CollabSession {
     /// 目的：回答请教那一关：用户的话进主会话（所有成员下一回合都看得到），接着往下推。
     /// 约束：那一关已由队列出队——这里只管"他的话怎么进业务"，不碰队列。
     pub(crate) fn answer(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
-        let roots = self.sandboxes.ref_roots();
+        let roots = crate::units::business::workspace::api::ref_roots(&self.sandboxes);
         let text = crate::units::business::prompt::api::rewrite(text, None, &roots);
         if let Some(disc) = self.disc.as_mut() {
             disc.pending_user_answers.push(text);
@@ -276,7 +276,7 @@ impl CollabSession {
         if text.is_empty() {
             return;
         }
-        let roots = self.sandboxes.ref_roots();
+        let roots = crate::units::business::workspace::api::ref_roots(&self.sandboxes);
         let text = crate::units::business::prompt::api::rewrite(text, None, &roots);
         let line = self.view(LineView::user("", text));
         sink(SessionEvent::Transcript(vec![line]));

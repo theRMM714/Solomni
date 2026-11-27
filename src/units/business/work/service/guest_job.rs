@@ -10,7 +10,7 @@ use crate::units::business::vm::api::{
     ExecPlan, GuestDiagnosis, GuestRun, GuestSpec, Vm, admit_guest, classify_base, mounts_from,
     package_setup_scripts, resolve_guest,
 };
-use crate::units::business::workspace::api::Sandboxes;
+use crate::units::business::workbench::api::Benches;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -32,7 +32,7 @@ impl GuestBoot {
         lease: String,
         net: bool,
         plan: ExecPlan,
-        sandboxes: Sandboxes,
+        sandboxes: Benches,
         restart: bool,
     ) -> GuestBoot {
         GuestBoot {
@@ -171,7 +171,7 @@ impl GuestBoot {
 ///   与模块根（含 userdata）。
 /// 约束：这里只给"可见范围"，不表达某个 agent 的权限；per-agent 允许集由当次 GuestAccess 决定。
 ///   内部布局下 shared 在会话树内，不重复挂；外部绑定下两者互不包含（绑定校验保证），各挂一条。
-pub(crate) fn stable_roots(sandboxes: &Sandboxes) -> (Vec<PathBuf>, Vec<PathBuf>) {
+pub(crate) fn stable_roots(sandboxes: &Benches) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let mut rw: Vec<PathBuf> = Vec::new();
     if !sandboxes.session_root.as_os_str().is_empty() {
         rw.push(sandboxes.session_root.clone());
@@ -209,7 +209,7 @@ pub(crate) fn stable_roots(sandboxes: &Sandboxes) -> (Vec<PathBuf>, Vec<PathBuf>
 /// 约束：能往返的根才能挂（UNC 有单射编码，Windows 虚拟机档因此支持网络工作区）；卷 GUID 与非 UTF-8
 ///   表示不了，这里显式拒绝——不让它变成"guest 起来了、每次工具调用一条 fail-closed 诊断"。
 pub(crate) fn check_stable_roots(
-    sandboxes: &Sandboxes,
+    sandboxes: &Benches,
     bridge: &crate::units::business::vm::api::PathBridge,
 ) -> Result<(), String> {
     let root = &sandboxes.session_root;

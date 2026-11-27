@@ -270,7 +270,7 @@ pub trait ToolExec: Send + Sync {
     #[allow(clippy::too_many_arguments)]
     fn run_builtin(
         &self,
-        sb: &crate::units::business::workspace::api::Sandbox,
+        sb: &crate::units::business::workbench::api::Bench,
         builtin_tools: &ToolBook,
         observations: Observations,
         gate: Option<&dyn WriteGate>,

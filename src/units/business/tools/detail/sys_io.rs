@@ -10,7 +10,7 @@ use crate::units::business::tools::ports::{
     DirEntry, Expect, FilePage, FileRead, MAX_SCAN_LINE_BYTES, Mutation, ScanSummary, SysIo,
     WalkEntry, WalkOpts, WriteFault, WriteOp, WriteReceipt,
 };
-use crate::units::business::workspace::api::Rules;
+use crate::units::business::workbench::api::Rules;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::io::{Read, Write};

@@ -12,7 +12,7 @@ use crate::units::business::llm::api::{CompleteOpts, Msg};
 use crate::units::business::session_model::api::Artifact;
 use crate::units::business::transcript::api::SessionEvent;
 use crate::units::business::turn_state::domain::decisions::GateTicket;
-use crate::units::business::workspace::api::Sandboxes;
+use crate::units::business::workbench::api::Benches;
 use crate::units::pure::registry_model::api::AgentMeta;
 
 /// 目的：一回合的身份：坐在哪个流程段、扮演哪个角色（工具面与身份块都按它现拼）。
@@ -191,7 +191,7 @@ pub trait Flow: Send {
         text.to_string()
     }
     /// 目的：沙箱清单换成这一份（名单落定后由驱动通知；默认什么都不做）。
-    fn set_sandboxes(&mut self, sandboxes: Sandboxes) {
+    fn set_sandboxes(&mut self, sandboxes: Benches) {
         let _ = sandboxes;
     }
     /// 目的：整场工作的下一个回合号（子会话的回合标记读它；默认 0 = 本流程不自增）。

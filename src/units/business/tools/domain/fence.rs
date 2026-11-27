@@ -5,7 +5,7 @@
 
 use crate::kernel::api::fence::{Access, FenceBlocked, FencePlan, Grant, NetPolicy, Reach};
 use crate::kernel::api::types::Ask;
-use crate::units::business::workspace::api::Sandbox;
+use crate::units::business::workbench::api::Bench;
 use std::path::{Path, PathBuf};
 
 impl FencePlan {
@@ -13,7 +13,7 @@ impl FencePlan {
     /// 约束：授予是固定的——私有沙箱恒可写（`home` 隐含）、模块目录恒递归只读、主机只读根恒单层只读、
     ///   共享区永不进授予（提交走 work_commit）；唯一随调用变的是"这次调的是哪个模块"
     ///   （该模块自己的 userdata 加进可写）与全局网络开关。
-    pub fn for_call(sb: &Sandbox, module: Option<&str>, base: &FencePlan) -> FencePlan {
+    pub fn for_call(sb: &Bench, module: Option<&str>, base: &FencePlan) -> FencePlan {
         let mut plan = FencePlan {
             agent: sb.agent.clone(),
             lease: sb.session.clone(),
@@ -38,7 +38,7 @@ impl FencePlan {
     }
 
     /// 目的：为一个会话派生**并集围栏**——覆盖它可能签发过的全部落点，用于撤销持久授权与生命周期。
-    pub fn for_session(sb: &Sandbox, host_roots: &[PathBuf], global_net: bool) -> FencePlan {
+    pub fn for_session(sb: &Bench, host_roots: &[PathBuf], global_net: bool) -> FencePlan {
         let mut plan = FencePlan {
             agent: sb.agent.clone(),
             lease: sb.session.clone(),

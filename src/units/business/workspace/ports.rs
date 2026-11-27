@@ -1,9 +1,9 @@
 //! 目的：工作区的**出站端口**——目录布局（机制在适配层）。
 //! 管：`Workdirs`（一次工作的 work 目录与各 agent 沙箱）。
-//! 不管：路径拼接与越界判定的纯规则（在 `domain/workspace.rs`）；版本化落盘（在 `versions` 单元）。
+//! 不管：路径拼接与越界判定的纯规则（在 `workbench` 的 `bench.rs`）；版本化落盘（在 `versions` 单元）。
 //! 联动：本端口只由 `service.rs` 持有（R12）；实现见 `detail/fs_workspace.rs`。
 
-use crate::units::business::workspace::domain::workspace::{WorkFiles, WorkRoots, WorkUsage};
+use crate::units::business::workbench::api::{WorkFiles, WorkRoots, WorkUsage};
 use std::path::Path;
 
 /// 目的：工作区**目录布局**端口——一次工作的 work 目录与各 agent 沙箱（机制在适配层）。

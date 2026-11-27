@@ -137,7 +137,7 @@ pub(crate) struct PendingWork {
     delegate: bool,
     name: String,
     agent_names: Vec<String>,
-    sandboxes: crate::units::business::workspace::api::Sandboxes,
+    sandboxes: crate::units::business::workbench::api::Benches,
     /// 每个 agent 已解析好的通道（提交段直接装配，不再可能因"没模型"失败）。
     channels: BTreeMap<String, Channel>,
     /// 协作会话核心自己的通道（协作必须有；单 agent 未用核心默认时为空）。

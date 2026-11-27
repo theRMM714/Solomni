@@ -1,29 +1,17 @@
 //! 目的：工作区单元的入站面——其它单元与呈现层只准用这里（不许碰 `domain` / `ports`）。
-//! 管：`Workspace` 用例 trait（目录布局与文件寻址）与它的视图类型；共享区归属规则与过滤名单的重导出。
-//! 不管：版本化用例（在 `versions` 单元的 `api`）；用例实现（在 `service/`）；落盘机制（在 `detail/`）。
-//! 联动：实现见 `service.rs`；`versions` 借本面问"在哪儿"，`tools` 借 `Sandbox` / `Place` 定位读写落点。
+//! 管：`Workspace` 用例 trait（目录布局与文件寻址）、席位工作面的组装（`seat_benches` 与它的参数对象）、
+//!   共享区归属规则（`edit_of` / `edit_params` / `scope_from`）、@ 改写用的引用根（`ref_roots`）、外部根策略（`roots`）。
+//! 不管：工作面本身的形状与寻址语义（环 2 契约单元 `workbench`）；版本化用例（`versions`）；落盘机制（`detail/`）。
+//! 联动：实现见 `service.rs`；`tools` / `agentloop` 只认 `workbench` 的形状，`turn` 用本面组装席位工作面。
 
-/// 目的：工作区过滤的唯一名单与匹配规则——`tools` 的 grep 与内容面的导入 / 清单都只从这里取。
-#[allow(unused_imports)] // 入站面：规则类型给调用方与测试取用
-pub use crate::units::business::workspace::domain::path_filter;
-#[allow(unused_imports)] // 入站面：规则类型给调用方与测试取用
-pub use crate::units::business::workspace::domain::path_filter::{
-    MAX_RULE_BYTES, MAX_RULE_CHARS, MAX_RULE_LINES, Rules, WORKIGNORE, WORKIGNORE_SEED, check_rule,
-};
-
-/// 目的：把会话落盘的策略参数解释成生效归属——值类型与规则在 \`permission\`，参数形状只在本单元解释。
+/// 目的：把会话落盘的策略参数解释成生效归属——值类型与规则在 `permission`，参数形状只在本单元解释。
 #[allow(unused_imports)] // 入站面：参数函数给调用方与测试取用
 pub use crate::units::business::workspace::domain::scope::{edit_of, edit_params, scope_from};
 
-/// 目的：版本库共享类型（提交 / 拉取 / 推送 / 状态 / 差异 / 回退）——`tools`、呈现层与测试只从这里取。
-/// 约束：`WorkState` 等类型只在测试与呈现层命名，本 crate 的实现不直接用，故整组允许未使用告警。
-#[allow(unused_imports)]
+/// 目的：席位工作面的组装入口与它的参数对象——`turn` 取好事实后转调，工作面清单的唯一构造点。
+#[allow(unused_imports)] // 入站面：组装函数给调用方与测试取用
 pub use crate::units::business::workspace::domain::seats::{
-    ModuleDir, SeatFacts, SeatPlan, seat_sandboxes,
-};
-
-pub use crate::units::business::workspace::domain::workspace::{
-    AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage, safe_file_name,
+    ModuleDir, SeatFacts, SeatPlan, seat_benches,
 };
 
 /// 目的：外部工作区根的策略（判定 / 创建校验 / 加载复检）——`runtime` 建会话与重开时只经这里取。
@@ -31,6 +19,19 @@ pub use crate::units::business::workspace::domain::workspace::{
 pub use crate::units::business::workspace::service::roots::{
     ambient, policy, product_root, recheck, resolve,
 };
+
+/// 目的：用户输入里 @ 引用要的根（共享区 + 本会话的路径翻译器）——协作 / 主持人的话用它改写。
+/// 参数：`boxes` = 这次工作的席位工作面清单。
+/// 约束：private 恒为 None——这些入口没有"自己的沙箱"（与说话人无关的共读文本）。
+pub fn ref_roots(
+    boxes: &crate::units::business::workbench::api::Benches,
+) -> crate::units::business::prompt::api::RefRoots {
+    crate::units::business::prompt::api::RefRoots {
+        work: boxes.shared.clone(),
+        private: None,
+        path_codec: boxes.codec.clone(),
+    }
+}
 
 /// 目的：工作区的**用例面**（`service.rs` 实现）：目录布局与文件寻址，走这里。
 /// 约束：出站端口（`Workdirs`）**只由它持有**（R12）；版本化用例在 `versions::api::Versions`。
@@ -47,11 +48,23 @@ pub trait Workspace: Send + Sync {
     /// work/ 下是否已有同名文件（上传同名冲突判定）。
     fn work_has(&self, session: &str, name: &str) -> bool;
     /// 列出本工作可引用的文件（work/ 与各 agent 沙箱；相对路径、/ 分隔、排序稳定）。
-    fn files(&self, session: &str, agents: &[String]) -> Result<WorkFiles, String>;
+    fn files(
+        &self,
+        session: &str,
+        agents: &[String],
+    ) -> Result<crate::units::business::workbench::api::WorkFiles, String>;
     /// 统计工作区用量（共享区 + 各 agent 沙箱的文件数与总字节）：删除前如实交代用。
-    fn usage(&self, session: &str, agents: &[String]) -> Result<WorkUsage, String>;
-    /// 沙箱寻址根（work 与各 agent 私有区）：布局机制在适配层，拼接与越界校验在本单元。
-    fn roots(&self, session: &str, agents: &[String]) -> Result<WorkRoots, String>;
+    fn usage(
+        &self,
+        session: &str,
+        agents: &[String],
+    ) -> Result<crate::units::business::workbench::api::WorkUsage, String>;
+    /// 沙箱寻址根（work 与各 agent 私有区）：布局机制在适配层，拼接与越界校验在工作台契约单元。
+    fn roots(
+        &self,
+        session: &str,
+        agents: &[String],
+    ) -> Result<crate::units::business::workbench::api::WorkRoots, String>;
 
     /// 目的：该会话是否绑定了外部工作区（只读布局投影）。
     fn is_external(&self, session: &str) -> bool;

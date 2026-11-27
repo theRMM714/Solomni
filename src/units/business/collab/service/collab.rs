@@ -17,7 +17,7 @@ use crate::units::business::prompt::api::{Prompt, Segment};
 use crate::units::business::session_model::api::AskDesk;
 use crate::units::business::tools::api::ToolExec;
 use crate::units::business::transcript::api::{LineView, SessionEvent};
-use crate::units::business::workspace::api::Sandboxes;
+use crate::units::business::workbench::api::Benches;
 use crate::units::pure::registry_model::api::AgentMeta;
 use std::sync::Arc;
 
@@ -148,7 +148,7 @@ pub struct CollabSession {
     /// 目的：运行日志（工具循环里"输出被长度截断"这类事实落盘）。
     pub(crate) log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
     /// 目的：本工作的沙箱清单（按 agent 实例名取）。
-    pub(crate) sandboxes: Sandboxes,
+    pub(crate) sandboxes: Benches,
     pub(crate) done: bool,
     /// 目的：「停止」标志：由 Handle 在派发时把任务登记处的取消标志注入（见 set_cancel）。
     pub(crate) cancel: Arc<std::sync::atomic::AtomicBool>,
@@ -179,7 +179,7 @@ impl CollabSession {
         log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
         roster: Vec<AgentMeta>,
         delegated: bool,
-        sandboxes: Sandboxes,
+        sandboxes: Benches,
         // 这一段跑讨论还是执行（装配期按会话类型表里的流程序列各造一份）。
         phase: Phase,
         // 本会话的裁决队（核心按会话 id 给）。
@@ -529,7 +529,7 @@ impl CollabSession {
     }
 
     /// 目的：代拟确认后由 Core 补上沙箱清单（名单刚定下来时才有）。
-    pub fn set_sandboxes(&mut self, sandboxes: Sandboxes) {
+    pub fn set_sandboxes(&mut self, sandboxes: Benches) {
         self.sandboxes = sandboxes;
     }
 
@@ -565,7 +565,7 @@ impl CollabSession {
     /// 目的：只把新需求按本会话环境改写（@ 引用按沙箱清单翻译），不落行、不重开门。
     /// 约束：行由 Core 统一替换/追加（改需求要连旧行一起清掉，见 `update_task_outcome`）。
     pub(crate) fn retask_text(&self, task: &str) -> String {
-        let roots = self.sandboxes.ref_roots();
+        let roots = crate::units::business::workspace::api::ref_roots(&self.sandboxes);
         crate::units::business::prompt::api::rewrite(task, None, &roots)
     }
 
@@ -573,7 +573,7 @@ impl CollabSession {
     ///   协作里用户不属任何 agent 的沙箱：@ 引用按 speaker = None 改写（共读同一段文字）。
     pub fn set_task(&mut self, task: &str, sink: &mut dyn FnMut(SessionEvent)) {
         // 写法按本会话环境给（虚拟机档 = guest 写法，模块工具直接能用）：翻译器在沙箱清单里。
-        let roots = self.sandboxes.ref_roots();
+        let roots = crate::units::business::workspace::api::ref_roots(&self.sandboxes);
         let task = crate::units::business::prompt::api::rewrite(task, None, &roots);
         if task.trim().is_empty() {
             self.notice("[取消] 需求为空", sink);

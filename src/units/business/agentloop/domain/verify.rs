@@ -13,13 +13,13 @@ use crate::units::business::llm::api::Llm;
 use crate::units::business::prompt::api::Prompt;
 use crate::units::business::session_model::api::{FS_READ, SOURCE_AGENT};
 use crate::units::business::tools::api::{Observations, ToolBook, ToolExec};
-use crate::units::business::workspace::api::Sandbox;
+use crate::units::business::workbench::api::Bench;
 use crate::units::pure::registry_model::api::ToolMode;
 
 /// 目的：装配核心核实环境所需的全部事实与端口：沙箱、席位、通道形态、网络、工具总表、说明块素材与四个端口。
 pub struct VerifySpec<'a> {
     /// 目的：这一场工作的沙箱（调用方给 `sandboxes.list.first()`）；核实的根是它的共享区。
-    pub sandbox: &'a Sandbox,
+    pub bench: &'a Bench,
     /// 目的：这一席的席位 id（机制声明的席位）：只发它名下的工具。
     pub seat: &'a str,
     /// 目的：核心通道的工具调用形态（原生才声明工具；信封通道看提示词里的说明）。
@@ -45,7 +45,7 @@ pub struct VerifySpec<'a> {
 /// 目的：装配核心核实环境：沙箱改成"核心"（共享区当私有区、没有模块），工具面只发只读核实工具。
 ///   没有它，核心操作（出方案 / 节点验收…）一想核实就被判"没调用 X"而整步中断。
 pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
-    let mut sb = spec.sandbox.clone();
+    let mut sb = spec.bench.clone();
     sb.agent = "核心".to_string();
     sb.private = sb.shared.clone();
     sb.modules.clear();
@@ -67,10 +67,9 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
         // 核心核实不查段表（只挂 agent 来源）。
         loops: None,
         modules: &[],
-        sandbox: &sb,
+        bench: &sb,
         prompt: &*spec.prompt,
         residents: &residents,
-        workspace: None,
         versions: None,
     });
     Some(Box::new(MemberTools {
@@ -79,7 +78,7 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
             loop_id: String::new(),
             role: seat.role,
             modules: seat.modules,
-            sandbox: sb.clone(),
+            bench: sb.clone(),
             tools_this_turn: spec.tools_this_turn.to_string(),
             builtin_tools: book,
             unavailable: std::collections::BTreeMap::new(),
@@ -101,7 +100,6 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
         exec: Arc::clone(&spec.exec),
         residents: Arc::new(crate::units::business::residents::api::NoResidents),
         // 核心核实的工具面只读：没有共享区提交这回事。
-        workspace: None,
         versions: None,
         observations: Observations::default(),
         shell_live: None,

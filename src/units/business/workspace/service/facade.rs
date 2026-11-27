@@ -4,7 +4,8 @@
 //! 联动：`api::Workspace` 的唯一实现就是本文件；组合根注入 `FsWorkspace`。
 
 use super::*;
-use crate::units::business::workspace::api::{WorkFiles, WorkRoots, WorkUsage, Workspace};
+use crate::units::business::workbench::api::{WorkFiles, WorkRoots, WorkUsage};
+use crate::units::business::workspace::api::Workspace;
 use std::path::Path;
 
 impl Workspace for WorkspaceService {
