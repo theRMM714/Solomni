@@ -1,5 +1,5 @@
 # 会话类型表：一个会话类型就是一串要跑的流程段；每段要哪些角色、要几个人、发哪些机制动作，由段自己报
-# （src/units/business/session_model/domain/mechanism.rs 的 LOOPS）。
+# （systools/loops.yaml；跨表校验在 src/units/business/session_model/domain/decls.rs）。
 # id = 命令与落盘用（只写 ASCII，CLI 里好敲）；name = 界面渲染用（侧栏、向导直接显示它）。
 # 装配期会校验：id 唯一且无空白、流程段已注册且不重复、没有流程的类型要有静止段。
 # flows 为空 = 没有流程，直接轮循环（单机与代理就是这样），这时 loop 是它的静止段。

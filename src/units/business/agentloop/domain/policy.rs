@@ -1,13 +1,11 @@
 //! 目的：工具调用的授权端口——「这一刻准不准调」，与「在不在场」（来源各自交 id）分开。
 //! 管：`Policy` 端口、默认实现 `LoopPolicy`（按流程段的抑制表判）与能力组到工具 id 的映射。
 //! 不管：工具面怎么合成（`assemble`）、工具形状（`tools` 总表）、沙箱档位（`permission`）。
-//! 联动：`MemberTools` 在装配时注入它（`default_policy`）；引擎每次调用前问它（`src/units/business/agentloop/engine/tools.rs`）。
+//! 联动：装配时按当前段拍平成值注入 `MemberTools`（`LoopPolicy::of`）；引擎每次调用前问它（`src/units/business/agentloop/engine/tools.rs`）。
 
 use std::sync::Arc;
 
-use crate::units::business::session_model::api::{
-    EXEC, FS_READ, FS_WRITE, Loop, SHARED_WRITE, loop_of,
-};
+use crate::units::business::session_model::api::{EXEC, FS_READ, FS_WRITE, Loops, SHARED_WRITE};
 
 /// 目的：一次调用的授权请求：调哪个工具、由哪些来源交出、在哪个流程段的哪个角色下。
 pub struct ToolRequest<'a> {
@@ -43,36 +41,63 @@ pub trait Policy: Send + Sync {
     fn decide(&self, req: &ToolRequest<'_>) -> Verdict;
 }
 
-/// 目的：默认策略：流程段声明抑制哪些能力组（`Loop.deny`），这一段里的调用就不能调那组工具。
-/// 约束：只按段判，不看调用者是谁；段与能力组都在数据里（`src/units/business/session_model/domain/mechanism.rs`），代码里没有逐工具的名单。
-pub struct LoopPolicy;
+/// 目的：默认策略：流程段声明抑制哪些能力组（`Loop.deny`）与哪些动作要点头（`Loop.ask`）。
+/// 约束：装配期按当前段拍平成值（`of`）——运行期不再查段表；段表在数据里（`systools/loops.yaml`），代码里没有逐工具的名单。
+pub struct LoopPolicy {
+    id: String,
+    deny: Vec<String>,
+    ask: Vec<String>,
+}
 
-impl Policy for LoopPolicy {
-    fn decide(&self, req: &ToolRequest<'_>) -> Verdict {
-        verdict_for(loop_of(req.loop_id), req)
+impl LoopPolicy {
+    /// 目的：按一段的声明拍平出这一席的策略；段没在册就是「不抑制」。
+    pub fn of(loops: &Loops, loop_id: &str) -> LoopPolicy {
+        match loops.of(loop_id) {
+            Some(l) => LoopPolicy {
+                id: l.id.clone(),
+                deny: l.deny.clone(),
+                ask: l.ask.clone(),
+            },
+            None => LoopPolicy::none(),
+        }
+    }
+
+    /// 目的：不抑制也不问（核实环境与测试替身用）。
+    pub fn none() -> LoopPolicy {
+        LoopPolicy {
+            id: String::new(),
+            deny: Vec::new(),
+            ask: Vec::new(),
+        }
     }
 }
 
-/// 目的：一段流程对一次调用的结论：先看抑制（能力组），再看要不要问（工具 id），都没有就是准。
-/// 参数：`seg` = 调用方所在的那一段（不在册给 `None`，按准处理）；`req` = 这一次调用。
+impl Policy for LoopPolicy {
+    fn decide(&self, req: &ToolRequest<'_>) -> Verdict {
+        if self.id.is_empty() {
+            return Verdict::Allow;
+        }
+        verdict_of(&self.id, &self.deny, &self.ask, req)
+    }
+}
+
+/// 目的：按段声明判一次调用：先看抑制（能力组），再看要不要问（工具 id），都没有就是准。
 /// 约束：抑制先于问——一段里已经被抑制的动作不会再去问用户（问了也不能放行）。
-pub fn verdict_for(seg: Option<&'static Loop>, req: &ToolRequest<'_>) -> Verdict {
-    let Some(seg) = seg else {
-        return Verdict::Allow;
-    };
-    for ability in seg.deny {
+/// 参数：`id` = 段 id（只用于文案）；`deny` = 抑制的能力组；`ask` = 要点头的工具 id；`req` = 这一次调用。
+pub fn verdict_of(id: &str, deny: &[String], ask: &[String], req: &ToolRequest<'_>) -> Verdict {
+    for ability in deny {
         if ids_of(ability).contains(&req.tool) {
             return Verdict::Deny(format!(
                 "这一段（{}）不发给 {} 的 {} 能力：{} 这一回合不能用",
-                seg.id, req.role, ability, req.tool
+                id, req.role, ability, req.tool
             ));
         }
     }
-    if seg.ask.contains(&req.tool) {
+    if ask.iter().any(|t| t == req.tool) {
         return Verdict::Ask {
             why: format!(
                 "这一段（{}）里的 {} 要你点头才执行：{}",
-                seg.id, req.role, req.tool
+                id, req.role, req.tool
             ),
         };
     }
@@ -109,9 +134,9 @@ pub fn ask_card(agent: &str, req: &ToolRequest<'_>, why: &str) -> crate::kernel:
     }
 }
 
-/// 目的：装配时注入的默认策略。
+/// 目的：装配时注入的默认策略（不抑制、不问）。
 pub fn default_policy() -> Arc<dyn Policy> {
-    Arc::new(LoopPolicy)
+    Arc::new(LoopPolicy::none())
 }
 
 /// 目的：一个能力组覆盖哪些工具 id——来源（发放）与策略（抑制）共用这一份映射，避免两处漂。
@@ -131,39 +156,36 @@ pub fn ids_of(ability: &str) -> &'static [&'static str] {
 mod tests {
     use super::*;
 
-    /// 目的：一个只声明「要问」的合成段——产品表里四个段的 `ask` 都是空的（打开哪一段由数据定）。
-    const ASKING: Loop = Loop {
-        id: "asking",
-        flow: false,
-        cast: &[],
-        deny: &[],
-        ask: &[crate::units::business::tools::api::WRITE],
-        accepts: &[],
-        produces: None,
-    };
+    fn req<'a>(tool: &'a str, sources: &'a [String]) -> ToolRequest<'a> {
+        ToolRequest {
+            tool,
+            sources,
+            loop_id: "asking",
+            role: "solo",
+        }
+    }
 
     /// 目的：段声明了要问，段里这个动作给「问」；没声明的动作照旧放行。
     #[test]
     fn a_declared_action_asks_before_it_runs() {
         let sources: Vec<String> =
             vec![crate::units::business::session_model::api::SOURCE_AGENT.to_string()];
-        let req = |tool: &'static str| ToolRequest {
-            tool,
-            sources: &sources,
-            loop_id: "asking",
-            role: "solo",
-        };
+        let ask = [crate::units::business::tools::api::WRITE.to_string()];
         assert!(matches!(
-            verdict_for(
-                Some(&ASKING),
-                &req(crate::units::business::tools::api::WRITE)
+            verdict_of(
+                "asking",
+                &[],
+                &ask,
+                &req(crate::units::business::tools::api::WRITE, &sources)
             ),
             Verdict::Ask { .. }
         ));
         assert!(matches!(
-            verdict_for(
-                Some(&ASKING),
-                &req(crate::units::business::tools::api::READ)
+            verdict_of(
+                "asking",
+                &[],
+                &ask,
+                &req(crate::units::business::tools::api::READ, &sources)
             ),
             Verdict::Allow
         ));
@@ -172,24 +194,19 @@ mod tests {
     /// 目的：抑制先于问：一段既抑制又声明要问的动作不会被问（问了也放行不了）。
     #[test]
     fn a_suppressed_action_is_never_asked_about() {
-        const BOTH: Loop = Loop {
-            id: "both",
-            flow: false,
-            cast: &[],
-            deny: &[FS_WRITE],
-            ask: &[crate::units::business::tools::api::WRITE],
-            accepts: &[],
-            produces: None,
-        };
         let sources: Vec<String> =
             vec![crate::units::business::session_model::api::SOURCE_AGENT.to_string()];
-        let req = ToolRequest {
-            tool: crate::units::business::tools::api::WRITE,
-            sources: &sources,
-            loop_id: "both",
-            role: "solo",
-        };
-        assert!(matches!(verdict_for(Some(&BOTH), &req), Verdict::Deny(_)));
+        let deny = [FS_WRITE.to_string()];
+        let ask = [crate::units::business::tools::api::WRITE.to_string()];
+        assert!(matches!(
+            verdict_of(
+                "both",
+                &deny,
+                &ask,
+                &req(crate::units::business::tools::api::WRITE, &sources)
+            ),
+            Verdict::Deny(_)
+        ));
     }
 
     /// 目的：卡片形状是行为契约：两个固定选项 id、信封两段、载荷带段与角色。
@@ -197,13 +214,11 @@ mod tests {
     fn the_card_says_who_asks_and_what_the_options_are() {
         let sources: Vec<String> =
             vec![crate::units::business::session_model::api::SOURCE_AGENT.to_string()];
-        let req = ToolRequest {
-            tool: crate::units::business::tools::api::WRITE,
-            sources: &sources,
-            loop_id: "asking",
-            role: "solo",
-        };
-        let card = ask_card("甲", &req, "要你点头");
+        let card = ask_card(
+            "甲",
+            &req(crate::units::business::tools::api::WRITE, &sources),
+            "要你点头",
+        );
         assert_eq!(card.role, "tools");
         assert_eq!(card.name, "甲");
         assert!(card.has_option(OPT_ALLOW) && card.has_option(OPT_DENY));
@@ -220,7 +235,11 @@ mod tests {
     fn a_segment_suppresses_the_abilities_it_declares() {
         let sources: Vec<String> =
             vec![crate::units::business::session_model::api::SOURCE_AGENT.to_string()];
-        let p = LoopPolicy;
+        let p = LoopPolicy {
+            id: "discuss".to_string(),
+            deny: vec![FS_WRITE.to_string(), SHARED_WRITE.to_string()],
+            ask: Vec::new(),
+        };
         let deny = |tool: &str| {
             matches!(
                 p.decide(&ToolRequest {
@@ -236,8 +255,9 @@ mod tests {
         assert!(deny(crate::units::business::workspace::api::WORK_TOOLS[1]));
         assert!(!deny(crate::units::business::tools::api::READ));
         assert!(!deny(crate::units::business::tools::api::SHELL));
+        let open = LoopPolicy::none();
         assert!(!matches!(
-            p.decide(&ToolRequest {
+            open.decide(&ToolRequest {
                 tool: crate::units::business::tools::api::WRITE,
                 sources: &sources,
                 loop_id: "execute",

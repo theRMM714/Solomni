@@ -698,7 +698,6 @@ pub(crate) fn work_versioning_tools_are_granted_to_the_working_roles_only() {
     let abilities = vec![SHARED_WRITE.to_string()];
     let with_area = TurnCtx {
         loop_id: None,
-        role: "executor",
         agent_id: "甲",
         abilities: &abilities,
         profile: "collab",

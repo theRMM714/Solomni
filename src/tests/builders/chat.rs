@@ -316,6 +316,7 @@ pub(crate) fn native_member(
             modules: Vec::new(),
             prompt: Arc::new(test_prompts()),
             policy: crate::units::business::agentloop::api::default_policy(),
+            decls: crate::tests::doubles::test_decls(),
         }),
     }
 }
@@ -393,6 +394,6 @@ pub(crate) fn native_core(
         crate::tests::doubles::test_host_probe(),
         Arc::new(crate::units::business::residents::api::NoResidents),
         Arc::new(crate::units::business::catalog::secrets::api::NoSecrets),
-        crate::tests::doubles::test_profiles(),
+        crate::tests::doubles::test_decls(),
     )
 }

@@ -1,13 +1,13 @@
 //! 目的：会话类型表——一个会话类型就是一串要跑的流程段（或一个静止段）；装配期的规则校验在这里。
 //! 管：`Profiles` / `Profile` / `SessionSpec` 的形状与校验（段已注册、静止段在册、人数够、agent 能建哪些）；
 //!   会话创建时把选中的类型**解析成** `SessionSpec` 落进 meta，装配只看那份声明。
-//! 不管：yaml 解析（在 `detail/yaml_profiles.rs`）；段与角色的声明（在 `domain/mechanism.rs`）；会话装配（在 `turn` 的重建里）。
+//! 不管：yaml 解析（在 `detail/yaml_decls.rs`）；段与角色的声明（在 `domain/mechanism.rs`）；跨表聚合（在 `domain/decls.rs`）；会话装配（在 `turn` 的重建里）。
 //! 联动：组合根装载并在装配期调用 `validate`；创建期按 `min_agents` 校验名单。
 
 use serde::{Deserialize, Serialize};
 
 use crate::units::business::session_model::domain::artifact::Kind;
-use crate::units::business::session_model::domain::mechanism::{Loop, flow_ids, loop_of, role};
+use crate::units::business::session_model::domain::mechanism::{Loop, Loops};
 
 /// 目的：产品自带的单机类型 id（一个 agent、没有流程）。
 /// 约束：只有产品自带的会话类型表与测试知道它——代码按声明分支，不按 id 分支。
@@ -134,7 +134,7 @@ pub struct Profile {
 }
 
 /// 目的：会话类型总表（`systools/profiles.yaml` 的顶层形状）。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct Profiles {
     /// 目的：全部会话类型。
     pub profiles: Vec<Profile>,
@@ -143,7 +143,7 @@ pub struct Profiles {
 impl Profiles {
     /// 目的：把一个类型解析成落盘声明；没有这个类型返回 `None`。
     /// 约束：有流程的会话 `loop_id` / `role` 取空串（流程按回合给）；没有流程时取类型声明的静止段与它的第一个角色位。
-    pub fn spec_of(&self, kind: &str) -> Option<SessionSpec> {
+    pub fn spec_of(&self, kind: &str, loops: &Loops) -> Option<SessionSpec> {
         self.profiles
             .iter()
             .find(|p| p.id == kind)
@@ -156,11 +156,11 @@ impl Profiles {
                     String::new()
                 },
                 role: if p.flows.is_empty() {
-                    loop_of(&p.loop_id)
+                    loops
+                        .of(&p.loop_id)
                         .and_then(|l| l.cast.first())
-                        .map(|c| c.role)
+                        .map(|c| c.role.clone())
                         .unwrap_or_default()
-                        .to_string()
                 } else {
                     String::new()
                 },
@@ -192,14 +192,14 @@ impl Profiles {
     }
 
     /// 目的：这一串流程开跑至少要有几个 agent（各段要的人数取最大值——每段都要在自己的会话里跑得起来）。
-    pub fn min_agents(&self, flows: &[String]) -> usize {
+    pub fn min_agents(&self, flows: &[String], loops: &Loops) -> usize {
         flows
             .iter()
-            .filter_map(|id| loop_of(id))
+            .filter_map(|id| loops.of(id))
             .map(|l| {
                 l.cast
                     .iter()
-                    .filter(|c| role(c.role).map(|r| !r.core).unwrap_or(false))
+                    .filter(|c| loops.role(&c.role).map(|r| !r.core).unwrap_or(false))
                     .map(|c| c.min)
                     .sum::<usize>()
             })
@@ -210,7 +210,7 @@ impl Profiles {
     /// 目的：装配期校验：类型 id 唯一且无空白、流程都注册过且不重复、没有流程的类型要有静止机制。
     /// 返回：`Ok(())` 表示这张表可以拿去装配。
     /// 错误：文案点名 `systools/profiles.yaml` 与出问题的那一项。
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self, loops: &Loops) -> Result<(), String> {
         if self.profiles.is_empty() {
             return Err("会话类型表是空的（systools/profiles.yaml）".to_string());
         }
@@ -242,13 +242,13 @@ impl Profiles {
                         p.id
                     ));
                 }
-                let Some(l) = loop_of(&p.loop_id) else {
+                let Some(l) = loops.of(&p.loop_id) else {
                     return Err(format!(
                         "会话类型 {} 的静止段没声明：{}（systools/profiles.yaml）",
                         p.id, p.loop_id
                     ));
                 };
-                if l.flow {
+                if l.builder.is_some() {
                     return Err(format!(
                         "会话类型 {} 的静止段不能是流程段：{}（systools/profiles.yaml）",
                         p.id, p.loop_id
@@ -278,12 +278,12 @@ impl Profiles {
             }
             let mut flows: Vec<&str> = Vec::new();
             for id in &p.flows {
-                if loop_of(id).map(|l| !l.flow).unwrap_or(true) {
+                if loops.of(id).map(|l| l.builder.is_none()).unwrap_or(true) {
                     return Err(format!(
                         "会话类型 {} 的流程没注册：{}（已注册：{}；systools/profiles.yaml）",
                         p.id,
                         id,
-                        flow_ids().join(" / ")
+                        loops.flow_ids().join(" / ")
                     ));
                 }
                 if flows.contains(&id.as_str()) {
@@ -295,7 +295,7 @@ impl Profiles {
                 flows.push(id);
             }
             // 链上要接得上：第一段收得下用户需求，后一段收得下前一段交出的产物。
-            let steps: Vec<&'static Loop> = p.flows.iter().filter_map(|id| loop_of(id)).collect();
+            let steps: Vec<&Loop> = p.flows.iter().filter_map(|id| loops.of(id)).collect();
             if let Err(why) = chain_problem(&steps) {
                 return Err(format!(
                     "会话类型 {} 的流程串不起来：{}（systools/profiles.yaml）",
@@ -311,7 +311,7 @@ impl Profiles {
 /// 参数：`steps` = 按执行顺序排好的段声明（已按 id 解析过）。
 /// 返回：`Ok(())` 表示这条链能串。
 /// 错误：文案点名哪一段、交什么、谁不收（调用方补上会话类型与文件位置）。
-pub(crate) fn chain_problem(steps: &[&'static Loop]) -> Result<(), String> {
+pub(crate) fn chain_problem(steps: &[&Loop]) -> Result<(), String> {
     let Some(first) = steps.first() else {
         return Ok(());
     };
@@ -333,9 +333,86 @@ pub(crate) fn chain_problem(steps: &[&'static Loop]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::units::business::session_model::domain::mechanism::{Cast, Role};
 
-    fn base() -> Profiles {
-        Profiles {
+    fn role(id: &str, core: bool) -> Role {
+        Role {
+            id: id.to_string(),
+            prompt: format!("roles/{id}"),
+            core,
+        }
+    }
+
+    fn cast(role_id: &str, min: usize) -> Cast {
+        Cast {
+            role: role_id.to_string(),
+            min,
+            tools: Vec::new(),
+        }
+    }
+
+    fn seg(
+        id: &str,
+        builder: bool,
+        cast: Vec<Cast>,
+        accepts: Vec<Kind>,
+        produces: Option<Kind>,
+    ) -> Loop {
+        Loop {
+            id: id.to_string(),
+            builder: if builder { Some(id.to_string()) } else { None },
+            cast,
+            deny: Vec::new(),
+            ask: Vec::new(),
+            accepts,
+            produces,
+        }
+    }
+
+    fn loops() -> Loops {
+        Loops {
+            roles: vec![
+                role("core_proxy", true),
+                role("discussant", false),
+                role("planner", true),
+                role("executor", false),
+                role("solo", false),
+            ],
+            loops: vec![
+                seg(
+                    "discuss",
+                    true,
+                    vec![cast("core_proxy", 0), cast("discussant", 2)],
+                    vec![Kind::Requirement],
+                    Some(Kind::Summary),
+                ),
+                seg(
+                    "execute",
+                    true,
+                    vec![cast("planner", 0), cast("executor", 1)],
+                    vec![Kind::Requirement, Kind::Summary],
+                    None,
+                ),
+                seg(
+                    "standard",
+                    false,
+                    vec![cast("solo", 0)],
+                    vec![Kind::Requirement],
+                    None,
+                ),
+                seg(
+                    "proxy",
+                    false,
+                    vec![cast("core_proxy", 0)],
+                    Vec::new(),
+                    None,
+                ),
+            ],
+        }
+    }
+
+    fn base() -> (Loops, Profiles) {
+        let profiles = Profiles {
             profiles: vec![
                 Profile {
                     id: SINGLE.to_string(),
@@ -371,13 +448,14 @@ mod tests {
                     system_tools: Vec::new(),
                 },
             ],
-        }
+        };
+        (loops(), profiles)
     }
 
     #[test]
     fn the_shape_it_documents_validates() {
-        let p = base();
-        assert_eq!(p.validate(), Ok(()), "基准表必须合法");
+        let (loops, p) = base();
+        assert_eq!(p.validate(&loops), Ok(()), "基准表必须合法");
         let collab = p
             .profiles
             .iter()
@@ -387,44 +465,47 @@ mod tests {
         let ids: Vec<String> = p.profiles.iter().map(|x| x.id.clone()).collect();
         assert_eq!(ids, vec![SINGLE, MEETING, PROXY]);
         assert_eq!(p.label_of(MEETING), "会议");
-        let spec = p.spec_of(MEETING).expect("会议类型");
+        let spec = p.spec_of(MEETING, &loops).expect("会议类型");
         assert_eq!(spec.name, "会议");
         assert_eq!(spec.flow_ids(), vec!["discuss", "execute"]);
         assert_eq!(spec.role, "", "有流程的会话自己不带角色");
         assert_eq!(spec.loop_id, "", "有流程的会话自己不带段");
-        let single = p.spec_of(SINGLE).expect("单机");
+        let single = p.spec_of(SINGLE, &loops).expect("单机");
         assert_eq!(single.loop_id, "standard", "单机坐静止段");
         assert_eq!(single.role, "solo");
-        let proxy = p.spec_of(PROXY).expect("代理");
+        let proxy = p.spec_of(PROXY, &loops).expect("代理");
         assert_eq!(proxy.loop_id, "proxy");
         assert_eq!(proxy.role, "core_proxy");
-        assert!(p.spec_of("临时").is_none(), "没声明的类型解析不出声明");
-        assert_eq!(p.min_agents(&spec.flow_ids()), 2, "讨论至少要两人");
+        assert!(
+            p.spec_of("临时", &loops).is_none(),
+            "没声明的类型解析不出声明"
+        );
+        assert_eq!(p.min_agents(&spec.flow_ids(), &loops), 2, "讨论至少要两人");
     }
 
     #[test]
     fn a_type_id_must_be_unique_and_not_empty() {
-        let mut p = base();
+        let (loops, mut p) = base();
         p.profiles[0].id = "  ".to_string();
-        let err = p.validate().unwrap_err();
+        let err = p.validate(&loops).unwrap_err();
         assert!(err.contains("会话类型的 id 是空的"), "{}", err);
 
-        let mut p = base();
+        let (loops, mut p) = base();
         p.profiles[0].id = "单 机".to_string();
-        let err = p.validate().unwrap_err();
+        let err = p.validate(&loops).unwrap_err();
         assert!(err.contains("不能含空白"), "{}", err);
 
-        let mut p = base();
+        let (loops, mut p) = base();
         p.profiles[2].id = SINGLE.to_string();
-        let err = p.validate().unwrap_err();
+        let err = p.validate(&loops).unwrap_err();
         assert!(err.contains("会话类型重复"), "{}", err);
     }
 
     #[test]
     fn flows_must_be_registered_and_declared_once() {
-        let mut p = base();
+        let (loops, mut p) = base();
         p.profiles[1].flows = vec!["review".to_string()];
-        let err = p.validate().unwrap_err();
+        let err = p.validate(&loops).unwrap_err();
         assert!(err.contains("流程没注册：review"), "{}", err);
         assert!(
             err.contains("已注册：discuss / execute"),
@@ -432,42 +513,42 @@ mod tests {
             err
         );
 
-        let mut p = base();
+        let (loops, mut p) = base();
         p.profiles[1].flows.push("discuss".to_string());
-        let err = p.validate().unwrap_err();
+        let err = p.validate(&loops).unwrap_err();
         assert!(err.contains("同一个流程出现了两次"), "{}", err);
     }
 
     #[test]
     fn a_type_without_flows_needs_a_standing_loop() {
         // 没有流程又不声明静止段：不知道坐哪一段。
-        let mut p = base();
+        let (loops, mut p) = base();
         p.profiles[0].loop_id.clear();
-        let err = p.validate().unwrap_err();
+        let err = p.validate(&loops).unwrap_err();
         assert!(err.contains("没有声明静止段"), "{}", err);
 
         // 声明了流程段：流程段要串进会话才有角色，不能当静止段。
-        let mut p = base();
+        let (loops, mut p) = base();
         p.profiles[0].loop_id = "execute".to_string();
-        let err = p.validate().unwrap_err();
+        let err = p.validate(&loops).unwrap_err();
         assert!(err.contains("不能是流程段：execute"), "{}", err);
 
         // 声明了没登记的段 id。
-        let mut p = base();
+        let (loops, mut p) = base();
         p.profiles[0].loop_id = "ghost".to_string();
-        let err = p.validate().unwrap_err();
+        let err = p.validate(&loops).unwrap_err();
         assert!(err.contains("静止段没声明：ghost"), "{}", err);
 
         // 有流程又声明静止段：两套身份来源，装配不知道该听谁。
-        let mut p = base();
+        let (loops, mut p) = base();
         p.profiles[1].loop_id = "standard".to_string();
-        let err = p.validate().unwrap_err();
+        let err = p.validate(&loops).unwrap_err();
         assert!(err.contains("有流程，不该再声明静止段"), "{}", err);
     }
 
     #[test]
     fn only_the_types_marked_visible_are_open_to_agents() {
-        let p = base();
+        let (_, p) = base();
         let ids: Vec<&str> = p
             .profiles
             .iter()
@@ -490,64 +571,40 @@ mod tests {
         let err = Profiles {
             profiles: Vec::new(),
         }
-        .validate()
+        .validate(&loops())
         .unwrap_err();
         assert!(err.contains("会话类型表是空的"), "{}", err);
     }
+
     /// 目的：段声明里接不上的两种情形都在装配期被拦下（用合成段，不依赖产品表）。
     #[test]
     fn a_chain_that_does_not_hand_off_is_refused() {
-        const SILENT: Loop = Loop {
-            id: "silent",
-            flow: true,
-            cast: &[],
-            deny: &[],
-            ask: &[],
-            accepts: &[Kind::Requirement],
-            produces: None,
-        };
-        const TEXT: Loop = Loop {
-            id: "text",
-            flow: true,
-            cast: &[],
-            deny: &[],
-            ask: &[],
-            accepts: &[Kind::Requirement],
-            produces: Some(Kind::Summary),
-        };
-        const COLD: Loop = Loop {
-            id: "cold",
-            flow: true,
-            cast: &[],
-            deny: &[],
-            ask: &[],
-            accepts: &[],
-            produces: None,
-        };
-        const PICKY: Loop = Loop {
-            id: "picky",
-            flow: true,
-            cast: &[],
-            deny: &[],
-            ask: &[],
-            accepts: &[Kind::Requirement],
-            produces: None,
-        };
-        assert!(!chain_problem(&[&TEXT, &TEXT]).is_ok(), "第二段不收总结");
-        let err = chain_problem(&[&TEXT, &PICKY]).unwrap_err();
+        let silent = seg("silent", true, Vec::new(), vec![Kind::Requirement], None);
+        let text = seg(
+            "text",
+            true,
+            Vec::new(),
+            vec![Kind::Requirement],
+            Some(Kind::Summary),
+        );
+        let cold = seg("cold", true, Vec::new(), Vec::new(), None);
+        let picky = seg("picky", true, Vec::new(), vec![Kind::Requirement], None);
+        assert!(chain_problem(&[&text, &text]).is_err(), "第二段不收总结");
+        let err = chain_problem(&[&text, &picky]).unwrap_err();
         assert!(err.contains("text 交出上一段的总结"), "{}", err);
-        let err = chain_problem(&[&SILENT, &TEXT]).unwrap_err();
+        let err = chain_problem(&[&silent, &text]).unwrap_err();
         assert!(err.contains("不交产物"), "{}", err);
-        let err = chain_problem(&[&COLD]).unwrap_err();
+        let err = chain_problem(&[&cold]).unwrap_err();
         assert!(err.contains("第一段"), "{}", err);
     }
 
     /// 目的：产品表里讨论段交出的总结，执行段收得下——这条链必须通过（否则协作类型装不起来）。
     #[test]
     fn the_product_chain_hands_the_summary_to_the_executor() {
-        let steps: Vec<&'static Loop> = vec!["discuss", "execute"]
+        let loops = loops();
+        let steps: Vec<&Loop> = vec!["discuss", "execute"]
             .into_iter()
-            .filter_map(loop_of)
+            .filter_map(|id| loops.of(id))
             .collect();
         assert_eq!(chain_problem(&steps), Ok(()));
     }

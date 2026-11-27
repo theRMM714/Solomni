@@ -56,8 +56,8 @@ pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
         assert!(schema.params.is_some(), "{} 缺参数契约", name);
     }
     // 会话形状：只有代理类型把六个挂进 `system_tools`（其余类型的 system 面为空）。
-    let profiles = crate::tests::doubles::test_profiles();
-    let proxy = profiles
+    let decls = crate::tests::doubles::test_decls();
+    let proxy = decls
         .spec_of(crate::units::business::session_model::api::PROXY)
         .expect("代理类型在表里");
     for name in SIX {
@@ -72,7 +72,7 @@ pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
         crate::units::business::session_model::api::SINGLE,
         crate::units::business::session_model::api::MEETING,
     ] {
-        let spec = profiles.spec_of(kind).expect("产品类型在表里");
+        let spec = decls.spec_of(kind).expect("产品类型在表里");
         for name in SIX {
             assert!(
                 !spec.system_tools.iter().any(|t| t == name),
@@ -83,7 +83,9 @@ pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
         }
     }
     // 角色位不再含这些名字：它们来自会话类型，不来自流程段。
-    let core = crate::units::business::session_model::api::cast_of("proxy", "core_proxy")
+    let core = decls
+        .loops()
+        .cast_of("proxy", "core_proxy")
         .expect("代理段的核心角色位在册");
     assert!(
         core.tools.is_empty(),

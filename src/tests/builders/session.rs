@@ -134,6 +134,7 @@ pub(crate) fn member_with_tools(
             modules: Vec::new(),
             prompt: Arc::new(test_prompts()),
             policy: crate::units::business::agentloop::api::default_policy(),
+            decls: crate::tests::doubles::test_decls(),
         }),
     }
 }
@@ -161,7 +162,7 @@ pub(crate) fn agent_meta(name: &str, modules: &[&str], model: Option<&str>) -> A
 /// 目的：按会话类型表造一份落盘声明（夹具与产品同一条路：会议类型自带流程、代理类型坐核心席）。
 /// 参数：`kind` = 会话类型 id；表里没有就退回一个没有流程的单 agent 声明。
 pub(crate) fn seeded_spec(kind: &str) -> SessionSpec {
-    crate::tests::doubles::test_profiles()
+    crate::tests::doubles::test_decls()
         .spec_of(kind)
         .unwrap_or_else(|| SessionSpec::plain(kind, kind, "solo"))
 }

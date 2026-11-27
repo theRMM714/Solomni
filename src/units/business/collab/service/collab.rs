@@ -160,6 +160,10 @@ pub struct CollabSession {
     /// 目的：核心 AI 给用户的**建议**（随方案 / 节点验收那一次调用一起产出）：只属于**下一次登记**的那一关，
     ///   登记时搬进队列里的那一关；用掉就清，别漏到下一关。
     pub(crate) gate_advice: String,
+    /// 目的：这一段的成员身份（段 id + 成员角色 id）：派节点时给子会话定身份；段里没有成员角色为 None。
+    pub(crate) identity: Option<(String, String)>,
+    /// 目的：这一段开跑至少要有几个成员（非核心角色位的 min 之和，来自段声明）。
+    pub(crate) min_members: usize,
 }
 
 impl CollabSession {
@@ -184,11 +188,16 @@ impl CollabSession {
         phase: Phase,
         // 本会话的裁决队（核心按会话 id 给）。
         ask: Arc<dyn AskDesk>,
+        // 这一段的成员身份与最少成员数（由工厂按段声明算好交进来）。
+        identity: Option<(String, String)>,
+        min_members: usize,
     ) -> Result<CollabSession, String> {
         let core_chat = llm.core_channel(&core_channel);
         let core_mode = settings.tool_mode_for(None);
         Ok(CollabSession {
             phase,
+            identity,
+            min_members,
             summary: None,
             core_mode,
             delegated,
@@ -313,7 +322,6 @@ impl CollabSession {
         }
         let payload = crate::units::business::agentloop::api::core_operation(
             systools,
-            "planner",
             "verdict",
             mode,
             core_chat,
@@ -387,7 +395,6 @@ impl CollabSession {
         // 带核实回路：模型想先读/查落盘物时，核心执行只读工具再回灌（不再直接判"没调用"）。
         let payload = crate::units::business::agentloop::api::core_operation(
             systools,
-            "orchestrator",
             "node_verdict",
             mode,
             core_chat,

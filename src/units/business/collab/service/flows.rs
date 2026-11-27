@@ -1,7 +1,7 @@
-//! 目的：协作流程的工厂——把会话类型表里的 id 映射到讨论段 / 执行段，并按现场新建或恢复。
-//! 管：`CollabFlows`（id → `CollabSession` 的某一段）；是组合根注入给 turn / work 的唯一入口。
+//! 目的：协作流程的工厂——把段声明里的实现名（`builder`）映射到讨论段 / 执行段，并按现场新建或恢复。
+//! 管：`CollabFlows`（实现名 → `CollabSession` 的某一段）；是组合根注入给 turn / work 的唯一入口。
 //! 不管：两段各自的推进（`pump.rs` 等）；装配点的分支（turn 的重建与 work 的创建只认 `Flows`）。
-//! 联动：`systools/profiles.yaml` 的流程序列由它落地；新增协作流程在这里加一条映射。
+//! 联动：`systools/loops.yaml` 的 `builder` 由它落地；新增协作流程在这里加一条实现名映射。
 
 use std::sync::Arc;
 
@@ -9,7 +9,7 @@ use crate::kernel::ports::Log;
 use crate::units::business::catalog::modules::api::Modules;
 use crate::units::business::llm::api::Llm;
 use crate::units::business::prompt::api::Prompt;
-use crate::units::business::session_model::api::Profiles;
+use crate::units::business::session_model::api::SessionDecls;
 use crate::units::business::tools::api::{ToolExec, Tools};
 use crate::units::business::turn_state::api::{Flow, FlowSetup, Flows};
 use crate::units::business::vm::api::Vm;
@@ -25,7 +25,7 @@ pub struct CollabFlows {
     systools: Arc<dyn Tools>,
     tools: Arc<dyn ToolExec + Send + Sync>,
     log: Arc<dyn Log + Send + Sync>,
-    book: Profiles,
+    decls: Arc<SessionDecls>,
 }
 
 impl CollabFlows {
@@ -40,7 +40,7 @@ impl CollabFlows {
         systools: Arc<dyn Tools>,
         tools: Arc<dyn ToolExec + Send + Sync>,
         log: Arc<dyn Log + Send + Sync>,
-        book: Profiles,
+        decls: Arc<SessionDecls>,
     ) -> CollabFlows {
         CollabFlows {
             llm,
@@ -50,22 +50,40 @@ impl CollabFlows {
             systools,
             tools,
             log,
-            book,
+            decls,
         }
     }
 }
 
 impl Flows for CollabFlows {
-    fn book(&self) -> &Profiles {
-        &self.book
+    fn decls(&self) -> &SessionDecls {
+        &self.decls
     }
 
     fn build(&self, id: &str, setup: &FlowSetup<'_>) -> Result<Box<dyn Flow>, String> {
-        let phase = match id {
-            "discuss" => Phase::Discuss,
-            "execute" => Phase::Execute,
-            other => return Err(format!("流程没注册：{}（systools/profiles.yaml）", other)),
+        // 段 id 与实现的对应关系只在数据里：这里只认段声明写的实现名。
+        let loops = self.decls.loops();
+        let seg = loops
+            .of(id)
+            .ok_or_else(|| format!("流程没在册：{}（systools/loops.yaml）", id))?;
+        let phase = match seg.builder.as_deref() {
+            Some("discuss") => Phase::Discuss,
+            Some("execute") => Phase::Execute,
+            Some(other) => {
+                return Err(format!(
+                    "协作工厂里没有这个实现名：{}（流程段 {}；systools/loops.yaml）",
+                    other, id
+                ));
+            }
+            None => {
+                return Err(format!("流程段 {} 没声明实现名（systools/loops.yaml）", id));
+            }
         };
+        // 这一段的成员身份与最少成员数按段声明算一次，交进会话（会话不认识具体段 id）。
+        let identity = loops
+            .member_role(id)
+            .map(|role| (id.to_string(), role.to_string()));
+        let min_members = loops.min_members(id);
         // 两段共用同一份落盘事实：有重建现场就按转录恢复，没有就新建。
         let session = match setup.restore {
             Some((meta, events)) => CollabSession::restore(
@@ -82,6 +100,8 @@ impl Flows for CollabFlows {
                 setup.sandboxes.clone(),
                 phase,
                 Arc::clone(&setup.ask),
+                identity.clone(),
+                min_members,
             )?,
             None => {
                 let channel = setup
@@ -103,6 +123,8 @@ impl Flows for CollabFlows {
                     setup.sandboxes.clone(),
                     phase,
                     Arc::clone(&setup.ask),
+                    identity,
+                    min_members,
                 )?
             }
         };

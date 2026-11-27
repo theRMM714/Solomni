@@ -172,21 +172,27 @@ impl PromptSource for TestPrompts {
 /// 约束：表改了这里跟着变——测试断言的是产品怎么被装配，不是另写一份类型表。
 ///   唯一的追加是只给测试的形状 `execute`（只跑执行流程）：产品表里没有单执行流程的类型，
 ///   而要单独钉执行段的用例需要它。
-pub(crate) fn test_profiles() -> crate::units::business::session_model::api::Profiles {
+pub(crate) fn test_decls()
+-> std::sync::Arc<crate::units::business::session_model::api::SessionDecls> {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let mut book =
-        crate::units::business::conversation::session::detail::yaml_profiles::YamlProfiles::new(
-            crate::tests::doubles::assets_at(&root),
-        )
-        .load()
-        .expect("内置会话类型表必须合法");
-    book.profiles.push(
+    let decls = crate::units::business::session_model::detail::yaml_decls::YamlDecls::new(
+        crate::tests::doubles::assets_at(&root),
+    )
+    .load()
+    .expect("内置会话形状声明必须合法");
+    let mut profiles = decls.profiles().clone();
+    profiles.profiles.push(
         yaml_serde::from_str(
             "id: execute\nname: 执行\nhint: 只跑执行流程（测试用）\nflows: [execute]\nagent_visible: true\n",
         )
         .expect("测试形状"),
     );
-    book
+    std::sync::Arc::new(
+        crate::units::business::session_model::api::SessionDecls::new(
+            decls.loops().clone(),
+            profiles,
+        ),
+    )
 }
 
 pub(crate) fn test_prompts() -> Prompts {

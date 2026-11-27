@@ -1,13 +1,13 @@
 //! 目的：流程工厂面——装配期按会话类型表里的流程 id 造出一段流程（新增流程只在工厂里加一条映射）。
 //! 管：`Flows`（id → 造一段）与 `FlowSetup`（造一段要的现场）；`sequence_of` 把若干段串成一条。
-//! 不管：任何一段流程的内部；会话类型表的内容（在 `systools/profiles.yaml`）；回合驱动（在 `turn`）。
+//! 不管：任何一段流程的内部；会话形状的声明（在 `systools/loops.yaml` 与 `systools/profiles.yaml`）；回合驱动（在 `turn`）。
 //! 联动：组合根把实现注入 `turn` 与 `work`；装配点只按 id 取段，不认识任何具体流程的类型。
 
 use std::sync::Arc;
 
 use crate::units::business::catalog::registry::api::Settings;
 use crate::units::business::llm::api::Channel;
-use crate::units::business::session_model::api::{AskDesk, Profiles, SessionMeta};
+use crate::units::business::session_model::api::{AskDesk, SessionDecls, SessionMeta};
 use crate::units::business::turn_state::domain::flow::Flow;
 use crate::units::business::turn_state::domain::sequence::Sequence;
 use crate::units::business::workspace::api::Sandboxes;
@@ -31,12 +31,13 @@ pub struct FlowSetup<'a> {
     pub restore: Option<(&'a SessionMeta, &'a [serde_json::Value])>,
 }
 
-/// 目的：流程工厂：会话类型表 + id → 造一段（实现在流程自己的单元里，由组合根注入）。
+/// 目的：流程工厂：会话形状的声明 + 段 id → 造一段（实现在流程自己的单元里，由组合根注入）。
 pub trait Flows: Send + Sync {
-    /// 目的：会话类型表——装配按它取某个类型的流程序列。
-    fn book(&self) -> &Profiles;
-    /// 目的：按 id 造一段：新建还是按转录恢复，由 `setup.restore` 决定。
-    /// 错误：id 没注册、现场缺必需项（例如新建却没有核心通道）时如实报错。
+    /// 目的：会话形状的声明表——装配按它取某个类型的流程序列，工厂按它查段声明的实现名。
+    fn decls(&self) -> &SessionDecls;
+    /// 目的：按段 id 造一段：新建还是按转录恢复，由 `setup.restore` 决定。
+    /// 约束：段 id 与实现名的对应关系只在数据里（`systools/loops.yaml` 的 `builder`），本端口不出现具体段 id 的分支。
+    /// 错误：段没在册或没声明实现名、现场缺必需项（例如新建却没有核心通道）时如实报错。
     fn build(&self, id: &str, setup: &FlowSetup<'_>) -> Result<Box<dyn Flow>, String>;
 }
 

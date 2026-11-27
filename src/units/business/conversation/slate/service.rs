@@ -47,7 +47,6 @@ pub fn propose(
     let verify = req.verify.take();
     let payload = core_operation(
         parties.tools,
-        "planner",
         "slate",
         req.tool_mode,
         req.chat,

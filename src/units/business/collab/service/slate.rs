@@ -116,19 +116,8 @@ impl CollabSession {
         if self.done || self.disc.is_some() {
             return;
         }
-        // 代拟的名单到这一步才定下来：人数不够就不开聊（人数是流程段报的，见 session 的 loop_of）。
-        let need = crate::units::business::session_model::api::loop_of("discuss")
-            .map(|l| {
-                l.cast
-                    .iter()
-                    .filter(|c| {
-                        crate::units::business::session_model::api::role(c.role)
-                            .is_some_and(|r| !r.core)
-                    })
-                    .map(|c| c.min)
-                    .sum::<usize>()
-            })
-            .unwrap_or(0);
+        // 代拟的名单到这一步才定下来：人数不够就不开聊（人数是工厂按段声明算好交进来的）。
+        let need = self.min_members;
         if self.roster.len() < need {
             self.notice(
                 &format!(
@@ -257,6 +246,9 @@ impl CollabSession {
         phase: Phase,
         // 本会话的裁决队（核心按会话 id 与转录里已发出的卡号给）：重建出来的整队进它。
         ask: Arc<dyn AskDesk>,
+        // 这一段的成员身份与最少成员数（由工厂按段声明算好交进来）。
+        identity: Option<(String, String)>,
+        min_members: usize,
     ) -> Result<CollabSession, String> {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
         let st = crate::units::business::collab::domain::collab_state::derive(events, &names);
@@ -281,6 +273,8 @@ impl CollabSession {
         let core_mode = settings.tool_mode_for(None);
         let mut s = CollabSession {
             phase,
+            identity,
+            min_members,
             // 总结是讨论段写在转录里的那条事实：执行段拿它当需求。
             summary: st.summary.clone(),
             modules,

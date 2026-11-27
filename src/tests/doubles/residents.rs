@@ -310,6 +310,7 @@ pub(crate) fn member_with_service_tools(
         modules: Vec::new(),
         prompt: Arc::new(test_prompts()),
         policy: crate::units::business::agentloop::api::default_policy(),
+        decls: crate::tests::doubles::test_decls(),
     }
 }
 

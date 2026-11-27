@@ -5,7 +5,8 @@
 
 /// 目的：交接货币的种类（不带内容）：声明「这一段收什么、交什么」时用。
 /// 约束：闭合枚举——新增种类要动 core，这是有意的扩展（不是配置）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Kind {
     /// 目的：用户需求（会话开场由用户那条消息给出）。
     Requirement,

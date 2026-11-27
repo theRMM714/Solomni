@@ -16,6 +16,7 @@ use crate::units::business::catalog::secrets::api::SecretOps;
 use crate::units::business::llm::api::Llm;
 use crate::units::business::prompt::api::Prompt;
 use crate::units::business::residents::api::ResidentOps;
+use crate::units::business::session_model::api::SessionDecls;
 use crate::units::business::tools::api::{ToolExec, Tools};
 use crate::units::business::turn_state::api::{Flows, History};
 use crate::units::business::turn_state::domain::decisions::Gates;
@@ -61,6 +62,8 @@ pub struct Turn {
     pub(crate) packages: Arc<dyn Packages + Send + Sync>,
     /// 目的：流程工厂（组合根注入）：重建会话按会话类型表里的流程序列逐段造，本层不认识任何具体流程。
     pub(crate) flows: Arc<dyn Flows>,
+    /// 目的：会话形状的声明表（组合根注入）：装配一席的工具面与授权策略按它取当前段的声明。
+    pub(crate) decls: Arc<SessionDecls>,
 }
 
 /// 目的：`Turn` 的构造与取用。
@@ -86,6 +89,7 @@ impl Turn {
         modules: Arc<dyn Modules + Send + Sync>,
         packages: Arc<dyn Packages + Send + Sync>,
         flows: Arc<dyn Flows>,
+        decls: Arc<SessionDecls>,
     ) -> Turn {
         Turn {
             state: TurnState::new(),
@@ -105,6 +109,7 @@ impl Turn {
             modules,
             packages,
             flows,
+            decls,
         }
     }
 
@@ -125,6 +130,7 @@ impl Turn {
             residents: Arc::clone(&self.residents),
             workspace: Arc::clone(&self.workspace),
             compact: Arc::clone(&self.compact),
+            decls: Arc::clone(&self.decls),
         }
     }
 

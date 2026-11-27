@@ -150,9 +150,9 @@ impl Work {
     ) -> Result<(PreparedWork, Option<GuestBoot>), String> {
         let host: &dyn HostProbe = probe.as_ref();
         validate_work_name(&spec.name)?;
-        // 选中的会话类型在这里**解析成声明**：后面所有分岔只看声明（流程 / 席位），不看名字。
+        // 选中的会话类型在这里**解析成声明**：后面所有分岔只看声明（流程 / 段与角色），不看名字。
         // 会话形状只由类型表定：没有这个类型就建不出来（没有现拼流程的旁路）。
-        let decl = self.flows.book().spec_of(&spec.kind).ok_or_else(|| {
+        let decl = self.flows.decls().spec_of(&spec.kind).ok_or_else(|| {
             format!(
                 "会话类型表里没有「{}」这个类型（systools/profiles.yaml）",
                 spec.kind
@@ -215,7 +215,7 @@ impl Work {
         // **人数由流程自己报**（讨论至少两人、执行至少一人）：不够就建不出来；代拟路径留到确认名单时再查。
         // **单模式的组合语义**：点名了多个 agent = 模块并成一个**临时组合**（去重、保序；模型取核心默认）。
         if !spec.delegate {
-            let need = self.flows.book().min_agents(&decl.flow_ids());
+            let need = self.flows.decls().min_agents(&decl.flow_ids());
             if spec.agents.len() < need {
                 let label = if decl.name.trim().is_empty() {
                     decl.kind.clone()
@@ -768,7 +768,7 @@ impl Work {
         registry.core_channel()?;
         let (freshness_on, freshness_keep) = freshness.unwrap_or((false, 80));
         // 形状取类型表里那一份（含它挂的工具来源与 system 工具）：代理类型只挂 profile 来源。
-        let spec = self.flows.book().spec_of(kind).ok_or_else(|| {
+        let spec = self.flows.decls().spec_of(kind).ok_or_else(|| {
             format!(
                 "会话类型表里没有「{}」这个类型（systools/profiles.yaml）",
                 kind

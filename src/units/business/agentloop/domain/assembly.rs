@@ -157,6 +157,7 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
         profile: spec.profile,
         source_ids: spec.source_ids,
         system_tools: spec.system_tools,
+        loops: Some(ports.decls.loops()),
         modules: spec.modules,
         sandbox: sb,
         prompt: &*ports.prompt,
@@ -206,8 +207,14 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
         // 换席要现拼一席：模块、席位与说明块素材都留在活对象上（不靠会话外再传一遍）。
         modules: spec.modules.to_vec(),
         prompt: Arc::clone(&ports.prompt),
-        // 授权：默认策略按流程段的抑制表判；换策略只换这一处注入。
-        policy: crate::units::business::agentloop::domain::policy::default_policy(),
+        // 授权：装配期按当前段的声明拍平（抑制哪些能力组、哪些要点头）；换策略只换这一处注入。
+        policy: Arc::new(
+            crate::units::business::agentloop::domain::policy::LoopPolicy::of(
+                ports.decls.loops(),
+                spec.loop_id,
+            ),
+        ),
+        decls: Arc::clone(&ports.decls),
     }
 }
 

@@ -333,7 +333,6 @@ fn global_flags_work_on_both_sides_of_a_boot_command() {
 /// 新增动作忘了归属、或忘了给呈现层入口，这条会红。
 #[test]
 fn every_action_belongs_to_the_human_face_or_a_session_source() {
-    use crate::units::business::session_model::api as sm;
     use crate::units::business::tools::api as t;
     use crate::units::business::tools::api::HUMAN_ACTIONS;
     /// 人的命令面里有、但只有工具形态（没有呈现层按钮）的那几条。
@@ -352,20 +351,21 @@ fn every_action_belongs_to_the_human_face_or_a_session_source() {
     }
     assert!(!ids.is_empty(), "工具表里应当有动作");
 
-    // 会话侧会交出的 id：内置面（含 submit_report）、工作区工具、席位工具、会话类型的系统工具。
+    // 会话侧会交出的 id：内置面（含 submit_report）、工作区工具、段声明里的机制动作、会话类型的系统工具。
     let mut session: Vec<String> = t::names();
     session.extend(
         crate::units::business::workspace::api::WORK_TOOLS
             .iter()
             .map(|s| s.to_string()),
     );
-    for l in sm::LOOPS {
-        for c in l.cast {
-            session.extend(c.tools.iter().map(|s| s.to_string()));
+    let decls = crate::tests::doubles::test_decls();
+    for l in &decls.loops().loops {
+        for c in &l.cast {
+            session.extend(c.tools.iter().cloned());
         }
     }
-    for p in crate::tests::doubles::test_profiles().profiles {
-        session.extend(p.system_tools);
+    for p in &decls.profiles().profiles {
+        session.extend(p.system_tools.iter().cloned());
     }
     let mut orphan: Vec<&str> = Vec::new();
     for id in &ids {

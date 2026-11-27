@@ -329,8 +329,11 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
 #[test]
 pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     let systools = test_systools();
-    // 机制声明把核心操作发给对应的核心席位（越权校验与工具面的判据都是它）。
-    let face = |id: &str| -> Vec<String> { crate::units::business::agentloop::api::role_face(id) };
+    let decls = crate::tests::doubles::test_decls();
+    // 段声明把核心操作发给对应的核心角色（越权校验与工具面的判据都是它）。
+    let face = |id: &str| -> Vec<String> {
+        crate::units::business::agentloop::api::role_face(decls.loops(), id)
+    };
     for (role, tool) in [
         ("planner", "plan"),
         ("planner", "slate"),
@@ -410,6 +413,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         modules: Vec::new(),
         prompt: Arc::new(test_prompts()),
         policy: crate::units::business::agentloop::api::default_policy(),
+        decls: crate::tests::doubles::test_decls(),
     };
     // 第一轮：先核实（read）；第二轮：交出 plan。
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -426,7 +430,6 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     };
     let out = crate::units::business::agentloop::api::core_operation(
         &*test_tools_svc(),
-        "planner",
         "plan",
         crate::units::pure::registry_model::api::ToolMode::Envelope,
         &mut chat,
@@ -461,7 +464,6 @@ pub(crate) fn body_json_is_not_a_core_operation() {
     ]);
     let out = crate::units::business::agentloop::api::core_operation(
         &*test_tools_svc(),
-        "planner",
         "plan",
         crate::units::pure::registry_model::api::ToolMode::Envelope,
         chat.as_mut(),
@@ -507,7 +509,6 @@ pub(crate) fn core_operation_takes_a_native_structured_call() {
     let seen = Arc::clone(&rows);
     let out = crate::units::business::agentloop::api::core_operation(
         &*test_tools_svc(),
-        "planner",
         "plan",
         crate::units::pure::registry_model::api::ToolMode::Native,
         &mut chat,

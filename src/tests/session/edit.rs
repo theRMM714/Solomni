@@ -300,7 +300,7 @@ pub(crate) fn deleting_a_session_releases_its_fence_lease() {
         crate::tests::doubles::test_host_probe(),
         Arc::new(crate::units::business::residents::api::NoResidents),
         Arc::new(crate::units::business::catalog::secrets::api::NoSecrets),
-        crate::tests::doubles::test_profiles(),
+        crate::tests::doubles::test_decls(),
     );
     assert!(
         core.lifecycle.history_delete(&mut core.turn, "w").unwrap(),

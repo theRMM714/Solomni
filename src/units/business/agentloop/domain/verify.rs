@@ -66,6 +66,8 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
         // 核心核实只挂 agent 来源（读面）：不挂模块来源。
         source_ids: &[SOURCE_AGENT.to_string()],
         system_tools: &[],
+        // 核心核实不查段表（只挂 agent 来源）。
+        loops: None,
         modules: &[],
         sandbox: &sb,
         prompt: &*spec.prompt,
@@ -113,5 +115,6 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
         modules: Vec::new(),
         prompt: Arc::clone(&spec.prompt),
         policy: crate::units::business::agentloop::domain::policy::default_policy(),
+        decls: Arc::new(crate::units::business::session_model::api::SessionDecls::empty()),
     }))
 }

@@ -203,7 +203,7 @@ pub trait Flow: Send {
         None
     }
     /// 目的：这条流程此刻的成员身份（派节点时给子会话定段与角色）；默认没有成员身份。
-    fn member_identity(&self) -> Option<(&'static str, &'static str)> {
+    fn member_identity(&self) -> Option<(String, String)> {
         None
     }
 }

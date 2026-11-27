@@ -1,0 +1,51 @@
+# 目的：流程段与角色的唯一声明处（段 = loop，角色位 = cast）。
+# 约束：会话类型表（systools/profiles.yaml）的 flows / loop 只能引用这里声明过的段；
+#   builder 是流程实现名（代码按它注册），没有 builder 的段是静止段（没有流程的会话坐它）。
+# 联动：装载器 src/units/business/session_model/detail/yaml_decls.rs；形状在 domain/mechanism.rs。
+
+roles:
+  - id: core_proxy
+    prompt: roles/core_proxy
+    core: true
+  - id: discussant
+    prompt: roles/discussant
+  - id: planner
+    prompt: roles/planner
+    core: true
+  - id: orchestrator
+    prompt: roles/orchestrator
+    core: true
+  - id: executor
+    prompt: roles/executor
+  - id: solo
+    prompt: roles/executor
+
+loops:
+  - id: discuss
+    builder: discuss
+    accepts: [requirement]
+    produces: summary
+    deny: [fs-write, shared-write]
+    cast:
+      - role: core_proxy
+      - role: discussant
+        min: 2
+        tools: [say, agree, leave, ask]
+  - id: execute
+    builder: execute
+    accepts: [requirement, summary]
+    cast:
+      - role: planner
+        tools: [plan, slate, verdict]
+      - role: orchestrator
+        tools: [node_verdict, checklist]
+      - role: executor
+        min: 1
+        tools: [submit_report]
+  - id: standard
+    accepts: [requirement]
+    cast:
+      - role: solo
+  - id: proxy
+    cast:
+      - role: core_proxy
