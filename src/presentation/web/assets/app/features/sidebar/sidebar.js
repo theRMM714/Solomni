@@ -136,8 +136,11 @@ function renderHistory() {
       const mode = doc.createElement('span'); mode.className = 'hmode';
       // 运行状态改由行首的灯表达（颜色 + title），文字只留类型与不可用原因。
       const live = state.sessions.get(h.name);
+      // 记录的执行环境来自落盘 meta（h.sandbox 是声明：策略 id + 定版），能不能跑由后端视图说了算。
+      const recorded = (h.sandbox && h.sandbox.policy) || '';
+      const liveView = state.views.get(h.name);
       mode.textContent = app.typeLabel(h.kind) +
-        (h.tier === 'vm' && h.tier_ready === false ? '·虚拟机档不可用' : '') +
+        (recorded === 'vm' && liveView && liveView.sandbox_ready === false ? '·虚拟机档不可用' : '') +
         (h.workspace_missing ? '·工作区不存在' : '');
       const pencil = ui.iconButton({ icon: 'pencil', label: '会话操作', tip: '', cls: 'hpen' });
       pencil.onclick = (e) => { e.stopPropagation(); ui.menu(pencil, historyMenu(h)); };
@@ -216,8 +219,10 @@ function archivedRow(it) {
  * 用户有权知道这一点，也有权知道怎么才能用上。 */
 function warnIfTierUnavailable(name) {
   const view = (state.history || []).find((h) => h.name === name);
-  if (!view || view.tier !== 'vm' || view.tier_ready !== false) return;
-  const missing = (view.tier_missing || []).join('；') || '本机不具备虚拟机档的前置条件';
+  const recorded = (view && view.sandbox && view.sandbox.policy) || '';
+  const live = state.views.get(name);
+  if (recorded !== 'vm' || !live || live.sandbox_ready !== false) return;
+  const missing = (live.sandbox_missing || []).join('；') || '本机不具备虚拟机档的前置条件';
   ui.notice(
     sidebarCopy.vmUnavailable.title,
     '原因：' + missing + '。\n\n' + sidebarCopy.vmUnavailable.kept + '\n' + sidebarCopy.vmUnavailable.enable,

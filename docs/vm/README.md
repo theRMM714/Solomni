@@ -1,20 +1,23 @@
 # vm（虚拟机档）
-> 定位：执行档位的选型诊断、就绪检测与 guest 生命周期；运行包由 `packages` 选好，本单元只消费 `PackagePlan`。
+
+> `vm` 是一种**执行环境策略**，登记进 `sandbox` 的注册表（`src/units/business/vm/domain/policy.rs` 的 `VmPolicy`）；会话只说「用 `vm` 策略 + 参数 `guest: <虚拟根名>`」，解释权在本单元（口径见 [docs/sandbox/README.md](../sandbox/README.md)）。
+> 定位：客机侧的选型诊断、就绪检测与 guest 生命周期；运行包由 `packages` 选好，本单元只消费 `PackagePlan`。
 > 效力：规范｜核对：2026-11-25｜依据：`src/units/business/vm/api.rs`
 
 ## 管什么 / 不管什么
-- 管：执行档位（本机 / 虚拟机）的选型诊断、执行计划派生（`src/units/business/vm/service/plan.rs`：运行包由 `packages` 选好，本单元只消费 `PackagePlan`）、就绪检测（本机能不能承载虚拟机档；缺哪几项、每项怎么补），以及 guest 生命周期（按会话租约起 / 跑 / 销毁）与 guest 只读诊断。
+- 管：**执行环境策略 `vm`**（自我介绍、声明校验、把「虚拟根名」解成客机事实）、客机侧选型诊断、执行计划派生（`src/units/business/vm/service/plan.rs`：运行包由 `packages` 选好，本单元只消费 `PackagePlan`）、就绪检测（本机能不能承载虚拟机；缺哪几项、每项怎么补），以及 guest 生命周期（按会话租约起 / 跑 / 销毁）与 guest 只读诊断。
+- 不管：**会话怎么选执行环境**（会话只存 `SandboxDecl` 与 `SandboxFacts`，见 `docs/session/session-model.md`）、**本机侧怎么隔离**（内核围栏与 `tools` 的 `host` 策略）。
 - 不管：运行包契约、包库与选包（`packages`）、会话与档案（`session`）、工作区与沙箱（`workspace`，本单元只收它给的中立路径）、模块清单（`modules`，只消费它声明的 `runtimes`）、实际执行工具（`tools`）。
 
 ## 入站契约与状态归属
-- 入站面：`api::Vm`（`guest_start` / `guest_run` / `guest_wait_agent` / `guest_stop` / `guest_leases` / `guest_diagnose`）+ 档位与计划的纯函数（`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_capability` / `capability_refusal` / …）。
+- 入站面：`api::Vm`（`guest_start` / `guest_run` / `guest_wait_agent` / `guest_stop` / `guest_leases` / `guest_diagnose`）+ 计划与就绪的纯函数（`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_capability` / `capability_refusal` / `guest_image_of` / …）+ `vm_policy(root, probe)`（组合根用它把 `vm` 策略登记进 `SandboxPolicies`）。
 - 管：**一次销毁的自足任务** `GuestStop`（`src/units/business/vm/service/job.rs`）——调用方算出租约、在本线程 `run`，销毁要等 guest 落盘。
 - 出站端口 `VmEngine` / `ShareBackend` 只由 `service.rs` 持有（R12）；`GuestVm` / `GuestChannel` 由引擎在 boot 时交出。
-- `ExecSpec` 是共享形状（在 `exec_model`），本单元只读它；包库与选包在 `packages`。
+- `TargetSpec`（侧 + 客机名 + 定版）是共享形状（在 `exec_model`），本单元只读它；策略声明到它的换算是 `SandboxDecl::target(&facts)`。包库与选包在 `packages`。
 - 状态归属：虚拟根在项目内 `data/.vm/guest/<名>`；可写层在 `data/.vm/overlays/<租约>.qcow2`；构建缓存卷在 `data/.vm/build-cache/`（归 `builds`）；guest 租约按主会话树。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
-- 经 `::api` 用到：`catalog`、`exec_model`、`kernel`
+- 经 `::api` 用到：`catalog`、`exec_model`、`kernel`、`sandbox`（登记 `vm` 策略要 `SandboxPolicy` / `PolicyDecl` / `SandboxFacts`）
 - 谁在用我：`agentloop`、`collab`、`entry`、`lifecycle`、`maintenance`、`provision`、`runtime`、`system`、`turn`、`turn_state`、`work`
 
 ## 一、适配器与组合
@@ -26,10 +29,10 @@
 - 共享要隧道时给 `restrict=on` 网卡；共享挂载（Windows 的 SMB/cifs）有界重试 3 次，仍失败才判这次起 guest 失败，并在回执里给出尝试次数与最后一次 mount 报错；smbd 自己的输出带 `[虚拟机] smbd：` 前缀转出来，不和 guest 侧现场混在一起。
 
 ## 二、执行分派与就绪
-- 会话在 `tier == Vm` 时把模块命令交给 guest；建会话 / 启用历史会话时装配并拉起，删除会话时销毁。
-- 改配按装配输入变化重建：模块集合 / 档位 / 虚拟根 / 定版变了才重建；只改模型或权限不重建；网络是全局开关（`sandbox.policy.network`），改它走整体重启，不按会话重建。
+- 会话的事实是客机侧（`SandboxFacts.side == guest`）时把模块命令交给 guest；建会话 / 启用历史会话时装配并拉起，删除会话时销毁。
+- 改配按装配输入变化重建：模块集合 / 执行环境策略 / 虚拟根 / 定版变了才重建；只改模型或权限不重建；网络是全局开关（`sandbox.policy.network`），改它走整体重启，不按会话重建。
 - 一个主会话树共用一台 guest：guest 租约 = 顶层工作名（proxy 树 = 代理根名），协作 / 节点 / proxy 子工作的工具租约都指向它；主机围栏租约仍按子会话（`FencePlan.lease` 与工具上下文里的 `guest_lease` 分开）。
-- 环境属于主会话：`tier / guest / net / pins` 由人建主会话时决定，子会话只读继承；核心代理的 `create_session` 不接受模型自选环境。
+- 环境属于主会话：执行环境声明（策略 id + `params.guest` + `pins`）由人建主会话时决定，子会话只读继承；核心代理的 `create_session` 不接受模型自选环境。
 - 网络是全局开关（`sandbox.policy.network`），不是会话字段：虚拟机档决定 guest 网卡；本机档由平台围栏决定（Windows `internetClient`、macOS `network-outbound`、Linux `net=false` 用 seccomp 拒绝非本地 socket；Linux `net=true` 不装网络过滤器，不限制入站 / 绑定）；默认 false；Windows 只放行公网出站，不授 private network / loopback。
 - guest 装配按整棵树聚合：plan / 沙箱 / 包冲突 / 定版取作用域根与整棵子树的并集；新子会话的包已被运行 guest 装载就直接加入，引入新包时要求树空闲后按新装配重建，不做运行包动态加载。
 - 建 / 改配 / 删除会话都分两段：核心线程只做校验、占名与出计划，起停 guest 在调用方线程上跑，核心不陪着等 guest。
@@ -49,7 +52,7 @@
 - macOS 组合：缺 QEMU 取包与 Apple vz 引擎 + 自研 agent（vsock 通道）；缺口与验收标准只记在 `tests/macos/gaps.yaml`。
 
 ## 三、判据与预检
-- 判据分两层：机器能力（`vm_capability`：hypervisor / guest 后端 / 引擎 / 共享档）决定虚拟机档能不能选；虚拟根是会话级——创建（`create_session` 的 `guest`）或会话配置里从清单选（界面给下拉，不让人填路径），保存 /「开始」时才合并成严格判据（`tier_readiness` / `tier_refusal`）。
+- 判据分两层：机器能力（`vm_capability`：hypervisor / guest 后端 / 引擎 / 共享档）决定虚拟机能不能选；虚拟根是会话级参数（`SandboxDecl.params.guest`）——创建（`create_session` 的 `guest`）或会话配置里从清单选（界面给下拉，不让人填路径），保存 /「开始」时才合并成严格判据（`tier_readiness` / `tier_refusal`）。
 - 会话级还会检查所选 guest 的 `clients` 有没有本平台用户档能承载的，没有就在起 guest 前拒绝并指路 `guest.yaml`。
 - 静态预检在「开始」那一刻一次走完：机器能力 × 虚拟根（名字 → `data/.vm/guest/<名>`，`resolve_guest`）× guest 声明的运行能力（`guest.yaml` 的 `runtimes`）× 模块声明 × `packages` 的选包计划。
 - 共享档按所选 guest 的 `clients` 再判：没有本平台用户档能承载的客户端就在起 guest 前拒绝，并指路 `guest.yaml`；copy 不参与这条判据（开发 / 应急开关除外）。

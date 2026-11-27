@@ -13,7 +13,7 @@ impl Core {
         sid: &str,
     ) -> Result<crate::units::business::work::api::GuestDiagnose, String> {
         let meta = self.history.meta(sid)?;
-        if meta.exec.tier != crate::units::pure::exec_model::api::Tier::Vm {
+        if meta.facts.side != crate::units::pure::exec_model::api::Side::Guest {
             return Err("这条会话是本机档，没有 guest 可诊断".to_string());
         }
         match crate::units::business::conversation::session::api::guest_scope(

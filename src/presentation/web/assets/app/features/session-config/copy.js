@@ -6,7 +6,7 @@ export const sessionConfigCopy = {
     lead: '名单与形态已冻结，模块与模型仍可改。',
     detail: '这轮会话已经开过：agent 名单与形态冻结 —— 名字只读、不能增删 agent（要换人请新建会话）。',
   },
-  tier: {
+  sandbox: {
     lead: '本机档脚本在宿主上跑；虚拟机档在 guest 里跑，隔离更强、代价更重。',
     detail: '本机档：按宿主目标装载 runtimes/ 的包，基础工具链 / 宿主 PATH 回退；隔离就是宿主本身（快，但风险也在宿主上）。虚拟机档：一整套 guest，按模块声明的运行能力装载运行包；依赖运行包。',
   },

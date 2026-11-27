@@ -170,9 +170,9 @@ pub struct AppSettings {
     /// 约束：模型映射只能引用这里的档位；删掉仍被模型引用的档位会被拒绝。
     #[serde(default)]
     pub thinking: ThinkingCatalog,
-    /// 目的：默认执行档位：新建会话未单独选定时用它（本机 = 在宿主上跑；虚拟机 = 整台 guest）。
+    /// 目的：默认执行环境：新建会话未单独选定时用它（策略 id + 定版 + 参数，见 `sandbox` 单元的注册表）。
     #[serde(default)]
-    pub tier: crate::units::pure::exec_model::api::Tier,
+    pub default_sandbox: crate::units::business::sandbox::api::SandboxDecl,
     /// 目的：全局沙箱策略与会话默认权限。
     #[serde(default)]
     pub sandbox: SandboxSettings,
@@ -258,7 +258,7 @@ impl Default for AppSettings {
             streaming: true,
             show_reasoning: true,
             thinking: ThinkingCatalog::default(),
-            tier: crate::units::pure::exec_model::api::Tier::Host,
+            default_sandbox: crate::units::business::sandbox::api::SandboxDecl::host(),
             sandbox: SandboxSettings::default(),
             qemu_path: String::new(),
             virtiofsd_path: String::new(),

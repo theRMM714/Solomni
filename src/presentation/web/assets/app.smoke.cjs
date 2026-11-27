@@ -199,7 +199,8 @@ setTimeout(async () => {
     try {
       // 记的是虚拟机档、本机现在承载不了：打开前要给提示（不拦打开）。
       vm.runInNewContext(
-        "state.history = [{ name: 'w', kind: 'single', ts: 1, done: true, tier: 'vm', tier_ready: false, tier_missing: ['本机虚拟机监视器不可用'] }];" +
+        "state.history = [{ name: 'w', kind: 'single', ts: 1, done: true, sandbox: { policy: 'vm' } }];" +
+          "state.views = new Map([['w', { sid: 'w', sandbox: 'vm', sandbox_ready: false, sandbox_missing: ['本机虚拟机监视器不可用'] }]]);" +
           "warnIfTierUnavailable('w');",
         sandbox
       );
@@ -772,7 +773,7 @@ setTimeout(async () => {
       // 虚拟机档那一步：选的是**虚拟机**（虚拟根），并且按所选模块预判"可能要缺什么"。
       const now = [];
       (function walk(n) { for (const c of (n.children || [])) { now.push(c); walk(c); } })(root);
-      const radios = now.filter((n) => n.type === "radio" && n.name === "wf-tier");
+      const radios = now.filter((n) => n.type === "radio" && n.name === "wf-sandbox");
       const vmRadio = radios[1];
       if (!vmRadio) {
         loadErrors.push("向导虚拟根检查：没有找到虚拟机档 radio");
@@ -851,9 +852,9 @@ setTimeout(async () => {
         "(function () {" +
           " state.sessions.set('a', { sid: 'a', running: true, running_known: true });" +
           " state.history = [" +
-          "   { name: 'p', kind: 'proxy', auto: true, ts: 1, done: false, run: 'stopped', tier: 'host', parent: null }," +
-          "   { name: 'c', kind: 'single', ts: 2, done: false, run: 'archived', tier: 'host', parent: 'p' }," +
-          "   { name: 'a', kind: 'single', ts: 3, done: false, run: 'active', tier: 'host', parent: null }];" +
+          "   { name: 'p', kind: 'proxy', auto: true, ts: 1, done: false, run: 'stopped', sandbox: { policy: 'host' }, parent: null }," +
+          "   { name: 'c', kind: 'single', ts: 2, done: false, run: 'archived', sandbox: { policy: 'host' }, parent: 'p' }," +
+          "   { name: 'a', kind: 'single', ts: 3, done: false, run: 'active', sandbox: { policy: 'host' }, parent: null }];" +
           " const box = document.querySelector('#history-list'); box.children.length = 0;" +
           " state.treeOpen.add('p'); renderHistory();" +
           " const all = []; (function walk(n) { for (const c of (n.children || [])) { all.push(c); walk(c); } })(box);" +

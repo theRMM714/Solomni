@@ -22,6 +22,7 @@ use crate::units::business::provision::api::Provision;
 use crate::units::business::runtime::api::{
     Acted, ActionCall, ActionOps, ActionParamView, ActionView, Caller, LogOps, RuntimeOps,
 };
+use crate::units::business::sandbox::api::SandboxDecl;
 use crate::units::business::session_model::api::{HistoryView, RunState, SessionMeta};
 use crate::units::business::tools::api::{ToolExec, Tools, arg_fault_text};
 use crate::units::business::transcript::api::{DecisionQueue, SessionEvent};
@@ -33,11 +34,10 @@ use crate::units::business::vm::api::Vm;
 use crate::units::business::work::api::WorkOps;
 use crate::units::business::work::api::{
     AgentSuggestion, EditGuest, FilesView, GuestBoot, PreparedActivation, PreparedEdit,
-    PreparedWork, RuntimeReport, SessionConfig, SessionEdit, SessionTypeView, SessionView,
-    TierChoices, Work, WorkOpened, WorkSpec,
+    PreparedWork, RuntimeReport, SandboxChoices, SessionConfig, SessionEdit, SessionTypeView,
+    SessionView, Work, WorkOpened, WorkSpec,
 };
 use crate::units::business::workspace::api::Workspace;
-use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::registry_model::api::AgentView;
 use crate::units::pure::registry_model::api::ModelView;
 use crate::units::pure::registry_model::api::ProviderView;

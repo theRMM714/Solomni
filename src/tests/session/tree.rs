@@ -29,8 +29,9 @@ pub(crate) fn child_edit_writes_back_to_the_agent_roster() {
         task: None,
         ts: 2,
         agents: vec![agent_meta("a", &["a"], None)],
-        exec: Default::default(),
         sandbox: Default::default(),
+        facts: Default::default(),
+        permission: Default::default(),
         parent: Some("w".to_string()),
         node: None,
         delegation: None,
@@ -96,8 +97,9 @@ pub(crate) fn tree_wide_module_overlap_is_allowed_on_child_edit() {
         task: None,
         ts: 2,
         agents: vec![agent_meta("a", &["a"], None)],
-        exec: Default::default(),
         sandbox: Default::default(),
+        facts: Default::default(),
+        permission: Default::default(),
         parent: Some("w".to_string()),
         node: None,
         delegation: None,
@@ -415,7 +417,7 @@ pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
     core.edit_session(&parent, root_edit).expect("根编辑");
     let (cm, _) = core.lifecycle.history_open(&child).unwrap();
     assert_eq!(
-        cm.sandbox.narrowing.as_ref().and_then(|l| l.profile),
+        cm.permission.narrowing.as_ref().and_then(|l| l.profile),
         Some(ProfileId::Offline),
         "根编辑不能清掉子收窄"
     );
@@ -428,7 +430,7 @@ pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
     );
     let (pm, _) = core.lifecycle.history_open(&parent).unwrap();
     assert_eq!(
-        pm.sandbox.ceiling.as_ref().and_then(|l| l.profile),
+        pm.permission.ceiling.as_ref().and_then(|l| l.profile),
         Some(ProfileId::Online),
         "根 ceiling 换成联网"
     );
@@ -475,7 +477,7 @@ pub(crate) fn creation_writes_the_chosen_profile_into_the_root_ceiling() {
     let sid = core.create_work(spec).unwrap().sid;
     let (meta, _) = core.lifecycle.history_open(&sid).unwrap();
     assert_eq!(
-        meta.sandbox.ceiling.as_ref().and_then(|l| l.profile),
+        meta.permission.ceiling.as_ref().and_then(|l| l.profile),
         Some(ProfileId::Online)
     );
     assert_eq!(
@@ -514,7 +516,7 @@ pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
         .expect("根快速切档");
     let (pm, _) = core.lifecycle.history_open(&parent).unwrap();
     assert_eq!(
-        pm.sandbox.ceiling.as_ref().and_then(|l| l.profile),
+        pm.permission.ceiling.as_ref().and_then(|l| l.profile),
         Some(ProfileId::Offline)
     );
     assert_eq!(
@@ -532,41 +534,46 @@ pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
 #[test]
 pub(crate) fn guest_lease_follows_the_tier_and_the_proxy_root() {
     use crate::units::business::conversation::session::api::guest_lease;
-    use crate::units::pure::exec_model::api::ExecSpec;
-    use crate::units::pure::exec_model::api::Tier;
-    let meta = |name: &str, parent: Option<&str>, tier: Tier, kind: &str| SessionMeta {
-        usage_totals: Default::default(),
-        context_freshness: false,
-        freshness_keep_percent: 80,
-        name: name.to_string(),
-        spec: crate::tests::builders::seeded_spec(kind),
-        delegate: false,
-        modules: Vec::new(),
-        task: None,
-        ts: 1,
-        agents: Vec::new(),
-        exec: ExecSpec {
-            tier,
+    use crate::units::pure::exec_model::api::{Side, TargetSpec};
+    let meta = |name: &str, parent: Option<&str>, tier: Side, kind: &str| {
+        let spec = TargetSpec {
+            side: tier,
+            guest: (tier == Side::Guest).then(|| "g".to_string()),
             ..Default::default()
-        },
-        sandbox: Default::default(),
-        parent: parent.map(|p| p.to_string()),
-        node: None,
-        delegation: None,
-        thinking: None,
-        run: RunState::Active,
-        workspace: Default::default(),
+        };
+        let (sandbox, facts) = crate::tests::builders::sandbox_of(&spec);
+        SessionMeta {
+            usage_totals: Default::default(),
+            context_freshness: false,
+            freshness_keep_percent: 80,
+            name: name.to_string(),
+            spec: crate::tests::builders::seeded_spec(kind),
+            delegate: false,
+            modules: Vec::new(),
+            task: None,
+            ts: 1,
+            agents: Vec::new(),
+            sandbox,
+            facts,
+            permission: Default::default(),
+            parent: parent.map(|p| p.to_string()),
+            node: None,
+            delegation: None,
+            thinking: None,
+            run: RunState::Active,
+            workspace: Default::default(),
+        }
     };
-    let proxy = meta("proxy-root", None, Tier::Vm, PROXY);
+    let proxy = meta("proxy-root", None, Side::Guest, PROXY);
     assert_eq!(guest_lease(&proxy, &proxy), None, "代理根自己没有 guest");
-    let child = meta("proxy-root--a", Some("proxy-root"), Tier::Vm, MEETING);
+    let child = meta("proxy-root--a", Some("proxy-root"), Side::Guest, MEETING);
     assert_eq!(
         guest_lease(&child, &proxy),
         Some("proxy-root".to_string()),
         "子工作共用代理根那一台"
     );
-    let solo = meta("solo", None, Tier::Vm, SINGLE);
+    let solo = meta("solo", None, Side::Guest, SINGLE);
     assert_eq!(guest_lease(&solo, &solo), Some("solo".to_string()));
-    let host = meta("host", None, Tier::Host, SINGLE);
+    let host = meta("host", None, Side::Host, SINGLE);
     assert_eq!(guest_lease(&host, &host), None, "本机档没有 guest");
 }

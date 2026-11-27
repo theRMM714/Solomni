@@ -211,7 +211,7 @@ pub struct ToolFace {
     /// 目的：模块 id → 该模块的（目录, 工具表）；内置 read/write 不走这里。
     pub modules: BTreeMap<String, ModuleTools>,
     /// 目的：本会话的执行档位——工具执行者据此决定在本机跑还是送进 guest。
-    pub tier: crate::units::pure::exec_model::api::Tier,
+    pub side: crate::units::pure::exec_model::api::Side,
     /// 目的：虚拟机档要用的 **guest 租约**（空 = 本机档 / 没有 guest）：共享 guest 时它是作用域根工作名
     ///   （proxy 树 = 代理根名）；主机围栏仍用 `fence.lease`（子会话名）。
     pub guest_lease: String,
@@ -394,7 +394,7 @@ impl MemberTools {
         if !native {
             for id in ids {
                 if let Some(schema) = self.face.builtin_tools.get(id) {
-                    // 环境参数只属于人经呈现层：核心代理的 create_session 工具面不列 tier / guest。
+                    // 环境参数只属于人经呈现层：核心代理的 create_session 工具面不列 side / guest。
                     let text = if self.face.role == "core_proxy" && id == "create_session" {
                         schema.render_for_prompt_hiding(&["tier", "guest"])
                     } else {

@@ -9,7 +9,6 @@ use crate::units::business::system::api::System;
 use crate::units::business::tools::api::Op;
 use crate::units::business::transcript::api::{DecisionCard, DecisionWaiter, SessionEvent};
 use crate::units::business::turn::turn::api::Output;
-use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::pure::registry_model::api::ModelView;
 use crate::units::pure::registry_model::api::ProviderView;
@@ -47,12 +46,12 @@ pub(crate) fn startup_workspace(faces: &Faces, off: bool) -> Startup {
             };
         }
     };
-    let tier = faces
+    let sandbox = faces
         .registry
         .settings()
-        .map(|s| s.tier)
-        .unwrap_or(Tier::Host);
-    match faces.work.ambient_workspace(&cwd, tier) {
+        .map(|s| s.default_sandbox)
+        .unwrap_or_default();
+    match faces.work.ambient_workspace(&cwd, &sandbox) {
         Ok(root) if root.to_str().is_some() => Startup {
             workspace: Some(root),
             skip: None,

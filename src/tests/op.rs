@@ -3,10 +3,10 @@
 //! 不管：命令怎么执行（各执行者自己的测试）、手册怎么排版（`src/tests/cli.rs`）。
 //! 联动：`systools/commands.yaml`、`src/units/business/tools/domain/op.rs`。
 
-use crate::units::business::catalog::modules::api::{Param, ParamType};
 use crate::units::business::tools::api::{
     CommandBook, Executor, Op, OpBook, Phase, Runtime, ToolSchema, complete_op, op_usage, parse_op,
 };
+use crate::units::pure::registry_model::api::{Param, ParamType};
 use serde_json::json;
 use std::collections::BTreeMap;
 

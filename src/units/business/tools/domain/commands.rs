@@ -51,9 +51,8 @@ pub struct Command {
     /// 目的：参数契约（与动作面同一个形状）：位置序号、可选值、类型、缺省值都写在这里。
     ///   约束：写法（usage）、手册、补全与校验全部从它派生，不再手写字符串。
     #[serde(default)]
-    pub params: Option<
-        std::collections::BTreeMap<String, crate::units::business::catalog::modules::api::Param>,
-    >,
+    pub params:
+        Option<std::collections::BTreeMap<String, crate::units::pure::registry_model::api::Param>>,
     /// 目的：最后一步落在哪（core / system / ui）：声明与解析共用，只有执行入口不同。
     #[serde(default)]
     pub executor: super::op::Executor,

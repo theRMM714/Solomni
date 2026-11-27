@@ -18,7 +18,7 @@ impl WorkOps for Handle {
                     }
                 }
             }
-            self.ensure_built(&ids, spec.tier, spec.guest.as_deref())?;
+            self.ensure_built(&ids, &spec.sandbox)?;
         }
         // 两段：核心准备（毫秒级）→ 起 guest（这一段）→ 提交。核心线程不陪着等 QEMU。
         let (prepared, boot) = self.call(move |core| core.prepare_work(spec, None))?;
@@ -107,12 +107,13 @@ impl WorkOps for Handle {
         self.call(move |core| Ok(core.session_views(&history)))
     }
 
-    fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String> {
-        self.call(move |core| Ok(core.runtime_report(tier)))
+    fn runtime_report(&self, sandbox: &SandboxDecl) -> Result<RuntimeReport, String> {
+        let sandbox = sandbox.clone();
+        self.call(move |core| Ok(core.runtime_report(&sandbox)))
     }
 
-    fn tier_choices(&self) -> Result<TierChoices, String> {
-        self.call(|core| Ok(core.tier_choices()))
+    fn sandbox_choices(&self) -> Result<SandboxChoices, String> {
+        self.call(|core| Ok(core.sandbox_choices()))
     }
 
     fn suggest_models(&self, task: &str, kind: &str) -> Result<Vec<AgentSuggestion>, String> {
@@ -137,10 +138,11 @@ impl WorkOps for Handle {
     fn ambient_workspace(
         &self,
         raw: &std::path::Path,
-        tier: Tier,
+        sandbox: &SandboxDecl,
     ) -> Result<std::path::PathBuf, String> {
         let raw = raw.to_path_buf();
-        self.call(move |core| core.ambient_workspace(&raw, tier))
+        let sandbox = sandbox.clone();
+        self.call(move |core| core.ambient_workspace(&raw, &sandbox))
     }
 }
 

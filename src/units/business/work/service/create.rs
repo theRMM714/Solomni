@@ -25,10 +25,11 @@ impl Work {
         &self,
         probe: &dyn HostProbe,
         raw: &std::path::Path,
-        tier: crate::units::pure::exec_model::api::Tier,
+        sandbox: &crate::units::business::sandbox::api::SandboxDecl,
     ) -> Result<std::path::PathBuf, String> {
+        let side = self.policies.facts(sandbox)?.side;
         let product = crate::units::business::workspace::api::product_root(&self.root, probe);
-        crate::units::business::workspace::api::ambient(raw, tier, &product, probe)
+        crate::units::business::workspace::api::ambient(raw, side, &product, probe)
     }
 }
 
@@ -117,7 +118,7 @@ impl Work {
         &self,
         probe: &dyn HostProbe,
         raw: Option<&std::path::Path>,
-        tier: crate::units::pure::exec_model::api::Tier,
+        side: crate::units::pure::exec_model::api::Side,
         parent: Option<&str>,
     ) -> Result<crate::units::business::session_model::api::WorkspaceDecl, String> {
         if let Some(_p) = parent {
@@ -130,7 +131,7 @@ impl Work {
             return Ok(crate::units::business::session_model::api::WorkspaceDecl::layout());
         };
         let product = crate::units::business::workspace::api::product_root(&self.root, probe);
-        let root = crate::units::business::workspace::api::resolve(raw, tier, &product, probe)?;
+        let root = crate::units::business::workspace::api::resolve(raw, side, &product, probe)?;
         Ok(crate::units::business::session_model::api::WorkspaceDecl::at(root))
     }
 
@@ -156,14 +157,21 @@ impl Work {
             )
         })?;
         let driven = decl.driven();
+        // 执行环境的声明在这里先过策略自己的校验，再解析成事实一次：寻址、承载与运行包都读同一份派生值。
+        self.policies.check(&spec.sandbox)?;
+        let sandbox_facts = self.policies.facts(&spec.sandbox)?;
         if turn.holds(&spec.name)
             || self.history.load(&spec.name).is_ok()
             || turn.is_starting(&spec.name)
         {
             return Err(format!("工作名已存在：{}", spec.name));
         }
-        let workspace =
-            self.resolve_workspace_decl(host, spec.workspace.as_deref(), spec.tier, parent)?;
+        let workspace = self.resolve_workspace_decl(
+            host,
+            spec.workspace.as_deref(),
+            sandbox_facts.side,
+            parent,
+        )?;
         // **代理形态**（第三人形态）：没有名单、没有需求——用户选这一形态就是**授予全权**。
         // 它不是一个 agent 工作，装配与其余形态没有共同点，所以在这里就地分岔、不往下走。
         if !driven && decl.auto {
@@ -187,8 +195,7 @@ impl Work {
                     name: &spec.name,
                     kind: &spec.kind,
                     granted_at: crate::kernel::api::procs::unix_seconds(),
-                    tier: spec.tier,
-                    guest: spec.guest.as_deref(),
+                    sandbox: spec.sandbox.clone(),
                     profile: spec
                         .permission
                         .unwrap_or(crate::units::pure::permission::api::ProfileId::Online),
@@ -307,15 +314,15 @@ impl Work {
             parent: parent.map(|s| s.to_string()),
             node: None,
             delegation: None,
-            // 环境属于主会话：子会话整段沿用父会话（档位 / 虚拟根 / 网络 / 定版）；
-            // 顶层来自**用户在创建向导里的选择**（默认 = 设置里的档位）。承载不了由下面如实拒绝。
-            exec: match parent {
-                Some(p) => self.history.meta(p)?.exec,
-                None => crate::units::pure::exec_model::api::ExecSpec {
-                    tier: spec.tier,
-                    guest: spec.guest.clone(),
-                    ..crate::units::pure::exec_model::api::ExecSpec::default()
-                },
+            // 环境属于主会话：子会话整段沿用父会话的声明与事实（策略 / 参数 / 定版）；
+            // 顶层来自**用户在创建向导里的选择**（默认 = 设置里的 `default_sandbox`）。承载不了由下面如实拒绝。
+            sandbox: match parent {
+                Some(p) => self.history.meta(p)?.sandbox.clone(),
+                None => spec.sandbox.clone(),
+            },
+            facts: match parent {
+                Some(p) => self.history.meta(p)?.facts.clone(),
+                None => sandbox_facts.clone(),
             },
             // 外部根只写在工作根上；子会话沿 parent 链继承，自己只写一份没有根的声明。
             workspace: if parent.is_none() {
@@ -323,10 +330,10 @@ impl Work {
             } else {
                 Default::default()
             },
-            sandbox: match parent {
+            permission: match parent {
                 // 子会话只带自己的 narrowing；根 ceiling 沿祖先链现算，不再复制父权限。
                 Some(_) => Default::default(),
-                None => crate::units::pure::permission::api::SessionSandbox {
+                None => crate::units::pure::permission::api::PermissionOverride {
                     ceiling: spec.permission.map(|profile| {
                         crate::units::pure::permission::api::PermissionLayer {
                             profile: Some(profile),
@@ -342,7 +349,7 @@ impl Work {
         // 必须在建工作区之前收口——拒绝就该什么都不留下。
         if let Some(why) = crate::units::business::vm::api::tier_refusal(
             &self.root,
-            &meta.exec,
+            &meta.target(),
             &self.virtual_tools(registry),
             host,
         ) {
@@ -371,9 +378,12 @@ impl Work {
             .filter(|m| module_ids.iter().any(|id| id == &m.manifest.id))
             .cloned()
             .collect();
-        if meta.exec.tier == crate::units::pure::exec_model::api::Tier::Vm {
-            let guest_runtimes =
-                crate::units::business::vm::api::guest_runtimes_of(&self.root, host, &meta.exec);
+        if meta.facts.on_guest() {
+            let guest_runtimes = crate::units::business::vm::api::guest_runtimes_of(
+                &self.root,
+                host,
+                &meta.target(),
+            );
             for (id, caps) in pkgs::absent(&session_modules, &self.packages.library()) {
                 let caps: Vec<String> = caps
                     .into_iter()
@@ -390,7 +400,7 @@ impl Work {
         }
         // 执行选型完整性（「开始」即冻结）：选型不成立或**缺包**都如实拒绝（没有工具，用户完不成工作）。
         // 入口**按目标环境**判：虚拟机档按 guest 的 os 解析名字，跨平台还看文件形式（宿主编的产物跑不了）。
-        let guest = crate::units::business::vm::api::guest_os_of(&self.root, host, &meta.exec)
+        let guest = crate::units::business::vm::api::guest_os_of(&self.root, host, &meta.target())
             .map(|g| g.as_str());
         let target_os = guest.unwrap_or(std::env::consts::OS);
         let missing: Vec<crate::units::business::vm::api::MissingEntry> =
@@ -407,10 +417,10 @@ impl Work {
             &self.root,
             host,
             &self.packages.library(),
-            &meta.exec,
+            &meta.target(),
             &session_modules,
             &missing,
-            meta.exec.guest.as_deref(),
+            meta.facts.guest.as_deref(),
             registry.app().sandbox.policy.network,
         )?;
         self.log.info(
@@ -427,9 +437,7 @@ impl Work {
             None
         };
         // 代拟名单还没确认：沙箱/模块都不知道，先不起 guest；第一次真正生成前 ensure_guest 再起。
-        let boot = if meta.exec.tier == crate::units::pure::exec_model::api::Tier::Vm
-            && !(meta.delegate && meta.agents.is_empty())
-        {
+        let boot = if meta.facts.on_guest() && !(meta.delegate && meta.agents.is_empty()) {
             // 共享 guest：按整棵树装配（proxy 子工作都进代理根那一台），租约取作用域根。
             let (lease, scope_meta) = guest_scope(self.history.as_ref(), &meta)?
                 .ok_or_else(|| "虚拟机档会话没有解析出 guest 作用域".to_string())?;
@@ -540,24 +548,24 @@ impl Work {
                     probe,
                     &self.packages.library(),
                     &self.packages.base(),
-                    &meta.exec,
+                    &meta.target(),
                     &chosen,
                 );
                 let guest =
-                    crate::units::business::vm::api::guest_os_of(&self.root, probe, &meta.exec);
-                let host_plan = if meta.exec.tier == crate::units::pure::exec_model::api::Tier::Host
-                {
-                    crate::units::business::vm::api::host_plan_for(
-                        &self.packages.library(),
-                        &self.packages.base(),
-                        probe,
-                        &meta.exec,
-                        &chosen,
-                        pkgs::PinPolicy::Require,
-                    )
-                } else {
-                    pkgs::PackagePlan::default()
-                };
+                    crate::units::business::vm::api::guest_os_of(&self.root, probe, &meta.target());
+                let host_plan =
+                    if meta.facts.side == crate::units::pure::exec_model::api::Side::Host {
+                        crate::units::business::vm::api::host_plan_for(
+                            &self.packages.library(),
+                            &self.packages.base(),
+                            probe,
+                            &meta.target(),
+                            &chosen,
+                            pkgs::PinPolicy::Require,
+                        )
+                    } else {
+                        pkgs::PackagePlan::default()
+                    };
                 let (mut s, opened) = turn.build_single(
                     registry,
                     a,
@@ -566,7 +574,7 @@ impl Work {
                     &sb,
                     unavailable,
                     registry.app().sandbox.policy.network,
-                    meta.exec.tier,
+                    meta.facts.side,
                     guest,
                     guest_lease_for(self.history.as_ref(), &meta)?,
                     &host_plan,
@@ -721,8 +729,8 @@ impl Work {
     /// 目的：建一个**代理会话**的真身（`mode="proxy"` + 全权委托）：核心在这里跟用户对话，用代理工具代他决定。
     ///  没有 agent、没有模块工具；这一回合的工具面是 `core_proxy`（六项代理工具 + 只读核实）。
     /// 返回：（会话引用, **开场事实**）——事实交给 api 层发布到事件台（核心不持有事件台）。
-    ///  `tier` 是用户在向导里选的档位：它既是这条会话自己的工作区档位，也是它**建子工作时的默认档位**
-    ///  （`proxy_create` 取 `pmeta.exec.tier`）。承载不了就如实拒绝，不偷偷降级。
+    ///  `side` 是用户在向导里选的档位：它既是这条会话自己的工作区档位，也是它**建子工作时的默认档位**
+    ///  （`proxy_create` 取 `pmeta.facts.side`）。承载不了就如实拒绝，不偷偷降级。
     pub(crate) fn create_proxy_with_facts(
         &mut self,
         turn: &mut Turn,
@@ -734,8 +742,7 @@ impl Work {
             name,
             kind,
             granted_at,
-            tier,
-            guest,
+            sandbox,
             profile,
             workspace,
             freshness,
@@ -744,17 +751,14 @@ impl Work {
         if turn.holds(name) || self.history.load(name).is_ok() {
             return Err(format!("工作名已存在：{}", name));
         }
-        let exec = ExecSpec {
-            tier,
-            guest: guest
-                .map(|g| g.trim().to_string())
-                .filter(|g| !g.is_empty()),
-            ..ExecSpec::default()
-        };
+        // 执行环境的事实在这里求一次：承载判定与落盘都用它，策略实现由注册表给。
+        self.policies.check(&sandbox)?;
+        let facts = self.policies.facts(&sandbox)?;
+        let target = sandbox.target(&facts);
         // 与其余形态同一把尺子：虚拟机档的承载不成立就不建（用户环境问题，不是选型问题）。
         if let Some(why) = crate::units::business::vm::api::tier_refusal(
             &self.root,
-            &exec,
+            &target,
             &self.virtual_tools(registry),
             probe,
         ) {
@@ -781,8 +785,9 @@ impl Work {
             task: None,
             ts: crate::kernel::api::procs::unix_seconds(),
             agents: Vec::new(),
-            exec,
-            sandbox: crate::units::pure::permission::api::SessionSandbox {
+            sandbox: sandbox.clone(),
+            facts,
+            permission: crate::units::pure::permission::api::PermissionOverride {
                 ceiling: Some(crate::units::pure::permission::api::PermissionLayer {
                     profile: Some(profile),
                 }),

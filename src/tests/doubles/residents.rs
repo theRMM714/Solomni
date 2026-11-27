@@ -265,7 +265,7 @@ pub(crate) fn member_with_service_tools(
         face: crate::units::business::agentloop::api::ToolFace {
             mode: crate::units::pure::registry_model::api::ToolMode::Envelope,
             modules,
-            tier: crate::units::pure::exec_model::api::Tier::Host,
+            side: crate::units::pure::exec_model::api::Side::Host,
             guest_lease: String::new(),
             sandbox: sb.clone(),
             tools_this_turn: test_prompts()

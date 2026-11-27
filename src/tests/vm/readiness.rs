@@ -47,8 +47,8 @@ pub(crate) fn vm_capability_is_machine_only_while_session_readiness_needs_base()
         "机器能力清单不含会话级 base：{:?}",
         cap.requirements
     );
-    let spec = ExecSpec {
-        tier: Tier::Vm,
+    let spec = TargetSpec {
+        side: Side::Guest,
         guest: None,
         ..Default::default()
     };

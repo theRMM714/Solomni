@@ -13,17 +13,17 @@ use crate::kernel::ports::{HostProbe, PathCodec};
 use crate::units::business::catalog::modules::api::Module;
 use crate::units::business::catalog::packages::api as pkgs;
 use crate::units::business::catalog::packages::api::{BaseFacts, Library, PackagePlan, PinPolicy};
-use crate::units::pure::exec_model::api::ExecSpec;
-use crate::units::pure::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::Side;
+use crate::units::pure::exec_model::api::TargetSpec;
 
 /// 目的：这次会话的 guest 镜像（本机档或选定虚拟根判不出来 = None）——平台名与 guest OS 都从它派生。
 /// 约束：虚拟根名先经 `resolve_guest` 解析成那一格目录，再按布局判定；两者任一失败都给 None。
 pub fn guest_image_of(
     root: &Path,
     probe: &dyn HostProbe,
-    spec: &ExecSpec,
+    spec: &TargetSpec,
 ) -> Option<crate::units::business::vm::api::GuestImage> {
-    if spec.tier != Tier::Vm {
+    if spec.side != Side::Guest {
         return None;
     }
     let name = spec.guest.as_deref()?;
@@ -32,7 +32,7 @@ pub fn guest_image_of(
 }
 
 /// 目的：这次虚拟机档会话的 guest 平台名（os-arch）；本机档或判不出来给空串。
-pub fn guest_platform_of(root: &Path, probe: &dyn HostProbe, spec: &ExecSpec) -> String {
+pub fn guest_platform_of(root: &Path, probe: &dyn HostProbe, spec: &TargetSpec) -> String {
     guest_image_of(root, probe, spec)
         .map(|image| crate::units::business::vm::api::guest_platform(image.os, image.arch))
         .unwrap_or_default()
@@ -42,7 +42,7 @@ pub fn guest_platform_of(root: &Path, probe: &dyn HostProbe, spec: &ExecSpec) ->
 pub fn guest_os_of(
     root: &Path,
     probe: &dyn HostProbe,
-    spec: &ExecSpec,
+    spec: &TargetSpec,
 ) -> Option<crate::units::business::vm::api::GuestOs> {
     guest_image_of(root, probe, spec).map(|image| image.os)
 }
@@ -52,7 +52,7 @@ pub fn guest_os_of(
 pub fn path_codec_of(
     root: &Path,
     probe: &dyn HostProbe,
-    spec: &ExecSpec,
+    spec: &TargetSpec,
 ) -> Option<Arc<dyn PathCodec>> {
     let Some(guest) = guest_os_of(root, probe, spec) else {
         return crate::kernel::api::view_drive::view_codec();
@@ -66,14 +66,19 @@ pub fn path_codec_of(
 }
 
 /// 目的：这份规格的 guest 镜像自带哪些运行能力（本机档或判不出来 = 空）。
-pub fn guest_runtimes_of(root: &Path, probe: &dyn HostProbe, spec: &ExecSpec) -> Vec<String> {
+pub fn guest_runtimes_of(root: &Path, probe: &dyn HostProbe, spec: &TargetSpec) -> Vec<String> {
     guest_image_of(root, probe, spec)
         .map(|image| image.runtimes)
         .unwrap_or_default()
 }
 
 /// 目的：这次会话该用的包库——按 guest 平台筛过（分平台包只留与 guest 匹配的那份）。
-pub fn library_for(lib: &Library, root: &Path, probe: &dyn HostProbe, spec: &ExecSpec) -> Library {
+pub fn library_for(
+    lib: &Library,
+    root: &Path,
+    probe: &dyn HostProbe,
+    spec: &TargetSpec,
+) -> Library {
     pkgs::library_for_guest(lib, &guest_platform_of(root, probe, spec))
 }
 
@@ -82,7 +87,7 @@ pub fn host_plan_for(
     lib: &Library,
     base: &BaseFacts,
     probe: &dyn HostProbe,
-    spec: &ExecSpec,
+    spec: &TargetSpec,
     modules: &[Module],
     policy: PinPolicy,
 ) -> PackagePlan {
@@ -102,7 +107,7 @@ pub fn plan_for_spec(
     root: &Path,
     probe: &dyn HostProbe,
     lib: &Library,
-    spec: &ExecSpec,
+    spec: &TargetSpec,
     modules: &[Module],
     missing: &[crate::units::business::vm::api::MissingEntry],
     guest_root: Option<&str>,
@@ -112,7 +117,7 @@ pub fn plan_for_spec(
     let entry_diags = crate::units::business::vm::api::plan(spec, Vec::new(), missing, net)
         .err()
         .unwrap_or_default();
-    let package_plan = if spec.tier == Tier::Vm {
+    let package_plan = if spec.side == Side::Guest {
         pkgs::plan_guest(
             spec,
             modules,
@@ -145,10 +150,10 @@ pub fn unavailable_modules(
     probe: &dyn HostProbe,
     lib: &Library,
     base: &BaseFacts,
-    spec: &ExecSpec,
+    spec: &TargetSpec,
     modules: &[Module],
 ) -> BTreeMap<String, Vec<String>> {
-    if spec.tier == Tier::Vm {
+    if spec.side == Side::Guest {
         pkgs::plan_guest(
             spec,
             modules,

@@ -48,6 +48,8 @@ mod tools;
 mod vm;
 mod workspace;
 
+use builders::decl_of;
+
 /// 目的：测试用的**产品根**——当前工作目录（测试在仓库根跑，虚拟根就解析到 `data/.vm/guest/<名>` 这条相对路径上）。
 pub(crate) fn root_dir() -> std::path::PathBuf {
     std::env::current_dir().expect("取当前目录")
@@ -143,6 +145,7 @@ pub(crate) fn ops_with_vm(
         work.layout.clone(),
         work.versions.clone(),
         vm,
+        doubles::test_policies(),
         doubles::test_packages(std::sync::Arc::new(doubles::InMemoryPackages::empty())),
         doubles::test_provision(),
         doubles::test_modules(std::sync::Arc::new(doubles::VecSource(modules))),
@@ -187,8 +190,7 @@ pub(crate) fn single_work(
         task: None,
         delegate: false,
         permission: None,
-        tier: crate::units::pure::exec_model::api::Tier::Host,
-        guest: None,
+        sandbox: decl_of(crate::units::pure::exec_model::api::Side::Host, None),
         workspace: None,
     }
 }

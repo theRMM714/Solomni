@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use crate::kernel::api::fence::FencePlan;
 use crate::units::business::workspace::api::Sandbox;
-use crate::units::pure::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::Side;
 
 /// 目的：派生一席工具环境所需的全部已取事实。
 pub struct MemberEnvFacts<'a> {
@@ -20,7 +20,7 @@ pub struct MemberEnvFacts<'a> {
     /// 目的：该会话是否放行出站网络。
     pub net: bool,
     /// 目的：执行档位（宿主 / 虚拟机）。
-    pub tier: Tier,
+    pub side: Side,
     /// 目的：基础工具链根（只在宿主档放行）。
     pub base_roots: &'a [PathBuf],
     /// 目的：本机运行包的包根（并进只读树与工具链根）。
@@ -49,7 +49,7 @@ pub struct MemberEnv {
 pub fn member_env(facts: &MemberEnvFacts<'_>) -> MemberEnv {
     let mut fence = FencePlan::for_session(facts.sandbox, facts.host_read_roots, facts.net);
     fence.extend_read_tree(facts.package_roots.iter().cloned());
-    let mut runtime_roots = if facts.tier == Tier::Host {
+    let mut runtime_roots = if facts.side == Side::Host {
         facts.base_roots.to_vec()
     } else {
         Vec::new()

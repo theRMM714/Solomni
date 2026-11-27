@@ -15,7 +15,7 @@ use crate::units::business::session_model::api::{FS_READ, SOURCE_AGENT};
 use crate::units::business::tools::api::{Observations, ToolBook, ToolExec};
 use crate::units::business::vm::api::Vm;
 use crate::units::business::workspace::api::Sandbox;
-use crate::units::pure::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::Side;
 use crate::units::pure::registry_model::api::ToolMode;
 
 /// 目的：装配核心核实环境所需的全部事实与端口：沙箱、席位、通道形态、网络、工具总表、说明块素材与四个端口。
@@ -81,7 +81,7 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
             loop_id: String::new(),
             role: seat.role,
             modules: seat.modules,
-            tier: Tier::Host,
+            side: Side::Host,
             guest_lease: String::new(),
             sandbox: sb.clone(),
             tools_this_turn: spec.tools_this_turn.to_string(),

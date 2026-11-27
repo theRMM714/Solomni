@@ -11,7 +11,7 @@
 - 管：**工作形态的落盘形状**——`WorkSpec` / `WorkOpened` / `SessionMeta` 的装配顺序、通道解析（`resolve_channels`）、工作区绑定（`resolve_workspace_binding`）与工作名校验（`domain::validate_work_name`）。
 - 管：**视图**——`SessionView`（在世会话 × 历史的并集与继续判据）、`FilesView`、工作日志与提交恢复（`restore_work_commit`）。
 - 管：**模型视图**——`llm_opts` / `llm_opts_for`、思考片段、树上可用思考档与按根设置。
-- 管：**运行报告**——包库可用版本、缺失清单、档位视图（`RuntimeReport` / `TierChoices`）与权限视图（`PermissionView`）。
+- 管：**运行报告**——包库可用版本、缺失清单、执行环境视图（`RuntimeReport` / `SandboxChoices`：可按策略 id 列出可选的执行环境策略）与权限视图（`PermissionView`）。
 - 管：**guest 生命周期**——`GuestBoot` / `EditGuest` / `GuestDiagnose` 的起停诊断两段式（单次销毁的 `GuestStop` 归 `vm`），以及稳定根的判据（`stable_roots` / `check_stable_roots`）。
 - 管：**建议与激活**——`suggest_models` 按需求拟名单、`activation_build_request` / `prepare_activation` / `commit_activation` 启用历史会话的两段。
 - 不管：命令队列与生成驱动——谁在什么时候取走会话、生成完怎么放回，由 `runtime` 决定（本单元只提供用例方法）。
@@ -20,7 +20,7 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api` 的 DTO（`WorkSpec` / `WorkOpened` / `SessionTypeView`（会话类型表给界面的那份）/ `SessionConfig` / `SessionEdit` / `SessionView` / `ContinueView` / `FilesView` / `RuntimeReport` / `TierChoices` / `PermissionView` / `ThinkingView` / `AgentSuggestion` / `ConfigAgent` / `SessionTypeView`）与 guest 三类（`GuestBoot` / `GuestStop` / `EditGuest` / `GuestDiagnose`）；`work` 自己的 `WorkOps`、`turn` 的 `TurnOps` 与 `runtime` 的 `RuntimeOps` 签名直接用这些类型。
+- 入站面：`api` 的 DTO（`WorkSpec` / `WorkOpened` / `SessionTypeView`（会话类型表给界面的那份）/ `SessionConfig` / `SessionEdit` / `SessionView` / `ContinueView` / `FilesView` / `RuntimeReport` / `SandboxChoices` / `TierChoices` / `PermissionView` / `ThinkingView` / `AgentSuggestion` / `ConfigAgent` / `SessionTypeView`）与 guest 三类（`GuestBoot` / `GuestStop` / `EditGuest` / `GuestDiagnose`）；`work` 自己的 `WorkOps`、`turn` 的 `TurnOps` 与 `runtime` 的 `RuntimeOps` 签名直接用这些类型。
 - 状态归属：`Work` 只持各单元的入站面（`root` / `history` / `workspace` / `vm` / `packages` / `provision` / `modules` / `llm` / `tools` / `prompt` / `systools` / `log`），**不自持会话状态**：会话在世表、运行态与裁决队都在 `turn`，经形参 `&Turn` / `&mut Turn` 读写；`registry` / `probe` 同样按次传入。
 - 两段式的中间产物（`PreparedWork` / `PendingWork` / `PreparedEdit` / `PreparedActivation`）只在本单元内流转，不在 `api` 出现。
 

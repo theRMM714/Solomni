@@ -91,7 +91,7 @@ function check(name, cond, extra) {
 const CFG = {
   sid: "w", kind: "single", flows: false, started: true,
   agents: [{ name: "调研员", modules: ["research"], model: "m1", chara: "会话快照人设" }],
-  tier: "vm", guest: "debian-13", net: true,
+  sandbox: "vm", guest: "debian-13", net: true,
   permission: {
     profile: "offline", label: "离线", summary: "",
     shared: { read: "all", write: ["docs"], deny: [] },
@@ -108,9 +108,9 @@ const CFG = {
   pins: { python: "3.12", ruby: "3.2" },
   thinking: { level: null, default_level: "high", label: "high", options: [{ id: "high", label: "high" }], note: "" },
   vm_available: true, vm_unavailable_reason: "", vm_requirements: [],
-  tier_ready: true, tier_missing: [],
+  sandbox_ready: true, sandbox_missing: [],
   runtime: {
-    tier: "vm",
+    side: "guest",
     declared: { research: ["python"] },
     available: { python: ["3.11", "3.12"], node: ["20.11.0"] },
     missing: { research: ["python"] },
@@ -128,7 +128,7 @@ const CFG = {
 const RAW = { // 还没开过的协作会话：名字可改、本机档
   sid: "raw", kind: "collab", flows: true, started: false,
   agents: [{ name: "x", modules: ["research"], model: "" }, { name: "y", modules: ["research"], model: "m2" }],
-  tier: "host", guest: null, guests: [], net: false, pins: {},
+  sandbox: "host", guest: null, guests: [], net: false, pins: {},
   permission: { profile: "offline", label: "离线", summary: "", shared: { read: "all", write: "all", deny: [] }, narrowed: false, parent_profile: null, profiles: [] },
   // 这台机器**不具备**虚拟机档的前置条件：界面必须禁用虚拟机档并给出后端原话（本机档不受影响）。
   vm_available: false, vm_unavailable_reason: "虚拟机档现在不可用（guest 本体尚未接入）",
@@ -138,8 +138,8 @@ const RAW = { // 还没开过的协作会话：名字可改、本机档
     { id: "qemu", met: false, detail: "没有找到 qemu-system-x86_64.exe（按PATH找过）", how: "在创建向导或配置界面点「补齐虚拟机依赖」把它下载进项目内；也可自行安装 QEMU 并放进 PATH" },
     { id: "base", met: false, detail: "没有选定虚拟根", how: "在创建向导或配置界面点「补齐虚拟机依赖」把虚拟根装进项目内" },
   ],
-  tier_ready: true, tier_missing: [],
-  runtime: { tier: "host", declared: {}, available: {}, missing: {}, diagnoses: [], rejected: [], rejected_packages: [] },
+  sandbox_ready: true, sandbox_missing: [],
+  runtime: { side: "host", declared: {}, available: {}, missing: {}, diagnoses: [], rejected: [], rejected_packages: [] },
   runtimes_dir: "/runtimes",
 };
 const calls = [];
@@ -363,11 +363,11 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   check("config: 失败后保存按钮可再点", save.disabled === false);
   const editCall = calls.find((c) => /\/api\/actions\/edit_session$/.test(c.url));
   const sent = JSON.parse(editCall.body);
-  check("config: 提交体形状 {session_id,agents,tier,guest,pins,permission,shared}",
-    JSON.stringify(Object.keys(sent).sort()) === JSON.stringify(["agents", "guest", "permission", "pins", "session_id", "shared", "tier"])
+  check("config: 提交体形状 {session_id,agents,sandbox,guest,pins,permission,shared}",
+    JSON.stringify(Object.keys(sent).sort()) === JSON.stringify(["agents", "guest", "permission", "pins", "sandbox", "session_id", "shared"])
       && sent.session_id === "w", editCall.body);
   check("config: 提交体内容（名单/模块/模型/档位/虚拟根/pins/会话权限）",
-    sent.tier === "vm" && sent.guest === "debian-13"
+    sent.sandbox === "vm" && sent.guest === "debian-13"
     && sent.agents[0].name === "调研员" && JSON.stringify(sent.agents[0].modules) === JSON.stringify(["research"])
     && sent.agents[0].model === "m1" && sent.agents[0].chara === "临时改的人设"
     && JSON.stringify(sent.pins) === JSON.stringify({ python: "3.12", ruby: "3.2" })
@@ -403,7 +403,7 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   findButton(reg.get("#modal-root"), "保存").onclick();
   await sleep(60);
   const sent3 = JSON.parse(calls.filter((c) => /\/api\/actions\/edit_session$/.test(c.url)).pop().body);
-  check("config: 本机档提交 tier=host 且 guest=null", sent3.tier === "host" && sent3.guest === null, JSON.stringify(sent3));
+  check("config: 本机档提交 sandbox=host 且 guest=null", sent3.sandbox === "host" && sent3.guest === null, JSON.stringify(sent3));
 
   /* ---- 未开过的会话（started=false）：名字可改、无冻结、跨 agent 共用模块可保存 ---- */
   openConfig("raw");
@@ -490,7 +490,7 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   try { await vm.runInContext('openWizard()', ctx); await sleep(80); } catch (e) { guestErrored = e && e.message; }
   const wizGuestRoot = reg.get('#modal-root');
   check('wizard: 虚拟根未装齐时可打开向导', !guestErrored, String(guestErrored));
-  const wizGuestRadios = walk(wizGuestRoot, []).filter((n) => n.type === 'radio' && n.name === 'wf-tier');
+  const wizGuestRadios = walk(wizGuestRoot, []).filter((n) => n.type === 'radio' && n.name === 'wf-sandbox');
   wizGuestRadios[1].checked = true;
   (wizGuestRadios[1]._h.change || []).forEach((f) => f());
   const wizGuestSetup = findButton(wizGuestRoot, '补齐虚拟机依赖…');
@@ -526,7 +526,7 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   await vm.runInContext('openWizard()', ctx);
   await sleep(80);
   const wizRoot = reg.get('#modal-root');
-  const wizRadios = walk(wizRoot, []).filter((n) => n.type === 'radio' && n.name === 'wf-tier');
+  const wizRadios = walk(wizRoot, []).filter((n) => n.type === 'radio' && n.name === 'wf-sandbox');
   const wizVm = wizRadios[1];
   check('busy: 虚拟机档可用时可选', !!wizVm && wizVm.disabled !== true);
   wizVm.checked = true; (wizVm._h.change || []).forEach((f) => f());

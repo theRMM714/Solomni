@@ -106,7 +106,7 @@ pub struct ActionParamView {
 
 impl ActionParamView {
     /// 目的：从参数声明投影出一份呈现形态（两个目录入口共用，避免字段各写一遍）。
-    pub fn of(name: &str, p: &crate::units::business::catalog::modules::api::Param) -> Self {
+    pub fn of(name: &str, p: &crate::units::pure::registry_model::api::Param) -> Self {
         ActionParamView {
             name: name.to_string(),
             ty: p.ty.name().to_string(),

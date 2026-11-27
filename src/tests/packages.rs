@@ -52,7 +52,7 @@ pub(crate) fn base_capabilities_prefer_project_then_usable_host_fallback() {
         host_fallback: &fallback,
     };
     let plan = pkgs::plan_host(
-        &ExecSpec::default(),
+        &TargetSpec::default(),
         &modules,
         &Library::default(),
         PinPolicy::Require,
@@ -95,7 +95,7 @@ pub(crate) fn base_capability_uses_host_fallback_even_when_fence_cannot_grant() 
         host_fallback: &fallback,
     };
     let plan = pkgs::plan_host(
-        &ExecSpec::default(),
+        &TargetSpec::default(),
         &modules,
         &Library::default(),
         PinPolicy::Require,
@@ -120,7 +120,7 @@ pub(crate) fn base_capability_uses_host_fallback_even_when_fence_cannot_grant() 
         host_fallback: &empty,
     };
     let plan = pkgs::plan_host(
-        &ExecSpec::default(),
+        &TargetSpec::default(),
         &modules,
         &Library::default(),
         PinPolicy::Require,
@@ -197,7 +197,7 @@ pub(crate) fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
             .any(|d| matches!(d, Problem::Ambiguous { .. }))
     );
     // 定版指定的版本不在库里 = 如实报
-    let bad = ExecSpec {
+    let bad = TargetSpec {
         pins: BTreeMap::from([("python".to_string(), "9.9".to_string())]),
         ..vm_spec()
     };
@@ -214,7 +214,7 @@ pub(crate) fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
         pkgs::diagnose_text(&refused.problems)
     );
     // 定版之后可以成立
-    let ok = ExecSpec {
+    let ok = TargetSpec {
         pins: BTreeMap::from([("python".to_string(), "3.12.4".to_string())]),
         ..vm_spec()
     };

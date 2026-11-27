@@ -34,8 +34,7 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
         task: None,
         delegate: false,
         permission: None,
-        tier: crate::units::pure::exec_model::api::Tier::Host,
-        guest: None,
+        sandbox: decl_of(crate::units::pure::exec_model::api::Side::Host, None),
         workspace: None,
     };
     assert!(
@@ -70,8 +69,7 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
         task: Some("需求".to_string()),
         delegate: false,
         permission: None,
-        tier: crate::units::pure::exec_model::api::Tier::Host,
-        guest: None,
+        sandbox: decl_of(crate::units::pure::exec_model::api::Side::Host, None),
         workspace: None,
     };
     let opened = core
@@ -472,7 +470,7 @@ pub(crate) fn module_tools_go_into_the_guest_on_vm_tier() {
     let vm = Arc::new(crate::tests::doubles::RecordingVm::default());
     {
         let tools = m.tools.as_mut().expect("这一席有工具环境");
-        tools.face.tier = crate::units::pure::exec_model::api::Tier::Vm;
+        tools.face.side = crate::units::pure::exec_model::api::Side::Guest;
         tools.face.guest_lease = "w".to_string();
         tools.vm = vm.clone();
     }

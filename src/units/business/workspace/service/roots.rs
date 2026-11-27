@@ -6,7 +6,7 @@
 //!   也过不去；规范化、元数据与可写探测都走 `HostProbe`。
 
 use crate::kernel::ports::HostProbe;
-use crate::units::pure::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::Side;
 use std::path::{Path, PathBuf};
 
 /// 目的：把产品根规范化成判定用的写法（规范化失败时退回原样）。
@@ -21,11 +21,11 @@ pub fn product_root(root: &Path, probe: &dyn HostProbe) -> PathBuf {
 /// 目的：不需要 IO 的那部分策略——绝对路径、档位与网络路径、根的形态、虚拟机档的编码。
 /// 约束：本机档的网络路径在 canonicalize **之前**就拒绝——不为了报一条错去连一次共享。canonicalize 之后
 ///   再跑一遍：目录联接与映射盘的真身要到那时才露出来。
-pub fn policy(path: &Path, tier: Tier) -> Result<(), String> {
+pub fn policy(path: &Path, side: Side) -> Result<(), String> {
     if !path.is_absolute() {
         return Err(format!("工作区必须是绝对路径：{}", path.display()));
     }
-    if tier == Tier::Host && crate::kernel::api::locus::is_network_path(path) {
+    if side == Side::Host && crate::kernel::api::locus::is_network_path(path) {
         return Err(host_network(path));
     }
     if crate::kernel::api::path::is_unc(path)
@@ -41,7 +41,7 @@ pub fn policy(path: &Path, tier: Tier) -> Result<(), String> {
         return Err("工作区不能是文件系统根目录".to_string());
     }
     // 虚拟机档要把根编进 guest 写法：非 UTF-8 会在 to_string_lossy 下丢字节，单射不成立。
-    if tier == Tier::Vm && path.to_str().is_none() {
+    if side == Side::Guest && path.to_str().is_none() {
         return Err(format!(
             "虚拟机档的工作区必须是 UTF-8 路径：{}",
             path.display()
@@ -54,11 +54,11 @@ pub fn policy(path: &Path, tier: Tier) -> Result<(), String> {
 /// 返回：规范化后的根（native 写法，绑定与投影都按它存）。
 pub fn resolve(
     raw: &Path,
-    tier: Tier,
+    side: Side,
     product: &Path,
     probe: &dyn HostProbe,
 ) -> Result<PathBuf, String> {
-    let root = checked_dir(raw, tier, product, probe, "工作区")?;
+    let root = checked_dir(raw, side, product, probe, "工作区")?;
     // 写探测：外部目录必须真的可写；探针由端口在根目录下建删。
     probe
         .probe_writable(&root)
@@ -71,29 +71,29 @@ pub fn resolve(
 ///   共享根、非目录一律拒绝，原因原样交回调用方（呈现层据此回退到产品内 work/ 并说明）。
 pub fn ambient(
     raw: &Path,
-    tier: Tier,
+    side: Side,
     product: &Path,
     probe: &dyn HostProbe,
 ) -> Result<PathBuf, String> {
-    checked_dir(raw, tier, product, probe, "启动目录")
+    checked_dir(raw, side, product, probe, "启动目录")
 }
 
 /// 目的：两条入口共用的阶梯——策略 → 规范化 → 再策略 → 必须存在且是目录 → 与产品根互不包含。
 /// 参数：`what` 只用于报错文案（「工作区」/「启动目录」），判定本身与来源无关。
 fn checked_dir(
     raw: &Path,
-    tier: Tier,
+    side: Side,
     product: &Path,
     probe: &dyn HostProbe,
     what: &str,
 ) -> Result<PathBuf, String> {
-    policy(raw, tier)?;
+    policy(raw, side)?;
     let root = crate::kernel::api::path::native(
         &probe
             .canonicalize(raw)
             .map_err(|e| format!("{}不可达：{}（{}）", what, raw.display(), e))?,
     );
-    policy(&root, tier)?;
+    policy(&root, side)?;
     let meta = probe
         .host_metadata(&root)
         .map_err(|e| format!("读{}失败：{}（{}）", what, root.display(), e))?;
@@ -109,11 +109,11 @@ fn checked_dir(
 ///   共享根、非 UTF-8 都如实拒绝——否则手改 meta 就能绕过创建时的拦截。
 pub fn recheck(
     root: &Path,
-    tier: Tier,
+    side: Side,
     product: &Path,
     probe: &dyn HostProbe,
 ) -> Result<(), String> {
-    policy(root, tier)?;
+    policy(root, side)?;
     if probe.host_metadata(root).is_err() {
         return Ok(());
     }

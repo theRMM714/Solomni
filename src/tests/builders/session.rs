@@ -86,7 +86,7 @@ pub(crate) fn member_with_tools(
                 loop_id: "standard".to_string(),
                 role: "solo".to_string(),
                 modules,
-                tier: crate::units::pure::exec_model::api::Tier::Host,
+                side: crate::units::pure::exec_model::api::Side::Host,
                 guest_lease: String::new(),
                 sandbox: test_sandbox("m0", &[]),
                 tools_this_turn: test_prompts()
@@ -174,8 +174,9 @@ pub(crate) fn seed_session(
     name: &str,
     kind: &str,
     agents: Vec<AgentMeta>,
-    exec: ExecSpec,
+    exec: TargetSpec,
 ) {
+    let (sandbox, facts) = sandbox_of(&exec);
     hist.create(&SessionMeta {
         usage_totals: Default::default(),
         context_freshness: false,
@@ -187,8 +188,9 @@ pub(crate) fn seed_session(
         task: None,
         ts: 1,
         agents,
-        exec,
-        sandbox: Default::default(),
+        sandbox,
+        facts,
+        permission: Default::default(),
         parent: None,
         node: None,
         delegation: None,
@@ -211,7 +213,7 @@ pub(crate) fn edit_of(agents: Vec<(&str, &[&str], &str)>) -> SessionEdit {
                 chara: String::new(),
             })
             .collect(),
-        tier: "host".to_string(),
+        sandbox: "host".to_string(),
         guest: None,
         pins: BTreeMap::new(),
         permission: None,

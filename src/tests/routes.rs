@@ -17,7 +17,7 @@ use crate::units::business::turn::turn::api::{Events, TurnOps};
 use crate::units::business::turn_state::api::HistoryOps;
 use crate::units::business::work::api::{
     AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, RuntimeReport,
-    SessionConfig, SessionEdit, SessionTypeView, SessionView, TierChoices, WorkOpened, WorkOps,
+    SandboxChoices, SessionConfig, SessionEdit, SessionTypeView, SessionView, WorkOpened, WorkOps,
     WorkSpec,
 };
 
@@ -26,7 +26,7 @@ use crate::presentation::web::{self, FenceInfo};
 use crate::units::business::catalog::modules::api::{ModulesOps, Roster};
 use crate::units::business::catalog::registry::api::AppSettings;
 use crate::units::business::catalog::registry::api::RegistryOps;
-use crate::units::pure::exec_model::api::Tier;
+use crate::units::business::sandbox::api::SandboxDecl;
 use crate::units::pure::registry_model::api::AgentView;
 use crate::units::pure::registry_model::api::ModelView;
 use crate::units::pure::registry_model::api::ProviderView;
@@ -252,13 +252,13 @@ impl ActionOps for FakeFaces {
 
 fn report() -> RuntimeReport {
     RuntimeReport {
-        tier: "host".to_string(),
+        side: "host".to_string(),
         declared: BTreeMap::new(),
         available: BTreeMap::new(),
         missing: BTreeMap::new(),
         diagnoses: Vec::new(),
-        tier_ready: true,
-        tier_missing: Vec::new(),
+        sandbox_ready: true,
+        sandbox_missing: Vec::new(),
         rejected: Vec::new(),
         rejected_packages: Vec::new(),
     }
@@ -276,8 +276,9 @@ fn meta(name: &str) -> SessionMeta {
         task: None,
         ts: 1,
         agents: Vec::new(),
-        exec: crate::units::pure::exec_model::api::ExecSpec::default(),
         sandbox: Default::default(),
+        facts: Default::default(),
+        permission: Default::default(),
         parent: None,
         node: None,
         delegation: None,
@@ -294,7 +295,7 @@ impl WorkOps for FakeFaces {
     fn ambient_workspace(
         &self,
         _: &std::path::Path,
-        _: crate::units::pure::exec_model::api::Tier,
+        _: &SandboxDecl,
     ) -> Result<std::path::PathBuf, String> {
         Err("呈现层测试不定启动目录".into())
     }
@@ -327,8 +328,8 @@ impl WorkOps for FakeFaces {
                 model: String::new(),
                 chara: String::new(),
             }],
-            tier: "host".to_string(),
-            tier_locked: false,
+            sandbox: "host".to_string(),
+            sandbox_locked: false,
             guest: None,
             guests: Vec::new(),
             net: false,
@@ -353,8 +354,8 @@ impl WorkOps for FakeFaces {
                 profiles: Vec::new(),
             },
             pins: BTreeMap::new(),
-            tier_ready: true,
-            tier_missing: Vec::new(),
+            sandbox_ready: true,
+            sandbox_missing: Vec::new(),
             vm_available: true,
             vm_unavailable_reason: String::new(),
             vm_requirements: Vec::new(),
@@ -479,9 +480,9 @@ impl WorkOps for FakeFaces {
                 flows: h.flows,
                 auto: h.auto,
                 done: h.done,
-                tier: h.exec.tier.as_str().to_string(),
-                tier_ready: true,
-                tier_missing: Vec::new(),
+                sandbox: h.sandbox.policy.clone(),
+                sandbox_ready: true,
+                sandbox_missing: Vec::new(),
                 permission_profile: "offline".to_string(),
                 permission_label: "离线".to_string(),
                 context_freshness: false,
@@ -506,17 +507,18 @@ impl WorkOps for FakeFaces {
             })
             .collect())
     }
-    fn runtime_report(&self, _tier: Tier) -> Result<RuntimeReport, String> {
+    fn runtime_report(&self, _: &SandboxDecl) -> Result<RuntimeReport, String> {
         self.guard()?;
         Ok(report())
     }
-    fn tier_choices(&self) -> Result<TierChoices, String> {
+    fn sandbox_choices(&self) -> Result<SandboxChoices, String> {
         self.guard()?;
-        Ok(TierChoices {
+        Ok(SandboxChoices {
             default: "host".to_string(),
-            vm_available: false,
-            vm_unavailable_reason: "guest 本体尚未接入".to_string(),
-            vm_requirements: Vec::new(),
+            policies: Vec::new(),
+            guest_available: false,
+            guest_unavailable_reason: "guest 本体尚未接入".to_string(),
+            guest_requirements: Vec::new(),
             guests: Vec::new(),
             available: BTreeMap::new(),
         })
@@ -599,9 +601,9 @@ impl RuntimeOps for FakeFaces {
             flows: false,
             auto: false,
             done: false,
-            tier: "host".to_string(),
-            tier_ready: true,
-            tier_missing: Vec::new(),
+            sandbox: "host".to_string(),
+            sandbox_ready: true,
+            sandbox_missing: Vec::new(),
             permission_profile: "offline".to_string(),
             permission_label: "离线".to_string(),
             context_freshness: false,
@@ -789,7 +791,8 @@ impl HistoryOps for FakeFaces {
             auto: false,
             ts: 1,
             done: false,
-            exec: Default::default(),
+            sandbox: Default::default(),
+            facts: Default::default(),
             parent: None,
             workspace: Default::default(),
             workspace_missing: false,
@@ -1350,7 +1353,7 @@ fn success_shapes_are_pinned_per_route() {
         (
             "POST",
             "/api/actions/edit_session",
-            r#"{"session_id":"w1","agents":[],"tier":"host"}"#,
+            r#"{"session_id":"w1","agents":[],"sandbox":"host"}"#,
             200,
             "\"ok\"",
         ),

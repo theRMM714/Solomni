@@ -11,7 +11,7 @@
 | --- | --- |
 | `src/units/business/workspace/api.rs` | 入站面：`Workspace`（寻址 / 铺局 / 文件视图 / 用量 / 根）、沙箱纯数据、共享区归属与过滤规则的类型，以及外部工作区根策略（`product_root` / `policy` / `resolve` / `ambient` / `recheck`）的导出；版本化能力不在这一面（在 `versions::api`，其它能力只准用这里） |
 | `src/units/business/workspace/service.rs` | 门面：`Workdirs` 只在这里（R12）；`WorkspaceService` 只做「在哪儿」的转发——布局、文件视图、用量、根、外部根判定、跨会话写闸路径、共享区落文件 |
-| `src/units/business/workspace/service/roots.rs` | 外部工作区根的策略：按档位判网络路径 / 共享根 / 文件系统根 / UTF-8 与产品根的互包含（文本 + 落点身份），并做目录与可写探测；创建走 `resolve`，CLI 启动目录走 `ambient`（同一条阶梯、不探可写），加载复检走 `recheck`，三种用法共用同一份 `policy` 与 `check_bounds` |
+| `src/units/business/workspace/service/roots.rs` | 外部工作区根的策略：按执行侧（host / guest）判网络路径 / 共享根 / 文件系统根 / UTF-8 与产品根的互包含（文本 + 落点身份），并做目录与可写探测；创建走 `resolve`，CLI 启动目录走 `ambient`（同一条阶梯、不探可写），加载复检走 `recheck`，三种用法共用同一份 `policy` 与 `check_bounds` |
 | `src/units/business/workspace/service/facade.rs` | `Workspace` 的唯一 trait 实现：十个用例全部直接委托 `Workdirs`（Rust 不允许 trait impl 分块） |
 | `src/units/business/workspace/ports.rs` | 出站端口：`Workdirs`（目录布局、外部根判定、跨会话写闸路径、共享区落文件） |
 | `src/units/business/workspace/domain/seats.rs` | 沙箱清单的唯一构造点 `seat_sandboxes`：每席计划（agent 名 / 模块目录 / 生效权限面 / 工作台声明链）→ 私有根、模块目录、模块私有区与共享区归属；缺私有根当场点名报错 |

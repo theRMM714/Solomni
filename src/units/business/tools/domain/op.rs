@@ -9,7 +9,7 @@
 
 use super::commands::{CommandBook, Phase, Runtime};
 use super::schema::{ArgFault, ToolSchema};
-use crate::units::business::catalog::modules::api::{Param, ParamType};
+use crate::units::pure::registry_model::api::{Param, ParamType};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;

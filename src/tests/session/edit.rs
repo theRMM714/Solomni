@@ -30,7 +30,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     );
     // 改：模块 a → b，模型指定 m，档位换虚拟机档。网络是全局策略，不在会话里改。虚拟机档现在一律不可选
     // （guest 本体尚未接入），所以**先把它做成已存在的虚拟机档会话**——已在 vm 档的会话只校验它自己那几项。
-    hist.force_tier(&sid, Tier::Vm);
+    hist.force_tier(&sid, Side::Guest);
     let guest = crate::tests::test_guest("edit-session-base");
     core.edit_session(
         &sid,
@@ -41,7 +41,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
                 model: "m".to_string(),
                 chara: String::new(),
             }],
-            tier: "vm".to_string(),
+            sandbox: "vm".to_string(),
             guest: Some(guest.clone()),
             pins: BTreeMap::new(),
             permission: None,
@@ -56,7 +56,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     .unwrap();
     let cfg = core.session_config(&sid).unwrap();
     assert_eq!(cfg.agents[0].modules, vec!["b".to_string()]);
-    assert_eq!(cfg.tier, "vm");
+    assert_eq!(cfg.sandbox, "vm");
     assert_eq!(
         cfg.permission.shared.write,
         crate::units::business::workspace::api::ScopeMode::Paths(vec!["docs".to_string()])
@@ -67,7 +67,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
         vec!["b".to_string()],
         "meta.yaml 是名单的唯一真相"
     );
-    assert_eq!(meta.exec.tier, Tier::Vm);
+    assert_eq!(meta.facts.side, Side::Guest);
     assert_eq!(
         crate::units::business::workspace::api::edit_of(&meta.workspace.params)
             .expect("共享区参数应能读回")
@@ -78,7 +78,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
         "会话级共享区归属写回 meta"
     );
     assert_eq!(
-        meta.exec.guest.as_deref(),
+        meta.facts.guest.as_deref(),
         Some(guest.as_str()),
         "虚拟根随提交写回"
     );
@@ -128,7 +128,7 @@ pub(crate) fn edit_session_freezes_names_only_after_content() {
         "raw",
         SINGLE,
         vec![agent_meta("a", &["a"], None)],
-        ExecSpec::default(),
+        TargetSpec::default(),
     );
     let mut core = core_with_pkgs(
         vec![module_of("a"), module_of("b")],
@@ -169,14 +169,14 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
         "w",
         SINGLE,
         vec![agent_meta("a", &["a"], None)],
-        ExecSpec::default(),
+        TargetSpec::default(),
     );
     seed_session(
         &hist,
         "c",
         MEETING,
         vec![agent_meta("a", &["a"], None), agent_meta("b", &["b"], None)],
-        ExecSpec::default(),
+        TargetSpec::default(),
     );
     let mut core = core_with_pkgs(
         vec![module_of("a"), module_of("b")],
@@ -201,14 +201,14 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
             .all(|a| a.modules == vec!["a".to_string()])
     );
     let mut bad_tier = edit_of(vec![("x", &["a"], "")]);
-    bad_tier.tier = "docker".to_string();
+    bad_tier.sandbox = "docker".to_string();
     assert!(
         core.edit_session("c", bad_tier)
             .unwrap_err()
-            .contains("未知执行档位")
+            .contains("没有这个执行环境策略")
     );
     let mut two_agents = edit_of(vec![("x", &["a"], ""), ("y", &["b"], "")]);
-    two_agents.tier = "host".to_string();
+    two_agents.sandbox = "host".to_string();
     assert!(
         core.edit_session("w", two_agents)
             .unwrap_err()
@@ -225,10 +225,10 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
         "c",
         MEETING,
         vec![agent_meta("x", &["a"], None)],
-        ExecSpec {
-            tier: Tier::Vm,
+        TargetSpec {
+            side: Side::Guest,
             guest: Some(vm_guest.clone()),
-            ..ExecSpec::default()
+            ..TargetSpec::default()
         },
     );
     let mut core2 = core_with_pkgs(
@@ -244,7 +244,7 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
         ])),
     );
     let mut vm_edit = edit_of(vec![("x", &["a"], "")]);
-    vm_edit.tier = "vm".to_string();
+    vm_edit.sandbox = "vm".to_string();
     vm_edit.guest = Some(vm_guest.clone());
     let e = core2.edit_session("c", vm_edit.clone()).unwrap_err();
     assert!(e.contains("多个版本"), "{}", e);
@@ -272,7 +272,7 @@ pub(crate) fn deleting_a_session_releases_its_fence_lease() {
         "w",
         SINGLE,
         vec![agent_meta("甲", &["a"], None)],
-        ExecSpec::default(),
+        TargetSpec::default(),
     );
     let gateway: Arc<dyn ChatGateway + Send + Sync> =
         Arc::new(gw(BTreeMap::new(), vec!["[]".into()]));
@@ -288,6 +288,7 @@ pub(crate) fn deleting_a_session_releases_its_fence_lease() {
         work.layout.clone(),
         work.versions.clone(),
         test_vm(),
+        test_policies(),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
@@ -335,6 +336,11 @@ pub(crate) fn deleting_a_session_releases_its_fence_lease() {
 
 #[test]
 pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
+    let (sandbox, facts) = sandbox_of(&TargetSpec {
+        side: Side::Guest,
+        guest: Some(crate::tests::test_guest("rt-guest")),
+        pins: BTreeMap::from([("python".to_string(), "3.12.4".to_string())]),
+    });
     let meta = SessionMeta {
         usage_totals: Default::default(),
         context_freshness: false,
@@ -346,12 +352,9 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
         task: None,
         ts: 1,
         agents: Vec::new(),
-        exec: ExecSpec {
-            tier: Tier::Vm,
-            guest: Some(crate::tests::test_guest("rt-guest")),
-            pins: BTreeMap::from([("python".to_string(), "3.12.4".to_string())]),
-        },
-        sandbox: Default::default(),
+        sandbox,
+        facts,
+        permission: Default::default(),
         parent: None,
         node: None,
         delegation: None,
@@ -361,10 +364,10 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
     };
     let text = yaml_serde::to_string(&meta).expect("序列化");
     let back: SessionMeta = yaml_serde::from_str(&text).expect("反序列化");
-    assert_eq!(back.exec.tier, Tier::Vm);
-    assert_eq!(back.exec.guest.as_deref(), Some("rt-guest"));
+    assert_eq!(back.facts.side, Side::Guest);
+    assert_eq!(back.facts.guest.as_deref(), Some("rt-guest"));
     assert_eq!(
-        back.exec.pins.get("python").map(String::as_str),
+        back.sandbox.pins.get("python").map(String::as_str),
         Some("3.12.4")
     );
     assert_eq!(back.run, RunState::Active, "缺省运行态 = 正常运行");
@@ -385,9 +388,9 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
     let defaulted: SessionMeta =
         yaml_serde::from_str("name: w\nspec:\n  kind: single\nmodules: [a]\nts: 1\n")
             .expect("缺 exec 段的 meta 必须可读");
-    assert_eq!(defaulted.exec.tier, Tier::Host);
-    assert!(defaulted.exec.guest.is_none());
-    assert!(defaulted.exec.pins.is_empty());
+    assert_eq!(defaulted.facts.side, Side::Host);
+    assert!(defaulted.facts.guest.is_none());
+    assert!(defaulted.sandbox.pins.is_empty());
     assert_eq!(defaulted.run, RunState::Active);
     assert_eq!(
         crate::units::business::workspace::api::edit_of(&defaulted.workspace.params)

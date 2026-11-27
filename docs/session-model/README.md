@@ -24,7 +24,7 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`assets`（装载两份声明）、`exec_model`、`permission`、`registry_model`、`transcript`（历史里的档位与权限面由前两者定义，本单元只搬值；工作台声明是自己的形状，不依赖 `workspace`）
+- 经 `::api` 用到：`assets`（装载两份声明）、`exec_model`、`permission`、`registry_model`、`transcript`（历史里的执行环境事实与权限面由前两者定义，本单元只搬值；工作台声明是自己的形状，不依赖 `workspace`）
 - 谁在用我：`agentloop`、`collab`、`conversation`、`lifecycle`、`presentation`、`proxy`、`runtime`、`turn`、`turn_state`、`work`
 
 ## 一、为什么是独立单元

@@ -1,5 +1,5 @@
 //! 目的：只有网络的两档档位——档位预设、全局默认、一层覆盖与会话 meta 的权限段。
-//! 管：`ProfileId` / `ProfileSpec` / `PermissionDefaults` / `PermissionLayer` / `SessionSandbox`。
+//! 管：`ProfileId` / `ProfileSpec` / `PermissionDefaults` / `PermissionLayer` / `PermissionOverride`。
 //! 不管：生效态（`base.rs`）、共享区范围（workspace 的 `scope.rs`）。
 //! 联动：设置与会话 meta 直接反序列化成这些类型，`env::access` 把它们合并成生效态（docs/permission/README.md）。
 
@@ -127,7 +127,7 @@ pub struct PermissionLayer {
 /// 目的：会话 meta 的权限段——根只有 ceiling，子只有 narrowing。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SessionSandbox {
+pub struct PermissionOverride {
     /// 目的：根会话的上限。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ceiling: Option<PermissionLayer>,
@@ -136,11 +136,11 @@ pub struct SessionSandbox {
     pub narrowing: Option<PermissionLayer>,
 }
 
-impl SessionSandbox {
+impl PermissionOverride {
     /// 目的：取根会话的 ceiling；子会话带了 ceiling = 非法。
     pub fn root_layer(&self) -> Result<Option<&PermissionLayer>, String> {
         if self.narrowing.is_some() {
-            return Err("根会话的 sandbox 不能有 narrowing".to_string());
+            return Err("根会话的 permission 不能有 narrowing".to_string());
         }
         Ok(self.ceiling.as_ref())
     }
@@ -148,7 +148,7 @@ impl SessionSandbox {
     /// 目的：取子会话的 narrowing；根会话带了 narrowing = 非法。
     pub fn child_layer(&self) -> Result<Option<&PermissionLayer>, String> {
         if self.ceiling.is_some() {
-            return Err("子会话的 sandbox 不能有 ceiling".to_string());
+            return Err("子会话的 permission 不能有 ceiling".to_string());
         }
         Ok(self.narrowing.as_ref())
     }

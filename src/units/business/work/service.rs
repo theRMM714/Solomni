@@ -33,12 +33,11 @@ use crate::units::business::vm::api::Vm;
 use crate::units::business::work::api::{
     AgentSuggestion, ConfigAgent, ContinueView, EditGuest, FilesAgentRootView, FilesAgentView,
     FilesRootsView, FilesView, GuestBoot, PermissionSharedView, PermissionView, PreparedActivation,
-    ProxySeed, ReadyActivation, RuntimeDiagnosis, RuntimeReport, SessionConfig, SessionEdit,
-    SessionTypeView, SessionView, ThinkingView, TierChoices, WorkOpened, WorkSpec,
+    ProxySeed, ReadyActivation, RuntimeDiagnosis, RuntimeReport, SandboxChoices, SessionConfig,
+    SessionEdit, SessionTypeView, SessionView, ThinkingView, WorkOpened, WorkSpec,
 };
 use crate::units::business::work::domain::{merge_into_one, session_started, validate_work_name};
 use crate::units::business::workspace::api::Workspace;
-use crate::units::pure::exec_model::api::ExecSpec;
 use crate::units::pure::registry_model::api::AgentMeta;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -57,8 +56,10 @@ pub struct Work {
     workspace: Arc<dyn Workspace + Send + Sync>,
     /// 版本库用例面（**不持它的端口**，R12）：提交、拉取、日志与回档走它。
     versions: Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>,
-    /// 虚拟机档用例面（**不持它的端口**，R12）：guest 生命周期与档位就绪检测走它。
+    /// 虚拟机档用例面（**不持它的端口**，R12）：guest 生命周期与就绪检测走它。
     vm: Arc<dyn Vm + Send + Sync>,
+    /// 执行环境策略注册表（**值不是端口**）：声明解析成事实、就绪判定与选型派生都经它。
+    policies: crate::units::business::sandbox::api::SandboxPolicies,
     /// 运行包能力（**不持它的端口**，R12）：包库、选型诊断与计划走它。
     packages: Arc<dyn Packages + Send + Sync>,
     /// 依赖补齐面（**不持它的端口**，R12）：虚拟根清单与装没装齐从它读。
@@ -89,6 +90,7 @@ impl Work {
         workspace: Arc<dyn Workspace + Send + Sync>,
         versions: Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>,
         vm: Arc<dyn Vm + Send + Sync>,
+        policies: crate::units::business::sandbox::api::SandboxPolicies,
         packages: Arc<dyn Packages + Send + Sync>,
         provision: Arc<dyn Provision + Send + Sync>,
         modules: Arc<dyn Modules + Send + Sync>,
@@ -105,6 +107,7 @@ impl Work {
             workspace,
             versions,
             vm,
+            policies,
             packages,
             provision,
             modules,
@@ -192,11 +195,11 @@ fn agent_modules(meta: &SessionMeta) -> BTreeMap<String, Vec<String>> {
     out
 }
 
-/// 目的：这次改配要不要重建共享 guest——模块集合或 ExecSpec（档位 / 虚拟根 / 定版）变了才要。
+/// 目的：这次改配要不要重建共享 guest——模块集合或 TargetSpec（档位 / 虚拟根 / 定版）变了才要。
 /// 网络是全局策略；全局变更走整体重启，不在这里触发按会话重建。
 fn guest_assembly_changed(old: &SessionMeta, new: &SessionMeta) -> bool {
-    old.exec.tier != new.exec.tier
-        || old.exec.guest != new.exec.guest
-        || old.exec.pins != new.exec.pins
+    old.sandbox.policy != new.sandbox.policy
+        || old.facts.guest != new.facts.guest
+        || old.sandbox.pins != new.sandbox.pins
         || agent_modules(old) != agent_modules(new)
 }

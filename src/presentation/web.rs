@@ -429,7 +429,7 @@ pub(crate) fn route(
             }))
         }
 
-        "tiers" => match faces.work.tier_choices() {
+        "tiers" => match faces.work.sandbox_choices() {
             Ok(v) => ok_json(json!({ "tiers": v })),
             Err(e) => complaint(400, e),
         },

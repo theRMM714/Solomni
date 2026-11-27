@@ -3,6 +3,7 @@
 //! 不管：压缩（`compaction.rs`）、动作目录本身（`tools.rs`）。
 //! 联动：`src/units/business/runtime/api/action.rs` 与 `src/units/session/api`。
 
+use super::super::builders::decl_of;
 use super::super::doubles::{decl, model_draft, module_of, module_with_runtimes};
 use super::super::{ops_with, single_work, slow_ops};
 use super::support::spawn;
@@ -300,8 +301,7 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
             task: None,
             delegate: false,
             permission: None,
-            tier: crate::units::pure::exec_model::api::Tier::Host,
-            guest: None,
+            sandbox: decl_of(crate::units::pure::exec_model::api::Side::Host, None),
             workspace: None,
         })
         .expect("建工作");
@@ -349,7 +349,7 @@ fn editing_is_refused_while_a_session_is_generating() {
     let cfg = faces.work.config(&sid).expect("读配置");
     let edit = || SessionEdit {
         agents: cfg.agents.clone(),
-        tier: "host".to_string(),
+        sandbox: "host".to_string(),
         guest: None,
         pins: std::collections::BTreeMap::new(),
         permission: None,
@@ -516,7 +516,7 @@ fn create_session_and_config_carry_chara_as_a_snapshot() {
                     "modules": ["a"],
                     "chara": "建会话时写的人设"
                 }],
-                "tier": "host"
+                "sandbox": "host"
             }),
             caller: Caller::User,
             out: Output::Final,
@@ -540,7 +540,7 @@ fn create_session_and_config_carry_chara_as_a_snapshot() {
                     model: String::new(),
                     chara: "会话里临时改的人设".to_string(),
                 }],
-                tier: "host".to_string(),
+                sandbox: "host".to_string(),
                 guest: None,
                 pins: std::collections::BTreeMap::new(),
                 permission: None,

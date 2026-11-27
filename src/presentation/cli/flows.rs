@@ -133,12 +133,8 @@ pub(super) fn single_flow(
             }
         }
     };
-    // 档位：CLI 不提供交互选择，用设置里的默认档（与 Web 向导的默认一致）。
-    let tier = faces
-        .registry
-        .settings()
-        .map(|s| s.tier)
-        .unwrap_or(Tier::Host);
+    // 执行环境：CLI 不提供交互选择，用设置里的默认策略（与 Web 向导的默认一致）。
+    let sandbox = default_sandbox(faces);
     // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
     let mut cursor = faces.events.head();
     let sid = match create_session_action(
@@ -148,7 +144,7 @@ pub(super) fn single_flow(
             kind: "single",
             agents: &picked,
             task: None,
-            tier,
+            sandbox,
             workspace: opts.workspace.as_deref(),
         },
     ) {
@@ -172,11 +168,7 @@ pub(super) fn proxy_flow(
     seed: Option<String>,
     opts: &shell::Opts,
 ) -> Outcome {
-    let tier = faces
-        .registry
-        .settings()
-        .map(|s| s.tier)
-        .unwrap_or(Tier::Host);
+    let sandbox = default_sandbox(faces);
     // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
     let mut cursor = faces.events.head();
     let sid = match create_session_action(
@@ -186,7 +178,7 @@ pub(super) fn proxy_flow(
             kind: "proxy",
             agents: &[],
             task: None,
-            tier,
+            sandbox,
             workspace: opts.workspace.as_deref(),
         },
     ) {
@@ -232,11 +224,7 @@ pub(super) fn collab_flow(faces: &Faces, args: &Value, opts: &shell::Opts) {
             }
         }
     };
-    let tier = faces
-        .registry
-        .settings()
-        .map(|s| s.tier)
-        .unwrap_or(Tier::Host);
+    let sandbox = default_sandbox(faces);
     let mut cursor = faces.events.head();
     // 代拟由形态派生（协作 + 没给名单 = 核心按需求拟名单）；CLI 只交点名结果。
     let sid = match create_session_action(
@@ -246,7 +234,7 @@ pub(super) fn collab_flow(faces: &Faces, args: &Value, opts: &shell::Opts) {
             kind: "collab",
             agents: &agents,
             task: Some(&task),
-            tier,
+            sandbox,
             workspace: opts.workspace.as_deref(),
         },
     ) {
@@ -515,4 +503,13 @@ pub(super) fn prompt(text: &str) -> String {
 
 pub(super) fn first_line(s: &str) -> &str {
     s.lines().next().unwrap_or("")
+}
+
+/// 目的：设置里的默认执行环境策略 id（CLI 建会话不改它）。
+fn default_sandbox(faces: &Faces) -> String {
+    faces
+        .registry
+        .settings()
+        .map(|s| s.default_sandbox.policy)
+        .unwrap_or_else(|_| crate::units::business::sandbox::api::HOST_POLICY.to_string())
 }

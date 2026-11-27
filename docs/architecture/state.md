@@ -8,7 +8,7 @@
 
 ## 一、每个状态只有一个家
 - 会话身份与历史视图归 `session_model`、转录落盘归 `conversation` 的 `session`、回合运行态归 `turn_state`、一席的会话本体归 `agentloop`、构建状态归 `builds`、空间台账归 `storage`；别的单元读写只能经该单元的 `api`，不直接读对方文件（R1 / R4，判据在 `tests/gates/structure/dependency.js`）。
-- **跨层共享的形状有唯一家**（R6）：`kernel` 只托管端口载荷（`SessionId` / `ToolOutcome` / `Ask`），不含端口的产品词汇归环 1（`exec_model` 的 `Tier` / `ExecSpec` / `JobState`）；`kernel` 不解释业务语义、不构造业务决策与面向用户的文案；业务自己的入参 / 出参留在本单元 `api`。
+- **跨层共享的形状有唯一家**（R6）：`kernel` 只托管端口载荷（`SessionId` / `ToolOutcome` / `Ask`），不含端口的产品词汇归环 1（`exec_model` 的 `Side` / `TargetSpec` / `JobState`）；`kernel` 不解释业务语义、不构造业务决策与面向用户的文案；业务自己的入参 / 出参留在本单元 `api`。
 - **持状态的单元只能写自己的状态**；别人的状态只经 `api` 拿（`src/units/business/runtime/service/core.rs` 只持有 `turn_state` / `session_model` / `work` / `lifecycle` 等单元的入站对象并薄转发，不代写它们的状态）。
 - 状态归谁的三条判据（有不变式的参与方 / 依赖图上最高的使用方 / owner 的派生值）见 [boundaries.md](boundaries.md)。
 

@@ -31,9 +31,14 @@ pub struct SessionMeta {
     /// 目的：本次工作参与的 agent 实例（模型随 agent 记；名单的唯一真相）。
     #[serde(default)]
     pub agents: Vec<AgentMeta>,
-    /// 目的：执行档位与运行包选型（exec 段；缺字段按默认 = 本机档读回）。
+    /// 目的：这条会话要的执行环境：策略 id、定版表与策略自己的参数。
+    /// 约束：解释权在策略实现；会话只认事实（下面那格），不读 `params` 里的键。
     #[serde(default)]
-    pub exec: crate::units::pure::exec_model::api::ExecSpec,
+    pub sandbox: crate::units::business::sandbox::api::SandboxDecl,
+    /// 目的：上面那份声明解析出来的事实（哪一侧、客机是什么）——路径与安装侧据此判定。
+    /// 约束：改声明时同一次重新求值（`work` 的改配路径负责），别让两格漂。
+    #[serde(default)]
+    pub facts: crate::units::business::sandbox::api::SandboxFacts,
     /// 目的：这条会话要的工作台（策略 id / 外部根 / 策略自己的参数）。
     /// 约束：外部根只写在工作根上（子会话沿 `parent` 链继承同一个根），创建后不可改；
     ///   `params` 由工作台单元解释，会话不认里面的字段。
@@ -41,7 +46,7 @@ pub struct SessionMeta {
     pub workspace: crate::units::business::session_model::domain::workspace::WorkspaceDecl,
     /// 目的：这条会话的权限层：根是 ceiling，子是 narrowing。全局给默认值，这里只覆盖显式字段。
     #[serde(default)]
-    pub sandbox: crate::units::pure::permission::api::SessionSandbox,
+    pub permission: crate::units::pure::permission::api::PermissionOverride,
 
     /// 目的：思考强度（会话级，只记在**工作根**上；子会话沿 parent 链共享同一个值）。
     /// 约束：None = 随模型默认；各模型是否支持由登记处的 thinking 映射决定（不支持的档拒绝切换）。
@@ -162,6 +167,12 @@ impl SessionMeta {
         self.spec.is_proxy_spec() && self.agents.is_empty()
     }
 
+    /// 目的：把落盘的执行环境声明与事实换成执行选型（计划、就绪、寻址都读这一份派生值）。
+    /// 约束：不落盘；改声明时同一次重算 facts，声明与派生值永远同源。
+    pub fn target(&self) -> crate::units::pure::exec_model::api::TargetSpec {
+        self.sandbox.target(&self.facts)
+    }
+
     /// 目的：允许被派发 / 唤醒吗？停止与归档都拒绝——**运行态的唯一判据只有这一处**
     ///   （派发入口、代理转达、叫醒都问它，不各写一份）。None = 放行。
     pub fn dispatch_refusal(&self) -> Option<String> {
@@ -191,10 +202,13 @@ pub struct HistoryView {
     pub auto: bool,
     pub ts: i64,
     pub done: bool,
-    /// 目的：这条会话记的执行档位与选型（meta.yaml 的 exec 段；缺字段按默认 = 本机档读回）。
+    /// 目的：这条会话记的执行环境声明（meta.yaml 的 sandbox 段；缺字段按默认 = 本机策略读回）。
     ///   列表视图据此提示"环境已变"——**不拦打开**，记录是用户的。
     #[serde(default)]
-    pub exec: crate::units::pure::exec_model::api::ExecSpec,
+    pub sandbox: crate::units::business::sandbox::api::SandboxDecl,
+    /// 目的：声明解析出来的事实（哪一侧、guest 名）：列表视图与就绪判定读它，不各自重算。
+    #[serde(default)]
+    pub facts: crate::units::business::sandbox::api::SandboxFacts,
     /// 目的：谁编排的（子会话 = 父会话名）：侧栏据此把子会话缩进挂在父会话下。
     #[serde(default)]
     pub parent: Option<String>,

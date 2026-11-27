@@ -21,10 +21,17 @@ impl InMemoryHistory {
     }
 
     /// 目的：直接改掉某条会话已落盘的 meta（测试夹具）：用来构造"落盘档位与当前判据不一致"的情形。例如虚拟机档现在一律不可选，但**已存在的**虚拟机档会话必须还能打开（记录是用户的）。
-    pub(crate) fn force_tier(&self, name: &str, tier: crate::units::pure::exec_model::api::Tier) {
+    pub(crate) fn force_tier(&self, name: &str, tier: crate::units::pure::exec_model::api::Side) {
         let mut metas = self.metas.lock().expect("锁");
         if let Some(m) = metas.get_mut(name) {
-            m.exec.tier = tier;
+            let (sandbox, facts) = crate::tests::builders::sandbox_of(
+                &crate::units::pure::exec_model::api::TargetSpec {
+                    side: tier,
+                    ..Default::default()
+                },
+            );
+            m.sandbox = sandbox;
+            m.facts = facts;
         }
     }
 
@@ -91,7 +98,8 @@ impl HistoryStore for InMemoryHistory {
                             .any(|e| e.get("type").and_then(|t| t.as_str()) == Some("ended"))
                     })
                     .unwrap_or(false),
-                exec: m.exec.clone(),
+                sandbox: m.sandbox.clone(),
+                facts: m.facts.clone(),
                 parent: m.parent.clone(),
                 workspace: m
                     .workspace

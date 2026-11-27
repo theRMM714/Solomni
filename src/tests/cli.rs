@@ -8,7 +8,6 @@ use super::ops_with;
 use super::prelude::*;
 use crate::presentation::cli;
 use crate::units::business::session_model::api::SINGLE;
-use crate::units::pure::exec_model::api::Tier;
 
 /// 建会话在 CLI 上走**动作表**：同一份声明、同一处授权（未知形态在分发处被拒）。
 #[test]
@@ -26,7 +25,7 @@ fn cli_session_creation_goes_through_the_action_table() {
             kind: "single",
             agents: &picked,
             task: None,
-            tier: Tier::Host,
+            sandbox: "host".to_string(),
             workspace: None,
         },
     )
@@ -40,7 +39,7 @@ fn cli_session_creation_goes_through_the_action_table() {
                 kind: "乱来",
                 agents: &picked,
                 task: None,
-                tier: Tier::Host,
+                sandbox: "host".to_string(),
                 workspace: None,
             }
         )
@@ -65,7 +64,7 @@ fn cli_takes_the_backend_derived_session_name() {
             kind: "single",
             agents: &picked,
             task: None,
-            tier: Tier::Host,
+            sandbox: "host".to_string(),
             workspace: None,
         },
     )

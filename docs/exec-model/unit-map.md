@@ -9,7 +9,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/units/pure/exec_model/api.rs` | 入站面：重导出 `Tier` / `ExecSpec` / `JobState`（其它单元与呈现层只准用这里） |
+| `src/units/pure/exec_model/api.rs` | 入站面：重导出 `Side` / `TargetSpec` / `JobState`（其它单元与呈现层只准用这里） |
 | `src/units/pure/exec_model/domain.rs` | 纯定义的入口：声明 `exec_selection` 与 `job` 两个概念子模块 |
-| `src/units/pure/exec_model/domain/exec_selection.rs` | `Tier`（本机 / 虚拟机）与档位解析、`ExecSpec`（档位 + 虚拟根名 + 能力定版） |
+| `src/units/pure/exec_model/domain/exec_selection.rs` | `Side`（`host` / `guest` 哪一侧）与 `TargetSpec`（侧 + 客机名 + 能力定版；由执行环境事实派生，不落盘） |
 | `src/units/pure/exec_model/domain/job.rs` | `JobState`：长任务进度快照（`running` / `seq` / `lines` / `error`） |

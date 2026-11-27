@@ -1143,7 +1143,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
     assert(cv.status === 200, '建虚拟机档工作（先本机档）', cv.text.slice(0, 200));
     const ev = await act(nameVm, 'edit_session', {
       agents: [{ name: '探针兵', modules: ['toolbox'], model: 'm1' }],
-      tier: 'vm', guest: vmGuest,
+      sandbox: 'vm', guest: vmGuest,
     });
     assert(ev.status === 200, '改入虚拟机档（就绪检测放行）', ev.text.slice(0, 240));
     const saidVm = await act(nameVm, 'send_message', { text: '虚拟机档读一下' });
@@ -1235,7 +1235,7 @@ assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slic
         const ce = await api('POST', '/api/actions/create_session', {
           name: nameExt, kind: 'single',
           agents: [{ name: '探针兵', transient: true, modules: ['toolbox'], model: 'm1' }],
-          tier: 'vm', guest: vmGuest, workspace: extDir,
+          sandbox: 'vm', guest: vmGuest, workspace: extDir,
           // 这条旅程不联网，档位用默认的离线即可。
           permission: 'offline',
         });

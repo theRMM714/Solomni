@@ -278,9 +278,9 @@ tools:
       name:
         type: string
         desc: 工作名（落盘目录名）；省略 = 由核心派生并保证不重名
-      tier:
+      sandbox:
         type: string
-        desc: 仅人经呈现层可用（核心代理建子会话时**永远继承主会话**；模型给了也忽略，不接受子会话自选环境）
+        desc: 执行环境策略 id（catalog_agents 的 sandbox_choices 给出可选；如 host / vm）。仅人经呈现层可用（核心代理建子会话时**永远继承主会话**；模型给了也忽略，不接受子会话自选环境）
       guest:
         type: string
         desc: 仅人经呈现层可用（核心代理建子会话时**永远继承主会话的虚拟根**；模型给了也忽略）
@@ -698,11 +698,11 @@ tools:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
       profile: { type: string, required: true, non_empty: true, desc: offline / online }
   edit_session:
-    desc: 配置：改每个 agent 的模块与模型、执行档位、定版与会话级权限（会话开过后名单与形态冻结）。
+    desc: 配置：改每个 agent 的模块与模型、执行环境、定版与会话级权限（会话开过后名单与形态冻结）。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
       agents: { type: array, required: true, desc: 每个 agent 的配置数组（name / modules / model） }
-      tier: { type: string, required: true, non_empty: true, desc: 执行档位 host / vm }
+      sandbox: { type: string, required: true, non_empty: true, desc: 执行环境策略 id（如 host / vm；空 = 保持原样） }
       guest: { type: string, desc: 虚拟机档的虚拟根名（清单里的一个名字；可选） }
       pins: { type: object, desc: 能力定版表（可选） }
       permission: { type: object, desc: 会话级网络档位（profile；子会话只能收窄；网络是全局策略） }

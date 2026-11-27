@@ -23,7 +23,7 @@ use crate::units::business::transcript::api::{ContextUsage, SessionEvent};
 use crate::units::business::versions::api::ReadFact;
 use crate::units::business::vm::api::GuestOs;
 use crate::units::business::workspace::api::Sandbox;
-use crate::units::pure::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::Side;
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::pure::registry_model::api::ToolMode;
 
@@ -57,7 +57,7 @@ pub struct MemberSpec<'a> {
     /// 目的：这一回合的角色 id（用户建的单 agent 会话 = solo，协作子会话 = executor）。
     pub role: &'a str,
     /// 目的：档位（本机 / 虚拟机）。
-    pub tier: Tier,
+    pub side: Side,
     /// 目的：这一席的 guest 租约（本机档为空串）。
     pub guest_lease: String,
     /// 目的：这一席的 shell 活进程槽（成员工具面与状态栏共用同一份）。
@@ -170,7 +170,7 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
         face: ToolFace {
             mode: spec.mode,
             modules: seat.modules,
-            tier: spec.tier,
+            side: spec.side,
             guest_lease: spec.guest_lease.clone(),
             sandbox: sb.clone(),
             tools_this_turn: ports.prompt.text(Segment::ToolsThisTurn).to_string(),

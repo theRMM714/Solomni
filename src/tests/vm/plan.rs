@@ -20,7 +20,7 @@ pub(crate) fn host_plan_selects_host_packages_and_reports_missing_capabilities()
     let modules = vec![module_with_runtimes("a", &["solidity"])];
     let probe = FixedProbe::default();
     let base = BaseFacts::default();
-    let spec = ExecSpec::default();
+    let spec = TargetSpec::default();
     let plan = host_plan_for(&lib, &base, &probe, &spec, &modules, PinPolicy::Require);
     assert_eq!(
         plan.unusable,
@@ -77,7 +77,7 @@ pub(crate) fn unavailable_modules_uses_the_same_ruler_as_the_host_plan() {
         ..FixedProbe::default()
     };
     let base = BaseFacts::default();
-    let spec = ExecSpec::default();
+    let spec = TargetSpec::default();
     let plan = host_plan_for(&lib, &base, &probe, &spec, &modules, PinPolicy::Require);
     let got = unavailable_modules(
         &crate::tests::root_dir(),

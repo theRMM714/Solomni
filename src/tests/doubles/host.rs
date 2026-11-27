@@ -4,6 +4,7 @@
 //! 联动：`src/kernel/ports.rs` 与 `src/units/packages/ports.rs`。
 
 use super::*;
+use crate::tests::builders::decl_of;
 use crate::units::business::session_model::api::MEETING;
 
 /// 目的：记录型围栏端口：记录按会话（`lease_releases`）与按次（`released` / `leases`）两类释放请求。
@@ -185,8 +186,7 @@ pub(crate) fn work(name: &str, kind: &str, modules: &[&str]) -> WorkSpec {
         task: None,
         delegate: false,
         permission: None,
-        tier: crate::units::pure::exec_model::api::Tier::Host,
-        guest: None,
+        sandbox: decl_of(crate::units::pure::exec_model::api::Side::Host, None),
         workspace: None,
     }
 }

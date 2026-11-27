@@ -7,8 +7,8 @@
 #[test]
 pub(crate) fn a_guest_without_supported_clients_is_rejected_before_boot() {
     use crate::units::business::vm::api::tier_readiness;
-    use crate::units::pure::exec_model::api::ExecSpec as VmSpec;
-    use crate::units::pure::exec_model::api::Tier;
+    use crate::units::pure::exec_model::api::Side;
+    use crate::units::pure::exec_model::api::TargetSpec as VmSpec;
     let root = crate::tests::scratch("vm-guest-share-readiness");
     let probe = crate::kernel::detail::HostProbeAdapter;
     let arch = if cfg!(target_arch = "aarch64") {
@@ -42,7 +42,7 @@ pub(crate) fn a_guest_without_supported_clients_is_rejected_before_boot() {
     }
     let tool = tool.to_string_lossy().into_owned();
     let spec = |guest: &str| VmSpec {
-        tier: Tier::Vm,
+        side: Side::Guest,
         guest: Some(guest.to_string()),
         ..Default::default()
     };

@@ -450,6 +450,25 @@ pub(crate) fn test_vm_with_engine(
     ))
 }
 
+/// 目的：测试用的**执行环境策略注册表**——本机与客机两条策略都登记（与生产同一份形状）。
+/// 约束：客机策略按给定产品根解析虚拟根；注入产品根的用例要用 `test_policies_at`。
+pub(crate) fn test_policies() -> crate::units::business::sandbox::api::SandboxPolicies {
+    test_policies_at(crate::tests::root_dir())
+}
+
+/// 目的：按指定产品根造策略注册表（注入产品根的用例要它，否则客机策略找不到那格虚拟根）。
+pub(crate) fn test_policies_at(
+    root: std::path::PathBuf,
+) -> crate::units::business::sandbox::api::SandboxPolicies {
+    crate::units::business::sandbox::api::SandboxPolicies::new(vec![
+        crate::units::business::sandbox::api::host_policy(),
+        crate::units::business::vm::api::vm_policy(
+            root,
+            Arc::new(crate::kernel::detail::HostProbeAdapter),
+        ),
+    ])
+}
+
 /// 目的：测试用的 **packages 入站面**——把内存包库装进 `PackagesService`（与生产同一条路，R12）。
 pub(crate) fn test_packages(
     packages: Arc<dyn PackageSource + Send + Sync>,

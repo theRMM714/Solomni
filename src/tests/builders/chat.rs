@@ -276,7 +276,7 @@ pub(crate) fn native_member(
                 loop_id: "standard".to_string(),
                 role: "solo".to_string(),
                 modules,
-                tier: crate::units::pure::exec_model::api::Tier::Host,
+                side: crate::units::pure::exec_model::api::Side::Host,
                 guest_lease: String::new(),
                 sandbox: sb.clone(),
                 tools_this_turn: test_prompts()
@@ -385,6 +385,7 @@ pub(crate) fn native_core(
         work.layout.clone(),
         work.versions.clone(),
         test_vm(),
+        test_policies(),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
