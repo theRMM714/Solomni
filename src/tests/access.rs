@@ -10,7 +10,7 @@ use crate::units::business::session_model::api::{
     MEETING, RunState, SINGLE, SessionMeta, WorkspaceDecl,
 };
 use crate::units::business::tools::api::{MemberEnvFacts, host_read_roots, member_env};
-use crate::units::business::workbench::api::{Bench, WorkRoots};
+use crate::units::business::workbench::api::{Area, Bench, WorkRoots};
 use crate::units::business::workspace::api::{
     ModuleDir, SeatFacts, SeatPlan, edit_of, edit_params, scope_from, seat_benches,
 };
@@ -353,6 +353,43 @@ fn seat_benches_give_each_agent_only_its_own_modules() {
     );
     assert_eq!(out.shared, PathBuf::from("shared"));
     assert_eq!(out.session_root, PathBuf::from("sessions/w"));
+}
+
+/// 目的：不版本化的工作区只有一棵树：私有面指到共享区那一棵，共享区可写（没有工作副本要提交）。
+#[test]
+fn a_shared_writable_layout_is_a_single_tree() {
+    let roots = WorkRoots {
+        shared: PathBuf::from("shared"),
+        session_root: PathBuf::from("sessions/w"),
+        agents: BTreeMap::from([("a".to_string(), PathBuf::from("work/a"))]),
+        store: PathBuf::from("store"),
+    };
+    let seats = vec![SeatPlan {
+        agent: "a".to_string(),
+        modules: Vec::new(),
+        permissions: PermissionDefaults::default().to_permission_set(),
+        params: vec![WorkspaceDecl::default().params],
+        private: None,
+    }];
+    let out = seat_benches(&SeatFacts {
+        work: "w",
+        session: "s",
+        roots: &roots,
+        codec: None,
+        base_scope: &SharedScope::default(),
+        hard_deny: &[],
+        modules: &[],
+        seats: &seats,
+        shared_writable: true,
+    })
+    .expect("单树布局应能组装");
+    let a = &out.list[0];
+    assert_eq!(
+        a.private,
+        PathBuf::from("shared"),
+        "只有一棵树，私有面不另开"
+    );
+    assert!(a.can_write(&Area::Shared), "不版本化时共享区就是工作区");
 }
 
 /// 目的：工作区没给出某席的私有根时如实报缺哪个 agent（不猜路径）。

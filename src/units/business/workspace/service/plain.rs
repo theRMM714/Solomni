@@ -30,3 +30,36 @@ impl BenchPolicy for PlainPolicy {
 pub fn plain_policy() -> std::sync::Arc<dyn BenchPolicy> {
     std::sync::Arc::new(PlainPolicy)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::units::business::workbench::api::PlanRequest;
+
+    /// 目的：不版本化只负责「这棵树可写」：不给共享区动作、不给回合钩子——引擎的版本库入口只有这两处，所以零调用。
+    #[test]
+    fn plain_hands_out_no_versioning_tools_and_no_hooks() {
+        let policy = plain_policy();
+        let abilities = vec!["shared-write".to_string()];
+        let params = serde_json::Value::Null;
+        let plan = policy
+            .plan(&PlanRequest {
+                bench: None,
+                abilities: &abilities,
+                params: &params,
+            })
+            .expect("不版本化给空计划");
+        assert!(plan.tools.is_empty(), "没有共享区动作：{:?}", plan.tools);
+        assert!(plan.handlers.is_empty());
+        assert!(
+            plan.driver.is_none(),
+            "不版本化没有回合边界钩子：引擎只经驱动与处理器碰版本库"
+        );
+        assert!(policy.shared_writable(), "共享区就是工作区");
+        assert!(
+            policy.capabilities().is_empty(),
+            "没有能力位：前端不渲染回档类按键"
+        );
+        assert_eq!(policy.id(), PLAIN_POLICY);
+    }
+}

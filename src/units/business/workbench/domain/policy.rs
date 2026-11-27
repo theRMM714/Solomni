@@ -178,3 +178,53 @@ impl BenchPolicies for Policies {
         self.list.iter().find(|p| p.id() == id).cloned()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 目的：一个只实现端口的新策略（交一个工具）：注册表按 id 取到它，装配期就能把工具放进面。
+    struct OneTool;
+
+    impl BenchPolicy for OneTool {
+        fn id(&self) -> &'static str {
+            "one"
+        }
+
+        fn capabilities(&self) -> &'static [&'static str] {
+            &[]
+        }
+
+        fn shared_writable(&self) -> bool {
+            true
+        }
+
+        fn plan(&self, _req: &PlanRequest<'_>) -> Result<BenchPlan, String> {
+            Ok(BenchPlan {
+                tools: vec!["one.ping".to_string()],
+                ..BenchPlan::default()
+            })
+        }
+    }
+
+    /// 目的：新增一种工作区不需要改 session / tools / agentloop——只要实现端口并登记进策略表。
+    #[test]
+    fn any_policy_that_implements_the_port_is_visible_by_its_id() {
+        let table: std::sync::Arc<dyn BenchPolicies> =
+            std::sync::Arc::new(Policies::new(vec![std::sync::Arc::new(OneTool)]));
+        let policy = table.get("one").expect("按 id 取到");
+        assert_eq!(policy.id(), "one");
+        assert!(policy.shared_writable());
+        let abilities: Vec<String> = Vec::new();
+        let params = serde_json::Value::Null;
+        let plan = policy
+            .plan(&PlanRequest {
+                bench: None,
+                abilities: &abilities,
+                params: &params,
+            })
+            .expect("新策略交名单");
+        assert_eq!(plan.tools, vec!["one.ping".to_string()]);
+        assert!(table.get("nope").is_none());
+    }
+}
