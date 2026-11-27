@@ -11,6 +11,10 @@ use std::sync::OnceLock;
 const BOOT: &str = include_str!("../presentation/cli/boot.rs");
 /// 入口的内部协议分派（这里不许再出现产品命令）。
 const ENTRY_ARGS: &str = include_str!("../entry/args.rs");
+/// 转录相命令各自的执行函数（取参与打印；一条命令一个函数）。
+const COMMANDS: &str = include_str!("../presentation/cli/commands.rs");
+/// 会话流命令的执行函数（发起会话、注册处命令）。
+const FLOWS: &str = include_str!("../presentation/cli/flows.rs");
 /// 转录中心的分派实现（转录相命令的落点：主循环与共用词法）。
 const CLI: &str = concat!(
     include_str!("../presentation/cli.rs"),
@@ -413,5 +417,82 @@ fn every_action_belongs_to_the_human_face_or_a_session_source() {
         absent.is_empty(),
         "这些动作在人的命令面里，但呈现层没有入口，也没登记豁免：{:?}",
         absent
+    );
+}
+
+/// 目的：一条命令声明的参数名（没有参数时为空）。
+fn declared_of(op: &Op) -> Vec<String> {
+    op.schema
+        .params
+        .as_ref()
+        .map(|p| p.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// 目的：从一个执行函数的函数体里取出它读过的参数名（text(args, "x") 与 num(args, "x")）。
+fn reads_of(body: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for lead in ["text(args, \"", "num(args, \""] {
+        let mut rest = body;
+        while let Some(at) = rest.find(lead) {
+            let after = &rest[at + lead.len()..];
+            let Some(end) = after.find('"') else { break };
+            let name = after[..end].to_string();
+            if !out.contains(&name) {
+                out.push(name);
+            }
+            rest = &after[end..];
+        }
+    }
+    out
+}
+
+/// 目的：按函数名从源码里切出函数体（到列首的右花括号为止）。
+fn body_of<'a>(sources: &'a str, name: &str) -> Option<&'a str> {
+    let head = format!("fn {}(", name);
+    let start = sources.find(&head)?;
+    let tail = &sources[start..];
+    let mut offset = 0;
+    for line in tail.lines() {
+        offset += line.len() + 1;
+        if line == "}" && offset > head.len() {
+            return Some(&tail[..offset]);
+        }
+    }
+    None
+}
+
+/// 对齐：转录相命令的执行函数读的参数名必须在这一条命令的声明里。
+#[test]
+fn executors_only_read_the_params_their_command_declares() {
+    let sources = format!("{}\n{}\n{}", COMMANDS, FLOWS, CLI);
+    let mut checked = 0;
+    for op in phase(Phase::Core) {
+        let declared = declared_of(op);
+        let snake = op.id.replace('-', "_");
+        let mut found = false;
+        for suffix in ["_cmd", "_flow"] {
+            let name = format!("{}{}", snake, suffix);
+            let Some(body) = body_of(&sources, &name) else {
+                continue;
+            };
+            found = true;
+            for read in reads_of(body) {
+                assert!(
+                    declared.contains(&read),
+                    "命令 {} 的执行函数读参数 {}，但 systools/commands.yaml 没声明它",
+                    op.id,
+                    read
+                );
+            }
+        }
+        if found {
+            checked += 1;
+        }
+    }
+    assert!(
+        checked >= 9,
+        "至少九条转录相命令有专门的执行函数，实际 {}",
+        checked
     );
 }
