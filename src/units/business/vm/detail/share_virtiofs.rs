@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::kernel::api::env;
+use crate::kernel::api::fs;
 use crate::kernel::api::process::{Daemon, Spawn, spawn};
 use crate::kernel::detail::procs::ProcessBook;
 use crate::units::business::vm::domain::exec::VIRTIOFSD_BIN;
@@ -202,9 +203,9 @@ impl VirtioFsGuard {
             daemon.stop();
         }
         for p in self.paths.drain(..) {
-            let _ = std::fs::remove_file(&p);
+            let _ = fs::remove_tree(&p);
             // virtiofsd 会在套接字旁写一份 pid 文件，一起删掉，别留残留。
-            let _ = std::fs::remove_file(p.with_extension("sock.pid"));
+            let _ = fs::remove_tree(&p.with_extension("sock.pid"));
         }
     }
 }

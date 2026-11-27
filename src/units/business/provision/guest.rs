@@ -4,6 +4,7 @@
 //! 联动：由 service.rs 的 guest-runtime 分支调用；vm 能力经 ::api 注入（组合根或 --provision 入口装配）；契约见 RUNTIME_SPEC.md。
 
 use super::domain::{Dep, deps, links, source_url, under};
+use crate::kernel::api::fs;
 use crate::kernel::api::layout;
 use crate::kernel::ports::HostProbe;
 use crate::units::business::vm::api::{
@@ -104,7 +105,14 @@ pub(crate) fn write_guest_yaml(
         arch = arch,
         os = image.os.as_str()
     );
-    std::fs::write(layout::guest_spec(base), text).map_err(|e| format!("写 guest.yaml 失败：{}", e))
+    fs::write(
+        None,
+        &layout::guest_spec(base),
+        text.as_bytes(),
+        fs::Expect::Any,
+    )
+    .map(|_| ())
+    .map_err(|fault| format!("写 guest.yaml 失败：{}", fault.message))
 }
 
 /// 目的：找清单里**本机** QEMU 的真实落点（运行期编排要用它起 guest）。
@@ -209,8 +217,14 @@ pub(crate) fn install_guest_runtime(
         // agent 活着之后顺手关掉 cloud-init；失败不影响"agent 已确认"这个事实。
         let _ = vm.guest_run(&lease, &sh("touch /etc/cloud/cloud-init.disabled; sync"));
         vm.guest_stop(&lease);
-        std::fs::write(&qga_marker, "QGA guest-sync 通过（产品 Rust 编排）\n")
-            .map_err(|e| format!("写 {} 失败：{}", qga_marker.display(), e))?;
+        fs::write(
+            None,
+            &qga_marker,
+            "QGA guest-sync 通过（产品 Rust 编排）\n".as_bytes(),
+            fs::Expect::Any,
+        )
+        .map(|_| ())
+        .map_err(|fault| format!("写 {} 失败：{}", qga_marker.display(), fault.message))?;
         on_line("guest 里的 qemu-guest-agent 已确认");
     }
 
@@ -336,17 +350,26 @@ pub(crate) fn install_guest_runtime(
             "gcc".to_string(),
         ];
         write_guest_yaml(&base, &image, &proven, &clients)?;
-        std::fs::write(
+        fs::write(
+            None,
             &runtimes_marker,
             format!(
                 "产品 Rust 编排：python / node（固定版本）/ cc + gcc（Debian GCC）已逐个自证可用；共享客户端 [{}]\n",
                 clients.join(", ")
-            ),
+            )
+            .as_bytes(),
+            fs::Expect::Any,
         )
-        .map_err(|e| format!("写 {} 失败：{}", runtimes_marker.display(), e))?;
+        .map(|_| ())
+        .map_err(|fault| format!("写 {} 失败：{}", runtimes_marker.display(), fault.message))?;
         if !qga_marker.is_file() {
             // 用户自备的虚拟根没有 .qga-ready：维护启动能通就说明 agent 在场——如实落这条事实。
-            let _ = std::fs::write(&qga_marker, "维护启动已确认 qemu-guest-agent 在场\n");
+            let _ = fs::write(
+                None,
+                &qga_marker,
+                "维护启动已确认 qemu-guest-agent 在场\n".as_bytes(),
+                fs::Expect::Any,
+            );
         }
         on_line("guest 基础工具链已装好（python / node / cc + gcc 都自证可用）");
     }

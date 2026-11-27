@@ -444,6 +444,8 @@ fn main() {
         std::sync::Arc::clone(&write_allowed),
     )
     .with_mode(std::sync::Arc::clone(&sandbox_mode));
+    // 内核的文件事务先装上跨进程锁的落点：各单元写盘时不必逐个穿这一层（显式传入仍优先）。
+    kernel::api::fs::install_lock_space(kernel::api::fs::LockSpace::new(layout::locks(&root)));
     // 内置文件工具：纯 Rust 直接读写，不经过外部进程（编码问题不进本程序）。
     let io = units::business::tools::detail::FsSysIo::with_lock_dir(layout::locks(&root));
     // **工具单元**：三张表由加载器读进来，三个出站端口（外部执行 / 内置读写 / 围栏释放）

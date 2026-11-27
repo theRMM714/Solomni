@@ -111,6 +111,8 @@ impl WriteFault {
     }
 
     /// 目的：磁盘上的版本已经不是调用方以为的那一份。
+    /// 约束：生产路径的旧版本比对照在 `src/kernel/detail/fs.rs` 的 `check_expect`；这里只给替身造同一形状的失败。
+    #[cfg(test)]
     pub fn stale(path: &Path, expected: &str, current: &str) -> WriteFault {
         WriteFault::new(
             "FS_STALE_VERSION",
@@ -124,6 +126,8 @@ impl WriteFault {
     }
 
     /// 目的：想新建的路径已经存在（别的写者抢先建成）。
+    /// 约束：生产路径的这一步在 `src/kernel/detail/fs.rs` 的 `check_expect`；这里只给替身造同一形状的失败。
+    #[cfg(test)]
     pub fn already_exists(path: &Path) -> WriteFault {
         WriteFault::new(
             "FS_ALREADY_EXISTS",
@@ -177,6 +181,8 @@ impl WriteFault {
     }
 
     /// 目的：其它机制错误。
+    /// 约束：生产路径的机制错误由 `src/kernel/detail/fs.rs` 的 `Fault::io` 生产；这里只给替身造同一形状的失败。
+    #[cfg(test)]
     pub fn io(path: &Path, why: impl std::fmt::Display) -> WriteFault {
         WriteFault::new("FS_IO", format!("{} 写盘失败：{}", path.display(), why))
     }

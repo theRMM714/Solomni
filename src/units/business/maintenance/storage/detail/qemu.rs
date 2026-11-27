@@ -3,8 +3,8 @@
 //! 不管：构建缓存卷怎么建（在 builds）、guest 怎么起（在 vm）。
 //! 联动：storage::service 用它算实际占用；工具与构建共用项目内的 qemu-img。
 
+use crate::kernel::api::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 /// 目的：一块磁盘镜像的 facts。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,19 +26,24 @@ pub fn find(root: &Path) -> Option<PathBuf> {
 
 /// 目的：读一块 qcow2 的 actual/virtual 与 corrupt；失败给 None。
 pub fn info(qemu: &Path, path: &Path) -> Option<DiskInfo> {
-    let out = Command::new(qemu)
-        .arg("info")
-        .arg("--output=json")
-        .arg(path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    if !out.status.success() {
+    let args = vec![
+        "info".to_string(),
+        "--output=json".to_string(),
+        path.to_string_lossy().into_owned(),
+    ];
+    let out = crate::kernel::api::process::run_to_end(&crate::kernel::api::process::Run {
+        program: qemu,
+        args: &args,
+        env: &[],
+        cwd: None,
+        timeout: std::time::Duration::from_secs(120),
+        stdin: None,
+    })
+    .ok()?;
+    if !out.ok() {
         return None;
     }
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&out.stdout_text()).ok()?;
     let actual = v.get("actual-size").and_then(|x| x.as_u64())?;
     let virtual_size = v.get("virtual-size").and_then(|x| x.as_u64()).unwrap_or(0);
     let corrupt = v
@@ -59,35 +64,37 @@ pub fn info(qemu: &Path, path: &Path) -> Option<DiskInfo> {
 pub fn convert(qemu: &Path, path: &Path) -> Result<u64, String> {
     let temp = path.with_extension("compact.qcow2");
     let backup = path.with_extension("compact.bak");
-    let _ = std::fs::remove_file(&temp);
-    let _ = std::fs::remove_file(&backup);
-    let out = Command::new(qemu)
-        .arg("convert")
-        .arg("-O")
-        .arg("qcow2")
-        .arg(path)
-        .arg(&temp)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| format!("起不了 qemu-img：{}", e))?;
-    if !out.status.success() {
-        let _ = std::fs::remove_file(&temp);
-        return Err(format!(
-            "压缩失败：{}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
+    let _ = fs::remove_tree(&temp);
+    let _ = fs::remove_tree(&backup);
+    let args = vec![
+        "convert".to_string(),
+        "-O".to_string(),
+        "qcow2".to_string(),
+        path.to_string_lossy().into_owned(),
+        temp.to_string_lossy().into_owned(),
+    ];
+    let out = crate::kernel::api::process::run_to_end(&crate::kernel::api::process::Run {
+        program: qemu,
+        args: &args,
+        env: &[],
+        cwd: None,
+        timeout: std::time::Duration::from_secs(1800),
+        stdin: None,
+    })
+    .map_err(|e| format!("起不了 qemu-img：{}", e))?;
+    if !out.ok() {
+        let _ = fs::remove_tree(&temp);
+        return Err(format!("压缩失败：{}", out.stderr_text().trim()));
     }
-    std::fs::rename(path, &backup).map_err(|e| {
-        let _ = std::fs::remove_file(&temp);
-        format!("替换原卷失败：{}", e)
+    fs::move_file(path, &backup).map_err(|fault| {
+        let _ = fs::remove_tree(&temp);
+        format!("替换原卷失败：{}", fault.message)
     })?;
-    if let Err(e) = std::fs::rename(&temp, path) {
-        let _ = std::fs::rename(&backup, path);
-        let _ = std::fs::remove_file(&temp);
-        return Err(format!("放回压缩卷失败：{}", e));
+    if let Err(fault) = fs::move_file(&temp, path) {
+        let _ = fs::move_file(&backup, path);
+        let _ = fs::remove_tree(&temp);
+        return Err(format!("放回压缩卷失败：{}", fault.message));
     }
-    let _ = std::fs::remove_file(&backup);
+    let _ = fs::remove_tree(&backup);
     Ok(info(qemu, path).map(|i| i.actual).unwrap_or(0))
 }

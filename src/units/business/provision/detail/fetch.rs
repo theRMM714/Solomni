@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::kernel::api::env;
+use crate::kernel::api::fs as kfs;
 use crate::units::business::provision::ports::Fetcher;
 
 /// 目的：HTTP 的 Fetcher 实现——一个 ureq agent 走完全部请求（连接与代理配置只建一次）。
@@ -170,16 +171,18 @@ pub(crate) fn download_with_resume(
         if same_source {
             fs::metadata(&part).map(|m| m.len()).unwrap_or(0)
         } else {
-            let _ = fs::remove_file(&part);
+            let _ = kfs::remove_tree(&part);
             0
         }
     } else {
         0
     };
     if offset == 0 {
-        let _ = fs::remove_file(&marker);
+        let _ = kfs::remove_tree(&marker);
     }
-    fs::write(&marker, url).map_err(|e| format!("写来源标记 {} 失败：{}", marker.display(), e))?;
+    kfs::write(None, &marker, url.as_bytes(), kfs::Expect::Any)
+        .map(|_| ())
+        .map_err(|fault| format!("写来源标记 {} 失败：{}", marker.display(), fault.message))?;
     let mut req = agent.get(url);
     if offset > 0 {
         req = req.header("Range", format!("bytes={}-", offset));
@@ -198,33 +201,28 @@ pub(crate) fn download_with_resume(
         ));
     }
     let append = offset > 0 && code == 206;
-    let mut opts = fs::OpenOptions::new();
-    opts.create(true).write(true);
-    if append {
-        opts.append(true);
-    } else {
-        opts.truncate(true);
-    }
-    let mut f = opts
-        .open(&part)
-        .map_err(|e| format!("建 {} 失败：{}", part.display(), e))?;
     let mut reader = resp.into_body().into_reader();
     let mut added = 0u64;
-    let mut buf = [0u8; 64 * 1024];
-    loop {
-        let got = reader
-            .read(&mut buf)
-            .map_err(|e| format!("读下载流失败（{}）：{}", url, e))?;
-        if got == 0 {
-            break;
+    kfs::stream_into(None, &part, append, "下载分片", |sink| {
+        let mut buf = [0u8; 64 * 1024];
+        loop {
+            let got = reader.read(&mut buf).map_err(|e| {
+                kfs::Fault::new(kfs::FS_IO, format!("读下载流失败（{}）：{}", url, e))
+            })?;
+            if got == 0 {
+                break;
+            }
+            sink.write_all(&buf[..got]).map_err(|e| {
+                kfs::Fault::new(kfs::FS_IO, format!("写 {} 失败：{}", part.display(), e))
+            })?;
+            added += got as u64;
         }
-        io::Write::write_all(&mut f, &buf[..got])
-            .map_err(|e| format!("写 {} 失败：{}", part.display(), e))?;
-        added += got as u64;
-    }
-    drop(f);
-    fs::rename(&part, dest).map_err(|e| format!("改名 {} 失败：{}", part.display(), e))?;
-    let _ = fs::remove_file(&marker);
+        Ok(())
+    })
+    .map_err(|fault| fault.message)?;
+    kfs::move_file(&part, dest)
+        .map_err(|fault| format!("改名 {} 失败：{}", part.display(), fault.message))?;
+    let _ = kfs::remove_tree(&marker);
     if append {
         on_line(&format!(
             "续传完成：断点 {} 字节 + 新增 {} 字节",

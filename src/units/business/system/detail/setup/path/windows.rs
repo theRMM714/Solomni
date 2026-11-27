@@ -4,6 +4,7 @@
 //! 联动：由 `setup/path.rs` 按平台选中。
 
 use super::*;
+use crate::kernel::api::fs;
 use crate::kernel::api::layout;
 use crate::kernel::ports::{PathValue, UserPath};
 
@@ -22,8 +23,8 @@ fn write_backup(home: &Path, value: &PathValue, bin: &str) -> Result<(), String>
         return Ok(());
     }
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)
-            .map_err(|e| format!("建私有区失败（{}）：{}", dir.display(), e))?;
+        fs::ensure_dir(dir)
+            .map_err(|fault| format!("建私有区失败（{}）：{}", dir.display(), fault.message))?;
     }
     let backup = PathBackup {
         v: 1,
@@ -33,7 +34,9 @@ fn write_backup(home: &Path, value: &PathValue, bin: &str) -> Result<(), String>
         at: now_secs(),
     };
     let text = serde_json::to_string_pretty(&backup).map_err(|e| e.to_string())?;
-    std::fs::write(&path, text).map_err(|e| format!("写备份失败（{}）：{}", path.display(), e))
+    fs::write(None, &path, text.as_bytes(), fs::Expect::Any)
+        .map(|_| ())
+        .map_err(|fault| format!("写备份失败（{}）：{}", path.display(), fault.message))
 }
 
 /// 目的：--setup=path 的核心（端口注入，便于测试）：确保 shim，再把 bin 追加进用户 PATH。

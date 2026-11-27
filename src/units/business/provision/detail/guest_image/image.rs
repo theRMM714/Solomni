@@ -17,13 +17,20 @@ pub(crate) struct GuestAttr {
 /// 约束：普通用户身份解——内核会剥掉特权位、rdump 也改不动属主；这两样由
 ///   `guest_attrs_to_restore` / `restore_guest_image_attrs` 在打包后按源镜像回填。
 pub(crate) fn extract_guest_rootfs(image: &Path, dest: &Path) -> Result<(), String> {
-    run_tool(
-        std::process::Command::new("debugfs")
-            .arg("-R")
-            .arg(format!("rdump / {}", dest.display()))
-            .arg(image),
+    let done = run_tool(
         "debugfs",
-    )
+        vec![
+            "-R".to_string(),
+            format!("rdump / {}", dest.display()),
+            image.to_string_lossy().into_owned(),
+        ],
+        None,
+        std::time::Duration::from_secs(600),
+    )?;
+    if !done.ok() {
+        return Err(format!("debugfs 失败：{}", done.stderr_text().trim()));
+    }
+    Ok(())
 }
 
 /// 目的：源镜像里"打包会丢"的属性——特权位（setuid / setgid / sticky）、非 root 属主 / 属组。
@@ -169,20 +176,20 @@ pub(crate) fn image_dirs(tree: &Path) -> Result<Vec<String>, String> {
 pub(crate) fn run_debugfs(image: &Path, cmds: &str, write: bool) -> Result<String, String> {
     let cmd_file = image.with_extension(format!("debugfs-{}.cmd", std::process::id()));
     fs::write(&cmd_file, cmds).map_err(|e| format!("写 debugfs 命令表失败：{}", e))?;
-    let mut cmd = std::process::Command::new("debugfs");
+    let mut args: Vec<String> = Vec::new();
     if write {
-        cmd.arg("-w");
+        args.push("-w".to_string());
     }
-    let out = cmd.arg("-f").arg(&cmd_file).arg(image).output();
-    let _ = fs::remove_file(&cmd_file);
-    let out = out.map_err(|e| format!("跑不了 debugfs（要 e2fsprogs）：{}", e))?;
-    if !out.status.success() {
-        return Err(format!(
-            "debugfs 失败：{}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
+    args.push("-f".to_string());
+    args.push(cmd_file.to_string_lossy().into_owned());
+    args.push(image.to_string_lossy().into_owned());
+    let done = run_tool("debugfs", args, None, std::time::Duration::from_secs(600));
+    let _ = crate::kernel::api::fs::remove_tree(&cmd_file);
+    let done = done.map_err(|e| format!("跑不了 debugfs（要 e2fsprogs）：{e}"))?;
+    if !done.ok() {
+        return Err(format!("debugfs 失败：{}", done.stderr_text().trim()));
     }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    Ok(done.stdout_text())
 }
 
 /// 目的：把镜像内路径变成 debugfs 命令表里一个双引号参数。
@@ -232,7 +239,7 @@ pub(crate) fn dir_bytes(dir: &Path) -> Result<u64, String> {
 ///   比 len() 更接近 ext4 真正要分配的空间。
 /// 约束：非 Unix 拿不到块数，退回文件长度；打包本身只在 Linux 上真跑。
 pub(crate) fn file_footprint(meta: &fs::Metadata) -> u64 {
-    crate::kernel::api::fs_meta::file_footprint(meta)
+    crate::kernel::api::fs::file_footprint(meta)
 }
 
 /// 目的：只留下 `keep` 里那几个名字，其余全删（虚拟根目录的收口）。

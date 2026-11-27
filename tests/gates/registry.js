@@ -30,6 +30,8 @@ const S = {
   resourceNames: require("./structure/resource-names.js"),
   kernelProducts: require("./structure/kernel-products.js"),
   envSurface: require("./structure/env-surface.js"),
+  fsSurface: require("./structure/fs-surface.js"),
+  processSurface: require("./structure/process-surface.js"),
   rootEntries: require("./structure/root-entries.js"),
   diskOwners: require("./structure/disk-owners.js"),
   ioOwners: require("./structure/io-owners.js"),
@@ -158,6 +160,30 @@ const GATES = [
     inputs: ["src/**/*.rs"],
     run: (root, ctx) => {
       const r = S.envSurface.envSurface(root);
+      ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
+      return r.problems;
+    },
+  },
+  {
+    id: "structure/fs-surface",
+    lane: "structure",
+    step: "T0 结构审查",
+    kind: "text",
+    inputs: ["src/**/*.rs"],
+    run: (root, ctx) => {
+      const r = S.fsSurface.fsSurface(root);
+      ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
+      return r.problems;
+    },
+  },
+  {
+    id: "structure/process-surface",
+    lane: "structure",
+    step: "T0 结构审查",
+    kind: "text",
+    inputs: ["src/**/*.rs"],
+    run: (root, ctx) => {
+      const r = S.processSurface.processSurface(root);
       ctx.stats.notes = (ctx.stats.notes || []).concat(r.notes);
       return r.problems;
     },

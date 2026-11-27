@@ -3,6 +3,7 @@
 //! 不管：下载与校验（在 fetch / service）、镜像内部构造（在 guest_image）、台账（在 ledger）。
 //! 联动：service 按清单的 kind 选一个方法调用；本文件直接碰宿主文件系统与外部工具。
 
+use crate::kernel::api::fs as kfs;
 use crate::kernel::api::layout;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -107,7 +108,8 @@ pub(crate) fn write_zig_wrappers(install: &Path) -> Result<(), String> {
         .map_err(|_| format!("zig 不在安装目录里：{}", zig.display()))?;
     let rel = rel.to_string_lossy().replace('\\', "/");
     let bin = install.join("bin");
-    fs::create_dir_all(&bin).map_err(|e| format!("建 {} 失败：{}", bin.display(), e))?;
+    kfs::ensure_dir(&bin)
+        .map_err(|fault| format!("建 {} 失败：{}", bin.display(), fault.message))?;
     // Zig 默认把全局缓存写到 ~/.cache/zig（项目外）；钉进安装目录，项目根整体搬移后仍成立。
     let zig_body = format!(
         r#"#!/bin/sh
@@ -162,7 +164,8 @@ pub(crate) fn install_file(cached: &Path, dest: &Path, probe: &str) -> Result<()
         .file_name()
         .ok_or_else(|| format!("probe 没有文件名：{}", probe))?;
     let to = dest.join(name);
-    fs::copy(cached, &to).map_err(|e| format!("复制到 {} 失败：{}", to.display(), e))?;
+    kfs::copy_file(cached, &to)
+        .map_err(|fault| format!("复制到 {} 失败：{}", to.display(), fault.message))?;
     Ok(())
 }
 
@@ -173,22 +176,24 @@ pub(crate) fn install_appimage(
     dest: &Path,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
-    crate::kernel::api::fs_meta::make_executable_checked(archive)
+    crate::kernel::api::fs::make_executable_checked(archive)
         .map_err(|e| format!("给 {} 加执行位失败：{}", archive.display(), e))?;
     // 解到安装目录里（同一文件系统，随后原地搬移，避免跨设备 rename）。
-    let _ = fs::remove_dir_all(dest.join("AppDir"));
-    let _ = fs::remove_file(dest.join("squashfs-root"));
+    let _ = kfs::remove_tree(&dest.join("AppDir"));
+    let _ = kfs::remove_tree(&dest.join("squashfs-root"));
     on_line("解包 AppImage（--appimage-extract，不依赖 FUSE）");
-    let out = std::process::Command::new(archive)
-        .arg("--appimage-extract")
-        .current_dir(dest)
-        .output()
-        .map_err(|e| format!("跑不了 AppImage 解包（{}）：{}", archive.display(), e))?;
-    if !out.status.success() {
-        let msg: String = String::from_utf8_lossy(&out.stderr)
-            .chars()
-            .take(200)
-            .collect();
+    let args = vec!["--appimage-extract".to_string()];
+    let out = crate::kernel::api::process::run_to_end(&crate::kernel::api::process::Run {
+        program: archive,
+        args: &args,
+        env: &[],
+        cwd: Some(dest),
+        timeout: std::time::Duration::from_secs(600),
+        stdin: None,
+    })
+    .map_err(|e| format!("跑不了 AppImage 解包（{}）：{}", archive.display(), e))?;
+    if !out.ok() {
+        let msg: String = out.stderr_text().chars().take(200).collect();
         return Err(format!("AppImage 解包失败：{}", msg));
     }
     // pkgforge 的运行时解到 AppDir/（另留一个 squashfs-root 软链）；两种布局都认。
@@ -208,11 +213,16 @@ pub(crate) fn install_appimage(
         if to.exists() {
             continue; // 重复安装时幂等：已在场的不覆盖
         }
-        fs::rename(entry.path(), &to)
-            .map_err(|e| format!("搬 {} 失败：{}", entry.file_name().to_string_lossy(), e))?;
+        kfs::move_file(&entry.path(), &to).map_err(|fault| {
+            format!(
+                "搬 {} 失败：{}",
+                entry.file_name().to_string_lossy(),
+                fault.message
+            )
+        })?;
     }
-    let _ = fs::remove_dir_all(dest.join("AppDir"));
-    let _ = fs::remove_file(dest.join("squashfs-root"));
+    let _ = kfs::remove_tree(&dest.join("AppDir"));
+    let _ = kfs::remove_tree(&dest.join("squashfs-root"));
     Ok(())
 }
 
@@ -235,11 +245,14 @@ pub(crate) fn install_guest_disk(
     }
     let yaml = layout::guest_spec(dest);
     if !yaml.is_file() {
-        fs::write(
+        kfs::write(
+            None,
             &yaml,
-            "# 由产品生成：命令通道 QGA；共享客户端由运行期编排装好 cifs-utils 后声明（见 guest-runtime）。\n\nid: debian-13-genericcloud-amd64\nos: linux\narch: amd64\nagent: qga\nclients: []\nruntimes: []\n",
+            "# 由产品生成：命令通道 QGA；共享客户端由运行期编排装好 cifs-utils 后声明（见 guest-runtime）。\n\nid: debian-13-genericcloud-amd64\nos: linux\narch: amd64\nagent: qga\nclients: []\nruntimes: []\n".as_bytes(),
+            kfs::Expect::Any,
         )
-        .map_err(|e| format!("写 guest.yaml 失败：{}", e))?;
+        .map(|_| ())
+        .map_err(|fault| format!("写 guest.yaml 失败：{}", fault.message))?;
         on_line("写 guest.yaml（QGA 通道画像）");
     }
     Ok(())

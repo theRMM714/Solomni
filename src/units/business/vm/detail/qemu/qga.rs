@@ -6,6 +6,7 @@
 use super::UNFENCED_GUEST_RUN_SECS;
 use super::seed::SeedServer;
 use crate::kernel::api::clock;
+use crate::kernel::api::fs;
 use crate::kernel::api::net;
 use crate::kernel::api::process::Daemon;
 use crate::kernel::api::types::ToolOutcome;
@@ -63,7 +64,7 @@ impl QemuHandle {
             daemon.stop();
         }
         if let Some(path) = self.overlay.take() {
-            let _ = std::fs::remove_file(&path);
+            let _ = fs::remove_tree(&path);
         }
     }
 

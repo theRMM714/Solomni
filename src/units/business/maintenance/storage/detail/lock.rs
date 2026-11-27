@@ -3,6 +3,7 @@
 //! 不管：构建卷自己的锁（在 builds）；陈旧判定（内核文件锁由操作系统在进程退出时释放）。
 //! 联动：storage::service 的 gc 与显式清理共用这一把闸。
 
+use crate::kernel::api::fs;
 use std::path::{Path, PathBuf};
 
 /// 目的：锁文件路径。
@@ -16,7 +17,7 @@ fn path(root: &Path) -> PathBuf {
 pub fn try_acquire(root: &Path) -> Result<Option<std::fs::File>, String> {
     let p = path(root);
     if let Some(dir) = p.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("建存储目录失败：{}", e))?;
+        fs::ensure_dir(dir).map_err(|fault| format!("建存储目录失败：{}", fault.message))?;
     }
     crate::kernel::api::lock::try_lock(&p, "回收")
 }

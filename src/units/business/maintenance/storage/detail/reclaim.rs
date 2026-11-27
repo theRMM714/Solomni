@@ -3,6 +3,7 @@
 //! 不管：哪些该删（domain）、什么时候删（service）、路径约定（paths）。
 //! 联动：service 经 SpaceReclaim 端口消费；删除用的路径与 survey 共用 detail/paths.rs。
 
+use crate::kernel::api::fs;
 use crate::units::business::maintenance::storage::api::{
     CAT_BUILD, CAT_DOWNLOAD, CAT_OVERLAYS, LastGc,
 };
@@ -49,11 +50,14 @@ impl SpaceReclaim for DiskReclaim {
         }
         let _lease =
             take_build_lock(&self.root, guest).map_err(|e| format!("{}，不能标记清理", e))?;
-        std::fs::write(
-            paths::build_purge(&self.root, guest),
-            format!("{}\n", module),
+        fs::write(
+            None,
+            &paths::build_purge(&self.root, guest),
+            format!("{}\n", module).as_bytes(),
+            fs::Expect::Any,
         )
-        .map_err(|e| format!("写清理标记失败：{}", e))
+        .map(|_| ())
+        .map_err(|fault| format!("写清理标记失败：{}", fault.message))
     }
 
     fn compact(&self, guest: &str) -> Result<(u64, u64), String> {
@@ -108,8 +112,9 @@ fn remove_build_volume(root: &Path, guest: &str) -> Result<(), String> {
 fn take_build_lock(root: &Path, guest: &str) -> Result<std::fs::File, String> {
     let path = paths::build_lock(root, guest);
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)
-            .map_err(|e| format!("建构建缓存目录失败（{}）：{}", dir.display(), e))?;
+        fs::ensure_dir(dir).map_err(|fault| {
+            format!("建构建缓存目录失败（{}）：{}", dir.display(), fault.message)
+        })?;
     }
     crate::kernel::api::lock::try_lock(&path, "构建缓存卷")?
         .ok_or_else(|| format!("虚拟根 {} 有构建在跑", guest))
@@ -117,12 +122,5 @@ fn take_build_lock(root: &Path, guest: &str) -> Result<std::fs::File, String> {
 
 /// 目的：删一个文件或目录；不存在视为已删。
 fn remove_entry(p: &Path) -> Result<(), String> {
-    match std::fs::symlink_metadata(p) {
-        Ok(m) if m.is_dir() => {
-            std::fs::remove_dir_all(p).map_err(|e| format!("删 {} 失败：{}", p.display(), e))
-        }
-        Ok(_) => std::fs::remove_file(p).map_err(|e| format!("删 {} 失败：{}", p.display(), e)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(format!("看 {} 失败：{}", p.display(), e)),
-    }
+    fs::remove_tree(p).map_err(|fault| format!("删 {} 失败：{}", p.display(), fault.message))
 }

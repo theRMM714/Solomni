@@ -183,15 +183,15 @@ fn fs_meta_primitives_follow_platform_file_mode_rules() {
     let file = root.join("tool");
     std::fs::write(&file, b"#!/bin/sh\n").expect("写文件");
 
-    crate::kernel::api::fs_meta::make_executable_checked(&file).expect("加执行位");
+    crate::kernel::api::fs::make_executable_checked(&file).expect("加执行位");
     assert!(crate::kernel::detail::fs_meta::is_executable(&file));
-    crate::kernel::api::fs_meta::ensure_executable(&file);
-    crate::kernel::api::fs_meta::ensure_executable(&root.join("missing"));
+    crate::kernel::api::fs::ensure_executable(&file);
+    crate::kernel::api::fs::ensure_executable(&root.join("missing"));
     let dir = root.join("dir");
     std::fs::create_dir_all(&dir).expect("建目录");
-    crate::kernel::api::fs_meta::ensure_executable(&dir);
-    crate::kernel::api::fs_meta::make_executable(&file);
-    crate::kernel::api::fs_meta::restrict_private_file(&file).expect("收紧私密权限");
+    crate::kernel::api::fs::ensure_executable(&dir);
+    crate::kernel::api::fs::make_executable(&file);
+    crate::kernel::detail::fs_meta::restrict_private_file(&file).expect("收紧私密权限");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -205,21 +205,20 @@ fn fs_meta_primitives_follow_platform_file_mode_rules() {
         );
     }
     let meta = std::fs::metadata(&file).expect("元数据");
-    assert!(crate::kernel::api::fs_meta::file_footprint(&meta) > 0);
-    crate::kernel::api::fs_meta::sync_dir(&root);
+    assert!(crate::kernel::api::fs::file_footprint(&meta) > 0);
 
     let script = root.join("script");
-    crate::kernel::api::fs_meta::write_executable(&script, "#!/bin/sh\n").expect("写可执行脚本");
+    crate::kernel::api::fs::write_executable(&script, "#!/bin/sh\n").expect("写可执行脚本");
     assert!(script.is_file());
     #[cfg(unix)]
     assert!(crate::kernel::detail::fs_meta::is_executable(&script));
 
     let link = root.join("link");
-    let linked = crate::kernel::api::fs_meta::symlink("tool", &link);
+    let linked = crate::kernel::api::fs::symlink("tool", &link);
     #[cfg(unix)]
     {
         linked.expect("建软链");
-        assert!(crate::kernel::api::fs_meta::is_link(&link));
+        assert!(crate::kernel::api::fs::is_link(&link));
     }
     #[cfg(not(unix))]
     assert!(linked.is_err());
@@ -594,14 +593,6 @@ fn fs_sys_io_transact_commits_together_or_not_at_all() {
     assert_eq!(err.code, "FS_IO");
     assert!(!c.exists(), "事务失败不能留下第 1 个文件");
 
-    // 回滚原语：有备份就写回，没有备份就删掉。
-    crate::units::business::tools::detail::sys_io::rollback(&a, Some("备份".as_bytes()))
-        .expect("写回备份内容");
-    assert_eq!(std::fs::read_to_string(&a).expect("读回"), "备份");
-    std::fs::write(&c, "新").expect("造新文件");
-    crate::units::business::tools::detail::sys_io::rollback(&c, None).expect("删掉新文件");
-    assert!(!c.exists());
-
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -712,25 +703,43 @@ fn fs_history_nests_children_inside_their_parent_dir() {
 /// 目的：写路径的跨进程锁由锁目录承载——同路径第二个实例拿不到锁就报 FS_LOCKED，放锁后可重试。
 #[test]
 fn fs_sys_io_write_lock_is_cross_instance_and_releases() {
+    use crate::kernel::api::fs::LockSpace;
     use crate::kernel::api::hash::content_hash;
+    use crate::units::business::tools::ports::{Expect, Mutation};
+    use std::sync::mpsc;
 
     let root = scratch("fs-sysio-lock");
     let path = root.join("a.txt");
     std::fs::write(&path, "a").expect("造文件");
-    let io = FsSysIo::with_lock_dir(root.join("locks"));
-    let held = io
-        .hold_lock_for_test(&path)
-        .expect("拿锁成功")
-        .expect("配置了锁目录就应有锁文件");
+    let locks = root.join("locks");
+    let space = LockSpace::new(locks.clone());
+    let (held_tx, held_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let holder = {
+        let held_path = path.clone();
+        std::thread::spawn(move || {
+            crate::kernel::api::fs::transact_with(
+                Some(&space),
+                &[held_path.as_path()],
+                "测试持锁",
+                |_tx| {
+                    held_tx.send(()).expect("回报持锁");
+                    release_rx.recv().expect("等放锁");
+                    Ok(())
+                },
+            )
+            .expect("持锁事务");
+        })
+    };
+    held_rx.recv().expect("等持锁线程拿到锁");
 
-    let mut tight = FsSysIo::with_lock_dir(root.join("locks"));
-    tight.lock_wait = std::time::Duration::from_millis(50);
+    let tight = FsSysIo::with_lock_dir(locks).with_wait(std::time::Duration::from_millis(50));
     let version = content_hash(b"a");
     let err = tight
         .mutate(
             &path,
-            &crate::units::business::tools::ports::Expect::Version(version.clone()),
-            crate::units::business::tools::ports::Mutation::Replace("b".to_string()),
+            &Expect::Version(version.clone()),
+            Mutation::Replace("b".to_string()),
         )
         .expect_err("另一个实例还持锁时必须失败");
     assert_eq!(err.code, "FS_LOCKED", "{}", err.message);
@@ -740,18 +749,19 @@ fn fs_sys_io_write_lock_is_cross_instance_and_releases() {
         "被挡住时不能写"
     );
 
-    drop(held);
+    release_tx.send(()).expect("通知放锁");
+    holder.join().expect("持锁线程退出");
     let receipt = tight
         .mutate(
             &path,
-            &crate::units::business::tools::ports::Expect::Version(version),
-            crate::units::business::tools::ports::Mutation::Replace("b".to_string()),
+            &Expect::Version(version),
+            Mutation::Replace("b".to_string()),
         )
         .expect("放锁后应能写");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "b");
     assert_eq!(receipt.total_lines, 1);
+    let _ = std::fs::remove_dir_all(&root);
 }
-
 /// 目的：准备会话时播种 `.workignore`，且**不覆盖**用户已改的规则；规则落在版本库目录里、不进共享区。
 #[test]
 fn fs_workspace_prepare_seeds_workignore_once() {

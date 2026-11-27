@@ -103,6 +103,8 @@
 - **rootEntries**（根目录条目）：仓库根只许受版本管理的骨架条目；产品介质一律写 `data/`，旧位置（`.home` / `.vm` / `logs` / `session` / `runtimes`）出现即报错；`modules/<id>/userdata` 也算越界（源码树不长数据）（`tests/gates/structure/root-entries.js`）；
 - **kernelProducts**（内核无产品名）：`src/kernel` 下任何 `.rs`（含注释与测试）不得出现 `qemu` / `smbd` / `virtiofsd`——内核只提供通用机制，产品名与它的 argv、配置文件名留在单元里；命中即失败、零豁免（`tests/gates/structure/kernel-products.js`）；
 - **envSurface**（环境面）：`std::env::` 只许在 `src/kernel/detail/io/env.rs`、`src/main.rs`、`src/entry/`、`src/presentation/` 出现（呈现面是终端能力探测）；其余一律经 `kernel::api::env`，`std::env::consts` 与 `split_paths` 不在判据内（`tests/gates/structure/env-surface.js`）；
+- **fsSurface**（文件面）：写盘只经 `kernel::api::fs`——除 `src/kernel/` 与测试文件外，`std::fs` 的变更原语（写 / 删除 / 改名 / 建目录 / 复制 / 链接 / 改权限）与 `File::create` / `OpenOptions::new` 出现即报错（锁、旧版本比对、暂存与一次发布都在内核事务里）（`tests/gates/structure/fs-surface.js`）；
+- **processSurface**（进程面）：跑外部程序只经 `kernel::api::process`——除 `src/kernel/` 与测试文件外，`std::process::Command::new` 出现即报错（等待、超时与杀树只有一处实现）（`tests/gates/structure/process-surface.js`）；
 - **diskOwners**（盘主）：一块盘一个主——`layout::<介质>()` 只许主人单元、组合根与内核调用，别的单元走主人单元 api / 端口；主人表与 `layout.rs` 双向比对，改了名不登记即报错（`tests/gates/structure/disk-owners.js`）；
 - **unitBuckets**（单元桶）：`src/units/` 下只许 `pure` / `resource` / `business` 三个桶，每个单元恰好住一个桶，桶的模块根声明与桶内目录双向一致，并与 `layers.yaml` 的单元清单双向比对；在顶层新加一个平铺单元即失败（`tests/gates/structure/unit-buckets.js`）；
 - **ioOwners**（IO 面）：入站监听、回环客户端、出站装配各只有一份实现（`src/kernel/detail/io/net/`）；命中点只能落在实现文件或表里逐条登记过的例外（容器内回环中继绑 `127.0.0.2`、流式栈自建 `reqwest` client），其余一律经 `kernel::api::net`（`tests/gates/structure/io-owners.js`，口径见 [io.md](io.md)）；

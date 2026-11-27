@@ -4,7 +4,7 @@
 > 效力：规范｜核对：2026-11-26｜依据：`src/kernel/api.rs`、`src/kernel/detail/io/`、`tests/gates/structure/io-owners.js`
 
 ## 适用与判据
-- 新增副作用、新增网络或进程代码前读本文；违反由 `structure/io-owners`、`structure/env-surface`、`structure/capability-internal`、`structure/disk-owners` 判。
+- 新增副作用、新增网络或进程代码前读本文；违反由 `structure/io-owners`、`structure/env-surface`、`structure/fs-surface`、`structure/process-surface`、`structure/capability-internal`、`structure/disk-owners` 判。
 - 算 IO 的是**进程之外的系统面**：网络（出站与入站）、回环 TCP、进程环境、本机时间、长驻子进程、盘。判完还要再分一件事：**有 IO 的单元** ≠ **IO 单元**。
 
 ## 一、有 IO 的单元不是 IO 单元
@@ -21,6 +21,8 @@
 | 进程环境 | `src/kernel/detail/io/env.rs` | `kernel::api::env`：`var` / `temp_dir` / `current_exe`（其余访问器只在核心里用） | `src/main.rs`、`src/entry/`、`src/presentation/`：启动参数与终端能力探测是原始输入，不收 |
 | 本机时间 | `src/kernel/detail/clock.rs` | `kernel::api::clock`：`now_secs` / `now_nanos` / `local_stamp` | 无：`domain` 自己取时即门禁失败 |
 | 长驻子进程 | `src/kernel/detail/procs/spawn.rs` 与 `src/kernel/detail/procs/daemon.rs` | `kernel::api::process`：`spawn`（`Spawn` → `Daemon`） | 一次性工具进程走 `ProcessRunner` 端口（围栏 + trace + 截断），不走 `spawn` |
+| 文件写入（锁、旧版本比对、暂存与发布） | `src/kernel/detail/fs.rs`（锁在 `src/kernel/detail/lock.rs`） | `kernel::api::fs`：`write` / `write_private` / `append` / `stream_into` / `transact_with` / `ensure_dir` / `remove_tree` / `copy_file` / `move_file` / `within`，锁目录经 `install_lock_space` 装一次 | 无：单元写盘一律经这个面（`structure/fs-surface`） |
+| 一次性宿主程序 | `src/kernel/detail/process.rs` 的 `run_to_end` | `kernel::api::process`：`run_to_end`（`Run` → `Done`） | 会话内的执行走 `sandbox` 的执行端口，不走这里（`structure/process-surface`） |
 | 盘 | `src/kernel/domain/layout.rs` 的访问器 + 主人单元 | `kernel::api::layout` 与主人单元的 `api` / 端口 | 主人表在 `tests/gates/structure/disk-owners.js`，一块盘一个主 |
 
 - **TLS 只有一份决策**：ureq 与 reqwest 两条通道共用 `src/kernel/detail/io/net/backend.rs` 的平台判断；不合并传输——流式必须 async，统一的是策略与事实，不是传输栈。
@@ -45,7 +47,7 @@
 
 ## 检查
 - 唯一实现与调用点 → `structure/io-owners`（类别表在本门禁里，命中即失败）。
-- 环境读取面 → `structure/env-surface`；单元内 IO 与 domain 取时 → `structure/capability-internal`。
+- 环境读取面 → `structure/env-surface`；文件写入与宿主程序 → `structure/fs-surface` / `structure/process-surface`（都只许落 `src/kernel/`，单元经 `kernel::api::fs` 与 `kernel::api::process`）；单元内 IO 与 domain 取时 → `structure/capability-internal`。
 - 盘面归属 → `structure/disk-owners`；内核不出现产品名 → `structure/kernel-products`。
 - 依赖边与环 → `structure/layers` 与 `structure/dependency`，可读的地图见 [dependency-map.md](dependency-map.md)。
 

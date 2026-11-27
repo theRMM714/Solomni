@@ -11,6 +11,7 @@ pub(crate) use deb::*;
 pub(crate) use image::*;
 pub(crate) use initrd::*;
 
+use crate::kernel::api::fs as kfs;
 use crate::kernel::api::layout;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -48,19 +49,23 @@ impl GuestImage for Ext4Images {
 
 /// 目的：清掉 cloud 镜像留下的、在 9p 根下会掉进 emergency 的东西。
 pub(crate) fn sanitize_guest_base(base: &Path) -> Result<(), String> {
-    fs::write(
-        base.join("etc").join("fstab"),
+    kfs::write(
+        None,
+        &base.join("etc").join("fstab"),
         "# guest root 由内核命令行给出（磁盘镜像 /dev/vda），这里不写 fstab 条目。
-",
+"
+        .as_bytes(),
+        kfs::Expect::Any,
     )
-    .map_err(|e| format!("写 fstab 失败：{}", e))?;
+    .map(|_| ())
+    .map_err(|fault| format!("写 fstab 失败：{}", fault.message))?;
     let mask = base
         .join("etc")
         .join("systemd")
         .join("system")
         .join("systemd-remount-fs.service");
     if mask.symlink_metadata().is_err() {
-        fs::create_dir_all(mask.parent().expect("有父目录")).map_err(|e| e.to_string())?;
+        kfs::ensure_dir(mask.parent().expect("有父目录")).map_err(|fault| fault.message)?;
         symlink("/dev/null", &mask).map_err(|e| format!("mask remount 失败：{}", e))?;
     }
     Ok(())
@@ -78,30 +83,42 @@ pub(crate) fn install_guest_rootfs(
     let family = family_of(dep)?;
     let base = under(root, &dep.install);
     let cache = crate::units::resource::vmstore::api::paths(root).downloads();
-    fs::create_dir_all(&base).map_err(|e| format!("建 {} 失败：{}", base.display(), e))?;
+    kfs::ensure_dir(&base)
+        .map_err(|fault| format!("建 {} 失败：{}", base.display(), fault.message))?;
     let disk = cache.join("disk.raw");
     if !disk.is_file() {
         on_line("解开 cloud 镜像 tar（disk.raw）");
         let x = cache.join("image-x");
-        let _ = fs::remove_dir_all(&x);
-        fs::create_dir_all(&x).map_err(|e| format!("建 {} 失败：{}", x.display(), e))?;
+        let _ = kfs::remove_tree(&x);
+        kfs::ensure_dir(&x)
+            .map_err(|fault| format!("建 {} 失败：{}", x.display(), fault.message))?;
         // 2 GB 的 disk.raw 在 tar 里是 **GNU sparse**：用系统 tar 展开（纯 Rust 解包暂不支持稀疏项）。
-        run_tool(
-            std::process::Command::new("tar")
-                .arg("-xf")
-                .arg(image_tar)
-                .arg("-C")
-                .arg(&x),
+        let tar = run_tool(
             "tar",
+            vec![
+                "-xf".to_string(),
+                image_tar.to_string_lossy().into_owned(),
+                "-C".to_string(),
+                x.to_string_lossy().into_owned(),
+            ],
+            None,
+            std::time::Duration::from_secs(600),
         )?;
+        if !tar.ok() {
+            return Err(format!(
+                "tar 解 cloud 镜像失败：{}",
+                tar.stderr_text().trim()
+            ));
+        }
         let found = fs::read_dir(&x)
             .map_err(|e| format!("读 {} 失败：{}", x.display(), e))?
             .filter_map(|e| e.ok())
             .map(|e| e.path())
             .find(|p| p.file_name().map(|n| n == "disk.raw").unwrap_or(false))
             .ok_or_else(|| "cloud 镜像 tar 里没有 disk.raw".to_string())?;
-        fs::rename(&found, &disk).map_err(|e| format!("搬 disk.raw 失败：{}", e))?;
-        let _ = fs::remove_dir_all(&x);
+        kfs::move_file(&found, &disk)
+            .map_err(|fault| format!("搬 disk.raw 失败：{}", fault.message))?;
+        let _ = kfs::remove_tree(&x);
     } else {
         on_line("用已有 disk.raw（缓存）");
     }
@@ -109,22 +126,29 @@ pub(crate) fn install_guest_rootfs(
     if !rootfs.is_file() {
         on_line("从 GPT 取 root 分区（sfdisk + dd）");
         let (start, size) = root_partition(&disk)?;
-        run_tool(
-            std::process::Command::new("dd")
-                .arg(format!("if={}", disk.display()))
-                .arg(format!("of={}", rootfs.display()))
-                .arg("bs=512")
-                .arg(format!("skip={}", start))
-                .arg(format!("count={}", size))
-                .arg("status=none"),
+        let dd = run_tool(
             "dd",
+            vec![
+                format!("if={}", disk.display()),
+                format!("of={}", rootfs.display()),
+                "bs=512".to_string(),
+                format!("skip={start}"),
+                format!("count={size}"),
+                "status=none".to_string(),
+            ],
+            None,
+            std::time::Duration::from_secs(600),
         )?;
+        if !dd.ok() {
+            return Err(format!("dd 取 root 分区失败：{}", dd.stderr_text().trim()));
+        }
     }
     // 重新构造前先清掉上一次的镜像产物：留着它，rdump 出来的目录里就多一份旧 rootfs.ext4，
     // 打新镜像时会被整个包进去（体积翻倍、内容还是过期的）。
     let stale_image = base.join("rootfs.ext4");
     if stale_image.is_file() {
-        fs::remove_file(&stale_image).map_err(|e| format!("清旧镜像失败：{}", e))?;
+        kfs::remove_tree(&stale_image)
+            .map_err(|fault| format!("清旧镜像失败：{}", fault.message))?;
     }
     if !base.join("etc").join("os-release").is_file() {
         on_line(&format!("把 rootfs 解到 {}（debugfs rdump）", dep.install));
@@ -145,11 +169,14 @@ pub(crate) fn install_guest_rootfs(
     // 画像：虚拟根对世界的自我介绍（列表显示名与 os 从这里读）；运行能力由运行期编排另写。
     let yaml = layout::guest_spec(&base);
     if !yaml.is_file() {
-        fs::write(
+        kfs::write(
+            None,
             &yaml,
-            "# 由产品生成：命令通道 QGA；共享客户端与运行能力在运行期编排（guest-runtime）里确认后另写。\n\nid: debian-13-genericcloud-amd64\nos: linux\narch: amd64\nagent: qga\nclients: [9p, virtiofs]\nruntimes: []\n",
+            "# 由产品生成：命令通道 QGA；共享客户端与运行能力在运行期编排（guest-runtime）里确认后另写。\n\nid: debian-13-genericcloud-amd64\nos: linux\narch: amd64\nagent: qga\nclients: [9p, virtiofs]\nruntimes: []\n".as_bytes(),
+            kfs::Expect::Any,
         )
-        .map_err(|e| format!("写 guest.yaml 失败：{}", e))?;
+        .map(|_| ())
+        .map_err(|fault| format!("写 guest.yaml 失败：{}", fault.message))?;
         on_line("写 guest.yaml（QGA 通道画像）");
     }
     // 运行产物是**磁盘镜像**（会话靠每租约可写层并发，谁也不写基础镜像）；目录只在这条构造链里当中间产物。
@@ -163,11 +190,14 @@ pub(crate) fn install_guest_rootfs(
     }
     restore_guest_image_attrs(&base.join("rootfs.ext4"), &attrs)?;
     // agent 已经装进镜像：运行期编排看到这个标记就跳过 cloud-init 首启。
-    fs::write(
-        base.join(".qga-ready"),
-        "guest-rootfs 已装 qemu-guest-agent（打包进磁盘镜像）\n",
+    kfs::write(
+        None,
+        &base.join(".qga-ready"),
+        "guest-rootfs 已装 qemu-guest-agent（打包进磁盘镜像）\n".as_bytes(),
+        kfs::Expect::Any,
     )
-    .map_err(|e| format!("写 .qga-ready 失败：{}", e))?;
+    .map(|_| ())
+    .map_err(|fault| format!("写 .qga-ready 失败：{}", fault.message))?;
     Ok(())
 }
 
@@ -191,9 +221,12 @@ pub(crate) fn pack_guest_base(
             continue;
         }
         let tmp = base.join(format!("{}.solid", name));
-        fs::copy(&link, &tmp).map_err(|e| format!("把 {name} 落成实体文件失败：{e}"))?;
-        fs::remove_file(&link).map_err(|e| format!("换掉 {name} 软链失败：{e}"))?;
-        fs::rename(&tmp, &link).map_err(|e| format!("放回 {name} 失败：{e}"))?;
+        kfs::copy_file(&link, &tmp)
+            .map_err(|fault| format!("把 {name} 落成实体文件失败：{}", fault.message))?;
+        kfs::remove_tree(&link)
+            .map_err(|fault| format!("换掉 {name} 软链失败：{}", fault.message))?;
+        kfs::move_file(&tmp, &link)
+            .map_err(|fault| format!("放回 {name} 失败：{}", fault.message))?;
     }
     let used = dir_bytes(base)?;
     // 留足余量：guest 里 apt 要下索引（压缩的也有几十 MB）、装 C/C++（约 300 MB）、解 Node（约 200 MB）、写日志——
@@ -202,7 +235,7 @@ pub(crate) fn pack_guest_base(
     let need = std::cmp::max(1u64 << 30, used + slack);
     let blocks = need.div_ceil(4096);
     let tmp_img = cache.join("pack.ext4");
-    let _ = fs::remove_file(&tmp_img);
+    let _ = kfs::remove_tree(&tmp_img);
     on_line(&format!(
         "把 rootfs 打成磁盘镜像（{} MiB，目录占用 {} MiB）",
         need >> 20,
@@ -210,18 +243,34 @@ pub(crate) fn pack_guest_base(
     ));
     // `-d` 从目录灌内容；假 root 里跑，镜像属主才是 root。**必须显式 `-b 4096`**：位置参数按块大小解释，
     // 不给时 mke2fs 会按体积选 1024 字节块（并套用 small 的 4096 字节/inode），镜像缩成约四分之一而装不下。
-    run_tool(
-        std::process::Command::new("unshare")
-            .arg("-r")
-            .arg("mke2fs")
-            .args(["-q", "-b", "4096", "-t", "ext4", "-F", "-d"])
-            .arg(base)
-            .arg(&tmp_img)
-            .arg(blocks.to_string()),
-        "unshare + mke2fs（要 e2fsprogs 且内核允许非特权用户命名空间）",
+    let made = run_tool(
+        "unshare",
+        vec![
+            "-r".to_string(),
+            "mke2fs".to_string(),
+            "-q".to_string(),
+            "-b".to_string(),
+            "4096".to_string(),
+            "-t".to_string(),
+            "ext4".to_string(),
+            "-F".to_string(),
+            "-d".to_string(),
+            base.to_string_lossy().into_owned(),
+            tmp_img.to_string_lossy().into_owned(),
+            blocks.to_string(),
+        ],
+        None,
+        std::time::Duration::from_secs(600),
     )?;
+    if !made.ok() {
+        return Err(format!(
+            "unshare + mke2fs 失败（要 e2fsprogs 且内核允许非特权用户命名空间）：{}",
+            made.stderr_text().trim()
+        ));
+    }
     let image = base.join("rootfs.ext4");
-    fs::rename(&tmp_img, &image).map_err(|e| format!("放 rootfs.ext4 失败：{e}"))?;
+    kfs::move_file(&tmp_img, &image)
+        .map_err(|fault| format!("放 rootfs.ext4 失败：{}", fault.message))?;
     // 中间产物删掉：虚拟根只剩 磁盘镜像 + 内核 + initrd + 画像（没有第二份真相）。
     purge_except(
         base,
