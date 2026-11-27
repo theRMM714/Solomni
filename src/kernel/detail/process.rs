@@ -31,20 +31,13 @@ thread_local! {
 }
 
 /// 目的：一次围栏准备的耗时交棒：总耗时 + 真写 ACL 的分步明细（每条授权一条；纯命中时为空）。
-/// 约束：分步明细只用于解释「时间花在哪」，不改回执行文——回执仍只读总秒数（`as_secs`）。
+/// 约束：分步明细只用于解释「时间花在哪」，不改回执行文——回执仍只读总秒数（`total`）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FenceTiming {
     /// 目的：整段 prepare_fence 的墙钟耗时（回执的「其中围栏准备 N 秒」用它）。
     pub total: Duration,
     /// 目的：真写 ACL 的步骤（解释器目录 / 祖先链 / 受保护根 / 可信基座），纯命中为空。
     pub steps: Vec<confine::FenceStep>,
-}
-
-impl FenceTiming {
-    /// 目的：回执口径的总秒数（与改动前的 Option<Duration> 同义：回执行文与解析口径不变）。
-    pub fn as_secs(&self) -> u64 {
-        self.total.as_secs()
-    }
 }
 
 /// 目的：读走本次 shell 执行的围栏准备耗时（读即清：同一线程的下一趟不会读到这一趟的值）。

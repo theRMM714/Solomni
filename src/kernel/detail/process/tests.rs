@@ -1115,7 +1115,7 @@ fn fence_prep_handoff_is_read_once_and_reset_each_run() {
     };
     FENCE_PREP.with(|slot| slot.set(Some(seven.clone())));
     assert_eq!(take_fence_prep(), Some(seven.clone()));
-    assert_eq!(seven.as_secs(), 7, "回执口径仍是总秒数");
+    assert_eq!(seven.total.as_secs(), 7, "回执口径仍是总秒数");
     assert!(
         take_fence_prep().is_none(),
         "读即清：同一趟的交棒只能被取走一次"

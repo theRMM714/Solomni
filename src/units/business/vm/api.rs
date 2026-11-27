@@ -3,6 +3,8 @@
 //! 不管：纯逻辑实现（domain/）与端口（ports.rs）；运行包契约与选包在 packages 能力。
 //! 联动：被 runtime / collab / cli 与入口层消费。
 
+pub use crate::kernel::api::path_bridge::PathBridge;
+pub use crate::units::business::sandbox::api::{GuestArch, GuestOs};
 pub use crate::units::business::vm::detail::qemu::create_disk;
 pub use crate::units::business::vm::domain::diagnose::GuestDiagnosis;
 pub use crate::units::business::vm::domain::exec::resolve_guest;
@@ -12,12 +14,11 @@ pub use crate::units::business::vm::domain::exec::{
     guest_platform, missing_entries_for, plan, plan_summary, runs_on_target, share_chain,
     tier_readiness, tier_refusal, vm_capability, vm_requirements,
 };
-pub use crate::units::business::vm::domain::guest::{GuestArch, GuestClients, GuestOs};
+pub use crate::units::business::vm::domain::guest::GuestClients;
 pub use crate::units::business::vm::domain::guest::{
     GuestImage, GuestRun, GuestSpec, OutputLimit, SeedDocs, classify_base, mounts_from,
     package_setup_scripts,
 };
-pub use crate::units::business::vm::domain::paths::PathBridge;
 pub use crate::units::business::vm::domain::tool::{ToolPath, ToolReport, VmTools};
 pub use crate::units::business::vm::service::job::GuestStop;
 #[allow(unused_imports)] // 入站面：运行计划派生的唯一出口（能力外只经这里取用）
@@ -89,8 +90,9 @@ pub trait Vm: Send + Sync {
 pub fn vm_policy(
     root: std::path::PathBuf,
     probe: std::sync::Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
+    vm: std::sync::Arc<dyn Vm + Send + Sync>,
 ) -> std::sync::Arc<dyn crate::units::business::sandbox::api::SandboxPolicy> {
     std::sync::Arc::new(crate::units::business::vm::domain::policy::VmPolicy::new(
-        root, probe,
+        root, probe, vm,
     ))
 }

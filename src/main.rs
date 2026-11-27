@@ -676,10 +676,11 @@ fn main() {
     };
     // **执行环境注册表**：本机与客机两个策略；会话 meta 只写策略 id 与参数，解释权在实现方。
     let policies = units::business::sandbox::api::SandboxPolicies::new(vec![
-        units::business::sandbox::api::host_policy(),
+        units::business::tools::api::host_policy(toolexec.clone()),
         units::business::vm::api::vm_policy(
             root.clone(),
             Arc::new(kernel::detail::HostProbeAdapter),
+            Arc::clone(&vm),
         ),
     ]);
     // 启动时要按有效启停拉起常驻服务：留一份手柄（进程级租约，不属于任何会话）。

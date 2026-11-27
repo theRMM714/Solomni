@@ -44,8 +44,9 @@ pub(crate) fn runtime_base_roots_are_only_put_on_host_member_tools() {
         crate::units::pure::registry_model::api::ToolMode::Envelope,
         "standard",
         "solo",
-        crate::units::pure::exec_model::api::Side::Host,
-        String::new(),
+        &crate::units::business::sandbox::api::SandboxFacts::host(),
+        &crate::units::business::sandbox::api::SandboxDecl::default(),
+        "",
         &plan,
     );
     assert!(
@@ -61,8 +62,11 @@ pub(crate) fn runtime_base_roots_are_only_put_on_host_member_tools() {
         crate::units::pure::registry_model::api::ToolMode::Envelope,
         "standard",
         "solo",
-        crate::units::pure::exec_model::api::Side::Guest,
-        "guest".to_string(),
+        &crate::units::business::sandbox::api::SandboxFacts::guest("guest"),
+        &crate::units::business::sandbox::api::SandboxDecl::of(
+            crate::units::business::sandbox::api::VM_POLICY,
+        ),
+        "guest",
         &plan,
     );
     assert!(

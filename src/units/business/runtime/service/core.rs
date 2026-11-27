@@ -88,7 +88,6 @@ impl Core {
         let flows: Arc<dyn crate::units::business::turn_state::api::Flows> =
             Arc::new(crate::units::business::collab::api::CollabFlows::new(
                 Arc::clone(&llm),
-                Arc::clone(&vm),
                 Arc::clone(&modules),
                 Arc::clone(&prompt),
                 Arc::clone(&systools),
@@ -100,7 +99,7 @@ impl Core {
         let turn = crate::units::business::turn_state::api::Turn::new(
             Arc::clone(&workspace),
             Arc::clone(&versions),
-            Arc::clone(&vm),
+            Arc::new(policies.clone()),
             Arc::clone(&residents),
             Arc::clone(&secrets),
             Arc::clone(&tools),

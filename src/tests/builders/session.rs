@@ -77,6 +77,12 @@ pub(crate) fn member_with_tools(
         crate::units::pure::registry_model::api::ToolMode::Envelope,
         scripted(script),
     );
+    let exec_svc: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync> =
+        test_tools_svc_with(
+            runner,
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        );
     // 该路径走模块声明的外部命令（scan）：空沙箱 + 内存 IO，内置工具不参与。
     WithTools {
         member: m,
@@ -86,8 +92,6 @@ pub(crate) fn member_with_tools(
                 loop_id: "standard".to_string(),
                 role: "solo".to_string(),
                 modules,
-                side: crate::units::pure::exec_model::api::Side::Host,
-                guest_lease: String::new(),
                 sandbox: test_sandbox("m0", &[]),
                 tools_this_turn: test_prompts()
                     .text(crate::units::business::prompt::api::Segment::ToolsThisTurn)
@@ -100,7 +104,6 @@ pub(crate) fn member_with_tools(
                     false,
                 ),
                 module_env: Default::default(),
-                runtime_path: None,
                 runtime_roots: Vec::new(),
                 // 测试替身按"执行席"发放全部内置工具与模块的限定 id（机制席位的越权校验另有专门用例）。
                 allowed,
@@ -116,12 +119,8 @@ pub(crate) fn member_with_tools(
             },
             llm: test_llm_demo(),
             log: Arc::new(crate::kernel::ports::NoopLog),
-            tools: test_tools_svc_with(
-                runner,
-                Arc::new(InMemorySysIo::new()),
-                Arc::new(NoFenceHost),
-            ),
-            vm: test_vm(),
+            tools: Arc::clone(&exec_svc),
+            exec: crate::units::business::tools::api::host_sandbox(exec_svc),
             residents: Arc::new(crate::units::business::residents::api::NoResidents),
             // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
             workspace: Default::default(),

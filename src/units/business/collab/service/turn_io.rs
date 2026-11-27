@@ -97,7 +97,7 @@ impl CollabSession {
                 llm: Arc::clone(&self.llm),
                 log: Arc::clone(&self.log),
                 tools: Arc::clone(&self.tools),
-                vm: Arc::clone(&self.vm),
+                exec: crate::units::business::tools::api::host_sandbox(Arc::clone(&self.tools)),
             },
         )
     }

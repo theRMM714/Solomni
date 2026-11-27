@@ -717,33 +717,11 @@ pub(crate) fn run_shell(
             .at(&ctx.face.sandbox.private);
     fence.extend_read_tree(ctx.face.runtime_roots.iter().cloned());
     // 要连宿主回环时才换网络档：容器侧起中继、按端口放行（宿主侧还会拒产品自己的端口）。
+    // 能不能在本档这么做由执行面自己判（虚拟机档的 guest 回环不映射宿主端口）。
     if !call.local_ports.is_empty() {
-        if ctx.face.side == crate::units::pure::exec_model::api::Side::Guest {
-            return (
-                ToolOutcome::new(
-                    false,
-                    "local_ports 只在本机档生效：虚拟机档的 guest 回环是它自己的，不映射到宿主端口；这次调用没有执行。"
-                        .to_string(),
-                ),
-                None,
-            );
-        }
         fence.net = crate::kernel::api::fence::NetPolicy::Local {
             ports: call.local_ports.clone(),
         };
-    }
-    // 容器身份按"会话 + agent + 受保护根集合"派生（见 container_name）：同一会话的 shell 共用 SID 与 ACL。
-    // 生命周期归会话，调用结束不释放。
-    if ctx.face.side == crate::units::pure::exec_model::api::Side::Guest
-        && ctx.face.guest_lease.is_empty()
-    {
-        return (
-            ToolOutcome::new(
-                false,
-                "这条虚拟机档会话没有 guest 租约，shell 没有执行。".to_string(),
-            ),
-            None,
-        );
     }
     let started = std::time::Instant::now();
     // cwd 用**本环境写法**：本机档是宿主路径，虚拟机档是 guest 内路径（与文件工具、提示词同一座路径桥）。
@@ -755,34 +733,24 @@ pub(crate) fn run_shell(
     if let Some(slot) = &slot {
         slot.start(&call.script, &cwd_view);
     }
-    // 本机档的围栏准备耗时由 ProcessRunner 同线程交棒（见 kernel 的 take_fence_prep）；虚拟机档没有本机 ACL 准备，这里恒为 None。
-    let mut fence_prep: Option<crate::kernel::api::process::FenceTiming> = None;
-    let mut outcome = if ctx.face.side == crate::units::pure::exec_model::api::Side::Guest {
-        let run = crate::units::business::vm::api::GuestRun {
-            command: call.script.clone(),
-            args_json: String::new(),
-            env: Vec::new(),
-            cwd: ctx.face.sandbox.private.display().to_string(),
-            timeout_secs: call.timeout.as_secs(),
-            output_limit: crate::units::business::vm::api::OutputLimit::Shell,
-        };
-        ctx.vm
-            .guest_run_fenced_cancellable(&ctx.face.guest_lease, &run, &fence, Some(cancel))
-    } else {
-        let run = crate::kernel::ports::ShellRun {
-            fence: &fence,
+    // 执行面自己认这一档（本机 / 虚拟机），引擎只递请求：档位差异不外泄到这里。
+    let exec = crate::units::business::sandbox::api::ExecRequest {
+        kind: crate::units::business::sandbox::api::ExecKind::Shell {
             script: &call.script,
-            timeout: call.timeout,
-            cancel: Some(cancel),
-            path: ctx.face.runtime_path.as_deref(),
-            ask,
-            gate: None,
-        };
-        let outcome = ctx.tools.run_shell(&run, budget);
-        // 同一次执行的值只取一次（读即清）：这里没取到就说明这次没写本机权限项。
-        fence_prep = crate::kernel::api::process::take_fence_prep();
-        outcome
+        },
+        cwd: &ctx.face.sandbox.private,
+        fence,
+        timeout: call.timeout,
+        ask,
+        cancel: Some(cancel),
+        budget,
     };
+    if let Some(why) = ctx.exec.precheck(&exec) {
+        return (refuse(why), None);
+    }
+    let got = ctx.exec.run(&exec);
+    let fence_prep = got.fence_prep;
+    let mut outcome = got.outcome;
     // 共享区不承载执行位：相对路径脚本被直接执行（EACCES）时，补一条"用解释器跑"的说明。
     if let Some(note) = api::shared_exec_note(&call.script, &outcome.output) {
         outcome.push_note(note);
@@ -795,19 +763,14 @@ pub(crate) fn run_shell(
         for note in api::place_notes(
             &cwd_view,
             elapsed.as_secs(),
-            fence_prep.as_ref().map(|timing| timing.as_secs()),
+            fence_prep.map(|t| t.as_secs()),
         ) {
             outcome.push_note(note);
         }
     }
     // 事实只从这一次执行产出：实况槽与会话回放读同一份，呈现层不再解析回执。
     // 没跑成（围栏拒绝、启动失败）也留一条：落点与耗时是真的，退出码与状态缺省，界面据此显示"最近一次尝试"。
-    let facts = api::shell_facts(
-        &cwd_view,
-        elapsed,
-        fence_prep.map(|timing| timing.total),
-        &outcome.notes,
-    );
+    let facts = api::shell_facts(&cwd_view, elapsed, fence_prep, &outcome.notes);
     if let Some(slot) = &slot {
         slot.finish(Some(&facts), outcome.ok, &outcome.output);
     }
@@ -898,59 +861,26 @@ pub(crate) fn dispatch_external(
                 &ctx.face.fence,
             )
             .at(&mt.root);
-            let outcome = if ctx.face.side == crate::units::pure::exec_model::api::Side::Guest {
-                // 虚拟机档：命令送进这个会话的 guest；per-call 断网由 guest helper 落实。
-                if ctx.face.guest_lease.is_empty() {
-                    return (
-                        module,
-                        refuse("这条虚拟机档会话没有 guest 租约，工具没有执行。".to_string()),
-                    );
-                }
-                // 共享盘不承载执行位：模块声明的相对入口先落进 guest 本地副本，再把首 token 换成它
-                // （cwd 仍是共享的模块根，数据与 userdata 不动）。
-                let declared = command.trim_start();
-                let dispatched =
-                    match crate::units::business::catalog::modules::api::local_entry(declared) {
-                        Some(entry) => {
-                            match ctx.vm.stage_exec(
-                                &ctx.face.guest_lease,
-                                &module,
-                                &mt.root.join(entry),
-                                entry,
-                            ) {
-                                Ok(staged) => {
-                                    format!("{}{}", staged, &declared[entry.len()..])
-                                }
-                                Err(why) => return (module, refuse(why)),
-                            }
-                        }
-                        None => declared.to_string(),
-                    };
-                ctx.vm.guest_run_fenced(
-                    &ctx.face.guest_lease,
-                    &crate::units::business::vm::api::GuestRun {
-                        command: dispatched,
-                        args_json: inv.args_json.clone(),
-                        env: env.to_vec(),
-                        cwd: mt.root.display().to_string(),
-                        timeout_secs: 30,
-                        output_limit: crate::units::business::vm::api::OutputLimit::Head,
-                    },
-                    &fence,
-                )
-            } else {
-                ctx.tools.run_module(
-                    &module,
-                    &fence,
+            // 执行面自己认这一档：本机直接起进程，虚拟机先把相对入口落进 guest 本地副本再跑。
+            let exec = crate::units::business::sandbox::api::ExecRequest {
+                kind: crate::units::business::sandbox::api::ExecKind::Module {
+                    module: &module,
                     command,
-                    &inv.args_json,
+                    args_json: &inv.args_json,
                     env,
-                    ctx.face.runtime_path.as_deref(),
-                    mt.parallel.contains(&inv.name),
-                    ask,
-                    budget,
-                )
+                    parallel: mt.parallel.contains(&inv.name),
+                },
+                cwd: &mt.root,
+                fence,
+                timeout: std::time::Duration::from_secs(30),
+                ask,
+                cancel: None,
+                budget,
             };
+            if let Some(why) = ctx.exec.precheck(&exec) {
+                return (module, refuse(why));
+            }
+            let outcome = ctx.exec.run(&exec).outcome;
             (module, outcome)
         }
         None => {

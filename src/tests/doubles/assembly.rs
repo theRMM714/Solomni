@@ -240,6 +240,12 @@ pub(crate) fn core_with_services(
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     let work = test_workspace(Arc::new(InMemoryWorkspace::new()));
+    let toolexec: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync> =
+        test_tools_svc_with(
+            runner,
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        );
     Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
@@ -247,17 +253,13 @@ pub(crate) fn core_with_services(
         work.layout.clone(),
         work.versions.clone(),
         test_vm(),
-        test_policies(),
+        test_policies_with(Arc::clone(&toolexec)),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         Arc::new(crate::units::business::maintenance::builds::api::NoBuilds),
         llm,
-        test_tools_svc_with(
-            runner,
-            Arc::new(InMemorySysIo::new()),
-            Arc::new(NoFenceHost),
-        ),
+        toolexec,
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
@@ -285,6 +287,12 @@ pub(crate) fn core_with_workspace(
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     let work = test_workspace(ws);
+    let toolexec: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync> =
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        );
     Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
@@ -292,17 +300,13 @@ pub(crate) fn core_with_workspace(
         work.layout.clone(),
         work.versions.clone(),
         test_vm(),
-        test_policies(),
+        test_policies_with(Arc::clone(&toolexec)),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         Arc::new(crate::units::business::maintenance::builds::api::NoBuilds),
         llm,
-        test_tools_svc_with(
-            Arc::new(SilentRunner),
-            Arc::new(InMemorySysIo::new()),
-            Arc::new(NoFenceHost),
-        ),
+        toolexec,
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
@@ -327,6 +331,12 @@ pub(crate) fn core_with_workdirs(
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     let work = test_workspace(dirs);
+    let toolexec: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync> =
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        );
     Core::new(
         root,
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
@@ -334,17 +344,13 @@ pub(crate) fn core_with_workdirs(
         work.layout.clone(),
         work.versions.clone(),
         test_vm(),
-        test_policies(),
+        test_policies_with(Arc::clone(&toolexec)),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         Arc::new(crate::units::business::maintenance::builds::api::NoBuilds),
         llm,
-        test_tools_svc_with(
-            Arc::new(SilentRunner),
-            Arc::new(InMemorySysIo::new()),
-            Arc::new(NoFenceHost),
-        ),
+        toolexec,
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
@@ -395,7 +401,13 @@ pub(crate) fn core_with_workdirs_vm(
         )),
     );
     let work = test_workspace(dirs);
-    let policies = test_policies_at(root.clone());
+    let toolexec: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync> =
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        );
+    let policies = test_policies_at_with(root.clone(), Arc::clone(&toolexec));
     Core::new(
         root,
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
@@ -409,11 +421,7 @@ pub(crate) fn core_with_workdirs_vm(
         test_modules(Arc::new(VecSource(modules))),
         Arc::new(crate::units::business::maintenance::builds::api::NoBuilds),
         llm,
-        test_tools_svc_with(
-            Arc::new(SilentRunner),
-            Arc::new(InMemorySysIo::new()),
-            Arc::new(NoFenceHost),
-        ),
+        toolexec,
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
@@ -452,6 +460,12 @@ pub(crate) fn core_with_builds(
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     let work = test_workspace(Arc::new(InMemoryWorkspace::new()));
+    let toolexec: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync> =
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        );
     Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
@@ -459,17 +473,13 @@ pub(crate) fn core_with_builds(
         work.layout.clone(),
         work.versions.clone(),
         test_vm(),
-        test_policies(),
+        test_policies_with(Arc::clone(&toolexec)),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         builds,
         llm,
-        test_tools_svc_with(
-            Arc::new(SilentRunner),
-            Arc::new(InMemorySysIo::new()),
-            Arc::new(NoFenceHost),
-        ),
+        toolexec,
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
@@ -589,6 +599,8 @@ pub(crate) fn core_with_pkgs_probe(
         }
     }
     let work = test_workspace(Arc::new(InMemoryWorkspace::new()));
+    let toolexec: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync> =
+        test_tools_svc_with(runner, io, Arc::new(NoFenceHost));
     Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
@@ -596,13 +608,13 @@ pub(crate) fn core_with_pkgs_probe(
         work.layout.clone(),
         work.versions.clone(),
         test_vm(),
-        test_policies(),
+        test_policies_with(Arc::clone(&toolexec)),
         test_packages_with_base(packages, base),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         Arc::new(crate::units::business::maintenance::builds::api::NoBuilds),
         llm,
-        test_tools_svc_with(runner, io, Arc::new(NoFenceHost)),
+        toolexec,
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
@@ -627,6 +639,12 @@ pub(crate) fn core_with_settings_modules(store: InMemorySettings, modules: Vec<M
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     let work = test_workspace(Arc::new(InMemoryWorkspace::new()));
+    let toolexec: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync> =
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        );
     Core::new(
         crate::tests::root_dir(),
         registry_service(store, Arc::clone(&llm)),
@@ -634,17 +652,13 @@ pub(crate) fn core_with_settings_modules(store: InMemorySettings, modules: Vec<M
         work.layout.clone(),
         work.versions.clone(),
         test_vm(),
-        test_policies(),
+        test_policies_with(Arc::clone(&toolexec)),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         Arc::new(crate::units::business::maintenance::builds::api::NoBuilds),
         llm,
-        test_tools_svc_with(
-            Arc::new(SilentRunner),
-            Arc::new(InMemorySysIo::new()),
-            Arc::new(NoFenceHost),
-        ),
+        toolexec,
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
@@ -676,6 +690,8 @@ pub(crate) fn core_with_io_gateway(
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     let work = test_workspace(Arc::new(InMemoryWorkspace::new()));
+    let toolexec: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync> =
+        test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost));
     Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
@@ -683,13 +699,13 @@ pub(crate) fn core_with_io_gateway(
         work.layout.clone(),
         work.versions.clone(),
         test_vm(),
-        test_policies(),
+        test_policies_with(Arc::clone(&toolexec)),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         Arc::new(crate::units::business::maintenance::builds::api::NoBuilds),
         llm,
-        test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
+        toolexec,
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
@@ -721,6 +737,12 @@ pub(crate) fn core_with_gateway_probe(
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     let work = test_workspace(Arc::new(InMemoryWorkspace::new()));
+    let toolexec: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync> =
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        );
     Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
@@ -728,17 +750,13 @@ pub(crate) fn core_with_gateway_probe(
         work.layout.clone(),
         work.versions.clone(),
         test_vm(),
-        test_policies(),
+        test_policies_with(Arc::clone(&toolexec)),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         Arc::new(crate::units::business::maintenance::builds::api::NoBuilds),
         llm,
-        test_tools_svc_with(
-            Arc::new(SilentRunner),
-            Arc::new(InMemorySysIo::new()),
-            Arc::new(NoFenceHost),
-        ),
+        toolexec,
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),

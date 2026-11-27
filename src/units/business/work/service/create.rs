@@ -566,6 +566,8 @@ impl Work {
                     } else {
                         pkgs::PackagePlan::default()
                     };
+                // 执行租约要在装配前算好：装配按它开这一席的执行面（虚拟机档 = 共享 guest 的作用域根）。
+                let lease = guest_lease_for(self.history.as_ref(), &meta)?;
                 let (mut s, opened) = turn.build_single(
                     registry,
                     a,
@@ -574,9 +576,10 @@ impl Work {
                     &sb,
                     unavailable,
                     registry.app().sandbox.policy.network,
-                    meta.facts.side,
                     guest,
-                    guest_lease_for(self.history.as_ref(), &meta)?,
+                    &meta.facts,
+                    &meta.sandbox,
+                    &lease,
                     &host_plan,
                     &meta.spec,
                 );

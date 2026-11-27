@@ -13,9 +13,7 @@ use crate::units::business::llm::api::Llm;
 use crate::units::business::prompt::api::Prompt;
 use crate::units::business::session_model::api::{FS_READ, SOURCE_AGENT};
 use crate::units::business::tools::api::{Observations, ToolBook, ToolExec};
-use crate::units::business::vm::api::Vm;
 use crate::units::business::workspace::api::Sandbox;
-use crate::units::pure::exec_model::api::Side;
 use crate::units::pure::registry_model::api::ToolMode;
 
 /// 目的：装配核心核实环境所需的全部事实与端口：沙箱、席位、通道形态、网络、工具总表、说明块素材与四个端口。
@@ -40,8 +38,8 @@ pub struct VerifySpec<'a> {
     pub log: Arc<dyn Log + Send + Sync>,
     /// 目的：工具执行面：只读核实工具经它跑。
     pub tools: Arc<dyn ToolExec + Send + Sync>,
-    /// 目的：虚拟机档的 guest 用例面。
-    pub vm: Arc<dyn Vm + Send + Sync>,
+    /// 目的：执行面（本机 / 虚拟机都由策略给）：核实只用只读内置工具，它在这里只为把形状凑齐。
+    pub exec: Arc<dyn crate::units::business::sandbox::api::Sandbox + Send + Sync>,
 }
 
 /// 目的：装配核心核实环境：沙箱改成"核心"（共享区当私有区、没有模块），工具面只发只读核实工具。
@@ -81,8 +79,6 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
             loop_id: String::new(),
             role: seat.role,
             modules: seat.modules,
-            side: Side::Host,
-            guest_lease: String::new(),
             sandbox: sb.clone(),
             tools_this_turn: spec.tools_this_turn.to_string(),
             builtin_tools: book,
@@ -90,7 +86,6 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
             fence: FencePlan::for_session(&sb, &[], spec.net),
             // 核心核实用的是只读内置工具，没有模块工具进程，也就没有注入项。
             module_env: Default::default(),
-            runtime_path: None,
             runtime_roots: Vec::new(),
             allowed: seat.allowed,
             source_ids: vec![SOURCE_AGENT.to_string()],
@@ -103,7 +98,7 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
         llm: Arc::clone(&spec.llm),
         log: Arc::clone(&spec.log),
         tools: Arc::clone(&spec.tools),
-        vm: Arc::clone(&spec.vm),
+        exec: Arc::clone(&spec.exec),
         residents: Arc::new(crate::units::business::residents::api::NoResidents),
         // 核心核实的工具面只读：没有共享区提交这回事。
         workspace: None,

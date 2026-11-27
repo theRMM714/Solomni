@@ -9,6 +9,8 @@
 - 管：运行日志端口、宿主探测端口、**提问端口**（请用户裁决）、**时间**（`clock`：此刻的本机民用时间、到分钟流水戳，以及记时刻用的 `now_secs` / `now_ms`）。
 - 管：生成中作业的取消表。
 - 管：**内容指纹**（`hash`：SHA-256 增量实现，`content_hash` / `Sha256` / `is_content_hash`）——版本化、工具读写、运行包与素材指纹共用同一份。
+- 管：**回执预算**（`budget`：`ResultBudget` / `Continuation` / `cap_result_with` / `MAX_RESULT_CHARS`）——模型可见的截断只有这一处口径，执行端口把它当参数往下传。
+- 管：**路径桥**（`path_bridge`：`PathBridge` / `PathDialect`）——宿主路径与客机路径互译，虚拟机的路径书写与宿主的视图路径共用同一份。
 - 管：**端口载荷形状**（`contracts`：`SessionId` / `ToolOutcome` / `Ask`）与路径的对外书写形式；其余跨层共享形状归环 1 单元（`Side` / `TargetSpec` / `JobState` 在 `exec_model`）。
 - 管：**外部进程执行**——一次性的 `ProcessRunner` 与长驻的 `SessionHost`；围栏裁决经 `FenceGate` 原样转交，机制不解释裁决的业务变体。
 - 管：**长驻子进程的账与回收**（`procs`）。
@@ -19,7 +21,7 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api`（按对外概念分文件：`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `net` / `path` / `platform` / `hash`——见「六、对外面」）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`FenceHost`、`FenceGate`、`UserPath`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执与回执说明）、`domain`（路径书写、取消表、沙箱模式、回执装配）、`detail`（`clock`、`file_log`、`host_probe`、`io`（`env` / `net`）、`unpack`、`user_path`、`process`、`procs`、`session`、`i18n`、`confine`：门面 + `job` / `ledger` / `paths` / `prep`）。
+- 入站面：`api`（按对外概念分文件：`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `net` / `path` / `platform` / `hash` / `budget` / `path_bridge`——见「六、对外面」）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`FenceHost`、`FenceGate`、`UserPath`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执与回执说明）、`domain`（路径书写、取消表、沙箱模式、回执装配）、`detail`（`clock`、`file_log`、`host_probe`、`io`（`env` / `net`）、`unpack`、`user_path`、`process`、`procs`、`session`、`i18n`、`confine`：门面 + `job` / `ledger` / `paths` / `prep`）。
 - `AskUser` 是「需要用户裁决的机制请用户裁决」的**唯一**入口（`src/kernel/ports.rs`），工具执行层与围栏用它。
   - 形状：`ask(问题) -> 选项 id`，**阻塞**。
   - `halt(为什么)` = 停会话 + 落警告；调用方只在有可回答前端时用它，没有前端按 fail-closed 收场。
@@ -95,7 +97,7 @@
   - **shell 的一次执行**：`run_shell` 走同一个守门进程；`timeout_secs` 是本次的（不沿用模块工具的 30 秒），到点或取消旗置位都杀整棵树；输出原样交回（模型可见的截断由工具层的回执预算统一施加），落点与本次耗时由工具层补成说明（码 `shell.place` / `shell.place.prep`；没跑成的调用不加落点行，但结构化事实仍记下落点与耗时）；每次调用都 `require_fs + require_net + allow_degraded=false`，装不上拒绝；Windows 的容器身份按 `会话租约 + agent + 计划指纹` 派生（同一计划复用 SID 与 ACL），授权按会话持有、会话改配 / 删除时回收；工具链与运行包是基础工具链基线，不参与按次授权。
   - **VM guest 的 per-call 断网**：guest helper 读策略里的 `net`，false 时在子进程前 `unshare(CLONE_NEWNET)`；失败以 111 fail-closed，不静默降级。helper 同时读 `timeout_secs` 并按它杀树；guest 输出按 `GuestRun.output_limit` 只留开头或开头 + 结尾。
   - **本机回环的一次性放行（仅 Windows）**：`net = Local { ports }` 时容器里 bind 的是 `127.0.0.2:<端口>`（容器与宿主共用一个回环栈，同端口同地址会撞 `WSAEADDRINUSE`），宿主按端口清单 dial `127.0.0.1:<端口>`，两侧用继承的匿名管道传帧、不走网络；端口清单与「产品自己的端口」都在**宿主侧**判，后者按「监听者 pid 落在本产品进程树里，或它跑的就是本产品这个可执行文件」判（`src/kernel/detail/container/windows/relay.rs`）。中继进程就是产品自己的可执行文件，它进容器要一条单文件只读授权（`FencePart::Relay`）。本档不许降级：中继起不来即以 `FENCE_FAILED` 拒绝，否则等于把回环全通给容器（`src/kernel/detail/confine/job.rs` 的 `local_relay` 判定）。
-  - 收尾：stdout / stderr 分别读；模块工具超时 30 秒（`ProcTools::timeout`），shell 用本次 `timeout_secs`；到时连根杀树；输出原样交回——机制层不做模型可见的截断，16k 预算唯一在 `src/units/business/tools/domain/budget.rs`。超时与机制失败记成回执说明的码；围栏裁决的文案归工具层，机制不硬编码。
+  - 收尾：stdout / stderr 分别读；模块工具超时 30 秒（`ProcTools::timeout`），shell 用本次 `timeout_secs`；到时连根杀树；输出原样交回——机制层不做模型可见的截断，16k 预算唯一在 `src/kernel/domain/budget.rs`。超时与机制失败记成回执说明的码；围栏裁决的文案归工具层，机制不硬编码。
   - 围栏装不上（本机不支持 / 容器起不来）：命中 `require_fs` / `require_net` 且未同意降级时，守门进程以 `FENCE_FAILED` **拒绝执行**；已同意降级才如实降级继续。Linux 的文件系统与网络两项**独立**判定，一项装不上不影响另一项。能力等级已在启动报告里说明。
   - Windows 外层未授权（`sandbox.policy.windows.write_acl=false`）：容器不装；启动门要求强制时只能本次降级 / 重设 / 退出（`src/main.rs`），否则按无围栏执行；全局网络开关不生效于容器，启动报告的「本次实际」已标出。
   - Windows 未授权时段先自检（`confine::verify`）：`EnvUnavailable` = 本机不支持，降级照跑；`Broken` = 自检说机制有效却装不上（我们写错了），**拒绝执行**，不按无围栏跑。

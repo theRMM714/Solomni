@@ -474,11 +474,14 @@ pub(crate) fn module_tools_are_concurrent_only_when_declared() {
             mt.parallel.insert("scan".to_string());
         }
         t.face.allowed.push("m0.scan".to_string());
-        t.tools = test_tools_svc_with(
-            runner,
-            Arc::new(InMemorySysIo::new()),
-            Arc::new(NoFenceHost),
-        );
+        let svc: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync> =
+            test_tools_svc_with(
+                runner,
+                Arc::new(InMemorySysIo::new()),
+                Arc::new(NoFenceHost),
+            );
+        t.tools = Arc::clone(&svc);
+        t.exec = crate::units::business::tools::api::host_sandbox(svc);
         m
     }
     let prompts = test_prompts();

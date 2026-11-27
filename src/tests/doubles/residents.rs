@@ -261,12 +261,16 @@ pub(crate) fn member_with_service_tools(
         },
     );
     let allowed = crate::tests::builders::face_allowed(&modules);
+    let exec_svc: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync> =
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        );
     crate::units::business::agentloop::domain::member_tools::MemberTools {
         face: crate::units::business::agentloop::api::ToolFace {
             mode: crate::units::pure::registry_model::api::ToolMode::Envelope,
             modules,
-            side: crate::units::pure::exec_model::api::Side::Host,
-            guest_lease: String::new(),
             sandbox: sb.clone(),
             tools_this_turn: test_prompts()
                 .text(crate::units::business::prompt::api::Segment::ToolsThisTurn)
@@ -275,7 +279,6 @@ pub(crate) fn member_with_service_tools(
             unavailable: BTreeMap::new(),
             fence: crate::kernel::api::fence::FencePlan::for_session(&sb, &[], false),
             module_env: Default::default(),
-            runtime_path: None,
             runtime_roots: Vec::new(),
             allowed,
             loop_id: "standard".to_string(),
@@ -292,12 +295,8 @@ pub(crate) fn member_with_service_tools(
         },
         llm: test_llm_demo(),
         log: Arc::new(crate::kernel::ports::NoopLog),
-        tools: test_tools_svc_with(
-            Arc::new(SilentRunner),
-            Arc::new(InMemorySysIo::new()),
-            Arc::new(NoFenceHost),
-        ),
-        vm: test_vm(),
+        tools: Arc::clone(&exec_svc),
+        exec: crate::units::business::tools::api::host_sandbox(exec_svc),
         residents,
         // 工具面用例不接工作区：写工具落地后不自动提交。
         workspace: None,

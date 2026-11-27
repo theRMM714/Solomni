@@ -469,10 +469,30 @@ pub(crate) fn module_tools_go_into_the_guest_on_vm_tier() {
     );
     let vm = Arc::new(crate::tests::doubles::RecordingVm::default());
     {
+        let policies = crate::units::business::sandbox::api::SandboxPolicies::new(vec![
+            crate::units::business::vm::api::vm_policy(
+                crate::tests::root_dir(),
+                Arc::new(crate::kernel::detail::HostProbeAdapter),
+                vm.clone(),
+            ),
+        ]);
+        let decl = crate::units::business::sandbox::api::SandboxDecl {
+            policy: crate::units::business::sandbox::api::VM_POLICY.to_string(),
+            pins: Default::default(),
+            params: serde_json::json!({"guest": "w"}),
+        };
+        let facts = crate::units::business::sandbox::api::SandboxFacts::host();
+        let exec = policies
+            .open(&crate::units::business::sandbox::api::OpenRequest {
+                session: "s",
+                lease: "w",
+                decl: &decl,
+                facts: &facts,
+                runtime_path: None,
+            })
+            .expect("客机执行面能开起来");
         let tools = m.tools.as_mut().expect("这一席有工具环境");
-        tools.face.side = crate::units::pure::exec_model::api::Side::Guest;
-        tools.face.guest_lease = "w".to_string();
-        tools.vm = vm.clone();
+        tools.exec = exec;
     }
     let prompts = test_prompts();
     let _ = run_execution(std::slice::from_mut(&mut m), "任务", &prompts);

@@ -1,11 +1,12 @@
 //! 目的：沙箱注册表——按策略 id 找实现，并把声明翻成事实。
-//! 管：`SandboxPolicies`（登记、查找、事实）。
+//! 管：`SandboxPolicies`（登记、查找、事实、开执行句柄）。
 //! 不管：策略内部怎么算（实现方）；会话怎么建（`work`）。
 //! 联动：组合根在装配期登记；消费方只经本单元的 `api` 取。
 
 use crate::units::business::sandbox::domain::decl::{HOST_POLICY, SandboxDecl};
+use crate::units::business::sandbox::domain::exec::Sandbox;
 use crate::units::business::sandbox::domain::facts::{PolicyDecl, SandboxFacts};
-use crate::units::business::sandbox::domain::policy::SandboxPolicy;
+use crate::units::business::sandbox::domain::policy::{OpenRequest, SandboxPolicy};
 use std::sync::Arc;
 
 /// 目的：执行环境策略的注册表（键是策略 id）。
@@ -61,6 +62,19 @@ impl SandboxPolicies {
             .first()
             .map(|p| p.decl().id)
             .unwrap_or_else(|| HOST_POLICY.to_string())
+    }
+
+    /// 目的：按声明开一席的执行句柄。
+    /// 错误：策略 id 没登记，或策略自己报的问题。
+    pub fn open(&self, req: &OpenRequest<'_>) -> Result<Arc<dyn Sandbox>, String> {
+        match self.of(&req.decl.policy) {
+            Some(p) => p.open(req),
+            None => Err(format!(
+                "没有这个执行环境策略：{}（登记的有：{}）",
+                req.decl.policy,
+                self.ids().join(" / ")
+            )),
+        }
     }
 
     /// 目的：声明对应的事实。

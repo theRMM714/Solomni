@@ -14,7 +14,6 @@ use crate::units::business::session_model::api::AskDesk;
 use crate::units::business::session_model::api::SessionMeta;
 use crate::units::business::tools::api::ToolExec;
 use crate::units::business::transcript::api::{LineView, SessionEvent};
-use crate::units::business::vm::api::Vm;
 use crate::units::business::workspace::api::Sandboxes;
 use std::sync::Arc;
 
@@ -232,7 +231,6 @@ impl CollabSession {
     #[allow(clippy::too_many_arguments)]
     pub fn restore(
         llm: Arc<dyn Llm + Send + Sync>,
-        vm: Arc<dyn Vm + Send + Sync>,
         modules: Arc<dyn Modules + Send + Sync>,
         settings: Settings,
         prompts: Arc<dyn Prompt>,
@@ -307,7 +305,6 @@ impl CollabSession {
             prompts: prompts.clone(),
             systools: systools.clone(),
             llm,
-            vm,
             tools,
             log,
             sandboxes,
