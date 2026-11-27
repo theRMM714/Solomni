@@ -4,6 +4,7 @@
 //! 联动：`src/units/session/ports.rs` 的 `HistoryStore` 与 `src/units/business/llm/ports.rs`。
 
 use super::*;
+use crate::units::business::transcript::api::Content;
 
 impl InMemoryHistory {
     pub(crate) fn new() -> InMemoryHistory {
@@ -61,22 +62,22 @@ impl HistoryStore for InMemoryHistory {
             .insert(meta.name.clone(), meta.clone());
         Ok(())
     }
-    fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
+    fn append(&self, name: &str, content: &Content) -> Result<(), String> {
         self.guard()?;
         self.events
             .lock()
             .expect("锁")
             .entry(name.to_string())
             .or_default()
-            .extend_from_slice(events);
+            .extend_from_slice(&content.to_events());
         Ok(())
     }
-    fn replace(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
+    fn replace(&self, name: &str, content: &Content) -> Result<(), String> {
         self.guard()?;
         self.events
             .lock()
             .expect("锁")
-            .insert(name.to_string(), events.to_vec());
+            .insert(name.to_string(), content.to_events());
         Ok(())
     }
     fn list(&self) -> Result<Vec<HistoryView>, String> {
@@ -125,7 +126,7 @@ impl HistoryStore for InMemoryHistory {
             .cloned()
             .ok_or_else(|| format!("无此会话：{}", name))
     }
-    fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
+    fn load(&self, name: &str) -> Result<(SessionMeta, Content), String> {
         self.guard()?;
         let meta = self
             .metas
@@ -141,7 +142,7 @@ impl HistoryStore for InMemoryHistory {
             .get(name)
             .cloned()
             .unwrap_or_default();
-        Ok((meta, events))
+        Ok((meta, Content::of_events(&events)))
     }
     fn delete(&self, name: &str) -> Result<bool, String> {
         self.guard()?;

@@ -6,6 +6,7 @@
 use super::super::builders::*;
 use super::super::prelude::*;
 use crate::units::business::session_model::api::{MEETING, SINGLE};
+use crate::units::business::transcript::api::Content;
 
 #[test]
 pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
@@ -113,7 +114,6 @@ pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
 /// 目的：留档：只标记并折叠尾部，文件字节一个不少，新行从最大 id 续号；恢复把标记及其后真的删掉。
 #[test]
 pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
-    use crate::units::business::agentloop::api::next_line_id;
     use crate::units::business::lifecycle::api::RewindTarget;
     let say = |t: &str| serde_json::json!({"type": "say", "text": t}).to_string();
     let mut member = BTreeMap::new();
@@ -153,13 +153,7 @@ pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
     })
     .unwrap(); // 行 2 用户 / 3 AI
 
-    let rows = |raw: &[serde_json::Value]| -> Vec<u64> {
-        raw.iter()
-            .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
-            .flatten()
-            .map(|l| l.get("id").and_then(|i| i.as_u64()).unwrap_or(0))
-            .collect()
-    };
+    let rows = |raw: &Content| -> Vec<u64> { raw.lines().map(|l| l.id).collect() };
 
     // 留档到第 1 行：活动视图只剩「用户 问一」；文件里 2/3 仍在，标记写进流水。
     let replayed =
@@ -167,33 +161,19 @@ pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
     assert_eq!(replay_lines(&replayed), vec!["[用户] 问一".to_string()]);
     let (_, raw) = hist.load("w").unwrap();
     assert_eq!(rows(&raw), vec![0, 1, 2, 3], "留档不删字节");
-    assert_eq!(next_line_id(&raw), 4, "新行从最大 id 续号，绝不复用");
-    let mark = raw
-        .iter()
-        .find(|e| e.get("type").and_then(|t| t.as_str()) == Some("rewind"))
-        .expect("留档标记要进流水");
+    assert_eq!(raw.next_id(), 4, "新行从最大 id 续号，绝不复用");
+    let marks = raw.marks();
+    let mark = marks.first().expect("留档标记要进流水");
+    assert_eq!(mark.shared, None, "没有提交时共享区头是空的");
     assert_eq!(
-        mark.get("shared").and_then(|v| v.as_u64()),
-        None,
-        "没有提交时共享区头是空的"
-    );
-    assert_eq!(
-        mark.get("heads").and_then(|h| h.get("a")),
-        Some(&serde_json::Value::Null),
+        mark.heads.get("a"),
+        Some(&None),
         "每个 agent 的头要写进标记：{:?}",
         mark
     );
+    assert_eq!(mark.label, "答二", "标签取折叠区间里最后一条内容行");
     assert_eq!(
-        mark.get("label").and_then(|v| v.as_str()),
-        Some("答二"),
-        "标签取折叠区间里最后一条内容行"
-    );
-    assert_eq!(
-        crate::units::business::agentloop::api::truncate_events(&raw)
-            .iter()
-            .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
-            .flatten()
-            .count(),
+        raw.folded_away().lines().count(),
         1,
         "活动视图只剩折叠外的行"
     );
@@ -211,12 +191,7 @@ pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
     );
     let (_, raw2) = hist.load("w").unwrap();
     assert_eq!(rows(&raw2), vec![0, 1, 2, 3]);
-    assert!(
-        !raw2
-            .iter()
-            .any(|e| e.get("type").and_then(|t| t.as_str()) == Some("rewind")),
-        "恢复真的删掉了标记"
-    );
+    assert!(raw2.marks().is_empty(), "恢复真的删掉了标记");
 }
 
 /// 目的：删除：真的把标记点之后的字节从文件里删掉（不是只截视图）。
@@ -263,18 +238,9 @@ pub(crate) fn delete_rewrites_the_file_for_real() {
 
     crate::tests::lifecycle::rewind(&mut core, &sid, RewindTarget::Delete(2)).unwrap();
     let (_, raw) = hist.load("w").unwrap();
-    let ids: Vec<u64> = raw
-        .iter()
-        .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
-        .flatten()
-        .map(|l| l.get("id").and_then(|i| i.as_u64()).unwrap_or(0))
-        .collect();
+    let ids: Vec<u64> = raw.lines().map(|l| l.id).collect();
     assert_eq!(ids, vec![0, 1], "删除真的截断文件");
-    assert!(
-        !raw.iter()
-            .any(|e| e.get("type").and_then(|t| t.as_str()) == Some("rewind")),
-        "删除不留标记"
-    );
+    assert!(raw.marks().is_empty(), "删除不留标记");
 }
 
 #[test]
@@ -521,7 +487,7 @@ pub(crate) fn rebuild_restores_the_last_shell_snapshot_from_the_transcript() {
     let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     hist.append(
         &sid,
-        &[serde_json::json!({
+        &Content::of_events(&[serde_json::json!({
             "type": "transcript",
             "lines": [{
                 "id": 0,
@@ -535,7 +501,7 @@ pub(crate) fn rebuild_restores_the_last_shell_snapshot_from_the_transcript() {
                     }
                 }
             }]
-        })],
+        })]),
     )
     .unwrap();
     let (meta, events) = core.lifecycle.history_open(&sid).unwrap();
@@ -571,7 +537,7 @@ pub(crate) fn rebuild_reads_the_structured_shell_facts() {
     let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
     hist.append(
         &sid,
-        &[serde_json::json!({
+        &Content::of_events(&[serde_json::json!({
             "type": "transcript",
             "lines": [{
                 "id": 0,
@@ -586,7 +552,7 @@ pub(crate) fn rebuild_reads_the_structured_shell_facts() {
                     }
                 }
             }]
-        })],
+        })]),
     )
     .unwrap();
     let (meta, events) = core.lifecycle.history_open(&sid).unwrap();
@@ -714,5 +680,83 @@ pub(crate) fn history_list_is_ordered_as_a_tree() {
         names,
         vec!["A", "A--甲", "A--乙", "B"],
         "父会话必须紧跟它的子会话"
+    );
+}
+
+#[test]
+pub(crate) fn a_plain_session_has_no_version_library_to_rewind() {
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+    );
+    let sid = core.create_work(work("w", SINGLE, &["a"])).unwrap().sid;
+    with_turn_io(|io, cancel, emit| {
+        core.turn.single_say(
+            &sid,
+            "问一",
+            io,
+            cancel,
+            emit,
+            core.registry.as_ref(),
+            core.probe.as_ref(),
+        )
+    })
+    .unwrap();
+    // 约束：plain 工作台没有版本库，回档三模式都不成立（转录只往前加）。
+    let (mut meta, _) = core.history_read(&sid).unwrap();
+    meta.workspace.policy = "plain".to_string();
+    core.history_save_meta(&meta).unwrap();
+    let err = crate::tests::lifecycle::rewind(
+        &mut core,
+        &sid,
+        crate::units::business::lifecycle::api::RewindTarget::Archive(1),
+    )
+    .expect_err("没有版本库就不该能留档");
+    assert!(err.contains("没有版本库"), "{err}");
+    assert!(err.contains("plain"), "{err}");
+}
+
+#[test]
+pub(crate) fn a_changed_task_is_appended_and_the_old_line_is_only_hidden() {
+    let mut w = work("w", MEETING, &["a", "b"]);
+    w.task = Some("旧需求".to_string());
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut core = core_with_all(
+        vec![module_of("a"), module_of("b")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["a".to_string(), "b".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+    );
+    let sid = core.create_work(w).unwrap().sid;
+    core.turn
+        .update_task_outcome(&sid, "新需求", core.registry.as_ref(), core.probe.as_ref())
+        .unwrap();
+    let (_, raw) = core.history_read(&sid).unwrap();
+    let texts: Vec<String> = raw.lines().map(|l| l.line.clone()).collect();
+    assert!(
+        texts.iter().any(|t| t == "旧需求"),
+        "旧需求留在流水里（只追加，不物理删）"
+    );
+    assert!(
+        texts.iter().any(|t| t.contains("新需求")),
+        "新需求追加在末尾"
+    );
+    let view: Vec<String> = raw
+        .folded_away()
+        .superseded()
+        .lines()
+        .map(|l| l.line.clone())
+        .collect();
+    assert!(!view.iter().any(|t| t == "旧需求"), "读视图里旧需求被取代");
+    assert!(
+        view.iter().any(|t| t.contains("新需求")),
+        "读视图里有新需求"
     );
 }

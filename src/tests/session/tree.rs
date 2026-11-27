@@ -6,6 +6,7 @@
 use super::super::builders::*;
 use super::super::prelude::*;
 use crate::units::business::session_model::api::{MEETING, PROXY, SINGLE, SessionSpec};
+use crate::units::business::transcript::api::Content;
 
 /// 目的：共享 guest 的子会话也能改配置；写回该 agent 的唯一名单，而不是留一份会漂的副本。
 #[test]
@@ -141,10 +142,10 @@ pub(crate) fn continue_hint_is_derived_from_the_session_state() {
     );
     hist.append(
         "w",
-        &[serde_json::json!({
+        &Content::of_events(&[serde_json::json!({
             "type": "transcript",
             "lines": [{ "id": 0, "kind": "user", "speaker": "用户", "line": "做一下" }],
-        })],
+        })]),
     )
     .expect("写入用户行");
     let mut core = core_with_pkgs(
@@ -185,14 +186,14 @@ pub(crate) fn stopped_session_offers_enable_instead_of_continue() {
     );
     hist.append(
         "w",
-        &[serde_json::json!({
+        &Content::of_events(&[serde_json::json!({
             "type": "transcript",
             "lines": [
                 { "id": 0, "kind": "user", "speaker": "用户", "line": "做一下" },
                 { "id": 1, "kind": "msg", "speaker": "a", "line": "做完了，还剩一点" },
                 { "id": 2, "kind": "user", "speaker": "用户", "line": "接着做" },
             ],
-        })],
+        })]),
     )
     .expect("写入用户行");
     let mut core = core_with_pkgs(
@@ -237,10 +238,10 @@ pub(crate) fn archive_hides_dispatch_and_restore_brings_it_back() {
     );
     hist.append(
         "w",
-        &[serde_json::json!({
+        &Content::of_events(&[serde_json::json!({
             "type": "transcript",
             "lines": [{ "id": 0, "kind": "user", "speaker": "用户", "line": "做一下" }],
-        })],
+        })]),
     )
     .expect("写入用户行");
     let mut core = core_with_pkgs(

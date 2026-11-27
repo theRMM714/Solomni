@@ -141,11 +141,11 @@ pub(crate) enum Prepared {
 }
 
 /// 目的：回档重建的**描述**（改需求那条路径要宿主执行重建，本层不持生命周期）。
-///   `events` 已经是改写后的盘上事件切片；`next` 是沿用"全量最大 id + 1"的续号。
+///   `content` 是读出来的样子（折叠与取代已在读时做完）；`next` 是沿用"全量最大 id + 1"的续号。
 pub(crate) struct RestoreRequest {
     pub(crate) sid: String,
     pub(crate) meta: SessionMeta,
-    pub(crate) events: Vec<serde_json::Value>,
+    pub(crate) content: crate::units::business::transcript::api::Content,
     pub(crate) next: u64,
 }
 

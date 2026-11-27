@@ -15,5 +15,5 @@
 | `src/units/business/lifecycle.rs` | 单元入口与公开面 |
 | `src/units/business/lifecycle/api.rs` | 入站面：`RewindTarget`（留档 / 删除按行 id，还原按标记 id）、`RewindOutcome`（主视图 + 子会话视图）、`RebuildDeps`（登记处与探针按次传入）；删除收尾对象与撤权回调经这里转出 |
 | `src/units/business/lifecycle/service.rs` | 方法族入口：`Lifecycle` 的六个入站面与构造（组合根专用，不新建实现） |
-| `src/units/business/lifecycle/service/rewind.rs` | 回档三模式：留档（标记 + 折叠）、删除（收窗 + 截断）、还原（删标记 + 重放）；`restore_session` 重建并放回、`next_mark_id` 续号、`keep_by_agent` 按 agent 收窗 |
+| `src/units/business/lifecycle/service/rewind.rs` | 回档三模式：留档（只追加标记 + 读时折叠）、删除（收窗 + 物理裁尾）、还原（删标记 + 重放）；没有版本能力的策略一律拒绝；`restore_session` 重建并放回、`next_mark_id` 续号、`keep_by_agent` 按 agent 收窗 |
 | `src/units/business/lifecycle/service/history.rs` | 历史列出 / 只读打开 / 删除收尾：`FenceRelease` 后台撤权、`SessionDelete::run` 先停 guest 再删目录、`delete_bookkeeping` 的报账与报错 |

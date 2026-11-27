@@ -22,6 +22,7 @@ use crate::units::business::llm::ports::{ChatGateway, ModelCatalog};
 use crate::units::business::prompt::ports::PromptSource;
 use crate::units::business::session_model::api::{MEETING, SINGLE, SessionMeta, SessionSpec};
 use crate::units::business::tools::ports::SysIo;
+use crate::units::business::transcript::api::Content;
 use crate::units::business::workspace::ports::Workdirs;
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::pure::registry_model::api::Provider;
@@ -623,14 +624,23 @@ fn sys_io_double_transact_rejects_the_same_path_twice() {
 fn history_store_double_roundtrips_lists_deletes_and_propagates_failure() {
     let h = InMemoryHistory::new();
     h.create(&meta("w1")).expect("创建成功");
-    assert!(h.load("w1").expect("读回").1.is_empty(), "新会话没有流水");
-    h.append("w1", &[serde_json::json!({"type": "say", "text": "hi"})])
-        .expect("追加成功");
-    h.append("w1", &[serde_json::json!({"type": "ended"})])
-        .expect("追加成功");
+    assert!(
+        h.load("w1").expect("读回").1.lines().next().is_none(),
+        "新会话没有流水"
+    );
+    h.append(
+        "w1",
+        &Content::of_events(&[serde_json::json!({"type": "say", "text": "hi"})]),
+    )
+    .expect("追加成功");
+    h.append(
+        "w1",
+        &Content::of_events(&[serde_json::json!({"type": "ended"})]),
+    )
+    .expect("追加成功");
     let (m, events) = h.load("w1").expect("读回");
     assert_eq!(m.name, "w1");
-    assert_eq!(events.len(), 2, "流水只追加，不丢行");
+    assert_eq!(events.to_events().len(), 2, "流水只追加，不丢行");
     // 只读元信息：与 load 是同一份真相，但不回放流水。
     assert_eq!(h.meta("w1").expect("读元信息").name, "w1");
     let listed = h.list().expect("列会话");
@@ -654,7 +664,10 @@ fn history_store_double_roundtrips_lists_deletes_and_propagates_failure() {
     let bad = InMemoryHistory::new().fail_with("历史不可用");
     assert_eq!(bad.create(&meta("x")).unwrap_err(), "历史不可用");
     assert_eq!(bad.save_meta(&meta("x")).unwrap_err(), "历史不可用");
-    assert_eq!(bad.append("x", &[]).unwrap_err(), "历史不可用");
+    assert_eq!(
+        bad.append("x", &Content::of_events(&[])).unwrap_err(),
+        "历史不可用"
+    );
     assert_eq!(bad.list().unwrap_err(), "历史不可用");
     assert_eq!(bad.meta("x").unwrap_err(), "历史不可用");
     assert_eq!(bad.load("x").unwrap_err(), "历史不可用");

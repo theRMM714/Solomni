@@ -144,6 +144,7 @@ impl Core {
             Arc::clone(&tools),
             Arc::clone(&vm),
             Arc::clone(&residents),
+            Arc::clone(&bench_policies),
             Arc::clone(&log),
         );
         let c = Core {
@@ -298,7 +299,32 @@ impl Core {
         sid: &str,
         events: &[serde_json::Value],
     ) -> Result<(), String> {
-        self.history.append(sid, events)
+        self.history.append(
+            sid,
+            &crate::units::business::transcript::api::Content::of_events(events),
+        )
+    }
+
+    /// 目的：测试用：读回某个会话的元信息与内容（造「换个工作台策略再看回档」这类前提）。
+    pub fn history_read(
+        &self,
+        sid: &str,
+    ) -> Result<
+        (
+            crate::units::business::session_model::api::SessionMeta,
+            crate::units::business::transcript::api::Content,
+        ),
+        String,
+    > {
+        self.history.load(sid)
+    }
+
+    /// 目的：测试用：改写某个会话的元信息（生产路径在 work / runtime 的用例里）。
+    pub fn history_save_meta(
+        &self,
+        meta: &crate::units::business::session_model::api::SessionMeta,
+    ) -> Result<(), String> {
+        self.history.save_meta(meta)
     }
 
     /// 目的：该会话此刻的**身份块**（按当前提示词册与形态现渲染）：测试用它断言"它被告诉了什么"。

@@ -4,6 +4,7 @@
 //! 联动：`src/units/business/runtime/api.rs` 的 `SessionEvent` 与呈现层的 `LineView`。
 
 use super::*;
+use crate::units::business::transcript::api::Content;
 
 /// 目的：测试里**回答当前那张裁决卡**（卡号从会话的挂起取）：返回这一答产生的事件。
 /// 约束：与呈现层同一条路——带选项 id（+ 附言），由 `collab_answer` 校验与落档。
@@ -36,7 +37,7 @@ pub(crate) fn advance(core: &mut Core, sid: &str) -> Vec<SessionEvent> {
     // 与生产路径同口径：工作线程把这一步产生的事件一并落档。
     let hist = core.history_handle();
     for e in &events {
-        let _ = hist.append(sid, &[e.to_json()]);
+        let _ = hist.append(sid, &Content::of_events(&[e.to_json()]));
     }
     events
 }

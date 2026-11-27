@@ -1,12 +1,12 @@
 # transcript（转录）
 
-> 定位：纯领域——会话流水线那一层线格式与呈现词汇的唯一家：事件、转录行、裁决卡、上下文用量。
+> 定位：纯领域——会话流水线那一层线格式、内容日志与呈现词汇的唯一家：事件、转录行、裁决卡、上下文用量、只追加的条目与读时变换。
 > 效力：规范｜核对：2026-11-25｜依据：`src/units/business/transcript/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
-- 管：会话事件 `SessionEvent`（含机制事件通道 `Push`）、转录行 `LineView` 与工具调用行 `ToolCallView`、裁决卡与信封（`DecisionCard` / `DecisionEnvelope` / `DecisionMessage` / `OptionView` / `DecisionWaiter` / `DecisionQueue` / `DecisionAnswer`）与把 `kernel::Ask` 翻译成卡 / 等待方的五个自由函数（`card_of` / `waiter_of` / `event_of` / `json_of` / `note_of`）、上下文用量 `ContextUsage`，以及它们的构造函数与判定（`idle` / `working` / `qualify` / `last_compaction` / `interrupted_note` / `stopped_note`）。
+- 管：内容日志 `Content` / `Entry`（只追加的条目流；读时变换 `folded_away` / `superseded`，写时裁尾 `cut_before`，留档标记 `ArchiveMark`，行 id 推进 `next_id`）、会话事件 `SessionEvent`（含机制事件通道 `Push`）、转录行 `LineView` 与工具调用行 `ToolCallView`、裁决卡与信封（`DecisionCard` / `DecisionEnvelope` / `DecisionMessage` / `OptionView` / `DecisionWaiter` / `DecisionQueue` / `DecisionAnswer`）与把 `kernel::Ask` 翻译成卡 / 等待方的五个自由函数（`card_of` / `waiter_of` / `event_of` / `json_of` / `note_of`）、上下文用量 `ContextUsage`，以及它们的构造函数与判定（`idle` / `working` / `qualify` / `interrupted_note` / `stopped_note`）。
 - 不管：会话状态与派生（在 `conversation` 的 `session` 子业务）；裁决排队与等待的机制（那里的 `src/units/business/turn_state/domain/decisions.rs`）；落盘与回放（那里的 `detail/` 与 `service/`）；前端渲染（`src/presentation`）；措辞与译文（`prompt`）。
 - 不管：不碰 IO、不持端口、不持有状态；但它是**环 2**而不是环 1——转录行里嵌着别的单元的载荷值（见「为什么是独立单元」）。
 
@@ -28,9 +28,16 @@
 - **为什么是环 2 而不是环 1**：行里嵌着别的单元的值——`ContextUsage::from_tokens` 收 `llm::api::TokenUsage`，`ToolCallView` 持有 `tools::api::ObservationFact` 与 `tools::api::ShellFacts`（后者又牵 `workspace` 的 `ReadFact`）。这些载荷没下沉环 1 之前，把它放进 `src/units/pure/` 会让环 1 反向依赖环 2（H1 判红）。载荷下沉是 P4（registry-model / llm 协议）与工具事实归位的活，做完之后本单元可以搬进 `src/units/pure/`、环号改 1。
 - 与会话的边界：形状与构造在这里；「什么时候产生哪条事件」「怎么回放成状态」「怎么排队等待」在会话单元。改形状要同时看两边的联动（见下）。
 
+## 二、内容日志：只追加的条目与读时变换
+
+- 日志本体是 `Content`：一串 `Entry`（`Line` 转录行 / `Fact` 带 kind 的事实 / `Raw` 不认识的事件）。**基础面只追加**（`push_line` / `push_fact`），没有基础截断——行 id 单调、不重用。
+- 写扩展各自追加自己的 kind：版本控制追加 `rewind`（留档标记），流程追加 `stage`，压缩追加 `compact`，改需求追加 `supersede`（带旧需求行 id）。kind 不参与决策，因此不需要注册表。
+- 读扩展不改数据、只产出视图：`folded_away`（折叠留档区间）、`superseded`（过滤被替代的需求行）、`cut_before`（版本控制的删除 / 恢复才用的物理裁尾）、`last_usage`、`last_compaction`。
+- 「活动视图」不是截断：留档的行只是不进视图，文件里仍在，还原后回来。物理裁尾只有版本控制的删除 / 恢复会调（`cut_before` + `replace`）。
+- 落盘不在本单元：线格式与本体的互转是 `of_events` / `to_events`，文件由会话单元的 `FsHistory` 读写；本单元不碰 IO。
 ## 改动本单元时必须同步
 
-- 改行 / 事件形状（`LineView` 字段、`SessionEvent` 变体、`kind` 词）→ 会话的派生与回放（`src/units/business/agentloop/domain/session.rs`、`src/units/business/turn_state/domain/decisions.rs`、`src/units/business/agentloop/engine/`）、`collab` 的状态派生、`runtime` 的视图、`cli` / `web` 的渲染、`src/tests/session/`，以及 [session-model.md](../session/session-model.md)。
+- 改行 / 事件形状（`LineView` 字段、`SessionEvent` 变体、`kind` 词）或 `Content` 的读时变换 → 会话的派生与回放（`src/units/business/agentloop/domain/session.rs`、`src/units/business/turn_state/domain/decisions.rs`、`src/units/business/agentloop/engine/`）、`collab` 的状态派生、`runtime` 的视图、`cli` / `web` 的渲染、`src/tests/session/`，以及 [session-model.md](../session/session-model.md)。
 - 改裁决卡形状或选项 id 的语义 → 会话的裁决队列、各机制的关卡词汇（协作在 `src/units/business/collab/domain/`）与 [session-model.md](../session/session-model.md) 的「请用户裁决」。
 - 改上下文用量字段 → 状态栏与压缩判定（`service/engine/compact`、`presentation` 的状态栏）。
 

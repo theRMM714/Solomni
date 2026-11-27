@@ -114,7 +114,7 @@ session/<工作名>/
 - **上下文用量是独立事件**：`usage` 记录最近一次模型调用的 prompt / completion / total、当时的窗口与"精确还是估算"。
 - 它**不落成转录行、不进模型上下文**，随会话流水落盘（刷新/重建可恢复）；`line` 是这次调用产出第一行的行号，回档折叠到它之前时这条用量随之失效。`SessionView.context` 是同一份事实的快照，**只给有持续对话的 `Session::Single`**（single / proxy / 协作的 agent 子会话）；协作主会话是流程会话（`Session::Flow`），没有这个字段。
 - **累计花费是 meta 事实**：`SessionMeta.usage_totals`（calls / prompt / completion / cache_read / cache_creation）跨回合、跨压缩累加供应商**精确报回**的用量——每次模型调用都记，压缩调用也记；字符估算不进账，回档不清零（花出去的钱退不回来）。`SessionView.usage_totals` 是同一份事实的快照，面板的「累计输入 / 输出」与「缓存（累计）读 · 命中率」读它；「已用 / 占用」仍跟随当前发送视图。
-- **shell 状态也是快照**：`SessionView.shell` 取该会话最近一次 shell 的运行槽（命令、cwd（本环境写法：本机档是宿主路径，虚拟机档是 guest 内路径）、起止、耗时、退出码、状态 `status` 与回执预览；`status` 取 `exit` / `timeout` / `stopped` / `signal`，None = 运行中 / 未执行 / 没跑成），由工具循环写、状态栏读；它只服务界面，不进模型上下文，也不替代转录里的 shell 工具行。**重建 / 回放按转录派生**：`last_shell(events)` 取最后一条带命令、带结构化事实的 shell 工具行（`tool.shell`：cwd / 耗时毫秒 / 围栏准备 / 退出码 / 状态 / 是否截断），不解析回执正文——标 `historical`、不伪造起止时间；回档折叠掉的行不参与派生。`/api/history` 在响应里带同一份快照，前端本地没有时才填。首次按会话授权的外部工作区，其围栏授权等待计入这条回执的总耗时（粒度见「外部工作区绑定」的 `workspace.grant`）。
+- **shell 状态也是快照**：`SessionView.shell` 取该会话最近一次 shell 的运行槽（命令、cwd（本环境写法：本机档是宿主路径，虚拟机档是 guest 内路径）、起止、耗时、退出码、状态 `status` 与回执预览；`status` 取 `exit` / `timeout` / `stopped` / `signal`，None = 运行中 / 未执行 / 没跑成），由工具循环写、状态栏读；它只服务界面，不进模型上下文，也不替代转录里的 shell 工具行。**重建 / 回放按转录派生**：`last_shell` 从内容日志 `Content`（`folded_away` 的活动视图）取最后一条带命令、带结构化事实的 shell 工具行（`tool.shell`：cwd / 耗时毫秒 / 围栏准备 / 退出码 / 状态 / 是否截断），不解析回执正文——标 `historical`、不伪造起止时间；回档折叠掉的行不参与派生。`/api/history` 在响应里带同一份快照，前端本地没有时才填。首次按会话授权的外部工作区，其围栏授权等待计入这条回执的总耗时（粒度见「外部工作区绑定」的 `workspace.grant`）。
 - **裁决卡与回答是例外**：`DecisionCard` / `DecisionAnswer` 按上表落盘（单 agent 与协作会话都留、系统会话不留）——"用户答过什么"是会话的事实，重启后卡与答案都要在（见"请用户裁决"一节）。
 
 - **会话表由后端给，前端不自己造会话**：前端只为 `/api/state` 会话表里"后端说在跑"的会话建标签页，事件流里出现**不认识的 sid** 一律不动（只置位，等下一次状态刷新把会话表带进来）（`src/presentation/web/assets/app/features/transcript/events.js`）。
@@ -325,6 +325,8 @@ session/<工作名>/
 
 ## 七、回档：三种模式 + 工作级标记
 
+- 回档是**版本控制专属**：只有工作台策略带 `versions` 能力位（`versioned`）的会话才有留档 / 删除 / 恢复；`plain` 会话没有版本库，三种模式一律拒绝（文案以 `src/units/business/lifecycle/service/rewind.rs` 为准），转录只往前加。
+- 转录是**只追加**的内容日志（`Content`）：留档只追加一条 `rewind` 事实，不裁字节；只有删除与恢复会做物理裁尾（`cut_before` + 整份重写）。
 - 回档的载体是**标记**（写进转录的 `rewind` 事件），不是"删掉就算"。用户在某一行的「回档到此处」上二选一：
 
 | 模式 | 转录 | 行 id | 共享区 |
@@ -346,7 +348,7 @@ session/<工作名>/
 
 - **按行精确物化共享区**：每个提交记录带 `(agent, line)` 锚（用户投喂锚在主会话当时的行号，agent 提交锚在它自己会话的行号）。回档时按"各会话的保留行"逐个提交比对，取最后一个"所有锚都还没越过保留行"的提交点再物化（**没有锚的提交不参与选点**：外部同步与用户投喂都带锚，无锚说明来历不明，算进"之前"会让留档永远停在外来提交上）；删除额外丢弃不再可达的提交并把各 agent 的基线对齐到该点，恢复同样丢弃留档之后的提交（回到留档操作前的线）。行锚由每席的 `MemberTools.line` 随转录推进（成员工具面由 `src/units/business/agentloop/domain/assembly.rs` 装配，`line` 随会话持有）：显式 `work_commit` / `work_push` 经 `ToolCtx` 拿到它，写工具落地后的自动快照与批次末的沙箱采纳都读同一处（采纳的提交记 `source=external`、作者仍是该 agent，所以留档同样能把它退掉）。
 
-- 被折叠 / 被截断的行不进发送视图，也不进压缩摘要的输入；`truncate_events` 是"活动窗口"的唯一算术，界面按 `rewind` 事件画折叠分界（见「上下文压缩」）。
+- 被折叠 / 被截断的行不进发送视图，也不进压缩摘要的输入；活动窗口由内容日志 `Content::folded_away()` 算（`src/units/business/transcript/domain/content.rs`），界面按 `rewind` 事件画折叠分界（见「上下文压缩」）。
 
 ## 八、上下文压缩
 

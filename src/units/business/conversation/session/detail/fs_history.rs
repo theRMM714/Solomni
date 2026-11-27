@@ -5,6 +5,7 @@
 use crate::kernel::api::fs;
 use crate::units::business::conversation::session::ports::HistoryStore;
 use crate::units::business::session_model::api::{HistoryView, SessionMeta};
+use crate::units::business::transcript::api::Content;
 use std::path::PathBuf;
 
 pub struct FsHistory {
@@ -134,12 +135,13 @@ impl HistoryStore for FsHistory {
         self.create(meta)
     }
 
-    fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
+    fn append(&self, name: &str, content: &Content) -> Result<(), String> {
         let d = self
             .find(name)
             .ok_or_else(|| format!("无此会话：{}", name))?;
+        let events = content.to_events();
         let mut text = String::new();
-        for ev in events {
+        for ev in &events {
             text.push_str(&serde_json::to_string(ev).map_err(|e| e.to_string())?);
             text.push('\n');
         }
@@ -147,12 +149,13 @@ impl HistoryStore for FsHistory {
             .map_err(|fault| fault.message)
     }
 
-    fn replace(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
+    fn replace(&self, name: &str, content: &Content) -> Result<(), String> {
         let d = self
             .find(name)
             .ok_or_else(|| format!("无此会话：{}", name))?;
+        let events = content.to_events();
         let mut text = String::new();
-        for ev in events {
+        for ev in &events {
             text.push_str(&serde_json::to_string(ev).map_err(|e| e.to_string())?);
             text.push('\n');
         }
@@ -204,7 +207,7 @@ impl HistoryStore for FsHistory {
         Self::read_meta(&d, name)
     }
 
-    fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
+    fn load(&self, name: &str) -> Result<(SessionMeta, Content), String> {
         let d = self
             .find(name)
             .ok_or_else(|| format!("无此会话：{}", name))?;
@@ -220,7 +223,7 @@ impl HistoryStore for FsHistory {
                 }
             }
         }
-        Ok((meta, events))
+        Ok((meta, Content::of_events(&events)))
     }
 
     fn delete(&self, name: &str) -> Result<bool, String> {

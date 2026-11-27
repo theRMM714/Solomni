@@ -64,6 +64,8 @@ impl Turn {
         probe: &dyn HostProbe,
     ) -> Result<crate::units::business::turn_state::api::Session, String> {
         let roster = self.modules.roster();
+        // 内容视图：重建要读的几个量（回复号、用量、压缩点）都从条目流派生，不再各自扫 JSON。
+        let content = crate::units::business::transcript::api::Content::of_events(events);
         // 打开 / 重建时按 meta 刷新布局投影（会话目录可能被复制或迁移；meta 是权威）。
         let work = work_root_of(self.history.as_ref(), meta)?;
         // 过期清理开关与保底都是**工作根**的会话级事实：子会话沿根继承，自己 meta 里那份不作准。
@@ -227,14 +229,14 @@ impl Turn {
                     line_ids,
                     compacted_upto,
                     compacted_line,
-                    reply_seq: crate::units::business::agentloop::api::max_reply(events),
+                    reply_seq: content.max_reply(),
                     context: (window, percent, keep_percent),
                     model: a.model.clone().or_else(|| registry.core_model()),
                     freshness: freshness.0,
                     freshness_keep_percent: freshness.1,
                     reads,
                     observations,
-                    usage: crate::units::business::agentloop::api::last_usage(events),
+                    usage: content.last_usage(),
                 };
                 Session::Single(crate::units::business::agentloop::api::rebuild_single(
                     &self.session_ports(),
@@ -254,7 +256,7 @@ impl Turn {
                 s.compacted_upto = compacted_upto;
                 s.compacted_line = compacted_line;
                 s.next_line = s.marks.len() as u64;
-                s.set_reply_seq(crate::units::business::agentloop::api::max_reply(events));
+                s.set_reply_seq(content.max_reply());
                 s.set_context_freshness(freshness.0);
                 s.set_freshness_keep_percent(freshness.1);
                 let (observations, reads) = replay_ledgers(events, compacted_upto);
@@ -262,13 +264,13 @@ impl Turn {
                 for (reply, body, fact) in reads {
                     s.note_read_at(body, reply, fact);
                 }
-                s.set_last_usage(crate::units::business::agentloop::api::last_usage(events));
+                s.set_last_usage(content.last_usage());
                 Session::Single(s)
             }
         };
         // 状态栏的 shell 快照同样按转录派生：重启 / 启用 / 回档重建后不再"失忆"。
         self.shell_slot(&meta.name)
-            .set(crate::units::business::agentloop::api::last_shell(events));
+            .set(crate::units::business::agentloop::api::last_shell(&content));
         Ok(built)
     }
 }
@@ -349,7 +351,8 @@ pub fn replay_dialogue(
     }
     // **压缩过**的会话按最后一条压缩行重建发送视图（见 session-model.md 六）：`up_to` 之前的行由摘要代替，
     // 转录本身完整保留；回档到压缩行之前时它已随转录被截掉，所以「没有它」就是「回到压缩前」。
-    let compacted = crate::units::business::transcript::api::last_compaction(events);
+    let compacted =
+        crate::units::business::transcript::api::Content::of_events(events).last_compaction();
     let compacted_upto = compacted.as_ref().map(|(up_to, _, _)| *up_to).unwrap_or(0);
     let compacted_line = compacted.as_ref().map(|(_, _, id)| *id).unwrap_or(0);
     // 对话里**只有**真正发生过的事；身份与环境由 params 现渲染。

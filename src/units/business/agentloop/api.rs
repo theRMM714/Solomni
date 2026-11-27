@@ -36,15 +36,10 @@ pub use crate::units::business::agentloop::domain::ports::SessionPorts;
 #[allow(unused_imports)]
 pub use crate::units::business::agentloop::domain::reply::{reply_msgs, tool_result_body};
 #[allow(unused_imports)]
-pub use crate::units::business::agentloop::domain::rewind::{
-    ArchiveMark, align_keep, archive_label, cut_before_line, folded, last_line_within, last_usage,
-    line_reply_of, max_reply, next_line_id, rewind_marks, truncate_events, turn_of_line,
-};
-#[allow(unused_imports)]
 pub use crate::units::business::agentloop::domain::session::{
     AgentSession, CompactChatFactory, CompactChatSpec, CompactionPlan, FRESHNESS_MIN_SAVED_CHARS,
     FreshnessStats, ReadAt, SessionParams, TurnRun, delta_visible, expired_note, freshness_view,
-    keep_whole_replies, stream_piece, summary_message, unique_work_name,
+    stream_piece, summary_message, unique_work_name,
 };
 /// 目的：测试用——直接造一个来源，验「它按什么条件交 id」；生产路径由会话类型挂来源。
 #[cfg(test)]

@@ -4,8 +4,12 @@
 //! 联动：会话、collab、turn、runtime、呈现层与测试都经这里取形状。
 
 #[allow(unused_imports)] // 入站面：别的单元与呈现层都经这里取形状
+pub use crate::units::business::transcript::domain::content::{
+    ArchiveMark, Content, Entry, keep_whole_replies, line_reply_of,
+};
+#[allow(unused_imports)] // 入站面：别的单元与呈现层都经这里取形状
 pub use crate::units::business::transcript::domain::events::{
     ContextUsage, DecisionAnswer, DecisionCard, DecisionEnvelope, DecisionMessage, DecisionQueue,
     DecisionWaiter, LineView, OptionView, SessionEvent, ToolCallView, card_of, event_of, idle,
-    interrupted_note, json_of, last_compaction, note_of, qualify, stopped_note, waiter_of, working,
+    interrupted_note, json_of, note_of, qualify, stopped_note, waiter_of, working,
 };

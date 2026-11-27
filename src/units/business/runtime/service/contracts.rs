@@ -310,7 +310,7 @@ impl RuntimeOps for Handle {
                     },
                     &req.sid,
                     &req.meta,
-                    &req.events,
+                    &req.content,
                     req.next,
                 )?;
                 Ok(RewindOutcome {

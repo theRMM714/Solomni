@@ -710,9 +710,9 @@ impl Turn {
         Ok(out)
     }
 
-    /// 目的：协作中途改需求：只改需求那一行提示词——旧需求整行清掉，末尾追加一条「需求已修改」的新需求。
-    ///  返回：需要重建的会话 + 已落盘的事件切片 + 下一个行号（**回档重建归宿主执行**，见 `RestoreRequest`）。
-    /// 约束：不截断转录、不回退工作区；旧需求行删除后，新需求行追加在末尾，
+    /// 目的：协作中途改需求：追加一条「需求已修改」的新需求行，再用 `supersede` 事实声明旧需求行作废（读方过滤）。
+    ///  返回：需要重建的会话 + 读出来的内容 + 下一个行号（**回档重建归宿主执行**，见 `RestoreRequest`）。
+    /// 约束：内容日志只追加、不截断转录、不回退工作区；旧需求行仍在文件里，新需求行追加在末尾，
     ///   这样讨论进行中的新需求也落在 [开始] 之后，成员下一轮看得到。
     pub(crate) fn update_task_outcome(
         &mut self,
@@ -735,51 +735,32 @@ impl Turn {
         };
         let text = f.adapt_text(text);
         let (meta, raw) = self.history.load(sid)?;
-        let next = crate::units::business::agentloop::api::next_line_id(&raw);
-        let mut kept = Vec::with_capacity(raw.len() + 1);
-        for ev in &raw {
-            if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
-                kept.push(ev.clone());
-                continue;
-            }
-            let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
-                kept.push(ev.clone());
-                continue;
-            };
-            // 旧需求行按**结构化字段**认（种类=user、动词=需求），不匹配正文。
-            let lines: Vec<serde_json::Value> = lines
-                .iter()
-                .filter(|l| {
-                    !(l.get("kind").and_then(|k| k.as_str()) == Some("user")
-                        && l.get("verb").and_then(|v| v.as_str()) == Some("需求"))
-                })
-                .cloned()
-                .collect();
-            if lines.is_empty() {
-                continue;
-            }
-            let mut e2 = ev.clone();
-            e2["lines"] = serde_json::Value::Array(lines);
-            kept.push(e2);
-        }
+        let next = raw.next_id();
+        // 旧需求行按**结构化字段**认（种类=user、动词=需求），不匹配正文。
+        let targets: Vec<u64> = raw
+            .lines()
+            .filter(|l| l.kind == "user" && l.verb == "需求")
+            .map(|l| l.id)
+            .collect();
         let mut line = crate::units::business::transcript::api::LineView::user(
             "需求",
             format!("需求已修改，以下是新需求：{}", text),
         );
         line.id = next;
         line.reply = next;
-        kept.push(
-            crate::units::business::transcript::api::SessionEvent::Transcript(vec![line]).to_json(),
-        );
+        // 内容日志只追加：新需求是一条新行，旧需求由 supersede 事实声明作废（读方过滤）。
+        let mut fresh = crate::units::business::transcript::api::Content::empty();
+        fresh.push_line(line);
+        fresh.push_fact("supersede", serde_json::json!({ "targets": targets }));
         self.history
-            .replace(sid, &kept)
+            .append(sid, &fresh)
             .map_err(|e| format!("改需求落盘失败：{}", e))?;
-        // 回档重建（行 id、标记顺序、事件顺序）只有宿主那条生命周期路径能做：
-        // 这里把「哪条会话 + 已落盘的事件切片 + 下一个行号」交出去，由调用方在同一个核心线程闭包里执行。
+        // 回档重建要的是「读出来看到的样子」：折叠与取代都在读时做完了。
+        let content = raw.folded_away().superseded();
         Ok(RestoreRequest {
             sid: sid.to_string(),
             meta,
-            events: kept,
+            content,
             next: next + 1,
         })
     }

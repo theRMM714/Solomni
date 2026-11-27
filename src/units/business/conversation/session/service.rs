@@ -6,7 +6,7 @@
 use crate::units::business::conversation::session::ports::HistoryStore;
 use crate::units::business::session_model::api::persist_policy_for;
 use crate::units::business::session_model::api::{HistoryView, SessionMeta};
-use crate::units::business::transcript::api::SessionEvent;
+use crate::units::business::transcript::api::{Content, SessionEvent};
 use crate::units::business::turn_state::api::History;
 use std::sync::Arc;
 
@@ -33,12 +33,12 @@ impl History for SessionService {
         self.store.save_meta(meta)
     }
 
-    fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
-        self.store.append(name, events)
+    fn append(&self, name: &str, content: &Content) -> Result<(), String> {
+        self.store.append(name, content)
     }
 
-    fn replace(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
-        self.store.replace(name, events)
+    fn replace(&self, name: &str, content: &Content) -> Result<(), String> {
+        self.store.replace(name, content)
     }
 
     fn list(&self) -> Result<Vec<HistoryView>, String> {
@@ -49,7 +49,7 @@ impl History for SessionService {
         self.store.meta(name)
     }
 
-    fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
+    fn load(&self, name: &str) -> Result<(SessionMeta, Content), String> {
         self.store.load(name)
     }
 
@@ -78,7 +78,7 @@ pub fn persist_events(
     if jsons.is_empty() {
         return None;
     }
-    match history.append(sid, &jsons) {
+    match history.append(sid, &Content::of_events(&jsons)) {
         Ok(()) => None,
         Err(e) => {
             log.error(

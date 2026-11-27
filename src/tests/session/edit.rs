@@ -6,6 +6,7 @@
 use super::super::builders::*;
 use super::super::prelude::*;
 use crate::units::business::session_model::api::{MEETING, SINGLE, SessionSpec};
+use crate::units::business::transcript::api::Content;
 
 #[test]
 pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
@@ -90,8 +91,9 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
         "虚拟根随提交写回"
     );
     let config = events
-        .iter()
-        .find(|e| e.get("type").and_then(|t| t.as_str()) == Some("config"))
+        .facts("config")
+        .into_iter()
+        .next()
         .unwrap_or_else(|| panic!("每次提交编辑追加一条旁路配置记录：{:?}", events));
     assert!(
         config.get("permission").is_some(),
@@ -153,7 +155,9 @@ pub(crate) fn edit_session_freezes_names_only_after_content() {
     // 有内容之后：名字冻结，模块与模型照旧可改。
     hist.append(
         "raw",
-        &[serde_json::json!({"type":"transcript","lines":[{"id":0,"line":"[用户] 你好"}]})],
+        &Content::of_events(&[
+            serde_json::json!({"type":"transcript","lines":[{"id":0,"line":"[用户] 你好"}]}),
+        ]),
     )
     .unwrap();
     let err = core
