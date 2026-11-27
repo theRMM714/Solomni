@@ -142,4 +142,48 @@ mod tests {
         let err = SessionDecls::new(loops(), p).validate().unwrap_err();
         assert!(err.contains("流程没注册：ghost"), "{}", err);
     }
+
+    #[test]
+    fn a_new_segment_can_reuse_a_declared_implementation() {
+        let mut l = loops();
+        l.loops.push(Loop {
+            id: "review".to_string(),
+            builder: Some("work".to_string()),
+            cast: vec![
+                Cast {
+                    role: "core".to_string(),
+                    min: 0,
+                    tools: Vec::new(),
+                },
+                Cast {
+                    role: "member".to_string(),
+                    min: 3,
+                    tools: vec!["say".to_string()],
+                },
+            ],
+            deny: Vec::new(),
+            ask: Vec::new(),
+            accepts: vec![Kind::Requirement],
+            produces: None,
+        });
+        let mut p = profiles();
+        p.profiles.push(Profile {
+            id: "review_team".to_string(),
+            name: "复核".to_string(),
+            hint: String::new(),
+            loop_id: String::new(),
+            flows: vec!["review".to_string()],
+            auto: false,
+            agent_visible: true,
+            sources: Vec::new(),
+            system_tools: Vec::new(),
+        });
+        let d = SessionDecls::new(l, p);
+        assert_eq!(d.validate(), Ok(()), "新段复用已有实现名也算合法声明");
+        assert_eq!(d.min_agents(&["review".to_string()]), 3);
+        assert_eq!(
+            d.spec_of("review_team").expect("声明的类型").flows,
+            vec!["review"]
+        );
+    }
 }
