@@ -8,6 +8,7 @@ pub use crate::units::business::tools::domain::budget::{
 };
 pub use crate::units::business::tools::domain::commands::{CommandBook, Phase, Runtime};
 pub use crate::units::business::tools::domain::env::{MemberEnvFacts, host_read_roots, member_env};
+pub use crate::units::business::tools::domain::host_exec::{host_policy, host_sandbox};
 pub use crate::units::business::tools::domain::op::{
     Executor, Op, OpBook, complete as complete_op, parse as parse_op, usage as op_usage,
     usage_named,

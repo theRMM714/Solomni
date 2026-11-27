@@ -12,14 +12,12 @@ use crate::units::business::prompt::api::Prompt;
 use crate::units::business::session_model::api::SessionDecls;
 use crate::units::business::tools::api::{ToolExec, Tools};
 use crate::units::business::turn_state::api::{Flow, FlowSetup, Flows};
-use crate::units::business::vm::api::Vm;
 
 use super::collab::{CollabSession, Phase};
 
 /// 目的：协作流程工厂：持有装配两段要的入站面，按 id 造讨论段或执行段。
 pub struct CollabFlows {
     llm: Arc<dyn Llm + Send + Sync>,
-    vm: Arc<dyn Vm + Send + Sync>,
     modules: Arc<dyn Modules + Send + Sync>,
     prompts: Arc<dyn Prompt>,
     systools: Arc<dyn Tools>,
@@ -34,7 +32,6 @@ impl CollabFlows {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         llm: Arc<dyn Llm + Send + Sync>,
-        vm: Arc<dyn Vm + Send + Sync>,
         modules: Arc<dyn Modules + Send + Sync>,
         prompts: Arc<dyn Prompt>,
         systools: Arc<dyn Tools>,
@@ -44,7 +41,6 @@ impl CollabFlows {
     ) -> CollabFlows {
         CollabFlows {
             llm,
-            vm,
             modules,
             prompts,
             systools,
@@ -88,7 +84,6 @@ impl Flows for CollabFlows {
         let session = match setup.restore {
             Some((meta, events)) => CollabSession::restore(
                 Arc::clone(&self.llm),
-                Arc::clone(&self.vm),
                 Arc::clone(&self.modules),
                 setup.settings.clone(),
                 Arc::clone(&self.prompts),
@@ -110,7 +105,6 @@ impl Flows for CollabFlows {
                     .ok_or_else(|| format!("流程 {} 新建时缺少核心模型通道", id))?;
                 CollabSession::start(
                     Arc::clone(&self.llm),
-                    Arc::clone(&self.vm),
                     Arc::clone(&self.modules),
                     setup.settings.clone(),
                     channel,

@@ -210,11 +210,7 @@ pub struct ToolFace {
     pub mode: crate::units::pure::registry_model::api::ToolMode,
     /// 目的：模块 id → 该模块的（目录, 工具表）；内置 read/write 不走这里。
     pub modules: BTreeMap<String, ModuleTools>,
-    /// 目的：本会话的执行档位——工具执行者据此决定在本机跑还是送进 guest。
-    pub side: crate::units::pure::exec_model::api::Side,
-    /// 目的：虚拟机档要用的 **guest 租约**（空 = 本机档 / 没有 guest）：共享 guest 时它是作用域根工作名
-    ///   （proxy 树 = 代理根名）；主机围栏仍用 `fence.lease`（子会话名）。
-    pub guest_lease: String,
+
     /// 目的：本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 runtime）。
     pub sandbox: crate::units::business::workspace::api::Sandbox,
     /// 目的：工具说明块的标题模板（来自提示词段 `tools_this_turn`；变量 `{{tools}}`）。
@@ -230,7 +226,6 @@ pub struct ToolFace {
     /// 目的：模块 id → 该模块隐私字段的注入项（env 名 → 值）；起进程时只走环境，不进命令行。
     pub module_env: std::collections::BTreeMap<String, Vec<(String, String)>>,
     /// 目的：本机档运行包的生效 PATH（由 packages 计划给出；虚拟机档 / 没有包 = None）。
-    pub runtime_path: Option<std::ffi::OsString>,
     /// 目的：shell 的只读工具链根：项目内基础 profile + 该 agent 模块的运行包根。
     /// 约束：只进 shell 的 per-call 围栏；模块工具的放行仍走它自己的命令解释器基线。
     pub runtime_roots: Vec<PathBuf>,
@@ -265,8 +260,8 @@ pub(crate) struct MemberTools {
     pub log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
     /// 目的：工具执行面（**不持它的端口**，R12）：跑外部/内置工具都走它。
     pub tools: Arc<dyn ToolExec + Send + Sync>,
-    /// 目的：虚拟机档的 guest 用例面（**不持它的端口**，R12）：guest 执行走它。
-    pub vm: Arc<dyn crate::units::business::vm::api::Vm + Send + Sync>,
+    /// 目的：这一席的执行面（本机 / 虚拟机都由策略给）：shell 与模块工具都经它跑，引擎不认识档位。
+    pub exec: Arc<dyn crate::units::business::sandbox::api::Sandbox + Send + Sync>,
     /// 目的：常驻服务的统一管理面——模块的 `services` 操作经它调用（**不持它的端口**，R12）。
     pub residents: Arc<dyn crate::units::business::residents::api::ResidentOps + Send + Sync>,
     /// 目的：工作区用例面——写工具落地后把沙箱改动记进**该 agent 的存档线**（**不持它的端口**，R12）。

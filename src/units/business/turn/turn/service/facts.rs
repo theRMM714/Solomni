@@ -18,10 +18,10 @@ use crate::units::business::agentloop::api::{
 };
 use crate::units::business::conversation::session::api::work_root_of;
 use crate::units::business::llm::api::Channel;
+use crate::units::business::sandbox::api::GuestOs;
 use crate::units::business::session_model::api::SessionMeta;
 use crate::units::business::transcript::api::SessionEvent;
 use crate::units::business::turn_state::api::Turn;
-use crate::units::business::vm::api::GuestOs;
 use crate::units::business::workspace::api::{ModuleDir, Sandbox, Sandboxes, SeatFacts, SeatPlan};
 use crate::units::pure::exec_model::api::Side;
 use crate::units::pure::permission::api::PermissionSet;
@@ -223,8 +223,9 @@ impl Turn {
         // 这一回合的段与角色：用户建的单 agent 会话 = standard/solo，协作子会话 = 流程的成员角色。
         loop_id: &str,
         role: &str,
-        side: Side,
-        guest_lease: String,
+        facts: &crate::units::business::sandbox::api::SandboxFacts,
+        decl: &crate::units::business::sandbox::api::SandboxDecl,
+        lease: &str,
         host_plan: &PackagePlan,
     ) -> crate::units::business::agentloop::api::ToolFace {
         let source_ids: Vec<String> = ["agent", "module", "workspace"]
@@ -242,10 +243,10 @@ impl Turn {
             mode,
             loop_id,
             role,
-            side,
-            guest_lease,
+            decl,
+            lease,
             shell: self.shell_slot(&sb.session),
-            env: self.member_env(registry, modules, sb, net, side, host_plan),
+            env: self.member_env(registry, modules, sb, net, facts.side, host_plan),
             source_ids: &source_ids,
             system_tools: &[],
             abilities: &abilities,
@@ -268,9 +269,10 @@ impl Turn {
         sb: &Sandbox,
         unavailable: BTreeMap<String, Vec<String>>,
         net: bool,
-        side: Side,
         guest: Option<GuestOs>,
-        guest_lease: String,
+        facts: &crate::units::business::sandbox::api::SandboxFacts,
+        decl: &crate::units::business::sandbox::api::SandboxDecl,
+        lease: &str,
         host_plan: &PackagePlan,
         // 会话形状（会话类型展开后的声明）：工具来源与 system 工具都按它发。
         shape: &crate::units::business::session_model::api::SessionSpec,
@@ -287,10 +289,10 @@ impl Turn {
                 // 单 agent 工作：用户自己开的那场对话（不是任务链的节点）——坐会话类型声明的那一席。
                 loop_id: &shape.loop_id,
                 role: &shape.role,
-                side,
-                guest_lease,
+                decl,
+                lease,
                 shell: self.shell_slot(&sb.session),
-                env: self.member_env(registry, modules, sb, net, side, host_plan),
+                env: self.member_env(registry, modules, sb, net, facts.side, host_plan),
                 source_ids: &shape.sources,
                 system_tools: &shape.system_tools,
                 abilities: &abilities,

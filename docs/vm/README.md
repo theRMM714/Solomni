@@ -31,7 +31,7 @@
 ## 二、执行分派与就绪
 - 会话的事实是客机侧（`SandboxFacts.side == guest`）时把模块命令交给 guest；建会话 / 启用历史会话时装配并拉起，删除会话时销毁。
 - 改配按装配输入变化重建：模块集合 / 执行环境策略 / 虚拟根 / 定版变了才重建；只改模型或权限不重建；网络是全局开关（`sandbox.policy.network`），改它走整体重启，不按会话重建。
-- 一个主会话树共用一台 guest：guest 租约 = 顶层工作名（proxy 树 = 代理根名），协作 / 节点 / proxy 子工作的工具租约都指向它；主机围栏租约仍按子会话（`FencePlan.lease` 与工具上下文里的 `guest_lease` 分开）。
+- 一个主会话树共用一台 guest：guest 租约 = 顶层工作名（proxy 树 = 代理根名），协作 / 节点 / proxy 子工作的工具租约都指向它；主机围栏租约仍按子会话（`FencePlan.lease` 与客机租约分开：客机租约在装配期经 `sandbox::api::OpenRequest.lease` 交给执行句柄）。
 - 环境属于主会话：执行环境声明（策略 id + `params.guest` + `pins`）由人建主会话时决定，子会话只读继承；核心代理的 `create_session` 不接受模型自选环境。
 - 网络是全局开关（`sandbox.policy.network`），不是会话字段：虚拟机档决定 guest 网卡；本机档由平台围栏决定（Windows `internetClient`、macOS `network-outbound`、Linux `net=false` 用 seccomp 拒绝非本地 socket；Linux `net=true` 不装网络过滤器，不限制入站 / 绑定）；默认 false；Windows 只放行公网出站，不授 private network / loopback。
 - guest 装配按整棵树聚合：plan / 沙箱 / 包冲突 / 定版取作用域根与整棵子树的并集；新子会话的包已被运行 guest 装载就直接加入，引入新包时要求树空闲后按新装配重建，不做运行包动态加载。
@@ -122,7 +122,7 @@
 - 模块构建也能落 guest（创建会话前自动补编；手动入口是 `solomni --build=<模块 id> --guest=<虚拟根>`），细节见 `docs/builds/README.md`。
 - 包库在 `packages` 单元：契约、扫描与选包都在那里；`vm` 只消费 `PackagePlan` 做挂载 / 软链 / 叠写，不再持有 `PackageSource`。
 - 就绪检测按组合逐项报"现状 + 怎么补"；"验过没有"是数据表（`VERIFIED_HOSTS`），不是平台 `cfg`。
-- 路径桥（`src/units/business/vm/domain/paths.rs`）：宿主路径 ↔ guest 路径只有一座桥；同方言时恒等（宿主路径原样在 guest 里成立）；跨方言时编进镜像根（宿主 `D:\a\b` → POSIX guest `/solomni-host/d/a/b`；POSIX 宿主 → Windows guest `C:\solomni-host\…`，非法字符转义）；UNC 根编成保留段（宿主 `\\server\share\a` → `/solomni-host/unc/server/share/a`，盘符段只可能是单字母，两种段不会撞）；宿主文件系统自己的错误（例如 Windows 对 `<>` 这类非法文件名的错误码）会原样出现在 guest 的回执里——这是共享盘语义，不是 guest 内核的判定。
+- 路径桥（`src/kernel/domain/path_bridge.rs`，宿主与 `sandbox` 共用同一份）：宿主路径 ↔ guest 路径只有一座桥；同方言时恒等（宿主路径原样在 guest 里成立）；跨方言时编进镜像根（宿主 `D:\a\b` → POSIX guest `/solomni-host/d/a/b`；POSIX 宿主 → Windows guest `C:\solomni-host\…`，非法字符转义）；UNC 根编成保留段（宿主 `\\server\share\a` → `/solomni-host/unc/server/share/a`，盘符段只可能是单字母，两种段不会撞）；宿主文件系统自己的错误（例如 Windows 对 `<>` 这类非法文件名的错误码）会原样出现在 guest 的回执里——这是共享盘语义，不是 guest 内核的判定。
 - 挂载表优先：宿主路径落在某个已挂稳定根 / 包根内时用该挂载的 guest 点，表外才退镜像根；外部工作区根同样由桥给挂载点（内部布局下共享区在会话树内，不额外挂）。
 - 挂载点与命令装配（`cwd` / 路径型 `env`）都走路径桥；反向也走它：系统工具跑在宿主侧，靠它把模型给的 guest 写法译回宿主路径（`PathCodec`，见 `docs/tools/tools-and-roles.md` 的「路径模型」）。起 guest 前校验每个稳定根都能经桥往返（`check_stable_roots`）；UNC 经保留段编码后往返成立（虚拟机档因此支持 UNC 外部根），卷 GUID 与非 UTF-8 如实拒绝。
 - 工作环境提示词按环境分发（`prompts/shared/tools.yaml` 的 `env_hosts` / `env_guests` / `envs`）：本机档按宿主平台给，虚拟机档按 guest 的 os 给——虚拟机档给出的路径就是 guest 内路径；系统工具与模块工具同一套写法（路径规矩只在提示词册的 `path_rules` 里说一次，核心在寻址前翻译）。

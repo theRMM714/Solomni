@@ -18,12 +18,11 @@ use crate::units::business::agentloop::domain::session::{
 use crate::units::business::catalog::modules::api::Module;
 use crate::units::business::llm::api::{Channel, Msg};
 use crate::units::business::prompt::api::Segment;
+use crate::units::business::sandbox::api::GuestOs;
 use crate::units::business::tools::api::{ObservationFact, Observations};
 use crate::units::business::transcript::api::{ContextUsage, SessionEvent};
 use crate::units::business::versions::api::ReadFact;
-use crate::units::business::vm::api::GuestOs;
 use crate::units::business::workspace::api::Sandbox;
-use crate::units::pure::exec_model::api::Side;
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::pure::registry_model::api::ToolMode;
 
@@ -56,10 +55,10 @@ pub struct MemberSpec<'a> {
     pub loop_id: &'a str,
     /// 目的：这一回合的角色 id（用户建的单 agent 会话 = solo，协作子会话 = executor）。
     pub role: &'a str,
-    /// 目的：档位（本机 / 虚拟机）。
-    pub side: Side,
-    /// 目的：这一席的 guest 租约（本机档为空串）。
-    pub guest_lease: String,
+    /// 目的：这一会话的执行环境声明（策略 id + 不透明参数）：装配时据此开一个执行面。
+    pub decl: &'a crate::units::business::sandbox::api::SandboxDecl,
+    /// 目的：这一席的执行租约（虚拟机档 = 共享 guest 的租约；本机档为空串）。
+    pub lease: &'a str,
     /// 目的：这一席的 shell 活进程槽（成员工具面与状态栏共用同一份）。
     pub shell: Arc<ShellSlot>,
     /// 目的：工具环境事实（围栏 / 注入项 / 运行路径 / 工具链根），由 turn 侧的 `env` 派生后拷入。
@@ -146,6 +145,26 @@ pub struct ProxySpec<'a> {
     pub freshness_keep_percent: u8,
 }
 
+/// 目的：按这一会话的执行环境声明开一个执行面（本机 / 虚拟机都由策略给）；开不出来时给一个"什么都不跑"的句柄。
+/// 约束：开不出来不打断整场会话——每次调用都会如实回执理由；决策在策略里，这里只搬运。
+fn open_exec(
+    ports: &SessionPorts,
+    spec: &MemberSpec<'_>,
+) -> Arc<dyn crate::units::business::sandbox::api::Sandbox> {
+    let opened = ports.policies.facts(spec.decl).and_then(|facts| {
+        ports
+            .policies
+            .open(&crate::units::business::sandbox::api::OpenRequest {
+                session: &spec.sandbox.session,
+                lease: spec.lease,
+                decl: spec.decl,
+                facts: &facts,
+                runtime_path: spec.env.runtime_path.as_deref().map(std::path::Path::new),
+            })
+    });
+    opened.unwrap_or_else(crate::units::business::sandbox::api::refused)
+}
+
 /// 目的：装配一席的工具环境：把席位声明与端口面交给**会话唯一的装配机**（`domain::assemble`），再包成活的工具面对象。
 pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools {
     let sb = spec.sandbox;
@@ -170,8 +189,6 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
         face: ToolFace {
             mode: spec.mode,
             modules: seat.modules,
-            side: spec.side,
-            guest_lease: spec.guest_lease.clone(),
             sandbox: sb.clone(),
             tools_this_turn: ports.prompt.text(Segment::ToolsThisTurn).to_string(),
             builtin_tools: ports.systools.book(),
@@ -179,7 +196,6 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
             // 围栏、模块注入项、运行路径与工具链根都由 turn 侧的 env 派生后拷进来（本文件不给第二份）。
             fence: spec.env.fence.clone(),
             module_env: spec.env.module_env.clone(),
-            runtime_path: spec.env.runtime_path.clone(),
             runtime_roots: spec.env.runtime_roots.clone(),
             // 这一席的系统工具面**由装配机按席位合成**（越权校验的唯一判据）：给什么写什么，代码里不留第二份名单。
             allowed: seat.allowed,
@@ -196,8 +212,8 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
         llm: Arc::clone(&ports.llm),
         log: Arc::clone(&ports.log),
         tools: Arc::clone(&ports.tools),
-        vm: Arc::clone(&ports.vm),
-        // 常驻服务的统一管理面：模块的 services 操作经它调用。
+        // 执行面：按这一会话的声明开一个句柄（本机 / 虚拟机都是同一个端口，引擎只认它）。
+        exec: open_exec(ports, spec), // 常驻服务的统一管理面：模块的 services 操作经它调用。
         residents: Arc::clone(&ports.residents),
         workspace: Some(Arc::clone(&ports.workspace)),
         versions: Some(Arc::clone(&ports.versions)),

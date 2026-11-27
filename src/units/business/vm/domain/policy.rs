@@ -1,12 +1,14 @@
 //! 目的：虚拟机策略——把「客机」这条执行环境登记进 `sandbox` 的注册表。
-//! 管：`VmPolicy`（自我介绍、声明校验、客机事实）。
+//! 管：`VmPolicy`（自我介绍、声明校验、客机事实、开句柄）、`VmSandbox`（把命令送进 guest）。
 //! 不管：guest 怎么起停（`vm::service`）；会话怎么用它（`work`）。
 //! 联动：组合根在装配期经 `vm::api::vm_policy` 建实例并登记。
 
 use crate::kernel::ports::HostProbe;
 use crate::units::business::sandbox::api::{
-    PolicyDecl, SandboxDecl, SandboxFacts, SandboxPolicy, VM_POLICY,
+    ExecKind, ExecOutcome, ExecRequest, OpenRequest, PolicyDecl, Sandbox, SandboxDecl,
+    SandboxFacts, SandboxPolicy, VM_POLICY,
 };
+use crate::units::business::vm::api::{GuestRun, OutputLimit, Vm};
 use crate::units::pure::exec_model::api::{Side, TargetSpec};
 use crate::units::pure::registry_model::api::{Param, ParamType};
 use std::collections::BTreeMap;
@@ -17,12 +19,17 @@ use std::sync::Arc;
 pub struct VmPolicy {
     root: PathBuf,
     probe: Arc<dyn HostProbe + Send + Sync>,
+    vm: Arc<dyn Vm + Send + Sync>,
 }
 
 impl VmPolicy {
-    /// 目的：按项目根与宿主探针建策略（判客机镜像要用它们）。
-    pub fn new(root: PathBuf, probe: Arc<dyn HostProbe + Send + Sync>) -> VmPolicy {
-        VmPolicy { root, probe }
+    /// 目的：按项目根、宿主探针与客机执行面建策略（判镜像与跑命令要用它们）。
+    pub fn new(
+        root: PathBuf,
+        probe: Arc<dyn HostProbe + Send + Sync>,
+        vm: Arc<dyn Vm>,
+    ) -> VmPolicy {
+        VmPolicy { root, probe, vm }
     }
 
     fn guest_of(decl: &SandboxDecl) -> Result<String, String> {
@@ -105,5 +112,99 @@ impl SandboxPolicy for VmPolicy {
             guest_os: Some(image.os.as_str().to_string()),
             guest_arch: Some(image.arch.as_str().to_string()),
         })
+    }
+
+    fn open(&self, req: &OpenRequest<'_>) -> Result<Arc<dyn Sandbox>, String> {
+        Ok(Arc::new(VmSandbox {
+            vm: Arc::clone(&self.vm),
+            lease: req.lease.to_string(),
+        }))
+    }
+}
+
+/// 目的：客机侧的执行句柄——命令送进这个会话的 guest，本机不跑任何东西。
+pub struct VmSandbox {
+    vm: Arc<dyn Vm + Send + Sync>,
+    lease: String,
+}
+
+impl Sandbox for VmSandbox {
+    fn precheck(&self, req: &ExecRequest<'_>) -> Option<String> {
+        if self.lease.is_empty() {
+            return Some(match req.kind {
+                ExecKind::Shell { .. } => {
+                    "这条虚拟机档会话没有 guest 租约，shell 没有执行。".to_string()
+                }
+                ExecKind::Module { .. } => {
+                    "这条虚拟机档会话没有 guest 租约，工具没有执行。".to_string()
+                }
+            });
+        }
+        if req.fence.net.is_local() {
+            return Some(
+                "local_ports 只在本机档生效：虚拟机档的 guest 回环是它自己的，不映射到宿主端口；这次调用没有执行。"
+                    .to_string(),
+            );
+        }
+        None
+    }
+
+    fn run(&self, req: &ExecRequest<'_>) -> ExecOutcome {
+        match &req.kind {
+            ExecKind::Shell { script, .. } => {
+                let run = GuestRun {
+                    command: script.to_string(),
+                    args_json: String::new(),
+                    env: Vec::new(),
+                    cwd: req.cwd.display().to_string(),
+                    timeout_secs: req.timeout.as_secs(),
+                    output_limit: OutputLimit::Shell,
+                };
+                ExecOutcome::plain(self.vm.guest_run_fenced_cancellable(
+                    &self.lease,
+                    &run,
+                    &req.fence,
+                    req.cancel,
+                ))
+            }
+            ExecKind::Module {
+                module,
+                command,
+                args_json,
+                env,
+                ..
+            } => {
+                // 共享盘不承载执行位：模块声明的相对入口先落进 guest 本地副本，再把首 token 换成它。
+                let declared = command.trim_start();
+                let dispatched =
+                    match crate::units::business::catalog::modules::api::local_entry(declared) {
+                        Some(entry) => {
+                            match self.vm.stage_exec(
+                                &self.lease,
+                                module,
+                                &req.cwd.join(entry),
+                                entry,
+                            ) {
+                                Ok(staged) => format!("{}{}", staged, &declared[entry.len()..]),
+                                Err(why) => {
+                                    return ExecOutcome::plain(
+                                        crate::kernel::api::types::ToolOutcome::new(false, why),
+                                    );
+                                }
+                            }
+                        }
+                        None => declared.to_string(),
+                    };
+                let run = GuestRun {
+                    command: dispatched,
+                    args_json: args_json.to_string(),
+                    env: env.to_vec(),
+                    cwd: req.cwd.display().to_string(),
+                    timeout_secs: 30,
+                    output_limit: OutputLimit::Head,
+                };
+                ExecOutcome::plain(self.vm.guest_run_fenced(&self.lease, &run, &req.fence))
+            }
+        }
     }
 }

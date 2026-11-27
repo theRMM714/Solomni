@@ -137,7 +137,7 @@ pub struct SessionParams {
     /// 目的：这一回合坐在哪个**流程段**（standard / discuss / execute / proxy）：loop 来源按 (段, 角色) 查角色位。
     pub loop_id: String,
     /// 目的：这场会话跑在哪种 guest 里（本机档 = None）——工作环境块按它选 guest 档，路径按 guest 拼法渲染。
-    pub guest: Option<crate::units::business::vm::api::GuestOs>,
+    pub guest: Option<crate::units::business::sandbox::api::GuestOs>,
 }
 
 impl SessionParams {
@@ -180,7 +180,7 @@ impl SessionParams {
     /// 目的：把"这场会话跑在哪种 guest 里"接上（本机档传 None）——工作环境块与路径拼法按它选。
     pub fn with_guest(
         mut self,
-        guest: Option<crate::units::business::vm::api::GuestOs>,
+        guest: Option<crate::units::business::sandbox::api::GuestOs>,
     ) -> SessionParams {
         self.guest = guest;
         self
@@ -194,14 +194,14 @@ impl SessionParams {
             .guest
         {
             Some(g) => Some(std::sync::Arc::new(
-                crate::units::business::vm::api::PathBridge::for_session(
+                crate::kernel::api::path_bridge::PathBridge::for_session(
                     std::env::consts::OS,
                     Some(g.dialect()),
                 ),
             )),
             None => crate::kernel::api::view_drive::view_codec().or_else(|| {
                 Some(
-                    std::sync::Arc::new(crate::units::business::vm::api::PathBridge::for_session(
+                    std::sync::Arc::new(crate::kernel::api::path_bridge::PathBridge::for_session(
                         std::env::consts::OS,
                         None,
                     )) as std::sync::Arc<dyn crate::kernel::ports::PathCodec>,
@@ -242,7 +242,7 @@ impl SessionParams {
 /// 约束：纯函数；编码器由参数注入，两个分支都能在不碰全局视图盘的情况下验收。
 pub(crate) fn env_path(
     view: Option<&dyn crate::kernel::ports::PathCodec>,
-    bridge: &crate::units::business::vm::api::PathBridge,
+    bridge: &crate::kernel::api::path_bridge::PathBridge,
     path: &std::path::Path,
 ) -> String {
     match view {
@@ -264,7 +264,7 @@ pub fn env_block(
     } else {
         None
     };
-    let bridge = crate::units::business::vm::api::PathBridge::for_session(
+    let bridge = crate::kernel::api::path_bridge::PathBridge::for_session(
         std::env::consts::OS,
         p.guest.map(|g| g.dialect()),
     );

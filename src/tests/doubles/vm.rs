@@ -456,15 +456,31 @@ pub(crate) fn test_policies() -> crate::units::business::sandbox::api::SandboxPo
     test_policies_at(crate::tests::root_dir())
 }
 
+/// 目的：同上，但本机执行面用调用方给的 `ToolExec`（要观察 shell 实际跑什么时用这一条）。
+pub(crate) fn test_policies_with(
+    toolexec: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync>,
+) -> crate::units::business::sandbox::api::SandboxPolicies {
+    test_policies_at_with(crate::tests::root_dir(), toolexec)
+}
+
 /// 目的：按指定产品根造策略注册表（注入产品根的用例要它，否则客机策略找不到那格虚拟根）。
 pub(crate) fn test_policies_at(
     root: std::path::PathBuf,
 ) -> crate::units::business::sandbox::api::SandboxPolicies {
+    test_policies_at_with(root, crate::tests::doubles::chat::test_tools_svc())
+}
+
+/// 目的：同上，但本机执行面与客机执行面都用调用方给的实例。
+pub(crate) fn test_policies_at_with(
+    root: std::path::PathBuf,
+    toolexec: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync>,
+) -> crate::units::business::sandbox::api::SandboxPolicies {
     crate::units::business::sandbox::api::SandboxPolicies::new(vec![
-        crate::units::business::sandbox::api::host_policy(),
+        crate::units::business::tools::api::host_policy(toolexec),
         crate::units::business::vm::api::vm_policy(
             root,
             Arc::new(crate::kernel::detail::HostProbeAdapter),
+            test_vm(),
         ),
     ])
 }

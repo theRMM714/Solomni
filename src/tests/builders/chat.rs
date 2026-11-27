@@ -268,6 +268,8 @@ pub(crate) fn native_member(
     );
     let sb = test_sandbox(id, &[]);
     let allowed = super::face_allowed(&modules);
+    let exec_svc: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync> =
+        test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost));
     WithTools {
         member: m,
         tools: Some(MemberTools {
@@ -276,8 +278,6 @@ pub(crate) fn native_member(
                 loop_id: "standard".to_string(),
                 role: "solo".to_string(),
                 modules,
-                side: crate::units::pure::exec_model::api::Side::Host,
-                guest_lease: String::new(),
                 sandbox: sb.clone(),
                 tools_this_turn: test_prompts()
                     .text(crate::units::business::prompt::api::Segment::ToolsThisTurn)
@@ -286,7 +286,6 @@ pub(crate) fn native_member(
                 unavailable: BTreeMap::new(),
                 fence: crate::kernel::api::fence::FencePlan::for_session(&sb, &[], false),
                 module_env: Default::default(),
-                runtime_path: None,
                 runtime_roots: Vec::new(),
                 // 测试替身按"执行席"发放全部内置工具与模块的限定 id（机制席位的越权校验另有专门用例）。
                 allowed,
@@ -302,8 +301,8 @@ pub(crate) fn native_member(
             },
             llm: test_llm_demo(),
             log: Arc::new(crate::kernel::ports::NoopLog),
-            tools: test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
-            vm: test_vm(),
+            tools: Arc::clone(&exec_svc),
+            exec: crate::units::business::tools::api::host_sandbox(exec_svc),
             residents: Arc::new(crate::units::business::residents::api::NoResidents),
             // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
             workspace: None,

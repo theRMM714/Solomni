@@ -13,7 +13,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/kernel.rs` | 地基库的入口与公开面：`contracts` / `api` / `ports` / `domain` / `detail` 五个子模块的形状声明 |
-| `src/kernel/api.rs` | 地基库对外面的入口：只声明 `api/` 下的面模块。面按**对外概念**切（`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `net` / `path` / `platform` / `hash`），每个面只做重导出、不定义条目；能力与装配层经 `api::<面>` 取用，内核内部直取所属机制（见 [README](README.md) 的「六、对外面」） |
+| `src/kernel/api.rs` | 地基库对外面的入口：只声明 `api/` 下的面模块。面按**对外概念**切（`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `net` / `path` / `platform` / `hash` / `budget` / `path_bridge`），每个面只做重导出、不定义条目；能力与装配层经 `api::<面>` 取用，内核内部直取所属机制（见 [README](README.md) 的「六、对外面」） |
 | `src/kernel/ports.rs` | 全项目共享的机制端口：`Log` / `PathCodec` / `AskUser` / `ToolHandler` / `HostProbe` / `ProcessRunner` / `SessionHost` / `FenceHost` / `FenceGate` / `UserPath` 的 trait 定义与它们的纯数据形态（含 `ShellRun` 的 `gate`、用户 PATH 的 `PathValue`） |
 | `src/kernel/contracts.rs` | 跨层共享形状的入口：`fence` / `note` / `run` / `types` 四个子模块声明 |
 | `src/kernel/contracts/types.rs` | 跨层共享的端口载荷（纯数据）：`SessionId` / `ToolOutcome` / `Ask` / `AskOutcome` 与默认预算、能力名文法（执行档位与作业进度归 `exec_model`，不在 kernel） |
@@ -22,6 +22,8 @@
 | `src/kernel/contracts/fence.rs` | 围栏**意图**：`FencePlan`（`home` / `cwd` / `grants` / `net`）、`Grant`（`path` + `Access` + `Reach`）、`NetPolicy`、`FenceRunPolicy` 与 `FenceBlocked`：纯数据，不含任何平台词汇 |
 | `src/kernel/domain/actor.rs` | 命令队列（`Actor<S>`）：把一份核心状态搬到它自己的线程上，命令按到达顺序逐条执行，一条命令 panic 不带走整个核心；线程退出与 panic 都落日志。不含命令的业务语义 |
 | `src/kernel/domain/hash.rs` | 内容指纹 SHA-256：增量实现（`Sha256` / `content_hash` / `is_content_hash`），共享区内容寻址与运行包/素材指纹的唯一键（纯逻辑，对外经 `api::hash`） |
+| `src/kernel/domain/budget.rs` | 工具回执预算：`ResultBudget`（`full` / `for_batch` / `pressure` / `exhausted`）、`Continuation`（`Command` / `Read`）、`cap_result_with` 与 `MAX_RESULT_CHARS` / `MIN_RESULT_CHARS` 等常量；按行边界截断、留一行预算说明（纯逻辑，对外经 `api::budget`） |
+| `src/kernel/domain/path_bridge.rs` | 路径方言桥：`PathDialect`（`Posix` / `Windows`）与 `PathBridge`（`for_session` / `to_guest` / `round_trips`），把宿主路径与客机路径互译（POSIX 镜像 `/solomni-host`、Windows 镜像 `C:\solomni-host` 与 UNC 段）；虚拟机的路径书写与宿主的视图路径共用这一份（纯逻辑，对外经 `api::path_bridge`） |
 | `src/kernel/domain/fence.rs` | 沙箱策略对机制的要求与本次模式（`SandboxRequirements` / `SandboxMode`）、按次租约生成：纯机制 |
 | `src/kernel/domain/path.rs` | 路径的对外书写形式（门面）：把路径统一写成 `/` 分隔的字符串；拆出 UNC 的 server / share，并给出落点身份 `Locus` 的键；平台实现在 `src/kernel/domain/path/windows.rs` / `src/kernel/domain/path/unix.rs` |
 | `src/kernel/domain/path/windows.rs` | `path` 的 Windows 后端：把 `\\?\` / `\\?\UNC\` 扩展前缀还原成普通写法 |
@@ -30,7 +32,7 @@
 | `src/kernel/domain/jobs.rs` | 生成中作业的取消表（`JobRegistry`）：同一会话每次生成各持一面旗，停止置位全部、摘旗按身份 |
 | `src/kernel/domain/name.rs` | 会成为目录名的名字的两条纯规则：`validate_dir_name`（非空、无首尾空白、不含 Windows 非法字符与控制字符、不是设备保留名，主语只进报错）与 `dedup_suffix`（占用时依次试 `-2` / `-3`） |
 | `src/kernel/domain/layout.rs` | 产品根的布局名字（`.home` / `.vm` / `runtimes` / `guest.yaml`）与由根派生的四处路径：`home` / `vm` / `runtimes` / `guest_spec`，调用点不再各自拼字面量 |
-| `src/kernel/domain/receipt.rs` | host/guest 共用的 shell 回执装配：`ShellReceipt { payload, notes }`——stdout 与 `[stderr]` 区进正文、结束状态（退出码 / 信号 / 超时 / 用户停止）成说明；只装配不截断，预算在 `src/units/business/tools/domain/budget.rs` |
+| `src/kernel/domain/receipt.rs` | host/guest 共用的 shell 回执装配：`ShellReceipt { payload, notes }`——stdout 与 `[stderr]` 区进正文、结束状态（退出码 / 信号 / 超时 / 用户停止）成说明；只装配不截断，预算在 `src/kernel/domain/budget.rs` |
 | `src/kernel/detail/clock.rs` | 时间机制（门面）：`Local`（本机时区的年月日时分秒毫秒）与此刻的 `local_now`、到分钟流水戳 `local_stamp`（`YYYYMMDD-HHMM`）、记时刻用的 `now_secs` / `now_ms`（自 Unix 纪元）；按平台选中 `src/kernel/detail/clock/{windows,unix}.rs` |
 | `src/kernel/detail/clock/windows.rs` | `clock` 的 Windows 后端：`GetLocalTime` 取本机时区的民用时间 |
 | `src/kernel/detail/clock/unix.rs` | `clock` 的非 Windows 后端：`localtime_r` 转本地民用时间，时区坏掉时退到 `gmtime_r` 的 UTC 值 |

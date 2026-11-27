@@ -1,7 +1,7 @@
 //! 目的：宿主路径 → guest 路径的桥（纯逻辑）——按 guest 方言给拼法，同方言走恒等。
 //! 管：宿主路径与 guest 路径两个方向的互换（跨方言时编进镜像根；盘符与 UNC 各有一段编码，单射、可逆）——系统工具跑在宿主侧，靠反向把模型给的 guest 写法译回宿主路径再校验。
 //! 不管：谁在什么时候用它（挂载 / 命令装配 / 提示词 / 系统工具的寻址各自调用）、文件是否真存在。
-//! 联动：GuestImage 的 os 决定 guest 方言；mounts_from 与命令装配共用同一座桥。
+//! 联动：沙箱事实里的 guest OS 决定方言；挂载、命令装配与提示词共用同一座桥（内核提供，谁跨环境渲染路径都同一条尺子）。
 
 use std::path::{Component, Path, PathBuf, Prefix};
 
@@ -78,7 +78,7 @@ impl PathBridge {
 /// 约束：非 UTF-8 在 `to_string_lossy` 下会丢字节，lossy 比较会把两条不同的路径判成同一条——两边都是
 ///   合法 UTF-8 才比，否则给 false（宁可往返不成立，也不给一条假的"可表示"）。
 fn same_host_path(a: &Path, b: &Path) -> bool {
-    crate::kernel::api::platform::host_path_eq(a, b)
+    crate::kernel::domain::platform::host_path_eq(a, b)
 }
 
 /// 目的：Windows 宿主路径编进 POSIX guest——盘符小写当第一段、UNC 编成保留段

@@ -368,14 +368,14 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     let note = s(&["demo", "work", "note.txt"]);
     io.seed(&["demo", "work", "note.txt"], "现场：一切正常\n");
     let sb = test_sandbox("核心", &[]);
+    let exec_svc: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync> =
+        test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost));
     let mut verify = MemberTools {
         face: crate::units::business::agentloop::api::ToolFace {
             mode: crate::units::pure::registry_model::api::ToolMode::Envelope,
             loop_id: "execute".to_string(),
             role: "orchestrator".to_string(),
             modules: BTreeMap::new(),
-            side: crate::units::pure::exec_model::api::Side::Host,
-            guest_lease: String::new(),
             sandbox: sb.clone(),
             tools_this_turn: test_prompts()
                 .text(crate::units::business::prompt::api::Segment::ToolsThisTurn)
@@ -384,7 +384,6 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
             unavailable: BTreeMap::new(),
             fence: crate::kernel::api::fence::FencePlan::for_session(&sb, &[], false),
             module_env: Default::default(),
-            runtime_path: None,
             runtime_roots: Vec::new(),
             allowed: vec!["read".to_string(), "plan".to_string()],
             source_ids: vec!["agent".to_string(), "module".to_string()],
@@ -399,8 +398,8 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         },
         llm: test_llm_demo(),
         log: Arc::new(crate::kernel::ports::NoopLog),
-        tools: test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
-        vm: test_vm(),
+        tools: Arc::clone(&exec_svc),
+        exec: crate::units::business::tools::api::host_sandbox(exec_svc),
         residents: Arc::new(crate::units::business::residents::api::NoResidents),
         // 核实工具面只读：没有共享区提交这回事。
         workspace: None,

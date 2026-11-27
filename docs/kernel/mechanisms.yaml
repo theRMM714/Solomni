@@ -36,6 +36,7 @@ domain/receipt: 1
 contracts/types: 2
 
 # 第 3 层
+domain/budget: 3
 domain/jobs: 3
 ports: 3
 
@@ -46,6 +47,7 @@ detail/user_path: 4
 detail/view_drive: 4
 detail/view_drive_lifecycle: 4
 domain/actor: 4
+domain/path_bridge: 4
 
 # 第 5 层
 detail/launch: 5

@@ -16,13 +16,13 @@ use crate::units::business::catalog::secrets::api::SecretOps;
 use crate::units::business::llm::api::Llm;
 use crate::units::business::prompt::api::Prompt;
 use crate::units::business::residents::api::ResidentOps;
+use crate::units::business::sandbox::api::SandboxPolicies;
 use crate::units::business::session_model::api::SessionDecls;
 use crate::units::business::tools::api::{ToolExec, Tools};
 use crate::units::business::turn_state::api::{Flows, History};
 use crate::units::business::turn_state::domain::decisions::Gates;
 use crate::units::business::turn_state::domain::live::{Session, TurnState};
 use crate::units::business::versions::api::Versions;
-use crate::units::business::vm::api::Vm;
 use crate::units::business::workspace::api::Workspace;
 
 /// 目的：回合状态本体：在世表与运行态（`TurnState`）连同装配一席要用的入站面，一处持有。
@@ -35,8 +35,8 @@ pub struct Turn {
     pub(crate) workspace: Arc<dyn Workspace + Send + Sync>,
     /// 目的：版本库用例面：一席的 `work_*` 工具执行者与回档 / 归档按它造（版本化与控制台分层，故与工作区分开持有）。
     pub(crate) versions: Arc<dyn Versions + Send + Sync>,
-    /// 目的：虚拟机用例面：一席的 guest 事实随工具面交给机制层。
-    pub(crate) vm: Arc<dyn Vm + Send + Sync>,
+    /// 目的：执行环境策略表：一席的执行面按这一会话的声明从它开来。
+    pub(crate) policies: Arc<SandboxPolicies>,
     /// 目的：常驻服务管理面：已就绪服务的操作并入一席的工具面。
     pub(crate) residents: Arc<dyn ResidentOps + Send + Sync>,
     /// 目的：隐秘字段管理面：装配期按模块解析注入项。
@@ -78,7 +78,7 @@ impl Turn {
     pub fn new(
         workspace: Arc<dyn Workspace + Send + Sync>,
         versions: Arc<dyn Versions + Send + Sync>,
-        vm: Arc<dyn Vm + Send + Sync>,
+        policies: Arc<SandboxPolicies>,
         residents: Arc<dyn ResidentOps + Send + Sync>,
         secrets: Arc<dyn SecretOps + Send + Sync>,
         tools: Arc<dyn ToolExec + Send + Sync>,
@@ -99,7 +99,7 @@ impl Turn {
             state: TurnState::new(),
             workspace,
             versions,
-            vm,
+            policies,
             residents,
             secrets,
             tools,
@@ -131,7 +131,7 @@ impl Turn {
             prompt: Arc::clone(&self.prompt),
             systools: Arc::clone(&self.systools),
             tools: Arc::clone(&self.tools),
-            vm: Arc::clone(&self.vm),
+            policies: Arc::clone(&self.policies),
             residents: Arc::clone(&self.residents),
             workspace: Arc::clone(&self.workspace),
             versions: Arc::clone(&self.versions),
