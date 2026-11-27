@@ -1,49 +1,44 @@
-//! 目的：执行档位与执行选型——「在哪跑、挂哪个虚拟根、定哪个版本」这三个共享事实。
-//! 管：`Tier`（本机 / 虚拟机）、`ExecSpec`（档位 + 虚拟根名 + 能力定版）与档位的对外解析。
-//! 不管：虚拟机怎么起、清单怎么解析（vm）；执行计划怎么排（provision / runtime）；落盘（会话 meta 的读写方）。
-//! 联动：登记处、vm、provision、runtime、turn 与呈现层都经 units::pure::exec_model::api 取它；唯一家判据见 R6。
+//! 目的：执行环境的**派生选型**——会话里存的是执行环境声明（策略 id + 参数），这里放解析出来的三件事实：
+//!   「在哪一侧跑、哪个虚拟根、能力定哪个版本」，供执行计划与就绪判定使用。
+//! 管：`Side`（宿主侧 / guest 侧）与 `TargetSpec`（侧 + 虚拟根名 + 定版）。
+//! 不管：策略清单、策略参数与策略实现（sandbox）；虚拟机怎么起、计划怎么排（vm / packages）。
+//! 联动：sandbox 把声明解析成 `TargetSpec`；vm、packages、provision、tools、runtime 与呈现层经 api 取用。
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// 目的：执行档位——本机 = 直接在宿主上跑；虚拟机 = 整台 guest（不信任 AI 时的可选档）。
-/// 约束：共享形状只有这一份（R6）——它被登记处与执行计划共享，且不认识任何业务概念。
+/// 目的：执行在哪一侧——宿主侧 = 直接在宿主上跑；guest 侧 = 整台虚拟机里（不信任 AI 时的可选档）。
+/// 约束：这是**派生事实**，不是策略清单：策略有哪些、叫什么由 sandbox 注册表回答（`SandboxFacts.policy`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Tier {
+pub enum Side {
     #[default]
     Host,
-    Vm,
+    Guest,
 }
 
-impl Tier {
+impl Side {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Tier::Host => "host",
-            Tier::Vm => "vm",
+            Side::Host => "host",
+            Side::Guest => "guest",
         }
     }
 
-    /// 目的：把对外写法解析成档位；缺省（空串）= 本机档，未知值如实报错。
-    /// 约束：呈现层与协调业务共用这一处解析，不再各写一份（对外词汇只有 host / vm）。
-    pub fn parse(s: &str) -> Result<Tier, String> {
-        match s.trim() {
-            "" | "host" => Ok(Tier::Host),
-            "vm" => Ok(Tier::Vm),
-            other => Err(format!("未知执行档位：{}（只接受 host / vm）", other)),
-        }
+    pub fn on_guest(&self) -> bool {
+        *self == Side::Guest
     }
 }
 
-/// 目的：会话的执行选型——档位 + 虚拟根名 + 能力定版。
-/// 约束：进 meta.yaml 的 exec 段（缺字段按默认 = 本机档读回）；本机/虚拟机两侧与呈现层共享，按 R6 只此一份。
-///   网络与围栏要求是**全局策略**，不在这里。
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// 目的：一次执行的选型事实——哪一侧 + 虚拟根名 + 能力定版。
+/// 约束：由 `SandboxDecl`（策略 id + 参数 + 定版）解析而来；**不落盘**，落盘的是声明本身（会话 meta 的 sandbox 段）。
+///   网络与围栏要求是全局策略，不在这里。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ExecSpec {
+pub struct TargetSpec {
     #[serde(default)]
-    pub tier: Tier,
-    /// 目的：虚拟机档用的**虚拟根名**（清单 `guest` 字段，如 debian / windows）；本机档为空。
+    pub side: Side,
+    /// 目的：guest 侧用的**虚拟根名**（策略参数 `guest`，如 debian / windows）；宿主侧为空。
     /// 约束：存的是名字不是路径——路径由 `vm::resolve_guest` 按当前安装解析，换安装/挪产品根都不用改会话。
     #[serde(default)]
     pub guest: Option<String>,

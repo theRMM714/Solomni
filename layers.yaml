@@ -25,6 +25,7 @@ llm: 2
 prompt: 2
 provision: 2
 residents: 2
+sandbox: 2
 transcript: 2
 session_model: 2
 tools: 2
