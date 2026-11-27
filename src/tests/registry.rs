@@ -221,8 +221,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         task: None,
         delegate: false,
         permission: None,
-        tier: crate::units::pure::exec_model::api::Tier::Host,
-        guest: None,
+        sandbox: decl_of(crate::units::pure::exec_model::api::Side::Host, None),
         workspace: None,
     };
     let opened = core.create_work(spec).unwrap();
@@ -269,8 +268,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         task: Some("需求".to_string()),
         delegate: false,
         permission: None,
-        tier: crate::units::pure::exec_model::api::Tier::Host,
-        guest: None,
+        sandbox: decl_of(crate::units::pure::exec_model::api::Side::Host, None),
         workspace: None,
     };
     let opened = core.create_work(cross).expect("同一模块可跨 agent 共用");

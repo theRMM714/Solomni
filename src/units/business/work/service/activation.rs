@@ -14,17 +14,12 @@ impl Work {
     ) -> Result<
         (
             Vec<String>,
-            crate::units::pure::exec_model::api::Tier,
-            Option<String>,
+            crate::units::business::sandbox::api::SandboxDecl,
         ),
         String,
     > {
         let meta = self.history.meta(sid)?;
-        Ok((
-            meta.modules.clone(),
-            meta.exec.tier,
-            meta.exec.guest.clone(),
-        ))
+        Ok((meta.modules.clone(), meta.sandbox.clone()))
     }
 
     /// 目的：启用会话的第一段（核心，毫秒级）——已归档拒绝；正在生成则附着；

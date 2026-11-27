@@ -14,17 +14,16 @@ use crate::units::business::workspace::api::{
     ModuleDir, Sandbox, ScopeMode, SeatFacts, SeatPlan, SharedEdit, SharedScope, WorkRoots,
     edit_of, edit_params, scope_from, seat_sandboxes,
 };
-use crate::units::pure::exec_model::api::ExecSpec;
-use crate::units::pure::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::Side;
 use crate::units::pure::permission::api::{
-    PermissionDefaults, PermissionLayer, ProfileId, SessionSandbox,
+    PermissionDefaults, PermissionLayer, PermissionOverride, ProfileId,
 };
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
 /// 一条最小会话 meta：权限段与工作台声明由调用方按需覆盖。
-fn meta(name: &str, parent: Option<&str>, tier: Tier, kind: &str) -> SessionMeta {
+fn meta(name: &str, parent: Option<&str>, tier: Side, kind: &str) -> SessionMeta {
     SessionMeta {
         usage_totals: Default::default(),
         context_freshness: false,
@@ -36,11 +35,16 @@ fn meta(name: &str, parent: Option<&str>, tier: Tier, kind: &str) -> SessionMeta
         task: None,
         ts: 1,
         agents: Vec::new(),
-        exec: ExecSpec {
-            tier,
+        sandbox: crate::units::business::sandbox::api::SandboxDecl::of(if tier == Side::Guest {
+            crate::units::business::sandbox::api::VM_POLICY
+        } else {
+            crate::units::business::sandbox::api::HOST_POLICY
+        }),
+        facts: crate::units::business::sandbox::api::SandboxFacts {
+            side: tier,
             ..Default::default()
         },
-        sandbox: SessionSandbox::default(),
+        permission: PermissionOverride::default(),
         workspace: WorkspaceDecl::layout(),
         parent: parent.map(str::to_string),
         node: None,
@@ -78,15 +82,15 @@ fn with_shared(mut decl: WorkspaceDecl, edit: SharedEdit) -> WorkspaceDecl {
 fn profile_narrows_with_the_chain() {
     let mut app = AppSettings::default();
     app.sandbox.defaults.profile = ProfileId::Online;
-    let mut root = meta("root", None, Tier::Host, SINGLE);
-    root.sandbox = SessionSandbox {
+    let mut root = meta("root", None, Side::Host, SINGLE);
+    root.permission = PermissionOverride {
         ceiling: Some(PermissionLayer {
             profile: Some(ProfileId::Offline),
         }),
         narrowing: None,
     };
-    let mut child = meta("root--a", Some("root"), Tier::Host, MEETING);
-    child.sandbox = SessionSandbox {
+    let mut child = meta("root--a", Some("root"), Side::Host, MEETING);
+    child.permission = PermissionOverride {
         ceiling: None,
         narrowing: Some(PermissionLayer {
             profile: Some(ProfileId::Offline),
@@ -103,7 +107,7 @@ fn profile_narrows_with_the_chain() {
         "根 ceiling 把联网档压到离线"
     );
     // 子会话想选联网 = 比父宽：拒绝。
-    child.sandbox.narrowing = Some(PermissionLayer {
+    child.permission.narrowing = Some(PermissionLayer {
         profile: Some(ProfileId::Online),
     });
     let why = crate::units::business::session_model::api::permissions(
@@ -124,7 +128,7 @@ fn shared_scope_applies_root_then_narrows_and_keeps_hard_deny() {
         deny: Vec::new(),
     };
     app.sandbox.policy.deny = vec!["secret/".to_string()];
-    let mut root = meta("root", None, Tier::Host, SINGLE);
+    let mut root = meta("root", None, Side::Host, SINGLE);
     root.workspace = with_shared(
         root.workspace.clone(),
         SharedEdit {
@@ -136,7 +140,7 @@ fn shared_scope_applies_root_then_narrows_and_keeps_hard_deny() {
             deny: Vec::new(),
         },
     );
-    let mut child = meta("root--a", Some("root"), Tier::Host, MEETING);
+    let mut child = meta("root--a", Some("root"), Side::Host, MEETING);
     child.workspace = with_shared(
         child.workspace.clone(),
         SharedEdit {
@@ -214,7 +218,7 @@ fn member_env_merges_package_roots_once_and_only_host_tier_keeps_base_roots() {
         sandbox: &sb,
         host_read_roots: &[],
         net: false,
-        tier: Tier::Host,
+        side: Side::Host,
         base_roots: &base,
         package_roots: &package_roots,
         package_path: Some(OsString::from("rt/bin")),
@@ -247,7 +251,7 @@ fn member_env_merges_package_roots_once_and_only_host_tier_keeps_base_roots() {
         sandbox: &sb,
         host_read_roots: &[],
         net: false,
-        tier: Tier::Vm,
+        side: Side::Guest,
         base_roots: &base,
         package_roots: &package_roots,
         package_path: None,

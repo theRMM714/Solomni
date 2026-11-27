@@ -5,5 +5,5 @@
 
 #[allow(unused_imports)] // 入站面：其它单元与测试都经这里取类型
 pub use crate::units::pure::permission::domain::permission::{
-    PermissionDefaults, PermissionLayer, PermissionSet, ProfileId, ProfileSpec, SessionSandbox,
+    PermissionDefaults, PermissionLayer, PermissionOverride, PermissionSet, ProfileId, ProfileSpec,
 };

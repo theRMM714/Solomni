@@ -84,7 +84,7 @@ data/.home/
 | `streaming` | 布尔 | 否 | `true` | 流式传输：向供应商请求逐片返回 |
 | `show_reasoning` | 布尔 | 否 | `true` | 思维链显示（界面上永远默认折叠、点击才展开） |
 | `thinking.levels` | 数组 | 否 | `off / low / high / max` | 全局思考强度目录；标签顺序即界面顺序 |
-| `tier` | 字符串 | 否 | `host` | 默认执行档位：`host`（本机）｜`vm`（虚拟机） |
+| `default_sandbox` | 对象 | 否 | `{policy: host}` | 默认执行环境：不给会话单独选时用它（`policy` 是执行环境策略 id，如 `host` / `vm`，参数写法见 `docs/sandbox/README.md`） |
 | `sandbox.policy.network` | 布尔 | 否 | `false` | 全局网络开关：会话 / 直接模块工具 / 常驻服务 / 构建共用 |
 | `sandbox.policy.enforce.filesystem` | 字符串 | 否 | `require` | 文件系统围栏：`require` / `best_effort` |
 | `sandbox.policy.enforce.network` | 字符串 | 否 | `require` | 网络围栏：`require` / `best_effort` |

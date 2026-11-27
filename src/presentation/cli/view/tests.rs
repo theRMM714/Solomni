@@ -7,8 +7,8 @@ use super::*;
 use crate::presentation::faces::Faces;
 use crate::units::business::runtime::api::Handle;
 use crate::units::business::work::api::{
-    AgentSuggestion, FilesView, RuntimeDiagnosis, RuntimeReport, SessionConfig, SessionEdit,
-    SessionTypeView, SessionView, TierChoices, WorkOpened, WorkOps, WorkSpec,
+    AgentSuggestion, FilesView, RuntimeDiagnosis, RuntimeReport, SandboxChoices, SessionConfig,
+    SessionEdit, SessionTypeView, SessionView, WorkOpened, WorkOps, WorkSpec,
 };
 
 use crate::tests::doubles::{
@@ -90,7 +90,7 @@ fn map(rows: &[(&str, &[&str])]) -> BTreeMap<String, Vec<String>> {
 /// 目的：运行报告：各分区都有内容；诊断一条缺包（应被过滤）一条多版本。
 fn report() -> RuntimeReport {
     RuntimeReport {
-        tier: "vm".into(),
+        side: "guest".into(),
         declared: map(&[("a", &["qemu"])]),
         available: map(&[("qemu", &["9.2", "9.1"])]),
         missing: map(&[("b", &["qemu"])]),
@@ -104,8 +104,8 @@ fn report() -> RuntimeReport {
                 versions: vec!["9.2".into(), "9.1".into()],
             }),
         ],
-        tier_ready: false,
-        tier_missing: Vec::new(),
+        sandbox_ready: false,
+        sandbox_missing: Vec::new(),
         rejected: vec!["坏的清单".into()],
         rejected_packages: vec!["坏的包".into()],
     }
@@ -268,11 +268,14 @@ fn vocabulary() -> Vec<SessionEvent> {
 /// 目的：工作面替身：运行报告由用例指定（覆盖报告各分区与报告失败），其余用例一律如实报没装。
 struct FakeCore(Result<RuntimeReport, String>);
 impl WorkOps for FakeCore {
-    fn runtime_report(&self, _: Tier) -> Result<RuntimeReport, String> {
+    fn runtime_report(
+        &self,
+        _: &crate::units::business::sandbox::api::SandboxDecl,
+    ) -> Result<RuntimeReport, String> {
         self.0.clone()
     }
-    fn tier_choices(&self) -> Result<TierChoices, String> {
-        Err("没装档位选择".into())
+    fn sandbox_choices(&self) -> Result<SandboxChoices, String> {
+        Err("没装执行环境选择".into())
     }
     fn suggest_models(&self, _: &str, _: &str) -> Result<Vec<AgentSuggestion>, String> {
         Err("没装推荐".into())
@@ -283,7 +286,7 @@ impl WorkOps for FakeCore {
     fn ambient_workspace(
         &self,
         _: &std::path::Path,
-        _: Tier,
+        _: &crate::units::business::sandbox::api::SandboxDecl,
     ) -> Result<std::path::PathBuf, String> {
         Err("没装启动目录".into())
     }
@@ -388,14 +391,14 @@ fn startup_lines_read_facts_off_the_registry() {
     let facts = startup_facts(&faces);
     assert_eq!(facts.len(), 4);
     assert!(facts[0].contains("agent 0"), "{}", facts[0]);
-    assert!(facts[1].contains("模块 1") && facts[2].contains("档位 host"));
+    assert!(facts[1].contains("模块 1") && facts[2].contains("执行环境 host"));
     assert!(facts[3].contains("模型 m"));
     assert!(
         term::capture(startup_tagline)
             .0
             .contains("终端转录中心 · v")
     );
-    assert!(startup_status(&faces).contains("● 就绪 · 模型 m · 档位 host"));
+    assert!(startup_status(&faces).contains("● 就绪 · 模型 m · 执行环境 host"));
     let models = faces.registry.models().expect("模型可读");
     assert_eq!(
         model_line(&models[0], Some("m")),
@@ -418,7 +421,7 @@ fn startup_facts_fall_back_when_reads_fail() {
     faces.registry = Arc::new(BrokenRegistry);
     let facts = startup_facts(&faces);
     assert!(facts[0].contains("agent 0") && facts[1].contains("模块 0"));
-    assert!(facts[2].contains("档位 host") && facts[3].contains("（未设定）"));
+    assert!(facts[2].contains("执行环境 host") && facts[3].contains("（未设定）"));
     assert!(startup_status(&faces).contains("（未设定）"));
 }
 #[test]
@@ -438,9 +441,9 @@ fn print_roster_covers_discovery_and_report_sections() {
     let rows = said(|| print_roster(&faces));
     let needles = concat!(
         "[拒收] 坏的清单|",
-        "[运行包] 档位 vm；包库：qemu 9.2/9.1|",
+        "[运行包] 执行环境 guest；包库：qemu 9.2/9.1|",
         "[缺运行包] 模块 b 需要 qemu；把包放进依赖文件夹 runtimes/|",
-        "[档位诊断] 运行包 qemu 有多个版本，需用户定版：9.2、9.1|",
+        "[执行环境诊断] 运行包 qemu 有多个版本，需用户定版：9.2、9.1|",
         "[运行包拒收] 坏的包",
     );
     for needle in needles.split('|') {

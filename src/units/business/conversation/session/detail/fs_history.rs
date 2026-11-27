@@ -97,8 +97,9 @@ impl FsHistory {
             auto: meta.spec.is_proxy_spec(),
             ts: meta.ts,
             done,
-            // 档位来自 meta 的 exec 段：列表视图据此提示"环境已变"，不拦打开。
-            exec: meta.exec,
+            // 执行环境来自 meta 的 sandbox 段：列表视图据此提示"环境已变"，不拦打开。
+            sandbox: meta.sandbox,
+            facts: meta.facts,
             // 编排者：子会话在侧栏里缩进挂在父会话下。
             parent: meta.parent,
             workspace: meta

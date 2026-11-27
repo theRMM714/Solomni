@@ -23,7 +23,6 @@ use crate::units::business::prompt::ports::PromptSource;
 use crate::units::business::session_model::api::{MEETING, SINGLE, SessionMeta, SessionSpec};
 use crate::units::business::tools::ports::SysIo;
 use crate::units::business::workspace::ports::Workdirs;
-use crate::units::pure::exec_model::api::ExecSpec;
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::pure::registry_model::api::Provider;
 use std::collections::BTreeMap;
@@ -68,8 +67,9 @@ fn meta(name: &str) -> SessionMeta {
 
             abilities: None,
         }],
-        exec: ExecSpec::default(),
         sandbox: Default::default(),
+        facts: Default::default(),
+        permission: Default::default(),
         parent: None,
         node: None,
         delegation: None,

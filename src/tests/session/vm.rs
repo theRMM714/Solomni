@@ -73,8 +73,9 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
         task: None,
         ts: 2,
         agents: vec![agent_meta("a", &["a"], None)],
-        exec: vm_spec(),
-        sandbox: Default::default(),
+        sandbox: sandbox_of(&vm_spec()).0,
+        facts: sandbox_of(&vm_spec()).1,
+        permission: Default::default(),
         parent: Some("w".to_string()),
         node: None,
         delegation: None,
@@ -104,12 +105,12 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
     );
     // 子会话配置把档位标成继承（界面不渲染选择）。
     assert!(
-        core.session_config("w--a").expect("配置").tier_locked,
+        core.session_config("w--a").expect("配置").sandbox_locked,
         "子会话档位随主会话"
     );
     // 子会话不能单独改档位。
     let mut bad = edit_of(vec![("a", &["a"], "")]);
-    bad.tier = "host".to_string();
+    bad.sandbox = "host".to_string();
     bad.guest = None;
     let err = core
         .prepare_edit("w--a", bad)
@@ -118,7 +119,7 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
     assert!(err.contains("子会话"), "{}", err);
     // 主会话留在 VM 档改配：子会话的 exec 要同步成主会话的。
     let mut edit = edit_of(vec![("a", &["a"], ""), ("b", &["b"], "")]);
-    edit.tier = "vm".to_string();
+    edit.sandbox = "vm".to_string();
     edit.guest = Some(crate::tests::test_guest("vm-spec"));
     let (prepared, _job) = core.prepare_edit("w", edit).expect("准备改配");
     let updated = prepared
@@ -126,7 +127,7 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
         .iter()
         .find(|m| m.name == "w--a")
         .expect("子树里有子会话");
-    assert_eq!(updated.exec.tier, Tier::Vm, "子会话档位跟主会话");
+    assert_eq!(updated.facts.side, Side::Guest, "子会话环境跟主会话");
 }
 
 /// 目的：proxy 树里的子工作共用代理根那一台 guest，不再每个子工作各起一台。
@@ -145,8 +146,9 @@ pub(crate) fn proxy_children_share_the_proxy_tree_guest() {
         task: None,
         ts: 2,
         agents: vec![agent_meta("a", &["a"], None)],
-        exec: vm_spec(),
-        sandbox: Default::default(),
+        sandbox: sandbox_of(&vm_spec()).0,
+        facts: sandbox_of(&vm_spec()).1,
+        permission: Default::default(),
         parent: Some("p".to_string()),
         node: None,
         delegation: None,

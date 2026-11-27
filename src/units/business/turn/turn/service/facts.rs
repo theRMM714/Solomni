@@ -25,7 +25,7 @@ use crate::units::business::vm::api::GuestOs;
 use crate::units::business::workspace::api::{
     ModuleDir, Sandbox, Sandboxes, SeatFacts, SeatPlan, SharedScope,
 };
-use crate::units::pure::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::Side;
 use crate::units::pure::permission::api::PermissionSet;
 use crate::units::pure::registry_model::api::AgentMeta;
 #[cfg(test)]
@@ -49,7 +49,8 @@ impl Turn {
         let roots = self.workspace.roots(&work, &names)?;
         // 虚拟机档给 guest↔宿主翻译器：system 工具跑在宿主侧，但收模型给的 guest 写法；
         // **同一份**也交给 @ 改写（挂载点、命令装配与用户引用用同一座桥，三处不会各给一种写法）。
-        let codec = crate::units::business::vm::api::path_codec_of(&self.root, probe, &meta.exec);
+        let codec =
+            crate::units::business::vm::api::path_codec_of(&self.root, probe, &meta.target());
         let modules: Vec<ModuleDir> = roster
             .modules
             .iter()
@@ -173,7 +174,7 @@ impl Turn {
         modules: &[Module],
         sb: &Sandbox,
         net: bool,
-        tier: Tier,
+        side: Side,
         host_plan: &PackagePlan,
     ) -> MemberEnvParts {
         let module_vars: BTreeMap<String, Vec<(String, String)>> = modules
@@ -193,7 +194,7 @@ impl Turn {
                 sandbox: sb,
                 host_read_roots: &host_read_roots,
                 net,
-                tier,
+                side,
                 base_roots: &self.base_roots,
                 package_roots: &host_plan.roots,
                 package_path: host_plan.path.clone(),
@@ -223,7 +224,7 @@ impl Turn {
         // 这一回合的段与角色：用户建的单 agent 会话 = standard/solo，协作子会话 = 流程的成员角色。
         loop_id: &str,
         role: &str,
-        tier: Tier,
+        side: Side,
         guest_lease: String,
         host_plan: &PackagePlan,
     ) -> crate::units::business::agentloop::api::ToolFace {
@@ -242,10 +243,10 @@ impl Turn {
             mode,
             loop_id,
             role,
-            tier,
+            side,
             guest_lease,
             shell: self.shell_slot(&sb.session),
-            env: self.member_env(registry, modules, sb, net, tier, host_plan),
+            env: self.member_env(registry, modules, sb, net, side, host_plan),
             source_ids: &source_ids,
             system_tools: &[],
             abilities: &abilities,
@@ -268,7 +269,7 @@ impl Turn {
         sb: &Sandbox,
         unavailable: BTreeMap<String, Vec<String>>,
         net: bool,
-        tier: Tier,
+        side: Side,
         guest: Option<GuestOs>,
         guest_lease: String,
         host_plan: &PackagePlan,
@@ -287,10 +288,10 @@ impl Turn {
                 // 单 agent 工作：用户自己开的那场对话（不是任务链的节点）——坐会话类型声明的那一席。
                 loop_id: &shape.loop_id,
                 role: &shape.role,
-                tier,
+                side,
                 guest_lease,
                 shell: self.shell_slot(&sb.session),
-                env: self.member_env(registry, modules, sb, net, tier, host_plan),
+                env: self.member_env(registry, modules, sb, net, side, host_plan),
                 source_ids: &shape.sources,
                 system_tools: &shape.system_tools,
                 abilities: &abilities,

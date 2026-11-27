@@ -9,13 +9,14 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/units/business/vm/api.rs` | 入站面：`Vm` 用例 trait（guest 生命周期与 `guest_diagnose` 只读诊断）与档位、计划、入口诊断、就绪检测的重导出 |
+| `src/units/business/vm/api.rs` | 入站面：`Vm` 用例 trait（guest 生命周期与 `guest_diagnose` 只读诊断）与策略入口 `vm_policy`、计划、入口诊断、就绪检测的重导出 |
 | `src/units/business/vm/service/job.rs` | 销毁任务 `GuestStop`：按租约清单逐条 `guest_stop`（幂等），只装参数不做事，`run` 由调用方线程执行 |
 | `src/units/business/vm/service/plan.rs` | 运行计划派生：宿主 / guest 包选型、模块可用性与路径翻译器；纯函数，root / 宿主探针 / 包库 / 模块声明都走形参 |
 | `src/units/business/vm/service.rs` | 用例与端口持有者：持 `VmEngine` / `ShareBackend`（R12），按租约管理 guest（每租约一把锁：跨租约并行、同一租约串行）；`guest_diagnose` 用只读系统允许集走 helper 诊断模式并如实区分失败原因 |
 | `src/units/business/vm/ports.rs` | 出站端口：`VmEngine` / `GuestVm` / `GuestChannel`（起 / 跑 / 销毁 guest）与 `ShareBackend` / `SharePlan`（宿主↔guest 共享） |
 | `src/units/business/vm/domain/diagnose.rs` | guest 只读诊断的纯逻辑：报告结构（键与 helper 输出一一对应）、`parse_report` 的合法性判定，以及失败原因文案（没有活 guest / 非 Linux guest / 通道不通 / helper 不可用 / 缺 python3 / 超时 / 执行失败 / 输出不可解析） |
-| `src/units/business/vm/domain/exec.rs` | 执行档位诊断、执行计划派生（消费 `PackagePlan`）、承载判定、就绪检测与并发准入（纯逻辑；hypervisor 提示与类型用 kernel 平台事实） |
+| `src/units/business/vm/domain/policy.rs` | 虚拟机策略 `VmPolicy`：把「客机」登记进 `sandbox` 的注册表——自我介绍（参数只有虚拟根）、声明校验、从镜像读出客机事实 |
+| `src/units/business/vm/domain/exec.rs` | 虚拟机侧诊断、执行计划派生（消费 `PackagePlan`）、承载判定、就绪检测与并发准入（纯逻辑；hypervisor 提示与类型用 kernel 平台事实） |
 | `src/units/business/vm/domain/guest.rs` | guest 镜像判定（`GuestImage`）、挂载清单、prefix 软链与 system 叠写脚本、`GuestRun` 的按次超时与输出上限选项（传输/内存护栏，模型可见的截断在宿主预算；纯逻辑，宿主架构用 kernel 平台事实） |
 | `src/units/business/vm/domain/paths.rs` | 宿主 ↔ guest 路径桥（恒等 / 镜像根，可逆；盘符与 UNC 各有单射编码，纯逻辑） |
 | `src/units/business/vm/domain/tool.rs` | 外部工具的位置事实（`ToolPath` / `VmTools` / `ToolSource`）：登记值与项目内补齐那份的优先序，以及"这次用的是哪一份"的如实标注（纯值，不解析路径、不判可执行） |

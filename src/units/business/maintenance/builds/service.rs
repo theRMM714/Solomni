@@ -19,7 +19,7 @@ use crate::units::business::provision::api::Provision;
 use crate::units::business::vm::api::{
     self as vm, ExecPlan, GuestOs, GuestRun, GuestSpec, MissingEntry, Vm,
 };
-use crate::units::pure::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::Side;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -378,7 +378,7 @@ impl BuildsService {
             grants: crate::kernel::contracts::fence::grants_of(rw, Vec::new(), Vec::new()),
         };
         let plan = ExecPlan {
-            tier: Tier::Vm,
+            side: Side::Guest,
             net,
             guest: Some(guest.to_string()),
             packages: merged_packages(plans.iter()),

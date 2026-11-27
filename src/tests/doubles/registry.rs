@@ -53,9 +53,14 @@ impl InMemorySettings {
     }
 
     /// 目的：指定默认执行档位的登记处（断言虚拟机档下的诊断与工具回执）。
-    pub(crate) fn with_tier(tier: Tier) -> InMemorySettings {
+    pub(crate) fn with_tier(tier: Side) -> InMemorySettings {
         let s = InMemorySettings::new();
-        s.s.lock().expect("锁").app.tier = tier;
+        s.s.lock().expect("锁").app.default_sandbox =
+            crate::units::business::sandbox::api::SandboxDecl::of(if tier == Side::Guest {
+                crate::units::business::sandbox::api::VM_POLICY
+            } else {
+                crate::units::business::sandbox::api::HOST_POLICY
+            });
         s
     }
 

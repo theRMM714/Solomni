@@ -354,7 +354,7 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     let schema = systools.tools.get("plan").expect("plan 该在工具总表里");
     assert_eq!(
         schema.params.as_ref().expect("有参数")["nodes"].ty,
-        crate::units::business::catalog::modules::api::ParamType::Array,
+        crate::units::pure::registry_model::api::ParamType::Array,
         "任务链节点表是数组载荷"
     );
 }
@@ -374,7 +374,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
             loop_id: "execute".to_string(),
             role: "orchestrator".to_string(),
             modules: BTreeMap::new(),
-            tier: crate::units::pure::exec_model::api::Tier::Host,
+            side: crate::units::pure::exec_model::api::Side::Host,
             guest_lease: String::new(),
             sandbox: sb.clone(),
             tools_this_turn: test_prompts()

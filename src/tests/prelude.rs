@@ -40,7 +40,7 @@ pub use crate::units::business::tools::api::ToolExec;
 pub use crate::units::business::catalog::modules::api::Module;
 
 pub use crate::units::business::vm::api::{self as exec};
-pub use crate::units::pure::exec_model::api::ExecSpec;
+pub use crate::units::pure::exec_model::api::TargetSpec;
 
 pub use crate::units::business::catalog::modules::ports::ModuleSource;
 pub use crate::units::business::workspace::ports::Workdirs;
@@ -55,7 +55,7 @@ pub use crate::units::business::collab::api::{OPT_BEGIN, OPT_PLAN_SAY, OPT_SLATE
 
 pub(crate) use crate::units::business::runtime::service::Core;
 
-pub use crate::units::pure::exec_model::api::Tier;
+pub use crate::units::pure::exec_model::api::Side;
 
 pub use std::collections::{BTreeMap, BTreeSet};
 

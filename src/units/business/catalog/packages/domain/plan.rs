@@ -7,7 +7,7 @@ use crate::units::business::catalog::modules::api::Module;
 use crate::units::business::catalog::packages::domain::manifest::{
     KIND_SYSTEM, Library, PackageManifest, Target, conflicts,
 };
-use crate::units::pure::exec_model::api::ExecSpec;
+use crate::units::pure::exec_model::api::TargetSpec;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
@@ -212,7 +212,7 @@ pub fn requests_for(caps: &[String], module: &str) -> Vec<Request> {
 
 /// 目的：本机档的包计划：按宿主目标选 prefix、产出 PATH/只读根；包优先于基础工具链/宿主 PATH。
 pub fn plan_host(
-    spec: &ExecSpec,
+    spec: &TargetSpec,
     modules: &[Module],
     lib: &Library,
     policy: PinPolicy,
@@ -440,7 +440,7 @@ pub fn has_host_executable(probe: &dyn ExecProbe, cap: &str) -> bool {
 pub fn diagnoses(
     modules: &[Module],
     lib: &Library,
-    spec: &ExecSpec,
+    spec: &TargetSpec,
     guest_runtimes: &[String],
 ) -> Vec<Problem> {
     let mut out: Vec<Problem> = Vec::new();
@@ -507,7 +507,7 @@ pub fn diagnoses(
 /// 目的：虚拟机档的包计划：诊断不成立时 packages 为空；问题与不可用能力都如实带回。
 /// 约束：选包顺序与 `diagnoses` 同一份事实；guest 自带的运行能力不算缺（镜像里已经有解释器）。
 pub fn plan_guest(
-    spec: &ExecSpec,
+    spec: &TargetSpec,
     modules: &[Module],
     lib: &Library,
     guest_runtimes: &[String],

@@ -122,36 +122,36 @@ pub(super) fn startup_tagline() -> String {
     format!("终端转录中心 · v{} · {}", env!("CARGO_PKG_VERSION"), root)
 }
 
-/// 目的：启动页事实行：agent 数、模块数、档位与核心默认模型各一格。
+/// 目的：启动页事实行：agent 数、模块数、执行环境与核心默认模型各一格。
 pub(super) fn startup_facts(faces: &Faces) -> Vec<String> {
     let agents = faces.registry.agents().map(|a| a.len()).unwrap_or(0);
     let modules = faces.modules.roster().map(|r| r.modules.len()).unwrap_or(0);
-    let tier = faces
+    let sandbox = faces
         .registry
         .settings()
-        .map(|s| s.tier.as_str())
-        .unwrap_or("host");
+        .map(|s| s.default_sandbox.policy)
+        .unwrap_or_else(|_| "host".to_string());
     let model = faces.registry.core_model().ok().flatten();
     vec![
         fact("agent", &agents.to_string()),
         fact("模块", &modules.to_string()),
-        fact("档位", tier),
+        fact("执行环境", &sandbox),
         fact("模型", model.as_deref().unwrap_or("（未设定）")),
     ]
 }
 
-/// 目的：状态行：就绪、核心默认模型与档位。
+/// 目的：状态行：就绪、核心默认模型与执行环境。
 pub(super) fn startup_status(faces: &Faces) -> String {
     let model = faces.registry.core_model().ok().flatten();
-    let tier = faces
+    let sandbox = faces
         .registry
         .settings()
-        .map(|s| s.tier.as_str())
-        .unwrap_or("host");
+        .map(|s| s.default_sandbox.policy)
+        .unwrap_or_else(|_| "host".to_string());
     format!(
-        "● 就绪 · 模型 {} · 档位 {}",
+        "● 就绪 · 模型 {} · 执行环境 {}",
         model.as_deref().unwrap_or("（未设定）"),
-        tier
+        sandbox
     )
 }
 
@@ -171,15 +171,15 @@ pub(super) fn print_roster(faces: &Faces) {
             return;
         }
     };
-    let tier = match faces.registry.settings() {
-        Ok(s) => s.tier,
+    let sandbox = match faces.registry.settings() {
+        Ok(s) => s.default_sandbox,
         Err(e) => {
             term::say(&format!("[错误] {}", e));
             return;
         }
     };
-    // 运行能力报告与模块清单同源：按默认执行档位如实报（缺包不是崩溃，工具按档位不可用）。
-    let report = match faces.work.runtime_report(tier) {
+    // 运行能力报告与模块清单同源：按默认执行环境如实报（缺包不是崩溃，工具按执行环境不可用）。
+    let report = match faces.work.runtime_report(&sandbox) {
         Ok(r) => r,
         Err(e) => {
             term::say(&format!("[错误] {}", e));
@@ -219,7 +219,7 @@ pub(super) fn print_roster(faces: &Faces) {
             .map(|(id, vs)| format!("{} {}", id, vs.join("/")))
             .collect::<Vec<_>>()
             .join(" · ");
-        term::say(&format!("[运行包] 档位 {}；包库：{}", report.tier, lib));
+        term::say(&format!("[运行包] 执行环境 {}；包库：{}", report.side, lib));
     }
     for (id, caps) in &report.missing {
         term::say(&format!(
@@ -244,7 +244,7 @@ pub(super) fn print_roster(faces: &Faces) {
         .collect();
     if !hard.is_empty() {
         term::say(&format!(
-            "[档位诊断] {}（虚拟机档要先解决这些才能开始会话）",
+            "[执行环境诊断] {}（虚拟机档要先解决这些才能开始会话）",
             crate::units::business::work::api::diagnose_text(&hard)
         ));
     }

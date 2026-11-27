@@ -8,7 +8,7 @@
 
 - 管：运行日志端口、宿主探测端口、**提问端口**（请用户裁决）、**时间**（`clock`：此刻的本机民用时间、到分钟流水戳，以及记时刻用的 `now_secs` / `now_ms`）。
 - 管：生成中作业的取消表。
-- 管：**端口载荷形状**（`contracts`：`SessionId` / `ToolOutcome` / `Ask`）与路径的对外书写形式；其余跨层共享形状归环 1 单元（`Tier` / `ExecSpec` / `JobState` 在 `exec_model`）。
+- 管：**端口载荷形状**（`contracts`：`SessionId` / `ToolOutcome` / `Ask`）与路径的对外书写形式；其余跨层共享形状归环 1 单元（`Side` / `TargetSpec` / `JobState` 在 `exec_model`）。
 - 管：**外部进程执行**——一次性的 `ProcessRunner` 与长驻的 `SessionHost`；围栏裁决经 `FenceGate` 原样转交，机制不解释裁决的业务变体。
 - 管：**长驻子进程的账与回收**（`procs`）。
 - 管：**围栏机制**（`confine`）——可达范围、出站网络、进程树、平台实现与 Windows 授权台账。

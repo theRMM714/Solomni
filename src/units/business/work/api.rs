@@ -11,7 +11,6 @@ use crate::units::business::session_model::api::HistoryView;
 use crate::units::business::transcript::api::{OptionView, SessionEvent};
 use crate::units::business::vm::api::{ExecPlan, GuestStop, Vm};
 use crate::units::business::workspace::api::Sandboxes;
-use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::registry_model::api::AgentMeta;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -28,12 +27,11 @@ pub struct WorkSpec {
     pub task: Option<String>,
     /// 目的：保留：委托核心代拟名单（协作且未给 agent 时）。
     pub delegate: bool,
-    /// 目的：执行档位（用户在创建向导里选的；默认 = 设置里的档位）。承载不了就由 create_work 如实拒绝。
-    pub tier: Tier,
+    /// 目的：执行环境（用户在创建向导里选的策略与参数；默认 = 设置里的 `default_sandbox`）。
+    /// 约束：承载不了就由 create_work 如实拒绝；子会话整段沿用父会话的这份声明。
+    pub sandbox: crate::units::business::sandbox::api::SandboxDecl,
     /// 目的：创建时选的权限档位；None = 用设置里的默认档（代理创建时由呈现层显式选）。
     pub permission: Option<crate::units::pure::permission::api::ProfileId>,
-    /// 目的：虚拟机档用的虚拟根名（可省 = 空；会话建好后也可在会话配置里改）。
-    pub guest: Option<String>,
     /// 目的：外部工作区根（已规范化的绝对路径）；None = 产品内 `session/<名>/work`。
     /// 约束：只有顶层会话能指定；子会话沿父链继承同一个根。
     pub workspace: Option<std::path::PathBuf>,
@@ -88,41 +86,44 @@ pub fn diagnose_text(diags: &[RuntimeDiagnosis]) -> String {
         .join("；")
 }
 
-/// 目的：运行能力报告（呈现与日志用）：声明了什么、包库里有什么、缺什么、档位诊断。
+/// 目的：运行能力报告（呈现与日志用）：声明了什么、包库里有什么、缺什么、执行环境诊断。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct RuntimeReport {
-    pub tier: String,
+    /// 目的：这份报告算的是哪一侧（`host` / `guest`）。
+    pub side: String,
     /// 目的：模块 id → 它声明的运行能力（升序）。
     pub declared: BTreeMap<String, Vec<String>>,
     /// 目的：能力名 → 包库里的可用版本（升序）。
     pub available: BTreeMap<String, Vec<String>>,
-    /// 目的：模块 id → 本档位下用不了的能力。
+    /// 目的：模块 id → 本执行环境下用不了的能力。
     pub missing: BTreeMap<String, Vec<String>>,
-    /// 目的：本档位下不能成立的诊断（包选择 + 模块入口）；空 = 没有。
+    /// 目的：本执行环境下不能成立的诊断（包选择 + 模块入口）；空 = 没有。
     pub diagnoses: Vec<RuntimeDiagnosis>,
-    /// 目的：本机能不能承载**当前档位**（虚拟机档的前置条件；本机档恒为可）。
-    ///   界面据此决定虚拟机档能不能选，并与「开始」/编辑的校验同源（`crate::units::business::vm::api::tier_readiness`）。
-    pub tier_ready: bool,
+    /// 目的：本机能不能承载**当前执行环境**（guest 侧策略的前置条件；本机策略恒为可）。
+    ///   界面据此决定 guest 侧策略能不能选，并与「开始」/编辑的校验同源（`crate::units::business::vm::api::tier_readiness`）。
+    pub sandbox_ready: bool,
     /// 目的：承载不了时缺什么（空 = 齐了）。
-    pub tier_missing: Vec<String>,
+    pub sandbox_missing: Vec<String>,
     /// 目的：被拒收的模块（原因如实）。
     pub rejected: Vec<String>,
     /// 目的：被拒收的运行包（原因如实）。
     pub rejected_packages: Vec<String>,
 }
 
-/// 目的：新建工作时的档位选择视图（创建向导用）：默认档 + 虚拟机档为什么不能选（逐项前置）。
+/// 目的：新建工作时的执行环境选择视图（创建向导用）：默认策略 + guest 侧策略为什么不能选（逐项前置）。
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct TierChoices {
-    /// 目的：默认档位（设置里的 `tier`）。
+pub struct SandboxChoices {
+    /// 目的：默认执行环境策略 id（设置里的 `default_sandbox`；没登记就回落到注册表第一项）。
     pub default: String,
-    /// 目的：**虚拟机档**能不能选（与当前档位无关）。
-    pub vm_available: bool,
+    /// 目的：登记的执行环境策略（呈现层照抄名字与说明，不自己编）。
+    pub policies: Vec<crate::units::business::sandbox::api::PolicyDecl>,
+    /// 目的：**guest 侧策略**能不能选（与当前执行环境无关）。
+    pub guest_available: bool,
     /// 目的：不能选时的理由（能选 = 空）。
-    pub vm_unavailable_reason: String,
-    /// 目的：虚拟机档的**逐项前置**（缺哪几项、每项怎么补）：界面照抄，不自己编话。
-    pub vm_requirements: Vec<crate::units::business::vm::api::VmRequirement>,
-    /// 目的：本机可选的**虚拟根**（虚拟机档那一步的下拉项）——界面照抄，不自己编列表。
+    pub guest_unavailable_reason: String,
+    /// 目的：guest 侧策略的**逐项前置**（缺哪几项、每项怎么补）：界面照抄，不自己编话。
+    pub guest_requirements: Vec<crate::units::business::vm::api::VmRequirement>,
+    /// 目的：本机可选的**虚拟根**（guest 侧那一步的下拉项）——界面照抄，不自己编列表。
     pub guests: Vec<crate::units::business::provision::api::GuestBase>,
     /// 目的：包库里可用的能力名（→ 版本）：界面据此预判"这个虚拟根 + 包库满足不了哪些模块"。
     pub available: BTreeMap<String, Vec<String>>,
@@ -181,10 +182,10 @@ pub struct SessionConfig {
     /// 目的：会话已经开过（流水里有内容）= agent 名单与形态冻结。
     pub started: bool,
     pub agents: Vec<ConfigAgent>,
-    pub tier: String,
-    /// 目的：档位是否随主会话（子会话为 true）：界面不渲染档位选择，后端拒绝子会话改档位。
-    pub tier_locked: bool,
-    /// 目的：这条会话选的虚拟根名（本机档为空）。
+    pub sandbox: String,
+    /// 目的：执行环境是否随主会话（子会话为 true）：界面不渲染选择，后端拒绝子会话改。
+    pub sandbox_locked: bool,
+    /// 目的：这条会话选的虚拟根名（本机策略为空）。
     pub guest: Option<String>,
     /// 目的：本机有哪些虚拟根可选（含"装没装齐"）——界面据此渲染下拉，不自己编列表。
     pub guests: Vec<crate::units::business::provision::api::GuestBase>,
@@ -199,11 +200,11 @@ pub struct SessionConfig {
     /// 目的：过期内容保底百分比（0 = 不保底；只写工作根）。
     pub freshness_keep_percent: u8,
     pub pins: BTreeMap<String, String>,
-    /// 目的：本机能不能承载**当前档位**（虚拟机档的前置条件）：界面据此决定虚拟机档能不能选。
-    pub tier_ready: bool,
+    /// 目的：本机能不能承载**当前执行环境**：界面据此决定 guest 侧策略能不能选。
+    pub sandbox_ready: bool,
     /// 目的：承载不了时缺什么（空 = 齐了）。
-    pub tier_missing: Vec<String>,
-    /// 目的：**虚拟机档**能不能选（与当前档位无关）：为假时界面禁用虚拟机档，编辑与「开始」也会拒绝。
+    pub sandbox_missing: Vec<String>,
+    /// 目的：**guest 侧策略**能不能选（与当前执行环境无关）：为假时界面禁用，编辑与「开始」也会拒绝。
     pub vm_available: bool,
     /// 目的：虚拟机档为什么不能选（`vm_available` 为真时为空）。
     pub vm_unavailable_reason: String,
@@ -215,13 +216,13 @@ pub struct SessionConfig {
     pub runtimes_dir: String,
 }
 
-/// 目的：编辑提交（配置界面用）：改模块、模型、档位、定版与网络。
+/// 目的：编辑提交（配置界面用）：改模块、模型、执行环境、定版与网络。
 ///   名字与形态不在这里——会话一旦开过（流水有内容）它们就冻结了。
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionEdit {
     pub agents: Vec<ConfigAgent>,
-    pub tier: String,
+    pub sandbox: String,
     #[serde(default)]
     pub guest: Option<String>,
     #[serde(default)]
@@ -256,12 +257,12 @@ pub struct SessionView {
     /// 目的：决定权是不是整块交给核心（没有名单、没有需求：界面叫代理式）。
     pub auto: bool,
     pub done: bool,
-    /// 目的：这条会话记的执行档位（`host` / `vm`）：打开时据此提示"环境已变"。
-    pub tier: String,
-    /// 目的：记的档位**现在还能不能承载**（本机档恒真）。为假时前端打开前给提示，但不拦打开。
-    pub tier_ready: bool,
+    /// 目的：这条会话记的执行环境策略 id（`host` / `vm` / 其它已登记策略）：打开时据此提示"环境已变"。
+    pub sandbox: String,
+    /// 目的：记的执行环境**现在还能不能承载**（本机策略恒真）。为假时前端打开前给提示，但不拦打开。
+    pub sandbox_ready: bool,
     /// 目的：承载不了时缺什么（空 = 齐了）。
-    pub tier_missing: Vec<String>,
+    pub sandbox_missing: Vec<String>,
     /// 目的：生效权限档位 id（状态栏显示；子会话可能是收窄后的档）。
     pub permission_profile: String,
     /// 目的：生效权限档位标签。
@@ -422,7 +423,7 @@ pub(crate) struct ReadyActivation {
 /// 目的：工作方法族与两段结果（实现在 `service`，入站面只经这里取）。
 pub(crate) use crate::units::business::work::service::{PreparedEdit, PreparedWork, Work};
 
-/// 目的：建代理会话要落进 `meta` 的那几项——工作名、授予时刻、档位、guest 规格与外部工作区。
+/// 目的：建代理会话要落进 `meta` 的那几项——工作名、授予时刻、执行环境声明与外部工作区。
 pub(crate) struct ProxySeed<'a> {
     /// 目的：新会话的工作名，也是它在会话目录里的落盘名。
     pub(crate) name: &'a str,
@@ -430,10 +431,8 @@ pub(crate) struct ProxySeed<'a> {
     pub(crate) kind: &'a str,
     /// 目的：授予的秒级时间戳，写进 `meta.delegation`。
     pub(crate) granted_at: i64,
-    /// 目的：用户选的档位；也是这条会话建子工作时的默认档位。
-    pub(crate) tier: Tier,
-    /// 目的：虚拟机档要用的 guest 规格（空串按没给）。
-    pub(crate) guest: Option<&'a str>,
+    /// 目的：用户选的执行环境；也是这条会话建子工作时的默认执行环境。
+    pub(crate) sandbox: crate::units::business::sandbox::api::SandboxDecl,
     /// 目的：权威档的权限档位。
     pub(crate) profile: crate::units::pure::permission::api::ProfileId,
     /// 目的：要的工作台声明（外部根已解析，不是原始路径；子会话落一份没有根的声明）。
@@ -480,11 +479,14 @@ pub trait WorkOps: Send + Sync {
     /// 目的：**在世会话 × 历史的并集**（界面上的会话列表）：只有会话中心同时知道两边，所以归这里。
     /// 落盘历史的列表 / 打开 / 删除归 `session::api::HistoryOps`。
     fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String>;
-    /// 目的：运行包与档位的运行报告（只报事实）。
-    fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String>;
-    /// 目的：新建工作时的**档位选择**（默认档 + 虚拟机档可用性与逐项前置）。
+    /// 目的：运行包与执行环境的运行报告（只报事实）。
+    fn runtime_report(
+        &self,
+        sandbox: &crate::units::business::sandbox::api::SandboxDecl,
+    ) -> Result<RuntimeReport, String>;
+    /// 目的：新建工作时的**执行环境选择**（默认策略 + guest 侧策略可用性与逐项前置）。
     /// 与「开始」的校验同源（同一把 `tier_readiness` 尺子），界面照抄，不自己编话。
-    fn tier_choices(&self) -> Result<TierChoices, String>;
+    fn sandbox_choices(&self) -> Result<SandboxChoices, String>;
     /// 目的：核心按任务推荐的 agent 草案（带理由；用户可改）。
     fn suggest_models(&self, task: &str, kind: &str) -> Result<Vec<AgentSuggestion>, String>;
     /// 目的：会话类型表给界面看的那份（选类型时的名字与说明、要不要名单与需求）。
@@ -493,7 +495,11 @@ pub trait WorkOps: Send + Sync {
     /// 目的：把启动目录收成外部工作区根（"在哪个目录启动就用哪个目录"，建会话前判一次）。
     /// 约束：与建会话时的 `resolve` 同一条阶梯但**不探可写**；不建目录、不落盘。
     ///   Err 是「为什么不能当工作区」的整句文案，调用方据此回退到产品内 work/ 并说明。
-    fn ambient_workspace(&self, raw: &std::path::Path, tier: Tier) -> Result<PathBuf, String>;
+    fn ambient_workspace(
+        &self,
+        raw: &std::path::Path,
+        sandbox: &crate::units::business::sandbox::api::SandboxDecl,
+    ) -> Result<PathBuf, String>;
 }
 
 /// 目的：一个会话类型在界面上的样子（新建向导的逐个选项）。

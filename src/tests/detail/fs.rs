@@ -29,8 +29,9 @@ fn meta(name: &str) -> SessionMeta {
 
             abilities: None,
         }],
-        exec: ExecSpec::default(),
         sandbox: Default::default(),
+        facts: Default::default(),
+        permission: Default::default(),
         parent: None,
         node: None,
         delegation: None,

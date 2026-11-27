@@ -9,7 +9,7 @@ use crate::tests::doubles::{
 use crate::units::business::workspace::api::{ScopeMode, SharedEdit, SharedScope, validate_entry};
 use crate::units::business::workspace::domain::workspace::Place;
 use crate::units::pure::permission::api::{
-    PermissionDefaults, PermissionLayer, PermissionSet, ProfileId, SessionSandbox,
+    PermissionDefaults, PermissionLayer, PermissionOverride, PermissionSet, ProfileId,
 };
 
 fn paths(v: &[&str]) -> Vec<String> {
@@ -66,7 +66,7 @@ fn permission_set_root_and_narrowing_only_touch_the_tier() {
             .apply_root(&PermissionLayer::default())
             .unwrap()
     );
-    let _ = SessionSandbox::default();
+    let _ = PermissionOverride::default();
 }
 
 /// 目的：共享区范围是三态，空集合不再兼作整棵。

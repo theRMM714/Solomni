@@ -18,7 +18,7 @@ impl Handle {
     ) -> Result<d::Created, String> {
         // 先补编：名单里声明了 `build:` 的模块若在目标环境还没有入口，就在这一段（调用方线程）编好——
         // 核心线程不陪着等编译器；编不成如实拒绝，不进入准备段（什么都不留下）。
-        let (tier, guest) = self.call({
+        let sandbox = self.call({
             let spec = spec.clone();
             move |core| core.resolve_env(&spec)
         })?;
@@ -30,7 +30,7 @@ impl Handle {
                 }
             }
         }
-        self.ensure_built(&ids, tier, guest.as_deref())?;
+        self.ensure_built(&ids, &sandbox)?;
         // **两段**：核心只做校验 / 占名 / 出计划（毫秒级）；起 guest 要等几十秒到几分钟，
         // 在这一段（调用方线程）上跑——核心线程因此不被占住，别的请求照常响应。
         let (prepared, boot) = self.call({
@@ -241,8 +241,8 @@ impl Handle {
                 .get("name")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
-            tier: args
-                .get("tier")
+            sandbox: args
+                .get("sandbox")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
             guest: args

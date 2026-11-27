@@ -49,7 +49,7 @@ pub struct DepStatus {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GuestBase {
-    /// 目的：虚拟根名（清单 `guest` 字段；也是会话 `ExecSpec.guest` 存的值）。
+    /// 目的：虚拟根名（清单 `guest` 字段；也是会话 `TargetSpec.guest` 存的值）。
     pub guest: String,
     /// 目的：给人看的显示名（镜像 `guest.yaml` 的 `id`，例如 debian-13-…；缺画像时退名字）。
     pub label: String,

@@ -32,28 +32,28 @@ async function openWizard(draft) {
   // 类型表由后端给（systools/profiles.yaml）：界面只按它渲染名字与差别，不写死类型名。
   // 有名单的类型共用一份 agent 卡片列表：单人的恰好 0/1 个，多人的可多个。
   const w = resumed ? draft : {
-    kind: '', agents: [], task: '', tier: 'host', guest: '', permission: 'offline',
+    kind: '', agents: [], task: '', sandbox: 'host', guest: '', permission: 'offline',
     context_freshness: false, freshness_keep_percent: 80, __wizardDraft: true,
   };
   if (!Array.isArray(w.agents)) w.agents = [];
   // 名称与需求是**弹层里**输入框的现值（在本作用域之外）：由弹层装好后把取值钩子挂上来。
   let snapshotDraft = () => {};
   // 档位选择：默认档与虚拟机档可用性由后端给（GET /api/tiers，与「开始」的校验同源）。
-  let tiers = null;
-  try { const r = await api('GET', '/api/tiers'); tiers = (r && r.tiers) || null; } catch (e) { tiers = null; }
-  if (!resumed && tiers && tiers.default) w.tier = tiers.default;
+  let sandboxChoices = null;
+  try { const r = await api('GET', '/api/tiers'); sandboxChoices = (r && r.tiers) || null; } catch (e) { sandboxChoices = null; }
+  if (!resumed && sandboxChoices && sandboxChoices.default) w.sandbox = sandboxChoices.default;
   // 档位那一格：虚拟机档不可用时禁用，并逐项说明缺什么、怎么补（照抄后端事实，不自己编话）。
-  const tierField = doc.createElement('div'); tierField.className = 'wf-field';
-  const tierLabel = doc.createElement('div'); tierLabel.className = 'wf-label'; tierLabel.textContent = '执行档位';
-  const hostR = ui.radio('本机档', w.tier !== 'vm', 'wf-tier');
-  const vmOk = !!(tiers && tiers.vm_available);
-  const vmR = ui.radio('虚拟机档', w.tier === 'vm', 'wf-tier', !vmOk);
-  hostR.box.addEventListener('change', () => { if (hostR.box.checked) { w.tier = 'host'; syncWizardTier(); } });
-  vmR.box.addEventListener('change', () => { if (vmR.box.checked) { w.tier = 'vm'; syncWizardTier(); } });
-  const tierGroup = doc.createElement('div'); tierGroup.className = 'form-col';
-  tierGroup.appendChild(hostR.wrap); tierGroup.appendChild(vmR.wrap);
-  tierField.appendChild(tierLabel); tierField.appendChild(tierGroup);
-  ui.attachHelp(tierField, wizardCopy.tier);
+  const sandboxField = doc.createElement('div'); sandboxField.className = 'wf-field';
+  const sandboxLabel = doc.createElement('div'); sandboxLabel.className = 'wf-label'; sandboxLabel.textContent = '执行档位';
+  const hostR = ui.radio('本机档', w.sandbox !== 'vm', 'wf-sandbox');
+  const vmOk = !!(sandboxChoices && sandboxChoices.vm_available);
+  const vmR = ui.radio('虚拟机档', w.sandbox === 'vm', 'wf-sandbox', !vmOk);
+  hostR.box.addEventListener('change', () => { if (hostR.box.checked) { w.sandbox = 'host'; syncWizardSandbox(); } });
+  vmR.box.addEventListener('change', () => { if (vmR.box.checked) { w.sandbox = 'vm'; syncWizardSandbox(); } });
+  const sandboxGroup = doc.createElement('div'); sandboxGroup.className = 'form-col';
+  sandboxGroup.appendChild(hostR.wrap); sandboxGroup.appendChild(vmR.wrap);
+  sandboxField.appendChild(sandboxLabel); sandboxField.appendChild(sandboxGroup);
+  ui.attachHelp(sandboxField, wizardCopy.sandbox);
   // 上下文：过期内容替换与保底。挂在形态与档位之后：先定形态，再定这轮的上下文策略。
   const ctxField = doc.createElement('div'); ctxField.className = 'wf-field';
   const ctxLabel = doc.createElement('div'); ctxLabel.className = 'wf-label'; ctxLabel.textContent = '上下文';
@@ -79,41 +79,41 @@ async function openWizard(draft) {
   profileField.appendChild(profileLabel); profileField.appendChild(profileSel);
   profileField.appendChild(ui.hint(wizardCopy.permission));
   if (!vmOk) {
-    const reqs = (tiers && tiers.vm_requirements) || [];
+    const reqs = (sandboxChoices && sandboxChoices.vm_requirements) || [];
     // 只列**现状**：怎么补这件事由下面的按钮承担（把指引和动作分成两件事，用户不会只看到话看不到路）。
     const lines = reqs.filter((r) => !r.met).map((r) => '· ' + r.detail);
-    tierField.appendChild(ui.hint(
-      '虚拟机档现在不能选：' + ((tiers && tiers.vm_unavailable_reason) || '本机不具备虚拟机档的前置条件') +
+    sandboxField.appendChild(ui.hint(
+      '虚拟机档现在不能选：' + ((sandboxChoices && sandboxChoices.vm_unavailable_reason) || '本机不具备虚拟机档的前置条件') +
       (lines.length ? '\n' + lines.join('\n') : ''),
       'err'
     ));
     // 装完把向导按草稿重开：判据是后端按新状态算的，界面不自己改结论。
     // 先把用户填的名称与需求抄进草稿（它们只在弹层里读得到），否则重开会把它们清掉。
-    tierField.appendChild(app.setupAction(snapshotDraft, () => openWizard(w)));
+    sandboxField.appendChild(app.setupAction(snapshotDraft, () => openWizard(w)));
   }
 
   // 虚拟机档在**创建时**就要选一个虚拟根（会话级选择；机器能力已在上面判过）。
   let syncGuestSetup = () => {};
-  const pick = guestPicker(tiers && tiers.guests, w.guest, (v, g) => {
+  const pick = guestPicker(sandboxChoices && sandboxChoices.guests, w.guest, (v, g) => {
     w.guest = v; w.guestInfo = g; syncGuestSetup();
   });
   // 机器前置齐、但选中的虚拟根没装齐时，虚拟根选择器下面给同一个补齐动作（与机器前置入口不重复）。
   const guestSetup = app.setupAction(snapshotDraft, () => openWizard(w));
   guestSetup.classList.add('hidden');
   syncGuestSetup = () => {
-    const show = vmOk && w.tier === 'vm' && (!w.guestInfo || !w.guestInfo.ready);
+    const show = vmOk && w.sandbox === 'vm' && (!w.guestInfo || !w.guestInfo.ready);
     if (show) guestSetup.classList.remove('hidden');
     else guestSetup.classList.add('hidden');
   };
   // 预判：这个虚拟根（+ 包库）满足不了本次点到的哪些模块——**只是提示**，判据仍以创建时的后端校验为准。
   const gapHint = ui.hint('');
   function syncGuestGap() {
-    if (w.tier !== 'vm') { gapHint.textContent = ''; return; }
+    if (w.sandbox !== 'vm') { gapHint.textContent = ''; return; }
     const g = w.guestInfo;
     if (!g || !g.ready) { gapHint.textContent = ''; return; }
     const covered = {};
     (g.runtimes || []).forEach((c) => { covered[c] = true; });
-    Object.keys((tiers && tiers.available) || {}).forEach((c) => { covered[c] = true; });
+    Object.keys((sandboxChoices && sandboxChoices.available) || {}).forEach((c) => { covered[c] = true; });
     const ids = w.agents.reduce((acc, a) => acc.concat(a.modules || []), []);
     const lack = [];
     for (const id of ids) {
@@ -126,10 +126,10 @@ async function openWizard(draft) {
       ? wizardCopy.gapLead + lack.join('；') + '。' + wizardCopy.gapDetail
       : '';
   }
-  function syncWizardTier() {
-    pick.wrap.className = w.tier === 'vm' ? 'wf-field' : 'wf-field hidden';
-    pick.hint.className = 'wf-hint' + (w.tier === 'vm' ? '' : ' hidden');
-    gapHint.className = 'wf-hint' + (w.tier === 'vm' ? '' : ' hidden');
+  function syncWizardSandbox() {
+    pick.wrap.className = w.sandbox === 'vm' ? 'wf-field' : 'wf-field hidden';
+    pick.hint.className = 'wf-hint' + (w.sandbox === 'vm' ? '' : ' hidden');
+    gapHint.className = 'wf-hint' + (w.sandbox === 'vm' ? '' : ' hidden');
     pick.sync();
     syncGuestSetup();
     syncGuestGap();
@@ -452,7 +452,7 @@ function pickWorkspaceDir(onPick) {
     async function submit(body) {
       const release = busyButton(createBtn, '正在创建…');
       cancelBtn.disabled = true;
-      c.setMsg(w.tier === 'vm' ? wizardCopy.creatingVm : wizardCopy.creatingHost);
+      c.setMsg(w.sandbox === 'vm' ? wizardCopy.creatingVm : wizardCopy.creatingHost);
       try {
         await startSession(body);
         ui.closeModal();
@@ -471,11 +471,11 @@ function pickWorkspaceDir(onPick) {
       if (!name) { c.setMsg('工作名称必填', true); return; }
       const task = taskIn.value.trim();
       const vmGuest = (w.guest || '').trim();
-      if (w.tier === 'vm' && !vmGuest) {
+      if (w.sandbox === 'vm' && !vmGuest) {
         c.setMsg(wizardCopy.vmRequired, true);
         return;
       }
-      if (w.tier === 'vm' && w.guestInfo && !w.guestInfo.ready) {
+      if (w.sandbox === 'vm' && w.guestInfo && !w.guestInfo.ready) {
         const miss = (w.guestInfo.missing || []).join('、');
         c.setMsg('这个虚拟根还没装齐' + (miss ? '（缺 ' + miss + '）' : '') + '：先点「补齐虚拟机依赖…」装上再用。', true);
         return;
@@ -484,7 +484,7 @@ function pickWorkspaceDir(onPick) {
       const t = typeNow() || {};
       if (!t.roster) {
         // 决定权交给核心的类型：没有名单、没有需求——选这个类型就是授予全权（档位由上面的选择显式落盘）。
-        const proxyBody = { name, kind: w.kind, agents: [], tier: w.tier, guest: w.tier === 'vm' ? vmGuest : null, permission: w.permission || 'online' };
+        const proxyBody = { name, kind: w.kind, agents: [], sandbox: w.sandbox, guest: w.sandbox === 'vm' ? vmGuest : null, permission: w.permission || 'online' };
         proxyBody.context_freshness = !!w.context_freshness;
         proxyBody.freshness_keep_percent = keepNow();
         const proxyWs = workspaceIn.value.trim();
@@ -521,14 +521,14 @@ function pickWorkspaceDir(onPick) {
       }
       const names = agents.map((a) => a.name);
       const dup = names.filter((n, i) => names.indexOf(n) !== i)[0];
-      const body = { name, kind: w.kind, agents, tier: w.tier, permission: w.permission || 'offline' };
+      const body = { name, kind: w.kind, agents, sandbox: w.sandbox, permission: w.permission || 'offline' };
       body.context_freshness = !!w.context_freshness;
       body.freshness_keep_percent = keepNow();
       const bodyWs = workspaceIn.value.trim();
       if (bodyWs) {
         body.workspace = bodyWs;
       }
-      if (w.tier === 'vm') body.guest = vmGuest;
+      if (w.sandbox === 'vm') body.guest = vmGuest;
       if (task) body.task = task;
       if (dup) {
         app.choiceModal('agent 重名', '本次工作里有同名 agent「' + dup + '」。', [
@@ -544,7 +544,7 @@ function pickWorkspaceDir(onPick) {
     c.body.appendChild(field('工作区（可选）', workspaceWrap, wizardCopy.workspace));
     c.body.appendChild(field('会话类型', typeSel));
     c.body.appendChild(typeHint);
-    c.body.appendChild(tierField);
+    c.body.appendChild(sandboxField);
     c.body.appendChild(ctxField);
     c.body.appendChild(profileField);
     c.body.appendChild(pick.wrap);
@@ -562,7 +562,7 @@ function pickWorkspaceDir(onPick) {
     // 有 foot 就固定在底部；没有（老调用）仍随正文走。
     (c.foot || c.body).appendChild(actions);
 
-    renderParts(); renderModels(); syncWizardTier(); syncCreateButton();
+    renderParts(); renderModels(); syncWizardSandbox(); syncCreateButton();
     // 别的标签页 / 设置在轮询后改了登记处：只换模型提示与创建按钮，不重建名字 / 需求输入框。
     c.onRegistryChange(() => { renderModels(); syncCreateButton(); });
   }, true);

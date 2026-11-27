@@ -160,7 +160,7 @@ impl Handle {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(current.show_reasoning),
             thinking,
-            tier: current.tier,
+            default_sandbox: current.default_sandbox,
             sandbox,
             qemu_path: text("qemu_path", &current.qemu_path),
             virtiofsd_path: text("virtiofsd_path", &current.virtiofsd_path),

@@ -126,10 +126,14 @@ impl Work {
                     .unwrap_or("active")
                     .to_string();
                 // 记的档位来自落盘 meta（权威）：环境变了也要如实提示——**不拦打开**（记录是用户的）。
-                let exec = entry.map(|h| h.exec.clone()).unwrap_or_default();
+                let sandbox = entry.map(|h| h.sandbox.clone()).unwrap_or_default();
+                let facts = entry.map(|h| h.facts.clone()).unwrap_or_default();
                 let tools = self.virtual_tools(registry);
                 let readiness = crate::units::business::vm::api::tier_readiness(
-                    &self.root, &exec, &tools, probe,
+                    &self.root,
+                    &sandbox.target(&facts),
+                    &tools,
+                    probe,
                 );
                 // 「改需求」能力位：有本次需求行才给。在表里看会话种类；不在表里（生成中/未打开）
                 // 看落盘 meta 的形态（那是名单与形态的单一真相）。
@@ -163,7 +167,7 @@ impl Work {
                                 Ok(p) => (
                                     p.profile.as_str().to_string(),
                                     p.profile.label().to_string(),
-                                    m.parent.is_some() && m.sandbox.narrowing.is_some(),
+                                    m.parent.is_some() && m.permission.narrowing.is_some(),
                                     parent,
                                 ),
                                 Err(_) => (String::new(), "权限不可用".to_string(), false, None),
@@ -213,9 +217,9 @@ impl Work {
                     flows,
                     auto,
                     done,
-                    tier: exec.tier.as_str().to_string(),
-                    tier_ready: readiness.ready(),
-                    tier_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
+                    sandbox: sandbox.policy.clone(),
+                    sandbox_ready: readiness.ready(),
+                    sandbox_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
                     permission_profile,
                     permission_label,
                     thinking,

@@ -73,7 +73,7 @@
 - **R3**：DIP **只画在 IO 或可替换点上**；纯逻辑刻意不抽象
 - **R4**：**状态所有权排他**：一块状态只有一个单元写，别人只经 `api` 读改
 - **R5**：**并发模型不变式**：单线程命令队列（`src/kernel/domain/actor.rs` 的 `Actor`）+ 单元间同步调用，**核心状态不加锁**
-- **R6**：**跨层共享的形状有唯一家**：`kernel` 只托管端口载荷（`SessionId` / `ToolOutcome` / `Ask` 这类跨层搬运的事实）；不含端口的产品词汇归环 1（如 `exec_model` 的 `Tier` / `ExecSpec` / `JobState`）。禁止各业务复制 DTO（R15）；`kernel` 不解释这些形状的业务语义，也不构造业务决策与面向用户的文案（`src/kernel/`、`src/units/pure/exec_model/`）
+- **R6**：**跨层共享的形状有唯一家**：`kernel` 只托管端口载荷（`SessionId` / `ToolOutcome` / `Ask` 这类跨层搬运的事实）；不含端口的产品词汇归环 1（如 `exec_model` 的 `Side` / `TargetSpec` / `JobState`）。禁止各业务复制 DTO（R15）；`kernel` 不解释这些形状的业务语义，也不构造业务决策与面向用户的文案（`src/kernel/`、`src/units/pure/exec_model/`）
 - **R7**：**不留兼容层**：项目是 GREEN FIELD，**只维护当前唯一实现**——旧实现直接删，不留转发壳或历史说明 <!-- hygiene-ignore -->
 - **R8**：**文档同步**：改结构必须同一次改 `docs/architecture/` 对应细则 / `docs/<单元>/unit-map.md` / 相关细则 / `AGENTS.md` 路由表
 - **R9**：**跨平台与路径**：一律 `PathBuf` 组件拼接；对外用 `/`；不假设平台

@@ -53,7 +53,7 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
     agents: (cfg.agents || []).map((a) => ({
       name: a.name || '', modules: (a.modules || []).slice(), model: a.model || '', chara: a.chara || '',
     })),
-    tier: cfg.tier === 'vm' ? 'vm' : 'host',
+    sandbox: cfg.sandbox === 'vm' ? 'vm' : 'host',
     guest: cfg.guest || '',
     pins: {},
     permission: cfg.permission || { profile: 'offline', shared: { read: 'all', write: 'all', deny: [] } },
@@ -84,10 +84,10 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
   // 虚拟机档的**承载**由后端判定（与「开始」/保存同一把尺子）：前置条件不具备时禁用，不让选。
   // 与「未接入」是两回事：guest 本体尚未接入这一点写在下面的提示里，两条都如实说。
   const vmOk = cfg.vm_available !== false;
-  const tierLocked = !!cfg.tier_locked;
-  const hostR = ui.radio('本机档（脚本在宿主上跑）', draft.tier === 'host', 'cfg-tier');
-  const vmR = ui.radio('虚拟机档（脚本在 guest 里跑）', draft.tier === 'vm', 'cfg-tier', !vmOk);
-  if (tierLocked) {
+  const sandboxLocked = !!cfg.sandbox_locked;
+  const hostR = ui.radio('本机档（脚本在宿主上跑）', draft.sandbox === 'host', 'cfg-sandbox');
+  const vmR = ui.radio('虚拟机档（脚本在 guest 里跑）', draft.sandbox === 'vm', 'cfg-sandbox', !vmOk);
+  if (sandboxLocked) {
     hostR.box.disabled = true;
     vmR.box.disabled = true;
     secT.appendChild(ui.hint('执行档位随主会话：子会话不能单独改档位与虚拟根。', 'warn'));
@@ -102,22 +102,22 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
   const guestSetup = app.setupAction(null, () => openConfig(sid));
   guestSetup.classList.add('hidden');
   syncGuestSetup = () => {
-    const show = vmOk && draft.tier === 'vm' && (!guestInfo || !guestInfo.ready);
+    const show = vmOk && draft.sandbox === 'vm' && (!guestInfo || !guestInfo.ready);
     if (show) guestSetup.classList.remove('hidden');
     else guestSetup.classList.add('hidden');
   };
-  const syncTier = () => {
-    const vm = draft.tier === 'vm';
-    const show = vm && !tierLocked;
+  const syncSandbox = () => {
+    const vm = draft.sandbox === 'vm';
+    const show = vm && !sandboxLocked;
     pick.wrap.className = show ? 'wf-field' : 'wf-field hidden';
     pick.hint.className = 'cfg-hint' + (show ? '' : ' hidden');
     pick.sync();
     syncGuestSetup();
   };
-  hostR.box.addEventListener('change', () => { if (hostR.box.checked) { draft.tier = 'host'; syncTier(); } });
-  vmR.box.addEventListener('change', () => { if (vmR.box.checked) { draft.tier = 'vm'; syncTier(); } });
+  hostR.box.addEventListener('change', () => { if (hostR.box.checked) { draft.sandbox = 'host'; syncSandbox(); } });
+  vmR.box.addEventListener('change', () => { if (vmR.box.checked) { draft.sandbox = 'vm'; syncSandbox(); } });
   secT.appendChild(hostR.wrap); secT.appendChild(vmR.wrap);
-  secT.appendChild(ui.detail(sessionConfigCopy.tier));
+  secT.appendChild(ui.detail(sessionConfigCopy.sandbox));
   // 前置逐项照抄后端（缺哪几项、每项怎么补），界面不自己编话、也不笼统说"前置条件不具备"。
   const reqs = cfg.vm_requirements || [];
   if (!vmOk) {
@@ -145,10 +145,10 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
   }
   secT.appendChild(pick.wrap); secT.appendChild(pick.hint); secT.appendChild(guestSetup);
   box.appendChild(secT);
-  syncTier();
+  syncSandbox();
 
   // 运行能力：declared / missing / available / diagnoses / rejected / rejected_packages
-  box.appendChild(cfgRuntimeBlock(rt, dir, draft.tier, () => {
+  box.appendChild(cfgRuntimeBlock(rt, dir, draft.sandbox, () => {
     c.setMsg('正在重新扫描模块清单与依赖文件夹…');
     loadConfig(sid, c, box, setSync);
   }));
@@ -312,8 +312,8 @@ function buildConfigForm(sid, cfg, c, box, setSync) {
     }
     const body = {
       agents: draft.agents.map((a) => ({ name: a.name.trim(), modules: a.modules.slice(), model: a.model || '', chara: a.chara || '' })),
-      tier: draft.tier,
-      guest: draft.tier === 'vm' ? (draft.guest || null) : null,
+      sandbox: draft.sandbox,
+      guest: draft.sandbox === 'vm' ? (draft.guest || null) : null,
       pins: pins,
       permission: { profile: prof.value },
       shared: {
@@ -369,7 +369,7 @@ function cfgAgentBlock(a, idx, frozen, modelSyncs) {
 }
 
 /// 运行能力区：声明 / 缺口 / 可用 / 虚拟机档诊断 / 两类拒收，全部如实呈现。
-function cfgRuntimeBlock(rt, dir, savedTier, rescan) {
+function cfgRuntimeBlock(rt, dir, savedSandbox, rescan) {
   const sec = ui.div('cfg-sec');
   const head = ui.div('cfg-sec-head');
   head.appendChild(ui.div('cfg-sec-title', '运行能力（模块声明 / 包库可用 / 缺什么）'));
@@ -381,7 +381,7 @@ function cfgRuntimeBlock(rt, dir, savedTier, rescan) {
 
   sec.appendChild(ui.div('cfg-line', '依赖文件夹（运行包放这里）：'));
   sec.appendChild(ui.div('cfg-dir', dir || '（后端没有给出依赖文件夹路径）'));
-  sec.appendChild(ui.detail(savedTier === 'host' ? sessionConfigCopy.savedHost : sessionConfigCopy.savedVm));
+  sec.appendChild(ui.detail(savedSandbox === 'host' ? sessionConfigCopy.savedHost : sessionConfigCopy.savedVm));
 
   const declared = rt.declared || {};
   const dIds = Object.keys(declared);

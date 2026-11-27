@@ -599,8 +599,7 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
             task: None,
             delegate: false,
             permission: None,
-            tier: crate::units::pure::exec_model::api::Tier::Host,
-            guest: None,
+            sandbox: decl_of(crate::units::pure::exec_model::api::Side::Host, None),
             workspace: None,
         })
         .expect("建会话")

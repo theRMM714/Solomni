@@ -7,23 +7,29 @@ use super::*;
 
 impl Handle {
     /// 目的：创建会话前的补编——本次名单里的模块若在目标环境没有入口、且声明了 `build:`，先在这里编好。
-    /// 参数：`ids` = 本次会话的模块 id（已去重保序）；`tier` / `guest` = 目标环境。
+    /// 参数：`ids` = 本次会话的模块 id（已去重保序）；`sandbox` = 目标执行环境声明。
     /// 错误：构建失败或环境不齐时如实拒绝（错误里带目标与构建输出）。
     /// 约束：跑在**调用方线程**（不占核心队列），核心线程不陪着等编译器；入口已在场的模块不碰。
     pub(crate) fn ensure_built(
         &self,
         ids: &[String],
-        tier: crate::units::pure::exec_model::api::Tier,
-        guest: Option<&str>,
+        sandbox: &crate::units::business::sandbox::api::SandboxDecl,
     ) -> Result<(), String> {
         use crate::units::business::maintenance::builds::api::Target;
         if ids.is_empty() {
             return Ok(());
         }
-        let target = match tier {
-            crate::units::pure::exec_model::api::Tier::Host => Target::Host,
-            crate::units::pure::exec_model::api::Tier::Vm => {
-                match guest.map(str::trim).filter(|g| !g.is_empty()) {
+        let decl = sandbox.clone();
+        let facts = self.call(move |core| core.sandbox_facts(&decl))?;
+        let target = match facts.side {
+            crate::units::pure::exec_model::api::Side::Host => Target::Host,
+            crate::units::pure::exec_model::api::Side::Guest => {
+                match facts
+                    .guest
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|g| !g.is_empty())
+                {
                     Some(g) => Target::Guest(g.to_string()),
                     // 虚拟根没给：准备段会如实拒绝（这里不猜默认值）。
                     None => return Ok(()),
@@ -111,11 +117,11 @@ impl Handle {
         let sid = sid.to_string();
         // 启用历史会话也要先确保目标环境的模块产物：老会话可能是在宿主上建的，
         // 切到/重开 VM 档时不能把宿主 native 产物直接带进 guest。
-        let (ids, tier, guest) = self.call({
+        let (ids, sandbox) = self.call({
             let sid = sid.clone();
             move |core| core.activation_build_request(&sid)
         })?;
-        self.ensure_built(&ids, tier, guest.as_deref())?;
+        self.ensure_built(&ids, &sandbox)?;
         let prepared = self.call(move |core| core.prepare_activation(&sid))?;
         let prepared = match prepared {
             crate::units::business::work::api::PreparedActivation::Ready(ready) => {

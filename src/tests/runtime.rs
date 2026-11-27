@@ -30,6 +30,7 @@ fn runtime_rooted(
         work.layout.clone(),
         work.versions.clone(),
         test_vm(),
+        test_policies(),
         test_packages(Arc::new(InMemoryPackages::empty())),
         provision,
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
@@ -66,11 +67,12 @@ fn runtime_for_vm(
     let work = test_workspace(Arc::new(InMemoryWorkspace::new()));
     Core::new(
         crate::tests::root_dir(),
-        registry_service(InMemorySettings::with_tier(Tier::Vm), Arc::clone(&llm)),
+        registry_service(InMemorySettings::with_tier(Side::Guest), Arc::clone(&llm)),
         test_history(),
         work.layout.clone(),
         work.versions.clone(),
         crate::tests::doubles::test_vm_with_engine(engine),
+        crate::tests::doubles::test_policies(),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
         test_modules(Arc::new(VecSource(modules))),
@@ -120,8 +122,7 @@ pub(crate) fn creating_a_vm_session_does_not_block_the_core() {
     let handle = Handle::spawn(core).expect("起核心");
     let faces = Faces::from_handle(&handle);
     let mut spec = work("w-core-free", SINGLE, &["a"]);
-    spec.tier = Tier::Vm;
-    spec.guest = Some(guest.clone());
+    spec.sandbox = decl_of(Side::Guest, Some(&guest));
     let creator = {
         let faces = faces.clone();
         std::thread::spawn(move || faces.work.create_work(spec))
@@ -129,7 +130,7 @@ pub(crate) fn creating_a_vm_session_does_not_block_the_core() {
     // 让 boot 真的开始，再问核心一件小事：它必须立刻回，而不是等 400ms。
     std::thread::sleep(std::time::Duration::from_millis(80));
     let t0 = std::time::Instant::now();
-    let answered = faces.work.tier_choices();
+    let answered = faces.work.sandbox_choices();
     let waited = t0.elapsed();
     let created = creator.join().expect("线程没崩").expect("建会话");
     assert!(answered.is_ok(), "核心要能应答");
@@ -166,8 +167,7 @@ pub(crate) fn a_failed_guest_boot_leaves_no_session_behind() {
     let handle = Handle::spawn(core).expect("起核心");
     let faces = Faces::from_handle(&handle);
     let mut spec = work("w-boot-fail", SINGLE, &["a"]);
-    spec.tier = Tier::Vm;
-    spec.guest = Some(guest);
+    spec.sandbox = decl_of(Side::Guest, Some(&guest));
     let err = faces.work.create_work(spec).expect_err("起不来要如实拒绝");
     assert!(err.contains("起不来"), "{}", err);
     assert!(
@@ -180,7 +180,7 @@ pub(crate) fn a_failed_guest_boot_leaves_no_session_behind() {
     );
     // 占名也要撤掉：同名重试能通过（而不是被"工作名已存在"挡住）。
     let mut again = work("w-boot-fail", SINGLE, &["a"]);
-    again.tier = Tier::Host;
+    again.sandbox = decl_of(Side::Host, None);
     faces
         .work
         .create_work(again)
@@ -260,8 +260,7 @@ pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
     let engine = FakeEngine::new();
     let (mut core, product, external, guest) = core_for_external_vm("vm-ext-boot", engine.clone());
     let mut spec = work("wx", SINGLE, &["a"]);
-    spec.tier = Tier::Vm;
-    spec.guest = Some(guest);
+    spec.sandbox = decl_of(Side::Guest, Some(&guest));
     spec.workspace = Some(external.clone());
     let sid = core
         .create_work(spec)
@@ -300,13 +299,13 @@ pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
 #[test]
 pub(crate) fn workspace_policy_splits_network_roots_by_tier() {
     use crate::units::business::workspace::api::policy;
-    use crate::units::pure::exec_model::api::Tier;
+    use crate::units::pure::exec_model::api::Side;
     use std::path::Path;
     use std::time::{Duration, Instant};
 
     let unreachable = Path::new(r"\\192.0.2.1\share\proj");
     let started = Instant::now();
-    let err = policy(unreachable, Tier::Host).expect_err("本机档必须拒绝网络工作区");
+    let err = policy(unreachable, Side::Host).expect_err("本机档必须拒绝网络工作区");
     assert!(err.contains("本机档不能用网络工作区"), "{err}");
     assert!(
         started.elapsed() < Duration::from_secs(3),
@@ -314,10 +313,10 @@ pub(crate) fn workspace_policy_splits_network_roots_by_tier() {
         started.elapsed()
     );
 
-    policy(Path::new(r"\\server\share\proj"), Tier::Vm).expect("虚拟机档接受 UNC");
-    let err = policy(Path::new(r"\\server\share"), Tier::Vm).expect_err("共享根要拒");
+    policy(Path::new(r"\\server\share\proj"), Side::Guest).expect("虚拟机档接受 UNC");
+    let err = policy(Path::new(r"\\server\share"), Side::Guest).expect_err("共享根要拒");
     assert!(err.contains("网络共享的根目录"), "{err}");
-    let err = policy(Path::new(r"D:\"), Tier::Vm).expect_err("文件系统根要拒");
+    let err = policy(Path::new(r"D:\"), Side::Guest).expect_err("文件系统根要拒");
     assert!(err.contains("文件系统根目录"), "{err}");
 }
 
@@ -325,7 +324,7 @@ pub(crate) fn workspace_policy_splits_network_roots_by_tier() {
 #[test]
 pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
     use crate::units::business::workspace::api::{product_root, recheck};
-    use crate::units::pure::exec_model::api::Tier;
+    use crate::units::pure::exec_model::api::Side;
 
     let root = crate::tests::scratch("recheck-cross");
     let product = root.join("product");
@@ -335,10 +334,10 @@ pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
     let probe = crate::kernel::detail::host_probe::HostProbeAdapter;
     let product = product_root(&product, &probe);
 
-    let err = recheck(&product, Tier::Host, &product, &probe).expect_err("产品根自身要拒");
+    let err = recheck(&product, Side::Host, &product, &probe).expect_err("产品根自身要拒");
     assert!(err.contains("互相包含"), "{}", err);
-    recheck(&outside, Tier::Host, &product, &probe).expect("产品外的目录要放行");
-    recheck(&root.join("gone"), Tier::Host, &product, &probe).expect("暂时不可达不挡");
+    recheck(&outside, Side::Host, &product, &probe).expect("产品外的目录要放行");
+    recheck(&root.join("gone"), Side::Host, &product, &probe).expect("暂时不可达不挡");
 
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -348,7 +347,7 @@ pub(crate) fn workspace_recheck_rejects_bounds_and_allows_unreachable_roots() {
 #[test]
 pub(crate) fn ambient_workspace_takes_the_startup_directory_through_the_same_ladder() {
     use crate::units::business::workspace::api::{ambient, product_root};
-    use crate::units::pure::exec_model::api::Tier;
+    use crate::units::pure::exec_model::api::Side;
 
     let root = crate::tests::scratch("ambient-workspace");
     let product = root.join("product");
@@ -358,7 +357,7 @@ pub(crate) fn ambient_workspace_takes_the_startup_directory_through_the_same_lad
     let probe = crate::kernel::detail::host_probe::HostProbeAdapter;
     let product = product_root(&product, &probe);
 
-    let got = ambient(&startup, Tier::Host, &product, &probe).expect("产品外的目录能当工作区");
+    let got = ambient(&startup, Side::Host, &product, &probe).expect("产品外的目录能当工作区");
     assert_eq!(
         got.file_name().and_then(|n| n.to_str()),
         Some("proj"),
@@ -366,13 +365,13 @@ pub(crate) fn ambient_workspace_takes_the_startup_directory_through_the_same_lad
         got.display()
     );
 
-    let err = ambient(&product, Tier::Host, &product, &probe).expect_err("产品根自身要拒");
+    let err = ambient(&product, Side::Host, &product, &probe).expect_err("产品根自身要拒");
     assert!(err.contains("互相包含"), "{err}");
-    let err = ambient(&root.join("gone"), Tier::Host, &product, &probe).expect_err("不可达要拒");
+    let err = ambient(&root.join("gone"), Side::Host, &product, &probe).expect_err("不可达要拒");
     assert!(err.contains("启动目录不可达"), "{err}");
     let file = root.join("note.txt");
     std::fs::write(&file, b"x").expect("建文件");
-    let err = ambient(&file, Tier::Host, &product, &probe).expect_err("文件不能当工作区");
+    let err = ambient(&file, Side::Host, &product, &probe).expect_err("文件不能当工作区");
     assert!(err.contains("启动目录不是目录"), "{err}");
 
     let _ = std::fs::remove_dir_all(&root);
@@ -383,7 +382,7 @@ pub(crate) fn ambient_workspace_takes_the_startup_directory_through_the_same_lad
 #[test]
 pub(crate) fn loaded_binding_is_rechecked_against_the_tier() {
     use crate::units::business::workspace::api::{product_root, recheck};
-    use crate::units::pure::exec_model::api::Tier;
+    use crate::units::pure::exec_model::api::Side;
     use std::path::Path;
 
     let probe = crate::kernel::detail::HostProbeAdapter;
@@ -392,15 +391,15 @@ pub(crate) fn loaded_binding_is_rechecked_against_the_tier() {
     let product = product_root(&product, &probe);
     let err = recheck(
         Path::new(r"\\server\share\proj"),
-        Tier::Host,
+        Side::Host,
         &product,
         &probe,
     )
     .expect_err("本机档的 UNC 绑定要拒");
     assert!(err.contains("本机档不能用网络工作区"), "{err}");
-    let err = recheck(&product, Tier::Host, &product, &probe).expect_err("越界绑定要拒");
+    let err = recheck(&product, Side::Host, &product, &probe).expect_err("越界绑定要拒");
     assert!(err.contains("互相包含"), "{err}");
-    recheck(&product.join("gone"), Tier::Host, &product, &probe).expect("不可达不挡开会话");
+    recheck(&product.join("gone"), Side::Host, &product, &probe).expect("不可达不挡开会话");
 }
 
 /// 目的：先建本机档 + 外部绑定，再切进虚拟机档——起 guest 的挂载计划与直接建虚拟机档一致。
@@ -426,7 +425,7 @@ pub(crate) fn vm_edit_from_host_to_vm_keeps_external_workspace_mounts() {
                 model: String::new(),
                 chara: String::new(),
             }],
-            tier: "vm".to_string(),
+            sandbox: "vm".to_string(),
             guest: Some(guest),
             pins: BTreeMap::new(),
             permission: None,
@@ -445,8 +444,7 @@ pub(crate) fn external_workspace_vm_delete_stops_guest_and_keeps_external() {
     let (mut core, product, external, guest) =
         core_for_external_vm("vm-ext-delete", engine.clone());
     let mut spec = work("wx", SINGLE, &["a"]);
-    spec.tier = Tier::Vm;
-    spec.guest = Some(guest);
+    spec.sandbox = decl_of(Side::Guest, Some(&guest));
     spec.workspace = Some(external.clone());
     let sid = core.create_work(spec).expect("建会话").sid;
     let session = product.join("session").join("wx");
@@ -480,8 +478,7 @@ pub(crate) fn failed_guest_boot_cleans_external_workspace_store() {
     };
     let (mut core, product, external, guest) = core_for_external_vm("vm-ext-boot-fail", engine);
     let mut spec = work("wx", SINGLE, &["a"]);
-    spec.tier = Tier::Vm;
-    spec.guest = Some(guest);
+    spec.sandbox = decl_of(Side::Guest, Some(&guest));
     spec.workspace = Some(external.clone());
     let err = core.create_work(spec).expect_err("起不来要如实拒绝");
     assert!(err.contains("起不来"), "{}", err);
@@ -520,12 +517,12 @@ pub(crate) fn vm_tool_paths_follow_provisioned_packages_without_restart() {
     // 没登记：按项目内补齐的那一个判 → 这一项成立，且文案说清是按哪条路找到的。
     let core = runtime_rooted(
         &root,
-        InMemorySettings::with_tier(Tier::Host),
+        InMemorySettings::with_tier(Side::Host),
         Arc::clone(&provision),
     );
-    let choices = core.tier_choices();
+    let choices = core.sandbox_choices();
     let qemu = choices
-        .vm_requirements
+        .guest_requirements
         .iter()
         .find(|r| r.id == "qemu")
         .expect("qemu 是一项前置");
@@ -543,8 +540,8 @@ pub(crate) fn vm_tool_paths_follow_provisioned_packages_without_restart() {
         Arc::clone(&provision),
     );
     let qemu = registered
-        .tier_choices()
-        .vm_requirements
+        .sandbox_choices()
+        .guest_requirements
         .into_iter()
         .find(|r| r.id == "qemu")
         .expect("qemu 是一项前置");
@@ -1462,8 +1459,7 @@ fn creating_a_proxy_without_core_default_is_refused() {
         task: None,
         delegate: false,
         permission: None,
-        tier: Tier::Host,
-        guest: None,
+        sandbox: decl_of(Side::Host, None),
         workspace: None,
     };
     let err = core

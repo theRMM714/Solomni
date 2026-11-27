@@ -22,8 +22,7 @@ impl Work {
         // 过期内容替换与保底是**工作根**的会话级事实：配置界面读根上的值。
         let root = work_root(self.history.as_ref(), sid).unwrap_or_else(|_| sid.to_string());
         let root_meta = self.history.meta(&root)?;
-        let tier = meta.exec.tier;
-        // 机器能力（与某条会话无关）：界面据此决定虚拟机档能不能**选**；虚拟根是会话级，另行校验。
+        // 机器能力（与某条会话无关）：界面据此决定 guest 侧能不能**选**；虚拟根是会话级，另行校验。
         let tools = self.virtual_tools(registry);
         let inputs = crate::units::business::vm::api::VmInputs {
             tools: &tools,
@@ -35,8 +34,12 @@ impl Work {
             crate::units::business::vm::api::capability_refusal(&inputs).unwrap_or_default();
         let vm_requirements = cap.requirements;
         // 会话级判据（机器能力 + 这条会话选的虚拟根）只算一次：两处读同一个结论，不各算一遍。
-        let readiness =
-            crate::units::business::vm::api::tier_readiness(&self.root, &meta.exec, &tools, probe);
+        let readiness = crate::units::business::vm::api::tier_readiness(
+            &self.root,
+            &meta.target(),
+            &tools,
+            probe,
+        );
         Ok(SessionConfig {
             sid: meta.name.clone(),
             kind: meta.spec.kind.clone(),
@@ -51,20 +54,20 @@ impl Work {
                     chara: a.chara.clone(),
                 })
                 .collect(),
-            tier: tier.as_str().to_string(),
-            tier_locked: meta.parent.is_some(),
-            guest: meta.exec.guest.clone(),
+            sandbox: meta.sandbox.policy.clone(),
+            sandbox_locked: meta.parent.is_some(),
+            guest: meta.facts.guest.clone(),
             guests: self.provision.guest_bases()?,
             net: registry.app().sandbox.policy.network,
             permission: self.permission_view(turn, registry, &meta)?,
             thinking: self.thinking_view_for_root(registry, &root),
             context_freshness: root_meta.context_freshness,
             freshness_keep_percent: root_meta.freshness_keep_percent,
-            pins: meta.exec.pins.clone(),
-            runtime: self.runtime_report_for(registry, probe, &meta.exec),
+            pins: meta.sandbox.pins.clone(),
+            runtime: self.runtime_report_for(registry, probe, &meta.target()),
             runtimes_dir: crate::kernel::api::path::slash(&self.packages.runtimes_dir()),
-            tier_ready: readiness.ready(),
-            tier_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
+            sandbox_ready: readiness.ready(),
+            sandbox_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
             // 虚拟机档能不能选**与当前档位无关**：本机档会话也要如实告诉用户 vm 现在不可用（界面据此禁用）。
             // 逐项清单一起给出：界面照抄"缺哪几项、每项怎么补"，不自己编话。
             vm_available,
@@ -177,33 +180,36 @@ impl Work {
                 return Err("子会话不能改 agent 名单：要换人请改主会话或新建会话".to_string());
             }
         }
-        // 档位：与「开始」同一把尺子——虚拟机档的选型不成立（多版本未定版 / 定版不存在 / 路径冲突）如实拒绝。
-        let tier = match edit.tier.as_str() {
-            "host" => crate::units::pure::exec_model::api::Tier::Host,
-            "vm" => crate::units::pure::exec_model::api::Tier::Vm,
-            other => return Err(format!("未知执行档位：{}（只认 host / vm）", other)),
+        // 执行环境：与「开始」同一把尺子——策略不认识、选型不成立（多版本未定版 / 定版不存在 / 路径冲突）如实拒绝。
+        let policy = if edit.sandbox.trim().is_empty() {
+            meta.sandbox.policy.clone()
+        } else {
+            edit.sandbox.trim().to_string()
         };
-        let spec = crate::units::pure::exec_model::api::ExecSpec {
-            tier,
-            guest: edit.guest.clone(),
-            pins: edit.pins.clone(),
-        };
-        // 子会话的档位只随主会话：这里只锁 tier / guest，模块与模型仍按各自规则（后续再收口）。
-        if meta.parent.is_some() && (spec.tier != meta.exec.tier || spec.guest != meta.exec.guest) {
+        let mut decl = crate::units::business::sandbox::api::SandboxDecl::of(&policy);
+        decl.pins = edit.pins.clone();
+        if let Some(g) = edit.guest.as_deref().filter(|g| !g.is_empty()) {
+            decl.params = serde_json::json!({ "guest": g });
+        }
+        let facts = self.policies.facts(&decl)?;
+        let target = decl.target(&facts);
+        // 子会话的执行环境只随主会话：这里只锁策略与 guest，模块与模型仍按各自规则（后续再收口）。
+        if meta.parent.is_some()
+            && (decl.policy != meta.sandbox.policy || facts.guest != meta.facts.guest)
+        {
             return Err(
-                "子会话的档位随主会话：不能单独改 tier / guest（改主会话即可）".to_string(),
+                "子会话的执行环境随主会话：不能单独改 sandbox / guest（改主会话即可）".to_string(),
             );
         }
-        // 承载校验：前置条件不具备时**不允许改入虚拟机档**（用户环境问题，不是选型问题）；界面上的"能不能选"由
-        // SessionConfig 的 tier_ready 说同一件事。已在虚拟机档上的会话只校验它自己那几项（基础根等），不拦模块/模型/定版/网络。
-        let staying_vm = meta.exec.tier == crate::units::pure::exec_model::api::Tier::Vm
-            && tier == crate::units::pure::exec_model::api::Tier::Vm;
+        // 承载校验：前置条件不具备时**不允许改入 guest 侧**（用户环境问题，不是选型问题）；界面上的"能不能选"由
+        // SessionConfig 的 sandbox_ready 说同一件事。已在 guest 上的会话只校验它自己那几项（基础根等），不拦模块/模型/定版/网络。
+        let staying_vm = meta.facts.on_guest() && facts.on_guest();
         if staying_vm {
             // 留在 vm 档：只校验用户这次填的基础根（填错路径就是填错路径），
             // 不拿"本机能不能提供 vm 档"去拦一条已经存在的会话。
             let tools = self.virtual_tools(registry);
             let base_item =
-                crate::units::business::vm::api::tier_readiness(&self.root, &spec, &tools, host)
+                crate::units::business::vm::api::tier_readiness(&self.root, &target, &tools, host)
                     .requirements
                     .into_iter()
                     .find(|r| r.id == "base");
@@ -214,7 +220,7 @@ impl Work {
             }
         } else if let Some(why) = crate::units::business::vm::api::tier_refusal(
             &self.root,
-            &spec,
+            &target,
             &self.virtual_tools(registry),
             host,
         ) {
@@ -229,7 +235,7 @@ impl Work {
             .collect();
         // 入口按**目标环境**判：虚拟机档在 guest 里跑（guest 的 os），本机档在宿主；
         // 跨平台时还要看文件形式——宿主编出来的产物（如 Windows 的 .exe）在 linux guest 里跑不了。
-        let guest = crate::units::business::vm::api::guest_os_of(&self.root, host, &spec)
+        let guest = crate::units::business::vm::api::guest_os_of(&self.root, host, &target)
             .map(|g| g.as_str());
         let target_os = guest.unwrap_or(std::env::consts::OS);
         let missing: Vec<crate::units::business::vm::api::MissingEntry> =
@@ -246,23 +252,24 @@ impl Work {
             &self.root,
             host,
             &self.packages.library(),
-            &spec,
+            &target,
             &session_modules,
             &missing,
-            spec.guest.as_deref(),
+            facts.guest.as_deref(),
             registry.app().sandbox.policy.network,
         )?;
 
         let mut new_meta = meta.clone();
         new_meta.modules = flat_modules(&metas);
         new_meta.agents = metas.clone();
-        new_meta.exec = spec.clone();
+        new_meta.sandbox = decl.clone();
+        new_meta.facts = facts.clone();
         if let Some(p) = &edit.permission {
             if meta.parent.is_none() {
                 // 根：只更新 ceiling；子会话的 narrowing 原样保留，出计划/装配时再求交。
                 turn.permissions_for(registry, &meta)?.apply_root(p)?;
-                new_meta.sandbox.ceiling = Some(p.clone());
-                new_meta.sandbox.narrowing = None;
+                new_meta.permission.ceiling = Some(p.clone());
+                new_meta.permission.narrowing = None;
             } else {
                 // 子：只能收窄；父的生效权限是校验基线。
                 let parent = self
@@ -270,8 +277,8 @@ impl Work {
                     .meta(meta.parent.as_deref().unwrap_or_default())?;
                 turn.permissions_for(registry, &parent)?
                     .apply_narrowing(p)?;
-                new_meta.sandbox.narrowing = Some(p.clone());
-                new_meta.sandbox.ceiling = None;
+                new_meta.permission.narrowing = Some(p.clone());
+                new_meta.permission.ceiling = None;
             }
         }
         if let Some(s) = &edit.shared {
@@ -306,7 +313,8 @@ impl Work {
                     continue;
                 }
                 let mut cm = self.history.meta(&child)?;
-                cm.exec = spec.clone();
+                cm.sandbox = decl.clone();
+                cm.facts = facts.clone();
                 for ca in &mut cm.agents {
                     if let Some(na) = new_meta.agents.iter().find(|a| a.name == ca.name) {
                         *ca = na.clone();
@@ -316,12 +324,12 @@ impl Work {
                 new_children.push(cm);
             }
         }
-        let was_vm = meta.exec.tier == crate::units::pure::exec_model::api::Tier::Vm;
-        let is_vm = new_meta.exec.tier == crate::units::pure::exec_model::api::Tier::Vm;
+        let was_vm = meta.facts.on_guest();
+        let is_vm = new_meta.facts.on_guest();
         // 共享 guest 的装配按整棵树算：把这次的新值覆盖到作用域根的子树上，再出计划与沙箱。
         let (lease, tree, tree_plan) = if is_vm {
             let (lease, scope_meta) = guest_scope(self.history.as_ref(), &new_meta)?
-                .ok_or_else(|| "虚拟机档会话没有解析出 guest 作用域".to_string())?;
+                .ok_or_else(|| "guest 侧的会话没有解析出 guest 作用域".to_string())?;
             let mut extras: Vec<&SessionMeta> = vec![&new_meta];
             extras.extend(new_children.iter());
             let tree = tree_meta_with(self.history.as_ref(), &scope_meta, &extras)?;
@@ -392,9 +400,9 @@ impl Work {
             }
         }
         let mut layer = if meta.parent.is_none() {
-            meta.sandbox.ceiling.clone()
+            meta.permission.ceiling.clone()
         } else {
-            meta.sandbox.narrowing.clone()
+            meta.permission.narrowing.clone()
         }
         .unwrap_or_default();
         layer.profile = Some(profile);
@@ -409,11 +417,11 @@ impl Work {
         }
         let mut new_meta = meta.clone();
         if meta.parent.is_none() {
-            new_meta.sandbox.ceiling = Some(layer);
-            new_meta.sandbox.narrowing = None;
+            new_meta.permission.ceiling = Some(layer);
+            new_meta.permission.narrowing = None;
         } else {
-            new_meta.sandbox.narrowing = Some(layer);
-            new_meta.sandbox.ceiling = None;
+            new_meta.permission.narrowing = Some(layer);
+            new_meta.permission.ceiling = None;
         }
         let changed = subtree_of(self.history.as_ref(), sid);
         self.history.save_meta(&new_meta)?;
@@ -481,14 +489,15 @@ impl Work {
             "type": "config",
             "ts": crate::kernel::api::procs::unix_seconds(),
             "kind": meta.spec.kind,
-            "tier": meta.exec.tier.as_str(),
-            "guest": meta.exec.guest,
+            "sandbox": meta.sandbox.policy,
+            "side": meta.facts.side.as_str(),
+            "guest": meta.facts.guest,
             "net": registry.app().sandbox.policy.network,
-            "pins": meta.exec.pins,
+            "pins": meta.sandbox.pins,
             "thinking": meta.thinking,
             "context_freshness": meta.context_freshness,
             "freshness_keep_percent": meta.freshness_keep_percent,
-            "permission": serde_json::to_value(&meta.sandbox).unwrap_or(serde_json::Value::Null),
+            "permission": serde_json::to_value(&meta.permission).unwrap_or(serde_json::Value::Null),
             "permission_effective": turn.permissions_for(registry, meta).ok().map(|p| serde_json::json!({
                 "profile": p.profile,
                 "shared": turn.shared_scope_for(registry, meta).ok(),

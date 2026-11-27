@@ -48,6 +48,8 @@ pub struct Core {
     pub(crate) lifecycle: crate::units::business::lifecycle::api::Lifecycle,
     /// 目的：会话形状声明（类型表与段表）——解释工具面时按它重算，不另存一份。
     pub(super) decls: Arc<crate::units::business::session_model::api::SessionDecls>,
+    /// 目的：执行环境策略注册表——补编与呈现层要按声明解析出「在哪一侧、哪个客机」。
+    pub(super) policies: crate::units::business::sandbox::api::SandboxPolicies,
 }
 
 /// 目的：在世会话形态（`turn_state` 的状态类型）：测试访问器用它读会话内容。
@@ -66,6 +68,7 @@ impl Core {
         workspace: Arc<dyn Workspace + Send + Sync>,
         versions: Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>,
         vm: Arc<dyn Vm + Send + Sync>,
+        policies: crate::units::business::sandbox::api::SandboxPolicies,
         packages: Arc<dyn Packages + Send + Sync>,
         provision: Arc<dyn Provision + Send + Sync>,
         modules: Arc<dyn Modules + Send + Sync>,
@@ -121,6 +124,7 @@ impl Core {
             Arc::clone(&workspace),
             Arc::clone(&versions),
             Arc::clone(&vm),
+            policies.clone(),
             Arc::clone(&packages),
             Arc::clone(&provision),
             Arc::clone(&modules),
@@ -157,6 +161,7 @@ impl Core {
             work,
             lifecycle,
             decls,
+            policies,
         };
         c.sync_compact_choice();
         c
@@ -303,14 +308,7 @@ impl Core {
     pub(crate) fn activation_build_request(
         &self,
         sid: &str,
-    ) -> Result<
-        (
-            Vec<String>,
-            crate::units::pure::exec_model::api::Tier,
-            Option<String>,
-        ),
-        String,
-    > {
+    ) -> Result<(Vec<String>, SandboxDecl), String> {
         self.work.activation_build_request(sid)
     }
 
@@ -529,15 +527,15 @@ impl Core {
     }
 
     /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。
-    pub fn runtime_report(&self, tier: crate::units::pure::exec_model::api::Tier) -> RuntimeReport {
+    pub fn runtime_report(&self, sandbox: &SandboxDecl) -> RuntimeReport {
         self.work
-            .runtime_report(self.registry.as_ref(), self.probe.as_ref(), tier)
+            .runtime_report(self.registry.as_ref(), self.probe.as_ref(), sandbox)
     }
 
     /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。
-    pub fn tier_choices(&self) -> TierChoices {
+    pub fn sandbox_choices(&self) -> SandboxChoices {
         self.work
-            .tier_choices(self.registry.as_ref(), self.probe.as_ref())
+            .sandbox_choices(self.registry.as_ref(), self.probe.as_ref())
     }
 
     /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。
@@ -571,9 +569,19 @@ impl Core {
     pub fn ambient_workspace(
         &self,
         raw: &std::path::Path,
-        tier: crate::units::pure::exec_model::api::Tier,
+        sandbox: &SandboxDecl,
     ) -> Result<std::path::PathBuf, String> {
-        self.work.ambient_workspace(self.probe.as_ref(), raw, tier)
+        self.work
+            .ambient_workspace(self.probe.as_ref(), raw, sandbox)
+    }
+
+    /// 目的：声明解析成事实（在哪一侧、哪个客机）——补编与建会话前的判定读它。
+    /// 错误：策略没登记或参数不成立时如实拒绝。
+    pub fn sandbox_facts(
+        &self,
+        sandbox: &SandboxDecl,
+    ) -> Result<crate::units::business::sandbox::api::SandboxFacts, String> {
+        self.policies.facts(sandbox)
     }
 
     /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。

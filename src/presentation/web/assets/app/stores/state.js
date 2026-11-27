@@ -64,7 +64,7 @@ function newSession(v, h) {
     running: false, working: null, running_known: false,
     can_update_task: !!v.can_update_task,
     continue_action: v.continue || null,
-    tier: v.tier, tier_ready: v.tier_ready, tier_missing: v.tier_missing || [],
+    sandbox: v.sandbox, sandbox_ready: v.sandbox_ready, sandbox_missing: v.sandbox_missing || [],
     permission_profile: v.permission_profile || '', permission_label: v.permission_label || '',
     thinking: v.thinking || null,
     permission_narrowed: !!v.permission_narrowed, permission_parent: v.permission_parent || null,
@@ -90,9 +90,9 @@ function align(state, cur, v) {
   cur.pending = v.pending || null;
   // 只读视图不显示上下文继续（只有启用）。
   if (!cur.readonly) cur.continue_action = v.continue || null;
-  cur.tier = v.tier;
-  cur.tier_ready = v.tier_ready;
-  cur.tier_missing = v.tier_missing || [];
+  cur.sandbox = v.sandbox;
+  cur.sandbox_ready = v.sandbox_ready;
+  cur.sandbox_missing = v.sandbox_missing || [];
   cur.permission_profile = v.permission_profile || cur.permission_profile;
   cur.permission_label = v.permission_label || cur.permission_label;
   if (v.thinking !== undefined) cur.thinking = v.thinking || null;

@@ -5,7 +5,6 @@
 
 use crate::units::business::session_model::api::{HistoryView, SessionMeta};
 use crate::units::business::turn_state::api::History;
-use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::registry_model::api::AgentMeta;
 
 /// 目的：整张名单的扁平模块清单（保序去重）：同一模块被多个 agent 共用时只出现一次。
@@ -155,10 +154,10 @@ pub fn tree_meta_with(
     Ok(out)
 }
 
-/// 目的：这条会话的共享 guest 租约；空 = 本机档，或代理父会话自己没有 guest。
+/// 目的：这条会话的共享 guest 租约；空 = 本机侧，或代理父会话自己没有 guest。
 /// 约束：一个主会话树一台 guest；proxy 父会话没有 guest，它的每个子工作临时各占一台。
 pub fn guest_lease(meta: &SessionMeta, top: &SessionMeta) -> Option<String> {
-    if top.exec.tier != Tier::Vm {
+    if !top.facts.on_guest() {
         return None;
     }
     if top.is_proxy() && meta.parent.is_none() {
@@ -169,12 +168,12 @@ pub fn guest_lease(meta: &SessionMeta, top: &SessionMeta) -> Option<String> {
 
 /// 目的：这台会话的**共享 guest 作用域**——(guest 租约, 该租约对应的会话 meta)。
 /// 约束：一个主会话树一台 guest；proxy 父会话没有 guest，它的每个子工作临时各占一台。
-///   host 档 / proxy 父会话 = None；其余 = (租约, 作用域根 meta)。
+///   host 侧 / proxy 父会话 = None；其余 = (租约, 作用域根 meta)。
 pub fn guest_scope(
     history: &dyn History,
     meta: &SessionMeta,
 ) -> Result<Option<(String, SessionMeta)>, String> {
-    if meta.exec.tier != Tier::Vm {
+    if !meta.facts.on_guest() {
         return Ok(None);
     }
     // 顶层工作名：子会话沿 parent 走到顶（整棵树只有一个 work/）。

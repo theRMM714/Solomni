@@ -364,8 +364,8 @@ pub struct NewSession {
     pub request_id: String,
     /// 目的：工作名——给了就用它，没给由宿主派生（代理建的子工作按 agent 名派生）。
     pub name: Option<String>,
-    /// 目的：执行档位——给了就用它，没给由宿主按父会话或设置定。
-    pub tier: Option<String>,
+    /// 目的：执行环境策略 id——给了就用它，没给由宿主按父会话或设置定。
+    pub sandbox: Option<String>,
     /// 目的：虚拟机档的虚拟根名——给了就用它，没给由宿主按父会话定（顶层为空，建好后在会话配置里选）。
     pub guest: Option<String>,
     /// 目的：父会话——由**机制**从调用上下文填，不从模型参数取（模型不能自选父）。
@@ -579,7 +579,7 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
         task,
         request_id,
         name,
-        tier: None,
+        sandbox: None,
         guest: None,
         parent: None,
         permission,

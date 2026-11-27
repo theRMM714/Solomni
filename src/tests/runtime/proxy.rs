@@ -5,6 +5,7 @@
 
 use super::super::prelude::*;
 use crate::presentation::faces::Faces;
+use crate::tests::builders::decl_of;
 
 use crate::units::business::proxy::api as d;
 use crate::units::business::proxy::api::ProxyTools;
@@ -494,7 +495,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
                 task: "做事".to_string(),
                 request_id: "r1".to_string(),
                 name: None,
-                tier: None,
+                sandbox: None,
                 guest: None,
                 parent: Some("w-notify".to_string()),
                 permission: None,
@@ -607,8 +608,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         task: None,
         delegate: false,
         permission: None,
-        tier: Tier::Host,
-        guest: None,
+        sandbox: decl_of(Side::Host, None),
         workspace: None,
     };
     let (opened, _head) = faces.work.create_work(spec.clone()).expect("建代理会话");
@@ -667,11 +667,16 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
     // 档位与其余形态同一把尺子：用户选虚拟机档就按它建（承载不了则如实拒绝、什么都不留）。
     let mut vm = spec;
     vm.name = "w-user-proxy-vm".to_string();
-    vm.tier = Tier::Vm;
+    let guest = crate::tests::test_guest("proxy-vm");
+    vm.sandbox = crate::tests::builders::decl_of(Side::Guest, Some(&guest));
     match faces.work.create_work(vm) {
         Ok((o, _)) => {
             let (m, _) = faces.history.open(&o.sid).expect("落盘");
-            assert_eq!(m.exec.tier, Tier::Vm, "用户选的档位要落盘（子工作继承它）");
+            assert_eq!(
+                m.facts.side,
+                Side::Guest,
+                "用户选的执行环境要落盘（子工作继承它）"
+            );
         }
         Err(e) => {
             assert!(!e.trim().is_empty(), "拒绝要把原因说清");
@@ -704,8 +709,7 @@ pub(crate) fn proxy_session_exposes_context_usage() {
         task: None,
         delegate: false,
         permission: None,
-        tier: Tier::Host,
-        guest: None,
+        sandbox: decl_of(Side::Host, None),
         workspace: None,
     };
     let sid = faces.work.create_work(spec).expect("建代理会话").0.sid;
@@ -757,7 +761,7 @@ pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
                     task: "做事".to_string(),
                     request_id: "r-env".to_string(),
                     name: None,
-                    tier: Some("vm".to_string()),
+                    sandbox: Some("vm".to_string()),
                     guest: Some("nope".to_string()),
                     parent: Some(proxy),
                     permission: None,
@@ -768,8 +772,8 @@ pub(crate) fn ai_created_child_inherits_the_proxy_environment() {
         })
         .expect("建子会话");
     let (meta, _) = faces.history.open(&child).expect("子会话落盘");
-    assert_eq!(meta.exec.tier, Tier::Host, "子会话环境随代理主会话");
-    assert_eq!(meta.exec.guest, None, "AI 不能给子会话选虚拟根");
+    assert_eq!(meta.facts.side, Side::Host, "子会话环境随代理主会话");
+    assert_eq!(meta.facts.guest, None, "AI 不能给子会话选虚拟根");
 }
 
 /// 目的：代理也能从状态栏快速切档；不经过 edit_session（代理没有名单）。
@@ -786,7 +790,7 @@ pub(crate) fn proxy_profile_can_be_quick_switched() {
         .expect("代理快速切档");
     let (meta, _) = faces.history.open(&sid).expect("落盘");
     assert_eq!(
-        meta.sandbox.ceiling.as_ref().and_then(|l| l.profile),
+        meta.permission.ceiling.as_ref().and_then(|l| l.profile),
         Some(ProfileId::Offline)
     );
     assert_eq!(

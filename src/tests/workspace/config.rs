@@ -10,13 +10,15 @@ use crate::units::business::session_model::api::SINGLE;
 #[test]
 pub(crate) fn session_config_reports_tier_missing_and_runtimes_dir() {
     let hist = Arc::new(InMemoryHistory::new());
+    let guest = crate::tests::test_guest("cfg-vm");
     seed_session(
         &hist,
         "w",
         SINGLE,
         vec![agent_meta("a", &["a"], Some("m"))],
-        ExecSpec {
-            tier: Tier::Vm,
+        TargetSpec {
+            side: Side::Guest,
+            guest: Some(guest),
             ..Default::default()
         },
     );
@@ -33,7 +35,7 @@ pub(crate) fn session_config_reports_tier_missing_and_runtimes_dir() {
     assert_eq!(cfg.sid, "w");
     assert_eq!(cfg.kind, SINGLE);
     assert!(!cfg.started, "没有内容的会话 = 还没开过");
-    assert_eq!(cfg.tier, "vm");
+    assert_eq!(cfg.sandbox, "vm");
     assert_eq!(cfg.agents[0].model, "m");
     assert_eq!(
         cfg.runtime.missing.get("a"),

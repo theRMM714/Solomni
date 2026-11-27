@@ -104,10 +104,50 @@ pub(crate) fn run_execution<S: Seat>(
     out
 }
 
+/// 目的：把一份派生选型折回会话 meta 的两个字段（声明 + 派生的侧与虚拟根）。
+/// 约束：只给夹具用——生产里 meta 的这两个字段由 `work` 按策略解析后落盘。
+pub(crate) fn sandbox_of(
+    spec: &TargetSpec,
+) -> (
+    crate::units::business::sandbox::api::SandboxDecl,
+    crate::units::business::sandbox::api::SandboxFacts,
+) {
+    use crate::units::business::sandbox::api::{SandboxDecl, SandboxFacts, VM_POLICY};
+    let mut decl = if spec.side == Side::Guest {
+        SandboxDecl::of(VM_POLICY)
+    } else {
+        SandboxDecl::host()
+    };
+    decl.pins = spec.pins.clone();
+    if spec.side == Side::Guest
+        && let Some(g) = spec.guest.as_deref()
+    {
+        decl.params = serde_json::json!({ "guest": g });
+    }
+    let facts = match spec.guest.as_deref() {
+        Some(g) if spec.side == Side::Guest => SandboxFacts::guest(g),
+        _ => SandboxFacts::host(),
+    };
+    (decl, facts)
+}
+
+/// 目的：按「哪一侧 + 虚拟根名」造一份执行环境声明（夹具里替代已删的 tier / guest 两格）。
+pub(crate) fn decl_of(
+    side: Side,
+    guest: Option<&str>,
+) -> crate::units::business::sandbox::api::SandboxDecl {
+    let spec = TargetSpec {
+        side,
+        guest: guest.map(str::to_string),
+        pins: BTreeMap::new(),
+    };
+    sandbox_of(&spec).0
+}
+
 /// 目的：虚拟机档选型：基础根 + 不联网（定版留空 = 让库自己决定；多版本时报歧义）。
-pub(crate) fn vm_spec() -> ExecSpec {
-    ExecSpec {
-        tier: Tier::Vm,
+pub(crate) fn vm_spec() -> TargetSpec {
+    TargetSpec {
+        side: Side::Guest,
         guest: Some(crate::tests::test_guest("vm-spec")),
         pins: BTreeMap::new(),
     }

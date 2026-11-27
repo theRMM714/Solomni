@@ -488,41 +488,32 @@ pub(crate) struct PreparedSession {
 }
 
 impl Core {
-    /// 目的：规整一次建会话的**目标环境**（档位 / 虚拟根）：有父沿用父会话的执行段，顶层取载荷或设置默认。
+    /// 目的：规整一次建会话的**执行环境**：有父沿用父会话的声明，顶层取载荷里的策略 id 或设置里的默认。
     /// 参数：`spec` = 规整后的载荷。
-    /// 返回：(档位, 虚拟根名)。
-    /// 错误：档位名不合法。
-    /// 约束：与准备段同一份判据（准备段也调它）——创建前的补编因此按同一个目标环境编。
-    pub(crate) fn resolve_env(
-        &self,
-        spec: &d::NewSession,
-    ) -> Result<(Tier, Option<String>), String> {
-        let parent_exec = match &spec.parent {
-            Some(p) => Some(self.history.meta(p)?.exec),
-            None => None,
-        };
-        let tier = match &parent_exec {
-            Some(exec) => exec.tier,
-            None => match spec
-                .tier
-                .as_deref()
-                .map(str::trim)
-                .filter(|t| !t.is_empty())
-            {
-                Some(t) => Tier::parse(t)?,
-                None => self.registry.app_settings().tier,
-            },
-        };
-        let guest = match &parent_exec {
-            Some(exec) => exec.guest.clone(),
-            None => spec
-                .guest
-                .as_deref()
-                .map(str::trim)
-                .filter(|b| !b.is_empty())
-                .map(|b| b.to_string()),
-        };
-        Ok((tier, guest))
+    /// 返回：执行环境声明（策略 id + 定版表 + 参数）。
+    /// 错误：策略没登记、或父会话的声明读不出来。
+    /// 约束：与准备段同一份判据（准备段也调它）——创建前的补编因此按同一个执行环境编。
+    pub(crate) fn resolve_env(&self, spec: &d::NewSession) -> Result<SandboxDecl, String> {
+        if let Some(p) = spec.parent.as_deref() {
+            return Ok(self.history.meta(p)?.sandbox.clone());
+        }
+        let policy = spec
+            .sandbox
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| self.registry.app_settings().default_sandbox.policy.clone());
+        let mut decl = SandboxDecl::of(&policy);
+        if let Some(g) = spec
+            .guest
+            .as_deref()
+            .map(str::trim)
+            .filter(|b| !b.is_empty())
+        {
+            decl.params = serde_json::json!({ "guest": g });
+        }
+        Ok(decl)
     }
 
     /// 目的：建会话的第一段（核心，毫秒级）——规整载荷、占名、备好工作区与计划。
@@ -558,9 +549,9 @@ impl Core {
             Some(n) => self.unique_work_name(n, &derived),
             None => self.unique_work_name(&derived, "work"),
         };
-        // 环境属于主会话：有父就整段沿用父会话的 ExecSpec（档位 / 虚拟根 / 网络 / 定版），
+        // 环境属于主会话：有父就整段沿用父会话的 TargetSpec（档位 / 虚拟根 / 网络 / 定版），
         // 不给子会话留任何单独覆盖的入口。顶层仍由人经呈现层给档位与虚拟根。
-        let (tier, vm_guest) = self.resolve_env(spec)?;
+        let sandbox = self.resolve_env(spec)?;
         // 本次需求：给了就带上（有流程的会话必须有，判定在 work 的准备段）。
         let task = spec.task.trim();
         let task = (!task.is_empty()).then(|| task.to_string());
@@ -572,9 +563,8 @@ impl Core {
             agents,
             task,
             delegate,
-            tier,
+            sandbox,
             permission: spec.permission,
-            guest: vm_guest,
             workspace: spec
                 .workspace
                 .as_deref()

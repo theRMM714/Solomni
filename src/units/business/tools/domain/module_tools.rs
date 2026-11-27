@@ -1,6 +1,6 @@
 //! 目的：模块清单 → 工具面——把 `module.yaml` 声明的工具与参数契约转成工具单元认识的形态。
 //! 管：参数契约的声明形态（`ToolDecl::schema`）、模型侧的工具参数段与工具清单段。
-//! 不管：`module.yaml` 的读取与参数**声明形态**（`Param` / `ParamType` 归 `workspace`）——这里只消费，免得 `workspace → tools` 成环。
+//! 不管：`module.yaml` 的读取与参数**声明形态**（`Param` / `ParamType` 归 `registry_model`）——这里只消费。
 //! 联动：由本单元的 `service/` 在装配工具面时调用；声明形态来自 `workspace::api`。
 
 use crate::units::business::catalog::modules::api::{Module, ToolDecl};

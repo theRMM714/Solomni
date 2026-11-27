@@ -118,11 +118,11 @@ pub fn host_platform() -> Option<&'static str> {
     }
 }
 
-/// 目的：认出的平台子目录：`tier` = None 表示两档通用，Some 表示只服务那一档。
+/// 目的：认出的平台子目录：`side` = None 表示两档通用，Some 表示只服务那一档。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlatformDir<'a> {
     /// 目的：None = 两档通用；Some = 只服务那一档。
-    pub tier: Option<crate::units::pure::exec_model::api::Tier>,
+    pub side: Option<crate::units::pure::exec_model::api::Side>,
     /// 目的：平台名（os-arch）。
     pub platform: &'a str,
 }
@@ -130,10 +130,10 @@ pub struct PlatformDir<'a> {
 /// 目的：平台子目录名的写法：`<os>-<arch>`（两档通用）、`host-<os>-<arch>`、`guest-<os>-<arch>`。
 /// 约束：不认的子目录当普通内容，不是平台目录。
 pub fn platform_dir(name: &str) -> Option<PlatformDir<'_>> {
-    let (tier, rest) = if let Some(rest) = name.strip_prefix("host-") {
-        (Some(crate::units::pure::exec_model::api::Tier::Host), rest)
+    let (side, rest) = if let Some(rest) = name.strip_prefix("host-") {
+        (Some(crate::units::pure::exec_model::api::Side::Host), rest)
     } else if let Some(rest) = name.strip_prefix("guest-") {
-        (Some(crate::units::pure::exec_model::api::Tier::Vm), rest)
+        (Some(crate::units::pure::exec_model::api::Side::Guest), rest)
     } else {
         (None, name)
     };
@@ -142,7 +142,7 @@ pub fn platform_dir(name: &str) -> Option<PlatformDir<'_>> {
         return None;
     }
     Some(PlatformDir {
-        tier,
+        side,
         platform: rest,
     })
 }

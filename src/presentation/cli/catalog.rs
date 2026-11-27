@@ -5,10 +5,10 @@
 //! 联动：`cli.rs` 渲染 help 与提示；`term.rs` 的 Tab 补全取 `complete`；旗语正文取 `argv`。
 
 use super::MenuRow;
-use crate::units::business::catalog::modules::api::ParamType;
 use crate::units::business::tools::api::{
     CommandBook, Executor, Op, OpBook, Phase, complete_op, op_usage,
 };
+use crate::units::pure::registry_model::api::ParamType;
 use std::sync::OnceLock;
 
 /// 目的：产品内置的命令表；表非法是编译期就该发现的事，这里让它在第一次使用时炸出来。
@@ -170,10 +170,7 @@ pub(crate) fn detail(raw: &str) -> Option<String> {
 }
 
 /// 目的：一行旗语说明（名字、取值提示、说明），从参数声明派生。
-pub(crate) fn param_row(
-    name: &str,
-    p: &crate::units::business::catalog::modules::api::Param,
-) -> String {
+pub(crate) fn param_row(name: &str, p: &crate::units::pure::registry_model::api::Param) -> String {
     let spec = if p.ty == ParamType::Boolean {
         format!("--{}", name)
     } else {

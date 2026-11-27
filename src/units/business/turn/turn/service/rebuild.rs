@@ -34,22 +34,22 @@ impl Turn {
         meta: &SessionMeta,
         probe: &dyn HostProbe,
     ) -> Result<Option<std::path::PathBuf>, String> {
-        let (root, tier) = match &meta.workspace.root {
-            Some(root) => (root.clone(), meta.exec.tier),
+        let (root, side) = match &meta.workspace.root {
+            Some(root) => (root.clone(), meta.facts.side),
             None => match &meta.parent {
                 None => return Ok(None),
                 Some(p) => {
                     let top = work_root(self.history.as_ref(), p)?;
                     let top_meta = self.history.meta(&top)?;
                     match top_meta.workspace.root {
-                        Some(root) => (root, top_meta.exec.tier),
+                        Some(root) => (root, top_meta.facts.side),
                         None => return Ok(None),
                     }
                 }
             },
         };
         let product = crate::units::business::workspace::api::product_root(&self.root, probe);
-        crate::units::business::workspace::api::recheck(&root, tier, &product, probe)?;
+        crate::units::business::workspace::api::recheck(&root, side, &product, probe)?;
         Ok(Some(root))
     }
 
@@ -151,7 +151,9 @@ impl Turn {
                 )
                 .with_chara(a.chara.clone())
                 .with_guest(crate::units::business::vm::api::guest_os_of(
-                    &self.root, probe, &meta.exec,
+                    &self.root,
+                    probe,
+                    &meta.target(),
                 ));
                 let (history, marks, line_reply, line_ids, compacted_upto, compacted_line) =
                     replay_dialogue(events, mode);
@@ -160,24 +162,24 @@ impl Turn {
                     probe,
                     &self.packages.library(),
                     &self.packages.base(),
-                    &meta.exec,
+                    &meta.target(),
                     &modules,
                 );
                 // 段与角色取落盘声明里的那一份（成员 / 节点会话是流程的成员角色）——与实时同一个口径。
                 let (loop_id, role) = (meta.spec.loop_id.clone(), meta.spec.role.clone());
-                let host_plan = if meta.exec.tier == crate::units::pure::exec_model::api::Tier::Host
-                {
-                    crate::units::business::vm::api::host_plan_for(
-                        &self.packages.library(),
-                        &self.packages.base(),
-                        probe,
-                        &meta.exec,
-                        &modules,
-                        crate::units::business::catalog::packages::api::PinPolicy::Require,
-                    )
-                } else {
-                    crate::units::business::catalog::packages::api::PackagePlan::default()
-                };
+                let host_plan =
+                    if meta.facts.side == crate::units::pure::exec_model::api::Side::Host {
+                        crate::units::business::vm::api::host_plan_for(
+                            &self.packages.library(),
+                            &self.packages.base(),
+                            probe,
+                            &meta.target(),
+                            &modules,
+                            crate::units::business::catalog::packages::api::PinPolicy::Require,
+                        )
+                    } else {
+                        crate::units::business::catalog::packages::api::PackagePlan::default()
+                    };
                 // 工具环境事实（围栏 / 注入项 / 运行路径 / 工具链根）由这里经 `env` 派生后按值拷进 `session`。
                 // 能力组与工具来源都按落盘声明（与实时同一份，不在重建时重算）。
                 let abilities = a.abilities();
@@ -189,7 +191,7 @@ impl Turn {
                     // 身份与段/角色**同一把尺子**（重建与实时不能各写一份）。
                     loop_id: &loop_id,
                     role: &role,
-                    tier: meta.exec.tier,
+                    side: meta.facts.side,
                     guest_lease: guest_lease_for(self.history.as_ref(), meta)?,
                     shell: self.shell_slot(&sb.session),
                     env: self.member_env(
@@ -197,7 +199,7 @@ impl Turn {
                         &modules,
                         &sb,
                         registry.app().sandbox.policy.network,
-                        meta.exec.tier,
+                        meta.facts.side,
                         &host_plan,
                     ),
                     source_ids: &meta.spec.sources,
@@ -561,7 +563,7 @@ impl Turn {
             mode: tool_mode,
             loop_id: &meta.spec.loop_id,
             role: &meta.spec.role,
-            tier: crate::units::pure::exec_model::api::Tier::Host,
+            side: crate::units::pure::exec_model::api::Side::Host,
             guest_lease: String::new(),
             shell: self.shell_slot(&sb.session),
             env: self.member_env(
@@ -569,7 +571,7 @@ impl Turn {
                 &[],
                 &sb,
                 registry.app().sandbox.policy.network,
-                crate::units::pure::exec_model::api::Tier::Host,
+                crate::units::pure::exec_model::api::Side::Host,
                 &crate::units::business::catalog::packages::api::PackagePlan::default(),
             ),
             source_ids: &meta.spec.sources,

@@ -131,7 +131,7 @@ pub(crate) fn session_delete_releases_fences_in_background_after_directories() {
         "w",
         SINGLE,
         vec![agent_meta("a", &[], None)],
-        ExecSpec::default(),
+        TargetSpec::default(),
     );
     let hist = test_history_of(Arc::clone(&store));
     let vm: Arc<dyn Vm + Send + Sync> = Arc::new(crate::tests::doubles::RecordingVm::default());
@@ -199,7 +199,7 @@ pub(crate) fn session_delete_with_no_fence_leases_skips_release() {
         "w",
         SINGLE,
         vec![agent_meta("a", &[], None)],
-        ExecSpec::default(),
+        TargetSpec::default(),
     );
     let hist = test_history_of(Arc::clone(&store));
     let vm: Arc<dyn Vm + Send + Sync> = Arc::new(crate::tests::doubles::RecordingVm::default());
@@ -238,7 +238,7 @@ pub(crate) fn session_delete_logs_background_release_failures() {
         "w",
         SINGLE,
         vec![agent_meta("a", &[], None)],
-        ExecSpec::default(),
+        TargetSpec::default(),
     );
     let hist = test_history_of(Arc::clone(&store));
     let vm: Arc<dyn Vm + Send + Sync> = Arc::new(crate::tests::doubles::RecordingVm::default());
@@ -389,9 +389,9 @@ pub(crate) fn history_delete_refuses_when_any_node_in_the_subtree_is_running() {
     );
 }
 
-/// 目的：创建工作的档位来自用户选择；承载不了的虚拟机档如实拒绝（与「开始」的校验同源）。
+/// 目的：创建工作的执行环境来自用户选择；虚拟机声明没给虚拟根就如实拒绝（与「开始」的校验同源）。
 #[test]
-pub(crate) fn create_work_uses_chosen_tier_and_rejects_unavailable_vm() {
+pub(crate) fn create_work_uses_the_chosen_sandbox_and_refuses_a_vm_without_a_guest() {
     let hist = Arc::new(InMemoryHistory::new());
     let mut core = core_with_all(
         vec![module_of("a")],
@@ -403,13 +403,13 @@ pub(crate) fn create_work_uses_chosen_tier_and_rejects_unavailable_vm() {
     );
     let host = core.create_work(work("h", SINGLE, &["a"])).unwrap().sid;
     assert_eq!(
-        core.lifecycle.history_open(&host).unwrap().0.exec.tier,
-        Tier::Host
+        core.lifecycle.history_open(&host).unwrap().0.facts.side,
+        Side::Host
     );
     let mut vm = work("v", SINGLE, &["a"]);
-    vm.tier = Tier::Vm;
+    vm.sandbox = decl_of(Side::Guest, None);
     let err = core.create_work(vm).unwrap_err();
-    assert!(err.contains("虚拟机档现在不可用"), "{}", err);
+    assert!(err.contains("虚拟机策略要一个虚拟根"), "{}", err);
     assert!(
         core.lifecycle.history_open("v").is_err(),
         "拒绝就该什么都不留下"
@@ -475,8 +475,7 @@ pub(crate) fn create_work_validates_user_choices() {
         task: None,
         delegate: false,
         permission: None,
-        tier: crate::units::pure::exec_model::api::Tier::Host,
-        guest: None,
+        sandbox: decl_of(crate::units::pure::exec_model::api::Side::Host, None),
         workspace: None,
     };
     let opened = core

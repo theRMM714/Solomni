@@ -15,11 +15,11 @@ pub fn permissions(
 ) -> Result<PermissionSet, String> {
     let root = chain.first().ok_or_else(|| "会话权限链为空".to_string())?;
     let mut out = defaults.to_permission_set();
-    if let Some(layer) = root.sandbox.root_layer()? {
+    if let Some(layer) = root.permission.root_layer()? {
         out = out.apply_root(layer)?;
     }
     for child in chain.iter().skip(1) {
-        if let Some(layer) = child.sandbox.child_layer()? {
+        if let Some(layer) = child.permission.child_layer()? {
             out = out.apply_narrowing(layer)?;
         }
     }

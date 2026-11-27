@@ -135,7 +135,7 @@
 | GET | `/api/history` | `HistoryOps::list` | — | `{sessions}` | 200, 400 |
 | GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events,live,head,shell}`（`shell` 从转录派生：回放/重建后的状态栏快照；读工具行的结构化事实 `tool.shell`，不解析回执正文） | 200, 404 |
 | POST | `/api/history/{name}/delete` | `HistoryOps::delete` | — | `{ok}` | 200, 400 |
-| GET | `/api/tiers` | `WorkOps::tier_choices` | — | `{tiers:{default,vm_available,vm_unavailable_reason,vm_requirements,guests,available}}` | 200, 400 |
+| GET | `/api/tiers` | `WorkOps::sandbox_choices` | — | `{tiers:{default,policies,guest_available,guest_unavailable_reason,guest_requirements,guests,available}}`（路由名与回包键暂留旧名，答的是「可选执行环境策略」） | 200, 400 |
 | GET | `/api/processes` | `Provision::processes` | — | `{procs:[{pid,alive,purpose,owner,since,orphanRisk,guardNote}]}` | 200, 400 |
 | GET | `/api/setup/status` | `Provision::status + job` | 查询 `since` / `wait` | `{deps:[{id,guest,present,install,probe,source,url,size_mb,note}],job:{running,seq,lines,error},missing,pending:[id]}` | 200, 400 |
 | POST | `/api/setup/ensure` | `Provision::status + start` | `{deps?:[id],confirm?:bool}`（不点名 = 只补现在缺的） | `{preview:[{id,url,size_mb,present}]}` / `{ok,deps}`（都装好了 → `{ok,deps:[]}`） | 200, 400 |

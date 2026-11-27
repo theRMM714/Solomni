@@ -151,9 +151,9 @@ function applyActivation(s, v) {
   s.can_update_task = !!v.can_update_task;
   s.pending = v.pending || null;
   s.continue_action = v.continue || null;
-  s.tier = v.tier || s.tier;
-  s.tier_ready = v.tier_ready;
-  s.tier_missing = v.tier_missing || [];
+  s.sandbox = v.sandbox || s.sandbox;
+  s.sandbox_ready = v.sandbox_ready;
+  s.sandbox_missing = v.sandbox_missing || [];
   // 启用返回的 SessionView 已经带生效权限：和会话状态一起贴回，别等下一次 /api/state 轮询。
   s.permission_profile = v.permission_profile || s.permission_profile;
   s.permission_label = v.permission_label || s.permission_label;

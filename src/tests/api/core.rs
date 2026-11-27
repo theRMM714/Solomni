@@ -8,7 +8,7 @@ use super::super::{single_work, slow_ops};
 use super::support::spawn;
 use crate::presentation::faces::Faces;
 use crate::units::business::turn::turn::api::Output;
-use crate::units::pure::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::Side;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -37,7 +37,7 @@ fn commands_run_on_the_core_thread_and_changes_are_visible() {
     assert!(
         faces
             .work
-            .runtime_report(Tier::Host)
+            .runtime_report(&crate::tests::builders::decl_of(Side::Host, None))
             .expect("能力报告")
             .diagnoses
             .is_empty()

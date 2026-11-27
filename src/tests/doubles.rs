@@ -33,7 +33,7 @@ use crate::units::business::tools::ports::{FileRead, SysIo};
 use crate::units::business::versions::domain::asset::{AssetScanner, FileVersion};
 use crate::units::business::versions::ports::WorkStore;
 use crate::units::business::workspace::ports::Workdirs;
-use crate::units::pure::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::Side;
 use crate::units::pure::registry_model::api::ModelEntry;
 use crate::units::pure::registry_model::api::Provider;
 use std::collections::{BTreeMap, BTreeSet};

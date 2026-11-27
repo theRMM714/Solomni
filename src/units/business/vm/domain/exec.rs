@@ -1,15 +1,15 @@
 //! 目的：执行档位与执行计划的纯逻辑——档位诊断、计划派生、承载判定与就绪检测。
-//! 管：ExecSpec 的档位诊断、ExecPlan 的装载顺序、本机能否承载虚拟机档。
+//! 管：TargetSpec 的档位诊断、ExecPlan 的装载顺序、本机能否承载虚拟机档。
 //! 不管：包库与选包（packages）、目录遍历与 guest 启动（在 detail/ 与 guest 后端）、会话档案（session）、实际的工具进程执行（tools）。
-//! 联动：契约见 docs/vm/README.md 与 RUNTIME_SPEC.md；ExecSpec 是 kernel 的共享形状；被 runtime 与呈现层经 api.rs 消费。
+//! 联动：契约见 docs/vm/README.md 与 RUNTIME_SPEC.md；TargetSpec 是 kernel 的共享形状；被 runtime 与呈现层经 api.rs 消费。
 
 use crate::kernel::ports::HostProbe;
 use crate::units::business::catalog::modules::api::Module;
 use crate::units::business::catalog::packages::api::PlannedPackage;
 use crate::units::business::vm::domain::guest::{GuestAgent, GuestImage, GuestOs};
 use crate::units::business::vm::domain::tool::{ToolPath, ToolSource, VmTools};
-use crate::units::pure::exec_model::api::ExecSpec;
-use crate::units::pure::exec_model::api::Tier;
+use crate::units::pure::exec_model::api::Side;
+use crate::units::pure::exec_model::api::TargetSpec;
 use serde::Serialize;
 use std::path::Path;
 
@@ -75,7 +75,7 @@ pub fn missing_entries_for(
 /// 目的：执行计划：运行时派生，从不落盘（装配阶段按 (id, version) 去包里定位内容）。
 #[derive(Debug, Clone)]
 pub struct ExecPlan {
-    pub tier: Tier,
+    pub side: Side,
     pub net: bool,
     /// 目的：这次执行用的虚拟根名（本机档为空）——装配阶段按它解析出那一格目录。
     pub guest: Option<String>,
@@ -781,11 +781,11 @@ pub fn capability_refusal(vm: &VmInputs<'_>) -> Option<String> {
 /// 约束：判据**只有一份**：机器能力清单（vm_requirements）+ 这条会话选的虚拟根；逐项都满足才算承载得了。
 pub fn tier_readiness(
     root: &Path,
-    spec: &ExecSpec,
+    spec: &TargetSpec,
     tools: &VmTools,
     probe: &dyn HostProbe,
 ) -> TierReadiness {
-    if spec.tier != Tier::Vm {
+    if spec.side != Side::Guest {
         return TierReadiness {
             requirements: Vec::new(),
         };
@@ -803,7 +803,7 @@ pub fn tier_readiness(
 /// 目的：虚拟机档的可读拒绝理由（创建与编辑共用同一把尺子）。
 pub fn tier_refusal(
     root: &Path,
-    spec: &ExecSpec,
+    spec: &TargetSpec,
     tools: &VmTools,
     probe: &dyn HostProbe,
 ) -> Option<String> {
@@ -836,7 +836,7 @@ pub fn admit_guest(running: &[String], lease: &str, max: u32) -> Result<(), Stri
 /// 目的：派生执行计划：入口判据与档位无关；运行包由 packages 能力选好，这里只负责落进 ExecPlan。
 /// 约束：本机档的 `packages` 为空（运行包由 packages 注入本次 PATH，不进 guest 装配）；虚拟机档的包选择与诊断在 `packages::api::plan_guest`。
 pub fn plan(
-    spec: &ExecSpec,
+    spec: &TargetSpec,
     packages: Vec<PlannedPackage>,
     missing: &[MissingEntry],
     net: bool,
@@ -854,15 +854,15 @@ pub fn plan(
     if !entries.is_empty() {
         return Err(entries);
     }
-    match spec.tier {
-        Tier::Host => Ok(ExecPlan {
-            tier: Tier::Host,
+    match spec.side {
+        Side::Host => Ok(ExecPlan {
+            side: Side::Host,
             net,
             guest: None,
             packages: Vec::new(),
         }),
-        Tier::Vm => Ok(ExecPlan {
-            tier: Tier::Vm,
+        Side::Guest => Ok(ExecPlan {
+            side: Side::Guest,
             net,
             guest: spec.guest.clone(),
             packages,
@@ -904,7 +904,7 @@ pub fn diagnose_text_for(diags: &[EntryProblem], guest: Option<&str>) -> String 
 /// 目的：计划的一句话摘要（日志用）：只报事实，不含真实路径。
 pub fn plan_summary(plan: &ExecPlan) -> String {
     let net = if plan.net { "放行" } else { "不放行" };
-    if plan.tier == Tier::Host {
+    if plan.side == Side::Host {
         return format!("执行档位 本机（不装载运行包）；网络 {}", net);
     }
     let pkgs: Vec<String> = plan
