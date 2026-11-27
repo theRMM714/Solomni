@@ -1,7 +1,7 @@
 # 工具、流程段与角色
 
 > 定位：系统工具、流程段与角色（身份）与"谁能用哪些工具"的唯一权威。
-> 效力：规范｜核对：2026-11-25｜依据：`systools/tools.yaml`、`src/units/business/session_model/domain/mechanism.rs`
+> 效力：规范｜核对：2026-11-25｜依据：`systools/tools.yaml`、`systools/loops.yaml`、`src/units/business/session_model/domain/mechanism.rs`
 
 ## 适用与判据
 - 声明系统工具、流程段与角色和越权校验时以本文为准（`docs/tools/tools-and-roles.md`）。
@@ -39,13 +39,13 @@ tools:
 Role { id: "discussant", prompt: "roles/discussant", core: false }
 // 角色位：某一段里的这个角色要几员、交哪些机制动作
 Cast { role: "discussant", min: 2, tools: &["say", "agree", "leave", "ask"] }
-// 流程段：回合身份的来源；cast 按声明顺序（核心位与成员位混排）
-Loop { id: "discuss", flow: true, cast: &[Cast { role: "core_proxy", .. }, Cast { role: "discussant", .. }] }
+// 流程段：回合身份的来源；builder 是实现名（写了才能当流程串），cast 按声明顺序（核心位与成员位混排）
+Loop { id: "discuss", builder: Some("discuss"), cast: vec![Cast { role: "core_proxy", .. }, Cast { role: "discussant", .. }] }
 ```
 
 - **角色位 = 绑在段上的身份位**：`discussant` 只在 `discuss` 段出场、`orchestrator` 只在 `execute` 段出场；人数与机制动作都在角色位上，**同一个角色在不同段可以交不同的工具**，所以不需要"阶段 → 工具"的第二张表。
-- **流程段 = 回合身份的来源**：`flow: true` 的段能当流程串进会话（`discuss` / `execute`），`flow: false` 的是没有流程的会话坐的**静止段**（`standard` 坐 `solo`、`proxy` 坐 `core_proxy`）。会话类型表（`systools/profiles.yaml`）的 `flows` 列流程段，`loop` 写静止段。
-- **工具只认「段 + 角色」**：落盘的 `SessionSpec` 带 `loop_id` 与 `role`，`loop` 来源按这两个值查角色位；换段时两者一起换（`Identity`），不许只换一个。文件面与执行面归 agent 的能力组，模块面归 agent 装了哪些模块，共享区面归有没有工作区与 `shared-write`，系统工具归会话类型——角色位只声明人数与机制动作。
+- **流程段 = 回合身份的来源**：写了实现名 `builder` 的段能当流程串进会话（`discuss` / `execute` 各自绑一个实现），没写的段是没有流程的会话坐的**静止段**（`standard` 坐 `solo`、`proxy` 坐 `core_proxy`）。段与角色声明在 `systools/loops.yaml`；会话类型表（`systools/profiles.yaml`）的 `flows` 列流程段，`loop` 写静止段。
+- **工具只认「段 + 角色」**：落盘的 `SessionSpec` 带 `loop_id` 与 `role`，装配期按这两个值查出角色位再拍平成 `loop` 来源要交的 id；换段时两者一起换（`Identity`），不许只换一个。文件面与执行面归 agent 的能力组，模块面归 agent 装了哪些模块，共享区面归有没有工作区与 `shared-write`，系统工具归会话类型——角色位只声明人数与机制动作。
 - **角色 id 全局唯一**：流程段只引用 id，不复制声明；装配期 `loop_check::problems` 断言角色在册、角色位交的动作都在总表里。
 - **核心角色是数据不是特判**：`core: true` 由会话的核心通道出演（核心代理 / 计划 / 验收），不进成员表；`core: false` 才是成员会话。哪一段里有核心位由该段的 `cast` 决定，这条约束由 `loop_check::problems` 断言。
 - **不做角色继承**：重复列几个 id 没有代价，继承会引入隐式耦合。
@@ -60,7 +60,7 @@ Loop { id: "discuss", flow: true, cast: &[Cast { role: "core_proxy", .. }, Cast 
 | --- | --- | --- |
 | `agent` | `read` `list` `grep`、`write` `edit` `patch` `delete`、`shell` | agent 的能力组 `fs-read` / `fs-write` / `exec`（`agents.yaml` 的 `abilities`；不写 = 全给） |
 | `module` | 该 agent 的模块工具，限定 id `<模块>.<工具>` / `<模块>.<服务>.<操作>` | agent 装了哪些模块（`agents.yaml` 的 `modules`） |
-| `loop` | 当前角色位的机制动作（`say` / `submit_report` / `plan` / `node_verdict` …） | 这一回合的段与角色（`Cast.tools`：`(loop_id, role)` 查角色位） |
+| `loop` | 当前角色位的机制动作（`say` / `submit_report` / `plan` / `node_verdict` …） | 这一回合的段与角色（装配期用 `(loop_id, role)` 在段表里查出 `Cast.tools`，之后来源只持有这份 id 清单） |
 | `workspace` | 11 个 `work_*`（`workspace::api::WORK_TOOLS`） | 有工作区，且能力组含 `shared-write` |
 | `profile` | 会话类型声明的系统工具（代理类型的六个会话控制动作） | 会话 meta 里的 `system_tools`（建会话时按类型表展开） |
 
@@ -235,7 +235,7 @@ prompts/
 
 - 每份文件里**具体有哪些键、每个键干什么**：[prompts.md](../prompt/prompts.md)。
 
-- **角色位 = 一个角色在这一段的机制动作**（`mechanism.rs` 的 `Cast`，角色本身是 `Role` 的提示词 + core）：信封模式下这一回合能用的信封清单**要渲染进该回合的上下文**（原生通道则由声明槽给出）。文件面 / 模块面 / 系统工具不随角色位声明，它们各自有来源，分开声明不会漂——来源只答"在不在场"。
+- **角色位 = 一个角色在这一段的机制动作**（`loops.yaml` 的 `cast`，类型是 `src/units/business/session_model/domain/mechanism.rs` 的 `Cast`；角色本身是 `Role` 的提示词 + core）：信封模式下这一回合能用的信封清单**要渲染进该回合的上下文**（原生通道则由声明槽给出）。文件面 / 模块面 / 系统工具不随角色位声明，它们各自有来源，分开声明不会漂——来源只答"在不在场"。
 - **身份必须可派生**：提示词与工具面决定了上下文与转录，重启 / 回档后必须重建出**同样的身份与上下文**（回放与实时产出同样的消息），所以身份**不能**是运行时内存里的临时状态；每回合由 `TurnRun.loop_id` / `TurnRun.role` 现给（`src/units/business/prompt/domain/prompt.rs`）。
 - **planner 与 orchestrator 分开**（上下文不同、工具面不同、指令互斥），只共享**背景知识**（链的语义、节点状态定义、信封协议）——共享的是背景，不是指令。
 - **executor 是全新上下文**：讨论内容只经任务提示词带入，不继承讨论转录。
