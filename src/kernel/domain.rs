@@ -6,6 +6,7 @@
 pub mod actor;
 pub mod budget;
 pub mod fence;
+pub mod fs;
 pub mod hash;
 pub mod jobs;
 pub mod layout;

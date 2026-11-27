@@ -2,9 +2,9 @@
 //! 管：目录布局（顶层 `session/<名字>/`，子会话嵌在 `children/<名字>/`，任意深度）与文件格式；流水只追加，留档追加一条 rewind 记录，删除 / 恢复整体重写。
 //! 不管：名字校验与队列调度（在 `runtime`）；会话状态派生（在 `domain/`）。
 //! 联动：组合根构造后经 `ports::HistoryStore` 注入 `service.rs`；会话中心经同一端口读列表与元信息。
+use crate::kernel::api::fs;
 use crate::units::business::conversation::session::ports::HistoryStore;
 use crate::units::business::session_model::api::{HistoryView, SessionMeta};
-use std::io::Write;
 use std::path::PathBuf;
 
 pub struct FsHistory {
@@ -122,9 +122,11 @@ impl FsHistory {
 impl HistoryStore for FsHistory {
     fn create(&self, meta: &SessionMeta) -> Result<(), String> {
         let d = self.dir_of(meta);
-        std::fs::create_dir_all(&d).map_err(|e| format!("建会话目录失败：{}", e))?;
+        fs::ensure_dir(&d).map_err(|fault| fault.message)?;
         let text = yaml_serde::to_string(meta).map_err(|e| e.to_string())?;
-        std::fs::write(d.join("meta.yaml"), text).map_err(|e| format!("写会话元信息失败：{}", e))
+        fs::write(None, &d.join("meta.yaml"), text.as_bytes(), fs::Expect::Any)
+            .map(|_| ())
+            .map_err(|fault| fault.message)
     }
 
     fn save_meta(&self, meta: &SessionMeta) -> Result<(), String> {
@@ -136,38 +138,33 @@ impl HistoryStore for FsHistory {
         let d = self
             .find(name)
             .ok_or_else(|| format!("无此会话：{}", name))?;
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(d.join("transcript.jsonl"))
-            .map_err(|e| e.to_string())?;
+        let mut text = String::new();
         for ev in events {
-            let line = serde_json::to_string(ev).map_err(|e| e.to_string())?;
-            writeln!(f, "{}", line).map_err(|e| e.to_string())?;
+            text.push_str(&serde_json::to_string(ev).map_err(|e| e.to_string())?);
+            text.push('\n');
         }
-        Ok(())
+        fs::append(None, &d.join("transcript.jsonl"), text.as_bytes())
+            .map_err(|fault| fault.message)
     }
 
     fn replace(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
         let d = self
             .find(name)
             .ok_or_else(|| format!("无此会话：{}", name))?;
-        let path = d.join("transcript.jsonl");
-        let tmp = d.join("transcript.jsonl.tmp");
         let mut text = String::new();
         for ev in events {
             text.push_str(&serde_json::to_string(ev).map_err(|e| e.to_string())?);
             text.push('\n');
         }
-        if let Err(e) = std::fs::write(&tmp, text) {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(format!("重写流水失败：{}", e));
-        }
-        if let Err(e) = std::fs::rename(&tmp, &path) {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(format!("替换流水失败：{}", e));
-        }
-        Ok(())
+        // 整份替换走内核事务：同目录暂存 + 原子发布，发布失败不留半份流水。
+        fs::write(
+            None,
+            &d.join("transcript.jsonl"),
+            text.as_bytes(),
+            fs::Expect::Any,
+        )
+        .map(|_| ())
+        .map_err(|fault| fault.message)
     }
 
     fn list(&self) -> Result<Vec<HistoryView>, String> {
@@ -230,7 +227,7 @@ impl HistoryStore for FsHistory {
         let Some(d) = self.find(name) else {
             return Ok(false);
         };
-        std::fs::remove_dir_all(&d).map_err(|e| e.to_string())?;
+        fs::remove_tree(&d).map_err(|fault| fault.message)?;
         Ok(true)
     }
 }

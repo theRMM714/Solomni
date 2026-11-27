@@ -1,9 +1,11 @@
 //! 目的：共享区**版本库**的落盘实现（实现 workspace 自己的 `WorkStore` 端口）。
 //! 管：资产原语（主副本 `work/` 与各 agent 沙箱的流式扫描 / 写入 / 复制，落点必须真实落在给定根之内）
 //!   与仓库原语（内容寻址对象、提交记录 `commits/<id>.json`、head 指针、每 agent 拉取基线 `index/<agent>.json`）。
-//! 不管：三方比较、路径校验等纯逻辑（在 `domain::workstore`）；本文件只做机制。
+//! 不管：三方比较、路径校验等纯逻辑（在 `domain::workstore`）；写盘的暂存、加锁、原子发布与回滚都在内核（`src/kernel/detail/fs.rs`）。
 //! 联动：由 workspace 的 `service.rs` 经 `WorkStore` 端口持有（R12）；装配在 `main.rs`。
 
+use crate::kernel::api::fs::{self, Expect};
+use crate::kernel::api::hash::content_hash;
 use crate::units::business::versions::domain::asset::{
     ASSET_CHUNK_BYTES, AssetScanner, FileVersion,
 };
@@ -15,9 +17,8 @@ use crate::units::business::workbench::api::filter::Rules;
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 pub struct FsWorkStore;
 
@@ -27,72 +28,19 @@ impl FsWorkStore {
     }
 }
 
-/// 把一个干净相对路径安全地落到 root 下：取"目标或它最近的已存在祖先"的真实路径，
-/// 必须仍在 root 的真实路径之内——中间或末尾是符号链接就挡在这里。
+/// 把一个干净相对路径安全地落到 root 下：越界判定交给内核的文件事务面（同一个根也允许还没建出来）。
 fn safe_path(root: &Path, rel: &str) -> Result<PathBuf, String> {
     let target = join_rel(root, rel)?;
-    let root_real = root
-        .canonicalize()
-        .map_err(|e| format!("根目录不可达：{}（{}）", root.display(), e))?;
-    let mut probe: &Path = &target;
-    let real = loop {
-        match probe.canonicalize() {
-            Ok(r) => break r,
-            Err(_) => match probe.parent() {
-                Some(parent) if parent != probe => probe = parent,
-                _ => return Err(format!("路径不可达：{}", target.display())),
-            },
-        }
-    };
-    if !real.starts_with(&root_real) {
-        return Err(format!("路径越过允许的根（符号链接指向根外）：{}", rel));
-    }
+    // 越界判定只有内核一份（根还没建出来时按最近的已存在祖先判，不把一切当成不可达）。
+    fs::within(root, &target).map_err(|fault| fault.message)?;
     Ok(target)
 }
 
-/// 临时文件名的序号（同一进程内不重名；配合 pid 避免跨进程碰撞）。
-static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
-
-/// 目的：同目录下的临时文件名。
-fn temp_path(dir: &Path) -> PathBuf {
-    dir.join(format!(
-        ".tmp-{}-{}",
-        std::process::id(),
-        TMP_SEQ.fetch_add(1, Ordering::Relaxed)
-    ))
-}
-
-/// 目的：把同目录临时文件 rename 成目标文件；失败时清掉临时文件。
-fn rename_temp(tmp: &Path, path: &Path) -> Result<(), String> {
-    if let Err(e) = std::fs::rename(tmp, path) {
-        let _ = std::fs::remove_file(tmp);
-        return Err(format!("替换文件失败（{}）：{}", path.display(), e));
-    }
-    // Unix 上 rename 的目录项也要刷一次，才能在掉电后稳定；其它平台由 fs_meta 后端空操作。
-    if let Some(dir) = path.parent() {
-        crate::kernel::api::fs_meta::sync_dir(dir);
-    }
-    Ok(())
-}
-
-/// 目的：同目录临时文件 + rename；半个 JSON / 半个对象比没有更糟。
-/// 约束：rename 目标与临时文件必须同目录（同一卷），否则 rename 不成立。
+/// 目的：整份写一个文件——暂存、加锁、原子发布与回滚都在内核文件事务里。
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let dir = path
-        .parent()
-        .ok_or_else(|| format!("落点没有父目录：{}", path.display()))?;
-    std::fs::create_dir_all(dir).map_err(|e| format!("建目录失败：{}", e))?;
-    let tmp = temp_path(dir);
-    let written = (|| -> std::io::Result<()> {
-        let mut file = File::create(&tmp)?;
-        file.write_all(bytes)?;
-        file.sync_all()
-    })();
-    if let Err(e) = written {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(format!("写入临时文件失败（{}）：{}", tmp.display(), e));
-    }
-    rename_temp(&tmp, path)
+    fs::write(None, path, bytes, Expect::Any)
+        .map(|_| ())
+        .map_err(|fault| fault.message)
 }
 
 /// 目的：引用名 → `store/refs/<name>.json`。
@@ -174,7 +122,7 @@ fn read_json<T: DeserializeOwned>(path: &Path, what: &str) -> Result<Option<T>, 
 /// 目的：拿住该工作的跨进程文件锁；有界等待，拿不到就如实报错。
 /// 联动：协议是内核的文件锁契约（`kernel::api::lock::lock_within`），这里只定路径与等待上限。
 fn lock_store(store: &Path) -> Result<File, String> {
-    std::fs::create_dir_all(store).map_err(|e| format!("建版本库目录失败：{}", e))?;
+    fs::ensure_dir(store).map_err(|fault| fault.message)?;
     crate::kernel::api::lock::lock_within(
         &store.join("lock"),
         std::time::Duration::from_secs(10),
@@ -185,11 +133,7 @@ fn lock_store(store: &Path) -> Result<File, String> {
 impl WorkStore for FsWorkStore {
     fn remove_under(&self, root: &Path, rel: &str) -> Result<(), String> {
         let path = safe_path(root, rel)?;
-        match std::fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(format!("删除失败：{}", e)),
-        }
+        fs::remove_tree(&path).map_err(|fault| fault.message)
     }
 
     fn list(&self, root: &Path) -> Result<Vec<String>, String> {
@@ -214,12 +158,6 @@ impl WorkStore for FsWorkStore {
     }
 
     fn write_text(&self, path: &Path, text: &str) -> Result<(), String> {
-        if let Some(dir) = path.parent()
-            && !dir.as_os_str().is_empty()
-        {
-            std::fs::create_dir_all(dir)
-                .map_err(|e| format!("建目录失败（{}）：{}", dir.display(), e))?;
-        }
         write_atomic(path, text.as_bytes())
     }
 
@@ -285,49 +223,20 @@ impl WorkStore for FsWorkStore {
             return Ok(meta.len());
         }
         let source = safe_path(root, rel)?;
-        let mut src =
-            File::open(&source).map_err(|e| format!("读取失败（{}）：{}", source.display(), e))?;
-        let dir = store.join("objects");
-        std::fs::create_dir_all(&dir).map_err(|e| format!("建对象目录失败：{}", e))?;
-        let tmp = temp_path(&dir);
-        let result = (|| -> Result<u64, String> {
-            let mut out = File::create(&tmp)
-                .map_err(|e| format!("建临时文件失败（{}）：{}", tmp.display(), e))?;
-            let mut scanner = AssetScanner::new(None);
-            let mut buf = vec![0u8; ASSET_CHUNK_BYTES];
-            let mut size: u64 = 0;
-            loop {
-                let n = src
-                    .read(&mut buf)
-                    .map_err(|e| format!("读取失败（{}）：{}", source.display(), e))?;
-                if n == 0 {
-                    break;
-                }
-                size = size.saturating_add(n as u64);
-                if size > max_bytes {
-                    return Err(format!(
-                        "文件超过单文件上限（{} 字节 > {} 字节）：{}",
-                        size, max_bytes, rel
-                    ));
-                }
-                scanner.feed(&buf[..n]);
-                out.write_all(&buf[..n])
-                    .map_err(|e| format!("写临时文件失败（{}）：{}", tmp.display(), e))?;
-            }
-            let scanned = scanner.finish();
-            if scanned.hash != expected_hash {
-                return Err(format!("文件在提交过程中被改动，请重试：{}", rel));
-            }
-            out.sync_all()
-                .map_err(|e| format!("刷临时文件失败（{}）：{}", tmp.display(), e))?;
-            drop(out);
-            rename_temp(&tmp, &object)?;
-            Ok(scanned.size)
-        })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(&tmp);
+        let bytes = std::fs::read(&source)
+            .map_err(|e| format!("读取失败（{}）：{}", source.display(), e))?;
+        let size = bytes.len() as u64;
+        if size > max_bytes {
+            return Err(format!(
+                "文件超过单文件上限（{} 字节 > {} 字节）：{}",
+                size, max_bytes, rel
+            ));
         }
-        result
+        if content_hash(&bytes) != expected_hash {
+            return Err(format!("文件在提交过程中被改动，请重试：{}", rel));
+        }
+        fs::write(None, &object, &bytes, Expect::Any).map_err(|fault| fault.message)?;
+        Ok(size)
     }
 
     fn copy_object_to_under(
@@ -339,27 +248,10 @@ impl WorkStore for FsWorkStore {
     ) -> Result<(), String> {
         let source = store.join("objects").join(hash);
         let target = safe_path(root, rel)?;
-        let dir = target
-            .parent()
-            .ok_or_else(|| format!("落点没有父目录：{}", target.display()))?;
-        std::fs::create_dir_all(dir).map_err(|e| format!("建目录失败：{}", e))?;
-        let tmp = temp_path(dir);
-        let result = (|| -> Result<(), String> {
-            let mut src =
-                File::open(&source).map_err(|e| format!("读对象 {} 失败：{}", hash, e))?;
-            let mut out = File::create(&tmp)
-                .map_err(|e| format!("建临时文件失败（{}）：{}", tmp.display(), e))?;
-            std::io::copy(&mut src, &mut out)
-                .map_err(|e| format!("写沙箱文件失败（{}）：{}", target.display(), e))?;
-            out.sync_all()
-                .map_err(|e| format!("刷临时文件失败（{}）：{}", tmp.display(), e))?;
-            drop(out);
-            rename_temp(&tmp, &target)
-        })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(&tmp);
-        }
-        result
+        let bytes = std::fs::read(&source).map_err(|e| format!("读对象 {} 失败：{}", hash, e))?;
+        fs::write(None, &target, &bytes, Expect::Any)
+            .map(|_| ())
+            .map_err(|fault| fault.message)
     }
 
     fn copy_under_to_under(
@@ -371,46 +263,15 @@ impl WorkStore for FsWorkStore {
         expected_hash: &str,
     ) -> Result<u64, String> {
         let source = safe_path(from_root, from_rel)?;
-        std::fs::create_dir_all(to_root)
-            .map_err(|e| format!("建目标根失败（{}）：{}", to_root.display(), e))?;
         let target = safe_path(to_root, to_rel)?;
-        let dir = target
-            .parent()
-            .ok_or_else(|| format!("落点没有父目录：{}", target.display()))?;
-        std::fs::create_dir_all(dir).map_err(|e| format!("建目录失败：{}", e))?;
-        let tmp = temp_path(dir);
-        let result = (|| -> Result<u64, String> {
-            let mut src = File::open(&source)
-                .map_err(|e| format!("读取失败（{}）：{}", source.display(), e))?;
-            let mut out = File::create(&tmp)
-                .map_err(|e| format!("建临时文件失败（{}）：{}", tmp.display(), e))?;
-            let mut scanner = AssetScanner::new(None);
-            let mut buf = vec![0u8; ASSET_CHUNK_BYTES];
-            loop {
-                let n = src
-                    .read(&mut buf)
-                    .map_err(|e| format!("读取失败（{}）：{}", source.display(), e))?;
-                if n == 0 {
-                    break;
-                }
-                scanner.feed(&buf[..n]);
-                out.write_all(&buf[..n])
-                    .map_err(|e| format!("写临时文件失败（{}）：{}", tmp.display(), e))?;
-            }
-            let scanned = scanner.finish();
-            if scanned.hash != expected_hash {
-                return Err(format!("源文件在复制过程中被改动，请重试：{}", from_rel));
-            }
-            out.sync_all()
-                .map_err(|e| format!("刷临时文件失败（{}）：{}", tmp.display(), e))?;
-            drop(out);
-            rename_temp(&tmp, &target)?;
-            Ok(scanned.size)
-        })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(&tmp);
+        let bytes = std::fs::read(&source)
+            .map_err(|e| format!("读取失败（{}）：{}", source.display(), e))?;
+        if content_hash(&bytes) != expected_hash {
+            return Err(format!("源文件在复制过程中被改动，请重试：{}", from_rel));
         }
-        result
+        let size = bytes.len() as u64;
+        fs::write(None, &target, &bytes, Expect::Any).map_err(|fault| fault.message)?;
+        Ok(size)
     }
 
     /// 主线指针就是 `refs/main`；旧布局的 `head` 文件读到一次就升级成引用再删掉。
@@ -436,7 +297,7 @@ impl WorkStore for FsWorkStore {
                         since: 0,
                     },
                 )?;
-                let _ = std::fs::remove_file(&legacy);
+                let _ = fs::remove_tree(&legacy);
                 Ok(Some(id))
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -458,11 +319,7 @@ impl WorkStore for FsWorkStore {
 
     fn clear_head(&self, store: &Path) -> Result<(), String> {
         self.remove_ref(store, "main")?;
-        match std::fs::remove_file(store.join("head")) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(format!("清 head 失败：{}", e)),
-        }
+        fs::remove_tree(&store.join("head")).map_err(|fault| fault.message)
     }
 
     fn read_ref(&self, store: &Path, name: &str) -> Result<Option<Ref>, String> {
@@ -493,11 +350,7 @@ impl WorkStore for FsWorkStore {
 
     fn remove_ref(&self, store: &Path, name: &str) -> Result<(), String> {
         let path = ref_path(store, name)?;
-        match std::fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(format!("删引用失败：{}", e)),
-        }
+        fs::remove_tree(&path).map_err(|fault| fault.message)
     }
 
     fn read_commit(&self, store: &Path, id: u64) -> Result<Option<Commit>, String> {
@@ -536,11 +389,7 @@ impl WorkStore for FsWorkStore {
 
     fn remove_commit(&self, store: &Path, id: u64) -> Result<(), String> {
         let path = store.join("commits").join(format!("{}.json", id));
-        match std::fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(format!("删提交记录失败：{}", e)),
-        }
+        fs::remove_tree(&path).map_err(|fault| fault.message)
     }
 
     fn read_index(&self, store: &Path, agent: &str) -> Result<Index, String> {
@@ -590,11 +439,7 @@ impl WorkStore for FsWorkStore {
     }
 
     fn clear_pending(&self, store: &Path) -> Result<(), String> {
-        match std::fs::remove_file(store.join("pending.json")) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(format!("删待恢复事务失败：{}", e)),
-        }
+        fs::remove_tree(&store.join("pending.json")).map_err(|fault| fault.message)
     }
 
     fn read_next_id(&self, store: &Path) -> Result<Option<u64>, String> {
@@ -657,10 +502,6 @@ impl WorkStore for FsWorkStore {
 
     fn remove_object(&self, store: &Path, hash: &str) -> Result<(), String> {
         let path = store.join("objects").join(hash);
-        match std::fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(format!("删对象 {} 失败：{}", hash, e)),
-        }
+        fs::remove_tree(&path).map_err(|fault| fault.message)
     }
 }

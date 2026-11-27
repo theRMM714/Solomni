@@ -21,7 +21,7 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api`（按对外概念分文件：`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `net` / `path` / `platform` / `hash` / `budget` / `path_bridge`——见「六、对外面」）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`FenceHost`、`FenceGate`、`UserPath`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执与回执说明）、`domain`（路径书写、取消表、沙箱模式、回执装配）、`detail`（`clock`、`file_log`、`host_probe`、`io`（`env` / `net`）、`unpack`、`user_path`、`process`、`procs`、`session`、`i18n`、`confine`：门面 + `job` / `ledger` / `paths` / `prep`）。
+- 入站面：`api`（按对外概念分文件：`fence` / `note` / `run` / `types` / `clock` / `fs` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `net` / `path` / `platform` / `hash` / `budget` / `path_bridge`——见「六、对外面」）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`FenceHost`、`FenceGate`、`UserPath`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执与回执说明）、`domain`（路径书写、取消表、沙箱模式、回执装配）、`detail`（`clock`、`file_log`、`fs`、`host_probe`、`io`（`env` / `net`）、`unpack`、`user_path`、`process`、`procs`、`session`、`i18n`、`confine`：门面 + `job` / `ledger` / `paths` / `prep`）。
 - `AskUser` 是「需要用户裁决的机制请用户裁决」的**唯一**入口（`src/kernel/ports.rs`），工具执行层与围栏用它。
   - 形状：`ask(问题) -> 选项 id`，**阻塞**。
   - `halt(为什么)` = 停会话 + 落警告；调用方只在有可回答前端时用它，没有前端按 fail-closed 收场。
@@ -167,7 +167,7 @@
 
 - 按**机制**归层，一个机制管一种机制：`contracts/<名>`（共享形状）、`domain/<名>`（纯逻辑）、`detail/<名>`（实现）、`ports`（全项目共享的出站面）。表在 `docs/kernel/mechanisms.yaml`，判据在 `tests/gates/structure/kernel-mechanisms.js`。
 - 三条硬判：盘上每个机制都要归层、表里的机制也要在盘上；依赖边只许指向严格更低层（**同层互依赖判红**）；声明层号 == 按现有依赖重算的层号。第四条是环：机制之间成环时只报环路径，不拿层号糊过去。
-- 当前 33 个机制、12 层，读到顶的顺序是 `detail/launch`（5）→ `detail/container`（6）→ `detail/acl`（7）→ `detail/ledger`（8）→ `detail/confine`（9）→ `detail/process`（10）→ `detail/session`（11）：越往上越是装配别人的机制。
+- 当前 38 个机制、12 层，读到顶的顺序是 `detail/launch`（5）→ `detail/container`（6）→ `detail/acl`（7）→ `detail/ledger`（8）→ `detail/confine`（9）→ `detail/process`（10）→ `detail/session`（11）：越往上越是装配别人的机制。
 - 围栏这一族按职责切成五个机制，每个只依赖下一层：`launch`（命令怎么起：PATH 解析、环境白名单、程序名改写）、`container`（容器身份与容器内拉起）、`acl`（逐路径改 DACL、读完整性标签）、`ledger`（授权台账与按条回收）、`confine`（编排：授权→执行→收尾，平台后端的策略判据）。
 - 动过一条边就 `node tests/gates/structure/kernel-mechanisms.js --write` 重算全表；不想抬层就消掉那条边。层级理由写在 diff 里，不在散文里。
 - 粒度区别：单元（`layers.yaml`）按业务用例切、可以互相调用对方的 `api`；机制（本表）没有业务语义、只许单向。机制不因调用方多就升格成单元。
@@ -190,6 +190,14 @@
 - **回环 TCP**：`src/kernel/detail/io/net/tcp.rs` 的 `reserve_port`（先占后放，只压小碰撞面、不作保留）、`dial`（唯一写死回环客户端地址处）、`await_loopback`（就绪轮询 + `gone` 回调，让调用方把「对端已死」说成自己的话）。
 - **进程环境**：`src/kernel/detail/io/env.rs` 是唯一读取面——`var` / `os` 两个原语 + 具名宿主事实（PATH、PATHEXT、SystemRoot、LOCALAPPDATA、可执行文件、临时目录）。`std::env::` 只许在它、`src/main.rs`、`src/entry/` 与 `src/presentation/`（终端能力探测）出现，其余经机制——门禁 `structure/env-surface` 判。
 - **内核不认识产品**：IO 层只提供原语，产品名与它的 argv / 配置文件名留在单元（门禁 `structure/kernel-products`）。
+
+## 八、文件事务与宿主程序
+
+- **写盘只经 `kernel::api::fs`**：`write` / `write_private` / `append` / `stream_into` / `transact_with` 把「按路径排序取锁（进程内互斥 + 跨进程 `lock_within`）→ 同目录暂存 → `Expect` 在锁内比对 → 一次发布 → 失败整体回滚」一次做完（`src/kernel/detail/fs.rs`）。旧版本比对在锁里，所以读后写门禁与写入之间没有 TOCTOU：期望的旧版本是事务形状的一部分，不是调用方自己再查一遍。
+- **锁目录由组合根装一次**：装配期调 `install_lock_space(LockSpace::new(layout::locks(&root)))`（`src/main.rs`）；调用方不拼锁名、不猜锁文件放哪（键由落点身份派生，同一物理对象同键）。显式传入 `Some(&space)` 仍优先，测试据此换等待上限。
+- **宿主程序只经 `kernel::api::process::run_to_end`**（`Run` / `Done`）：等到底、超时杀整棵树、输出保留字节、可送 stdin；单元里「跑一个外部程序到结束」都走它。会话内的执行不走这里——那由 `sandbox` 的执行端口按策略开句柄。
+- **策略不进内核**：能不能写、写什么内容归 `workbench`；版本语义与读后写门禁归 `versions`；围栏与可达域归 `detail/confine`。内核只答「怎么安全地写、怎么安全地跑」。
+- 两个面各有一条门禁：`structure/fs-surface`（除 `src/kernel/` 外不许 `std::fs` 变更原语与 `File::create` / `OpenOptions::new`）、`structure/process-surface`（除 `src/kernel/` 外不许 `std::process::Command::new`）。判据在 `tests/gates/structure/`，清单见 [boundaries.md](../architecture/boundaries.md)。
 
 ## 改动本单元时必须同步
 

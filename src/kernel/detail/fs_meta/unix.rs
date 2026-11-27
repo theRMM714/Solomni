@@ -64,10 +64,3 @@ pub(crate) fn write_executable(path: &Path, body: &str) -> io::Result<()> {
     fs::write(path, body)?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o755))
 }
-
-/// 目的：打开目录并 `sync_all`，失败只当尽力而为。
-pub(crate) fn sync_dir(path: &Path) {
-    if let Ok(dir) = fs::File::open(path) {
-        let _ = dir.sync_all();
-    }
-}

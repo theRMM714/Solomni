@@ -8,6 +8,7 @@ pub mod clock;
 pub mod confine;
 pub mod container;
 pub mod file_log;
+pub mod fs;
 pub mod fs_meta;
 pub mod host_probe;
 pub mod i18n;

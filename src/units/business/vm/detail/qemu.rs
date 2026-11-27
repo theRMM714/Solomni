@@ -3,6 +3,7 @@
 //! 不管：共享后端的额外参数（detail/share_ninep.rs）、镜像判定与挂载清单（domain/guest.rs）。
 //! 联动：端口在 ports.rs；由组合根构造、service.rs 持有。
 
+use crate::kernel::api::fs;
 use crate::kernel::api::net;
 use crate::kernel::api::process::{Spawn, Stream, spawn};
 use crate::kernel::detail::procs::ProcessBook;
@@ -12,7 +13,6 @@ use crate::units::business::vm::domain::guest::{
 use crate::units::business::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// 目的：**无围栏** guest 命令（供给编排 / apt / 下载工具链）的外层等待预算。
@@ -256,10 +256,11 @@ impl VmEngine for QemuEngine {
                     .overlay_dir
                     .as_ref()
                     .ok_or("这次启动要每租约可写层，但引擎没配可写层目录".to_string())?;
-                std::fs::create_dir_all(dir)
-                    .map_err(|e| format!("建可写层目录失败（{}）：{}", dir.display(), e))?;
+                fs::ensure_dir(dir).map_err(|fault| {
+                    format!("建可写层目录失败（{}）：{}", dir.display(), fault.message)
+                })?;
                 let path = dir.join(format!("{}.qcow2", lease_file_name(&spec.lease)));
-                let _ = std::fs::remove_file(&path);
+                let _ = fs::remove_tree(&path);
                 create_overlay(&exe, base, &path)?;
                 Some(path)
             }
@@ -322,7 +323,7 @@ impl VmEngine for QemuEngine {
                 let said = daemon.stderr_tail(20);
                 daemon.stop();
                 if let Some(path) = &overlay {
-                    let _ = std::fs::remove_file(path);
+                    let _ = fs::remove_tree(path);
                 }
                 // QEMU 一到就被加速器判死：错误里给出去处，避免用户以为是共享或镜像的问题。
                 let hint = if e.contains("已退出") {
@@ -446,25 +447,31 @@ fn qemu_img_for(engine_exe: &str) -> String {
 /// 错误：起不了 qemu-img 或它报失败。
 pub fn create_disk(engine_exe: &str, path: &Path, mib: u64) -> Result<(), String> {
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)
-            .map_err(|e| format!("建缓存卷目录失败（{}）：{}", dir.display(), e))?;
+        fs::ensure_dir(dir)
+            .map_err(|fault| format!("建缓存卷目录失败（{}）：{}", dir.display(), fault.message))?;
     }
-    let out = Command::new(qemu_img_for(engine_exe))
-        .arg("create")
-        .arg("-f")
-        .arg("qcow2")
-        .arg(path)
-        .arg(format!("{}M", mib))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| format!("起不了 qemu-img（{}）：{}", qemu_img_for(engine_exe), e))?;
-    if !out.status.success() {
+    let img = qemu_img_for(engine_exe);
+    let args = vec![
+        "create".to_string(),
+        "-f".to_string(),
+        "qcow2".to_string(),
+        path.to_string_lossy().into_owned(),
+        format!("{}M", mib),
+    ];
+    let out = crate::kernel::api::process::run_to_end(&crate::kernel::api::process::Run {
+        program: Path::new(&img),
+        args: &args,
+        env: &[],
+        cwd: None,
+        timeout: std::time::Duration::from_secs(600),
+        stdin: None,
+    })
+    .map_err(|e| format!("起不了 qemu-img（{}）：{}", img, e))?;
+    if !out.ok() {
         return Err(format!(
             "建缓存卷失败：{}{}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
+            out.stdout_text(),
+            out.stderr_text()
         ));
     }
     Ok(())
@@ -475,25 +482,31 @@ pub fn create_disk(engine_exe: &str, path: &Path, mib: u64) -> Result<(), String
 fn create_overlay(engine_exe: &str, base: &Path, overlay: &Path) -> Result<(), String> {
     let base_abs =
         std::path::absolute(base).map_err(|e| format!("基础镜像路径取绝对失败：{}", e))?;
-    let out = Command::new(qemu_img_for(engine_exe))
-        .arg("create")
-        .arg("-f")
-        .arg("qcow2")
-        .arg("-b")
-        .arg(&base_abs)
-        .arg("-F")
-        .arg(backing_format(base))
-        .arg(overlay)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| format!("起不了 qemu-img（{}）：{}", qemu_img_for(engine_exe), e))?;
-    if !out.status.success() {
+    let img = qemu_img_for(engine_exe);
+    let args = vec![
+        "create".to_string(),
+        "-f".to_string(),
+        "qcow2".to_string(),
+        "-b".to_string(),
+        base_abs.to_string_lossy().into_owned(),
+        "-F".to_string(),
+        backing_format(base).to_string(),
+        overlay.to_string_lossy().into_owned(),
+    ];
+    let out = crate::kernel::api::process::run_to_end(&crate::kernel::api::process::Run {
+        program: Path::new(&img),
+        args: &args,
+        env: &[],
+        cwd: None,
+        timeout: std::time::Duration::from_secs(600),
+        stdin: None,
+    })
+    .map_err(|e| format!("起不了 qemu-img（{}）：{}", img, e))?;
+    if !out.ok() {
         return Err(format!(
             "建可写层失败：{}{}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
+            out.stdout_text(),
+            out.stderr_text()
         ));
     }
     Ok(())

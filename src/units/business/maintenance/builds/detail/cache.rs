@@ -3,6 +3,7 @@
 //! 不管：编什么、什么时候编（`service.rs`）、guest 与盘怎么起（`vm`）。
 //! 联动：端口见 `ports.rs`；口径见 docs/builds/README.md 的「目标环境」与单元地图。
 
+use crate::kernel::api::fs;
 use crate::units::business::maintenance::builds::ports::{
     BuildCache, CacheGuard, CacheMount, ModuleWorkspace,
 };
@@ -280,7 +281,7 @@ pub(crate) fn read_purge(root: &Path, guest: &str) -> Vec<String> {
 
 /// 目的：清理已执行的按模块标记。
 pub(crate) fn clear_purge(root: &Path, guest: &str) {
-    let _ = std::fs::remove_file(api::paths(root).build_purge(guest));
+    let _ = fs::remove_tree(&api::paths(root).build_purge(guest));
 }
 
 /// 目的：写卷的模块占用元数据（只给界面与回收参考；失败不阻断构建）。
@@ -310,12 +311,10 @@ pub(crate) fn write_meta(
     });
     let p = meta_path(root, guest);
     if let Some(parent) = p.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        let _ = fs::ensure_dir(parent);
     }
-    let tmp = p.with_extension("json.tmp");
-    if std::fs::write(&tmp, text.to_string()).is_ok() {
-        let _ = std::fs::rename(&tmp, &p);
-    }
+    // 元数据只给界面与回收参考：写不进去不断构建，所以这里丢掉失败。
+    let _ = fs::write(None, &p, text.to_string().as_bytes(), fs::Expect::Any);
 }
 
 /// 目的：构建批次结束后统计每个模块工作区（字节 + USED 时间戳），给宿主写元数据。
@@ -363,8 +362,9 @@ impl BuildCache for CacheOnDisk {
     fn lock(&self, guest: &str) -> Result<Box<dyn CacheGuard>, String> {
         let path = lock_path(&self.root, guest);
         if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)
-                .map_err(|e| format!("建构建缓存目录失败（{}）：{}", dir.display(), e))?;
+            fs::ensure_dir(dir).map_err(|fault| {
+                format!("建构建缓存目录失败（{}）：{}", dir.display(), fault.message)
+            })?;
         }
         let file = crate::kernel::api::lock::lock_within(&path, LOCK_WAIT, "构建缓存卷")?;
         Ok(Box::new(file))

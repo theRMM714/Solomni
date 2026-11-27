@@ -13,7 +13,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/kernel.rs` | 地基库的入口与公开面：`contracts` / `api` / `ports` / `domain` / `detail` 五个子模块的形状声明 |
-| `src/kernel/api.rs` | 地基库对外面的入口：只声明 `api/` 下的面模块。面按**对外概念**切（`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `net` / `path` / `platform` / `hash` / `budget` / `path_bridge`），每个面只做重导出、不定义条目；能力与装配层经 `api::<面>` 取用，内核内部直取所属机制（见 [README](README.md) 的「六、对外面」） |
+| `src/kernel/api.rs` | 地基库对外面的入口：只声明 `api/` 下的面模块。面按**对外概念**切（`fence` / `note` / `run` / `types` / `clock` / `fs` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `net` / `path` / `platform` / `hash` / `budget` / `path_bridge`），每个面只做重导出、不定义条目；能力与装配层经 `api::<面>` 取用，内核内部直取所属机制（见 [README](README.md) 的「六、对外面」） |
 | `src/kernel/ports.rs` | 全项目共享的机制端口：`Log` / `PathCodec` / `AskUser` / `ToolHandler` / `HostProbe` / `ProcessRunner` / `SessionHost` / `FenceHost` / `FenceGate` / `UserPath` 的 trait 定义与它们的纯数据形态（含 `ShellRun` 的 `gate`、用户 PATH 的 `PathValue`） |
 | `src/kernel/contracts.rs` | 跨层共享形状的入口：`fence` / `note` / `run` / `types` 四个子模块声明 |
 | `src/kernel/contracts/types.rs` | 跨层共享的端口载荷（纯数据）：`SessionId` / `ToolOutcome` / `Ask` / `AskOutcome` 与默认预算、能力名文法（执行档位与作业进度归 `exec_model`，不在 kernel） |
@@ -22,6 +22,7 @@
 | `src/kernel/contracts/fence.rs` | 围栏**意图**：`FencePlan`（`home` / `cwd` / `grants` / `net`）、`Grant`（`path` + `Access` + `Reach`）、`NetPolicy`、`FenceRunPolicy` 与 `FenceBlocked`：纯数据，不含任何平台词汇 |
 | `src/kernel/domain/actor.rs` | 命令队列（`Actor<S>`）：把一份核心状态搬到它自己的线程上，命令按到达顺序逐条执行，一条命令 panic 不带走整个核心；线程退出与 panic 都落日志。不含命令的业务语义 |
 | `src/kernel/domain/hash.rs` | 内容指纹 SHA-256：增量实现（`Sha256` / `content_hash` / `is_content_hash`），共享区内容寻址与运行包/素材指纹的唯一键（纯逻辑，对外经 `api::hash`） |
+| `src/kernel/domain/fs.rs` | 文件事务的纯形状：`Expect`（`Any` / `Absent` / `Version`）、`Fault`（稳定码 `FS_*` + 中文原因）与失败码常量；事务本身在 `src/kernel/detail/fs.rs`（对外经 `api::fs`） |
 | `src/kernel/domain/budget.rs` | 工具回执预算：`ResultBudget`（`full` / `for_batch` / `pressure` / `exhausted`）、`Continuation`（`Command` / `Read`）、`cap_result_with` 与 `MAX_RESULT_CHARS` / `MIN_RESULT_CHARS` 等常量；按行边界截断、留一行预算说明（纯逻辑，对外经 `api::budget`） |
 | `src/kernel/domain/path_bridge.rs` | 路径方言桥：`PathDialect`（`Posix` / `Windows`）与 `PathBridge`（`for_session` / `to_guest` / `round_trips`），把宿主路径与客机路径互译（POSIX 镜像 `/solomni-host`、Windows 镜像 `C:\solomni-host` 与 UNC 段）；虚拟机的路径书写与宿主的视图路径共用这一份（纯逻辑，对外经 `api::path_bridge`） |
 | `src/kernel/domain/fence.rs` | 沙箱策略对机制的要求与本次模式（`SandboxRequirements` / `SandboxMode`）、按次租约生成：纯机制 |
@@ -42,7 +43,8 @@
 | `src/kernel/detail/host_probe/linux.rs` | `HostProbe` 的 Linux 虚拟化事实：`/dev/kvm` 存在 |
 | `src/kernel/detail/host_probe/macos.rs` | `HostProbe` 的 macOS 虚拟化事实：恒可用 |
 | `src/kernel/detail/host_probe/other.rs` | `HostProbe` 的兜底虚拟化事实：如实不可用 |
-| `src/kernel/detail/fs_meta.rs` | 宿主文件元数据原语（门面）：可执行位、软链、私密权限、占用估算、链接判定、目录刷新与可执行脚本；按平台选中 `src/kernel/detail/fs_meta/{windows,unix,other}.rs` |
+| `src/kernel/detail/fs_meta.rs` | 宿主文件元数据原语（门面）：可执行位、软链、私密权限、占用估算、链接判定与可执行脚本；按平台选中 `src/kernel/detail/fs_meta/{windows,unix,other}.rs` |
+| `src/kernel/detail/fs.rs` | 文件事务机制：`transact_with` 按路径排序取锁（进程内互斥 + 跨进程 `lock_within`）、同一目录暂存、一次发布、`Expect` 在锁内比对、失败整体回滚；`write` / `write_private` / `append` / `stream_into` / `ensure_dir` / `remove_tree` / `copy_file` / `move_file` / `within` 都从这里走；`LockSpace` 的锁目录由组合根经 `install_lock_space` 注入 |
 | `src/kernel/detail/fs_meta/windows.rs` | `fs_meta` 的 Windows 后端：可执行性按文件、权限位空操作、重解析点判定、占用按长度 |
 | `src/kernel/detail/fs_meta/unix.rs` | `fs_meta` 的 Unix 后端：模式位、软链、0600、块占用、0755 脚本 |
 | `src/kernel/detail/fs_meta/other.rs` | `fs_meta` 的兜底后端：没有模式位与软链，如实降级 |
@@ -65,7 +67,7 @@
 | `src/kernel/detail/unpack.rs` | 归档解包机制（门面）：tar / tar.gz / tar.zst / tar.xz / zip 解到目录，支持 strip 与宽容链接；权限位与软链在 `src/kernel/detail/unpack/{windows,unix}.rs` |
 | `src/kernel/detail/unpack/windows.rs` | `unpack` 的 Windows 后端：不设 Unix 权限位；软链按目录 / 文件分开建 |
 | `src/kernel/detail/unpack/unix.rs` | `unpack` 的非 Windows 后端：还原归档权限位与 Unix 软链 |
-| `src/kernel/detail/process.rs` | 外部进程执行机制（门面）：守门进程、stdin 送参、隐秘字段 env 注入、超时/取消杀树与一次性 shell；平台实现在 `src/kernel/detail/process/{windows,unix}.rs` |
+| `src/kernel/detail/process.rs` | 外部进程执行机制（门面）：守门进程、stdin 送参、隐秘字段 env 注入、超时/取消杀树与一次性 shell；另含宿主程序跑到底的 `run_to_end`（`Run` / `Done`：超时、杀整棵树、字节输出、可选 stdin），单元里跑外部程序只经它；平台实现在 `src/kernel/detail/process/{windows,unix}.rs` |
 | `src/kernel/detail/process/windows.rs` | `process` 的 Windows 后端：容器围栏准备、Job Object 收树与 PowerShell shell |
 | `src/kernel/detail/process/windows/tests.rs` | Windows 解释器解析的纯用例：真 pwsh / 应用执行别名 / 缺失三态，以及显式覆盖优先（`#[cfg(test)] mod tests;` 指向） |
 | `src/kernel/detail/process/unix.rs` | `process` 的非 Windows 后端：进程组收树与 `sh -c` shell |

@@ -1,5 +1,5 @@
 //! 目的：内容盘的文件系统适配器（实现 `ContentFs` 端口）。
-//! 管：目录的确保存在。
+//! 管：目录的确保存在（建目录走内核的文件事务面）。
 //! 不管：路径是不是该建、建完怎么报（在 `service.rs`）。
 //! 联动：由组合根构造，只经端口给 `service.rs`。
 
@@ -12,6 +12,6 @@ pub struct FsContentFs;
 
 impl ContentFs for FsContentFs {
     fn ensure_dir(&self, dir: &Path) -> bool {
-        dir.is_dir() || std::fs::create_dir_all(dir).is_ok()
+        dir.is_dir() || crate::kernel::api::fs::ensure_dir(dir).is_ok()
     }
 }

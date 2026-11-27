@@ -1,8 +1,9 @@
 //! 目的：登记处目录的文件系统适配器（实现 `ports::HomeFiles`）。
-//! 管：读一份文本（不存在 = None）、建目录、临时文件 + rename 的原子写、unix 下收紧权限。
+//! 管：读一份文本（不存在 = None）与写一份文本（原子发布、私密文件的权限收紧都在内核文件事务里）。
 //! 不管：文档名与私密策略（在 domain）、yaml（在 catalog）、目录路径（组合根给）。
 //! 联动：只经 `HomeService` 使用；路径来自 `kernel::domain::layout::home`。
 
+use crate::kernel::api::fs::{self, Expect};
 use crate::units::resource::home::ports::HomeFiles;
 use std::path::PathBuf;
 
@@ -28,19 +29,17 @@ impl HomeFiles for FsHome {
     }
 
     fn write(&self, name: &str, text: &str, private: bool) -> Result<(), String> {
-        std::fs::create_dir_all(&self.dir).map_err(|e| format!("建登记处目录失败：{}", e))?;
-        // 临时文件与目标同目录：rename 不跨卷；文件名带进程号，避免两个实例撞车。
-        let tmp = self
-            .dir
-            .join(format!(".{}.tmp-{}", name, std::process::id()));
-        std::fs::write(&tmp, text).map_err(|e| format!("写登记处失败：{}", e))?;
-        if private {
-            let _ = crate::kernel::api::fs_meta::restrict_private_file(&tmp);
-        }
-        std::fs::rename(&tmp, self.dir.join(name)).map_err(|e| {
-            let _ = std::fs::remove_file(&tmp);
-            format!("写登记处失败：{}", e)
-        })
+        fs::ensure_dir(&self.dir)
+            .map_err(|fault| format!("建登记处目录失败：{}", fault.message))?;
+        let path = self.dir.join(name);
+        let written = if private {
+            fs::write_private(None, &path, text.as_bytes(), Expect::Any)
+        } else {
+            fs::write(None, &path, text.as_bytes(), Expect::Any)
+        };
+        written
+            .map(|_| ())
+            .map_err(|fault| format!("写登记处失败：{}", fault.message))
     }
 }
 

@@ -49,6 +49,3 @@ pub(crate) fn is_link(path: &Path) -> bool {
 pub(crate) fn write_executable(path: &Path, body: &str) -> io::Result<()> {
     fs::write(path, body)
 }
-
-/// 目的：没有目录项刷新动作，空操作。
-pub(crate) fn sync_dir(_path: &Path) {}

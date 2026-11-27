@@ -7,9 +7,7 @@ use crate::units::business::vm::domain::guest::{GuestImage, GuestMount, GuestRun
 use crate::units::business::vm::ports::{
     GuestChannel, NoShareGuard, ShareBackend, ShareGuard, SharePlan,
 };
-use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Stdio};
 
 /// 目的：QGA 复制共享后端（开发/应急）——不依赖宿主侧文件服务，靠命令通道搬 tar。
 pub struct CopyShare;
@@ -141,19 +139,27 @@ pub(crate) fn copy_cleanup_script(temp: &str) -> String {
 
 /// 目的：把宿主目录打成 tar 字节（三平台都用 PATH 上的 tar：Unix 自带、Windows 10+ 自带 bsdtar）。
 pub fn host_tar(dir: &Path) -> Result<Vec<u8>, String> {
-    let out = Command::new("tar")
-        .arg("-cf")
-        .arg("-")
-        .arg("-C")
-        .arg(dir)
-        .arg(".")
-        .output()
-        .map_err(|e| format!("起不了 tar：{}", e))?;
-    if !out.status.success() {
+    let args = vec![
+        "-cf".to_string(),
+        "-".to_string(),
+        "-C".to_string(),
+        dir.to_string_lossy().into_owned(),
+        ".".to_string(),
+    ];
+    let out = crate::kernel::api::process::run_to_end(&crate::kernel::api::process::Run {
+        program: Path::new("tar"),
+        args: &args,
+        env: &[],
+        cwd: None,
+        timeout: std::time::Duration::from_secs(600),
+        stdin: None,
+    })
+    .map_err(|e| format!("起不了 tar：{}", e))?;
+    if !out.ok() {
         return Err(format!(
             "tar 打包 {} 失败：{}",
             dir.display(),
-            String::from_utf8_lossy(&out.stderr)
+            out.stderr_text()
         ));
     }
     Ok(out.stdout)
@@ -161,27 +167,26 @@ pub fn host_tar(dir: &Path) -> Result<Vec<u8>, String> {
 
 /// 目的：把 tar 字节解到宿主目录。
 pub fn host_untar(dir: &Path, tar: &[u8]) -> Result<(), String> {
-    let mut child = Command::new("tar")
-        .arg("-xf")
-        .arg("-")
-        .arg("-C")
-        .arg(dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("起不了 tar：{}", e))?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(tar)
-            .map_err(|e| format!("给 tar 送字节失败：{}", e))?;
-    }
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
-    if !out.status.success() {
+    let args = vec![
+        "-xf".to_string(),
+        "-".to_string(),
+        "-C".to_string(),
+        dir.to_string_lossy().into_owned(),
+    ];
+    let out = crate::kernel::api::process::run_to_end(&crate::kernel::api::process::Run {
+        program: Path::new("tar"),
+        args: &args,
+        env: &[],
+        cwd: None,
+        timeout: std::time::Duration::from_secs(600),
+        stdin: Some(tar),
+    })
+    .map_err(|e| format!("起不了 tar：{}", e))?;
+    if !out.ok() {
         return Err(format!(
             "tar 解到 {} 失败：{}",
             dir.display(),
-            String::from_utf8_lossy(&out.stderr)
+            out.stderr_text()
         ));
     }
     Ok(())

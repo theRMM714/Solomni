@@ -6,16 +6,21 @@
 use super::*;
 /// 目的：从 GPT 里取 Linux root 分区（type GUID 优先，退第一个）的 (start, size)，单位 512 字节扇区。
 pub(crate) fn root_partition(disk: &Path) -> Result<(u64, u64), String> {
-    let out = std::process::Command::new("sfdisk")
-        .arg("-J")
-        .arg(disk)
-        .output()
-        .map_err(|e| format!("跑不了 sfdisk（需要 util-linux）：{}", e))?;
-    if !out.status.success() {
+    let args = vec!["-J".to_string(), disk.to_string_lossy().into_owned()];
+    let out = crate::kernel::api::process::run_to_end(&crate::kernel::api::process::Run {
+        program: Path::new("sfdisk"),
+        args: &args,
+        env: &[],
+        cwd: None,
+        timeout: std::time::Duration::from_secs(120),
+        stdin: None,
+    })
+    .map_err(|e| format!("跑不了 sfdisk（需要 util-linux）：{}", e))?;
+    if !out.ok() {
         return Err("sfdisk 读分区表失败".to_string());
     }
-    let table: serde_json::Value =
-        serde_json::from_slice(&out.stdout).map_err(|e| format!("sfdisk 输出不是 JSON：{}", e))?;
+    let table: serde_json::Value = serde_json::from_str(&out.stdout_text())
+        .map_err(|e| format!("sfdisk 输出不是 JSON：{}", e))?;
     let parts = table
         .get("partitiontable")
         .and_then(|t| t.get("partitions"))
@@ -83,14 +88,18 @@ pub(crate) fn extract_deb(deb: &Path, dest: &Path, cache: &Path) -> Result<(), S
     let tmp = cache.join("deb-x");
     let _ = fs::remove_dir_all(&tmp);
     fs::create_dir_all(&tmp).map_err(|e| format!("建 {} 失败：{}", tmp.display(), e))?;
-    let st = std::process::Command::new("ar")
-        .arg("x")
-        .arg(deb)
-        .current_dir(&tmp)
-        .status()
-        .map_err(|e| format!("跑不了 ar（需要 binutils）：{}", e))?;
-    if !st.success() {
-        return Err("ar 解 .deb 失败".to_string());
+    let args = vec!["x".to_string(), deb.to_string_lossy().into_owned()];
+    let out = crate::kernel::api::process::run_to_end(&crate::kernel::api::process::Run {
+        program: Path::new("ar"),
+        args: &args,
+        env: &[],
+        cwd: Some(&tmp),
+        timeout: std::time::Duration::from_secs(120),
+        stdin: None,
+    })
+    .map_err(|e| format!("跑不了 ar（需要 binutils）：{}", e))?;
+    if !out.ok() {
+        return Err(format!("ar 解 .deb 失败：{}", out.stderr_text().trim()));
     }
     let data = fs::read_dir(&tmp)
         .map_err(|e| format!("读 {} 失败：{}", tmp.display(), e))?

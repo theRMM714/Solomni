@@ -3,6 +3,7 @@
 //! 不管：什么时候该重编（在 `service.rs`，按入口在场与目标比对）。
 //! 联动：端口见 `ports.rs`；落点与字段见 MODULE_SPEC 的「构建·缓存」。
 
+use crate::kernel::api::fs;
 use crate::units::business::catalog::modules::api::{BuildDecl, Module};
 use crate::units::business::maintenance::builds::ports::{
     BuildHome, BuildStates, BuiltRecord, SourceDigest,
@@ -42,11 +43,17 @@ pub(crate) fn read_state(path: &Path) -> Option<BuildState> {
 pub(crate) fn write_state(path: &Path, state: &BuildState) -> Result<(), String> {
     let text = serde_json::to_string_pretty(state).map_err(|e| format!("状态序列化失败：{}", e))?;
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)
-            .map_err(|e| format!("建状态目录失败（{}）：{}", dir.display(), e))?;
+        fs::ensure_dir(dir)
+            .map_err(|fault| format!("建状态目录失败（{}）：{}", dir.display(), fault.message))?;
     }
-    std::fs::write(path, format!("{}\n", text))
-        .map_err(|e| format!("写状态失败（{}）：{}", path.display(), e))
+    fs::write(
+        None,
+        path,
+        format!("{}\n", text).as_bytes(),
+        fs::Expect::Any,
+    )
+    .map(|_| ())
+    .map_err(|fault| format!("写状态失败（{}）：{}", path.display(), fault.message))
 }
 
 /// 目的：模块的源指纹（构建命令 + 能力 + 网络 + 全部源文件的相对路径与内容）——变了才重编。
@@ -119,7 +126,7 @@ impl BuildStates for BuildStore {
     fn prepare_home(&self, id: &str) -> Result<BuildHome, String> {
         let state = api::paths(&self.root).build_states().join(id);
         let home = api::paths(&self.root).build_home(id);
-        std::fs::create_dir_all(&home).map_err(|e| format!("建状态目录失败：{}", e))?;
+        fs::ensure_dir(&home).map_err(|fault| format!("建状态目录失败：{}", fault.message))?;
         Ok(BuildHome { state, home })
     }
 }

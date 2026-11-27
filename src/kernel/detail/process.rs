@@ -8,8 +8,8 @@ use crate::kernel::contracts::note::{Note, Severity, codes, severity_of};
 use crate::kernel::contracts::run::RunOutcome;
 use crate::kernel::detail::confine;
 use crate::kernel::ports::{FenceGate, ProcessRunner};
-use std::path::PathBuf;
-use std::process::Stdio;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -380,5 +380,115 @@ impl ProcTools {
     }
 }
 
+/// 目的：跑一个宿主程序到结束（无围栏）——给安装器、镜像构造、压缩这类"调系统工具"的活。
+/// 参数：`program` 是要跑的可执行文件；`args` 逐项传参；`env` 只补额外变量（其余继承本进程）；`cwd` 省缺用本进程目录；
+///   `timeout` 到点连根杀树；`stdin` 有则接管道送进去，无则接空设备（工具不会读住终端）。
+/// 返回：退出码与两路原始字节；超时被杀时 `timed_out` 为真、`code` 可能是 None。
+/// 错误：程序拉不起来（缺这个系统工具、没有执行位）时给一句人话。
+/// 约束：不做围栏（要读写安装根这类项目内目录）；命令是数据，不拼进 shell；输出保留字节（tar 这类是二进制）。
+pub struct Run<'a> {
+    pub program: &'a Path,
+    pub args: &'a [String],
+    pub env: &'a [(String, String)],
+    pub cwd: Option<&'a Path>,
+    pub timeout: Duration,
+    pub stdin: Option<&'a [u8]>,
+}
+
+/// 目的：一次宿主程序执行的结果。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Done {
+    pub code: Option<i32>,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    pub timed_out: bool,
+}
+
+impl Done {
+    /// 目的：成功 = 没超时且退出码为 0。
+    pub fn ok(&self) -> bool {
+        !self.timed_out && self.code == Some(0)
+    }
+
+    /// 目的：stdout 按文本读（给 JSON / 人话输出的工具；二进制场景直接用 `stdout`）。
+    pub fn stdout_text(&self) -> String {
+        String::from_utf8_lossy(&self.stdout).into_owned()
+    }
+
+    /// 目的：stderr 按文本读（失败文案里那一行原因通常在这里）。
+    pub fn stderr_text(&self) -> String {
+        String::from_utf8_lossy(&self.stderr).into_owned()
+    }
+}
+
+/// 目的：把宿主程序跑到底并收齐输出（见 `Run` 的参数与约束）。
+pub fn run_to_end(run: &Run<'_>) -> Result<Done, String> {
+    let mut cmd = Command::new(run.program);
+    cmd.args(run.args);
+    for (k, v) in run.env {
+        cmd.env(k, v);
+    }
+    if let Some(cwd) = run.cwd {
+        cmd.current_dir(cwd);
+    }
+    cmd.stdin(if run.stdin.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    })
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+    platform::configure_spawn(&mut cmd);
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("跑不了 {}：{}", run.program.display(), e))?;
+    let payload = run.stdin.map(|b| b.to_vec());
+    let writer = match (payload, child.stdin.take()) {
+        (Some(bytes), Some(mut pipe)) => Some(thread::spawn(move || {
+            use std::io::Write;
+            let _ = pipe.write_all(&bytes);
+            let _ = pipe.flush();
+        })),
+        _ => None,
+    };
+    let mut stdout_pipe = child.stdout.take().expect("stdout 已声明管道");
+    let mut stderr_pipe = child.stderr.take().expect("stderr 已声明管道");
+    let out_reader = thread::spawn(move || read_bytes(&mut stdout_pipe));
+    let err_reader = thread::spawn(move || read_bytes(&mut stderr_pipe));
+    let deadline = Instant::now() + run.timeout;
+    let mut timed_out = false;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    timed_out = true;
+                    kill_tree(&mut child);
+                    break;
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+            Err(_) => break,
+        }
+    }
+    if let Some(w) = writer {
+        let _ = w.join();
+    }
+    let stdout = out_reader.join().unwrap_or_default();
+    let stderr = err_reader.join().unwrap_or_default();
+    let code = child.try_wait().ok().flatten().and_then(|s| s.code());
+    Ok(Done {
+        code,
+        stdout,
+        stderr,
+        timed_out,
+    })
+}
+
+fn read_bytes(r: &mut impl std::io::Read) -> Vec<u8> {
+    let mut buf = Vec::new();
+    let _ = r.read_to_end(&mut buf);
+    buf
+}
 #[cfg(test)]
 mod tests;

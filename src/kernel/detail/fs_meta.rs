@@ -64,8 +64,3 @@ pub fn is_link(path: &Path) -> bool {
 pub fn write_executable(path: &Path, body: &str) -> io::Result<()> {
     backend::write_executable(path, body)
 }
-
-/// 目的：把目录项刷到盘上（Unix 上 rename 后需要它；其余平台为空操作，尽力而为）。
-pub fn sync_dir(path: &Path) {
-    backend::sync_dir(path);
-}

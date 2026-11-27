@@ -3,6 +3,7 @@
 //! 不管：注册表读写（端口）、命令入口与平台指引（在门面与平台后端）。
 //! 联动：由 `setup/path.rs` 在 Windows 或测试构建中选中。
 
+use crate::kernel::api::fs;
 use crate::kernel::ports::{PathValue, UserPath};
 use std::path::Path;
 
@@ -103,6 +104,6 @@ pub(crate) fn do_undo(port: &dyn UserPath, home: &Path) -> Result<String, String
         expand: backup.expand,
     })?;
     let _ = port.broadcast();
-    let _ = std::fs::remove_file(backup_path(home));
+    let _ = fs::remove_tree(&backup_path(home));
     Ok("已按备份还原用户 PATH（原串与原类型）".to_string())
 }

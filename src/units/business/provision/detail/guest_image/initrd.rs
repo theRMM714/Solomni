@@ -154,13 +154,25 @@ pub(crate) fn ensure_guest_initrd(
         proc = base.join("proc").display(),
         root = base.display()
     );
-    let out = std::process::Command::new("unshare")
-        .args(["-r", "-m", "sh", "-c", &inner])
-        .output()
-        .map_err(|e| format!("起不了 unshare（需要 util-linux）：{}", e))?;
-    let _ = fs::remove_file(&script);
-    if !out.status.success() {
-        return Err(initrd_failure(out.status.code(), &out.stderr, &out.stdout));
+    let args = vec![
+        "-r".to_string(),
+        "-m".to_string(),
+        "sh".to_string(),
+        "-c".to_string(),
+        inner,
+    ];
+    let out = crate::kernel::api::process::run_to_end(&crate::kernel::api::process::Run {
+        program: Path::new("unshare"),
+        args: &args,
+        env: &[],
+        cwd: None,
+        timeout: std::time::Duration::from_secs(900),
+        stdin: None,
+    })
+    .map_err(|e| format!("起不了 unshare（需要 util-linux）：{}", e))?;
+    let _ = crate::kernel::api::fs::remove_tree(&script);
+    if !out.ok() {
+        return Err(initrd_failure(out.code, &out.stderr, &out.stdout));
     }
     // 成功时把 chroot 的告警带出来（限 5 行，别刷屏）：/proc 绑定失败这类事实不能只在日志里。
     for line in String::from_utf8_lossy(&out.stderr)

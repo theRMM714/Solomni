@@ -3,6 +3,7 @@
 //! 不管：什么时候重装、装什么（在 service 的编排里）；下载与解包（在 fetch / install）。
 //! 联动：组合根构造 `FileLedger` 注入 service；本文件只经 domain 的纯规则算身份。
 
+use crate::kernel::api::fs as kfs;
 use crate::kernel::api::layout;
 use std::collections::BTreeMap;
 use std::fs;
@@ -88,13 +89,18 @@ pub(crate) fn read_ledger(root: &Path) -> BTreeMap<String, Entry> {
 pub(crate) fn write_ledger(root: &Path, ledger: &BTreeMap<String, Entry>) -> Result<(), String> {
     let file = ledger_path(root);
     let dir = file.parent().ok_or_else(|| "台账没有父目录".to_string())?;
-    fs::create_dir_all(dir).map_err(|e| format!("建 {} 失败：{}", dir.display(), e))?;
+    kfs::ensure_dir(dir)
+        .map_err(|fault| format!("建 {} 失败：{}", dir.display(), fault.message))?;
     let text =
         serde_json::to_string_pretty(ledger).map_err(|e| format!("序列化安装台账失败：{}", e))?;
-    let tmp = file.with_extension("json.tmp");
-    fs::write(&tmp, text + "\n").map_err(|e| format!("写 {} 失败：{}", tmp.display(), e))?;
-    fs::rename(&tmp, &file).map_err(|e| format!("提交 {} 失败：{}", file.display(), e))?;
-    Ok(())
+    kfs::write(
+        None,
+        &file,
+        format!("{}\n", text).as_bytes(),
+        kfs::Expect::Any,
+    )
+    .map(|_| ())
+    .map_err(|fault| format!("提交 {} 失败：{}", file.display(), fault.message))
 }
 
 /// 目的：登记「这条依赖按当前身份装好了」——每装好一条就落一次盘（后面某条失败时前面的成果不丢）。
@@ -139,29 +145,32 @@ pub(crate) fn relocate(root: &Path, dep: &Dep, from: &Placement) -> Result<bool,
 /// 目的：把一个文件或目录整体挪过去；跨卷时退化成复制 + 删源。
 fn move_path(from: &Path, to: &Path) -> Result<(), String> {
     if let Some(dir) = to.parent() {
-        fs::create_dir_all(dir).map_err(|e| format!("建 {} 失败：{}", dir.display(), e))?;
+        kfs::ensure_dir(dir)
+            .map_err(|fault| format!("建 {} 失败：{}", dir.display(), fault.message))?;
     }
-    if from.is_dir() && to.exists() {
-        fs::remove_dir_all(to).map_err(|e| format!("清 {} 失败：{}", to.display(), e))?;
-    } else if from.is_file() && to.exists() {
-        fs::remove_file(to).map_err(|e| format!("清 {} 失败：{}", to.display(), e))?;
+    if to.exists() {
+        kfs::remove_tree(to)
+            .map_err(|fault| format!("清 {} 失败：{}", to.display(), fault.message))?;
     }
-    if fs::rename(from, to).is_ok() {
+    if kfs::move_file(from, to).is_ok() {
         return Ok(());
     }
     if from.is_dir() {
         copy_dir(from, to)?;
-        fs::remove_dir_all(from).map_err(|e| format!("删 {} 失败：{}", from.display(), e))?;
+        kfs::remove_tree(from)
+            .map_err(|fault| format!("删 {} 失败：{}", from.display(), fault.message))?;
     } else {
-        fs::copy(from, to).map_err(|e| format!("复制 {} 失败：{}", from.display(), e))?;
-        fs::remove_file(from).map_err(|e| format!("删 {} 失败：{}", from.display(), e))?;
+        kfs::copy_file(from, to)
+            .map_err(|fault| format!("复制 {} 失败：{}", from.display(), fault.message))?;
+        kfs::remove_tree(from)
+            .map_err(|fault| format!("删 {} 失败：{}", from.display(), fault.message))?;
     }
     Ok(())
 }
 
 /// 目的：递归复制目录（跨卷搬家的兜底路径）。
 fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
-    fs::create_dir_all(to).map_err(|e| format!("建 {} 失败：{}", to.display(), e))?;
+    kfs::ensure_dir(to).map_err(|fault| format!("建 {} 失败：{}", to.display(), fault.message))?;
     for entry in fs::read_dir(from).map_err(|e| format!("读 {} 失败：{}", from.display(), e))? {
         let entry = entry.map_err(|e| format!("读 {} 失败：{}", from.display(), e))?;
         let src = entry.path();
@@ -169,7 +178,8 @@ fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
         if src.is_dir() {
             copy_dir(&src, &dst)?;
         } else {
-            fs::copy(&src, &dst).map_err(|e| format!("复制 {} 失败：{}", src.display(), e))?;
+            kfs::copy_file(&src, &dst)
+                .map_err(|fault| format!("复制 {} 失败：{}", src.display(), fault.message))?;
         }
     }
     Ok(())
@@ -179,25 +189,12 @@ fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
 pub(crate) fn clear_install(root: &Path, dep: &Dep) -> Result<(), String> {
     let probe = under(root, &dep.probe);
     let install = under(root, &dep.install);
-    let removed = match dep.kind.as_str() {
-        "guest-runtime" | "file" => {
-            if probe.is_file() {
-                fs::remove_file(&probe)
-            } else if probe.is_dir() {
-                fs::remove_dir_all(&probe)
-            } else {
-                Ok(())
-            }
-        }
-        _ => {
-            if install.is_dir() {
-                fs::remove_dir_all(&install)
-            } else {
-                Ok(())
-            }
-        }
+    let target = match dep.kind.as_str() {
+        "guest-runtime" | "file" => probe,
+        _ => install,
     };
-    removed.map_err(|e| format!("{}：清旧安装失败：{}", dep.id, e))
+    kfs::remove_tree(&target)
+        .map_err(|fault| format!("{}：清旧安装失败：{}", dep.id, fault.message))
 }
 
 pub(crate) fn sync_toolchain_active(root: &Path, all: &[Dep]) -> Result<(), String> {
@@ -245,14 +242,19 @@ pub(crate) fn sync_toolchain_active(root: &Path, all: &[Dep]) -> Result<(), Stri
     let dir = file
         .parent()
         .ok_or_else(|| "active.json 没有父目录".to_string())?;
-    fs::create_dir_all(dir).map_err(|e| format!("建 {} 失败：{}", dir.display(), e))?;
+    kfs::ensure_dir(dir)
+        .map_err(|fault| format!("建 {} 失败：{}", dir.display(), fault.message))?;
     let doc = serde_json::json!({ "target": target, "profile": profile, "tools": tools });
     let text = serde_json::to_string_pretty(&doc)
         .map_err(|e| format!("序列化 active.json 失败：{}", e))?;
-    let tmp = file.with_extension("json.tmp");
-    fs::write(&tmp, text + "\n").map_err(|e| format!("写 {} 失败：{}", tmp.display(), e))?;
-    fs::rename(&tmp, &file).map_err(|e| format!("提交 {} 失败：{}", file.display(), e))?;
-    Ok(())
+    kfs::write(
+        None,
+        &file,
+        format!("{}\n", text).as_bytes(),
+        kfs::Expect::Any,
+    )
+    .map(|_| ())
+    .map_err(|fault| format!("提交 {} 失败：{}", file.display(), fault.message))
 }
 
 impl Ledger for FileLedger {

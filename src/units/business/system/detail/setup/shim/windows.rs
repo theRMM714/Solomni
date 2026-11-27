@@ -4,6 +4,7 @@
 //! 联动：path.rs 在改 PATH 前先调用 ensure，保证 PATH 指向的入口存在。
 
 use crate::kernel::api::env;
+use crate::kernel::api::fs;
 use std::path::{Path, PathBuf};
 
 /// 目的：shim 的落点：产品根的 bin 目录（与 .tools 等产品内目录同级）。
@@ -36,11 +37,12 @@ pub(crate) fn ensure(root: &Path) -> Result<(PathBuf, bool), String> {
         return Ok((path, false));
     }
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)
-            .map_err(|e| format!("建 bin 目录失败（{}）：{}", dir.display(), e))?;
+        fs::ensure_dir(dir)
+            .map_err(|fault| format!("建 bin 目录失败（{}）：{}", dir.display(), fault.message))?;
     }
-    std::fs::write(&path, &want)
-        .map_err(|e| format!("写 shim 失败（{}）：{}", path.display(), e))?;
+    fs::write(None, &path, want.as_bytes(), fs::Expect::Any)
+        .map(|_| ())
+        .map_err(|fault| format!("写 shim 失败（{}）：{}", path.display(), fault.message))?;
     Ok((path, true))
 }
 
