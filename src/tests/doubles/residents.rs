@@ -301,6 +301,7 @@ pub(crate) fn member_with_service_tools(
         residents,
         // 工具面用例不接工作区：写工具落地后不自动提交。
         workspace: None,
+        versions: None,
         observations: Default::default(),
         shell_live: None,
         reply_seq: 0,

@@ -273,6 +273,9 @@ pub(crate) struct MemberTools {
     /// 约束：None = 这一席没有工作区（核心核实用途、部分测试装配）；有工作区的席位必须给 Some，
     ///   否则写入只落在沙箱、共享区永远不动（静默漏提交）。
     pub workspace: Option<Arc<dyn crate::units::business::workspace::api::Workspace + Send + Sync>>,
+    /// 目的：版本库用例面——`work_*` 执行者按它造、写工具落地后的存档线也走它（**不持它的端口**，R12）。
+    /// 约束：与 `workspace` 同生同灭（有工作区就有它）。
+    pub versions: Option<Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>>,
     /// 目的：本次会话的观察账本（哪些文件完整读过 / 由核心写过）：改动前的证据（见 crate::units::business::tools::api::Observations）。
     pub observations: crate::units::business::tools::api::Observations,
     /// 目的：这个会话最近一次 shell 的实时状态（状态栏卡片）；没有 shell 的席位为 None。
@@ -361,6 +364,7 @@ impl MemberTools {
             prompt: &*self.prompt,
             residents: &*self.residents,
             workspace: self.workspace.as_ref(),
+            versions: self.versions.as_ref(),
         });
         self.face.allowed = next.allowed;
         self.face.modules = next.modules;

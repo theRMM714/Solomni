@@ -307,14 +307,14 @@ impl WorkOps for FakeCore {
         _: &str,
         _: usize,
         _: Option<u64>,
-    ) -> Result<crate::units::business::workspace::api::WorkLog, String> {
+    ) -> Result<crate::units::business::versions::api::WorkLog, String> {
         Err("没装日志".into())
     }
     fn work_commit_view(
         &self,
         _: &str,
         _: u64,
-    ) -> Result<crate::units::business::workspace::api::CommitDetail, String> {
+    ) -> Result<crate::units::business::versions::api::CommitDetail, String> {
         Err("没装提交".into())
     }
     fn work_commit_file(
@@ -322,7 +322,7 @@ impl WorkOps for FakeCore {
         _: &str,
         _: u64,
         _: &str,
-    ) -> Result<crate::units::business::workspace::api::CommitFileView, String> {
+    ) -> Result<crate::units::business::versions::api::CommitFileView, String> {
         Err("没装提交文件".into())
     }
     fn exists(&self, _: &str) -> Result<bool, String> {

@@ -3,7 +3,7 @@
 //! 不管：改写工作区文件与写备份（`workspace/service` 与 `workspace::detail`）。
 //! 联动：`work_resolve` 与 `work_restore_lost` 的入参与回执（docs/workspace/README.md）。
 
-use crate::units::business::workspace::domain::asset::FileVersion;
+use crate::units::business::versions::domain::asset::FileVersion;
 
 /// 目的：一条路径的三方版本：基线（上次拉取/提交）/ 主副本当前 / 沙箱本地。
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -213,7 +213,7 @@ fn external_shared_root_is_not_a_shell_write_surface() {
 #[test]
 fn work_status_filters_paths_outside_read_scope() {
     use crate::kernel::ports::{ToolCtx, ToolHandler};
-    use crate::units::business::workspace::api::{CommitRequest, PushRequest, WorkHandler};
+    use crate::units::business::versions::api::{CommitRequest, PushRequest, WorkHandler};
 
     let dirs = std::sync::Arc::new(InMemoryWorkspace::new());
     let store = std::sync::Arc::new(InMemoryWorkStore::new());
@@ -267,7 +267,7 @@ fn work_status_filters_paths_outside_read_scope() {
         read: ScopeMode::Paths(paths(&["public.txt"])),
         ..Default::default()
     };
-    let h = WorkHandler::new(ws, "w", "a", scope);
+    let h = WorkHandler::new(ws.versions.clone(), "w", "a", scope);
     let ctx = ToolCtx {
         session: "s",
         agent: "a",
@@ -291,7 +291,7 @@ fn work_status_filters_paths_outside_read_scope() {
 #[test]
 fn work_lost_is_scoped_by_read_permission() {
     use crate::kernel::ports::{ToolCtx, ToolHandler};
-    use crate::units::business::workspace::api::WorkHandler;
+    use crate::units::business::versions::api::WorkHandler;
 
     let dirs = std::sync::Arc::new(InMemoryWorkspace::new());
     let store = std::sync::Arc::new(InMemoryWorkStore::new());
@@ -309,7 +309,7 @@ fn work_lost_is_scoped_by_read_permission() {
         read: ScopeMode::Paths(paths(&["public"])),
         ..Default::default()
     };
-    let h = WorkHandler::new(ws, "w", "a", scope);
+    let h = WorkHandler::new(ws.versions.clone(), "w", "a", scope);
     let ctx = ToolCtx {
         session: "s",
         agent: "a",
@@ -342,13 +342,13 @@ fn work_lost_is_scoped_by_read_permission() {
 #[test]
 fn work_versions_and_resolve_are_scoped_by_read_permission() {
     use crate::kernel::ports::{ToolCtx, ToolHandler};
-    use crate::units::business::workspace::api::WorkHandler;
+    use crate::units::business::versions::api::WorkHandler;
     let ws = test_workspace(std::sync::Arc::new(InMemoryWorkspace::new()));
     let scope = SharedScope {
         read: ScopeMode::Paths(paths(&["docs"])),
         ..Default::default()
     };
-    let h = WorkHandler::new(ws, "w", "a", scope);
+    let h = WorkHandler::new(ws.versions.clone(), "w", "a", scope);
     let ctx = ToolCtx {
         session: "s",
         agent: "a",
@@ -377,13 +377,13 @@ fn work_versions_and_resolve_are_scoped_by_read_permission() {
 #[test]
 fn no_write_scope_refuses_commit_and_push() {
     use crate::kernel::ports::{ToolCtx, ToolHandler};
-    use crate::units::business::workspace::api::WorkHandler;
+    use crate::units::business::versions::api::WorkHandler;
     let ws = test_workspace(std::sync::Arc::new(InMemoryWorkspace::new()));
     let scope = SharedScope {
         write: ScopeMode::None,
         ..Default::default()
     };
-    let h = WorkHandler::new(ws, "w", "a", scope);
+    let h = WorkHandler::new(ws.versions.clone(), "w", "a", scope);
     let ctx = ToolCtx {
         session: "s",
         agent: "a",

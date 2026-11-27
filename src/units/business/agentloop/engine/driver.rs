@@ -450,11 +450,11 @@ fn freshness_now(
         return None;
     }
     let tools = s.tools.as_ref()?;
-    let ws = tools.workspace.as_ref()?;
+    let ws = tools.versions.as_ref()?;
     let reads: Vec<&crate::units::business::agentloop::api::ReadAt> = s.reads().iter().collect();
-    let queries: Vec<crate::units::business::workspace::api::ReadQuery> = reads
+    let queries: Vec<crate::units::business::versions::api::ReadQuery> = reads
         .iter()
-        .map(|r| crate::units::business::workspace::api::ReadQuery {
+        .map(|r| crate::units::business::versions::api::ReadQuery {
             path: r.fact.path.clone(),
             blob: r.fact.blob.clone(),
             from: r.fact.from,

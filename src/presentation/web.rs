@@ -8,7 +8,7 @@ use crate::presentation::faces::Faces;
 use crate::units::business::runtime::api::{Acted, ActionCall, Caller};
 use crate::units::business::transcript::api::SessionEvent;
 use crate::units::business::turn::turn::api::Output;
-use crate::units::business::workspace::api::MAX_ASSET_BYTES;
+use crate::units::business::versions::api::MAX_ASSET_BYTES;
 pub(crate) mod assets;
 mod host_fs;
 pub mod routes;

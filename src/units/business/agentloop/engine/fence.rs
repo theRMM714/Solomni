@@ -28,7 +28,7 @@ pub(super) fn commit_refusal(
     if name != "work_commit" {
         return None;
     }
-    let ws = ctx.workspace.as_ref()?;
+    let ws = ctx.versions.as_ref()?;
     let args: serde_json::Value = serde_json::from_str(args_json).ok()?;
     let strings = |key: &str| -> Vec<String> {
         args.get(key)
@@ -58,7 +58,7 @@ pub(super) fn commit_refusal(
             Err(e) => return Some(ToolOutcome::new(false, e)),
         };
     let gate = SessionWriteGate {
-        workspace: ws.as_ref(),
+        versions: ws.as_ref(),
         work: &ctx.face.sandbox.work_name,
         agent: &ctx.face.sandbox.agent,
         facts,
@@ -104,7 +104,7 @@ pub(super) fn adopt_sandbox(
     done: &mut [Option<CallDone>],
     facts: &[crate::units::business::tools::api::ObservationFact],
 ) {
-    let Some(ws) = ctx.workspace.as_ref() else {
+    let Some(ws) = ctx.versions.as_ref() else {
         return;
     };
     if ctx.face.sandbox.work_name.is_empty() {
@@ -147,7 +147,7 @@ pub(super) fn adopt_sandbox(
 /// 约束：逐路径标出"当前版本看过没有"，并附**有界** diff 摘要——回执只是提醒，不代替 read。
 fn adopt_note(
     ctx: &MemberTools,
-    report: &crate::units::business::workspace::api::AdoptReport,
+    report: &crate::units::business::versions::api::AdoptReport,
     facts: &[crate::units::business::tools::api::ObservationFact],
 ) -> String {
     const MAX_PATHS: usize = 8;
@@ -160,7 +160,7 @@ fn adopt_note(
             id
         ));
     }
-    let Some(ws) = ctx.workspace.as_ref() else {
+    let Some(ws) = ctx.versions.as_ref() else {
         if !report.changed.is_empty() {
             out.push_str(&format!("\n改动路径：{}", report.changed.join("、")));
         }
@@ -220,7 +220,7 @@ fn adopt_note(
     let Ok(diff) = ws.work_diff(
         work,
         agent,
-        &crate::units::business::workspace::api::DiffRequest {
+        &crate::units::business::versions::api::DiffRequest {
             from: None,
             to: None,
             paths,
@@ -242,15 +242,15 @@ fn adopt_note(
             for h in &e.hunks {
                 for line in &h.lines {
                     match line.sign {
-                        crate::units::business::workspace::api::DiffSign::Add => added += 1,
-                        crate::units::business::workspace::api::DiffSign::Remove => removed += 1,
-                        crate::units::business::workspace::api::DiffSign::Context => {}
+                        crate::units::business::versions::api::DiffSign::Add => added += 1,
+                        crate::units::business::versions::api::DiffSign::Remove => removed += 1,
+                        crate::units::business::versions::api::DiffSign::Context => {}
                     }
                     if shown < MAX_LINES && body.len() < MAX_BYTES {
                         let sign = match line.sign {
-                            crate::units::business::workspace::api::DiffSign::Add => '+',
-                            crate::units::business::workspace::api::DiffSign::Remove => '-',
-                            crate::units::business::workspace::api::DiffSign::Context => ' ',
+                            crate::units::business::versions::api::DiffSign::Add => '+',
+                            crate::units::business::versions::api::DiffSign::Remove => '-',
+                            crate::units::business::versions::api::DiffSign::Context => ' ',
                         };
                         lines.push(format!("{}{}", sign, line.text));
                         shown += 1;

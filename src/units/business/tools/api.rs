@@ -30,8 +30,8 @@ pub use crate::units::business::tools::domain::systool::{
 };
 pub use crate::units::business::tools::domain::table::{SystemTools, action_audit};
 
-pub use crate::units::business::workspace::api::GateFile;
-use crate::units::business::workspace::api::{ReadFact, Workspace};
+pub use crate::units::business::versions::api::GateFile;
+use crate::units::business::versions::api::{ReadFact, Versions};
 
 /// 目的：一个从 1 开始、闭区间的行范围。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -295,8 +295,8 @@ pub trait WriteGate: Send + Sync {
 /// 目的：一次工具调用用的只读门禁——按路径向工作区取快照，再对账本里的观察事实。
 /// 约束：只在调用期间借用；每次 check 都重新取该路径的当前状态，不缓存、不跨调用复用。
 pub struct SessionWriteGate<'a> {
-    /// 目的：取 tracked / 当前 / 基线版本的工作区。
-    pub workspace: &'a (dyn Workspace + Send + Sync),
+    /// 目的：取 tracked / 当前 / 基线版本的版本库用例面。
+    pub versions: &'a (dyn Versions + Send + Sync),
     /// 目的：工作名（定位工作线）。
     pub work: &'a str,
     /// 目的：agent 名（定位它的工作线）。
@@ -316,7 +316,7 @@ impl SessionWriteGate<'_> {
         path: &str,
         need: Need,
         current: Option<&GateFile>,
-        info: &crate::units::business::workspace::api::PathGateInfo,
+        info: &crate::units::business::versions::api::PathGateInfo,
     ) -> Result<(), GateFault> {
         if !info.tracked {
             return Ok(());
@@ -360,7 +360,7 @@ impl SessionWriteGate<'_> {
     fn shown_version(
         &self,
         current: Option<&GateFile>,
-        info: &crate::units::business::workspace::api::PathGateInfo,
+        info: &crate::units::business::versions::api::PathGateInfo,
     ) -> Option<String> {
         current
             .or(info.current.as_ref())
@@ -394,8 +394,8 @@ impl SessionWriteGate<'_> {
     fn snapshot(
         &self,
         paths: &[String],
-    ) -> Result<Vec<crate::units::business::workspace::api::PathGateInfo>, GateFault> {
-        self.workspace
+    ) -> Result<Vec<crate::units::business::versions::api::PathGateInfo>, GateFault> {
+        self.versions
             .work_gate_info(self.work, self.agent, paths)
             .map_err(GateFault::Unavailable)
     }

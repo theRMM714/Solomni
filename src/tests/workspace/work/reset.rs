@@ -9,7 +9,7 @@ use crate::tests::workspace::support::*;
 /// 约束：只能退到自己工作线的祖先；覆盖前备份进 lost/。
 #[test]
 pub(crate) fn work_reset_restores_paths_and_moves_the_work_line() {
-    use crate::units::business::workspace::api::ResetRequest;
+    use crate::units::business::versions::api::ResetRequest;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string(), "b".to_string()])
         .unwrap();
@@ -106,7 +106,7 @@ pub(crate) fn work_reset_restores_paths_and_moves_the_work_line() {
 /// 目的：work_reset 的回执按事实说清「工作线动没动」——paths 形态不动线，不能套用 to 形态的话术。
 #[test]
 pub(crate) fn work_reset_receipts_name_the_form_that_ran() {
-    use crate::units::business::workspace::api::{ResetRequest, render_reset};
+    use crate::units::business::versions::api::{ResetRequest, render_reset};
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");

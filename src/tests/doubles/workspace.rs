@@ -40,7 +40,7 @@ impl Workdirs for InMemoryWorkspace {
         false
     }
 
-    fn lock_shared(&self, _session: &str) -> Result<Option<std::fs::File>, String> {
+    fn shared_lock_path(&self, _session: &str) -> Result<Option<std::path::PathBuf>, String> {
         Ok(None)
     }
 
@@ -159,13 +159,13 @@ pub(crate) struct InMemoryWorkStore {
     pub(crate) files: Mutex<BTreeMap<String, Vec<u8>>>,
     pub(crate) objects: Mutex<BTreeMap<String, Vec<u8>>>,
     pub(crate) commits:
-        Mutex<BTreeMap<String, crate::units::business::workspace::domain::workstore::Commit>>,
+        Mutex<BTreeMap<String, crate::units::business::versions::domain::workstore::Commit>>,
     pub(crate) refs:
-        Mutex<BTreeMap<String, crate::units::business::workspace::domain::workstore::Ref>>,
+        Mutex<BTreeMap<String, crate::units::business::versions::domain::workstore::Ref>>,
     pub(crate) index:
-        Mutex<BTreeMap<String, crate::units::business::workspace::domain::workstore::Index>>,
+        Mutex<BTreeMap<String, crate::units::business::versions::domain::workstore::Index>>,
     pub(crate) pending:
-        Mutex<BTreeMap<String, crate::units::business::workspace::domain::workstore::Pending>>,
+        Mutex<BTreeMap<String, crate::units::business::versions::domain::workstore::Pending>>,
     pub(crate) next_ids: Mutex<BTreeMap<String, u64>>,
     pub(crate) fail: Option<String>,
     pub(crate) fail_times: Mutex<BTreeMap<String, usize>>,
@@ -520,8 +520,8 @@ impl WorkStore for InMemoryWorkStore {
         }
         self.enter("set_head")?;
         let mut r = self.read_ref(store, "main")?.unwrap_or(
-            crate::units::business::workspace::domain::workstore::Ref {
-                kind: crate::units::business::workspace::domain::workstore::RefKind::Main,
+            crate::units::business::versions::domain::workstore::Ref {
+                kind: crate::units::business::versions::domain::workstore::RefKind::Main,
                 target: None,
                 heads: BTreeMap::new(),
                 saves: BTreeMap::new(),
@@ -540,7 +540,7 @@ impl WorkStore for InMemoryWorkStore {
         &self,
         store: &std::path::Path,
         name: &str,
-    ) -> Result<Option<crate::units::business::workspace::domain::workstore::Ref>, String> {
+    ) -> Result<Option<crate::units::business::versions::domain::workstore::Ref>, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -556,7 +556,7 @@ impl WorkStore for InMemoryWorkStore {
         &self,
         store: &std::path::Path,
         name: &str,
-        r: &crate::units::business::workspace::domain::workstore::Ref,
+        r: &crate::units::business::versions::domain::workstore::Ref,
     ) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
@@ -572,7 +572,7 @@ impl WorkStore for InMemoryWorkStore {
     fn list_refs(
         &self,
         store: &std::path::Path,
-    ) -> Result<BTreeMap<String, crate::units::business::workspace::domain::workstore::Ref>, String>
+    ) -> Result<BTreeMap<String, crate::units::business::versions::domain::workstore::Ref>, String>
     {
         if let Some(m) = &self.fail {
             return Err(m.clone());
@@ -600,7 +600,7 @@ impl WorkStore for InMemoryWorkStore {
         &self,
         store: &std::path::Path,
         id: u64,
-    ) -> Result<Option<crate::units::business::workspace::domain::workstore::Commit>, String> {
+    ) -> Result<Option<crate::units::business::versions::domain::workstore::Commit>, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -615,7 +615,7 @@ impl WorkStore for InMemoryWorkStore {
     fn write_commit(
         &self,
         store: &std::path::Path,
-        commit: &crate::units::business::workspace::domain::workstore::Commit,
+        commit: &crate::units::business::versions::domain::workstore::Commit,
     ) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
@@ -658,7 +658,7 @@ impl WorkStore for InMemoryWorkStore {
         &self,
         store: &std::path::Path,
         agent: &str,
-    ) -> Result<crate::units::business::workspace::domain::workstore::Index, String> {
+    ) -> Result<crate::units::business::versions::domain::workstore::Index, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -675,7 +675,7 @@ impl WorkStore for InMemoryWorkStore {
         &self,
         store: &std::path::Path,
         agent: &str,
-        index: &crate::units::business::workspace::domain::workstore::Index,
+        index: &crate::units::business::versions::domain::workstore::Index,
     ) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
@@ -727,7 +727,7 @@ impl WorkStore for InMemoryWorkStore {
     fn read_pending(
         &self,
         store: &std::path::Path,
-    ) -> Result<Option<crate::units::business::workspace::domain::workstore::Pending>, String> {
+    ) -> Result<Option<crate::units::business::versions::domain::workstore::Pending>, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -742,7 +742,7 @@ impl WorkStore for InMemoryWorkStore {
     fn write_pending(
         &self,
         store: &std::path::Path,
-        pending: &crate::units::business::workspace::domain::workstore::Pending,
+        pending: &crate::units::business::versions::domain::workstore::Pending,
     ) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
@@ -794,7 +794,7 @@ impl WorkStore for InMemoryWorkStore {
     fn list_indexes(
         &self,
         store: &std::path::Path,
-    ) -> Result<BTreeMap<String, crate::units::business::workspace::domain::workstore::Index>, String>
+    ) -> Result<BTreeMap<String, crate::units::business::versions::domain::workstore::Index>, String>
     {
         if let Some(m) = &self.fail {
             return Err(m.clone());
@@ -813,7 +813,7 @@ impl WorkStore for InMemoryWorkStore {
     fn list_objects(
         &self,
         store: &std::path::Path,
-    ) -> Result<Vec<crate::units::business::workspace::domain::workstore::ObjectInfo>, String> {
+    ) -> Result<Vec<crate::units::business::versions::domain::workstore::ObjectInfo>, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -823,7 +823,7 @@ impl WorkStore for InMemoryWorkStore {
         for (k, v) in objects.iter() {
             if let Some(hash) = k.strip_prefix(&prefix) {
                 out.push(
-                    crate::units::business::workspace::domain::workstore::ObjectInfo {
+                    crate::units::business::versions::domain::workstore::ObjectInfo {
                         hash: hash.to_string(),
                         size: v.len() as u64,
                     },

@@ -1,0 +1,27 @@
+# 共享区版本化 的用例声明（一个单元一份；文件名 = 单元名）。
+# 文件级条目：一个 Rust 测试模块 = 一条；搬实现只改适配层，这里仍指向行为。
+# 格式：- id: cargo/tests::<模块路径> | e2e/<旅程 id>，紧跟 tier 与一句 note。
+
+unit: versions
+title: 共享区版本化
+
+mutation:
+  schedule: weekly
+  files:
+    - src/units/business/versions/domain/workstore.rs
+    - src/units/business/versions/domain/workstore/merge.rs
+    - src/units/business/versions/domain/workstore/status.rs
+    - src/units/business/versions/service/commit.rs
+cases:
+  - id: cargo/tests::workspace::archive
+    tier: T1
+    note: 留档与恢复
+  - id: cargo/tests::workspace::gate
+    tier: T1
+    note: 先读后改门禁的版本快照
+  - id: cargo/tests::workspace::ignore
+    tier: T1
+    note: 过滤名单的读改写（work_ignore）与「规则只管发现」
+  - id: cargo/tests::workspace::work
+    tier: T1
+    note: 提交 / 推送 / 拉取 / 状态 / 差异 / 解决 / 回退

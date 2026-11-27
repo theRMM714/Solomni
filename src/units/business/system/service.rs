@@ -19,7 +19,8 @@ use crate::units::business::system::api::{
     BuildRequest, EnsureRequest, Facts, Fault, FenceFacts, GcRequest, ResetRequest, SetupMode,
     SetupOps, System, WorkGcRequest,
 };
-use crate::units::business::workspace::api::{WorkGcReport, Workspace, safe_file_name};
+use crate::units::business::versions::api::WorkGcReport;
+use crate::units::business::workspace::api::safe_file_name;
 use crate::units::pure::exec_model::api::JobState;
 use crate::units::resource::sessions::api::Sessions;
 
@@ -32,7 +33,8 @@ pub struct SystemDeps {
     pub storage: Arc<dyn Storage>,
     pub provision: Arc<dyn Provision>,
     pub builds: Arc<dyn Builds>,
-    pub workspace: Arc<dyn Workspace>,
+    /// 目的：版本库用例面——工作区的垃圾回收（删不被引用的对象）经它。
+    pub versions: Arc<dyn crate::units::business::versions::api::Versions>,
     pub modules: Arc<dyn Modules>,
     /// 目的：基础工具链事实（组合根在装配期算好；自检与启动报告共用）。
     pub toolchains: BaseFacts,
@@ -175,7 +177,7 @@ impl System for SystemService {
             return Err(Fault::usage(format!("没有这个工作：{}", work)));
         }
         self.deps
-            .workspace
+            .versions
             .work_gc(&work, req.confirm)
             .map_err(Fault::from)
     }

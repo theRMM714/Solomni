@@ -452,9 +452,9 @@ pub(super) fn work_cmd(faces: &Faces, args: &Value, json: bool) -> i32 {
                     println!(
                         "  {:<7} {:<10} {}",
                         match ch.kind {
-                            crate::units::business::workspace::api::ChangeKind::Add => "新增",
-                            crate::units::business::workspace::api::ChangeKind::Modify => "修改",
-                            crate::units::business::workspace::api::ChangeKind::Delete => "删除",
+                            crate::units::business::versions::api::ChangeKind::Add => "新增",
+                            crate::units::business::versions::api::ChangeKind::Modify => "修改",
+                            crate::units::business::versions::api::ChangeKind::Delete => "删除",
                         },
                         ch.size,
                         ch.path

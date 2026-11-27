@@ -19,7 +19,6 @@ use crate::units::business::tools::api::ToolExec;
 use crate::units::business::turn_state::api::History;
 use crate::units::business::turn_state::api::{Session, Turn};
 use crate::units::business::vm::api::Vm;
-use crate::units::business::workspace::api::Workspace;
 use std::sync::Arc;
 
 /// 目的：**会话历史生命周期的用例面**：回档三模式、历史列表与只读打开、删除的报账与收尾。
@@ -28,8 +27,8 @@ use std::sync::Arc;
 pub struct Lifecycle {
     /// 会话历史直连面（**不持它的端口**，R12）：读 / 写 / 删会话都走它。
     history: Arc<dyn History + Send + Sync>,
-    /// 工作区用例面（**不持它的端口**，R12）：留档、删除与恢复的版本化走它。
-    workspace: Arc<dyn Workspace + Send + Sync>,
+    /// 版本库用例面（**不持它的端口**，R12）：留档、删除与恢复走它。
+    versions: Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>,
     /// 工具执行面（**不持它的端口**，R12）：删除后按会话释放围栏授权走它。
     tools: Arc<dyn ToolExec + Send + Sync>,
     /// 虚拟机档用例面（**不持它的端口**，R12）：删除前停 guest 走它。
@@ -43,7 +42,7 @@ impl Lifecycle {
     /// 目的：组合根专用——与 `Core` 共享同一批入站面，不新建任何实现。
     pub fn new(
         history: Arc<dyn History + Send + Sync>,
-        workspace: Arc<dyn Workspace + Send + Sync>,
+        versions: Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>,
         tools: Arc<dyn ToolExec + Send + Sync>,
         vm: Arc<dyn Vm + Send + Sync>,
         residents: Arc<dyn ResidentOps + Send + Sync>,
@@ -51,7 +50,7 @@ impl Lifecycle {
     ) -> Lifecycle {
         Lifecycle {
             history,
-            workspace,
+            versions,
             tools,
             vm,
             residents,

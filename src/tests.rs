@@ -132,6 +132,7 @@ pub(crate) fn ops_with_vm(
         std::sync::Arc::clone(&gateway),
         std::sync::Arc::new(doubles::FakeCatalog::new(vec!["m".to_string()])),
     );
+    let work = doubles::test_workspace(std::sync::Arc::new(doubles::InMemoryWorkspace::new()));
     let core = crate::units::business::runtime::service::Core::new(
         root_dir(),
         doubles::registry_service(
@@ -139,7 +140,8 @@ pub(crate) fn ops_with_vm(
             std::sync::Arc::clone(&llm),
         ),
         doubles::test_history_of(history),
-        doubles::test_workspace(std::sync::Arc::new(doubles::InMemoryWorkspace::new())),
+        work.layout.clone(),
+        work.versions.clone(),
         vm,
         doubles::test_packages(std::sync::Arc::new(doubles::InMemoryPackages::empty())),
         doubles::test_provision(),

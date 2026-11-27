@@ -85,7 +85,7 @@ pub(crate) fn work_archive_moves_every_sandbox_to_one_point_and_keeps_uncommitte
 /// 目的：恢复档案让主副本与所有沙箱一起回到留档点，并把留档之后长出来的分叉整条丢弃。
 #[test]
 pub(crate) fn work_restore_archive_rewinds_every_sandbox_and_drops_the_fork() {
-    use crate::units::business::workspace::ports::WorkStore;
+    use crate::units::business::versions::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     let agents = ["a".to_string(), "b".to_string()];
     ws.ensure_layout("w", &agents).unwrap();
@@ -161,7 +161,7 @@ pub(crate) fn work_restore_archive_rewinds_every_sandbox_and_drops_the_fork() {
 /// 目的：删除把主副本与所有沙箱一起回退到同一个提交点，未提交内容进 lost，删除点之后的留档一并作废。
 #[test]
 pub(crate) fn work_delete_rolls_every_sandbox_back_and_prunes_archives() {
-    use crate::units::business::workspace::ports::WorkStore;
+    use crate::units::business::versions::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     let agents = ["a".to_string(), "b".to_string()];
     ws.ensure_layout("w", &agents).unwrap();

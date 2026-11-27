@@ -125,6 +125,7 @@ pub(crate) fn member_with_tools(
             residents: Arc::new(crate::units::business::residents::api::NoResidents),
             // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
             workspace: Default::default(),
+            versions: None,
             observations: crate::units::business::tools::api::Observations::default(),
             shell_live: None,
             reply_seq: 0,

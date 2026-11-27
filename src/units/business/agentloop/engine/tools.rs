@@ -77,8 +77,8 @@ pub(crate) fn run_branch(
     } else if crate::units::business::tools::api::is_builtin(name) {
         // 门禁看的是"这一批调用发出时模型还能看到的观察"：批前快照，同批 read 不授权后面的 write。
         let facts = gate_facts.to_vec();
-        let gate = ctx.workspace.as_ref().map(|ws| SessionWriteGate {
-            workspace: ws.as_ref(),
+        let gate = ctx.versions.as_ref().map(|ws| SessionWriteGate {
+            versions: ws.as_ref(),
             work: &ctx.face.sandbox.work_name,
             agent: &ctx.face.sandbox.agent,
             facts: &facts,
@@ -218,7 +218,7 @@ pub(crate) fn commit_writes(
     if written.is_empty() && removed.is_empty() {
         return;
     }
-    let Some(ws) = ctx.workspace.as_ref() else {
+    let Some(ws) = ctx.versions.as_ref() else {
         return;
     };
     let rel = |abs: &std::path::PathBuf| -> Option<String> {
@@ -240,7 +240,7 @@ pub(crate) fn commit_writes(
     } else {
         "工具写入"
     };
-    let req = crate::units::business::workspace::api::CommitRequest {
+    let req = crate::units::business::versions::api::CommitRequest {
         paths,
         deletes,
         message: message.to_string(),

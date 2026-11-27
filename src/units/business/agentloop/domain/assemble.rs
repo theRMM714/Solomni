@@ -103,6 +103,9 @@ pub struct FaceInput<'a> {
     pub residents: &'a dyn ResidentOps,
     /// 目的：共享区工具的宿主（核实环境没有工作区：None = 一个 `work_*` 也不发）。
     pub workspace: Option<&'a Arc<dyn Workspace + Send + Sync>>,
+    /// 目的：版本库用例面（一席的 `work_*` 执行者按它造）；与 `workspace` 同生同灭。
+    pub versions:
+        Option<&'a Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>>,
 }
 
 /// 目的：一席工具面装配出的**纯值**：发放名单、模块工具表、说明块与共享区工具的执行者。
@@ -149,11 +152,11 @@ pub fn assemble(input: FaceInput<'_>) -> SeatFace {
         .unwrap_or_default();
     let sources = build_sources(input.source_ids, &table, input.system_tools, &loop_tools);
     let (allowed, used) = face_of(&ctx, &sources);
-    let handlers = match input.workspace {
-        Some(ws) => {
-            crate::units::business::workspace::api::work_handlers(ws, input.sandbox, &allowed)
+    let handlers = match (input.workspace, input.versions) {
+        (Some(_), Some(versions)) => {
+            crate::units::business::versions::api::work_handlers(versions, input.sandbox, &allowed)
         }
-        None => Vec::new(),
+        _ => Vec::new(),
     };
     let mut notes = tool_notes(
         input.prompt,

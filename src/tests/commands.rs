@@ -360,7 +360,7 @@ fn every_action_belongs_to_the_human_face_or_a_session_source() {
     // 会话侧会交出的 id：内置面（含 submit_report）、工作区工具、段声明里的机制动作、会话类型的系统工具。
     let mut session: Vec<String> = t::names();
     session.extend(
-        crate::units::business::workspace::api::WORK_TOOLS
+        crate::units::business::versions::api::WORK_TOOLS
             .iter()
             .map(|s| s.to_string()),
     );

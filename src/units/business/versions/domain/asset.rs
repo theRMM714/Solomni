@@ -4,7 +4,7 @@
 //! 不管：真正的文件读写（在 `detail` 的 `WorkStore` 实现里）；三方比较与冲突（在 `workstore`）。
 //! 联动：`workstore` 的 `VersionView` 引用 `FileVersion`；`service` 用扫描结果拼三方视图与回执。
 
-use crate::units::business::workspace::domain::hash::Sha256;
+use crate::units::business::versions::domain::hash::Sha256;
 
 /// 目的：单文件进入共享区的上限（超出整次拒绝，不做存储级分块）。
 /// 约束：策略常量；上传、提交与回执共用这一个数。
@@ -232,7 +232,7 @@ impl Utf8Checker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::units::business::workspace::domain::hash::content_hash;
+    use crate::units::business::versions::domain::hash::content_hash;
 
     fn version(hash: &str, bytes: &[u8]) -> FileVersion {
         let mut scanner = AssetScanner::new(Some(VERSION_TEXT_LIMIT));

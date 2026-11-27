@@ -234,14 +234,18 @@ node run-tests.js --coverage
 | `llm` | `src/units/business/llm/detail/repair.rs` | weekly |
 | `permission` | `src/units/pure/permission/domain/permission.rs` | weekly |
 | `tools` | `src/units/business/tools/domain/patch.rs` | none |
+| `versions` | `src/units/business/versions/domain/workstore.rs` | weekly |
+| `versions` | `src/units/business/versions/domain/workstore/merge.rs` | weekly |
+| `versions` | `src/units/business/versions/domain/workstore/status.rs` | weekly |
+| `versions` | `src/units/business/versions/service/commit.rs` | weekly |
 | `vm` | `src/units/business/vm/domain/guest.rs` | weekly |
 | `vm` | `src/units/business/vm/domain/exec.rs` | weekly |
 | `vm` | `src/units/business/vm/service.rs` | weekly |
-| `workspace` | `src/units/business/workspace/domain/workstore.rs` | weekly |
+| `workspace` | `src/units/business/workspace/domain/scope.rs` | weekly |
 | `workspace` | `src/units/business/workspace/domain/workspace.rs` | weekly |
-| `workspace` | `src/units/business/workspace/service/commit.rs` | weekly |
+| `workspace` | `src/units/business/workspace/service/roots.rs` | weekly |
 
-> 7 个单元、周检 14 个文件；本表由 `tests/specs/*.yaml` 的 `mutation` 块生成（`node tests/docs-sync.mjs --write`），不手写。
+> 8 个单元、周检 18 个文件；本表由 `tests/specs/*.yaml` 的 `mutation` 块生成（`node tests/docs-sync.mjs --write`），不手写。
 <!-- END:mutation-scope -->
 
 - 安全纯逻辑必须在 `weekly` 里（`src/units/pure/permission/domain/permission.rs`、`src/kernel/detail/launch.rs`）；安全面的突变存活率目标 **≥90%**，在阶段出口人工审计，不接 CI 门禁。

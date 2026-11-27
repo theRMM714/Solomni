@@ -4,11 +4,11 @@
 //! 联动：`work_diff` 工具执行者与 `Workspace` trait。
 
 use super::*;
-use crate::units::business::workspace::domain::workstore::{
+use crate::units::business::versions::domain::workstore::{
     DIFF_MAX_BYTES, DiffEntry, DiffReport, DiffRequest, diff_text,
 };
 
-impl WorkspaceService {
+impl VersionService {
     /// 目的：比较两个版本（缺省：工作线头 ↔ 沙箱）的逐路径差异。
     /// 约束：二进制与超过 `DIFF_MAX_BYTES` 的文件不展开 hunk，只报类型与大小。
     pub(super) fn work_diff(
@@ -19,7 +19,7 @@ impl WorkspaceService {
     ) -> Result<DiffReport, String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work)?;
+        let _shared = self.shared_guard(work)?;
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;

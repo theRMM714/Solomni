@@ -77,7 +77,7 @@ impl Turn {
         if binding.is_some() {
             // 旧会话首次启用：补一次初始导入（有 head 时无操作）。
             if let Err(e) = self
-                .workspace
+                .versions
                 .work_import_root(&work, crate::kernel::api::procs::unix_seconds())
             {
                 self.log.warn(
@@ -276,11 +276,7 @@ fn replay_ledgers(
     compacted_upto: u64,
 ) -> (
     Vec<crate::units::business::tools::api::ObservationFact>,
-    Vec<(
-        u64,
-        String,
-        crate::units::business::workspace::api::ReadFact,
-    )>,
+    Vec<(u64, String, crate::units::business::versions::api::ReadFact)>,
 ) {
     let mut facts = Vec::new();
     let mut reads = Vec::new();

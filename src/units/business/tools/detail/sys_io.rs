@@ -9,7 +9,8 @@ use crate::units::business::tools::ports::{
     DirEntry, Expect, FilePage, FileRead, MAX_SCAN_LINE_BYTES, Mutation, ScanSummary, SysIo,
     WalkEntry, WalkOpts, WriteFault, WriteOp, WriteReceipt,
 };
-use crate::units::business::workspace::api::{Rules, Sha256, content_hash};
+use crate::units::business::versions::api::{Sha256, content_hash};
+use crate::units::business::workspace::api::Rules;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::io::{Read, Write};

@@ -20,8 +20,9 @@ use crate::units::business::llm::api::{Channel, Msg};
 use crate::units::business::prompt::api::Segment;
 use crate::units::business::tools::api::{ObservationFact, Observations};
 use crate::units::business::transcript::api::{ContextUsage, SessionEvent};
+use crate::units::business::versions::api::ReadFact;
 use crate::units::business::vm::api::GuestOs;
-use crate::units::business::workspace::api::{ReadFact, Sandbox};
+use crate::units::business::workspace::api::Sandbox;
 use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::pure::registry_model::api::ToolMode;
@@ -163,6 +164,7 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
         prompt: &*ports.prompt,
         residents: &*ports.residents,
         workspace: Some(&ports.workspace),
+        versions: Some(&ports.versions),
     });
     MemberTools {
         face: ToolFace {
@@ -198,6 +200,7 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
         // 常驻服务的统一管理面：模块的 services 操作经它调用。
         residents: Arc::clone(&ports.residents),
         workspace: Some(Arc::clone(&ports.workspace)),
+        versions: Some(Arc::clone(&ports.versions)),
         observations: Observations::default(),
         shell_live: Some(Arc::clone(&spec.shell)),
         // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_single）。

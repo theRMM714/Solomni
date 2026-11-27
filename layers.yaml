@@ -31,6 +31,7 @@ tools: 2
 turn_state: 2
 vm: 2
 workspace: 2
+versions: 2
 
 # 环 3 用例
 collab: 3

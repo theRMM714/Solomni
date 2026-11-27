@@ -1,16 +1,9 @@
-//! 目的：工作区的纯逻辑——沙箱寻址与越界判定、共享区路径归属、共享区版本化、通用资产判定。
-//! 管：`asset` / `freshness` / `hash` / `path_filter` / `readfact` / `scope` / `work_tools` / `workspace` /
-//!   `workstore` 与 `seats`（沙箱清单的唯一构造点）十个子模块。
-//! 不管：IO 与适配（扫描磁盘、读写工作区在 `detail/`）；端口的定义（在 `ports.rs`）。
-//! 联动：由本单元的 `service.rs` 消费；`api.rs` 对外重导出其中的共享类型。
+//! 目的：工作区的纯逻辑——沙箱寻址与越界判定、共享区路径归属、过滤名单、沙箱清单。
+//! 管：`path_filter` / `scope` / `seats`（沙箱清单的唯一构造点）/ `workspace`（沙箱与寻址视图）四个子模块。
+//! 不管：版本化规则（在 `versions` 单元）；IO 与适配（在 `detail/`）；端口定义（在 `ports.rs`）。
+//! 联动：由本单元 `service.rs` 消费；`api.rs` 对外重导出其中的共享类型。
 
-pub mod asset;
-pub mod freshness;
-pub mod hash;
 pub mod path_filter;
-pub mod readfact;
 pub mod scope;
 pub mod seats;
-pub mod work_tools;
 pub mod workspace;
-pub mod workstore;

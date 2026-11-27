@@ -114,12 +114,20 @@ impl FsWorkspace {
     }
 }
 
+/// 锁文件名的稳定摘要：只求同一文本得到同一名字，不承担版本库的内容寻址。
+fn lock_key(text: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut h);
+    format!("{:016x}", h.finish())
+}
+
 impl Workdirs for FsWorkspace {
     fn is_external(&self, session: &str) -> bool {
         self.mark_path(session).is_file()
     }
 
-    fn lock_shared(&self, session: &str) -> Result<Option<std::fs::File>, String> {
+    fn shared_lock_path(&self, session: &str) -> Result<Option<PathBuf>, String> {
         if !self.is_external(session) {
             return Ok(None);
         }
@@ -135,14 +143,7 @@ impl Workdirs for FsWorkspace {
         let product = self.sessions.parent().unwrap_or(&self.sessions);
         let dir = layout::locks(product);
         std::fs::create_dir_all(&dir).map_err(|e| format!("建工作区锁目录失败：{}", e))?;
-        let hash = crate::units::business::workspace::domain::hash::content_hash(key.as_bytes());
-        let path = dir.join(format!("workspace-{}.lock", hash));
-        let file = crate::kernel::api::lock::lock_within(
-            &path,
-            std::time::Duration::from_secs(10),
-            "工作区",
-        )?;
-        Ok(Some(file))
+        Ok(Some(dir.join(format!("workspace-{}.lock", lock_key(&key)))))
     }
 
     fn bind(&self, session: &str, root: Option<&Path>) -> Result<(), String> {
