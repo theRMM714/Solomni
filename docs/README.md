@@ -17,7 +17,6 @@
 | `collab`（协作会话） | [README.md](collab/README.md)、[unit-map.md](collab/unit-map.md)、[task-chain.md](collab/task-chain.md) |
 | `proxy`（核心代理工具） | [README.md](proxy/README.md)、[unit-map.md](proxy/unit-map.md) |
 | `turn`：`turn`（回合状态） | [README.md](turn/README.md)、[unit-map.md](turn/unit-map.md) |
-| `turn`：`env`（环境事实） | [README.md](env/README.md)、[unit-map.md](env/unit-map.md) |
 | `maintenance`：`builds`（模块构建） | [README.md](builds/README.md)、[unit-map.md](builds/unit-map.md) |
 | `maintenance`：`storage`（存储空间） | [README.md](storage/README.md)、[unit-map.md](storage/unit-map.md) |
 | `catalog`：`registry`（登记处） | [README.md](registry/README.md)、[unit-map.md](registry/unit-map.md) |

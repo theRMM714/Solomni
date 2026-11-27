@@ -24,6 +24,7 @@
 | `src/units/business/tools/domain/op.rs` | 命令与动作的统一形状 `Op`（分组、相位、执行者、确认门槛、参数 schema、回执）与文本入口的全部派生：`parse` 把词法转成参数 JSON、`usage` 出写法、`complete` 出补全、`problems` 判自洽；一份声明供 CLI 手册、TUI 命令、Web 表单与模型工具声明共用 |
 | `src/units/business/tools/domain/table.rs` | 工具总表的纯数据形态（`SystemTools`）：总表自检（id 非空且无空白）与动作审计格式化；工具面由 `agentloop` 单元的唯一装配机（src/units/business/agentloop/domain/assemble.rs 的 `assemble`）按**会话类型挂的来源**现拼 |
 | `src/units/business/tools/domain/fence.rs` | 围栏描述符的派生策略与裁决卡材料（`fence_ask` / 选项 id；描述符与落点判据在 `src/kernel/contracts/fence.rs`） |
+| `src/units/business/tools/domain/env.rs` | 一席的工具运行环境：`member_env`（围栏计划 + 模块变量 + PATH 入口 + 工具链根，宿主档才带基础根）与 `host_read_roots`（把声明里的宿主只读根逐条去空白、丢掉空项）；包事实以「包根 + PATH 入口」两个值进来 |
 | `src/units/business/tools/domain/shell.rs` | 执行类系统工具 shell 的纯规则：参数 / timeout 解析、命令长度、共享区执行位提示、回执解析（退出码 / 状态 / cwd·耗时） |
 | `src/units/business/tools/detail/sys_io.rs` | `SysIo` 端口的磁盘实现：纯 Rust 直接读写（严格 UTF-8、非法字节如实标注、写时建父目录）；按行窗口读流式扫完整份算行数与哈希；目录遍历走 `ignore::WalkBuilder`（不跟链接、按路径排序、规则剪枝），流式按行扫用 `BufReader` 且不受整份读上限约束；写盘在跨进程路径锁内做版本 CAS（锁目录由组合根注入，缺省退回进程内锁），临时文件 + 原子替换发布，`transact` 先校验/暂存再发布并在失败时回滚已发布文件 |
 | `src/units/business/tools/detail/yaml_systools.rs` | `SystoolsSource` 的装配输入：经 `Assets` 拿 `systools/tools.yaml` 与 `names.yaml` 并解码（落点与读盘在 `assets`，缺文件如实报装配错误） |

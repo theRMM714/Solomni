@@ -103,12 +103,14 @@ impl FsHistory {
             parent: meta.parent,
             workspace: meta
                 .workspace
+                .root
                 .as_ref()
-                .map(|binding| binding.root.display().to_string()),
+                .map(|root| root.display().to_string()),
             workspace_missing: meta
                 .workspace
+                .root
                 .as_ref()
-                .map(|binding| !binding.root.is_dir())
+                .map(|root| !root.is_dir())
                 .unwrap_or(false),
             // 运行态：侧栏据此标出已暂停 / 已关闭的会话。
             run: meta.run,

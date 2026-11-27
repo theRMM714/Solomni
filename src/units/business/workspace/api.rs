@@ -17,7 +17,14 @@ pub use crate::units::business::workspace::domain::readfact::ReadFact;
 /// 目的：共享区路径归属（读 / 写范围与黑名单）——\`permission\` 只管档位与网络，归属规则在这里。
 #[allow(unused_imports)] // 入站面：规则类型给调用方与测试取用
 pub use crate::units::business::workspace::domain::scope::{
-    ScopeMode, SharedEdit, SharedScope, hit, normalize, validate_entry,
+    ScopeMode, SharedEdit, SharedScope, edit_of, edit_params, hit, normalize, scope_from,
+    validate_entry,
+};
+/// 目的：版本库共享类型（提交 / 拉取 / 推送 / 状态 / 差异 / 回退）——`tools`、呈现层与测试只从这里取。
+/// 约束：`WorkState` 等类型只在测试与呈现层命名，本 crate 的实现不直接用，故整组允许未使用告警。
+#[allow(unused_imports)]
+pub use crate::units::business::workspace::domain::seats::{
+    ModuleDir, SeatFacts, SeatPlan, seat_sandboxes,
 };
 /// 目的：`work_*` 工具的名字、取参与回执拼装——`tools` 与 `turn` 只从这里取，不碰 domain。
 #[allow(unused_imports)]
@@ -30,8 +37,6 @@ pub use crate::units::business::workspace::domain::work_tools::{
 pub use crate::units::business::workspace::domain::workspace::{
     AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage, safe_file_name,
 };
-/// 目的：版本库共享类型（提交 / 拉取 / 推送 / 状态 / 差异 / 回退）——`tools`、呈现层与测试只从这里取。
-/// 约束：`WorkState` 等类型只在测试与呈现层命名，本 crate 的实现不直接用，故整组允许未使用告警。
 #[allow(unused_imports)]
 pub use crate::units::business::workspace::domain::workstore::{
     Change, ChangeKind, CommitAnchor, CommitReport, CommitRequest, CommitSummary, DiffReport,

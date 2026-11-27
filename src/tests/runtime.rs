@@ -266,7 +266,7 @@ pub(crate) fn external_workspace_vm_session_boots_with_two_stable_mounts() {
     assert_eq!(sid, "wx");
     let (meta, _) = core.lifecycle.history_open(&sid).expect("会话");
     assert_eq!(
-        meta.workspace.as_ref().map(|b| b.root.clone()),
+        meta.workspace.root.clone(),
         Some(crate::kernel::api::path::native(
             &external.canonicalize().expect("规范化外部路径")
         )),

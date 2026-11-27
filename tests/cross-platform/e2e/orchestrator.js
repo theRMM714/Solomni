@@ -575,6 +575,13 @@ async function main() {
   // 同时把围栏写入关掉：安全模式本来就不写本机权限项，宿主解释器因此按"无围栏"跑；
   // 真机围栏验收（--fence-live）才保留写入，并要求项目内工具链。
   const fenceWrite = process.env.SOLOMNI_FENCE_LIVE === "1" ? "1" : "0";
+  // 端口预检：上一次跑掉的进程若还占着 3099，新服务起不来，而驱动会**打到旧的那个**——
+  // 断言按陈旧二进制/陈旧夹具走，报出来的却像产品回归。这种情况必须当场说清，不猜。
+  if (await waitReady("http://127.0.0.1:" + PORT_SRV + "/api/state", 2)) {
+    console.error("[e2e] 端口 " + PORT_SRV + " 已被占用（多半是上一次跑掉的进程）：先结束它再跑");
+    stop(mock);
+    return 1;
+  }
   const srv = spawn(BIN, ["--web", "--port", String(PORT_SRV), "--root", FIXTURE], {
     cwd: PRODUCT_ROOT,
     stdio: "inherit",

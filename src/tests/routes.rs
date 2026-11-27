@@ -278,13 +278,12 @@ fn meta(name: &str) -> SessionMeta {
         agents: Vec::new(),
         exec: crate::units::pure::exec_model::api::ExecSpec::default(),
         sandbox: Default::default(),
-        shared: Default::default(),
         parent: None,
         node: None,
         delegation: None,
         thinking: None,
         run: crate::units::business::session_model::api::RunState::Active,
-        workspace: None,
+        workspace: Default::default(),
     }
 }
 
@@ -622,7 +621,7 @@ impl RuntimeOps for FakeFaces {
             continue_action: None,
             context: None,
             shell: None,
-            workspace: None,
+            workspace: Default::default(),
             workspace_missing: false,
         })
     }
@@ -792,7 +791,7 @@ impl HistoryOps for FakeFaces {
             done: false,
             exec: Default::default(),
             parent: None,
-            workspace: None,
+            workspace: Default::default(),
             workspace_missing: false,
             run: crate::units::business::session_model::api::RunState::Active,
         }])

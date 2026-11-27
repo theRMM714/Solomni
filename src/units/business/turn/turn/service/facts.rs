@@ -1,4 +1,4 @@
-//! 目的：turn 侧取「一席事实」的地方——沙箱清单、权限链与生效权限、工具环境事实（含 `env::api::member`）、上下文预算，都从这里从端口读齐。
+//! 目的：turn 侧取「一席事实」的地方——沙箱清单、权限链与生效权限、工具环境事实（含 `tools::api::member_env`）、上下文预算，都从这里从端口读齐。
 //! 管：`sandboxes` / `permission_chain` / `permissions_for` / `shared_scope_for` / `access_for_agent` 的取数与派生，
 //!   `member_env` 的入参收口与逐字段拷贝、`member_face` 的薄入口、`build_single` 的整场装配，`context_budget` 的窗口与阈值。
 //! 不管：装配规则（在 `agentloop::api`）、登记处里有什么（`registry`）、会话怎么落盘（`service/admit.rs`）。
@@ -20,10 +20,11 @@ use crate::units::business::conversation::session::api::work_root_of;
 use crate::units::business::llm::api::Channel;
 use crate::units::business::session_model::api::SessionMeta;
 use crate::units::business::transcript::api::SessionEvent;
-use crate::units::business::turn::env::api::SeatAccess;
 use crate::units::business::turn_state::api::Turn;
 use crate::units::business::vm::api::GuestOs;
-use crate::units::business::workspace::api::{Sandbox, Sandboxes, SharedScope};
+use crate::units::business::workspace::api::{
+    ModuleDir, Sandbox, Sandboxes, SeatFacts, SeatPlan, SharedScope,
+};
 use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::permission::api::PermissionSet;
 use crate::units::pure::registry_model::api::AgentMeta;
@@ -32,7 +33,7 @@ use crate::units::pure::registry_model::api::ToolMode;
 
 /// 目的：一席事实的取用：沙箱、权限、工具面入参与上下文预算。
 impl Turn {
-    /// 目的：组装本次工作的沙箱清单：工作根来自 Workspace 端口，模块目录来自清单。
+    /// 目的：组装本次工作的沙箱清单：工作根来自 Workspace 端口，每席的私有根与模块目录交给工作台单元落值。
     /// 参数：`registry` = 登记处；`probe` = 宿主探针（虚拟机档据此给 guest↔宿主翻译器）。
     /// 约束：模块目录只对使用它的 agent 可达；同一模块可被多个 agent 共用（各自独立沙箱与工具面）。
     pub(crate) fn sandboxes(
@@ -48,20 +49,38 @@ impl Turn {
         let roots = self.workspace.roots(&work, &names)?;
         // 虚拟机档给 guest↔宿主翻译器：system 工具跑在宿主侧，但收模型给的 guest 写法；
         // **同一份**也交给 @ 改写（挂载点、命令装配与用户引用用同一座桥，三处不会各给一种写法）。
-        let path_codec =
-            crate::units::business::vm::api::path_codec_of(&self.root, probe, &meta.exec);
-        // 逐席组装的规则在 env：模块目录只对使用它的 agent 可达，私有根缺一份就如实报缺哪个 agent。
-        crate::units::business::turn::env::api::sandboxes(
-            &crate::units::business::turn::env::api::SandboxesFacts {
-                work: &work,
-                session: &meta.name,
-                agents: &meta.agents,
-                roots: &roots,
-                roster,
-                codec: path_codec,
-            },
-            &|agent| self.access_for_agent(registry, meta, agent),
-        )
+        let codec = crate::units::business::vm::api::path_codec_of(&self.root, probe, &meta.exec);
+        let modules: Vec<ModuleDir> = roster
+            .modules
+            .iter()
+            .map(|m| ModuleDir {
+                id: m.manifest.id.clone(),
+                root: m.root.clone(),
+                private: m.private.clone(),
+            })
+            .collect();
+        let mut seats: Vec<SeatPlan> = Vec::new();
+        for a in &meta.agents {
+            let (permissions, params) = self.access_for_agent(registry, meta, &a.name)?;
+            seats.push(SeatPlan {
+                agent: a.name.clone(),
+                modules: a.modules.clone(),
+                permissions,
+                params,
+                private: None,
+            });
+        }
+        let app = registry.app();
+        crate::units::business::workspace::api::seat_sandboxes(&SeatFacts {
+            work: &work,
+            session: &meta.name,
+            roots: &roots,
+            codec,
+            base_scope: &app.sandbox.scope,
+            hard_deny: &app.sandbox.policy.deny,
+            modules: &modules,
+            seats: &seats,
+        })
     }
 
     /// 目的：一条会话的权限链——根在前，自己最后（沿 parent 走到顶）。
@@ -84,9 +103,9 @@ impl Turn {
         meta: &SessionMeta,
     ) -> Result<PermissionSet, String> {
         let chain = self.permission_chain(meta)?;
-        // 合成规则（默认 → 根 ceiling → 每层 narrowing → 硬黑名单）在 env。
+        // 合成规则（默认 → 根 ceiling → 每层 narrowing）在会话模型：这里只取链与全局默认。
         let app = registry.app();
-        crate::units::business::turn::env::api::permissions(&chain, app)
+        crate::units::business::session_model::api::permissions(&chain, &app.sandbox.defaults)
     }
 
     /// 目的：一条会话的**生效共享区归属**：全局默认 → 根覆盖 → 每层收窄 → 全局硬黑名单。
@@ -95,29 +114,42 @@ impl Turn {
         registry: &dyn Registry,
         meta: &SessionMeta,
     ) -> Result<SharedScope, String> {
-        let chain = self.permission_chain(meta)?;
+        let params = self.workspace_params_chain(meta)?;
         let app = registry.app();
-        crate::units::business::turn::env::api::shared_scope(&chain, app)
+        // 合成规则（全局默认 → 根覆盖 → 每层收窄 → 硬黑名单）在工作台单元：会话只搬声明。
+        crate::units::business::workspace::api::scope_from(
+            &params,
+            &app.sandbox.scope,
+            &app.sandbox.policy.deny,
+        )
     }
 
     /// 目的：某个 agent 的生效授权：协作主会话里的发言席优先取它自己的子会话（收窄层在那里）。
+    /// 返回：生效网络档位与根在前的策略参数链（共享区归属由工作台单元按链派生）。
     fn access_for_agent(
         &self,
         registry: &dyn Registry,
         meta: &SessionMeta,
         agent: &str,
-    ) -> Result<SeatAccess, String> {
-        let target = self.seat_meta(meta, agent);
-        match target {
-            Some(child) => Ok(SeatAccess {
-                permissions: self.permissions_for(registry, &child)?,
-                scope: self.shared_scope_for(registry, &child)?,
-            }),
-            None => Ok(SeatAccess {
-                permissions: self.permissions_for(registry, meta)?,
-                scope: self.shared_scope_for(registry, meta)?,
-            }),
-        }
+    ) -> Result<(PermissionSet, Vec<serde_json::Value>), String> {
+        let target = self.seat_meta(meta, agent).unwrap_or_else(|| meta.clone());
+        Ok((
+            self.permissions_for(registry, &target)?,
+            self.workspace_params_chain(&target)?,
+        ))
+    }
+
+    /// 目的：一条会话的策略参数链——根在前，自己最后（沿 parent 走到顶）。
+    /// 约束：只搬声明里那一层不透明参数，不解释字段（解释权在工作台单元）。
+    pub(crate) fn workspace_params_chain(
+        &self,
+        meta: &SessionMeta,
+    ) -> Result<Vec<serde_json::Value>, String> {
+        Ok(self
+            .permission_chain(meta)?
+            .into_iter()
+            .map(|m| m.workspace.params)
+            .collect())
     }
 
     /// 目的：协作主会话里某一席真正的会话元信息（发言席有自己的子会话就用它，否则就是这条会话）。
@@ -153,16 +185,18 @@ impl Turn {
                 )
             })
             .collect();
-        let host_read_roots =
-            crate::units::business::turn::env::api::host_read_roots(registry.app());
-        let menv = crate::units::business::turn::env::api::member(
-            &crate::units::business::turn::env::api::MemberFacts {
+        let host_read_roots = crate::units::business::tools::api::host_read_roots(
+            &registry.app().sandbox.policy.host_read_roots,
+        );
+        let menv = crate::units::business::tools::api::member_env(
+            &crate::units::business::tools::api::MemberEnvFacts {
                 sandbox: sb,
                 host_read_roots: &host_read_roots,
                 net,
                 tier,
                 base_roots: &self.base_roots,
-                plan: host_plan,
+                package_roots: &host_plan.roots,
+                package_path: host_plan.path.clone(),
                 module_vars: &module_vars,
             },
         );

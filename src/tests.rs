@@ -3,6 +3,7 @@
 //! 不管：真实 .home/、真实 session/、真实权限或外网；业务断言归各测试文件。
 //! 联动：docs/testing/gaps-acceptance.md、docs/testing/doubles.md、docs/testing/levels.md。
 
+mod access;
 mod api;
 pub(crate) mod boot;
 mod builders;
@@ -14,7 +15,6 @@ mod detail;
 mod diagnostics;
 pub(crate) mod doubles;
 mod entry;
-mod env;
 mod fakes;
 mod fence_reach;
 mod flow;

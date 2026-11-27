@@ -13,6 +13,9 @@ cases:
   - id: cargo/tests::api::tools
     tier: T3
     note: 跨单元 api 面：工具派发
+  - id: cargo/tests::access
+    tier: T1
+    note: 一席的生效面（权限链、共享区归属、沙箱清单、工具运行环境）
   - id: cargo/tests::tools::dispatch
     tier: T1
     note: 工具派发

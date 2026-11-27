@@ -75,13 +75,12 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
         agents: vec![agent_meta("a", &["a"], None)],
         exec: vm_spec(),
         sandbox: Default::default(),
-        shared: Default::default(),
         parent: Some("w".to_string()),
         node: None,
         delegation: None,
         thinking: None,
         run: RunState::Active,
-        workspace: None,
+        workspace: Default::default(),
     };
     hist.create(&child).expect("子会话落盘");
     let mut core = core_with_pkgs(
@@ -148,13 +147,12 @@ pub(crate) fn proxy_children_share_the_proxy_tree_guest() {
         agents: vec![agent_meta("a", &["a"], None)],
         exec: vm_spec(),
         sandbox: Default::default(),
-        shared: Default::default(),
         parent: Some("p".to_string()),
         node: None,
         delegation: None,
         thinking: None,
         run: RunState::Active,
-        workspace: None,
+        workspace: Default::default(),
     };
     hist.create(&child).expect("子工作落盘");
     let core = core_with_pkgs(

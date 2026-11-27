@@ -31,13 +31,12 @@ pub(crate) fn child_edit_writes_back_to_the_agent_roster() {
         agents: vec![agent_meta("a", &["a"], None)],
         exec: Default::default(),
         sandbox: Default::default(),
-        shared: Default::default(),
         parent: Some("w".to_string()),
         node: None,
         delegation: None,
         thinking: None,
         run: RunState::Active,
-        workspace: None,
+        workspace: Default::default(),
     };
     hist.create(&child).expect("子会话落盘");
     let mut core = core_with_pkgs(
@@ -99,13 +98,12 @@ pub(crate) fn tree_wide_module_overlap_is_allowed_on_child_edit() {
         agents: vec![agent_meta("a", &["a"], None)],
         exec: Default::default(),
         sandbox: Default::default(),
-        shared: Default::default(),
         parent: Some("w".to_string()),
         node: None,
         delegation: None,
         thinking: None,
         run: RunState::Active,
-        workspace: None,
+        workspace: Default::default(),
     };
     hist.create(&child).expect("子会话落盘");
     let mut core = core_with_pkgs(
@@ -422,7 +420,9 @@ pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
         "根编辑不能清掉子收窄"
     );
     assert_eq!(
-        cm.shared.read,
+        crate::units::business::workspace::api::edit_of(&cm.workspace.params)
+            .expect("共享区参数应能读回")
+            .read,
         Some(ScopeMode::Paths(vec!["src".to_string()])),
         "子自己的读范围原样保留"
     );
@@ -433,7 +433,9 @@ pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
         "根 ceiling 换成联网"
     );
     assert_eq!(
-        pm.shared.write,
+        crate::units::business::workspace::api::edit_of(&pm.workspace.params)
+            .expect("共享区参数应能读回")
+            .write,
         Some(ScopeMode::Paths(vec!["docs".to_string()]))
     );
     assert_eq!(
@@ -548,13 +550,12 @@ pub(crate) fn guest_lease_follows_the_tier_and_the_proxy_root() {
             ..Default::default()
         },
         sandbox: Default::default(),
-        shared: Default::default(),
         parent: parent.map(|p| p.to_string()),
         node: None,
         delegation: None,
         thinking: None,
         run: RunState::Active,
-        workspace: None,
+        workspace: Default::default(),
     };
     let proxy = meta("proxy-root", None, Tier::Vm, PROXY);
     assert_eq!(guest_lease(&proxy, &proxy), None, "代理根自己没有 guest");

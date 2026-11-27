@@ -10,13 +10,14 @@
 - 管：内置文件工具（read / list / write / edit / patch / delete / grep）的执行编排与纯规则、工具参数契约、补丁通道。
 - 管：执行类系统工具 `shell` 的参数 / 超时规则与派发；host 的拉起与围栏机制是 kernel 共享的 `ProcessRunner` / `confine`，VM 走 guest。
 - 管：模块工具进程的执行编排；拉起与围栏机制是 kernel 共享的 `ProcessRunner` / `confine`。
-- 管：围栏可达范围的派生（`src/units/business/tools/domain/fence.rs` 的 `for_call` / `for_session` / `standalone`）。
+- 管：围栏可达范围的派生（`src/units/business/tools/domain/fence.rs` 的 `for_call` / `for_session` / `standalone`），以及**一席的工具运行环境**（`src/units/business/tools/domain/env.rs` 的 `member_env`：围栏计划、模块变量、PATH 入口与工具链根）与宿主只读根的规整（`host_read_roots`：逐条去空白、丢掉空项，空白与空串不算根）。
 - 不管：不放领域语义（角色是会话的身份，不是业务概念）；不选模型；不碰会话流水。
-- 不管：不决定用户授权的主机只读根（`sandbox.policy.host_read_roots`）——由调用方（`runtime` / `collab`）叠加。
+- 不管：不决定用户**授权**哪些主机只读根——名单来自设置里的 `sandbox.policy.host_read_roots`，本单元只把声明规整成路径并写进围栏计划。
+- 不管：沙箱怎么来（在 `workspace`，`api::seat_sandboxes` 是唯一构造点）；包事实以「包根 + PATH 入口」两个值进来，本单元不认识包计划类型。
 
 ## 入站契约与状态归属
 
-- 入站面：`api::Tools`（总表 / 保留名 / 自检）+ `api::ToolExec`（跑模块工具与系统工具、释放围栏）。
+- 入站面：`api::Tools`（总表 / 保留名 / 自检）+ `api::ToolExec`（跑模块工具与系统工具、释放围栏）+ `api::member_env` / `api::host_read_roots`（一席的工具运行环境，纯派生）。
 - 出站端口：`SysIo` 与 kernel 共享的 `ProcessRunner` / `FenceHost` 由 `src/units/business/tools/service.rs` 持有（R12）；`SystoolsSource` 只在装配时读一次，不持有。
 - 模块工具的一次执行经 `--fence-run` 守门进程完成（命令与参数分开、环境白名单、超时杀树），协议见 [kernel 的「工具进程与守门协议」](../kernel/README.md)。
 - `shell` 是执行类系统工具：host 走同一个 `ProcessRunner`（Unix `sh`、Windows PowerShell），VM 走 guest helper；授予固定（私有沙箱 rw、模块目录与主机只读根 ro），profile 只决定出站网络。Windows 上每次宿主调用都用按次容器 profile（W1）把 ACL 收窄做实（shell、模块工具、独立调用、构建同一口径）；细节见 [tools-and-roles.md](tools-and-roles.md) 的「执行类系统工具：shell」。

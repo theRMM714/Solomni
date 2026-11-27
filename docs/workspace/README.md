@@ -7,12 +7,14 @@
 ## 管什么 / 不管什么
 
 - 管：工作区与沙箱寻址（含越界判定）、按会话铺局（`ensure_layout` / `discard_layout`）、上传、文件视图、根会话的外部工作区绑定投影，以及**共享区版本化工作区**（内容寻址的提交记录、三条线（存档线自动快照 + 各 agent 的工作线 + 主线）、推送时的文件级三方合并、三方视图与显式冲突解决、按提交点还原）。
+- 管：**沙箱清单的唯一构造点**（`src/units/business/workspace/domain/seats.rs` 的 `seat_sandboxes`）：调用方只交「每席要什么」（agent 名、模块目录、生效权限面、工作台声明链），本单元算出每席的私有根、模块目录、模块私有区与共享区归属；缺私有根就地报「工作区没有给出 agent <名> 的沙箱路径」。代理会话与普通会话走同一条路。
+- 管：**共享区归属的求值**（`src/units/business/workspace/domain/scope.rs` 的 `scope_from`）：全局默认 → 根覆盖 → 逐层收窄 → 全局硬黑名单，顺序错了就会放宽本该收紧的面；会话只在 `SessionMeta.workspace.params` 里存自己那层声明（`edit_of` / `edit_params` 是读写它的唯一入口）。
 - 管：**成员侧工作工具处理器**——`work_pull` / `work_commit` / `work_push` / `work_sync` / `work_status` / `work_ignore` / `work_versions` / `work_diff` / `work_resolve` / `work_reset` / `work_lost` 十一个工具名由 `src/units/business/workspace/service/work_tools.rs` 的 `WorkHandler` 认领，回执文本由 `src/units/business/workspace/domain/work_tools.rs` 渲染；`work_handlers` 按工具面发放的名单现取执行者。
 - 不管：**建工作**——工作名、通道、guest 与两段事务都在 `work`（`prepare_work` / `commit_work` / `abort_work`），本单元只按已有会话把目录铺出来，不产生会话也不决定工作名；不管模块清单与 `module.yaml`（在 `modules`，本单元只消费它给的模块事实）、不执行工具（`tools`）、不写会话流水（`session`）、不决定谁能用哪些工具（`tools` 的总表与会话能力的流程段与角色）。
 
 ## 入站契约与状态归属
 
-- 入站面：`api::Workspace`；装配侧另有 `api::work_handlers(&Arc<dyn Workspace + Send + Sync>, &Sandbox, &[String]) -> Vec<Arc<dyn ToolHandler>>` 与 `api::WorkHandler`（`turn` 装一席工具面时按 `allowed` 现取；工作名、agent 名与生效权限都从沙箱来）。
+- 入站面：`api::Workspace`；装配侧另有 `api::work_handlers(&Arc<dyn Workspace + Send + Sync>, &Sandbox, &[String]) -> Vec<Arc<dyn ToolHandler>>` 与 `api::WorkHandler`（`turn` 装一席工具面时按 `allowed` 现取；工作名、agent 名与生效权限都从沙箱来）；`api::seat_sandboxes` / `api::scope_from`（沙箱清单与共享区归属的唯一派生点，入参只收每席计划与会话声明链）。
   - 目录与视图：**`bind`**（把根会话的工作区绑定刷成 `.work-root` 布局投影；`None` = 产品内布局）/ `ensure_layout`（按会话铺目录：会话目录、版本库 `.work` 与过滤种子、`work/`、各 agent 沙箱）/ **`discard_layout`**（撤销一次铺局：只删本产品建出的东西——空沙箱 / 空 `work/`、布局投影与版本库 `.work`；建会话失败时用）/ `work_has` / `files` / `usage` / `roots`（共享区根、会话树根 `session_root` 与各 agent 私沙根）。`usage` 在内存里按 `session + agents` 缓存 2 秒（前端 `@` 菜单与删除确认会短时间重复取；写路径不做逐写失效），统计时**不跟随**目录链接 / 联接——链接本身按一个文件计，避免重复计数与成环（`src/units/business/workspace/detail/fs_workspace.rs`）。
   - 共享区版本化：`work_pull` / `work_commit` / `work_push` / `work_sync` / `work_commit_user` / `work_status` / `work_ignore` / `work_versions` / `work_diff` / `work_resolve` / `work_reset` / `work_lost` / `work_restore_lost` / `work_recover` / `work_gc` / `work_restore` / `work_head` / `work_archive` / `work_restore_archive` / `work_delete` / `work_archives`。
   - **提交历史视图**：`work_log(work, limit, before?)` 给当前 head、新→旧的分页主线提交与每条 `on_head`（是否在当前 head 祖先链），另给 `work` 列表——各 agent 工作线上的本地提交（新→旧，`pushed` 按主线提交记下的 `sources` 判：squash 之后原工作线提交已不在主线祖先链上，只有来源集合认得出它被推送过）；`work_commit_view` 给提交详情与改动清单（对象大小 / 媒体提示）；`work_commit_file` 给该提交里某个文件的受限预览（路径必须真在这条提交的树里，`src/units/business/workspace/domain/workspace.rs`）。这些是只读视图，不进动作表。
@@ -51,12 +53,13 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`exec_model`、`kernel`、`permission`、`prompt`
+- 经 `::api` 用到：`exec_model`、`kernel`、`permission`、`prompt`、`session_model`（只读 `WorkspaceDecl` 这一张声明，不认识会话元信息）
 - 谁在用我：`agentloop`、`catalog`、`collab`、`entry`、`lifecycle`、`maintenance`、`presentation`、`provision`、`runtime`、`session_model`、`system`、`tools`、`turn`、`turn_state`、`work`
 
 ## 改动本单元时必须同步
 
-- 用例测试在 `src/tests/workspace/`；运行包与执行档位的契约不在本单元（见 [docs/vm/README.md](../vm/README.md)）。
+- 用例测试在 `src/tests/workspace/` 与 `src/tests/access.rs`（沙箱清单与共享区归属的派生）；运行包与执行档位的契约不在本单元（见 [docs/vm/README.md](../vm/README.md)）。
+- 改 `seat_sandboxes` 的入参形状 → `src/units/business/turn/turn/service/facts.rs`（唯一取事实处）与 `src/units/business/turn/turn/service/rebuild.rs`（代理会话），两处都是同一份计划。
 
 ## 本目录
 

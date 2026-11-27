@@ -69,7 +69,9 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     );
     assert_eq!(meta.exec.tier, Tier::Vm);
     assert_eq!(
-        meta.shared.write,
+        crate::units::business::workspace::api::edit_of(&meta.workspace.params)
+            .expect("共享区参数应能读回")
+            .write,
         Some(crate::units::business::workspace::api::ScopeMode::Paths(
             vec!["docs".to_string()]
         )),
@@ -348,13 +350,12 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
             pins: BTreeMap::from([("python".to_string(), "3.12.4".to_string())]),
         },
         sandbox: Default::default(),
-        shared: Default::default(),
         parent: None,
         node: None,
         delegation: None,
         thinking: None,
         run: RunState::Active,
-        workspace: None,
+        workspace: Default::default(),
     };
     let text = yaml_serde::to_string(&meta).expect("序列化");
     let back: SessionMeta = yaml_serde::from_str(&text).expect("反序列化");
@@ -372,7 +373,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
         freshness_keep_percent: 80,
         thinking: None,
         run: RunState::Stopped,
-        workspace: None,
+        workspace: Default::default(),
         ..meta.clone()
     };
     let back: SessionMeta =
@@ -387,7 +388,8 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
     assert!(defaulted.exec.pins.is_empty());
     assert_eq!(defaulted.run, RunState::Active);
     assert_eq!(
-        defaulted.shared,
+        crate::units::business::workspace::api::edit_of(&defaulted.workspace.params)
+            .expect("共享区参数应能读回"),
         Default::default(),
         "缺 shared 段 = 不额外收窄"
     );

@@ -23,13 +23,14 @@
 | `src/units/business/workspace/service/facade.rs` | `Workspace` 的唯一 trait 实现：七个基础用例直接委托 `Workdirs`，其余方法逐条转发到同级子模块（Rust 不允许 trait impl 分块） |
 | `src/units/business/workspace/ports.rs` | 出站端口：`Workdirs`（目录布局）与 `WorkStore`（流式资产原语 + 按 `.workignore` 剪枝的清单 `list_visible` + 版本库小文本读 `read_text` / 写 `write_text` + 跨根复制 + 内容寻址对象 + 提交记录 + 拉取基线 + 待恢复事务 + 提交号 + 跨进程锁 + 对象枚举 / 删除） |
 | `src/units/business/workspace/service/work_tools.rs` | 成员侧工作工具执行者：`WorkHandler` 认领 `work_pull` / `work_commit` / `work_push` / `work_sync` / `work_status` / `work_ignore` / `work_versions` / `work_diff` / `work_resolve` / `work_reset` / `work_lost`，参数解析与路径权限在这里收口；`work_handlers` 按工具面发放的 `allowed` 现取执行者 |
+| `src/units/business/workspace/domain/seats.rs` | 沙箱清单的唯一构造点 `seat_sandboxes`：每席计划（agent 名 / 模块目录 / 生效权限面 / 工作台声明链）→ 私有根、模块目录、模块私有区与共享区归属；缺私有根当场点名报错 |
 | `src/units/business/workspace/domain/workspace.rs` | 工作区与沙箱的纯数据与寻址（含越界判定）；`Sandbox.filter_rules` 指向版本库目录里的 `.workignore`——检索面（grep）与内容面共用这一份规则文件 |
 | `src/units/business/workspace/domain/asset.rs` | 通用资产纯逻辑：分块扫描（指纹 / 大小 / NUL 与 UTF-8 判定 / 受限预览）、`FileVersion`、扩展名媒体类型提示与单文件上限 |
 | `src/units/business/workspace/domain/freshness.rs` | 读取判决纯逻辑：读过的行在新版本里是否原样还在（按内容找连续行窗口，不看行号与时间），结论分 `SameVersion` / `Shifted` / `Changed` 三态 |
 | `src/units/business/workspace/domain/hash.rs` | 内容指纹 SHA-256：增量实现，共享区内容寻址的唯一键（纯逻辑） |
 | `src/units/business/workspace/domain/path_filter.rs` | 工作区过滤的唯一名单与匹配规则：`.workignore` 的文件名与播种内容、把规则文本编译成与 git 同引擎的匹配器（`Rules`）、按相对路径判定忽略（命中的目录连带整棵子树）；内容面与检索面都从这里取规则，不另立名单 |
 | `src/units/business/workspace/domain/readfact.rs` | 读取事实 `ReadFact`：哪个工作树、哪个路径、读到哪几行、当时的整份指纹（随工具行落盘，过期由它派生） |
-| `src/units/business/workspace/domain/scope.rs` | 共享区路径归属的唯一实现：三态 `ScopeMode`（all / none / 路径数组，手写序列化）、`SharedScope`（读 / 写 / 黑名单的判定、求交、收窄、合并全局硬底线）、`SharedEdit`（会话级覆盖）与条目规范化 `hit` / `normalize` / `validate_entry` |
+| `src/units/business/workspace/domain/scope.rs` | 共享区路径归属的唯一实现：三态 `ScopeMode`（all / none / 路径数组，手写序列化）、`SharedScope`（读 / 写 / 黑名单的判定、求交、收窄、合并全局硬底线）、`SharedEdit`（会话级覆盖）、条目规范化 `hit` / `normalize` / `validate_entry`，以及声明链求值 `edit_of` / `edit_params` / `scope_from`（全局默认 → 根覆盖 → 逐层收窄 → 全局硬黑名单） |
 | `src/units/business/workspace/domain/work_tools.rs` | 成员侧工作工具的回执渲染纯逻辑：工具名清单（`is_work_tool`）、拉取 / 提交 / 推送 / 同步 / 状态 / 过滤名单 / 三方视图 / 差异 / 解决 / 回退 / 备份恢复的回执文本 |
 | `src/units/business/workspace/domain/workstore.rs` | 版本化工作区纯逻辑的入口：`record` / `path` / `merge` / `resolve` / `status` / `diff` / `reset` 七个职责子模块与内联单测 `tests` 的声明，并向 `api.rs` / `service` 重导出同一个调用面 |
 | `src/units/business/workspace/domain/workstore/record.rs` | 版本库记录形态：`Index` / `Tree` / `Change` / `Commit` / `Ref` 与待提交、对象信息、GC 报告 |

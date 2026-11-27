@@ -31,11 +31,7 @@ impl Handle {
             }
         };
         let roster = self.modules.roster();
-        let net = self.call(|core| {
-            Ok(crate::units::business::turn::env::api::network_allowed(
-                core.registry().app(),
-            ))
-        })?;
+        let net = self.call(|core| Ok(core.registry().app().sandbox.policy.network))?;
         // 一批一起交给构建能力：虚拟机档只起一台 guest、一块缓存卷，不按模块反复起停。
         let modules: Vec<&crate::units::business::catalog::modules::api::Module> = ids
             .iter()

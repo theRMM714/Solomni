@@ -409,14 +409,13 @@ impl Turn {
             exec: pmeta.exec.clone(),
             // 子会话只带自己的 narrowing；父的 ceiling 在判定时沿链求交，不复制。
             sandbox: Default::default(),
-            // 共享区归属沿工作根继承：子会话不额外收窄。
-            shared: Default::default(),
             parent: Some(parent.to_string()),
             node: None,
             delegation: None,
             thinking: None,
+            // 外部根沿工作根继承：子会话只落一份没有根的声明。
             run: RunState::Active,
-            workspace: None,
+            workspace: Default::default(),
         };
         // 沙箱锚在**顶层工作**上：该 agent 的目录在共享区那一层已经建好。
         let work = work_root(self.history.as_ref(), parent)?;

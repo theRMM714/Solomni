@@ -153,7 +153,7 @@ impl Work {
             &session_modules,
             &missing,
             meta.exec.guest.as_deref(),
-            crate::units::business::turn::env::api::network_allowed(registry.app()),
+            registry.app().sandbox.policy.network,
         )
     }
 
