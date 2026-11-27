@@ -278,7 +278,7 @@ pub(crate) fn installed_dep(
 }
 
 /// 目的：只跑执行流程的工作规格（执行席只要 1 个 agent，含需求）。
-/// 约束：形状来自测试类型表里追加的 `execute`（见 `test_profiles`）；产品表里没有只跑执行流程的类型。
+/// 约束：形状来自测试类型表里追加的 `execute`（见 `test_decls`）；产品表里没有只跑执行流程的类型。
 pub(crate) fn execute_work(name: &str, modules: &[&str], task: &str) -> WorkSpec {
     // 每个模块一个 agent：执行流程按负责人派节点，名字要能与脚本对上。
     let mut w = work(name, "execute", modules);

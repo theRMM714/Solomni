@@ -12,7 +12,7 @@ use crate::units::business::catalog::registry::api::Registry;
 
 use crate::units::business::agentloop::api::AgentSession;
 use crate::units::business::conversation::session::api::subtree_of;
-use crate::units::business::session_model::api::{RunState, cast_of, loop_of};
+use crate::units::business::session_model::api::RunState;
 use crate::units::business::transcript::api::SessionEvent;
 use crate::units::business::turn::turn::api::Prepared;
 use crate::units::business::turn_state::api::Session;
@@ -155,7 +155,9 @@ impl Turn {
                 session.role(),
             )
         });
-        if loop_of(&who.loop_id).is_none() || cast_of(&who.loop_id, &who.role).is_none() {
+        // 身份必须是段表里登记过的一位：没登记就如实报错，不交给装配去猜。
+        let loops = self.decls.loops();
+        if loops.of(&who.loop_id).is_none() || loops.cast_of(&who.loop_id, &who.role).is_none() {
             return Err(format!(
                 "会话 {} 的段或角色没登记：{}/{}",
                 child, who.loop_id, who.role

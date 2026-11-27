@@ -128,12 +128,10 @@ impl Turn {
                 };
                 let mut emit = |e: SessionEvent| notes.borrow_mut().push(e);
                 let mut sink = |e: SessionEvent| notes.borrow_mut().push(e);
-                if crate::units::business::session_model::api::loop_of(&ask.who.loop_id).is_none()
-                    || crate::units::business::session_model::api::cast_of(
-                        &ask.who.loop_id,
-                        &ask.who.role,
-                    )
-                    .is_none()
+                // 身份必须是段表里登记过的一位：没登记就如实报错，不交给装配去猜。
+                let loops = self.decls.loops();
+                if loops.of(&ask.who.loop_id).is_none()
+                    || loops.cast_of(&ask.who.loop_id, &ask.who.role).is_none()
                 {
                     return Err(format!(
                         "会话 {} 的段或角色没登记：{}/{}",
@@ -320,7 +318,7 @@ impl Turn {
             .session(sid)
             .and_then(|s| s.flow())
             .and_then(|f| f.member_identity())
-            .map(|(l, r)| Identity::new(l, r));
+            .map(|(l, r)| Identity::new(&l, &r));
         let mut out = Vec::new();
         let mut todo = Vec::new();
         // 资源约束：**一个 agent 的会话一次只能跑一轮**——它已有在跑的节点（或本轮已派的）就跳过，

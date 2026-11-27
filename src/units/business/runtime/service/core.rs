@@ -75,7 +75,7 @@ impl Core {
         probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
         residents: Arc<dyn crate::units::business::residents::api::ResidentOps + Send + Sync>,
         secrets: Arc<dyn crate::units::business::catalog::secrets::api::SecretOps + Send + Sync>,
-        profiles: crate::units::business::session_model::api::Profiles,
+        decls: Arc<crate::units::business::session_model::api::SessionDecls>,
     ) -> Core {
         let compact = Arc::new(CompactRuntime::new(Arc::clone(&llm)));
         // 流程工厂在这里注入：turn / work 只认 `turn_state::api::Flows`，具体流程的类型只出现在 `collab` 单元里。
@@ -88,7 +88,7 @@ impl Core {
                 Arc::clone(&systools),
                 Arc::clone(&tools),
                 Arc::clone(&log),
-                profiles,
+                Arc::clone(&decls),
             ));
         // 回合状态收在 turn_state：它只认入站面与压缩工厂，不认 runtime 的端口（环 2 不得依赖环 3）。
         let turn = crate::units::business::turn_state::api::Turn::new(
@@ -108,6 +108,7 @@ impl Core {
             Arc::clone(&modules),
             Arc::clone(&packages),
             Arc::clone(&flows),
+            Arc::clone(&decls),
         );
         // work 用例面与 runtime 共享同一批入站面（Arc 克隆，不新建实现）。
         let work = Work::new(

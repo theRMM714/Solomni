@@ -50,7 +50,6 @@ pub fn draft_plan(
     // 核心操作走工具调用：载荷形状是 plan + nodes，入口是 plan 工具。
     let payload = crate::units::business::agentloop::api::core_operation(
         systools,
-        "planner",
         "plan",
         mode,
         core_chat,
@@ -208,7 +207,6 @@ impl Execution {
         // 核心操作走工具调用：总验收清单由 checklist 工具承载。
         let made = crate::units::business::agentloop::api::core_operation(
             systools,
-            "orchestrator",
             "checklist",
             mode,
             core_chat,

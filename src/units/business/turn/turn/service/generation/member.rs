@@ -47,9 +47,10 @@ pub(crate) fn run_member_turn<H: TurnHost>(
     let turn_id = req.turn_id;
     // 这一回合坐的段与角色：**身份是回合的值**，工具面由会话在换身份时现拼（讨论段：流程动作 + 沙箱面）。
     let who = req.who.clone();
-    if crate::units::business::session_model::api::loop_of(&who.loop_id).is_none()
-        || crate::units::business::session_model::api::cast_of(&who.loop_id, &who.role).is_none()
-    {
+    // 身份必须是段表里登记过的一位（段表由组合根注入，随回合状态一起带过来）。
+    let decls = host.core(|turn| Ok(std::sync::Arc::clone(&turn.decls)))?;
+    let loops = decls.loops();
+    if loops.of(&who.loop_id).is_none() || loops.cast_of(&who.loop_id, &who.role).is_none() {
         return Err(format!("段或角色没登记：{}/{}", who.loop_id, who.role));
     }
     // 子会话自己的**权威行**（逐轮）与**运行态收尾**都走它自己的事件台，

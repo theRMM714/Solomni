@@ -293,6 +293,8 @@ pub(crate) struct MemberTools {
     pub prompt: Arc<dyn crate::units::business::prompt::api::Prompt>,
     /// 目的：授权端口：这一次调用准不准（装配时注入默认策略；与"在不在场上"分开）。
     pub policy: Arc<dyn crate::units::business::agentloop::domain::policy::Policy>,
+    /// 目的：会话形状的声明表：换席时按「段 + 角色」取这一席的机制动作（段表只从数据来）。
+    pub decls: Arc<crate::units::business::session_model::api::SessionDecls>,
 }
 
 /// 目的：核心操作回路里「先核实」的那半个环境——判定一个名字是不是只读核实工具、把它跑一次。
@@ -353,6 +355,7 @@ impl MemberTools {
             profile: &self.face.profile,
             source_ids: &self.face.source_ids,
             system_tools: &self.face.system_tools,
+            loops: Some(self.decls.loops()),
             modules: &self.modules,
             sandbox: &self.face.sandbox,
             prompt: &*self.prompt,

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::units::business::agentloop::domain::member_tools::ModuleTools;
 use crate::units::business::session_model::api::{
     EXEC, FS_READ, FS_WRITE, SHARED_WRITE, SOURCE_AGENT, SOURCE_LOOP, SOURCE_MODULE,
-    SOURCE_PROFILE, SOURCE_WORKSPACE, ToolSource, TurnCtx, cast_of,
+    SOURCE_PROFILE, SOURCE_WORKSPACE, ToolSource, TurnCtx,
 };
 use crate::units::business::tools::api::{DELETE, EDIT, GREP, LIST, PATCH, READ, SHELL, WRITE};
 use crate::units::business::workspace::api::WORK_TOOLS;
@@ -78,20 +78,28 @@ impl ToolSource for ModuleSource {
     }
 }
 
-/// 目的：当前流程段交的工具：按回合上下文里的段 id 与角色 id 查角色位。
-/// 约束：段或角色位没在册时交空面（装配期已由流程段表校验拦下）；同一角色在不同段可以拿不同的机制动作。
-pub struct LoopSource;
+/// 目的：当前流程段交的机制动作：装配期按「段 + 角色」在声明表里查一次，拍平成值。
+/// 约束：段或角色位没在册时装配期交空面（流程段表校验已拦下）；同一角色在不同段可以拿不同的机制动作。
+pub struct LoopSource {
+    actions: Vec<String>,
+}
+
+impl LoopSource {
+    /// 目的：按这一席所在段的角色位拍平出段来源（动作 id 已在装配期取好）。
+    pub fn new(actions: &[String]) -> LoopSource {
+        LoopSource {
+            actions: actions.to_vec(),
+        }
+    }
+}
 
 impl ToolSource for LoopSource {
     fn id(&self) -> &str {
         SOURCE_LOOP
     }
 
-    fn offer(&self, ctx: &TurnCtx) -> Vec<String> {
-        ctx.loop_id
-            .and_then(|loop_id| cast_of(loop_id, ctx.role))
-            .map(|c| c.tools.iter().map(|t| t.to_string()).collect())
-            .unwrap_or_default()
+    fn offer(&self, _ctx: &TurnCtx) -> Vec<String> {
+        self.actions.clone()
     }
 }
 
@@ -128,18 +136,20 @@ impl ToolSource for ProfileSource {
 }
 
 /// 目的：按会话类型声明的来源 id 造实例；未知 id 跳过（装配期 `Profiles::validate` 已拦下）。
-/// 参数：ids = 来源 id；table = 模块工具表（含已就绪服务）；system_tools = 会话 meta 里的 system 工具。
+/// 参数：ids = 来源 id；table = 模块工具表（含已就绪服务）；system_tools = 会话 meta 里的 system 工具；
+///   loop_tools = 当前段当前角色的机制动作（装配期拍平，段表不在来源里查）。
 pub fn build_sources(
     ids: &[String],
     table: &BTreeMap<String, ModuleTools>,
     system_tools: &[String],
+    loop_tools: &[String],
 ) -> Vec<Arc<dyn ToolSource>> {
     let mut out: Vec<Arc<dyn ToolSource>> = Vec::new();
     for id in ids {
         match id.as_str() {
             SOURCE_AGENT => out.push(Arc::new(AgentSource)),
             SOURCE_MODULE => out.push(Arc::new(ModuleSource::new(table))),
-            SOURCE_LOOP => out.push(Arc::new(LoopSource)),
+            SOURCE_LOOP => out.push(Arc::new(LoopSource::new(loop_tools))),
             SOURCE_WORKSPACE => out.push(Arc::new(WorkspaceSource)),
             SOURCE_PROFILE => out.push(Arc::new(ProfileSource {
                 tools: system_tools.to_vec(),

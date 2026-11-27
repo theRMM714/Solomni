@@ -24,14 +24,12 @@ pub const SOURCE_WORKSPACE: &str = "workspace";
 pub const SOURCE_PROFILE: &str = "profile";
 
 /// 目的：一次回合的上下文——来源据此决定交不交自己的工具。
-/// 约束：只装窄值，不传会话对象；`role` 是席位塌缩前的临时字段（阶段 B 删）。
+/// 约束：只装窄值，不传会话对象；段与角色已经由装配期拍平进各来源的实例，端口不再传它们。
 pub struct TurnCtx<'a> {
     /// 目的：当前回合所在的 loop id；不在流程里为空。
-    /// 约束：端口契约的字段，当前没有来源读它（loop 来源按 role 取）——留着给按 loop 分面的来源。
+    /// 约束：端口契约的字段，当前没有来源读它（段声明在装配期已拍平）——留着给按段分面的来源。
     #[allow(dead_code)]
     pub loop_id: Option<&'a str>,
-    /// 目的：当前回合的席位 id（临时候选：阶段 B 由 loop 声明取代）。
-    pub role: &'a str,
     /// 目的：当前回合是哪个 agent。
     /// 约束：端口契约的字段，当前没有来源读它——留给按 agent 分面的来源。
     #[allow(dead_code)]

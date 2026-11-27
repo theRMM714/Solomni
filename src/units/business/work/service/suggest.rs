@@ -38,20 +38,20 @@ impl Work {
             &mut crate::units::business::conversation::slate::api::Request {
                 task,
                 mode: {
-                    if !self.flows.book().known(kind) {
+                    if !self.flows.decls().known(kind) {
                         return Err(format!(
                             "会话类型表里没有「{}」这个类型（systools/profiles.yaml）",
                             kind
                         ));
                     }
                     // 代理类型没有名单可拟（核心自己挑人）；如实拒绝，不拿单席的清单糊弄。
-                    if self.flows.book().spec_of(kind).is_some_and(|s| s.auto) {
+                    if self.flows.decls().spec_of(kind).is_some_and(|s| s.auto) {
                         return Err(
                             "代理形态没有名单：决定权整块交给核心，由它自己挑人".to_string()
                         );
                     }
                     // 有流程 = 要凑一队人（多席拟名单）；没有流程 = 一个人（单席拟名单）。
-                    let many = self.flows.book().spec_of(kind).is_some_and(|s| s.driven());
+                    let many = self.flows.decls().spec_of(kind).is_some_and(|s| s.driven());
                     match many {
                         true => crate::units::business::conversation::slate::api::Mode::Collab,
                         false => crate::units::business::conversation::slate::api::Mode::Single,

@@ -401,25 +401,24 @@ fn main() {
     if runtime_needed && sandbox_mode.degraded() {
         eprintln!("[沙箱] 本进程已降级：缺失的强制项按如实降级执行；重启后重新评估");
     }
-    // **会话类型表**（systools/profiles.yaml）：一个会话类型就是一串流程与它的静止机制。
-    // 它是会话类型的唯一声明处：提示词册子的会话类型、机制册的校验都以它为口径；装配期就校验。
+    // **会话形状的声明**（systools/loops.yaml + systools/profiles.yaml）：段与角色、会话类型各一张表，
+    // 两张表合起来是会话形状的唯一声明处（提示词册子与工具面都以它为口径）；装配期就校验。
     let assets: std::sync::Arc<dyn units::resource::assets::api::Assets> =
         std::sync::Arc::new(units::resource::assets::service::AssetsService::new(
             &root,
             Box::new(units::resource::assets::detail::FsAssetFs),
         ));
-    let profiles =
-        match units::business::conversation::session::detail::yaml_profiles::YamlProfiles::new(
-            std::sync::Arc::clone(&assets),
-        )
-        .load()
-        {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("[装配失败] {}", e);
-                std::process::exit(1);
-            }
-        };
+    let decls = match units::business::session_model::detail::yaml_decls::YamlDecls::new(
+        std::sync::Arc::clone(&assets),
+    )
+    .load()
+    {
+        Ok(d) => std::sync::Arc::new(d),
+        Err(e) => {
+            eprintln!("[装配失败] {}", e);
+            std::process::exit(1);
+        }
+    };
     let prompt_source = units::business::prompt::detail::yaml_prompts::YamlPrompts::new(
         std::sync::Arc::clone(&assets),
     );
@@ -476,6 +475,7 @@ fn main() {
     // 流程段、角色与工具总表必须自洽（角色位里的机制动作都在总表）：
     // 悬空引用是装配错误，与上面的工具总表自检同一条时机。
     let loop_problems = units::business::conversation::session::api::loop_problems(
+        decls.loops(),
         &units::business::tools::api::Tools::book(&*systools),
     );
     if !loop_problems.is_empty() {
@@ -692,7 +692,7 @@ fn main() {
         Arc::new(kernel::detail::HostProbeAdapter),
         residents,
         secrets,
-        profiles,
+        decls,
     )
     .with_base_roots(base_roots);
 

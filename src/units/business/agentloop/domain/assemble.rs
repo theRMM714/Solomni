@@ -14,7 +14,7 @@ use crate::units::business::agentloop::domain::sources::build_sources;
 use crate::units::business::catalog::modules::api::Module;
 use crate::units::business::prompt::api::Prompt;
 use crate::units::business::residents::api::{ResidentOps, ServiceState, ServiceView};
-use crate::units::business::session_model::api::{SOURCE_MODULE, ToolSource, TurnCtx};
+use crate::units::business::session_model::api::{Loops, SOURCE_MODULE, ToolSource, TurnCtx};
 use crate::units::business::tools::api::{ToolNotes, tool_notes};
 use crate::units::business::workspace::api::{Sandbox, Workspace};
 
@@ -95,6 +95,8 @@ pub struct FaceInput<'a> {
     pub source_ids: &'a [String],
     /// 目的：会话类型展开进会话的 system 工具 id。
     pub system_tools: &'a [String],
+    /// 目的：流程段与角色的声明表（loop 来源在装配期按它拍平；核实环境给 None）。
+    pub loops: Option<&'a Loops>,
     pub modules: &'a [Module],
     pub sandbox: &'a Sandbox,
     pub prompt: &'a dyn Prompt,
@@ -123,7 +125,6 @@ pub struct SeatFace {
 pub fn assemble(input: FaceInput<'_>) -> SeatFace {
     let ctx = TurnCtx {
         loop_id: Some(input.loop_id).filter(|id| !id.is_empty()),
-        role: input.role,
         agent_id: input.agent,
         abilities: input.abilities,
         profile: input.profile,
@@ -140,7 +141,13 @@ pub fn assemble(input: FaceInput<'_>) -> SeatFace {
         BTreeMap::new()
     };
     let (module_tool_lines, service_param_lines) = serviced_tools(&started, &mut table);
-    let sources = build_sources(input.source_ids, &table, input.system_tools);
+    // 段来源的动作在装配期拍平成值：来源只回答在场，运行期不再查段表。
+    let loop_tools = input
+        .loops
+        .and_then(|loops| loops.cast_of(input.loop_id, input.role))
+        .map(|cast| cast.tools.clone())
+        .unwrap_or_default();
+    let sources = build_sources(input.source_ids, &table, input.system_tools, &loop_tools);
     let (allowed, used) = face_of(&ctx, &sources);
     let handlers = match input.workspace {
         Some(ws) => {
@@ -192,14 +199,13 @@ pub fn face_of(ctx: &TurnCtx<'_>, sources: &[Arc<dyn ToolSource>]) -> (Vec<Strin
 /// 目的：测试用——按某个角色在它所在段里的全能力口径算工具面 id（生产路径只有 assemble）。
 /// 约束：段按角色反查（取第一个含它的段）；模块来源恒空（测试只看声明与能力组），有工作区、无 system 工具。
 #[cfg(test)]
-pub fn role_face(role_id: &str) -> Vec<String> {
-    use crate::units::business::session_model::api::{
-        LOOPS, SOURCE_AGENT, SOURCE_LOOP, SOURCE_WORKSPACE,
-    };
-    let found = LOOPS
+pub fn role_face(loops: &Loops, role_id: &str) -> Vec<String> {
+    use crate::units::business::session_model::api::{SOURCE_AGENT, SOURCE_LOOP, SOURCE_WORKSPACE};
+    let found = loops
+        .loops
         .iter()
         .find(|l| l.cast.iter().any(|c| c.role == role_id));
-    let Some(loop_id) = found.map(|l| l.id) else {
+    let Some(loop_id) = found.map(|l| l.id.as_str()) else {
         return Vec::new();
     };
     let abilities: Vec<String> = crate::units::pure::registry_model::api::DEFAULT_ABILITIES
@@ -208,7 +214,6 @@ pub fn role_face(role_id: &str) -> Vec<String> {
         .collect();
     let ctx = TurnCtx {
         loop_id: Some(loop_id),
-        role: role_id,
         agent_id: "test",
         abilities: &abilities,
         profile: "single",
@@ -218,6 +223,10 @@ pub fn role_face(role_id: &str) -> Vec<String> {
         .iter()
         .map(|s| s.to_string())
         .collect();
-    let sources = build_sources(&ids, &BTreeMap::new(), &[]);
+    let loop_tools = loops
+        .cast_of(loop_id, role_id)
+        .map(|c| c.tools.clone())
+        .unwrap_or_default();
+    let sources = build_sources(&ids, &BTreeMap::new(), &[], &loop_tools);
     face_of(&ctx, &sources).0
 }

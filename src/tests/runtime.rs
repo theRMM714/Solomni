@@ -44,7 +44,7 @@ fn runtime_rooted(
         crate::tests::doubles::test_host_probe(),
         Arc::new(crate::units::business::residents::api::NoResidents),
         Arc::new(crate::units::business::catalog::secrets::api::NoSecrets),
-        crate::tests::doubles::test_profiles(),
+        crate::tests::doubles::test_decls(),
     )
 }
 
@@ -83,7 +83,7 @@ fn runtime_for_vm(
         probe,
         Arc::new(crate::units::business::residents::api::NoResidents),
         Arc::new(crate::units::business::catalog::secrets::api::NoSecrets),
-        crate::tests::doubles::test_profiles(),
+        crate::tests::doubles::test_decls(),
     )
 }
 

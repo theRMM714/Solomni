@@ -8,12 +8,12 @@ use std::sync::atomic::AtomicBool;
 
 use crate::units::business::collab::domain::events::CollabEvent;
 use crate::units::business::collab::domain::gates::{OPT_BEGIN_ALLOW, Pending};
-use crate::units::business::collab::service::collab::{CollabSession, Phase};
+use crate::units::business::collab::service::collab::CollabSession;
 use crate::units::business::collab::service::discussion::AfterTurn;
 
 use crate::kernel::api::types::Ask;
 use crate::units::business::agentloop::api::MemberTurn;
-use crate::units::business::session_model::api::{Artifact, loop_of, role};
+use crate::units::business::session_model::api::Artifact;
 use crate::units::business::transcript::api::SessionEvent;
 use crate::units::business::turn_state::api::{
     Flow, GateTicket, Handback, MemberAsk, Settle, WorkPlan,
@@ -157,19 +157,9 @@ impl Flow for CollabSession {
         Some(OPT_BEGIN_ALLOW.to_string())
     }
 
-    fn member_identity(&self) -> Option<(&'static str, &'static str)> {
-        let id = match self.phase {
-            Phase::Discuss => "discuss",
-            Phase::Execute => "execute",
-        };
-        let l = loop_of(id)?;
-        let r = l
-            .cast
-            .iter()
-            .filter_map(|c| role(c.role))
-            .find(|r| !r.core)
-            .map(|r| r.id)?;
-        Some((l.id, r))
+    fn member_identity(&self) -> Option<(String, String)> {
+        // 身份在装配期按段声明算好交给会话（流程不认识具体段 id）。
+        self.identity.clone()
     }
 }
 

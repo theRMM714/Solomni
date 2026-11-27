@@ -157,7 +157,7 @@ pub(crate) fn ops_with_vm(
         doubles::test_host_probe(),
         std::sync::Arc::new(crate::units::business::residents::api::NoResidents),
         std::sync::Arc::new(crate::units::business::catalog::secrets::api::NoSecrets),
-        doubles::test_profiles(),
+        doubles::test_decls(),
     );
     let handle = crate::units::business::runtime::api::Handle::spawn(core).expect("起核心线程");
     let faces = crate::presentation::faces::Faces::from_handle(&handle);

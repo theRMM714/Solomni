@@ -11,8 +11,9 @@ impl Work {
     /// 目的：会话类型表翻成界面要的样子（名字、一句说明、要不要名单与需求）。
     /// 约束：顺序照声明；要不要需求按声明里的流程（有流程才必填本次需求）；代理式（没有流程、坐核心代理席）不要名单。
     pub(crate) fn session_types(&self) -> Vec<SessionTypeView> {
-        self.flows
-            .book()
+        let decls = self.flows.decls();
+        decls
+            .profiles()
             .profiles
             .iter()
             .map(|p| {
@@ -28,7 +29,7 @@ impl Work {
                     flows: !p.flows.is_empty(),
                     roster: !auto,
                     needs_task: !p.flows.is_empty(),
-                    min_agents: self.flows.book().min_agents(&p.flows),
+                    min_agents: decls.min_agents(&p.flows),
                     agent_visible: p.agent_visible,
                 }
             })

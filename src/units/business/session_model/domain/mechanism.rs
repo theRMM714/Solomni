@@ -1,211 +1,281 @@
-//! 目的：会话的**流程段**（loop）与**角色**声明——一段流程自带它的角色位与机制动作，工具面因此跟段走、不跟全局席位走。
-//! 管：`Role` / `Cast` / `Loop` 三种声明与 `ROLES` / `LOOPS` 两张表，以及按 id 取角色 / 段 / 某个段里的某个角色位。
-//! 不管：工具面怎么合成（在 `agentloop` 的 `assemble`，按会话类型挂的工具来源各自交 id）；会话类型表（`profile` 引用段 id）。
-//! 联动：`profile` 的会话类型声明一串流程段或一个静止段；`turn` 的每回合按「段 + 角色」取身份与机制动作。
+//! 目的：流程段与角色的形状——段（loop）与角色（role）的数据类型、按 id 取值、表自身的装配期规则。
+//! 管：`Role` / `Cast` / `Loop` / `Loops` 的形状与 `validate`（角色唯一、角色位在册、流程段与静止段的形状、抑制的能力组认识）。
+//! 不管：哪些段串进哪个会话类型（在 `profile.rs`）；段与工具总表的比对（在 `conversation::session` 的 `loop_check`）；yaml 解析（在 `detail/yaml_decls.rs`）。
+//! 联动：`systools/loops.yaml` 是唯一声明处；组合根装载进 `SessionDecls`，装配期调 `validate`。
 
-use crate::units::business::session_model::domain::artifact::Kind;
+use serde::Deserialize;
 
-/// 目的：一个**角色**——身份本身：带哪段提示词、由核心通道还是成员会话出演。
-/// 约束：角色只是身份；人数与机制动作属于「它在某一段里坐的那个位」（`Cast`）。
-///   文件面与模块面不在这里：前者由 agent 的能力组决定，后者由它装了哪些模块决定（见 `tools` 的 `ToolSource`）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use super::artifact::Kind;
+use super::tools::{EXEC, FS_READ, FS_WRITE, SHARED_WRITE};
+
+/// 目的：一个角色：提示词段名、是不是核心角色（核心角色坐在主会话里，成员角色由 roster 里的人承担）。
+#[derive(Debug, Clone, Deserialize)]
 pub struct Role {
-    /// 目的：角色 id（全局唯一）：同时是运行时动作授权里的身份名与提示词的匹配键。
-    pub id: &'static str,
-    /// 目的：提示词在册子里的位置（`prompts/roles/<名字>.yaml`）。
-    pub prompt: &'static str,
-    /// 目的：坐核心通道（真）还是坐成员会话（假）。
+    /// 目的：角色 id（`systools/loops.yaml` 的角色位与 `SessionSpec::role` 引用它）。
+    pub id: String,
+    /// 目的：提示词段名（`roles/<id>` 或复用别的段，如 solo 用 `roles/executor`）。
+    pub prompt: String,
+    /// 目的：是不是核心角色（核心占主会话，不占名单）。
+    #[serde(default)]
     pub core: bool,
 }
 
-/// 目的：某一段流程里的一个**角色位**——这一段的这个角色要几个人、能用哪些机制动作。
-/// 约束：机制动作只在这一段里有效：同一个角色在另一段里可以有另一套动作（或一套都没有）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// 目的：一段里的一个角色位：谁、至少几个、这一段发它哪些机制动作。
+#[derive(Debug, Clone, Deserialize)]
 pub struct Cast {
-    /// 目的：角色 id（引用 `ROLES`）。
-    pub role: &'static str,
-    /// 目的：这一段至少要这个角色几个人（`0` = 核心通道出演，不占 agent 名额）。
+    /// 目的：角色 id（必须在 `roles` 里）。
+    pub role: String,
+    /// 目的：这一段要几个这样的人（0 = 不占名单；成员角色按它算最少人数）。
+    #[serde(default)]
     pub min: usize,
-    /// 目的：这一段发给这个角色的机制动作 id（`tools` 提供实现与参数契约）。
-    pub tools: &'static [&'static str],
+    /// 目的：这一段发给它的机制动作 id（系统工具总表里的名字）。
+    #[serde(default)]
+    pub tools: Vec<String>,
 }
 
-/// 目的：一段**流程**（loop）：一串角色位，跑起来是流程或静止身份。
-#[derive(Debug, Clone, Copy)]
+/// 目的：一段流程（或一个静止段）：谁参与、抑制什么、要用户点头什么、吃什么产物吐什么产物。
+#[derive(Debug, Clone, Deserialize)]
 pub struct Loop {
-    /// 目的：段 id（流程会话按它调度；静止会话按它定位唯一的角色位）。
-    pub id: &'static str,
-    /// 目的：能不能当流程串进会话（真 = 由流程调度回合；假 = 没有流程的会话坐的静止段）。
-    pub flow: bool,
-    /// 目的：这一段的角色位（按声明顺序；核心角色与成员角色都在这里）。
-    pub cast: &'static [Cast],
-    /// 目的：这一段抑制哪些能力组（`fs-read` / `fs-write` / `exec` / `shared-write`）：在场但这一段不给用。
-    /// 约束：只影响授权（`Policy`），不影响发放——工具仍在面上，调用时回一条拒绝回执。
-    pub deny: &'static [&'static str],
-    /// 目的：这一段里哪些**动作**要用户点头才执行（工具 id，不是能力组）：调用时先走裁决通道。
-    /// 约束：只影响授权（`Policy`），不影响发放；粒度刻意细到工具——能力组里混着只读动作，按组问会把查询也变成弹窗。
-    pub ask: &'static [&'static str],
-    /// 目的：这一段能接哪些产物（种类，不带内容）：串起来时前一段交出的东西要在这里面。
-    pub accepts: &'static [Kind],
-    /// 目的：这一段收尾时交给下一段哪种产物；`None` = 不交东西（后面还接一段就串不起来）。
+    /// 目的：段 id（会话类型表的 flows / loop 引用它）。
+    pub id: String,
+    /// 目的：流程实现名（`discuss` / `execute`）；None = 静止段（没有流程的会话坐它）。
+    #[serde(default)]
+    pub builder: Option<String>,
+    /// 目的：角色位（顺序即名单顺序）。
+    #[serde(default)]
+    pub cast: Vec<Cast>,
+    /// 目的：这一段抑制的能力组（发放与抑制共用 `policy::ids_of` 的映射）。
+    #[serde(default)]
+    pub deny: Vec<String>,
+    /// 目的：这一段要用户点头才执行的动作 id（细到工具，避免把只读查询也变成弹窗）。
+    #[serde(default)]
+    pub ask: Vec<String>,
+    /// 目的：这一段收得下的产物种类（第一段必须收用户需求）。
+    #[serde(default)]
+    pub accepts: Vec<Kind>,
+    /// 目的：这一段交出的产物种类（None = 不交，后面不能再接段）。
+    #[serde(default)]
     pub produces: Option<Kind>,
 }
 
-/// 目的：核心代理角色：把用户的话转成对其它会话的动作（开、发、看、停）。
-const CORE_PROXY: Role = Role {
-    id: "core_proxy",
-    prompt: "roles/core_proxy",
-    core: true,
-};
-
-/// 目的：讨论角色：只表态与核实，不动手（没有写面、没有模块工具）。
-const DISCUSSANT: Role = Role {
-    id: "discussant",
-    prompt: "roles/discussant",
-    core: false,
-};
-
-/// 目的：计划角色：拆节点、看节点完成、给验收结论（只读，不改文件）。
-const PLANNER: Role = Role {
-    id: "planner",
-    prompt: "roles/planner",
-    core: true,
-};
-
-/// 目的：验收角色：逐个节点判完成与清单核对（只读，不改文件）。
-const ORCHESTRATOR: Role = Role {
-    id: "orchestrator",
-    prompt: "roles/orchestrator",
-    core: true,
-};
-
-/// 目的：执行角色：在自己的沙箱里干活，并回报节点结论。
-const EXECUTOR: Role = Role {
-    id: "executor",
-    prompt: "roles/executor",
-    core: false,
-};
-
-/// 目的：单机角色：一个 agent 直接干活（没有流程时的静止身份，与执行角色同提示词、没有机制动作）。
-const SOLO: Role = Role {
-    id: "solo",
-    prompt: "roles/executor",
-    core: false,
-};
-
-/// 目的：全部角色的唯一定义处（角色 id 全局唯一：段只引用 id，不复制声明）。
-pub const ROLES: &[Role] = &[
-    CORE_PROXY,
-    DISCUSSANT,
-    PLANNER,
-    ORCHESTRATOR,
-    EXECUTOR,
-    SOLO,
-];
-
-/// 目的：讨论段：核心代理主持、讨论角色表态（讨论角色至少两人）。
-/// 约束：讨论段抑制写面与共享区写（讨论只表态与核实），读面与执行面照常。
-const DISCUSS: Loop = Loop {
-    id: "discuss",
-    flow: true,
-    ask: &[],
-    deny: &[
-        crate::units::business::session_model::domain::tools::FS_WRITE,
-        crate::units::business::session_model::domain::tools::SHARED_WRITE,
-    ],
-    accepts: &[Kind::Requirement],
-    produces: Some(Kind::Summary),
-    cast: &[
-        Cast {
-            role: CORE_PROXY.id,
-            min: 0,
-            tools: &[],
-        },
-        Cast {
-            role: DISCUSSANT.id,
-            min: 2,
-            tools: &["say", "agree", "leave", "ask"],
-        },
-    ],
-};
-
-/// 目的：执行段：计划角色拆节点、验收角色判完成、执行角色干活并回报。
-/// 约束：会话控制那 6 个是 **system 工具**：由会话类型声明、建会话时展开进 meta，不挂在任何角色位上。
-const EXECUTE: Loop = Loop {
-    id: "execute",
-    deny: &[],
-    flow: true,
-    ask: &[],
-    accepts: &[Kind::Requirement, Kind::Summary],
-    produces: None,
-    cast: &[
-        Cast {
-            role: PLANNER.id,
-            min: 0,
-            tools: &["plan", "slate", "verdict"],
-        },
-        Cast {
-            role: ORCHESTRATOR.id,
-            min: 0,
-            tools: &["node_verdict", "checklist"],
-        },
-        Cast {
-            role: EXECUTOR.id,
-            min: 1,
-            tools: &["submit_report"],
-        },
-    ],
-};
-
-/// 目的：单机段：一个 agent 直接干活（静止身份，没有机制动作）。
-const STANDARD: Loop = Loop {
-    id: "standard",
-    deny: &[],
-    flow: false,
-    ask: &[],
-    accepts: &[Kind::Requirement],
-    produces: None,
-    cast: &[Cast {
-        role: SOLO.id,
-        min: 0,
-        tools: &[],
-    }],
-};
-
-/// 目的：代理段：核心代理一个角色（会话控制工具由会话类型声明，不在这里）。
-const PROXY: Loop = Loop {
-    id: "proxy",
-    deny: &[],
-    flow: false,
-    ask: &[],
-    accepts: &[],
-    produces: None,
-    cast: &[Cast {
-        role: CORE_PROXY.id,
-        min: 0,
-        tools: &[],
-    }],
-};
-
-/// 目的：全部流程段的唯一定义处：两个能当流程用的（讨论、执行）与两个静止段（单机、代理）。
-pub const LOOPS: &[Loop] = &[DISCUSS, EXECUTE, STANDARD, PROXY];
-
-/// 目的：按 id 找一段流程；没有返回 `None`（调用方如实报错，不静默退化）。
-pub fn loop_of(id: &str) -> Option<&'static Loop> {
-    LOOPS.iter().find(|l| l.id == id)
+/// 目的：流程段与角色的总表（`systools/loops.yaml` 的顶层形状）。
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Loops {
+    /// 目的：全部角色。
+    #[serde(default)]
+    pub roles: Vec<Role>,
+    /// 目的：全部段。
+    #[serde(default)]
+    pub loops: Vec<Loop>,
 }
 
-/// 目的：能当流程用的段 id（会话类型表只认这些）。
-pub fn flow_ids() -> Vec<&'static str> {
-    LOOPS.iter().filter(|l| l.flow).map(|l| l.id).collect()
+impl Loops {
+    /// 目的：按 id 取段。
+    pub fn of(&self, id: &str) -> Option<&Loop> {
+        self.loops.iter().find(|l| l.id == id)
+    }
+
+    /// 目的：按 id 取角色。
+    pub fn role(&self, id: &str) -> Option<&Role> {
+        self.roles.iter().find(|r| r.id == id)
+    }
+
+    /// 目的：取某段里某个角色的角色位。
+    pub fn cast_of(&self, loop_id: &str, role_id: &str) -> Option<&Cast> {
+        self.of(loop_id)?.cast.iter().find(|c| c.role == role_id)
+    }
+
+    /// 目的：一段的成员角色 id（第一个非核心角色位）：派节点时子会话按它取身份；静止段没有成员角色。
+    pub fn member_role(&self, loop_id: &str) -> Option<&str> {
+        self.of(loop_id)?
+            .cast
+            .iter()
+            .find(|c| self.role(&c.role).is_some_and(|r| !r.core))
+            .map(|c| c.role.as_str())
+    }
+
+    /// 目的：这一段开跑至少要几个成员（所有非核心角色位的 min 之和）。
+    pub fn min_members(&self, loop_id: &str) -> usize {
+        self.of(loop_id)
+            .map(|l| {
+                l.cast
+                    .iter()
+                    .filter(|c| self.role(&c.role).is_some_and(|r| !r.core))
+                    .map(|c| c.min)
+                    .sum()
+            })
+            .unwrap_or(0)
+    }
+
+    /// 目的：注册过的流程段 id（有 builder 的才算流程段），按声明顺序。
+    pub fn flow_ids(&self) -> Vec<&str> {
+        self.loops
+            .iter()
+            .filter(|l| l.builder.is_some())
+            .map(|l| l.id.as_str())
+            .collect()
+    }
+
+    /// 目的：装配期校验：角色与段的 id 唯一、角色位在册、流程段有核心与成员、静止段只有一个角色位、抑制的能力组认识。
+    /// 返回：`Ok(())` 表示这张表可以拿去装配。
+    /// 错误：文案点名出问题的那一项与文件位置。
+    pub fn validate(&self) -> Result<(), String> {
+        let mut seen: Vec<&str> = Vec::new();
+        for r in &self.roles {
+            if r.id.trim().is_empty() {
+                return Err("角色的 id 是空的（systools/loops.yaml）".to_string());
+            }
+            if seen.contains(&r.id.as_str()) {
+                return Err(format!("角色 id 重复：{}（systools/loops.yaml）", r.id));
+            }
+            seen.push(&r.id);
+            if r.prompt.trim().is_empty() {
+                return Err(format!("角色 {} 没声明提示词（systools/loops.yaml）", r.id));
+            }
+        }
+        let mut lids: Vec<&str> = Vec::new();
+        for l in &self.loops {
+            if l.id.trim().is_empty() {
+                return Err("流程段的 id 是空的（systools/loops.yaml）".to_string());
+            }
+            if lids.contains(&l.id.as_str()) {
+                return Err(format!("流程段 id 重复：{}（systools/loops.yaml）", l.id));
+            }
+            lids.push(&l.id);
+            if l.cast.is_empty() {
+                return Err(format!(
+                    "流程段 {} 一个角色位都没声明（systools/loops.yaml）",
+                    l.id
+                ));
+            }
+            let mut has_core = false;
+            let mut has_member = false;
+            for c in &l.cast {
+                match self.role(&c.role) {
+                    None => {
+                        return Err(format!(
+                            "流程段 {} 引用了不存在的角色：{}（systools/loops.yaml）",
+                            l.id, c.role
+                        ));
+                    }
+                    Some(r) if r.core => has_core = true,
+                    Some(_) => has_member = true,
+                }
+            }
+            if l.builder.is_some() && !(has_core && has_member) {
+                return Err(format!(
+                    "流程段 {} 要同时有核心角色与成员角色（systools/loops.yaml）",
+                    l.id
+                ));
+            }
+            if l.builder.is_none() && l.cast.len() != 1 {
+                return Err(format!(
+                    "静止段 {} 只能有一个角色位（它是没有流程的会话的静止身份；systools/loops.yaml）",
+                    l.id
+                ));
+            }
+            for ability in &l.deny {
+                if !matches!(ability.as_str(), FS_READ | FS_WRITE | EXEC | SHARED_WRITE) {
+                    return Err(format!(
+                        "流程段 {} 抑制了一个不认识的能力组：{}（systools/loops.yaml）",
+                        l.id, ability
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
-/// 目的：按角色 id 找角色声明（全局唯一，段只引用 id）。
-pub fn role(id: &str) -> Option<&'static Role> {
-    ROLES.iter().find(|r| r.id == id)
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// 目的：某一段里某个角色的位置（人数与机制动作）；这一段没有这个角色返回 `None`。
-pub fn cast_of(loop_id: &str, role_id: &str) -> Option<&'static Cast> {
-    loop_of(loop_id)?.cast.iter().find(|c| c.role == role_id)
+    fn roles() -> Vec<Role> {
+        vec![
+            Role {
+                id: "core".to_string(),
+                prompt: "roles/core".to_string(),
+                core: true,
+            },
+            Role {
+                id: "member".to_string(),
+                prompt: "roles/member".to_string(),
+                core: false,
+            },
+        ]
+    }
+
+    #[test]
+    fn a_segment_with_a_builder_needs_a_core_and_a_member() {
+        let bad = Loops {
+            roles: roles(),
+            loops: vec![Loop {
+                id: "solo_flow".to_string(),
+                builder: Some("x".to_string()),
+                cast: vec![Cast {
+                    role: "core".to_string(),
+                    min: 0,
+                    tools: Vec::new(),
+                }],
+                deny: Vec::new(),
+                ask: Vec::new(),
+                accepts: Vec::new(),
+                produces: None,
+            }],
+        };
+        let err = bad.validate().unwrap_err();
+        assert!(err.contains("要同时有核心角色与成员角色"), "{}", err);
+    }
+
+    #[test]
+    fn a_standing_segment_holds_exactly_one_role() {
+        let bad = Loops {
+            roles: roles(),
+            loops: vec![Loop {
+                id: "stand".to_string(),
+                builder: None,
+                cast: vec![
+                    Cast {
+                        role: "core".to_string(),
+                        min: 0,
+                        tools: Vec::new(),
+                    },
+                    Cast {
+                        role: "member".to_string(),
+                        min: 1,
+                        tools: Vec::new(),
+                    },
+                ],
+                deny: Vec::new(),
+                ask: Vec::new(),
+                accepts: Vec::new(),
+                produces: None,
+            }],
+        };
+        let err = bad.validate().unwrap_err();
+        assert!(err.contains("只能有一个角色位"), "{}", err);
+    }
+
+    #[test]
+    fn an_unknown_ability_group_is_refused() {
+        let bad = Loops {
+            roles: roles(),
+            loops: vec![Loop {
+                id: "stand".to_string(),
+                builder: None,
+                cast: vec![Cast {
+                    role: "core".to_string(),
+                    min: 0,
+                    tools: Vec::new(),
+                }],
+                deny: vec!["fs-everything".to_string()],
+                ask: Vec::new(),
+                accepts: Vec::new(),
+                produces: None,
+            }],
+        };
+        let err = bad.validate().unwrap_err();
+        assert!(err.contains("不认识的能力组"), "{}", err);
+    }
 }

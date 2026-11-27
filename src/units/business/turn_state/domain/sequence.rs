@@ -177,7 +177,7 @@ impl Flow for Sequence {
         self.steps.last().is_some_and(|s| s.is_done())
     }
 
-    fn member_identity(&self) -> Option<(&'static str, &'static str)> {
+    fn member_identity(&self) -> Option<(String, String)> {
         self.current().and_then(|s| s.member_identity())
     }
 
