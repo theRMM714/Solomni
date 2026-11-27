@@ -175,25 +175,48 @@ pub fn assemble(input: FaceInput<'_>) -> SeatFace {
     }
 }
 
-/// 目的：把来源交出的 id 并成这一回合的工具面：按来源顺序去重，并记下真正交过 id 的来源。
-/// 参数：ctx = 回合上下文；sources = 这一席挂的来源实例（顺序即面序）。
-/// 返回：(工具面 id, 交过 id 的来源 id)。
-pub fn face_of(ctx: &TurnCtx<'_>, sources: &[Arc<dyn ToolSource>]) -> (Vec<String>, Vec<String>) {
-    let mut allowed: Vec<String> = Vec::new();
-    let mut used: Vec<String> = Vec::new();
+/// 目的：每个来源这一刻交出的 id（按来源顺序，交空的不记）——`face_of` 与工具面诊断共用这一处求值。
+/// 参数：ctx = 回合上下文；sources = 这一席挂的来源实例。
+/// 返回：(来源 id, 它交的 id)；同一个 id 出现在多个来源里即「同 id 多来源」。
+pub fn offers_of(ctx: &TurnCtx<'_>, sources: &[Arc<dyn ToolSource>]) -> Vec<(String, Vec<String>)> {
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
     for source in sources {
         let ids = source.offer(ctx);
         if ids.is_empty() {
             continue;
         }
-        used.push(source.id().to_string());
+        out.push((source.id().to_string(), ids));
+    }
+    out
+}
+
+/// 目的：把各来源交出的 id 并成这一回合的工具面：按来源顺序去重，并记下真正交过 id 的来源。
+/// 参数：offers = `offers_of` 的结果（顺序即面序）。
+/// 返回：(工具面 id, 交过 id 的来源 id)。
+pub fn merge_offers(offers: &[(String, Vec<String>)]) -> (Vec<String>, Vec<String>) {
+    let mut allowed: Vec<String> = Vec::new();
+    let mut used: Vec<String> = Vec::new();
+    for (source, ids) in offers {
+        if ids.is_empty() {
+            continue;
+        }
+        if !used.iter().any(|s| s == source) {
+            used.push(source.clone());
+        }
         for id in ids {
-            if !allowed.contains(&id) {
-                allowed.push(id);
+            if !allowed.contains(id) {
+                allowed.push(id.clone());
             }
         }
     }
     (allowed, used)
+}
+
+/// 目的：把来源交出的 id 并成这一回合的工具面：按来源顺序去重，并记下真正交过 id 的来源。
+/// 参数：ctx = 回合上下文；sources = 这一席挂的来源实例（顺序即面序）。
+/// 返回：(工具面 id, 交过 id 的来源 id)。
+pub fn face_of(ctx: &TurnCtx<'_>, sources: &[Arc<dyn ToolSource>]) -> (Vec<String>, Vec<String>) {
+    merge_offers(&offers_of(ctx, sources))
 }
 
 /// 目的：测试用——按某个角色在它所在段里的全能力口径算工具面 id（生产路径只有 assemble）。

@@ -177,6 +177,18 @@ impl Handle {
                     .map_err(|e| format!("诊断结果序列化失败：{}", e))?;
                 Ok(Acted::Done(value))
             }
+            // 工具面诊断：按会话 meta 重算一席的面，说清来源、判定与孤儿 id（只读，不动会话）。
+            "explain_tools" => {
+                let sid = s("session_id");
+                let agent = s("agent");
+                let loop_id = s("loop");
+                let role = s("role");
+                let report =
+                    self.call(move |core| core.explain_tools(&sid, &agent, &loop_id, &role))?;
+                let value = serde_json::to_value(&report)
+                    .map_err(|e| format!("工具面报告序列化失败：{}", e))?;
+                Ok(Acted::Done(value))
+            }
             "control_session" => {
                 let action = d::ControlAction::parse(&s("action"))?;
                 let reason = s("reason");

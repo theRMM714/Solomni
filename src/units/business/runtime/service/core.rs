@@ -46,6 +46,8 @@ pub struct Core {
     /// 目的：会话历史生命周期（环 3）——历史列出 / 只读打开 / 删除收尾 / 回档三模式都经它。
     ///   回合状态本体按形参交过去（`&mut turn`），它不持第二份。
     pub(crate) lifecycle: crate::units::business::lifecycle::api::Lifecycle,
+    /// 目的：会话形状声明（类型表与段表）——解释工具面时按它重算，不另存一份。
+    pub(super) decls: Arc<crate::units::business::session_model::api::SessionDecls>,
 }
 
 /// 目的：在世会话形态（`turn_state` 的状态类型）：测试访问器用它读会话内容。
@@ -151,6 +153,7 @@ impl Core {
             turn,
             work,
             lifecycle,
+            decls,
         };
         c.sync_compact_choice();
         c
@@ -325,6 +328,76 @@ impl Core {
             self.probe.as_ref(),
             prepared,
         )
+    }
+
+    /// 目的：按会话 meta 重算一席的工具面，并说清每个 id 从哪个来源来、这一段准不准（只读）。
+    /// 参数：`sid` = 会话 id；`agent` / `loop_id` / `role` 留空时用会话 meta 里的值。
+    /// 返回：解释报告；会话或 agent 不存在、模块清单读不到时报错。
+    pub(crate) fn explain_tools(
+        &self,
+        sid: &str,
+        agent: &str,
+        loop_id: &str,
+        role: &str,
+    ) -> Result<crate::units::business::agentloop::api::ExplainReport, String> {
+        let meta = self.history.meta(sid)?;
+        let name = if agent.trim().is_empty() {
+            meta.agents
+                .first()
+                .map(|a| a.name.clone())
+                .ok_or_else(|| format!("这个会话里还没有 agent：{}", sid))?
+        } else {
+            agent.to_string()
+        };
+        let who = meta
+            .agents
+            .iter()
+            .find(|a| a.name == name)
+            .ok_or_else(|| format!("这个会话里没有 agent {}：{}", name, sid))?;
+        let abilities: Vec<String> = match &who.abilities {
+            Some(list) => list.clone(),
+            None => crate::units::pure::registry_model::api::DEFAULT_ABILITIES
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        };
+        let roster = self.modules.roster();
+        let modules: Vec<Module> = roster
+            .modules
+            .into_iter()
+            .filter(|m| who.modules.iter().any(|id| id == &m.manifest.id))
+            .collect();
+        let services = self.residents.services().unwrap_or_default();
+        let history: &dyn History = self.history.as_ref();
+        let workspace =
+            crate::units::business::conversation::session::api::work_root_of(history, &meta)?;
+        let book = self.systools.book();
+        let loop_id = if loop_id.trim().is_empty() {
+            meta.spec.loop_id.as_str()
+        } else {
+            loop_id
+        };
+        let role = if role.trim().is_empty() {
+            meta.spec.role.as_str()
+        } else {
+            role
+        };
+        Ok(crate::units::business::agentloop::api::explain(
+            crate::units::business::agentloop::api::ExplainInput {
+                kind: &meta.spec.kind,
+                loop_id,
+                role,
+                agent: &name,
+                abilities: &abilities,
+                source_ids: &meta.spec.sources,
+                system_tools: &meta.spec.system_tools,
+                workspace_name: Some(workspace.as_str()),
+                modules: &modules,
+                services: &services,
+                loops: self.decls.loops(),
+                book: &book,
+            },
+        ))
     }
 
     /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。

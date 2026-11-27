@@ -19,6 +19,10 @@ pub use crate::units::business::agentloop::domain::assembly::{
     single_session,
 };
 #[allow(unused_imports)]
+pub use crate::units::business::agentloop::domain::explain::{
+    ExplainInput, ExplainReport, SourceOffer, ToolLine, explain,
+};
+#[allow(unused_imports)]
 pub use crate::units::business::agentloop::domain::member_tools::{
     CoreVerify, ModuleTools, ServiceOp, ShellLive, ShellSlot, ToolFace, last_shell,
     service_ops_for_modules, tool_table,

@@ -96,8 +96,8 @@ fn table_is_self_consistent() {
     );
     assert_eq!(
         phase(Phase::Core).len(),
-        17,
-        "转录相十七条（module 命令已删：模块工具走 <模块> 词；modules 是清单）"
+        18,
+        "转录相十八条（module 命令已删：模块工具走 <模块> 词；modules 是清单）"
     );
     assert_eq!(groups(Phase::Boot), vec!["维护"]);
     let core = groups(Phase::Core);
@@ -117,7 +117,9 @@ fn only_runtime_commands_ask_for_services() {
     services.sort_unstable();
     assert_eq!(
         services,
-        vec!["collab", "diagnose", "proxy", "resident", "single", "web"],
+        vec![
+            "collab", "diagnose", "explain", "proxy", "resident", "single", "web"
+        ],
         "services 只给进会话/生成、Web、常驻服务与模块工具调用"
     );
     for op in phase(Phase::Boot) {

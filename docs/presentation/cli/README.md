@@ -15,6 +15,7 @@
 - 管：交互模式的转录渲染——角色行与正文缩进、工具行（标签 + 参数摘要 + 成败）、验收清单与交付结论、裁决卡边框、生成态 spinner 与耗时、上下文用量写回状态行；同一批 `SessionEvent` 在非 TTY 下仍走原样文本。
 - 管：共享区提交历史与回滚入口——`work <会话>` 看 head + 最近提交，`work <会话> log [条数]` 列提交，`work <会话> show <提交号>` 看详情，`work <会话> restore <提交号> [--yes]` 走统一的 `restore_work_commit` 动作（非破坏性；交互模式要求输入 yes，`--yes` 仅用于显式脚本）。
 - 管：虚拟机档会话的只读诊断入口——`diagnose <会话>` 造一次 `guest_diagnose` 动作（`caller = user`），把动作返回的结构化 JSON（guest 进程表 / CPU 汇总 / 内存 / 负载 / 挂载）原样打印；与 `work` / `resident` / 模块工具同类，不做业务判断。
+- 管：工具面的解释入口——`explain <会话> [--agent <名>] [--loop <段>] [--role <角色>]` 造一次 `explain_tools` 动作（`caller = user`），把报告（每个来源交了哪些 id、每个 id 的授权判定与理由、孤儿 id）打印成可读行文；`--json` 打原始报告。只读诊断，不改会话状态。
 - 管：命令与模块工具同一条入口（`src/presentation/cli/shell.rs`）——命令行一次性调用与转录中心提示符都先把词表落到声明上（`Op` 的 `parse`），再按执行者交给业务面；声明里的 `runtime` 决定这次调用要不要常驻运行时（`none` 的一次性命令不占视图盘、不起存储自动任务、不拉常驻服务、不吃启动门的围栏授权；`services` 才进会话 / 服务 / 模块工具），`modules` 是模块清单（版本、启停、拒收原因），`<模块>` 是模块手册（版本、状态、`system` 原文、工具表），`<模块> <工具> --help` 是工具手册，`<模块> --version` 是模块版本（工具没有自己的版本）。
 - 管：启动相命令的最后一公里——`--doctor` / `--provision` / `--gc` / `--storage` / `--work-gc` / `--build` / `--setup` 的操作数与回执排版（`src/presentation/cli/boot.rs`）；执行与确认门槛在 `system` 单元（见 [docs/system](../../system/README.md)）。`--setup` 的写入成果（`bin` shim、用户 PATH、围栏机器级预授）要新开终端才生效。
 - 管：启动相命令的**第二个入口**——同一条命令在终端转录中心的提示符里也能跑（`--doctor`、`--gc<空格>--category=logs`），跑完回提示符、不退出进程；缺 `--yes` 时就地一问（先给预览再问），有会话在跑时写操作只给预览、不执行；`--json` 与 `--root` 在这里没有意义（前者提示后忽略，后者报错、退出码 2）——歧义判据见 `src/presentation/cli.rs` 的 `run_boot`。

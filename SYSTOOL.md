@@ -15,6 +15,7 @@
 | 一个**流程段**的角色位：哪些角色出演、各要几员、各交哪些机制动作、抑制哪几组能力、由哪个流程实现跑 | `systools/loops.yaml` 的 `loops`（写了 `builder` 的才是流程） |
 | 面里有的工具**这一刻准不准用** | 授权端口 `src/units/business/agentloop/domain/policy.rs`（默认实现按流程段的 `deny` 判） |
 | 表里没有的会话类型为什么建不出来、agent 能建哪些类型 | 形状只由类型表定（`src/units/business/work/service/create.rs`）；agent 只看 `agent_visible`（`catalog_agents` 的 `scope=types` 也照此过滤） |
+| 一条会话的工具面**为什么是这些 id**（每个来源交了哪些、每个 id 的授权判定与理由、面里的孤儿 id） | `explain_tools` 动作（只给 user）与 `src/units/business/agentloop/domain/explain.rs`；CLI `explain <会话>` |
 | 已确认但尚未实施的系统工具与验收条件，**不限席位**（非当前工具表、非测试缺口账） | [systool_gaps.yaml](systool_gaps.yaml) |
 | 角色位或会话类型引用了表里不存在的 id 为什么硬失败 | 装配期 `loop_check::problems(&ToolBook)` 与 `SystemTools::problems()`，由 `src/tests/detail/prompt.rs` 锁死 |
 
