@@ -13,7 +13,7 @@
 
 | 文件 | 键 | 用途 |
 | --- | --- | --- |
-| `shared/mechanisms.yaml` | `mechanisms[].seats` / `mechanisms[].text` | **机制说明按适用角色分发**：一个回合的身份块把**适用该角色**的条目按声明顺序拼起来（`{{mechanism}}`）。`seats` 匹配的是**角色 id**（声明在 `src/units/business/session_model/domain/mechanism.rs` 的 `ROLES`）——对应关系全在数据里，代码只做匹配（`CoreTexts::mechanisms_for`）；哪个段由哪些角色位出演由同一文件的 `LOOPS` 报 |
+| `shared/mechanisms.yaml` | `mechanisms[].seats` / `mechanisms[].text` | **机制说明按适用角色分发**：一个回合的身份块把**适用该角色**的条目按声明顺序拼起来（`{{mechanism}}`）。`seats` 匹配的是**角色 id**（声明在 `systools/loops.yaml` 的 `roles`）——对应关系全在数据里，代码只做匹配（`CoreTexts::mechanisms_for`）；哪个段由哪些角色位出演由同一份 yaml 的 `loops` 报 |
 | `shared/protocol.yaml` | `chat_protocol` | 讨论约定（讨论席与执行席一起注入，可自由演化） |
 | `shared/tools.yaml` | `env_hosts` / `env_guests` / `envs[].host\|guest\|text` | **工作环境按环境分发**：本机档按宿主平台（`env_hosts`：linux / windows / macos），虚拟机档按 guest 的 os（`env_guests`）；每条只写 host 或 guest 之一，装载时校验全表覆盖（不静默漏发一份环境）。文本变量：work_name / agent / work_root / sandbox_root / module_roots / path_rules——虚拟机档给的是 **guest 内路径**；路径规矩只有一处（`texts.yaml` 的 `path_rules`，`env_block` 用它渲染后插进每个环境块） |
 | | `patch_guide` | 自由格式补丁的写法（每块以 `*** End File` 收尾、SEARCH 要整行一致、一次可多块、整体原子） |
@@ -46,7 +46,7 @@
   或 `Prompt::render(Segment::…, vars)`（渲染）；名字表是 `units/business/prompt/domain/prompt.rs` 的 `Segment`——
   **加一段提示词 = 册子加键 + 这里加变体**（缺了编译不过）。运行时回执不由本单元返回。
 - 渲染（`{{key}}` 替换、缺键 / 缺变量即报错）在 `units/business/prompt/domain/prompt.rs`（纯逻辑，不读文件）；
-- **工具总表与角色表不在这份册子里**：`systools/tools.yaml`（工具是什么）与 `src/units/business/session_model/domain/mechanism.rs` 的 `ROLES` / `LOOPS`（身份有什么、哪一段要哪些角色）
+- **工具总表与角色表不在这份册子里**：`systools/tools.yaml`（工具是什么）与 `systools/loops.yaml`（身份有什么、哪一段要哪些角色）
   由 `units/business/tools/detail/yaml_systools.rs` 的 `YamlSystools` 装配成 `SystemTools`，**与册子分开注入**——
   挂进册子会让提示词反过来依赖工具，两边成环（见 [layers.md](../architecture/layers.md)）；
 - **组装（哪一回合发哪几段）留在各业务**：身份块归 `session`、工具说明归 `tools`、清单文本归 `registry` / `workspace`
