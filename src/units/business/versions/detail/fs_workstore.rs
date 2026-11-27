@@ -11,7 +11,7 @@ use crate::units::business::versions::domain::workstore::{
     Commit, Index, ObjectInfo, Pending, Ref, RefKind, join_rel,
 };
 use crate::units::business::versions::ports::WorkStore;
-use crate::units::business::workspace::api::path_filter::Rules;
+use crate::units::business::workbench::api::filter::Rules;
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 use std::fs::File;

@@ -1,5 +1,5 @@
 //! 目的：装配一席要用的入站面参数对象——组合根注入的同一批端口，按字段交给本单元的装配机。
-//! 管：`SessionPorts`（llm / 日志 / 提示词册 / 工具总表 / 工具执行 / 执行环境策略表 / 常驻服务 / 工作区 / 版本库 / 压缩通道 / 声明表）。
+//! 管：`SessionPorts`（llm / 日志 / 提示词册 / 工具总表 / 工具执行 / 执行环境策略表 / 常驻服务 / 版本库 / 压缩通道 / 声明表）。
 //! 不管：装配逻辑本身（在 `domain::assembly`）、端口的实现（各单元自己）。
 //! 联动：`Turn::session_ports` 按自己持有的那份克隆出来；装配与重建的每个入口都收它——它与装配机同单元，否则环 2 内成环。
 
@@ -14,7 +14,6 @@ use crate::units::business::sandbox::api::SandboxPolicies;
 use crate::units::business::session_model::api::SessionDecls;
 use crate::units::business::tools::api::{ToolExec, Tools};
 use crate::units::business::versions::api::Versions;
-use crate::units::business::workspace::api::Workspace;
 
 /// 目的：装配一场会话要用的入站面（组合根注入的同一批端口）。
 pub struct SessionPorts {
@@ -32,8 +31,6 @@ pub struct SessionPorts {
     pub policies: Arc<SandboxPolicies>,
     /// 目的：常驻服务管理面：已就绪服务的操作并入一席的工具面。
     pub residents: Arc<dyn ResidentOps + Send + Sync>,
-    /// 目的：工作区用例面：目录布局、沙箱寻址与文件寻址按它问。
-    pub workspace: Arc<dyn Workspace + Send + Sync>,
     /// 目的：版本库用例面：一席的 `work_*` 工具执行者按它造。
     pub versions: Arc<dyn Versions + Send + Sync>,
     /// 目的：压缩通道工厂：新会话与重建会话共用同一份。

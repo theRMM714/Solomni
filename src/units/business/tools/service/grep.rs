@@ -1,12 +1,12 @@
 //! 目的：内置 `grep` 的**匹配与输出编排**——按模式扫文件或目录，逐行给命中与上下文，并按过滤规则剪枝。
 //! 管：模式编译（正则 / 字面、忽略大小写）、glob 过滤、目录遍历后的目标收敛、逐文件流式扫描、上下文拼行、命中与扫描计数、回执与截断说明。
 //! 不管：遍历与剪枝机制（`ignore` 与 `Rules` 在 `src/units/business/tools/detail/sys_io.rs` 的 `SysIo::walk`）、结果预算规则（`src/units/business/tools/domain/budget.rs`）、工具面发放（`systools/tools.yaml`）。
-//! 联动：`src/units/business/tools/service/systool.rs` 验参后调 `run`；过滤规则来自 `src/units/business/workspace/domain/path_filter.rs`，IO 走 `SysIo` 端口。
+//! 联动：`src/units/business/tools/service/systool.rs` 验参后调 `run`；过滤规则来自 `src/units/business/workbench/domain/filter.rs`，IO 走 `SysIo` 端口。
 
 use crate::units::business::tools::api::ResultBudget;
 use crate::units::business::tools::domain::systool::*;
 use crate::units::business::tools::ports::{SysIo, WalkOpts};
-use crate::units::business::workspace::api::{Place, Sandbox, WORKIGNORE_SEED};
+use crate::units::business::workbench::api::{Area, Bench, WORKIGNORE_SEED};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
@@ -158,8 +158,8 @@ fn grep_file(
 /// 约束：默认按 `.gitignore` / `.ignore` 与工作区过滤规则 + 隐藏文件 + 二进制剪枝，`no_ignore` 一关全关；显式单文件 `path` 不走遍历与剪枝。
 /// 返回：成功时 `ok=true`；模式、glob、遍历或扫描失败时如实给出原因。
 pub(super) fn run(
-    sb: &Sandbox,
-    place: &Place,
+    sb: &Bench,
+    place: &Area,
     io: &dyn SysIo,
     budget: ResultBudget,
     args: &serde_json::Value,

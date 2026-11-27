@@ -7,7 +7,7 @@ use super::*;
 use crate::tests::doubles::test_workspace_store;
 use crate::units::business::session_model::api::{MEETING, SINGLE, SessionSpec};
 use crate::units::business::versions::api::{ChangeKind, CommitAnchor};
-use crate::units::business::workspace::api::{WORKIGNORE, WORKIGNORE_SEED};
+use crate::units::business::workbench::api::{WORKIGNORE, WORKIGNORE_SEED};
 
 fn meta(name: &str) -> SessionMeta {
     SessionMeta {

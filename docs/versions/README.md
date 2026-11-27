@@ -24,7 +24,7 @@
 - **冲突解决的安全边界**：`take=local` 必须带 `expect_head`（调用方看到的主副本提交 id），与当前 head 不符整次拒绝；本地与基线一致（没改过）时整次拒绝；本地缺失 / 没有基线只警告不硬拒。`take=upstream` 覆盖或删除本地文件前先把本地版本流式备份到 `.work/lost/<agent>/@resolve/<rel>`，任一备份失败则整次拒绝、不覆盖。不做自动合并（`src/units/business/versions/service/resolve.rs`、`src/units/business/versions/domain/workstore/resolve.rs`）。
 - **写事务与恢复**：提交 / 推送 / 同步 / 物化 / 丢弃先写 `.work/` 的 `pending.json`，再改主副本、提交记录、head 与基线；任一步失败由下一次操作幂等重放。元数据与对象用同目录临时文件 + rename；`.work/next-id` 只增不复用；`.work/lock` 是跨进程写闸；`.work/lost/<agent>/@<来源>/<rel>` 是覆盖 / 删除前的本地版本备份（`src/units/business/versions/service.rs`）。
 - **外部工作区**：工作区磁盘是外部内容的真相——`work_pull` 只拉与 head 一致的路径，`D != head` 的路径进回执的 `external`；`work_push` 写盘前核对同一条路径的磁盘指纹，被外部改过就整次拒绝；`work_status` 也列出 `external`；`work_sync` 读磁盘把差异采纳成 `author=external` 的提交；回档物化只删**当前 head 树里目标树没有**的路径，未跟踪文件永不自动删。多个会话绑同一外部根时共用一个工作区写锁（锁文件路径问 `workspace`，锁在这里取）。
-- **过滤名单只有一份**：版本库目录里的 `.workignore`（语法同 `.gitignore`）。**内容面**（首次导入、`work_status` 的未跟踪清单、`work_commit` / `work_sync` 的文件夹展开）与**检索面**（内置 `grep` 的默认剪枝）都按这一份名单判「哪些路径算工作区内容」；`.gitignore` 只参与检索面。显式点名单个文件仍然生效（同 `git add -f`），已跟踪文件不会因新规则消失；list / add / remove 是唯一维护入口（`src/units/business/versions/service/ignore.rs`、`src/units/business/workspace/domain/path_filter.rs`）。
+- **过滤名单只有一份**：版本库目录里的 `.workignore`（语法同 `.gitignore`）。**内容面**（首次导入、`work_status` 的未跟踪清单、`work_commit` / `work_sync` 的文件夹展开）与**检索面**（内置 `grep` 的默认剪枝）都按这一份名单判「哪些路径算工作区内容」；`.gitignore` 只参与检索面。显式点名单个文件仍然生效（同 `git add -f`），已跟踪文件不会因新规则消失；list / add / remove 是唯一维护入口（`src/units/business/versions/service/ignore.rs`、`src/units/business/workbench/domain/filter.rs`）。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 

@@ -5,7 +5,7 @@
 
 use super::support::*;
 use crate::units::business::versions::ports::WorkStore;
-use crate::units::business::workspace::api::{Rules, WORKIGNORE};
+use crate::units::business::workbench::api::{Rules, WORKIGNORE};
 
 /// 目的：没有名单文件时按种子答话；add 去重、立刻生效、remove 精确删行。
 #[test]

@@ -22,7 +22,8 @@ use crate::units::business::sandbox::api::GuestOs;
 use crate::units::business::session_model::api::SessionMeta;
 use crate::units::business::transcript::api::SessionEvent;
 use crate::units::business::turn_state::api::Turn;
-use crate::units::business::workspace::api::{ModuleDir, Sandbox, Sandboxes, SeatFacts, SeatPlan};
+use crate::units::business::workbench::api::{Bench, Benches};
+use crate::units::business::workspace::api::{ModuleDir, SeatFacts, SeatPlan, seat_benches};
 use crate::units::pure::exec_model::api::Side;
 use crate::units::pure::permission::api::PermissionSet;
 use crate::units::pure::permission::api::SharedScope;
@@ -41,7 +42,7 @@ impl Turn {
         probe: &dyn HostProbe,
         meta: &SessionMeta,
         roster: &Roster,
-    ) -> Result<Sandboxes, String> {
+    ) -> Result<Benches, String> {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
         // 沙箱锚在**顶层工作**上：整棵树不论嵌套多少层只有一个 work/。
         let work = work_root_of(self.history.as_ref(), meta)?;
@@ -71,7 +72,7 @@ impl Turn {
             });
         }
         let app = registry.app();
-        crate::units::business::workspace::api::seat_sandboxes(&SeatFacts {
+        seat_benches(&SeatFacts {
             work: &work,
             session: &meta.name,
             roots: &roots,
@@ -171,7 +172,7 @@ impl Turn {
         &self,
         registry: &dyn Registry,
         modules: &[Module],
-        sb: &Sandbox,
+        sb: &Bench,
         net: bool,
         side: Side,
         host_plan: &PackagePlan,
@@ -190,7 +191,7 @@ impl Turn {
         );
         let menv = crate::units::business::tools::api::member_env(
             &crate::units::business::tools::api::MemberEnvFacts {
-                sandbox: sb,
+                bench: sb,
                 host_read_roots: &host_read_roots,
                 net,
                 side,
@@ -216,7 +217,7 @@ impl Turn {
         &self,
         registry: &dyn Registry,
         modules: &[Module],
-        sb: &Sandbox,
+        sb: &Bench,
         unavailable: BTreeMap<String, Vec<String>>,
         net: bool,
         mode: ToolMode,
@@ -238,7 +239,7 @@ impl Turn {
             .collect();
         let spec = MemberSpec {
             modules,
-            sandbox: sb,
+            bench: sb,
             unavailable,
             mode,
             loop_id,
@@ -266,7 +267,7 @@ impl Turn {
         a: &AgentMeta,
         modules: &[Module],
         channel: Channel,
-        sb: &Sandbox,
+        sb: &Bench,
         unavailable: BTreeMap<String, Vec<String>>,
         net: bool,
         guest: Option<GuestOs>,
@@ -283,7 +284,7 @@ impl Turn {
             agent: a,
             member: MemberSpec {
                 modules,
-                sandbox: sb,
+                bench: sb,
                 unavailable,
                 mode: registry.tool_mode(a.model.as_deref()),
                 // 单 agent 工作：用户自己开的那场对话（不是任务链的节点）——坐会话类型声明的那一席。

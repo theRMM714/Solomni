@@ -278,7 +278,7 @@ pub(crate) fn native_member(
                 loop_id: "standard".to_string(),
                 role: "solo".to_string(),
                 modules,
-                sandbox: sb.clone(),
+                bench: sb.clone(),
                 tools_this_turn: test_prompts()
                     .text(crate::units::business::prompt::api::Segment::ToolsThisTurn)
                     .to_string(),
@@ -305,7 +305,6 @@ pub(crate) fn native_member(
             exec: crate::units::business::tools::api::host_sandbox(exec_svc),
             residents: Arc::new(crate::units::business::residents::api::NoResidents),
             // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
-            workspace: None,
             versions: None,
             observations: crate::units::business::tools::api::Observations::default(),
             shell_live: None,

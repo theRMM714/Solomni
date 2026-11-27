@@ -14,7 +14,7 @@ use crate::units::business::session_model::api::AskDesk;
 use crate::units::business::session_model::api::SessionMeta;
 use crate::units::business::tools::api::ToolExec;
 use crate::units::business::transcript::api::{LineView, SessionEvent};
-use crate::units::business::workspace::api::Sandboxes;
+use crate::units::business::workbench::api::Benches;
 use std::sync::Arc;
 
 use super::lines::*;
@@ -239,7 +239,7 @@ impl CollabSession {
         log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
         meta: &SessionMeta,
         events: &[serde_json::Value],
-        sandboxes: Sandboxes,
+        sandboxes: Benches,
         // 这一段跑讨论还是执行（同一条会话按会话类型表各重建一份）。
         phase: Phase,
         // 本会话的裁决队（核心按会话 id 与转录里已发出的卡号给）：重建出来的整队进它。

@@ -1,9 +1,9 @@
 //! 目的：工作区目录遍历的唯一实现（列文件、稳定排序、可选规则剪枝与条数上限）。
 //! 管：从根往下递归列文件（只列文件）；相对路径一律 / 分隔；逐层按名字排序；给了规则就把命中的子树整棵剪掉。
 //! 不管：不判权限、不读文件内容、不跟随符号链接；是否把链接当文件由调用方决定。
-//! 联动：`fs_workstore` 的 list / list_visible 与 `fs_workspace` 的清单共用这一份，规则语义只在 `domain/path_filter.rs`。
+//! 联动：`fs_workstore` 的 list / list_visible 与 `fs_workspace` 的清单共用这一份，规则语义只在 `workbench/domain/filter.rs`。
 
-use crate::units::business::workspace::api::path_filter::Rules;
+use crate::units::business::workbench::api::filter::Rules;
 use std::path::{Path, PathBuf};
 
 /// 目的：递归列文件到 out（只列文件），相对路径用 / 分隔；超过 limit 条就停。

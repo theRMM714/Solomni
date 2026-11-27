@@ -242,7 +242,7 @@ node run-tests.js --coverage
 | `vm` | `src/units/business/vm/domain/exec.rs` | weekly |
 | `vm` | `src/units/business/vm/service.rs` | weekly |
 | `workspace` | `src/units/business/workspace/domain/scope.rs` | weekly |
-| `workspace` | `src/units/business/workspace/domain/workspace.rs` | weekly |
+| `workspace` | `src/units/business/workspace/domain/seats.rs` | weekly |
 | `workspace` | `src/units/business/workspace/service/roots.rs` | weekly |
 
 > 8 个单元、周检 18 个文件；本表由 `tests/specs/*.yaml` 的 `mutation` 块生成（`node tests/docs-sync.mjs --write`），不手写。

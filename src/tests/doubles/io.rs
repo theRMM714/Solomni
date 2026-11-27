@@ -267,7 +267,7 @@ impl SysIo for InMemorySysIo {
             return Err(m.clone());
         }
         let compiled = match (opts.ignore, rules) {
-            (true, Some(text)) => Some(crate::units::business::workspace::api::Rules::compile(
+            (true, Some(text)) => Some(crate::units::business::workbench::api::Rules::compile(
                 root, text,
             )?),
             _ => None,

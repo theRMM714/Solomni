@@ -11,7 +11,7 @@ use super::super::prelude::*;
 ///   CI 没有 UNC，缺省打印 [探针] 如实跳过；用例自己在 UNC 根下建子目录并在结束时清掉。
 #[test]
 pub(crate) fn sandboxes_lookup_is_by_agent() {
-    let boxes = crate::units::business::workspace::api::Sandboxes {
+    let boxes = crate::units::business::workbench::api::Benches {
         shared: abs(&["w", "work"]),
         session_root: abs(&["w"]),
         list: vec![test_sandbox("甲", &["a"])],

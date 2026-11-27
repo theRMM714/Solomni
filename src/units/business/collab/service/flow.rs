@@ -18,7 +18,7 @@ use crate::units::business::transcript::api::SessionEvent;
 use crate::units::business::turn_state::api::{
     Flow, GateTicket, Handback, MemberAsk, Settle, WorkPlan,
 };
-use crate::units::business::workspace::api::Sandboxes;
+use crate::units::business::workbench::api::Benches;
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::pure::taskchain::api::NodeStatus;
 
@@ -144,7 +144,7 @@ impl Flow for CollabSession {
         self.retask_text(text)
     }
 
-    fn set_sandboxes(&mut self, sandboxes: Sandboxes) {
+    fn set_sandboxes(&mut self, sandboxes: Benches) {
         CollabSession::set_sandboxes(self, sandboxes);
     }
 

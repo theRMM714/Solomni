@@ -8,13 +8,13 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::kernel::api::fence::FencePlan;
-use crate::units::business::workspace::api::Sandbox;
+use crate::units::business::workbench::api::Bench;
 use crate::units::pure::exec_model::api::Side;
 
 /// 目的：派生一席工具环境所需的全部已取事实。
 pub struct MemberEnvFacts<'a> {
     /// 目的：该 agent 的沙箱（可达范围与权限面）。
-    pub sandbox: &'a Sandbox,
+    pub bench: &'a Bench,
     /// 目的：用户显式授权的主机只读根。
     pub host_read_roots: &'a [PathBuf],
     /// 目的：该会话是否放行出站网络。
@@ -47,7 +47,7 @@ pub struct MemberEnv {
 /// 参数：`facts` = 调用方已取好的事实（沙箱、只读根、网络、档位、基础根、包根、模块机密）。
 /// 返回：围栏（只读树并进包根、去重保序）、PATH 入口、工具链根、模块注入项。
 pub fn member_env(facts: &MemberEnvFacts<'_>) -> MemberEnv {
-    let mut fence = FencePlan::for_session(facts.sandbox, facts.host_read_roots, facts.net);
+    let mut fence = FencePlan::for_session(facts.bench, facts.host_read_roots, facts.net);
     fence.extend_read_tree(facts.package_roots.iter().cloned());
     let mut runtime_roots = if facts.side == Side::Host {
         facts.base_roots.to_vec()

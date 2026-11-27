@@ -92,7 +92,7 @@ pub(crate) fn member_with_tools(
                 loop_id: "standard".to_string(),
                 role: "solo".to_string(),
                 modules,
-                sandbox: test_sandbox("m0", &[]),
+                bench: test_sandbox("m0", &[]),
                 tools_this_turn: test_prompts()
                     .text(crate::units::business::prompt::api::Segment::ToolsThisTurn)
                     .to_string(),
@@ -123,7 +123,6 @@ pub(crate) fn member_with_tools(
             exec: crate::units::business::tools::api::host_sandbox(exec_svc),
             residents: Arc::new(crate::units::business::residents::api::NoResidents),
             // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
-            workspace: Default::default(),
             versions: None,
             observations: crate::units::business::tools::api::Observations::default(),
             shell_live: None,

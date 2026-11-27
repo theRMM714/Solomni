@@ -690,7 +690,7 @@ impl Work {
         registry: &dyn Registry,
         probe: &Arc<dyn HostProbe + Send + Sync>,
         plan: &crate::units::business::vm::api::ExecPlan,
-        sandboxes: &crate::units::business::workspace::api::Sandboxes,
+        sandboxes: &crate::units::business::workbench::api::Benches,
         restart: bool,
         lease: &str,
     ) -> GuestBoot {

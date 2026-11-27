@@ -469,8 +469,8 @@ fn freshness_now(
     // 占位符策略：只有内容真变了（Changed）才换；版本变了但那段内容还在（Shifted）照旧供着。
     let stale: Vec<bool> = ws
         .judge_reads(
-            &tools.face.sandbox.work_name,
-            &tools.face.sandbox.agent,
+            &tools.face.bench.work_name,
+            &tools.face.bench.agent,
             &queries,
         )
         .ok()?

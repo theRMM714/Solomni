@@ -4,7 +4,7 @@
 //! 联动：由 workspace 的 service.rs 持有（R12）；布局见 docs/session/session-model.md。
 
 use crate::kernel::api::layout;
-use crate::units::business::workspace::api::{
+use crate::units::business::workbench::api::{
     AreaUsage, WORKIGNORE, WORKIGNORE_SEED, WorkFiles, WorkRoots, WorkUsage,
 };
 use crate::units::business::workspace::ports::Workdirs;

@@ -20,7 +20,7 @@ use crate::units::business::system::api::{
     SetupOps, System, WorkGcRequest,
 };
 use crate::units::business::versions::api::WorkGcReport;
-use crate::units::business::workspace::api::safe_file_name;
+use crate::units::business::workbench::api::safe_file_name;
 use crate::units::pure::exec_model::api::JobState;
 use crate::units::resource::sessions::api::Sessions;
 

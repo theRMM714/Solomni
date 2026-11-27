@@ -144,7 +144,7 @@ impl SessionParams {
     /// 目的：从（agent、沙箱、模块清单）装配：沙箱给真实根与模块目录，模块清单给能力包。 这是**唯一**的装配口径——会话的建立与重建都走它，参数不会两处各拼一套。
     pub fn from_workspace(
         agent: &str,
-        sb: &crate::units::business::workspace::api::Sandbox,
+        sb: &crate::units::business::workbench::api::Bench,
         modules: &[crate::units::business::catalog::modules::api::Module],
         loop_id: &str,
         role: &str,

@@ -9,7 +9,7 @@ mutation:
   schedule: weekly
   files:
     - src/units/business/workspace/domain/scope.rs
-    - src/units/business/workspace/domain/workspace.rs
+    - src/units/business/workspace/domain/seats.rs
     - src/units/business/workspace/service/roots.rs
 cases:
   - id: cargo/tests::detail::fs

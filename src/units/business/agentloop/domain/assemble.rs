@@ -16,7 +16,7 @@ use crate::units::business::prompt::api::Prompt;
 use crate::units::business::residents::api::{ResidentOps, ServiceState, ServiceView};
 use crate::units::business::session_model::api::{Loops, SOURCE_MODULE, ToolSource, TurnCtx};
 use crate::units::business::tools::api::{ToolNotes, tool_notes};
-use crate::units::business::workspace::api::{Sandbox, Workspace};
+use crate::units::business::workbench::api::Bench;
 
 /// 目的：**已就绪**常驻服务的操作，按模块分组（模块 → 该模块的服务操作）。
 /// 约束：只收已就绪的服务——没启动的没有操作可发现，不该出现在模型工具面里。
@@ -98,12 +98,10 @@ pub struct FaceInput<'a> {
     /// 目的：流程段与角色的声明表（loop 来源在装配期按它拍平；核实环境给 None）。
     pub loops: Option<&'a Loops>,
     pub modules: &'a [Module],
-    pub sandbox: &'a Sandbox,
+    pub bench: &'a Bench,
     pub prompt: &'a dyn Prompt,
     pub residents: &'a dyn ResidentOps,
-    /// 目的：共享区工具的宿主（核实环境没有工作区：None = 一个 `work_*` 也不发）。
-    pub workspace: Option<&'a Arc<dyn Workspace + Send + Sync>>,
-    /// 目的：版本库用例面（一席的 `work_*` 执行者按它造）；与 `workspace` 同生同灭。
+    /// 目的：版本库用例面（一席的 `work_*` 执行者按它造）；没有工作区的席位给 None（一个 `work_*` 也不发）。
     pub versions:
         Option<&'a Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>>,
 }
@@ -152,15 +150,15 @@ pub fn assemble(input: FaceInput<'_>) -> SeatFace {
         .unwrap_or_default();
     let sources = build_sources(input.source_ids, &table, input.system_tools, &loop_tools);
     let (allowed, used) = face_of(&ctx, &sources);
-    let handlers = match (input.workspace, input.versions) {
-        (Some(_), Some(versions)) => {
-            crate::units::business::versions::api::work_handlers(versions, input.sandbox, &allowed)
+    let handlers = match (input.workspace_name.is_some(), input.versions) {
+        (true, Some(versions)) => {
+            crate::units::business::versions::api::work_handlers(versions, input.bench, &allowed)
         }
         _ => Vec::new(),
     };
     let mut notes = tool_notes(
         input.prompt,
-        input.sandbox,
+        input.bench,
         if with_modules { input.modules } else { &[] },
         &service_param_lines,
     );

@@ -164,7 +164,7 @@ impl ToolExec for ToolsService {
 
     fn run_builtin(
         &self,
-        sb: &crate::units::business::workspace::api::Sandbox,
+        sb: &crate::units::business::workbench::api::Bench,
         builtin_tools: &ToolBook,
         observations: Observations,
         gate: Option<&dyn crate::units::business::workbench::api::WriteGate>,

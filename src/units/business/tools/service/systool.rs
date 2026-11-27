@@ -6,8 +6,8 @@
 use crate::units::business::tools::api::{Coverage, LineRange, ObservationFact, ObservationSource};
 use crate::units::business::tools::domain::systool::*;
 use crate::units::business::tools::ports::{Expect, Mutation, SysIo, WriteFault, WriteOp};
+use crate::units::business::workbench::api::{Area, Bench};
 use crate::units::business::workbench::api::{GateItem, Need, VersionRef};
-use crate::units::business::workspace::api::{Place, Sandbox};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 /// 目的：把门禁拒绝同时写进 output 与结构化说明（稳定错误码供 UI / 模型分流）。
@@ -42,7 +42,7 @@ fn write_fail(fault: &WriteFault, spec: &str) -> crate::kernel::api::types::Tool
 /// 约束：只给测试直调；生产路径一律走 execute_with_budget。
 #[cfg(test)]
 pub fn execute(
-    sb: &Sandbox,
+    sb: &Bench,
     book: &crate::units::business::tools::api::ToolBook,
     io: &dyn SysIo,
     obs: &mut Observations,
@@ -65,7 +65,7 @@ pub fn execute(
 /// 目的：带本批预算执行内置工具——read 在**执行前**按它选行，事后再由调用方按同一预算兜底。
 #[allow(clippy::too_many_arguments)]
 pub fn execute_with_budget(
-    sb: &Sandbox,
+    sb: &Bench,
     book: &crate::units::business::tools::api::ToolBook,
     io: &dyn SysIo,
     obs: &mut Observations,
@@ -165,15 +165,15 @@ pub fn execute_with_budget(
 }
 
 /// 目的：一条绝对路径在工作树内的相对写法（斜杠分隔）；拿不到根或不在根内 = None。
-fn rel_of(sb: &Sandbox, place: &Place, path: &Path) -> Option<String> {
+fn rel_of(sb: &Bench, place: &Area, path: &Path) -> Option<String> {
     let root = sb.root_of(place)?;
     let rel = path.strip_prefix(root).ok()?;
     Some(crate::kernel::api::path::slash(rel))
 }
 
 /// 目的：观察事实里记哪个工作树：共享区为空串，其余记 agent 名。
-fn worktree_of(sb: &Sandbox, place: &Place) -> String {
-    if matches!(place, Place::Shared) {
+fn worktree_of(sb: &Bench, place: &Area) -> String {
+    if matches!(place, Area::Shared) {
         String::new()
     } else {
         sb.agent.clone()
@@ -187,7 +187,7 @@ struct Origin {
 }
 
 impl Origin {
-    fn of(sb: &Sandbox, place: &Place, path: &Path) -> Origin {
+    fn of(sb: &Bench, place: &Area, path: &Path) -> Origin {
         Origin {
             rel: rel_of(sb, place, path),
             worktree: worktree_of(sb, place),
@@ -250,7 +250,7 @@ fn list(io: &dyn SysIo, spec: &str, path: &Path) -> ToolOutcome {
 /// 共享区走 work_commit 的 deletes，模块目录（含 userdata）由模块自己的工具维护。
 /// 删除链接只删链接本身，绝不顺着链接去删目标。
 fn delete(
-    sb: &Sandbox,
+    sb: &Bench,
     io: &dyn SysIo,
     obs: &mut Observations,
     args: &serde_json::Value,
@@ -281,13 +281,13 @@ fn delete(
             Ok(x) => x,
             Err(e) => return fail(e),
         };
-        if !matches!(&place, Place::Private) {
+        if !matches!(&place, Area::Private) {
             let why = match &place {
-                Place::Shared => "共享区不在这里删：用 work_commit 的 deletes 显式列出",
-                Place::Module(_) => {
+                Area::Shared => "共享区不在这里删：用 work_commit 的 deletes 显式列出",
+                Area::Module(_) => {
                     "模块目录（含 userdata）由模块自己的工具 / 服务进程维护；delete 只删你自己的沙箱"
                 }
-                Place::Private => unreachable!(),
+                Area::Private => unreachable!(),
             };
             return fail(format!("delete 拒绝 {}：{}", spec, why));
         }
@@ -348,8 +348,8 @@ fn delete(
 /// read：按行区间返回，行号从 1 数起；回执末尾告诉模型接着用哪个 offset，并如实记账"读到的是不是全文"。
 #[allow(clippy::too_many_arguments)]
 fn read(
-    sb: &Sandbox,
-    place: &Place,
+    sb: &Bench,
+    place: &Area,
     io: &dyn SysIo,
     obs: &mut Observations,
     budget: crate::units::business::tools::api::ResultBudget,
@@ -695,7 +695,7 @@ fn edit(
 /// 原子性：先解析 + 寻址 + 读入 + 在内存里算出全部新内容；任何一块不成立就**一个文件都不写**，
 /// 回执点名第几块、为什么。同一个文件被多块改到时，后一块看到前一块的结果。
 fn apply_patch(
-    sb: &Sandbox,
+    sb: &Bench,
     io: &dyn SysIo,
     obs: &mut Observations,
     gate: Option<&dyn crate::units::business::workbench::api::WriteGate>,
@@ -711,7 +711,7 @@ fn apply_patch(
     let mut pending: BTreeMap<PathBuf, String> = BTreeMap::new();
     let mut coverage: BTreeMap<PathBuf, Coverage> = BTreeMap::new();
     let mut sources: BTreeMap<PathBuf, ObservationSource> = BTreeMap::new();
-    let mut places: BTreeMap<PathBuf, Place> = BTreeMap::new();
+    let mut places: BTreeMap<PathBuf, Area> = BTreeMap::new();
     // 每个路径的磁盘基线：事务提交时在锁内再比一次（不能拿补丁算出的新内容当期望）。
     let mut expects: BTreeMap<PathBuf, Expect> = BTreeMap::new();
     // 门禁检查攒到全部块解析完再一次性做：一批补丁只取一次工作区快照。

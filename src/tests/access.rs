@@ -1,5 +1,5 @@
 //! 目的：钉住「一席的生效面」三处派生——权限链（会话模型）、共享区归属与沙箱清单（工作台）、工具运行环境（工具单元）。
-//! 管：`session_model::api::permissions` 的档位求交、`workspace::api::scope_from` 与 `seat_sandboxes` 的落值、
+//! 管：`session_model::api::permissions` 的档位求交、`workspace::api::scope_from` 与 `seat_benches` 的落值、
 //!   `tools::api::member_env` 与 `host_read_roots` 的环境派生；纯内存，不碰端口、不落盘。
 //! 不管：取事实（`turn` 的 service 层）、机制侧怎么用围栏。
 //! 联动：`turn/turn/service/facts.rs` 取好会话链与包事实后转调这三处；改派生规则必须同改断言。
@@ -10,9 +10,9 @@ use crate::units::business::session_model::api::{
     MEETING, RunState, SINGLE, SessionMeta, WorkspaceDecl,
 };
 use crate::units::business::tools::api::{MemberEnvFacts, host_read_roots, member_env};
+use crate::units::business::workbench::api::{Bench, WorkRoots};
 use crate::units::business::workspace::api::{
-    ModuleDir, Sandbox, SeatFacts, SeatPlan, WorkRoots, edit_of, edit_params, scope_from,
-    seat_sandboxes,
+    ModuleDir, SeatFacts, SeatPlan, edit_of, edit_params, scope_from, seat_benches,
 };
 use crate::units::pure::exec_model::api::Side;
 use crate::units::pure::permission::api::{
@@ -56,8 +56,8 @@ fn meta(name: &str, parent: Option<&str>, tier: Side, kind: &str) -> SessionMeta
 }
 
 /// 一席默认权限的沙箱（模块目录为空，共享区走缺省读范围）。
-fn sandbox() -> Sandbox {
-    Sandbox {
+fn sandbox() -> Bench {
+    Bench {
         work_name: "w".to_string(),
         session: "s".to_string(),
         agent: "a".to_string(),
@@ -216,7 +216,7 @@ fn member_env_merges_package_roots_once_and_only_host_tier_keeps_base_roots() {
     let module_vars =
         BTreeMap::from([("m1".to_string(), vec![("K".to_string(), "V".to_string())])]);
     let host = member_env(&MemberEnvFacts {
-        sandbox: &sb,
+        bench: &sb,
         host_read_roots: &[],
         net: false,
         side: Side::Host,
@@ -249,7 +249,7 @@ fn member_env_merges_package_roots_once_and_only_host_tier_keeps_base_roots() {
         "包根并进围栏只留一份"
     );
     let vm = member_env(&MemberEnvFacts {
-        sandbox: &sb,
+        bench: &sb,
         host_read_roots: &[],
         net: false,
         side: Side::Guest,
@@ -282,7 +282,7 @@ fn host_read_roots_drop_blank_entries() {
 }
 
 #[test]
-fn seat_sandboxes_give_each_agent_only_its_own_modules() {
+fn seat_benches_give_each_agent_only_its_own_modules() {
     let mut m2 = module_of("m2");
     m2.private = Some(PathBuf::from("data/modules/m2/userdata"));
     let modules = vec![
@@ -324,7 +324,7 @@ fn seat_sandboxes_give_each_agent_only_its_own_modules() {
             private: None,
         },
     ];
-    let out = seat_sandboxes(&SeatFacts {
+    let out = seat_benches(&SeatFacts {
         work: "w",
         session: "s",
         roots: &roots,
@@ -362,7 +362,7 @@ fn a_seat_without_a_private_root_is_reported_by_name() {
         agents: BTreeMap::new(),
         store: PathBuf::from("store"),
     };
-    let why = seat_sandboxes(&SeatFacts {
+    let why = seat_benches(&SeatFacts {
         work: "w",
         session: "s",
         roots: &roots,
@@ -380,7 +380,7 @@ fn a_seat_without_a_private_root_is_reported_by_name() {
     })
     .expect_err("缺私有根应报错");
     assert!(
-        why.contains("工作区没有给出 agent a 的沙箱路径"),
+        why.contains("工作区没有给出 agent a 的工作面路径"),
         "文案要说清缺哪个 agent：{}",
         why
     );
