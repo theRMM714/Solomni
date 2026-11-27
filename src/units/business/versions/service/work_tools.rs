@@ -10,7 +10,8 @@ use crate::units::business::versions::api as dw;
 use crate::units::business::versions::api::{
     CommitRequest, DiffRequest, ResetRequest, ResolveRequest, ResolveTake,
 };
-use crate::units::business::workspace::api::{Sandbox, SharedScope};
+use crate::units::business::workspace::api::Sandbox;
+use crate::units::pure::permission::api::SharedScope;
 use std::sync::Arc;
 
 /// 目的：本席的工作区工具执行者：十个 `work_*` 名字由它认领，参数解析与路径权限在这里收口。

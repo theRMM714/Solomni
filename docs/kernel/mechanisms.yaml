@@ -18,6 +18,7 @@ detail/fs_meta: 0
 detail/io: 0
 detail/lock: 0
 detail/unpack: 0
+domain/hash: 0
 domain/layout: 0
 domain/name: 0
 domain/path: 0

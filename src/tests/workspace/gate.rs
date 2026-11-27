@@ -8,8 +8,8 @@ use super::support::*;
 /// 目的：门禁拒绝时写一条可追溯的审计记录，只记版本与路径、不记文件正文。
 #[test]
 pub(crate) fn gate_refusal_is_audited_without_file_content() {
-    use crate::units::business::tools::api::SessionWriteGate;
-    use crate::units::business::tools::api::{GateFault, Need, WriteGate};
+    use crate::units::business::agentloop::api::SessionWriteGate;
+    use crate::units::business::workbench::api::{GateFault, Need, WriteGate};
 
     let (ws, _dirs, _store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();
@@ -47,8 +47,8 @@ pub(crate) fn gate_refusal_is_audited_without_file_content() {
 /// 目的：一批写入只取一次快照，但每条仍按同一语义判定；返回第一条失败的序号。
 #[test]
 pub(crate) fn batch_gate_returns_the_first_failed_item() {
-    use crate::units::business::tools::api::SessionWriteGate;
-    use crate::units::business::tools::api::{GateFault, GateItem, Need, WriteGate};
+    use crate::units::business::agentloop::api::SessionWriteGate;
+    use crate::units::business::workbench::api::{GateFault, GateItem, Need, WriteGate};
 
     let (ws, _dirs, _store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();

@@ -69,7 +69,7 @@ pub(crate) fn source(
     buf.push(if decl.net { b'1' } else { b'0' });
     buf.push(0);
     collect_sources(module_root, module_root, &mut buf)?;
-    Ok(crate::units::business::versions::api::content_hash(&buf))
+    Ok(crate::kernel::api::hash::content_hash(&buf))
 }
 
 /// 目的：端口 `SourceDigest` 与 `BuildStates` 的落盘实现——状态文件与按次家目录都在产品根的 `.vm/build-state/` 下。

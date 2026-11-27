@@ -87,7 +87,7 @@ pub struct SandboxSettings {
     pub defaults: crate::units::pure::permission::api::PermissionDefaults,
     /// 目的：新建会话的默认共享区归属（读范围 / 写范围 / 黑名单）。
     #[serde(default)]
-    pub scope: crate::units::business::workspace::api::SharedScope,
+    pub scope: crate::units::pure::permission::api::SharedScope,
 }
 
 /// 目的：全局沙箱硬约束。会话不能覆盖这里的任何字段。
@@ -353,7 +353,7 @@ pub fn validate_sandbox_settings(s: &SandboxSettings) -> Result<(), String> {
         .validate()
         .map_err(|why| format!("sandbox.scope：{}", why))?;
     for e in &s.policy.deny {
-        crate::units::business::workspace::api::validate_entry(e)
+        crate::units::pure::permission::api::validate_entry(e)
             .map_err(|why| format!("sandbox.policy.deny：{}", why))?;
     }
     for r in &s.policy.host_read_roots {

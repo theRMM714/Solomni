@@ -8,6 +8,7 @@
 
 - 管：运行日志端口、宿主探测端口、**提问端口**（请用户裁决）、**时间**（`clock`：此刻的本机民用时间、到分钟流水戳，以及记时刻用的 `now_secs` / `now_ms`）。
 - 管：生成中作业的取消表。
+- 管：**内容指纹**（`hash`：SHA-256 增量实现，`content_hash` / `Sha256` / `is_content_hash`）——版本化、工具读写、运行包与素材指纹共用同一份。
 - 管：**端口载荷形状**（`contracts`：`SessionId` / `ToolOutcome` / `Ask`）与路径的对外书写形式；其余跨层共享形状归环 1 单元（`Side` / `TargetSpec` / `JobState` 在 `exec_model`）。
 - 管：**外部进程执行**——一次性的 `ProcessRunner` 与长驻的 `SessionHost`；围栏裁决经 `FenceGate` 原样转交，机制不解释裁决的业务变体。
 - 管：**长驻子进程的账与回收**（`procs`）。
@@ -18,7 +19,7 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api`（按对外概念分文件：`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `net` / `path` / `platform`——见「六、对外面」）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`FenceHost`、`FenceGate`、`UserPath`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执与回执说明）、`domain`（路径书写、取消表、沙箱模式、回执装配）、`detail`（`clock`、`file_log`、`host_probe`、`io`（`env` / `net`）、`unpack`、`user_path`、`process`、`procs`、`session`、`i18n`、`confine`：门面 + `job` / `ledger` / `paths` / `prep`）。
+- 入站面：`api`（按对外概念分文件：`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `net` / `path` / `platform` / `hash`——见「六、对外面」）、`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`PathCodec`、`ProcessRunner`、`SessionHost`、`FenceHost`、`FenceGate`、`UserPath`——R12 的例外：全项目共享）、`contracts`（共享形状、围栏描述符、执行回执与回执说明）、`domain`（路径书写、取消表、沙箱模式、回执装配）、`detail`（`clock`、`file_log`、`host_probe`、`io`（`env` / `net`）、`unpack`、`user_path`、`process`、`procs`、`session`、`i18n`、`confine`：门面 + `job` / `ledger` / `paths` / `prep`）。
 - `AskUser` 是「需要用户裁决的机制请用户裁决」的**唯一**入口（`src/kernel/ports.rs`），工具执行层与围栏用它。
   - 形状：`ask(问题) -> 选项 id`，**阻塞**。
   - `halt(为什么)` = 停会话 + 落警告；调用方只在有可回答前端时用它，没有前端按 fail-closed 收场。

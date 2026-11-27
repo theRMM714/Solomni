@@ -189,7 +189,7 @@ pub(crate) fn work_resolve_local_warns_when_local_missing_or_no_base() {
 /// 目的：take=upstream 覆盖前把本地版本备份到 lost/；work_lost 能列出并按当前 hash 恢复。
 #[test]
 pub(crate) fn work_resolve_upstream_backs_up_and_work_lost_restores() {
-    use crate::units::business::versions::api::content_hash;
+    use crate::kernel::api::hash::content_hash;
     use crate::units::business::versions::api::{ResolveAction, ResolveTake};
     use crate::units::business::versions::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
@@ -484,10 +484,7 @@ pub(crate) fn work_gc_keeps_index_and_commit_objects_and_removes_the_rest() {
     assert_eq!(dry.ignored_files, 1);
     assert!(
         store
-            .read_object(
-                &root,
-                &crate::units::business::versions::api::content_hash(b"g1")
-            )
+            .read_object(&root, &crate::kernel::api::hash::content_hash(b"g1"))
             .is_ok()
     );
 
@@ -497,19 +494,13 @@ pub(crate) fn work_gc_keeps_index_and_commit_objects_and_removes_the_rest() {
     assert_eq!(applied.removed_ignored, 1);
     assert!(
         store
-            .read_object(
-                &root,
-                &crate::units::business::versions::api::content_hash(b"g1")
-            )
+            .read_object(&root, &crate::kernel::api::hash::content_hash(b"g1"))
             .is_err(),
         "g1 应被回收"
     );
     assert!(
         store
-            .read_object(
-                &root,
-                &crate::units::business::versions::api::content_hash(b"g2")
-            )
+            .read_object(&root, &crate::kernel::api::hash::content_hash(b"g2"))
             .is_ok(),
         "基线引用的 g2 必须保留"
     );

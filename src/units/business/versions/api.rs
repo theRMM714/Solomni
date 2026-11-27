@@ -8,9 +8,8 @@ pub use crate::units::business::versions::domain::asset::{
 };
 
 pub use crate::units::business::versions::domain::freshness::ReadVerdict;
-pub use crate::units::business::versions::domain::hash::{Sha256, content_hash};
 
-pub use crate::units::business::versions::domain::readfact::ReadFact;
+pub use crate::units::business::workbench::api::{ReadFact, VersionRef};
 
 /// 目的：`work_*` 工具的名字、取参与回执拼装——`tools` 与 `turn` 只从这里取，不碰 domain。
 #[allow(unused_imports)]
@@ -34,15 +33,6 @@ pub use crate::units::business::versions::domain::workstore::{
 #[allow(unused_imports)]
 pub use crate::units::business::versions::service::work_tools::{WorkHandler, work_handlers};
 
-/// 目的：写入门禁用的一份版本身份：只关心"这份内容是不是同一份"，不返回正文。
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct GateFile {
-    /// 目的：整份内容的 SHA-256（与 `ReadFact.blob` / `Change.hash` 同源）。
-    pub hash: String,
-    /// 目的：文件字节数；来自对象树的基线版本可能没有大小（门禁只用 hash）。
-    pub size: Option<u64>,
-}
-
 /// 目的：一次写入门禁查询的结果：路径是否受管、当前内容与基线版本各是什么。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathGateInfo {
@@ -52,9 +42,9 @@ pub struct PathGateInfo {
     /// 约束：受管才要求观察；新建 / 构建产物 / scratch 不受门禁。
     pub tracked: bool,
     /// 目的：沙箱当前内容的版本；文件不存在（含已删除）= None。
-    pub current: Option<GateFile>,
+    pub current: Option<VersionRef>,
     /// 目的：受管版本的基线：优先该 agent 工作线 head，其次主线 head；都没有 = None。
-    pub base: Option<GateFile>,
+    pub base: Option<VersionRef>,
 }
 
 /// 目的：一条待判定的读取（一次 `read` 读到的行区间 + 当时的整份指纹）。

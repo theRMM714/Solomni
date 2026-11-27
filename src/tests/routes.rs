@@ -345,8 +345,8 @@ impl WorkOps for FakeFaces {
                 label: "离线".to_string(),
                 summary: "测试".to_string(),
                 shared: crate::units::business::work::api::PermissionSharedView {
-                    read: crate::units::business::workspace::api::ScopeMode::All,
-                    write: crate::units::business::workspace::api::ScopeMode::All,
+                    read: crate::units::pure::permission::api::ScopeMode::All,
+                    write: crate::units::pure::permission::api::ScopeMode::All,
                     deny: Vec::new(),
                 },
                 narrowed: false,

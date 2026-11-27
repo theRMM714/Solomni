@@ -34,6 +34,7 @@
 | `llm`（模型通道与协议） | [README.md](llm/README.md)、[unit-map.md](llm/unit-map.md) |
 | `sandbox`（执行环境策略） | [README.md](sandbox/README.md)、[unit-map.md](sandbox/unit-map.md) |
 | `vm`（虚拟机档，`vm` 策略的实现） | [README.md](vm/README.md)、[unit-map.md](vm/unit-map.md) |
+| `workbench`（工作台契约） | [README.md](workbench/README.md)、[unit-map.md](workbench/unit-map.md) |
 | `workspace`（工作区） | [README.md](workspace/README.md)、[unit-map.md](workspace/unit-map.md) |
 | `versions`（版本化工作区） | [README.md](versions/README.md)、[unit-map.md](versions/unit-map.md) |
 | `provision`（依赖补齐） | [README.md](provision/README.md)、[unit-map.md](provision/unit-map.md) |

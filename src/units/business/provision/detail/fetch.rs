@@ -236,12 +236,12 @@ pub(crate) fn download_with_resume(
     Ok(())
 }
 /// 目的：一个文件的 sha256（小写十六进制）——依赖补齐的完整性判据。
-/// 约束：复用 workspace 的 `content_hash`（项目里唯一那份零依赖 SHA-256，见其模块注释：
+/// 约束：复用内核的 `content_hash`（项目里唯一那份零依赖 SHA-256，见 `src/kernel/domain/hash.rs`：
 ///   "不引入加密库（项目依赖刻意保持最小）"）。整份读进内存是一次性的补齐全动作，最多几百 MB——
 ///   宁可这样，也不引第二套算法或加密库。
 pub(crate) fn sha256_file(path: &Path) -> Result<String, String> {
     let bytes = fs::read(path).map_err(|e| format!("读不了 {}：{}", path.display(), e))?;
-    Ok(crate::units::business::versions::api::content_hash(&bytes))
+    Ok(crate::kernel::api::hash::content_hash(&bytes))
 }
 /// 目的：取一个目录页的纯文本（列 Debian 包名用）。
 pub(crate) fn get_text(agent: &ureq::Agent, url: &str) -> Result<String, String> {

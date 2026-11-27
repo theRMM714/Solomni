@@ -11,13 +11,14 @@ use crate::units::business::session_model::api::{
 };
 use crate::units::business::tools::api::{MemberEnvFacts, host_read_roots, member_env};
 use crate::units::business::workspace::api::{
-    ModuleDir, Sandbox, ScopeMode, SeatFacts, SeatPlan, SharedEdit, SharedScope, WorkRoots,
-    edit_of, edit_params, scope_from, seat_sandboxes,
+    ModuleDir, Sandbox, SeatFacts, SeatPlan, WorkRoots, edit_of, edit_params, scope_from,
+    seat_sandboxes,
 };
 use crate::units::pure::exec_model::api::Side;
 use crate::units::pure::permission::api::{
     PermissionDefaults, PermissionLayer, PermissionOverride, ProfileId,
 };
+use crate::units::pure::permission::api::{ScopeMode, SharedEdit, SharedScope};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;

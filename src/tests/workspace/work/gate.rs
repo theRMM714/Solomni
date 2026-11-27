@@ -8,7 +8,7 @@ use crate::tests::workspace::support::*;
 /// 目的：门禁快照只回答三件事——是否受管、基线版本、当前版本。
 #[test]
 pub(crate) fn work_gate_info_distinguishes_tracked_base_and_current() {
-    use crate::units::business::versions::api::content_hash;
+    use crate::kernel::api::hash::content_hash;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();
     ws.work_commit_user("w", "base.md", b"base\n", 1, 0)
@@ -70,11 +70,12 @@ pub(crate) fn work_gate_info_distinguishes_tracked_base_and_current() {
 /// 目的：会话门禁只认"当前版本的观察"，且 untracked 一律放行。
 #[test]
 pub(crate) fn session_gate_rejects_unobserved_and_stale_tracked_paths() {
-    use crate::units::business::tools::api::SessionWriteGate;
+    use crate::kernel::api::hash::content_hash;
+    use crate::units::business::agentloop::api::SessionWriteGate;
     use crate::units::business::tools::api::{
-        Coverage, GateFault, LineRange, Need, ObservationFact, ObservationSource, WriteGate,
+        Coverage, LineRange, ObservationFact, ObservationSource,
     };
-    use crate::units::business::versions::api::content_hash;
+    use crate::units::business::workbench::api::{GateFault, Need, VersionRef, WriteGate};
 
     let (ws, _dirs, _store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();
@@ -173,7 +174,7 @@ pub(crate) fn session_gate_rejects_unobserved_and_stale_tracked_paths() {
             Coverage::Ranges(vec![LineRange::new(2, 2)]),
         ),
     ];
-    let edited = crate::units::business::versions::api::GateFile {
+    let edited = VersionRef {
         hash: edited_version,
         size: None,
     };
@@ -200,12 +201,12 @@ pub(crate) fn session_gate_rejects_unobserved_and_stale_tracked_paths() {
 /// 目的：压缩把读过的工具行移出上下文后，那条观察不再授权后一轮的写。
 #[test]
 pub(crate) fn compaction_drops_read_authorization() {
-    use crate::units::business::tools::api::SessionWriteGate;
-    use crate::units::business::tools::api::WriteGate;
+    use crate::kernel::api::hash::content_hash;
+    use crate::units::business::agentloop::api::SessionWriteGate;
     use crate::units::business::tools::api::{
-        Coverage, GateFault, Need, ObservationFact, ObservationSource, Observations,
+        Coverage, ObservationFact, ObservationSource, Observations,
     };
-    use crate::units::business::versions::api::content_hash;
+    use crate::units::business::workbench::api::{GateFault, Need, WriteGate};
 
     let (ws, _dirs, _store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();
@@ -244,7 +245,8 @@ pub(crate) fn compaction_drops_read_authorization() {
 /// 目的：判决按内容——指纹相同 = SameVersion，行号移位但内容还在 = Shifted，改到读过的行 = Changed。
 #[test]
 pub(crate) fn judge_reads_separates_shifted_from_changed() {
-    use crate::units::business::versions::api::{ReadQuery, ReadVerdict, content_hash};
+    use crate::kernel::api::hash::content_hash;
+    use crate::units::business::versions::api::{ReadQuery, ReadVerdict};
     let (ws, _dirs, _store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();
     let v1 = b"a\nb\nc\n";
@@ -360,7 +362,8 @@ pub(crate) fn judge_reads_separates_shifted_from_changed() {
 /// 目的：沙箱里的读按沙箱当前内容判——主副本改了不影响它，沙箱自己改了才过期。
 #[test]
 pub(crate) fn judge_reads_follow_the_sandbox_copy() {
-    use crate::units::business::versions::api::{ReadQuery, ReadVerdict, content_hash};
+    use crate::kernel::api::hash::content_hash;
+    use crate::units::business::versions::api::{ReadQuery, ReadVerdict};
     use crate::units::business::versions::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.ensure_layout("w", &["a".to_string()]).unwrap();

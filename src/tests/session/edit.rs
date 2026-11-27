@@ -52,10 +52,10 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
             guest: Some(guest.clone()),
             pins: BTreeMap::new(),
             permission: None,
-            shared: Some(crate::units::business::workspace::api::SharedEdit {
-                write: Some(crate::units::business::workspace::api::ScopeMode::Paths(
-                    vec!["docs".to_string()],
-                )),
+            shared: Some(crate::units::pure::permission::api::SharedEdit {
+                write: Some(crate::units::pure::permission::api::ScopeMode::Paths(vec![
+                    "docs".to_string(),
+                ])),
                 ..Default::default()
             }),
         },
@@ -66,7 +66,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     assert_eq!(cfg.sandbox, "vm");
     assert_eq!(
         cfg.permission.shared.write,
-        crate::units::business::workspace::api::ScopeMode::Paths(vec!["docs".to_string()])
+        crate::units::pure::permission::api::ScopeMode::Paths(vec!["docs".to_string()])
     );
     let (meta, events) = hist.load(&sid).unwrap();
     assert_eq!(
@@ -79,9 +79,9 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
         crate::units::business::workspace::api::edit_of(&meta.workspace.params)
             .expect("共享区参数应能读回")
             .write,
-        Some(crate::units::business::workspace::api::ScopeMode::Paths(
-            vec!["docs".to_string()]
-        )),
+        Some(crate::units::pure::permission::api::ScopeMode::Paths(vec![
+            "docs".to_string()
+        ])),
         "会话级共享区归属写回 meta"
     );
     assert_eq!(

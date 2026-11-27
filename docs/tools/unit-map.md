@@ -9,7 +9,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/units/business/tools/api.rs` | 入站面：`Tools`（工具总表与保留名）、`ToolExec`（执行模块 / 内置 / shell 工具、释放围栏授权）与 `CommandBook`（产品命令面）的用例面与公开类型重导出；`SessionWriteGate` 把批前观察事实与 `work_gate_info` 合成为 `WriteGate` 判定（未受管放行、未观察 / 过期 / 非全文拒绝；批量 `check_many` 只取一次工作区快照，拒绝记 `warn` 审计） |
+| `src/units/business/tools/api.rs` | 入站面：`Tools`（工具总表与保留名）、`ToolExec`（执行模块 / 内置 / shell 工具、释放围栏授权）与 `CommandBook`（产品命令面）的用例面与公开类型重导出；写入门禁只以契约相认（`workbench::api::WriteGate`，实现在 `agentloop` 的 `SessionWriteGate`） |
 | `src/units/business/tools/service.rs` | `tools` 单元的用例与端口持有者：持工具总表与名字表（`SystemTools`）及 `SysIo` / `ProcessRunner` / `FenceHost` / `FenceGate` 四个端口 |
 | `src/units/business/tools/service/fence.rs` | 围栏裁决（`ToolFenceGate`）：必要落点授不上时问用户、按裁决无围栏跑一次或拒绝；回执文案与停会话在这里 |
 | `src/units/business/tools/ports.rs` | 出站端口：两张表的加载 `SystoolsSource` 与内置文件工具的读写 `SysIo`（含整份读 `FileRead`、按行窗口读 `FilePage` / `read_page`、`DirEntry`、目录遍历 `walk` 与 `WalkOpts` / `WalkEntry`、流式按行扫 `scan_lines` 与 `ScanSummary`、配置类小文件 `read_small`、写盘的 `Expect` / `Mutation` / `WriteReceipt` / `WriteFault` 数据形态） |

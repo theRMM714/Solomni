@@ -5,10 +5,9 @@
 
 use super::super::builders::*;
 use super::super::prelude::*;
-use crate::units::business::tools::api::{
-    Coverage, GateFault, LineRange, Need, Observations, WriteGate,
-};
-use crate::units::business::versions::api::{GateFile, content_hash};
+use crate::kernel::api::hash::content_hash;
+use crate::units::business::tools::api::{Coverage, LineRange, Observations};
+use crate::units::business::workbench::api::{GateFault, Need, VersionRef, WriteGate};
 use std::sync::Mutex;
 
 #[test]
@@ -165,7 +164,7 @@ pub(crate) fn read_capped_by_the_result_budget_is_not_full() {
 
 #[derive(Default)]
 struct FakeGate {
-    calls: Mutex<Vec<(String, Need, Option<GateFile>)>>,
+    calls: Mutex<Vec<(String, Need, Option<VersionRef>)>>,
     answer: Option<GateFault>,
 }
 
@@ -181,13 +180,13 @@ impl FakeGate {
         FakeGate::default()
     }
 
-    fn calls(&self) -> Vec<(String, Need, Option<GateFile>)> {
+    fn calls(&self) -> Vec<(String, Need, Option<VersionRef>)> {
         self.calls.lock().expect("锁").clone()
     }
 }
 
 impl WriteGate for FakeGate {
-    fn check(&self, path: &str, need: Need, current: Option<&GateFile>) -> Result<(), GateFault> {
+    fn check(&self, path: &str, need: Need, current: Option<&VersionRef>) -> Result<(), GateFault> {
         self.calls
             .lock()
             .expect("锁")

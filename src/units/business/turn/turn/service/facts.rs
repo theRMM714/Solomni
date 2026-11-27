@@ -22,11 +22,10 @@ use crate::units::business::session_model::api::SessionMeta;
 use crate::units::business::transcript::api::SessionEvent;
 use crate::units::business::turn_state::api::Turn;
 use crate::units::business::vm::api::GuestOs;
-use crate::units::business::workspace::api::{
-    ModuleDir, Sandbox, Sandboxes, SeatFacts, SeatPlan, SharedScope,
-};
+use crate::units::business::workspace::api::{ModuleDir, Sandbox, Sandboxes, SeatFacts, SeatPlan};
 use crate::units::pure::exec_model::api::Side;
 use crate::units::pure::permission::api::PermissionSet;
+use crate::units::pure::permission::api::SharedScope;
 use crate::units::pure::registry_model::api::AgentMeta;
 #[cfg(test)]
 use crate::units::pure::registry_model::api::ToolMode;

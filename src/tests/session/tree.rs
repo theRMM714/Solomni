@@ -370,8 +370,8 @@ pub(crate) fn cut_lines_stay_out_of_the_model_dialogue() {
 /// 目的：根编辑不覆盖子收窄；子只能再收窄，不能换更高档。
 #[test]
 pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
-    use crate::units::business::workspace::api::{ScopeMode, SharedEdit};
     use crate::units::pure::permission::api::{PermissionLayer, ProfileId};
+    use crate::units::pure::permission::api::{ScopeMode, SharedEdit};
     let hist = Arc::new(InMemoryHistory::new());
     let mut core = core_with_all(
         vec![module_of("a")],

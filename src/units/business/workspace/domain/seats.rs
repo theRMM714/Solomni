@@ -49,7 +49,7 @@ pub struct SeatFacts<'a> {
     /// 目的：虚拟机档给 guest↔宿主的路径翻译器。
     pub codec: Option<Arc<dyn PathCodec>>,
     /// 目的：全局默认共享区范围（会话声明的根可在它之上覆盖）。
-    pub base_scope: &'a crate::units::business::workspace::api::SharedScope,
+    pub base_scope: &'a crate::units::pure::permission::api::SharedScope,
     /// 目的：全局硬黑名单（任何一层都不得放开）。
     pub hard_deny: &'a [String],
     /// 目的：清单里可用的模块目录。

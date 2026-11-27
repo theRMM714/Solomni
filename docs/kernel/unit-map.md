@@ -13,7 +13,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/kernel.rs` | 地基库的入口与公开面：`contracts` / `api` / `ports` / `domain` / `detail` 五个子模块的形状声明 |
-| `src/kernel/api.rs` | 地基库对外面的入口：只声明 `api/` 下的面模块。面按**对外概念**切（`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `net` / `path` / `platform`），每个面只做重导出、不定义条目；能力与装配层经 `api::<面>` 取用，内核内部直取所属机制（见 [README](README.md) 的「六、对外面」） |
+| `src/kernel/api.rs` | 地基库对外面的入口：只声明 `api/` 下的面模块。面按**对外概念**切（`fence` / `note` / `run` / `types` / `clock` / `fs_meta` / `host_probe` / `i18n` / `locus` / `process` / `procs` / `lock` / `view_drive` / `actor` / `jobs` / `layout` / `name` / `net` / `path` / `platform` / `hash`），每个面只做重导出、不定义条目；能力与装配层经 `api::<面>` 取用，内核内部直取所属机制（见 [README](README.md) 的「六、对外面」） |
 | `src/kernel/ports.rs` | 全项目共享的机制端口：`Log` / `PathCodec` / `AskUser` / `ToolHandler` / `HostProbe` / `ProcessRunner` / `SessionHost` / `FenceHost` / `FenceGate` / `UserPath` 的 trait 定义与它们的纯数据形态（含 `ShellRun` 的 `gate`、用户 PATH 的 `PathValue`） |
 | `src/kernel/contracts.rs` | 跨层共享形状的入口：`fence` / `note` / `run` / `types` 四个子模块声明 |
 | `src/kernel/contracts/types.rs` | 跨层共享的端口载荷（纯数据）：`SessionId` / `ToolOutcome` / `Ask` / `AskOutcome` 与默认预算、能力名文法（执行档位与作业进度归 `exec_model`，不在 kernel） |
@@ -21,6 +21,7 @@
 | `src/kernel/contracts/run.rs` | 宿主执行端口的中性回执 `RunOutcome`（跑没跑、轻重、输出、说明；不含业务语义与文案） |
 | `src/kernel/contracts/fence.rs` | 围栏**意图**：`FencePlan`（`home` / `cwd` / `grants` / `net`）、`Grant`（`path` + `Access` + `Reach`）、`NetPolicy`、`FenceRunPolicy` 与 `FenceBlocked`：纯数据，不含任何平台词汇 |
 | `src/kernel/domain/actor.rs` | 命令队列（`Actor<S>`）：把一份核心状态搬到它自己的线程上，命令按到达顺序逐条执行，一条命令 panic 不带走整个核心；线程退出与 panic 都落日志。不含命令的业务语义 |
+| `src/kernel/domain/hash.rs` | 内容指纹 SHA-256：增量实现（`Sha256` / `content_hash` / `is_content_hash`），共享区内容寻址与运行包/素材指纹的唯一键（纯逻辑，对外经 `api::hash`） |
 | `src/kernel/domain/fence.rs` | 沙箱策略对机制的要求与本次模式（`SandboxRequirements` / `SandboxMode`）、按次租约生成：纯机制 |
 | `src/kernel/domain/path.rs` | 路径的对外书写形式（门面）：把路径统一写成 `/` 分隔的字符串；拆出 UNC 的 server / share，并给出落点身份 `Locus` 的键；平台实现在 `src/kernel/domain/path/windows.rs` / `src/kernel/domain/path/unix.rs` |
 | `src/kernel/domain/path/windows.rs` | `path` 的 Windows 后端：把 `\\?\` / `\\?\UNC\` 扩展前缀还原成普通写法 |

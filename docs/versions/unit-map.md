@@ -22,11 +22,9 @@
 | `src/units/business/versions/service/lifecycle.rs` | 生命周期族：丢失文件、恢复、回收、回滚、归档、删除、归档恢复、还原点、提交后丢弃 |
 | `src/units/business/versions/service/ignore.rs` | 过滤名单族：`work_ignore` 的 list / add / remove、逐条越界校验、行数与字节上限、整份规则的可编译校验与原子写回（只动版本库目录里的 `.workignore`） |
 | `src/units/business/versions/service/work_tools.rs` | 成员侧工作工具执行者：`WorkHandler` 认领 `work_pull` / `work_commit` / `work_push` / `work_sync` / `work_status` / `work_ignore` / `work_versions` / `work_diff` / `work_resolve` / `work_reset` / `work_lost`，参数解析与路径权限在这里收口；`work_handlers` 按工具面发放的 `allowed` 现取执行者 |
-| `src/units/business/versions/domain.rs` | 纯逻辑模块根：`asset` / `freshness` / `hash` / `readfact` / `work_tools` / `workstore` 六个子模块与跨会话写闸持有物 `SharedGuard` |
+| `src/units/business/versions/domain.rs` | 纯逻辑模块根：`asset` / `freshness` / `work_tools` / `workstore` 四个子模块与跨会话写闸持有物 `SharedGuard` |
 | `src/units/business/versions/domain/asset.rs` | 通用资产纯逻辑：分块扫描（指纹 / 大小 / NUL 与 UTF-8 判定 / 受限预览）、`FileVersion`、扩展名媒体类型提示与单文件上限 |
 | `src/units/business/versions/domain/freshness.rs` | 读取判决纯逻辑：读过的行在新版本里是否原样还在（按内容找连续行窗口，不看行号与时间），结论分 `SameVersion` / `Shifted` / `Changed` 三态 |
-| `src/units/business/versions/domain/hash.rs` | 内容指纹 SHA-256：增量实现，共享区内容寻址的唯一键（纯逻辑） |
-| `src/units/business/versions/domain/readfact.rs` | 读取事实 `ReadFact`：哪个工作树、哪个路径、读到哪几行、当时的整份指纹（随工具行落盘，过期由它派生） |
 | `src/units/business/versions/domain/work_tools.rs` | 成员侧工作工具的回执渲染纯逻辑：工具名清单（`is_work_tool`）、拉取 / 提交 / 推送 / 同步 / 状态 / 过滤名单 / 三方视图 / 差异 / 解决 / 回退 / 备份恢复的回执文本 |
 | `src/units/business/versions/domain/workstore.rs` | 版本化工作区纯逻辑的入口：`record` / `path` / `merge` / `resolve` / `status` / `diff` / `reset` 七个职责子模块与内联单测 `tests` 的声明，并向 `api.rs` / `service` 重导出同一个调用面 |
 | `src/units/business/versions/domain/workstore/record.rs` | 版本库记录形态：`Index` / `Tree` / `Change` / `Commit` / `Ref` 与待提交、对象信息、GC 报告 |
