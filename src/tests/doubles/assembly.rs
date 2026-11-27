@@ -48,31 +48,113 @@ pub(crate) fn test_llm_demo() -> Arc<dyn crate::units::business::llm::api::Llm +
     test_llm_with_repair(Arc::new(NoRepair))
 }
 
-/// 目的：测试用的 **workspace 入站面**：把两个出站端口装进 `WorkspaceService`（与生产同一条路，R12）。版本库默认用内存替身；要观察主副本/提交记录的用例用 `test_workspace_store`。
-pub(crate) fn test_workspace(
-    dirs: Arc<dyn Workdirs + Send + Sync>,
-) -> Arc<dyn crate::units::business::workspace::api::Workspace + Send + Sync> {
+/// 目的：测试用的工作区对：布局面（`Workspace`）与版本面（`Versions`）由同一份目录替身造出，与生产同一条装配路（R12）。
+/// 约束：布局方法在 `TestWork` 上直通，版本方法经 `Deref` 到 `dyn Versions`——用例照旧一处调两边。
+pub(crate) struct TestWork {
+    pub layout: Arc<dyn crate::units::business::workspace::api::Workspace + Send + Sync>,
+    pub versions: Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>,
+}
+
+impl std::ops::Deref for TestWork {
+    type Target = dyn crate::units::business::versions::api::Versions + Send + Sync;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.versions
+    }
+}
+
+impl TestWork {
+    pub(crate) fn bind(&self, name: &str, root: Option<&std::path::Path>) -> Result<(), String> {
+        self.layout.bind(name, root)
+    }
+
+    pub(crate) fn ensure_layout(&self, name: &str, agents: &[String]) -> Result<(), String> {
+        self.layout.ensure_layout(name, agents)
+    }
+
+    pub(crate) fn discard_layout(&self, name: &str, agents: &[String]) -> Result<(), String> {
+        self.layout.discard_layout(name, agents)
+    }
+
+    pub(crate) fn work_has(&self, session: &str, name: &str) -> bool {
+        self.layout.work_has(session, name)
+    }
+
+    pub(crate) fn files(
+        &self,
+        session: &str,
+        agents: &[String],
+    ) -> Result<crate::units::business::workspace::api::WorkFiles, String> {
+        self.layout.files(session, agents)
+    }
+
+    pub(crate) fn usage(
+        &self,
+        session: &str,
+        agents: &[String],
+    ) -> Result<crate::units::business::workspace::api::WorkUsage, String> {
+        self.layout.usage(session, agents)
+    }
+
+    pub(crate) fn roots(
+        &self,
+        name: &str,
+        agents: &[String],
+    ) -> Result<crate::units::business::workspace::api::WorkRoots, String> {
+        self.layout.roots(name, agents)
+    }
+
+    pub(crate) fn is_external(&self, session: &str) -> bool {
+        self.layout.is_external(session)
+    }
+
+    pub(crate) fn shared_lock_path(
+        &self,
+        session: &str,
+    ) -> Result<Option<std::path::PathBuf>, String> {
+        self.layout.shared_lock_path(session)
+    }
+
+    pub(crate) fn write_work(&self, session: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
+        self.layout.write_work(session, name, bytes)
+    }
+}
+
+/// 目的：测试用的工作区面（布局 + 版本）：版本库默认用内存替身；要观察主副本/提交记录的用例用 `test_workspace_store`。
+pub(crate) fn test_workspace(dirs: Arc<dyn Workdirs + Send + Sync>) -> TestWork {
     test_workspace_store(dirs, Arc::new(InMemoryWorkStore::new()))
 }
 
 pub(crate) fn test_workspace_store(
     dirs: Arc<dyn Workdirs + Send + Sync>,
     store: Arc<dyn WorkStore + Send + Sync>,
-) -> Arc<dyn crate::units::business::workspace::api::Workspace + Send + Sync> {
-    Arc::new(crate::units::business::workspace::service::WorkspaceService::new(dirs, store))
+) -> TestWork {
+    let layout: Arc<dyn crate::units::business::workspace::api::Workspace + Send + Sync> = Arc::new(
+        crate::units::business::workspace::service::WorkspaceService::new(Arc::clone(&dirs)),
+    );
+    let versions: Arc<dyn crate::units::business::versions::api::Versions + Send + Sync> = Arc::new(
+        crate::units::business::versions::service::VersionService::new(Arc::clone(&layout), store),
+    );
+    TestWork { layout, versions }
 }
 
-/// 目的：用指定的单文件上限装配 workspace 面（测试超限分支时避免造 64 MiB 数据）。
+/// 目的：用指定的单文件上限装配工作区面（测试超限分支时避免造 64 MiB 数据）。
 pub(crate) fn test_workspace_store_with_max(
     dirs: Arc<dyn Workdirs + Send + Sync>,
     store: Arc<dyn WorkStore + Send + Sync>,
     max: u64,
-) -> Arc<dyn crate::units::business::workspace::api::Workspace + Send + Sync> {
-    Arc::new(
-        crate::units::business::workspace::service::WorkspaceService::with_max_asset_bytes(
-            dirs, store, max,
+) -> TestWork {
+    let layout: Arc<dyn crate::units::business::workspace::api::Workspace + Send + Sync> = Arc::new(
+        crate::units::business::workspace::service::WorkspaceService::new(Arc::clone(&dirs)),
+    );
+    let versions: Arc<dyn crate::units::business::versions::api::Versions + Send + Sync> = Arc::new(
+        crate::units::business::versions::service::VersionService::with_max_asset_bytes(
+            Arc::clone(&layout),
+            store,
+            max,
         ),
-    )
+    );
+    TestWork { layout, versions }
 }
 
 impl InMemoryModuleState {
@@ -157,11 +239,13 @@ pub(crate) fn core_with_services(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
+    let work = test_workspace(Arc::new(InMemoryWorkspace::new()));
     Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
-        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        work.layout.clone(),
+        work.versions.clone(),
         test_vm(),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
@@ -199,11 +283,13 @@ pub(crate) fn core_with_workspace(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
+    let work = test_workspace(ws);
     Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
-        test_workspace(ws),
+        work.layout.clone(),
+        work.versions.clone(),
         test_vm(),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
@@ -238,11 +324,13 @@ pub(crate) fn core_with_workdirs(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
+    let work = test_workspace(dirs);
     Core::new(
         root,
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
-        test_workspace(dirs),
+        work.layout.clone(),
+        work.versions.clone(),
         test_vm(),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
@@ -303,11 +391,13 @@ pub(crate) fn core_with_workdirs_vm(
             ),
         )),
     );
+    let work = test_workspace(dirs);
     Core::new(
         root,
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         history,
-        test_workspace(dirs),
+        work.layout.clone(),
+        work.versions.clone(),
         test_vm_with_engine(engine),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
@@ -356,11 +446,13 @@ pub(crate) fn core_with_builds(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
+    let work = test_workspace(Arc::new(InMemoryWorkspace::new()));
     Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
-        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        work.layout.clone(),
+        work.versions.clone(),
         test_vm(),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
@@ -490,11 +582,13 @@ pub(crate) fn core_with_pkgs_probe(
             );
         }
     }
+    let work = test_workspace(Arc::new(InMemoryWorkspace::new()));
     Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(history),
-        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        work.layout.clone(),
+        work.versions.clone(),
         test_vm(),
         test_packages_with_base(packages, base),
         test_provision(),
@@ -525,11 +619,13 @@ pub(crate) fn core_with_settings_modules(store: InMemorySettings, modules: Vec<M
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
+    let work = test_workspace(Arc::new(InMemoryWorkspace::new()));
     Core::new(
         crate::tests::root_dir(),
         registry_service(store, Arc::clone(&llm)),
         test_history(),
-        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        work.layout.clone(),
+        work.versions.clone(),
         test_vm(),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
@@ -571,11 +667,13 @@ pub(crate) fn core_with_io_gateway(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
+    let work = test_workspace(Arc::new(InMemoryWorkspace::new()));
     Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
-        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        work.layout.clone(),
+        work.versions.clone(),
         test_vm(),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),
@@ -613,11 +711,13 @@ pub(crate) fn core_with_gateway_probe(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
+    let work = test_workspace(Arc::new(InMemoryWorkspace::new()));
     Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
-        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        work.layout.clone(),
+        work.versions.clone(),
         test_vm(),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),

@@ -261,7 +261,7 @@ impl Work {
         }
         // 先恢复未完成的版本库事务，再做同名文件判定：否则 pending 里的文件会被当成不存在。
         let work = work_root(self.history.as_ref(), sid).unwrap_or_else(|_| sid.to_string());
-        self.workspace.work_recover(&work)?;
+        self.versions.work_recover(&work)?;
         if self.workspace.work_has(&work, &name) && !overwrite {
             return Ok(false);
         }
@@ -272,7 +272,7 @@ impl Work {
             Some(Session::Flow(m)) => m.next_line(),
             None => 0,
         };
-        self.workspace.work_commit_user(
+        self.versions.work_commit_user(
             &work,
             &name,
             bytes,
@@ -333,9 +333,9 @@ impl Work {
         sid: &str,
         limit: usize,
         before: Option<u64>,
-    ) -> Result<crate::units::business::workspace::api::WorkLog, String> {
+    ) -> Result<crate::units::business::versions::api::WorkLog, String> {
         let work = work_root(self.history.as_ref(), sid)?;
-        self.workspace.work_log(&work, limit, before)
+        self.versions.work_log(&work, limit, before)
     }
 
     /// 目的：一条提交的详情（只读）。
@@ -343,9 +343,9 @@ impl Work {
         &self,
         sid: &str,
         commit: u64,
-    ) -> Result<crate::units::business::workspace::api::CommitDetail, String> {
+    ) -> Result<crate::units::business::versions::api::CommitDetail, String> {
         let work = work_root(self.history.as_ref(), sid)?;
-        self.workspace.work_commit_view(&work, commit)
+        self.versions.work_commit_view(&work, commit)
     }
 
     /// 目的：一条提交里某个文件的内容预览（只读）。
@@ -354,9 +354,9 @@ impl Work {
         sid: &str,
         commit: u64,
         path: &str,
-    ) -> Result<crate::units::business::workspace::api::CommitFileView, String> {
+    ) -> Result<crate::units::business::versions::api::CommitFileView, String> {
         let work = work_root(self.history.as_ref(), sid)?;
-        self.workspace.work_commit_file(&work, commit, path)
+        self.versions.work_commit_file(&work, commit, path)
     }
 
     /// 目的：用户把共享区回滚到某个提交点（非破坏性）：只改共享区与 head，目标之后的提交仍保留。
@@ -375,20 +375,20 @@ impl Work {
         if let Some(running) = turn.running_iter().find(|s| tree.iter().any(|x| x == *s)) {
             return Err(Turn::running_refusal(running));
         }
-        let current = self.workspace.work_head(&work)?.unwrap_or(0);
+        let current = self.versions.work_head(&work)?.unwrap_or(0);
         if current != expect_head {
             return Err(format!(
                 "共享区已经变化：你看到的是 head #{}，现在是 #{}；先刷新提交历史再回滚",
                 expect_head, current
             ));
         }
-        let target = self.workspace.work_commit_view(&work, commit)?;
+        let target = self.versions.work_commit_view(&work, commit)?;
         if force {
-            self.workspace.work_restore_force(&work, commit)?;
+            self.versions.work_restore_force(&work, commit)?;
         } else {
-            self.workspace.work_restore(&work, commit)?;
+            self.versions.work_restore(&work, commit)?;
         }
-        let after = self.workspace.work_head(&work)?;
+        let after = self.versions.work_head(&work)?;
         let before = if current == 0 {
             "空共享区".to_string()
         } else {

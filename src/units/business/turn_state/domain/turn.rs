@@ -21,6 +21,7 @@ use crate::units::business::tools::api::{ToolExec, Tools};
 use crate::units::business::turn_state::api::{Flows, History};
 use crate::units::business::turn_state::domain::decisions::Gates;
 use crate::units::business::turn_state::domain::live::{Session, TurnState};
+use crate::units::business::versions::api::Versions;
 use crate::units::business::vm::api::Vm;
 use crate::units::business::workspace::api::Workspace;
 
@@ -30,8 +31,10 @@ use crate::units::business::workspace::api::Workspace;
 pub struct Turn {
     /// 目的：在世会话表、运行态与创建占位、裁决队、每会话的 shell 活进程槽。
     pub(crate) state: TurnState,
-    /// 目的：工作区用例面：一席的 `work_*` 工具执行者按它造。
+    /// 目的：工作区用例面：目录布局、沙箱寻址与文件寻址按它问。
     pub(crate) workspace: Arc<dyn Workspace + Send + Sync>,
+    /// 目的：版本库用例面：一席的 `work_*` 工具执行者与回档 / 归档按它造（版本化与控制台分层，故与工作区分开持有）。
+    pub(crate) versions: Arc<dyn Versions + Send + Sync>,
     /// 目的：虚拟机用例面：一席的 guest 事实随工具面交给机制层。
     pub(crate) vm: Arc<dyn Vm + Send + Sync>,
     /// 目的：常驻服务管理面：已就绪服务的操作并入一席的工具面。
@@ -74,6 +77,7 @@ impl Turn {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         workspace: Arc<dyn Workspace + Send + Sync>,
+        versions: Arc<dyn Versions + Send + Sync>,
         vm: Arc<dyn Vm + Send + Sync>,
         residents: Arc<dyn ResidentOps + Send + Sync>,
         secrets: Arc<dyn SecretOps + Send + Sync>,
@@ -94,6 +98,7 @@ impl Turn {
         Turn {
             state: TurnState::new(),
             workspace,
+            versions,
             vm,
             residents,
             secrets,
@@ -129,6 +134,7 @@ impl Turn {
             vm: Arc::clone(&self.vm),
             residents: Arc::clone(&self.residents),
             workspace: Arc::clone(&self.workspace),
+            versions: Arc::clone(&self.versions),
             compact: Arc::clone(&self.compact),
             decls: Arc::clone(&self.decls),
         }

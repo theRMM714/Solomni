@@ -65,10 +65,10 @@ impl Lifecycle {
         if force {
             // 用户已确认覆盖：先把受管路径的外部改动采纳成提交，随后的回档就不会再撞上“被外部改动”。
             // 行锚取“下一条转录行”：这条同步发生在这次回档之后，回档点不该停在它上面。
-            self.workspace.work_sync_tracked(
+            self.versions.work_sync_tracked(
                 &work,
                 crate::kernel::api::procs::unix_seconds(),
-                crate::units::business::workspace::api::CommitAnchor {
+                crate::units::business::versions::api::CommitAnchor {
                     agent: String::new(),
                     session: sid.to_string(),
                     line: next_line,
@@ -93,7 +93,7 @@ impl Lifecycle {
                 let (kids, folds) = self.archive_children_plan(turn, sid, keep_turn)?;
                 let keep = Self::keep_by_agent(&meta, before, &kids);
                 let agents = self.archive_agents(sid, &meta)?;
-                let report = self.workspace.work_archive(&work, &keep, &agents, mark)?;
+                let report = self.versions.work_archive(&work, &keep, &agents, mark)?;
                 let heads: std::collections::BTreeMap<String, Option<u64>> =
                     agents.iter().map(|a| (a.clone(), report.shared)).collect();
                 let stamp = ArchiveStamp {
@@ -139,7 +139,7 @@ impl Lifecycle {
                         .iter()
                         .map(|m| m.mark)
                         .collect();
-                let all_marks = self.workspace.work_archives(&work)?;
+                let all_marks = self.versions.work_archives(&work)?;
                 let doomed: Vec<u64> = all_marks
                     .iter()
                     .copied()
@@ -162,7 +162,7 @@ impl Lifecycle {
                 let keep = Self::keep_by_agent(&meta, before, &kids);
                 let agents = self.archive_agents(sid, &meta)?;
                 // 共享区与每个受影响沙箱一起落到删除点；该点之后的提交真的丢掉（删除就是删除）。
-                self.workspace
+                self.versions
                     .work_delete(&work, &keep, &agents, &kept_marks)?;
                 self.history
                     .replace(sid, &kept)
@@ -199,7 +199,7 @@ impl Lifecycle {
                     })
                     .ok_or_else(|| format!("没有回档标记 {}（可能已被恢复）", mark))?;
                 // 先恢复文件（失败则转录原封不动），再展开转录；版本库同时退回留档点、留档后的分叉作废。
-                self.workspace.work_restore_archive(&work, mark)?;
+                self.versions.work_restore_archive(&work, mark)?;
                 let kept: Vec<serde_json::Value> = raw[..idx].to_vec();
                 self.history
                     .replace(sid, &kept)

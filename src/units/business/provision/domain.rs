@@ -202,7 +202,7 @@ pub(crate) fn install_identity(dep: &Dep) -> String {
         dep.size_mb,
         tool
     );
-    crate::units::business::workspace::api::content_hash(material.as_bytes())
+    crate::units::business::versions::api::content_hash(material.as_bytes())
 }
 
 /// 目的：一个宿主工具的位置事实——登记值优先，其次本机清单里**已装好**那条的绝对路径（probe 相对产品根）。

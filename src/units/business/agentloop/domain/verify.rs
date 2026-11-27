@@ -73,6 +73,7 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
         prompt: &*spec.prompt,
         residents: &residents,
         workspace: None,
+        versions: None,
     });
     Some(Box::new(MemberTools {
         face: ToolFace {
@@ -106,6 +107,7 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
         residents: Arc::new(crate::units::business::residents::api::NoResidents),
         // 核心核实的工具面只读：没有共享区提交这回事。
         workspace: None,
+        versions: None,
         observations: Observations::default(),
         shell_live: None,
         reply_seq: 0,

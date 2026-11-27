@@ -53,8 +53,10 @@ pub struct Work {
     root: PathBuf,
     /// 会话历史直连面（**不持它的端口**，R12）：造/读/写/删会话都走它。
     history: Arc<dyn History + Send + Sync>,
-    /// 工作区用例面（**不持它的端口**，R12）：工作区目录与版本化走它。
+    /// 工作区用例面（**不持它的端口**，R12）：目录布局、沙箱寻址与文件寻址走它。
     workspace: Arc<dyn Workspace + Send + Sync>,
+    /// 版本库用例面（**不持它的端口**，R12）：提交、拉取、日志与回档走它。
+    versions: Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>,
     /// 虚拟机档用例面（**不持它的端口**，R12）：guest 生命周期与档位就绪检测走它。
     vm: Arc<dyn Vm + Send + Sync>,
     /// 运行包能力（**不持它的端口**，R12）：包库、选型诊断与计划走它。
@@ -85,6 +87,7 @@ impl Work {
         root: PathBuf,
         history: Arc<dyn History + Send + Sync>,
         workspace: Arc<dyn Workspace + Send + Sync>,
+        versions: Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>,
         vm: Arc<dyn Vm + Send + Sync>,
         packages: Arc<dyn Packages + Send + Sync>,
         provision: Arc<dyn Provision + Send + Sync>,
@@ -100,6 +103,7 @@ impl Work {
             root,
             history,
             workspace,
+            versions,
             vm,
             packages,
             provision,

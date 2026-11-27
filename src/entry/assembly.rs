@@ -306,7 +306,7 @@ pub(crate) struct SystemPorts {
     pub storage: Arc<dyn crate::units::business::maintenance::storage::api::Storage + Send + Sync>,
     pub provision: Arc<dyn Provision + Send + Sync>,
     pub builds: Arc<dyn crate::units::business::maintenance::builds::api::Builds + Send + Sync>,
-    pub workspace: Arc<dyn crate::units::business::workspace::api::Workspace + Send + Sync>,
+    pub versions: Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>,
     pub modules: Arc<dyn crate::units::business::catalog::modules::api::Modules + Send + Sync>,
 }
 
@@ -326,17 +326,18 @@ pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, Str
         Arc::new(build_service(root)?);
     let workspace: Arc<dyn crate::units::business::workspace::api::Workspace + Send + Sync> =
         Arc::new(
-            crate::units::business::workspace::service::WorkspaceService::new(
-                Arc::new(
-                    crate::units::business::workspace::detail::fs_workspace::FsWorkspace::new(
-                        sessions(root).root(),
-                    ),
+            crate::units::business::workspace::service::WorkspaceService::new(Arc::new(
+                crate::units::business::workspace::detail::fs_workspace::FsWorkspace::new(
+                    sessions(root).root(),
                 ),
-                Arc::new(
-                    crate::units::business::workspace::detail::fs_workstore::FsWorkStore::new(),
-                ),
-            ),
+            )),
         );
+    let versions: Arc<dyn crate::units::business::versions::api::Versions + Send + Sync> = Arc::new(
+        crate::units::business::versions::service::VersionService::new(
+            Arc::clone(&workspace),
+            Arc::new(crate::units::business::versions::detail::fs_workstore::FsWorkStore::new()),
+        ),
+    );
     let modules: Arc<dyn crate::units::business::catalog::modules::api::Modules + Send + Sync> =
         Arc::new(
             crate::units::business::catalog::modules::service::ModulesService::new(
@@ -369,7 +370,7 @@ pub(crate) fn system(root: &Path, base: &BaseFacts) -> Result<SystemService, Str
             storage,
             provision,
             builds,
-            workspace,
+            versions,
             modules,
         },
     )
@@ -459,7 +460,7 @@ pub(crate) fn system_with(
             storage: ports.storage,
             provision: ports.provision,
             builds: ports.builds,
-            workspace: ports.workspace,
+            versions: ports.versions,
             modules: ports.modules,
             toolchains: base.clone(),
             net: network_allowed(root),

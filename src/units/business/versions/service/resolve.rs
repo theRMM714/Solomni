@@ -4,7 +4,7 @@
 //! 联动：service.rs 的锁与物化、commit.rs 的 commit_locked 与 base 记录。
 
 use super::*;
-use crate::units::business::workspace::api::{
+use crate::units::business::versions::api::{
     ResolveAction, ResolveEntry, ResolveReport, ResolveRequest, ResolveTake, ResolveWarning,
     ResolveWarningKind,
 };
@@ -36,7 +36,7 @@ struct ResolvePlan {
     backup: Option<String>,
 }
 
-impl WorkspaceService {
+impl VersionService {
     pub(super) fn work_resolve(
         &self,
         work: &str,

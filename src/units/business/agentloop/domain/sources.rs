@@ -12,7 +12,7 @@ use crate::units::business::session_model::api::{
     SOURCE_PROFILE, SOURCE_WORKSPACE, ToolSource, TurnCtx,
 };
 use crate::units::business::tools::api::{DELETE, EDIT, GREP, LIST, PATCH, READ, SHELL, WRITE};
-use crate::units::business::workspace::api::WORK_TOOLS;
+use crate::units::business::versions::api::WORK_TOOLS;
 
 /// 目的：agent 自己的能力组来源：读面 / 工作面 / 执行各按能力组发放。
 pub struct AgentSource;

@@ -4,9 +4,9 @@
 //! 联动：`copy_object_to_under` / `remove_under`（铺盘与备份）、`Workspace` trait。
 
 use super::*;
-use crate::units::business::workspace::domain::workstore::{ResetReport, ResetRequest};
+use crate::units::business::versions::domain::workstore::{ResetReport, ResetRequest};
 
-impl WorkspaceService {
+impl VersionService {
     /// 目的：按请求恢复沙箱（`paths`）或移动工作线（`to`）。
     /// 约束：`to` 必须在这条工作线的祖先链上；移动只换头，提交对象一个都不删；
     ///   hard 形态只动工作线跟踪的路径（目标树 ∪ 当前头树），拉过但没提交的文件原样保留。
@@ -30,7 +30,7 @@ impl WorkspaceService {
         }
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work)?;
+        let _shared = self.shared_guard(work)?;
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;

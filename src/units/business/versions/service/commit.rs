@@ -4,10 +4,10 @@
 //! 联动：service.rs 提供锁、工作根与树物化；sync 与 lifecycle 会调用本文件的提交与锚点方法。
 
 use super::*;
-use crate::units::business::workspace::api::{
+use crate::units::business::versions::api::{
     Change, ChangeKind, CommitReport, CommitRequest, PushReport, PushRequest,
 };
-use crate::units::business::workspace::domain::workstore::MergePlan;
+use crate::units::business::versions::domain::workstore::MergePlan;
 
 /// 目的：一次推送判定的全部事实——「有没有待推送的东西」只有一个口径。
 /// 约束：`plan` 与 `conflicts` 互斥；`pending` 只在 `plan` 存在时可能非零。
@@ -28,7 +28,7 @@ pub(super) struct PushPlan {
     pub(super) theirs: Tree,
 }
 
-impl WorkspaceService {
+impl VersionService {
     /// 目的：提交的唯一实现（调用方已持 gate、shared、store 锁并已恢复事务）。
     /// 约束：`line` 决定提交落到哪条线——主线会改共享区与 `refs/main`，存档线只写提交与 `refs/agents/<agent>/saves`。
     #[allow(clippy::too_many_arguments)]
@@ -132,7 +132,7 @@ impl WorkspaceService {
             return Err("没有可提交的改动：paths 与 deletes 都是空的".to_string());
         }
         // 外部工作区的磁盘是真相：写共享区前要核对外部改动（存档线不碰共享区）。
-        if line == CommitLine::Main && self.dirs.is_external(work) {
+        if line == CommitLine::Main && self.places.is_external(work) {
             self.reject_external_changes(&shared, &tree, &locals)?;
         }
         let plan = match plan_commit(&index, &tree, &locals) {
@@ -516,7 +516,7 @@ impl WorkspaceService {
     }
 }
 
-impl WorkspaceService {
+impl VersionService {
     pub(super) fn work_commit(
         &self,
         work: &str,
@@ -526,7 +526,7 @@ impl WorkspaceService {
     ) -> Result<CommitReport, String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work)?;
+        let _shared = self.shared_guard(work)?;
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
@@ -658,7 +658,7 @@ impl WorkspaceService {
         }
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work)?;
+        let _shared = self.shared_guard(work)?;
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
@@ -691,7 +691,7 @@ impl WorkspaceService {
             locals.insert(ch.path.clone(), value);
         }
         // 外部工作区的磁盘是真相：合并要写共享区，先核对外部改动。
-        if self.dirs.is_external(work) {
+        if self.places.is_external(work) {
             self.reject_external_changes(&shared, &theirs, &locals)?;
         }
         // 对象：工作线提交时已把内容灌进版本库，这里只核对对象还在（缺了就是版本库损坏）。
@@ -770,7 +770,7 @@ impl WorkspaceService {
     ) -> Result<Option<CommitReport>, String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work)?;
+        let _shared = self.shared_guard(work)?;
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
@@ -817,7 +817,7 @@ impl WorkspaceService {
         }
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work)?;
+        let _shared = self.shared_guard(work)?;
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;

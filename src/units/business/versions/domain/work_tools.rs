@@ -6,7 +6,7 @@
 //!   冲突、状态与备份判定（在 `workspace`）。
 //! 联动：由本单元的 `service/` 调用；工具名与 `systools/tools.yaml` 同一份名单。
 
-use crate::units::business::workspace::api::{
+use crate::units::business::versions::api::{
     ChangeKind, CommitReport, DiffReport, DiffSign, LostReport, PullReport, PushReport,
     ResetReport, ResolveAction, ResolveEntry, ResolveReport, RestoreLostReport, StatusReport,
     SyncReport, VERSION_TEXT_LIMIT, VersionView,
@@ -703,7 +703,7 @@ pub fn str_arg(args: &serde_json::Value, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::units::business::workspace::api::FileVersion;
+    use crate::units::business::versions::api::FileVersion;
 
     fn version(hash: &str, size: u64, text: Option<&str>, too_large: bool) -> FileVersion {
         FileVersion {
@@ -778,7 +778,7 @@ mod tests {
     /// 目的：resolve 回执要说清基于哪个主副本、哪些路径有风险、哪些本地版本已备份。
     #[test]
     fn resolve_receipt_shows_head_warnings_and_backups() {
-        use crate::units::business::workspace::api::{
+        use crate::units::business::versions::api::{
             ResolveReport, ResolveTake, ResolveWarning, ResolveWarningKind,
         };
         let r = ResolveReport {
@@ -816,7 +816,7 @@ mod tests {
     /// 目的：work_lost / restore 回执给出备份指纹、当前沙箱指纹与恢复结果。
     #[test]
     fn lost_receipts_show_backup_and_current_hashes() {
-        use crate::units::business::workspace::api::LostEntry;
+        use crate::units::business::versions::api::LostEntry;
         let r = LostReport {
             agent: "a".to_string(),
             total: 1,

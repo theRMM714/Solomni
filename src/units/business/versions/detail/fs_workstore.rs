@@ -4,14 +4,14 @@
 //! 不管：三方比较、路径校验等纯逻辑（在 `domain::workstore`）；本文件只做机制。
 //! 联动：由 workspace 的 `service.rs` 经 `WorkStore` 端口持有（R12）；装配在 `main.rs`。
 
-use crate::units::business::workspace::domain::asset::{
+use crate::units::business::versions::domain::asset::{
     ASSET_CHUNK_BYTES, AssetScanner, FileVersion,
 };
-use crate::units::business::workspace::domain::path_filter::Rules;
-use crate::units::business::workspace::domain::workstore::{
+use crate::units::business::versions::domain::workstore::{
     Commit, Index, ObjectInfo, Pending, Ref, RefKind, join_rel,
 };
-use crate::units::business::workspace::ports::WorkStore;
+use crate::units::business::versions::ports::WorkStore;
+use crate::units::business::workspace::api::path_filter::Rules;
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 use std::fs::File;

@@ -395,9 +395,9 @@ impl WorkOps for FakeFaces {
         _sid: &str,
         _limit: usize,
         _before: Option<u64>,
-    ) -> Result<crate::units::business::workspace::api::WorkLog, String> {
+    ) -> Result<crate::units::business::versions::api::WorkLog, String> {
         self.guard()?;
-        use crate::units::business::workspace::api::{CommitSummary, WorkLog, WorkLogEntry};
+        use crate::units::business::versions::api::{CommitSummary, WorkLog, WorkLogEntry};
         Ok(WorkLog {
             head: Some(CommitSummary {
                 id: 1,
@@ -425,9 +425,9 @@ impl WorkOps for FakeFaces {
         &self,
         _sid: &str,
         _commit: u64,
-    ) -> Result<crate::units::business::workspace::api::CommitDetail, String> {
+    ) -> Result<crate::units::business::versions::api::CommitDetail, String> {
         self.guard()?;
-        use crate::units::business::workspace::api::{ChangeKind, ChangeView, CommitDetail};
+        use crate::units::business::versions::api::{ChangeKind, ChangeView, CommitDetail};
         Ok(CommitDetail {
             id: 1,
             parent: None,
@@ -450,9 +450,9 @@ impl WorkOps for FakeFaces {
         _sid: &str,
         _commit: u64,
         path: &str,
-    ) -> Result<crate::units::business::workspace::api::CommitFileView, String> {
+    ) -> Result<crate::units::business::versions::api::CommitFileView, String> {
         self.guard()?;
-        Ok(crate::units::business::workspace::api::CommitFileView {
+        Ok(crate::units::business::versions::api::CommitFileView {
             path: path.to_string(),
             hash: "h".to_string(),
             size: 2,

@@ -28,6 +28,7 @@ use crate::units::business::transcript::api::{DecisionQueue, SessionEvent};
 use crate::units::business::turn::turn::api::{Advance, CollabWork, Events, Output};
 use crate::units::business::turn::turn::api::{SPEAKER, TurnOps};
 use crate::units::business::turn_state::api::{Answered, History};
+use crate::units::business::versions::api::MAX_ASSET_BYTES;
 use crate::units::business::vm::api::Vm;
 use crate::units::business::work::api::WorkOps;
 use crate::units::business::work::api::{
@@ -35,7 +36,7 @@ use crate::units::business::work::api::{
     PreparedWork, RuntimeReport, SessionConfig, SessionEdit, SessionTypeView, SessionView,
     TierChoices, Work, WorkOpened, WorkSpec,
 };
-use crate::units::business::workspace::api::{MAX_ASSET_BYTES, Workspace};
+use crate::units::business::workspace::api::Workspace;
 use crate::units::pure::exec_model::api::Tier;
 use crate::units::pure::registry_model::api::AgentView;
 use crate::units::pure::registry_model::api::ModelView;

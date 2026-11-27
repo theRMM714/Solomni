@@ -4,7 +4,7 @@
 //! 联动：service.rs 的底座与 domain::workstore 的 pull_verdict / status_of。
 
 use super::*;
-use crate::units::business::workspace::api::{
+use crate::units::business::versions::api::{
     AdoptReport, Change, ChangeKind, CommitRequest, HeldChange, PullReport, ReadQuery, ReadVerdict,
     SyncReport,
 };
@@ -38,7 +38,7 @@ fn appcontainer_ignored(rel: &str) -> bool {
         .is_some_and(|head| head.eq_ignore_ascii_case(CONTAINER_PREFIX))
 }
 
-impl WorkspaceService {
+impl VersionService {
     pub(super) fn work_pull(
         &self,
         work: &str,
@@ -51,9 +51,9 @@ impl WorkspaceService {
         validate_paths(paths)?;
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work)?;
+        let _shared = self.shared_guard(work)?;
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
-        let external = self.dirs.is_external(work);
+        let external = self.places.is_external(work);
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
         let (head, tree) = self.head_tree(&store)?;
@@ -155,12 +155,12 @@ impl WorkspaceService {
         line: u64,
     ) -> Result<AdoptReport, String> {
         // 外部工作区的真相是磁盘（work_sync 采纳）；沙箱副本不是它的权威版本。
-        if self.dirs.is_external(work) {
+        if self.places.is_external(work) {
             return Ok(AdoptReport::default());
         }
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work)?;
+        let _shared = self.shared_guard(work)?;
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
@@ -356,7 +356,7 @@ impl WorkspaceService {
         validate_paths(paths)?;
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work)?;
+        let _shared = self.shared_guard(work)?;
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
@@ -466,7 +466,7 @@ impl WorkspaceService {
     }
 
     pub(super) fn work_import_root(&self, work: &str, time: i64) -> Result<SyncReport, String> {
-        if !self.dirs.is_external(work) {
+        if !self.places.is_external(work) {
             return Ok(SyncReport::default());
         }
         let (shared, store) = self.work_roots(work)?;

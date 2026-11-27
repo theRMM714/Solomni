@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::units::business::catalog::packages::api::BaseFacts;
 use crate::units::business::maintenance::builds::api::Built;
 use crate::units::business::maintenance::storage::api::{CleanOutcome, GcReport, Storage};
-use crate::units::business::workspace::api::WorkGcReport;
+use crate::units::business::versions::api::WorkGcReport;
 pub use crate::units::pure::exec_model::api::JobState;
 
 /// 目的：基础工具链 profile——与清单 toolchain 条目同一组（自检与启动报告共用）。

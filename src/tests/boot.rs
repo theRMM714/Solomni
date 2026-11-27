@@ -14,7 +14,7 @@ use crate::units::business::system::api::{
     toolchain_json, toolchain_lines,
 };
 use crate::units::business::tools::api::{CommandBook, Op, OpBook};
-use crate::units::business::workspace::api::WorkGcReport;
+use crate::units::business::versions::api::WorkGcReport;
 use crate::units::pure::exec_model::api::JobState;
 
 /// 目的：命令表里那一条——用例只按名字取，旗语与校验都由声明决定（表非法就直接失败）。

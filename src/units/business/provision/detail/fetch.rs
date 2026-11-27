@@ -241,7 +241,7 @@ pub(crate) fn download_with_resume(
 ///   宁可这样，也不引第二套算法或加密库。
 pub(crate) fn sha256_file(path: &Path) -> Result<String, String> {
     let bytes = fs::read(path).map_err(|e| format!("读不了 {}：{}", path.display(), e))?;
-    Ok(crate::units::business::workspace::api::content_hash(&bytes))
+    Ok(crate::units::business::versions::api::content_hash(&bytes))
 }
 /// 目的：取一个目录页的纯文本（列 Debian 包名用）。
 pub(crate) fn get_text(agent: &ureq::Agent, url: &str) -> Result<String, String> {

@@ -731,7 +731,7 @@ pub(crate) fn work_versioning_tools_are_granted_to_the_working_roles_only() {
     // 只读、无副作用的并发；pull / commit / resolve 会改状态，不并发。
     assert!(book["work_status"].parallel && book["work_versions"].parallel);
     // **发布面就是这 11 个 work_***：会改共享工作区的动作只有它们。
-    assert!(crate::units::business::workspace::api::is_work_tool(
+    assert!(crate::units::business::versions::api::is_work_tool(
         "work_commit"
     ));
     assert!(

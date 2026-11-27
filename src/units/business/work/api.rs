@@ -461,20 +461,20 @@ pub trait WorkOps: Send + Sync {
         sid: &str,
         limit: usize,
         before: Option<u64>,
-    ) -> Result<crate::units::business::workspace::api::WorkLog, String>;
+    ) -> Result<crate::units::business::versions::api::WorkLog, String>;
     /// 目的：一条提交的详情（只读）。
     fn work_commit_view(
         &self,
         sid: &str,
         commit: u64,
-    ) -> Result<crate::units::business::workspace::api::CommitDetail, String>;
+    ) -> Result<crate::units::business::versions::api::CommitDetail, String>;
     /// 目的：一条提交里某个文件的内容预览（只读；路径必须在这条提交的树里）。
     fn work_commit_file(
         &self,
         sid: &str,
         commit: u64,
         path: &str,
-    ) -> Result<crate::units::business::workspace::api::CommitFileView, String>;
+    ) -> Result<crate::units::business::versions::api::CommitFileView, String>;
     #[allow(dead_code)]
     fn exists(&self, sid: &str) -> Result<bool, String>;
     /// 目的：**在世会话 × 历史的并集**（界面上的会话列表）：只有会话中心同时知道两边，所以归这里。

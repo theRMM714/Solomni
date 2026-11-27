@@ -1,21 +1,21 @@
-//! 目的：共享区版本化工作区的**成员侧执行者**——把十个 work_* 调用接到 workspace 入站面上。
+//! 目的：共享区版本化工作区的**成员侧执行者**——把十一个 work_* 调用接到版本库入站面上。
 //! 管：成员工具调用的参数解析、路径权限收口与回执转交。
-//! 不管：版本库写入、冲突与备份判定（在 workspace）；工具声明（`systools/tools.yaml`）。
-//! 联动：`turn` 装配工具面时按 allowed 现取本文件的 `work_handlers`；版本库写入由 workspace 的
-//!   service 串行化（它持版本库端口）。
+//! 不管：版本库写入、冲突与备份判定（在 `service/` 各子模块）；工具声明（`systools/tools.yaml`）。
+//! 联动：`agentloop` 装配工具面时按 allowed 现取本文件的 `work_handlers`；版本库写入由 `service.rs`
+//!   串行化（它持版本库端口）。
 
 use crate::kernel::api::types::ToolOutcome;
 use crate::kernel::ports::ToolHandler;
-use crate::units::business::workspace::api as dw;
-use crate::units::business::workspace::api::{
-    CommitRequest, DiffRequest, ResetRequest, ResolveRequest, ResolveTake, Sandbox, SharedScope,
-    Workspace,
+use crate::units::business::versions::api as dw;
+use crate::units::business::versions::api::{
+    CommitRequest, DiffRequest, ResetRequest, ResolveRequest, ResolveTake,
 };
+use crate::units::business::workspace::api::{Sandbox, SharedScope};
 use std::sync::Arc;
 
 /// 目的：本席的工作区工具执行者：十个 `work_*` 名字由它认领，参数解析与路径权限在这里收口。
 pub struct WorkHandler {
-    workspace: Arc<dyn Workspace + Send + Sync>,
+    versions: Arc<dyn dw::Versions + Send + Sync>,
     /// 顶层工作名（共享区与版本库的归属）。
     work: String,
     /// 这一席的 agent 实例名（拉取基线按它记）。
@@ -66,13 +66,13 @@ pub(crate) fn check_writable(
 impl WorkHandler {
     /// 目的：按一席的沙箱事实造执行者（工作名、agent 实例名与共享区归属都从沙箱来）。
     pub fn new(
-        workspace: Arc<dyn Workspace + Send + Sync>,
+        versions: Arc<dyn dw::Versions + Send + Sync>,
         work: &str,
         agent: &str,
         scope: SharedScope,
     ) -> WorkHandler {
         WorkHandler {
-            workspace,
+            versions,
             work: work.to_string(),
             agent: agent.to_string(),
             scope,
@@ -91,12 +91,12 @@ impl WorkHandler {
             return outcome(false, e);
         }
         // 同步是这一席在当行做的动作：锚落在这里，回档到更早的行才能越过它。
-        let anchor = crate::units::business::workspace::api::CommitAnchor {
+        let anchor = crate::units::business::versions::api::CommitAnchor {
             agent: self.agent.clone(),
             session: session.to_string(),
             line,
         };
-        match self.workspace.work_sync(
+        match self.versions.work_sync(
             &self.work,
             &paths,
             crate::kernel::api::procs::unix_seconds(),
@@ -115,7 +115,7 @@ impl WorkHandler {
         if let Err(e) = check_readable(&self.scope, &paths) {
             return outcome(false, e);
         }
-        match self.workspace.work_pull(&self.work, &self.agent, &paths) {
+        match self.versions.work_pull(&self.work, &self.agent, &paths) {
             Ok(r) => outcome(true, dw::render_pull(&r)),
             Err(e) => outcome(false, e),
         }
@@ -147,7 +147,7 @@ impl WorkHandler {
             time: crate::kernel::api::procs::unix_seconds(),
             line,
         };
-        match self.workspace.work_commit(&self.work, agent, session, &req) {
+        match self.versions.work_commit(&self.work, agent, session, &req) {
             Ok(r) => outcome(true, dw::render_commit(&r)),
             Err(e) => outcome(false, e),
         }
@@ -164,7 +164,7 @@ impl WorkHandler {
             time: crate::kernel::api::procs::unix_seconds(),
             line,
         };
-        match self.workspace.work_push(&self.work, agent, session, &req) {
+        match self.versions.work_push(&self.work, agent, session, &req) {
             Ok(r) => outcome(true, dw::render_push(&r)),
             Err(e) => outcome(false, e),
         }
@@ -189,7 +189,7 @@ impl WorkHandler {
             Err(e) => return outcome(false, e),
         };
         let req = DiffRequest { from, to, paths };
-        match self.workspace.work_diff(&self.work, &self.agent, &req) {
+        match self.versions.work_diff(&self.work, &self.agent, &req) {
             Ok(mut r) => {
                 r.entries.retain(|e| self.scope.read_ok(&e.path));
                 outcome(true, dw::render_diff(&r))
@@ -223,7 +223,7 @@ impl WorkHandler {
             to,
             keep_changes,
         };
-        match self.workspace.work_reset(&self.work, &self.agent, &req) {
+        match self.versions.work_reset(&self.work, &self.agent, &req) {
             Ok(r) => outcome(true, dw::render_reset(&r)),
             Err(e) => outcome(false, e),
         }
@@ -237,7 +237,7 @@ impl WorkHandler {
         if let Err(e) = check_readable(&self.scope, &paths) {
             return outcome(false, e);
         }
-        match self.workspace.work_status(&self.work, &self.agent, &paths) {
+        match self.versions.work_status(&self.work, &self.agent, &paths) {
             Ok(mut r) => {
                 // 路径清单也受读作用域约束：不能靠 work_status 看到读不到的路径名。
                 r.tree.retain(|p| self.scope.read_ok(p));
@@ -277,7 +277,7 @@ impl WorkHandler {
                 );
             }
         }
-        match self.workspace.work_ignore(&self.work, &op, &patterns) {
+        match self.versions.work_ignore(&self.work, &op, &patterns) {
             Ok(r) => outcome(true, dw::render_ignore(&r)),
             Err(e) => outcome(false, e),
         }
@@ -296,7 +296,7 @@ impl WorkHandler {
         if let Err(e) = check_readable(&self.scope, std::slice::from_ref(&path)) {
             return outcome(false, e);
         }
-        match self.workspace.work_versions(&self.work, &self.agent, &path) {
+        match self.versions.work_versions(&self.work, &self.agent, &path) {
             Ok(v) => outcome(true, dw::render_versions(&v)),
             Err(e) => outcome(false, e),
         }
@@ -339,7 +339,7 @@ impl WorkHandler {
             take,
             expect_head,
         };
-        match self.workspace.work_resolve(&self.work, &self.agent, &req) {
+        match self.versions.work_resolve(&self.work, &self.agent, &req) {
             Ok(r) => outcome(true, dw::render_resolve(&r)),
             Err(e) => outcome(false, e),
         }
@@ -366,7 +366,7 @@ impl WorkHandler {
                 return outcome(false, e);
             }
             return match self
-                .workspace
+                .versions
                 .work_restore_lost(&self.work, &self.agent, &path, &expect)
             {
                 Ok(r) => outcome(true, dw::render_restore_lost(&r)),
@@ -379,7 +379,7 @@ impl WorkHandler {
             return outcome(false, e);
         }
         match self
-            .workspace
+            .versions
             .work_lost(&self.work, &self.agent, path.as_deref())
         {
             Ok(mut r) => {
@@ -408,9 +408,9 @@ fn commit_id(args: &serde_json::Value, key: &str) -> Result<Option<u64>, String>
 }
 
 /// 目的：本席要装的工作区工具执行者——席位面没发任何 `work_*` 就一个都不装。
-/// 参数：workspace = 共享区用例面；sb = 这一席的沙箱；allowed = 席位面发放的工具 id。
+/// 参数：versions = 版本库用例面；sb = 这一席的沙箱；allowed = 席位面发放的工具 id。
 pub fn work_handlers(
-    workspace: &Arc<dyn Workspace + Send + Sync>,
+    versions: &Arc<dyn dw::Versions + Send + Sync>,
     sb: &Sandbox,
     allowed: &[String],
 ) -> Vec<Arc<dyn ToolHandler>> {
@@ -418,7 +418,7 @@ pub fn work_handlers(
         return Vec::new();
     }
     vec![Arc::new(WorkHandler::new(
-        Arc::clone(workspace),
+        Arc::clone(versions),
         &sb.work_name,
         &sb.agent,
         sb.scope.clone(),

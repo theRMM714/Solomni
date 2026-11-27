@@ -4,14 +4,14 @@
 //! 联动：内容面（导入 / 未跟踪清单 / 提交展开）与检索面（grep）读同一份文件；`.gitignore` 不在这里改。
 
 use super::*;
-use crate::units::business::workspace::api::IgnoreReport;
+use crate::units::business::versions::api::IgnoreReport;
 
 /// `.workignore` 的三种 op。
 const LIST: &str = "list";
 const ADD: &str = "add";
 const REMOVE: &str = "remove";
 
-impl WorkspaceService {
+impl VersionService {
     /// 目的：读 / 改本工作的过滤名单；`add` 去重、`remove` 精确删行，改完立即按规则语法校验。
     /// 约束：只动版本库目录里的 `.workignore`（不碰共享区内容与 `.gitignore`）；改完的整份规则必须能编译，
     ///   语法不合法就整次拒绝，不留半份坏规则。

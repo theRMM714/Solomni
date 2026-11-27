@@ -4,13 +4,13 @@
 //! 联动：service.rs 的底座与 domain::workstore 的 status_of 与树回溯。
 
 use super::*;
-use crate::units::business::workspace::api::{
+use crate::units::business::versions::api::{
     ChangeKind, ChangeView, CommitDetail, CommitFileView, CommitSummary, StatusEntry, StatusReport,
     VERSION_TEXT_LIMIT, VersionView, WorkLineEntry, WorkLog, WorkLogEntry, media_hint,
 };
-use crate::units::business::workspace::domain::workstore::work_state_of;
+use crate::units::business::versions::domain::workstore::work_state_of;
 
-impl WorkspaceService {
+impl VersionService {
     pub(super) fn work_status(
         &self,
         work: &str,
@@ -59,7 +59,7 @@ impl WorkspaceService {
         } else {
             self.expand_forced(&sandbox, &available, paths)?
         };
-        let external = if self.dirs.is_external(work) {
+        let external = if self.places.is_external(work) {
             let mut out = Vec::new();
             for rel in &want {
                 let disk = self.disk_hash(&shared, rel)?;

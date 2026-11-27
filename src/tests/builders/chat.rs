@@ -307,6 +307,7 @@ pub(crate) fn native_member(
             residents: Arc::new(crate::units::business::residents::api::NoResidents),
             // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
             workspace: None,
+            versions: None,
             observations: crate::units::business::tools::api::Observations::default(),
             shell_live: None,
             reply_seq: 0,
@@ -376,11 +377,13 @@ pub(crate) fn native_core(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
+    let work = test_workspace(Arc::new(InMemoryWorkspace::new()));
     Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(history),
-        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        work.layout.clone(),
+        work.versions.clone(),
         test_vm(),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),

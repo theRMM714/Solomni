@@ -1,41 +1,29 @@
-# 工作区与虚拟根 的用例声明（一个单元一份；文件名 = 单元名）。
+# 工作区布局 的用例声明（一个单元一份；文件名 = 单元名）。
 # 文件级条目：一个 Rust 测试模块 = 一条；搬实现只改适配层，这里仍指向行为。
 # 格式：- id: cargo/tests::<模块路径> | e2e/<旅程 id>，紧跟 tier 与一句 note。
 
 unit: workspace
-title: 工作区与虚拟根
+title: 工作区布局与寻址
 
 mutation:
   schedule: weekly
   files:
-    - src/units/business/workspace/domain/workstore.rs
+    - src/units/business/workspace/domain/scope.rs
     - src/units/business/workspace/domain/workspace.rs
-    - src/units/business/workspace/service/commit.rs
+    - src/units/business/workspace/service/roots.rs
 cases:
   - id: cargo/tests::detail::fs
     tier: T1
     note: 工作区文件系统适配
-  - id: cargo/tests::workspace::archive
-    tier: T1
-    note: 工作区留档
   - id: cargo/tests::workspace::config
     tier: T1
     note: 工作区配置
   - id: cargo/tests::workspace::external
     tier: T1
-    note: 外部工作区
+    note: 外部工作区绑定
   - id: cargo/tests::workspace::filter
     tier: T1
     note: 过滤规则语义（.workignore）
-  - id: cargo/tests::workspace::gate
-    tier: T1
-    note: 先读后改门禁（审计与批量）
-  - id: cargo/tests::workspace::ignore
-    tier: T1
-    note: 过滤名单的读改写（work_ignore）与「规则只管发现」
   - id: cargo/tests::workspace::resolve
     tier: T1
     note: 路径解析与虚拟根
-  - id: cargo/tests::workspace::work
-    tier: T1
-    note: 工作存储

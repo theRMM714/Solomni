@@ -17,7 +17,7 @@ pub(crate) fn gate_refusal_is_audited_without_file_content() {
         .unwrap();
     let log = crate::tests::doubles::RecordingLog::new();
     let gate = SessionWriteGate {
-        workspace: ws.as_ref(),
+        versions: &*ws.versions,
         work: "w",
         agent: "a",
         facts: &[],
@@ -55,7 +55,7 @@ pub(crate) fn batch_gate_returns_the_first_failed_item() {
     ws.work_commit_user("w", "base.md", b"one\ntwo\n", 1, 0)
         .unwrap();
     let gate = SessionWriteGate {
-        workspace: ws.as_ref(),
+        versions: &*ws.versions,
         work: "w",
         agent: "a",
         facts: &[],

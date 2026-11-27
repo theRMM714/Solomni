@@ -64,6 +64,7 @@ impl Core {
         registry: Box<dyn Registry>,
         history: Arc<dyn History + Send + Sync>,
         workspace: Arc<dyn Workspace + Send + Sync>,
+        versions: Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>,
         vm: Arc<dyn Vm + Send + Sync>,
         packages: Arc<dyn Packages + Send + Sync>,
         provision: Arc<dyn Provision + Send + Sync>,
@@ -95,6 +96,7 @@ impl Core {
         // 回合状态收在 turn_state：它只认入站面与压缩工厂，不认 runtime 的端口（环 2 不得依赖环 3）。
         let turn = crate::units::business::turn_state::api::Turn::new(
             Arc::clone(&workspace),
+            Arc::clone(&versions),
             Arc::clone(&vm),
             Arc::clone(&residents),
             Arc::clone(&secrets),
@@ -117,6 +119,7 @@ impl Core {
             root.clone(),
             Arc::clone(&history),
             Arc::clone(&workspace),
+            Arc::clone(&versions),
             Arc::clone(&vm),
             Arc::clone(&packages),
             Arc::clone(&provision),
@@ -130,7 +133,7 @@ impl Core {
         );
         let lifecycle = crate::units::business::lifecycle::api::Lifecycle::new(
             Arc::clone(&history),
-            Arc::clone(&workspace),
+            Arc::clone(&versions),
             Arc::clone(&tools),
             Arc::clone(&vm),
             Arc::clone(&residents),
@@ -612,7 +615,7 @@ impl Core {
         sid: &str,
         limit: usize,
         before: Option<u64>,
-    ) -> Result<crate::units::business::workspace::api::WorkLog, String> {
+    ) -> Result<crate::units::business::versions::api::WorkLog, String> {
         self.work.work_log(sid, limit, before)
     }
 
@@ -621,7 +624,7 @@ impl Core {
         &self,
         sid: &str,
         commit: u64,
-    ) -> Result<crate::units::business::workspace::api::CommitDetail, String> {
+    ) -> Result<crate::units::business::versions::api::CommitDetail, String> {
         self.work.work_commit_view(sid, commit)
     }
 
@@ -631,7 +634,7 @@ impl Core {
         sid: &str,
         commit: u64,
         path: &str,
-    ) -> Result<crate::units::business::workspace::api::CommitFileView, String> {
+    ) -> Result<crate::units::business::versions::api::CommitFileView, String> {
         self.work.work_commit_file(sid, commit, path)
     }
 

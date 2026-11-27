@@ -8,7 +8,7 @@ use super::super::prelude::*;
 use crate::units::business::tools::api::{
     Coverage, GateFault, LineRange, Need, Observations, WriteGate,
 };
-use crate::units::business::workspace::api::{GateFile, content_hash};
+use crate::units::business::versions::api::{GateFile, content_hash};
 use std::sync::Mutex;
 
 #[test]

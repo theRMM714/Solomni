@@ -355,7 +355,7 @@ impl Work {
         if workspace.root.is_some() {
             // 首次绑定：把工作区现有文件导入成初始提交，agent 立刻就能 pull；失败不挡建会话。
             if let Err(e) = self
-                .workspace
+                .versions
                 .work_import_root(&root, crate::kernel::api::procs::unix_seconds())
             {
                 self.log
@@ -800,7 +800,7 @@ impl Work {
             .ensure_layout(name, &[PROXY_PRIVATE_DIR.to_string()])?;
         if workspace.root.is_some()
             && let Err(e) = self
-                .workspace
+                .versions
                 .work_import_root(name, crate::kernel::api::procs::unix_seconds())
         {
             self.log

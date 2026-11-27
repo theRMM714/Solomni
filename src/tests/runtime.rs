@@ -22,11 +22,13 @@ fn runtime_rooted(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
+    let work = test_workspace(Arc::new(InMemoryWorkspace::new()));
     Core::new(
         root.to_path_buf(),
         registry_service(settings, Arc::clone(&llm)),
         test_history(),
-        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        work.layout.clone(),
+        work.versions.clone(),
         test_vm(),
         test_packages(Arc::new(InMemoryPackages::empty())),
         provision,
@@ -61,11 +63,13 @@ fn runtime_for_vm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
+    let work = test_workspace(Arc::new(InMemoryWorkspace::new()));
     Core::new(
         crate::tests::root_dir(),
         registry_service(InMemorySettings::with_tier(Tier::Vm), Arc::clone(&llm)),
         test_history(),
-        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        work.layout.clone(),
+        work.versions.clone(),
         crate::tests::doubles::test_vm_with_engine(engine),
         test_packages(Arc::new(InMemoryPackages::empty())),
         test_provision(),

@@ -4,11 +4,11 @@
 //! 联动：service.rs 的锁与树物化、commit.rs 的归档标记与锚点。
 
 use super::*;
-use crate::units::business::workspace::api::{
+use crate::units::business::versions::api::{
     ArchiveReport, DeleteReport, LostEntry, LostReport, RestoreLostReport, WorkGcReport,
 };
 
-impl WorkspaceService {
+impl VersionService {
     pub(super) fn work_lost(
         &self,
         work: &str,
@@ -256,7 +256,7 @@ impl WorkspaceService {
     ) -> Result<Option<u64>, String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work)?;
+        let _shared = self.shared_guard(work)?;
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
@@ -291,7 +291,7 @@ impl WorkspaceService {
         }
         let pending = Pending::Restore { target };
         self.store.write_pending(&store, &pending)?;
-        let result = WorkspaceService::materialize(self.store.as_ref(), &shared, &store, target);
+        let result = VersionService::materialize(self.store.as_ref(), &shared, &store, target);
         self.settle(work, &shared, &store, result)?;
         Ok(target)
     }
@@ -308,7 +308,7 @@ impl WorkspaceService {
         }
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work)?;
+        let _shared = self.shared_guard(work)?;
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
@@ -389,8 +389,7 @@ impl WorkspaceService {
             }
             let pending = Pending::Restore { target };
             self.store.write_pending(&store, &pending)?;
-            let result =
-                WorkspaceService::materialize(self.store.as_ref(), &shared, &store, target);
+            let result = VersionService::materialize(self.store.as_ref(), &shared, &store, target);
             self.settle(work, &shared, &store, result)
         })();
         if result.is_err() {
@@ -414,7 +413,7 @@ impl WorkspaceService {
     ) -> Result<DeleteReport, String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work)?;
+        let _shared = self.shared_guard(work)?;
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
@@ -471,7 +470,7 @@ impl WorkspaceService {
                 self.reset_agent_point(&store, agent, target, save, &tree)?;
                 backed_up.insert(agent.clone(), n);
             }
-            WorkspaceService::materialize(self.store.as_ref(), &shared, &store, target)?;
+            VersionService::materialize(self.store.as_ref(), &shared, &store, target)?;
             self.discard_commits_locked(&store, target, &saves)
         })();
         self.settle(work, &shared, &store, result)?;
@@ -487,7 +486,7 @@ impl WorkspaceService {
     pub(super) fn work_archives(&self, work: &str) -> Result<Vec<u64>, String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work)?;
+        let _shared = self.shared_guard(work)?;
         let (_shared_root, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         let mut out = Vec::new();
@@ -513,7 +512,7 @@ impl WorkspaceService {
     ) -> Result<Option<u64>, String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work)?;
+        let _shared = self.shared_guard(work)?;
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
@@ -561,7 +560,7 @@ impl WorkspaceService {
         }
         let pending = Pending::Restore { target };
         self.store.write_pending(&store, &pending)?;
-        let result = WorkspaceService::materialize(self.store.as_ref(), &shared, &store, target);
+        let result = VersionService::materialize(self.store.as_ref(), &shared, &store, target);
         self.settle(work, &shared, &store, result)?;
         // 恢复 = 回到留档操作前：留档之后长出来的提交整条作废（含更晚的档案指向的提交）。
         self.discard_since_locked(&store, reference.since)?;
@@ -573,7 +572,7 @@ impl WorkspaceService {
     pub(super) fn work_restore_point(&self, work: &str, commit: Option<u64>) -> Result<(), String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work)?;
+        let _shared = self.shared_guard(work)?;
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
@@ -592,7 +591,7 @@ impl WorkspaceService {
         self.pin_head(&store)?;
         let pending = Pending::Restore { target: commit };
         self.store.write_pending(&store, &pending)?;
-        let result = WorkspaceService::materialize(self.store.as_ref(), &shared, &store, commit);
+        let result = VersionService::materialize(self.store.as_ref(), &shared, &store, commit);
         self.settle(work, &shared, &store, result)
     }
 
@@ -600,7 +599,7 @@ impl WorkspaceService {
     pub(super) fn work_discard_after(&self, work: &str, keep: Option<u64>) -> Result<(), String> {
         let gate = self.gate(work);
         let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
-        let _shared = self.dirs.lock_shared(work)?;
+        let _shared = self.shared_guard(work)?;
         let (shared, store) = self.work_roots(work)?;
         let _lock = self.store.lock(&store)?;
         self.recover_locked(work, &shared, &store)?;
@@ -624,7 +623,7 @@ impl WorkspaceService {
         };
         self.store.write_pending(&store, &pending)?;
         let result = (|| {
-            WorkspaceService::materialize(self.store.as_ref(), &shared, &store, keep)?;
+            VersionService::materialize(self.store.as_ref(), &shared, &store, keep)?;
             self.discard_commits_locked(&store, keep, &BTreeMap::new())
         })();
         self.settle(work, &shared, &store, result)

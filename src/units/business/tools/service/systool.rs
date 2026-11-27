@@ -740,7 +740,7 @@ fn apply_patch(
                 t.clone(),
                 false,
                 false,
-                crate::units::business::workspace::api::content_hash(t.as_bytes()),
+                crate::units::business::versions::api::content_hash(t.as_bytes()),
             )),
             None => match io.read(&path) {
                 Ok(g) => Some((g.text, g.cut, g.lossy, g.hash)),

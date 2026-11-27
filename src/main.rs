@@ -237,7 +237,7 @@ fn main() {
     let history =
         units::business::conversation::session::detail::fs_history::FsHistory::new(sessions.root());
     let workspace = units::business::workspace::detail::FsWorkspace::new(sessions.root());
-    let workstore = units::business::workspace::detail::FsWorkStore::new();
+    let workstore = units::business::versions::detail::FsWorkStore::new();
     // 运行包能力：依赖文件夹 runtimes/（一个包 = 一个文件夹 + package.yaml）。
     let packages: Arc<dyn units::business::catalog::packages::api::Packages + Send + Sync> =
         Arc::new(
@@ -557,10 +557,14 @@ fn main() {
             shares,
         ));
 
-    // **工作区单元**：目录布局与版本库两个出站端口只由它的 service 持有（R12）。
-    let workspace: Arc<dyn units::business::workspace::api::Workspace + Send + Sync> =
-        Arc::new(units::business::workspace::service::WorkspaceService::new(
-            Arc::new(workspace),
+    // **工作区单元**：目录布局一个出站端口由它的 service 持有（R12）。
+    let workspace: Arc<dyn units::business::workspace::api::Workspace + Send + Sync> = Arc::new(
+        units::business::workspace::service::WorkspaceService::new(Arc::new(workspace)),
+    );
+    // **版本单元**：版本库一个出站端口由它的 service 持有；"在哪儿"问工作区（versions → workspace）。
+    let versions: Arc<dyn units::business::versions::api::Versions + Send + Sync> =
+        Arc::new(units::business::versions::service::VersionService::new(
+            Arc::clone(&workspace),
             Arc::new(workstore),
         ));
 
@@ -660,7 +664,7 @@ fn main() {
             storage: Arc::clone(&storage),
             provision: Arc::clone(&provision),
             builds: Arc::clone(&builds),
-            workspace: Arc::clone(&workspace),
+            versions: Arc::clone(&versions),
             modules: Arc::clone(&modules),
         },
     ) {
@@ -679,6 +683,7 @@ fn main() {
             units::business::conversation::session::service::SessionService::new(Arc::new(history)),
         ),
         workspace,
+        versions,
         Arc::clone(&vm),
         Arc::clone(&packages),
         Arc::clone(&provision),

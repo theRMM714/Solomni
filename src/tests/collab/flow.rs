@@ -404,6 +404,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         residents: Arc::new(crate::units::business::residents::api::NoResidents),
         // 核实工具面只读：没有共享区提交这回事。
         workspace: None,
+        versions: None,
         observations: crate::units::business::tools::api::Observations::default(),
         shell_live: None,
         reply_seq: 0,

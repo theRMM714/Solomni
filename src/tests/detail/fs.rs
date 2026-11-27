@@ -6,9 +6,8 @@
 use super::*;
 use crate::tests::doubles::test_workspace_store;
 use crate::units::business::session_model::api::{MEETING, SINGLE, SessionSpec};
-use crate::units::business::workspace::api::{
-    ChangeKind, CommitAnchor, WORKIGNORE, WORKIGNORE_SEED,
-};
+use crate::units::business::versions::api::{ChangeKind, CommitAnchor};
+use crate::units::business::workspace::api::{WORKIGNORE, WORKIGNORE_SEED};
 
 fn meta(name: &str) -> SessionMeta {
     SessionMeta {
@@ -397,7 +396,7 @@ fn fs_sys_io_read_page_reads_a_late_window_and_counts_the_whole_file() {
     assert_eq!(page.bytes, text.len());
     assert_eq!(
         page.hash,
-        crate::units::business::workspace::api::content_hash(text.as_bytes()),
+        crate::units::business::versions::api::content_hash(text.as_bytes()),
         "版本仍是整份文件"
     );
     assert!(!page.lossy && !page.line_cut && !page.window_cut);
@@ -712,7 +711,7 @@ fn fs_history_nests_children_inside_their_parent_dir() {
 /// 目的：写路径的跨进程锁由锁目录承载——同路径第二个实例拿不到锁就报 FS_LOCKED，放锁后可重试。
 #[test]
 fn fs_sys_io_write_lock_is_cross_instance_and_releases() {
-    use crate::units::business::workspace::api::content_hash;
+    use crate::units::business::versions::api::content_hash;
 
     let root = scratch("fs-sysio-lock");
     let path = root.join("a.txt");

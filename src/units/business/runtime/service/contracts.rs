@@ -72,7 +72,7 @@ impl WorkOps for Handle {
         sid: &str,
         limit: usize,
         before: Option<u64>,
-    ) -> Result<crate::units::business::workspace::api::WorkLog, String> {
+    ) -> Result<crate::units::business::versions::api::WorkLog, String> {
         let sid = sid.to_string();
         self.call(move |core| core.work_log(&sid, limit, before))
     }
@@ -81,7 +81,7 @@ impl WorkOps for Handle {
         &self,
         sid: &str,
         commit: u64,
-    ) -> Result<crate::units::business::workspace::api::CommitDetail, String> {
+    ) -> Result<crate::units::business::versions::api::CommitDetail, String> {
         let sid = sid.to_string();
         self.call(move |core| core.work_commit_view(&sid, commit))
     }
@@ -91,7 +91,7 @@ impl WorkOps for Handle {
         sid: &str,
         commit: u64,
         path: &str,
-    ) -> Result<crate::units::business::workspace::api::CommitFileView, String> {
+    ) -> Result<crate::units::business::versions::api::CommitFileView, String> {
         let sid = sid.to_string();
         let path = path.to_string();
         self.call(move |core| core.work_commit_file(&sid, commit, &path))
