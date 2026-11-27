@@ -70,7 +70,9 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
         bench: &sb,
         prompt: &*spec.prompt,
         residents: &residents,
-        versions: None,
+        // 核心核实没有工作台策略：不拦写、不记存档线。
+        policy: None,
+        workspace_params: &serde_json::Value::Null,
     });
     Some(Box::new(MemberTools {
         face: ToolFace {
@@ -99,8 +101,10 @@ pub fn verify_tools(spec: &VerifySpec<'_>) -> Option<Box<dyn CoreVerify>> {
         tools: Arc::clone(&spec.tools),
         exec: Arc::clone(&spec.exec),
         residents: Arc::new(crate::units::business::residents::api::NoResidents),
-        // 核心核实的工具面只读：没有共享区提交这回事。
-        versions: None,
+        // 核心核实的工具面只读：没有共享区提交这回事，也没有回合钩子与策略。
+        driver: None,
+        bench_policy: None,
+        workspace_params: serde_json::Value::Null,
         observations: Observations::default(),
         shell_live: None,
         reply_seq: 0,

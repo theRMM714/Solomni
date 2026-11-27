@@ -146,6 +146,7 @@ pub(crate) fn ops_with_vm(
         work.versions.clone(),
         vm,
         doubles::test_policies(),
+        doubles::test_bench_policies_with(work.versions.clone()),
         doubles::test_packages(std::sync::Arc::new(doubles::InMemoryPackages::empty())),
         doubles::test_provision(),
         doubles::test_modules(std::sync::Arc::new(doubles::VecSource(modules))),

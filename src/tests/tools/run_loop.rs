@@ -758,7 +758,9 @@ pub(crate) fn read_in_the_same_batch_does_not_authorize_write() {
         sb.private = abs(&["w", "a"]);
         t.face.bench = sb.clone();
         t.face.fence = crate::kernel::api::fence::FencePlan::for_session(&sb, &[], false);
-        t.versions = Some(Arc::clone(&ws.versions));
+        t.driver = Some(crate::units::business::versions::api::versioned_driver(
+            Arc::clone(&ws.versions),
+        ));
     }
     let exec = run_execution(std::slice::from_mut(&mut m), "任务", &test_prompts());
     let trace = exec.traces.get("a").expect("工具记录");
@@ -820,7 +822,9 @@ pub(crate) fn work_commit_refuses_unobserved_tracked_changes() {
             &["work_commit".to_string()],
         );
         t.face.allowed.push("work_commit".to_string());
-        t.versions = Some(Arc::clone(&ws.versions));
+        t.driver = Some(crate::units::business::versions::api::versioned_driver(
+            Arc::clone(&ws.versions),
+        ));
     }
     let exec = run_execution(std::slice::from_mut(&mut m), "任务", &test_prompts());
     let trace = exec.traces.get("a").expect("工具记录");

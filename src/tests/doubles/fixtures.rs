@@ -104,6 +104,7 @@ pub(crate) fn test_sandbox(
             ".work",
             crate::units::business::workbench::api::WORKIGNORE,
         ]),
+        shared_writable: false,
     }
 }
 

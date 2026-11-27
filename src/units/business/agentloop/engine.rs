@@ -6,7 +6,6 @@
 pub mod core_op;
 pub mod decls;
 pub mod driver;
-mod fence;
 pub mod io;
 pub mod round;
 pub mod tools;

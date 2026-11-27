@@ -402,7 +402,9 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         exec: crate::units::business::tools::api::host_sandbox(exec_svc),
         residents: Arc::new(crate::units::business::residents::api::NoResidents),
         // 核实工具面只读：没有共享区提交这回事。
-        versions: None,
+        driver: None,
+        bench_policy: None,
+        workspace_params: serde_json::Value::Null,
         observations: crate::units::business::tools::api::Observations::default(),
         shell_live: None,
         reply_seq: 0,

@@ -72,6 +72,12 @@ impl Turn {
             });
         }
         let app = registry.app();
+        // 共享区可不可写由这一会话的工作台策略说：版本化 = 主副本只读，不版本化 = 单树直写。
+        let shared_writable = self
+            .bench_policies
+            .get(&meta.workspace.policy)
+            .map(|p| p.shared_writable())
+            .unwrap_or(false);
         seat_benches(&SeatFacts {
             work: &work,
             session: &meta.name,
@@ -81,6 +87,7 @@ impl Turn {
             hard_deny: &app.sandbox.policy.deny,
             modules: &modules,
             seats: &seats,
+            shared_writable,
         })
     }
 
@@ -227,6 +234,7 @@ impl Turn {
         facts: &crate::units::business::sandbox::api::SandboxFacts,
         decl: &crate::units::business::sandbox::api::SandboxDecl,
         lease: &str,
+        workspace: &crate::units::business::session_model::api::WorkspaceDecl,
         host_plan: &PackagePlan,
     ) -> crate::units::business::agentloop::api::ToolFace {
         let source_ids: Vec<String> = ["agent", "module", "workspace"]
@@ -252,6 +260,7 @@ impl Turn {
             system_tools: &[],
             abilities: &abilities,
             profile: "",
+            workspace,
         };
         member_face(&self.session_ports(), &spec)
     }
@@ -277,6 +286,8 @@ impl Turn {
         host_plan: &PackagePlan,
         // 会话形状（会话类型展开后的声明）：工具来源与 system 工具都按它发。
         shape: &crate::units::business::session_model::api::SessionSpec,
+        // 这一会话的工作台声明（策略 id + 不透明参数）：共享区动作与回合钩子按它开。
+        workspace: &crate::units::business::session_model::api::WorkspaceDecl,
     ) -> (AgentSession, Vec<SessionEvent>) {
         // 形态按登记处解析；通道已在前置判据里解析成功，这里不再有"没有通道"的分支。
         let abilities = a.abilities();
@@ -298,6 +309,7 @@ impl Turn {
                 system_tools: &shape.system_tools,
                 abilities: &abilities,
                 profile: &shape.kind,
+                workspace,
             },
             channel,
             guest,

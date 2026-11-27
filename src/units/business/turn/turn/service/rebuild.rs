@@ -76,10 +76,12 @@ impl Turn {
         self.workspace.bind(&work, binding.as_deref())?;
         if binding.is_some() {
             // 旧会话首次启用：补一次初始导入（有 head 时无操作）。
-            if let Err(e) = self
-                .versions
-                .work_import_root(&work, crate::kernel::api::procs::unix_seconds())
-            {
+            let imported = self
+                .bench_policies
+                .get(&meta.workspace.policy)
+                .map(|p| p.import_root(&work, crate::kernel::api::procs::unix_seconds()))
+                .unwrap_or(Ok(()));
+            if let Err(e) = imported {
                 self.log.warn(
                     "turn::rebuild_session",
                     &format!("工作区初始导入失败：{}", e),
@@ -208,6 +210,7 @@ impl Turn {
                     system_tools: &meta.spec.system_tools,
                     abilities: &abilities,
                     profile: &meta.spec.kind,
+                    workspace: &meta.workspace,
                 };
                 // 重建也要恢复上下文预算与最近一次用量：否则重启后自动压缩与状态栏都失忆。
                 let (window, percent, keep_percent) =
@@ -280,7 +283,11 @@ fn replay_ledgers(
     compacted_upto: u64,
 ) -> (
     Vec<crate::units::business::tools::api::ObservationFact>,
-    Vec<(u64, String, crate::units::business::versions::api::ReadFact)>,
+    Vec<(
+        u64,
+        String,
+        crate::units::business::workbench::api::ReadFact,
+    )>,
 ) {
     let mut facts = Vec::new();
     let mut reads = Vec::new();
@@ -528,6 +535,11 @@ impl Turn {
         // 沙箱清单只有一处构造点：代理发言席也是一席，只是私有目录名与发言人不一致。
         let app = registry.app();
         let params = self.workspace_params_chain(meta)?;
+        let shared_writable = self
+            .bench_policies
+            .get(&meta.workspace.policy)
+            .map(|p| p.shared_writable())
+            .unwrap_or(false);
         let mut seats = crate::units::business::workspace::api::seat_benches(
             &crate::units::business::workspace::api::SeatFacts {
                 work: &meta.name,
@@ -546,6 +558,7 @@ impl Turn {
                     params,
                     private: roots.agents.get(PROXY_PRIVATE_DIR).cloned(),
                 }],
+                shared_writable,
             },
         )?;
         let sb = seats
@@ -581,6 +594,7 @@ impl Turn {
             // 代理发言席不是某个 agent：没有能力组，工具面只由来源（会话类型展开的 system 工具）给。
             abilities: &[],
             profile: &meta.spec.kind,
+            workspace: &meta.workspace,
         };
         let (window, percent, keep_percent) = self.context_budget(registry, None);
         let spec = crate::units::business::agentloop::api::ProxySpec {

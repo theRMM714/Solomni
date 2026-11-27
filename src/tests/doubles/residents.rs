@@ -299,7 +299,9 @@ pub(crate) fn member_with_service_tools(
         exec: crate::units::business::tools::api::host_sandbox(exec_svc),
         residents,
         // 工具面用例不接工作区：写工具落地后不自动提交。
-        versions: None,
+        driver: None,
+        bench_policy: None,
+        workspace_params: serde_json::Value::Null,
         observations: Default::default(),
         shell_live: None,
         reply_seq: 0,

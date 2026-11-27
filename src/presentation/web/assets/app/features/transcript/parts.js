@@ -173,8 +173,15 @@ function reasoningBlock(text, sess, key) {
   return d;
 }
 
+/// 能力位判据：这条会话的工作台支持什么由服务端给（capabilities），前端不按有没有存档推断。
+function canRewind(s) {
+  return !!(s && Array.isArray(s.capabilities) && s.capabilities.includes('versions'));
+}
+
 /// 回档按钮：回到这一行（留档或删除，点开后再选）。图标 + 原生 title（长说明不会被滚动裁掉）。
-function rewindButton(id) {
+/// 没有 versions 能力位就返回 null（不渲染，不是灰着）。
+function rewindButton(id, s) {
+  if (!canRewind(s)) return null;
   const b = ui.iconButton({
     icon: 'undo',
     label: '回档到此处',
@@ -233,10 +240,10 @@ function sessionNote(s) {
   return d;
 }
 
-export { mdNode, appendBody, foldOpen, foldBind, scrollKey, flushScroll, toolDetail, toolCard, buildRootList, shortPath, reasoningBlock, rewindButton, lineBlock, sessionNote, pendingScroll };
+export { mdNode, appendBody, foldOpen, foldBind, scrollKey, flushScroll, toolDetail, toolCard, buildRootList, shortPath, reasoningBlock, canRewind, rewindButton, lineBlock, sessionNote, pendingScroll };
 
 /// 挂载：装配依赖并把本模块的入口交给组装点。
 export function mount(root, deps) {
   ({ g, doc, state, ui, app } = deps);
-  Object.assign(root, { mdNode, appendBody, foldOpen, foldBind, scrollKey, flushScroll, toolDetail, toolCard, buildRootList, shortPath, reasoningBlock, rewindButton, lineBlock, sessionNote, pendingScroll });
+  Object.assign(root, { mdNode, appendBody, foldOpen, foldBind, scrollKey, flushScroll, toolDetail, toolCard, buildRootList, shortPath, reasoningBlock, canRewind, rewindButton, lineBlock, sessionNote, pendingScroll });
 }

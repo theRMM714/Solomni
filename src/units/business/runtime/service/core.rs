@@ -50,6 +50,8 @@ pub struct Core {
     pub(super) decls: Arc<crate::units::business::session_model::api::SessionDecls>,
     /// 目的：执行环境策略注册表——补编与呈现层要按声明解析出「在哪一侧、哪个客机」。
     pub(super) policies: crate::units::business::sandbox::api::SandboxPolicies,
+    /// 目的：工作台策略表——会话只按会话声明里的策略 id 取；工具面解释与视图能力位都读它。
+    pub(super) bench_policies: Arc<dyn crate::units::business::workbench::api::BenchPolicies>,
 }
 
 /// 目的：在世会话形态（`turn_state` 的状态类型）：测试访问器用它读会话内容。
@@ -69,6 +71,7 @@ impl Core {
         versions: Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>,
         vm: Arc<dyn Vm + Send + Sync>,
         policies: crate::units::business::sandbox::api::SandboxPolicies,
+        bench_policies: Arc<dyn crate::units::business::workbench::api::BenchPolicies>,
         packages: Arc<dyn Packages + Send + Sync>,
         provision: Arc<dyn Provision + Send + Sync>,
         modules: Arc<dyn Modules + Send + Sync>,
@@ -98,7 +101,7 @@ impl Core {
         // 回合状态收在 turn_state：它只认入站面与压缩工厂，不认 runtime 的端口（环 2 不得依赖环 3）。
         let turn = crate::units::business::turn_state::api::Turn::new(
             Arc::clone(&workspace),
-            Arc::clone(&versions),
+            Arc::clone(&bench_policies),
             Arc::new(policies.clone()),
             Arc::clone(&residents),
             Arc::clone(&secrets),
@@ -124,6 +127,7 @@ impl Core {
             Arc::clone(&versions),
             Arc::clone(&vm),
             policies.clone(),
+            Arc::clone(&bench_policies),
             Arc::clone(&packages),
             Arc::clone(&provision),
             Arc::clone(&modules),
@@ -161,6 +165,7 @@ impl Core {
             lifecycle,
             decls,
             policies,
+            bench_policies,
         };
         c.sync_compact_choice();
         c
@@ -372,6 +377,8 @@ impl Core {
         let workspace =
             crate::units::business::conversation::session::api::work_root_of(history, &meta)?;
         let book = self.systools.book();
+        // 共享区动作名单与回合钩子都由这一会话的工作台策略说（解释与装配同一份取数）。
+        let bench_policy = self.bench_policies.get(&meta.workspace.policy);
         let loop_id = if loop_id.trim().is_empty() {
             meta.spec.loop_id.as_str()
         } else {
@@ -394,6 +401,8 @@ impl Core {
                 workspace_name: Some(workspace.as_str()),
                 modules: &modules,
                 services: &services,
+                policy: bench_policy,
+                workspace_params: &meta.workspace.params,
                 loops: self.decls.loops(),
                 book: &book,
             },

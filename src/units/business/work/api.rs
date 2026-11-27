@@ -313,6 +313,10 @@ pub struct SessionView {
     /// 目的：外部工作区根；None = 产品内布局。界面据此显示“删除只删记录”、工作区标记。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
+    /// 目的：这条会话的工作台支持哪些能力位（如 `versions`）：前端按位决定渲不渲染回档 / 留档。
+    /// 约束：来自会话声明的策略（`BenchPolicy::capabilities`），**不按有没有存档推断**；空 = 一个都不渲染。
+    #[serde(default)]
+    pub capabilities: Vec<String>,
     /// 目的：外部工作区根不可达（界面禁止打开 / 不渲染启动按钮）。
     #[serde(default)]
     pub workspace_missing: bool,

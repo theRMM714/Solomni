@@ -106,7 +106,7 @@ pub struct AgentSession {
 pub struct ReadAt {
     pub body: String,
     pub reply: u64,
-    pub fact: crate::units::business::versions::api::ReadFact,
+    pub fact: crate::units::business::workbench::api::ReadFact,
 }
 
 /// 目的：一次压缩的切分计划。
@@ -492,7 +492,7 @@ impl AgentSession {
         &mut self,
         body: String,
         reply: u64,
-        fact: crate::units::business::versions::api::ReadFact,
+        fact: crate::units::business::workbench::api::ReadFact,
     ) {
         let same = |r: &ReadAt| {
             r.fact.worktree == fact.worktree
@@ -927,8 +927,8 @@ pub fn unique_work_name(base: &str, fallback: &str, exists: impl Fn(&str) -> boo
 mod tests {
     use super::*;
 
-    fn fact_with(from: u64, to: u64) -> crate::units::business::versions::api::ReadFact {
-        crate::units::business::versions::api::ReadFact {
+    fn fact_with(from: u64, to: u64) -> crate::units::business::workbench::api::ReadFact {
+        crate::units::business::workbench::api::ReadFact {
             worktree: String::new(),
             path: "docs/README.md".to_string(),
             from,
@@ -937,7 +937,7 @@ mod tests {
         }
     }
 
-    fn fact() -> crate::units::business::versions::api::ReadFact {
+    fn fact() -> crate::units::business::workbench::api::ReadFact {
         fact_with(3, 9)
     }
 

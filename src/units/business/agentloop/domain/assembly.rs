@@ -21,8 +21,8 @@ use crate::units::business::prompt::api::Segment;
 use crate::units::business::sandbox::api::GuestOs;
 use crate::units::business::tools::api::{ObservationFact, Observations};
 use crate::units::business::transcript::api::{ContextUsage, SessionEvent};
-use crate::units::business::versions::api::ReadFact;
 use crate::units::business::workbench::api::Bench;
+use crate::units::business::workbench::api::ReadFact;
 use crate::units::pure::registry_model::api::AgentMeta;
 use crate::units::pure::registry_model::api::ToolMode;
 
@@ -71,6 +71,8 @@ pub struct MemberSpec<'a> {
     pub abilities: &'a [String],
     /// 目的：会话类型 id。
     pub profile: &'a str,
+    /// 目的：这一会话的工作台声明（策略 id + 不透明参数）：共享区动作与回合钩子按它开。
+    pub workspace: &'a crate::units::business::session_model::api::WorkspaceDecl,
 }
 
 /// 目的：装配一份单 agent 会话所需的全部事实（agent、席事实、通道、guest、上下文预算与核心默认模型）。
@@ -168,6 +170,8 @@ fn open_exec(
 /// 目的：装配一席的工具环境：把席位声明与端口面交给**会话唯一的装配机**（`domain::assemble`），再包成活的工具面对象。
 pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools {
     let sb = spec.bench;
+    // 工作台策略按会话声明取：没有这个策略时这一席没有共享区动作（组合根装配期已校验）。
+    let bench_policy = ports.bench_policies.get(&spec.workspace.policy);
     let seat = assemble_face(FaceInput {
         loop_id: spec.loop_id,
         role: spec.role,
@@ -182,7 +186,8 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
         bench: sb,
         prompt: &*ports.prompt,
         residents: &*ports.residents,
-        versions: Some(&ports.versions),
+        policy: bench_policy.clone(),
+        workspace_params: &spec.workspace.params,
     });
     MemberTools {
         face: ToolFace {
@@ -214,7 +219,9 @@ pub fn member_tools(ports: &SessionPorts, spec: &MemberSpec<'_>) -> MemberTools 
         // 执行面：按这一会话的声明开一个句柄（本机 / 虚拟机都是同一个端口，引擎只认它）。
         exec: open_exec(ports, spec), // 常驻服务的统一管理面：模块的 services 操作经它调用。
         residents: Arc::clone(&ports.residents),
-        versions: Some(Arc::clone(&ports.versions)),
+        driver: seat.driver,
+        bench_policy: bench_policy.clone(),
+        workspace_params: spec.workspace.params.clone(),
         observations: Observations::default(),
         shell_live: Some(Arc::clone(&spec.shell)),
         // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_single）。

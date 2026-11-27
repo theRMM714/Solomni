@@ -479,7 +479,7 @@ setTimeout(async () => {
     try {
       const r = vm.runInNewContext(
         "(function () {" +
-          " const s = { sid: 'pend', lines: [], live: [], fold: {}, scroll: {} };" +
+          " const s = { sid: 'pend', capabilities: ['versions'], lines: [], live: [], fold: {}, scroll: {} };" +
           " state.sessions.set('pend', s); state.activeSid = 'pend';" +
           " const box = document.querySelector('#stream'); box.children.length = 0;" +
           " s.lines.push({ cls: 'user', who: '用户', text: '乐观', pending: true });" +
@@ -541,16 +541,17 @@ setTimeout(async () => {
       if (!modalDismiss) loadErrors.push('弹层关闭判据：' + JSON.stringify(r));
     } catch (e) { loadErrors.push('弹层关闭判据失败：' + e.message); }
   }
-  // **回档是图标按钮**：有 aria-label / 有 SVG，且沿用 line-act 的 hover 显隐。
+  // **回档是图标按钮**：有能力位（versions）才渲染 aria-label / SVG 与 line-act 的 hover 显隐；
+  // 没有能力位（不版本化的会话）根本不出按钮——不是灰着。
   let rewindIcon = false;
   if (!loadErrors.length) {
     try {
       const r = vm.runInNewContext(
-        "(function () { const b = rewindButton(4); return { cls: b.className, label: b.attrs && b.attrs['aria-label'], svg: b.children[0] && b.children[0].innerHTML }; })()",
+        "(function () { const on = rewindButton(4, { capabilities: ['versions'] }); const off = rewindButton(4, { capabilities: [] }); return { cls: on.className, label: on.attrs && on.attrs['aria-label'], svg: on.children[0] && on.children[0].innerHTML, hidden: off === null }; })()",
         sandbox
       );
       rewindIcon = String(r.cls).indexOf('icon-btn') >= 0 && String(r.cls).indexOf('line-act') >= 0
-        && r.label === '回档到此处' && String(r.svg).indexOf('<svg') === 0;
+        && r.label === '回档到此处' && String(r.svg).indexOf('<svg') === 0 && r.hidden === true;
       if (!rewindIcon) loadErrors.push('回档图标检查：' + JSON.stringify(r));
     } catch (e) { loadErrors.push('回档图标检查失败：' + e.message); }
   }

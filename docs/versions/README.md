@@ -8,6 +8,8 @@
 
 - 管：**共享区版本化**——内容寻址的提交记录、三条线（存档线自动快照 + 各 agent 的工作线 + 主线）、推送时的文件级三方合并、三方视图与显式冲突解决、按提交点还原、留档 / 删除 / 回收、过滤名单的维护。
 - 管：**成员侧十一个工作工具**的处理器与回执：`work_pull` / `work_commit` / `work_push` / `work_sync` / `work_status` / `work_ignore` / `work_versions` / `work_diff` / `work_resolve` / `work_reset` / `work_lost` 由 `src/units/business/versions/service/work_tools.rs` 的 `WorkHandler` 认领，回执文本由 `src/units/business/versions/domain/work_tools.rs` 渲染；`work_handlers` 按工具面发放的名单现取执行者。
+- 管：**写门禁与回合边界**——`SessionWriteGate`（`WriteGate` 的实现，读版本库快照判「先读后改」）与 `VersionedDriver`（`BenchDriver` 的实现：写前拦 `work_commit` 未读的路径、写后自动存档、批末采纳并给出回执、过期读取判定），都在 `src/units/business/versions/service/driver.rs`；引擎只按驱动给的形状调，不认识版本库。
+- 管：**工作台策略 `versioned`**（`src/units/business/versions/service/policies.rs`）：能力位 `versions`、共享区只读；带 `shared-write` 能力组时整组发 11 个 `work_*` 并给出执行者与驱动。
 - 管：**写门禁的版本快照** `work_gate_info(work, agent, paths)`——只回答三条事实：路径是否受管（在主线 head 树或该 agent 工作线 head 树里）、沙箱当前版本的整份 SHA-256、基线版本（工作线头优先，否则主线头）。它不加锁、不比对读账本；门禁与上下文账本在 `tools` 侧合成（`src/units/business/versions/service.rs`、`src/units/business/tools/api.rs`）。自动存档线不算受管——否则脚本随手建的 scratch 也会被纳入。
 - 不管：**目录在哪儿**——布局、沙箱、根、外部绑定投影全在 `workspace`；本单元只经 `api::Workspace` 问「共享区根 / 会话树根 / 各 agent 私沙根」与「这会话是不是外部工作区、锁文件放哪」。
 - 不管：建工作（`work`）、模块清单（`modules`）、工具面归属与授权（`tools` / `agentloop` 的流程段与角色）、会话流水（`session`）。
@@ -29,13 +31,15 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`workspace`（只问「在哪儿」：根、外部根、写闸路径）
-- 谁在用我：`agentloop`、`runtime`、`work`、`tools`、`lifecycle`、`system`、`provision`、`maintenance`、`turn`、`turn_state`
+- 谁在用我：`main`（拼策略表）、`work`（回档 / 归档）、`lifecycle`、`system`、`provision`、`maintenance`；引擎侧只经 `workbench::api::BenchDriver` 拿到驱动，不直接依赖本单元
 
 ## 改动本单元时必须同步
 
 - `docs/workspace/README.md` → 版本化口径搬走后两页不许各说一半；「目录在哪」的判据只写在 workspace。
 - `tests/specs/versions.yaml` → 用例声明的文件清单与用例名（版本化搬来时一并搬）。
-- `docs/tools/tools-and-roles.md` → `work_*` 十一个工具的回执与授权口径变了要同步。
+- `docs/tools/tools-and-roles.md` → `work_*` 十一个工具的回执与授权口径变了要同步（发放由 `versioned` 策略的 `SHARED_TOOLS` 决定，工具面不硬编码）。
+- `docs/workbench/README.md` → 策略契约（`BenchPolicy` / `BenchDriver`）变了要同步。
+- `docs/workspace/README.md` → `plain` 与 `versioned` 是两个策略，别把「工作台」只写成一个。
 
 ## 本目录
 

@@ -46,7 +46,7 @@ fn meta(name: &str, parent: Option<&str>, tier: Side, kind: &str) -> SessionMeta
             ..Default::default()
         },
         permission: PermissionOverride::default(),
-        workspace: WorkspaceDecl::layout(),
+        workspace: WorkspaceDecl::default(),
         parent: parent.map(str::to_string),
         node: None,
         delegation: None,
@@ -69,6 +69,7 @@ fn sandbox() -> Bench {
         scope: SharedScope::default(),
         path_codec: None,
         filter_rules: PathBuf::from(".work").join(".workignore"),
+        shared_writable: false,
     }
 }
 
@@ -187,7 +188,7 @@ fn shared_scope_applies_root_then_narrows_and_keeps_hard_deny() {
 #[test]
 fn a_layer_round_trips_through_the_declaration_params() {
     let decl = with_shared(
-        WorkspaceDecl::layout(),
+        WorkspaceDecl::default(),
         SharedEdit {
             read: Some(ScopeMode::Paths(vec!["docs".to_string()])),
             write: None,
@@ -196,7 +197,7 @@ fn a_layer_round_trips_through_the_declaration_params() {
     );
     assert_eq!(
         decl.policy,
-        crate::units::business::session_model::api::LAYOUT_POLICY
+        crate::units::business::session_model::api::DEFAULT_POLICY
     );
     let back = edit_of(&decl.params).expect("参数应能读回");
     assert_eq!(back.read, Some(ScopeMode::Paths(vec!["docs".to_string()])));
@@ -306,7 +307,7 @@ fn seat_benches_give_each_agent_only_its_own_modules() {
         ]),
         store: PathBuf::from("store"),
     };
-    let decl = WorkspaceDecl::layout();
+    let decl = WorkspaceDecl::default();
     let permissions = PermissionDefaults::default().to_permission_set();
     let seats = vec![
         SeatPlan {
@@ -333,6 +334,7 @@ fn seat_benches_give_each_agent_only_its_own_modules() {
         hard_deny: &[],
         modules: &modules,
         seats: &seats,
+        shared_writable: false,
     })
     .expect("沙箱应能组装");
     assert_eq!(out.list.len(), 2);
@@ -374,9 +376,10 @@ fn a_seat_without_a_private_root_is_reported_by_name() {
             agent: "a".to_string(),
             modules: Vec::new(),
             permissions: PermissionDefaults::default().to_permission_set(),
-            params: vec![WorkspaceDecl::layout().params],
+            params: vec![WorkspaceDecl::default().params],
             private: None,
         }],
+        shared_writable: false,
     })
     .expect_err("缺私有根应报错");
     assert!(

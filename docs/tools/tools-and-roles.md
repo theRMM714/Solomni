@@ -29,7 +29,7 @@ tools:
 - **动作表只说"这个工具长什么样"**：没有 `capability` / `publish` / `callers` / `effect` / `reach` / `scope`。一张表同时回答"谁能调"在来源变多以后必然漂（同一动作既给人、又给会话内若干来源），所以谁能拿到归**来源**，授权归**权限端口**。
 - **没有工具卡**：权限侧不产生裁决卡，也没有逐次「允许 / 拒绝 / 本轮放行」的确认链路；需要人定夺的是核心各关卡（建会话、验收、定版）与工具层的围栏裁决（授不上必要落点时问一次，见本文件「授权面」）。
 - **人的命令面单独声明**：`src/units/business/tools/domain/systool.rs` 的 `HUMAN_ACTIONS` 列出人经呈现层能用的动作（`is_human_action`），它是呈现层的口径、不是授权；不在其中的动作被人调用会如实拒绝（「这个动作只在会话里用」）。
-- **共享区写权不再是逐工具标记**：谁能发布 `work_*` 由 agent 的能力组 `shared-write` 决定（`workspace` 来源只在有工作区且带这个能力时交那 11 个 id）。
+- **共享区写权不再是逐工具标记**：谁能发布 `work_*` 由工作台策略的 `plan` 决定——`versioned` 策略在 agent 的能力组含 `shared-write` 且这一席有工作区时整组发那 11 个 id（`workbench::api::SHARED_TOOLS`），`plain` 策略一个都不发。来源只转交这份名单，运行期不判能力组。
 - **列目录是"核实"的前提**：`read` 只读文件、`grep` 按模式找行，**没有 `list` 就确认不了"资料齐不齐"**；`read` 遇到目录会如实引导到 `list`。
 - **`grep` 的默认过滤是检索面口径**：目录递归时按 `.gitignore` + 版本库目录里的 `.workignore`、点号开头的隐藏文件、二进制（前 8 KiB 含 NUL）剪枝，不跟符号链接；`hidden` / `no_ignore` 是逃生口，显式给单个文件路径时不过滤。过滤名单只有一份，与「哪些文件算工作区内容」共用，维护入口是 `work_ignore`（见 [workspace](../workspace/README.md)）。
 - 参数不合法 → **如实拒绝并落工具行**。
@@ -45,7 +45,7 @@ Loop { id: "discuss", builder: Some("discuss"), cast: vec![Cast { role: "core_pr
 
 - **角色位 = 绑在段上的身份位**：`discussant` 只在 `discuss` 段出场、`orchestrator` 只在 `execute` 段出场；人数与机制动作都在角色位上，**同一个角色在不同段可以交不同的工具**，所以不需要"阶段 → 工具"的第二张表。
 - **流程段 = 回合身份的来源**：写了实现名 `builder` 的段能当流程串进会话（`discuss` / `execute` 各自绑一个实现），没写的段是没有流程的会话坐的**静止段**（`standard` 坐 `solo`、`proxy` 坐 `core_proxy`）。段与角色声明在 `systools/loops.yaml`；会话类型表（`systools/profiles.yaml`）的 `flows` 列流程段，`loop` 写静止段。
-- **工具只认「段 + 角色」**：落盘的 `SessionSpec` 带 `loop_id` 与 `role`，装配期按这两个值查出角色位再拍平成 `loop` 来源要交的 id；换段时两者一起换（`Identity`），不许只换一个。文件面与执行面归 agent 的能力组，模块面归 agent 装了哪些模块，共享区面归有没有工作区与 `shared-write`，系统工具归会话类型——角色位只声明人数与机制动作。
+- **工具只认「段 + 角色」**：落盘的 `SessionSpec` 带 `loop_id` 与 `role`，装配期按这两个值查出角色位再拍平成 `loop` 来源要交的 id；换段时两者一起换（`Identity`），不许只换一个。文件面与执行面归 agent 的能力组，模块面归 agent 装了哪些模块，共享区面归工作台策略（`versioned` 看 `shared-write`，`plain` 不给），系统工具归会话类型——角色位只声明人数与机制动作。
 - **角色 id 全局唯一**：流程段只引用 id，不复制声明；装配期 `loop_check::problems` 断言角色在册、角色位交的动作都在总表里。
 - **核心角色是数据不是特判**：`core: true` 由会话的核心通道出演（核心代理 / 计划 / 验收），不进成员表；`core: false` 才是成员会话。哪一段里有核心位由该段的 `cast` 决定，这条约束由 `loop_check::problems` 断言。
 - **不做角色继承**：重复列几个 id 没有代价，继承会引入隐式耦合。
@@ -61,7 +61,7 @@ Loop { id: "discuss", builder: Some("discuss"), cast: vec![Cast { role: "core_pr
 | `agent` | `read` `list` `grep`、`write` `edit` `patch` `delete`、`shell` | agent 的能力组 `fs-read` / `fs-write` / `exec`（`agents.yaml` 的 `abilities`；不写 = 全给） |
 | `module` | 该 agent 的模块工具，限定 id `<模块>.<工具>` / `<模块>.<服务>.<操作>` | agent 装了哪些模块（`agents.yaml` 的 `modules`） |
 | `loop` | 当前角色位的机制动作（`say` / `submit_report` / `plan` / `node_verdict` …） | 这一回合的段与角色（装配期用 `(loop_id, role)` 在段表里查出 `Cast.tools`，之后来源只持有这份 id 清单） |
-| `workspace` | 11 个 `work_*`（`workspace::api::WORK_TOOLS`） | 有工作区，且能力组含 `shared-write` |
+| `workspace` | 工作台策略的 `plan` 给的名单（`versioned` = 11 个 `work_*`，`plain` = 空） | 有工作区；`versioned` 还要能力组含 `shared-write` |
 | `profile` | 会话类型声明的系统工具（代理类型的六个会话控制动作） | 会话 meta 里的 `system_tools`（建会话时按类型表展开） |
 
 - 会话类型表（`systools/profiles.yaml`）的 `sources` 决定挂哪几个：`single` = `[agent, module, workspace]`、`collab` = `[agent, module, workspace, loop]`、`proxy` = `[profile]`（六个系统工具）。

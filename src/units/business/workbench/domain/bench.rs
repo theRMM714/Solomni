@@ -44,6 +44,8 @@ pub struct Bench {
     /// 目的：过滤规则文件（版本库目录里的 `.workignore`）：检索面（grep）与内容面（哪些文件算工作区内容）共用这一份。
     /// 约束：只读这份规则；文件不存在时调用方按种子名单兜底，不在这里建目录。
     pub filter_rules: PathBuf,
+    /// 目的：共享区当可写工作树（不版本化的策略是单树直写；版本化时共享区只读，写入走 `work_commit`）。
+    pub shared_writable: bool,
 }
 
 impl Bench {
@@ -119,10 +121,14 @@ impl Bench {
         }
     }
 
-    /// 目的：该落点这一席能不能写：内置文件工具永远不直接写共享主副本（写入走 work_commit）；
-    ///    私有沙箱恒可写；模块目录对内置文件工具永久只读。
+    /// 目的：该落点这一席能不能写：版本化时内置文件工具不直接写共享主副本（写入走 work_commit）；
+    ///    不版本化（`shared_writable`）时共享区就是可写工作树；私有沙箱恒可写；模块目录永久只读。
     pub fn can_write(&self, area: &Area) -> bool {
-        matches!(area, Area::Private)
+        match area {
+            Area::Private => true,
+            Area::Shared => self.shared_writable,
+            Area::Module(_) => false,
+        }
     }
 
     /// 目的：该落点这一席能不能读：共享区按路径归属；私有沙箱与模块目录恒可读。

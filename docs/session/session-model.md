@@ -400,7 +400,7 @@ session/<工作名>/
 - **读事实随工具行落盘**：成功的非截断 `read` 在工具行的观察事实里记"覆盖区间 + 读来源"（工作树 / 路径 / 当时的整份指纹 / 行数）；发送视图用的读事实由它派生，不再单独落一份。整份读派生一条 `1..=total_lines`，`offset` / `limit` 截过的分段读**每段派生一条**——大文件只能分段读，但读过的那几段照样会被占位符照看。空文件、越界段、`lossy` 与单行截断都不产生读事实（派生规则见 `src/units/business/tools/api.rs` 的 `ObservationFact::read_facts`，用例 `src/tests/tools/gate.rs`）。
 - **开关与保底都是落盘事实**：`meta.context_freshness`（默认关）与 `meta.freshness_keep_percent`（默认 80，范围 0–90；0 = 不保底，100 等于永不替换所以不允许）。关 = 只记事实、发送视图原样；开 = 发送前判一次过期。两个值都写在**工作根** meta 上、子会话沿根继承；落盘是为了回放与实时产出同一条请求。
 - **判定按内容，结论分三态**：指纹相同 = `SameVersion`；路径已不在对照物里 = `Changed`；否则取新旧两份正文，把"读过的那几行"当成连续行窗口在新内容里找——找到 = `Shifted`（版本变了但那段内容还在，头部插行导致的移位也算），找不到 = `Changed`（`Workspace::judge_reads`）。
-- **两个消费者对 `Shifted` 刻意取不同答案**：占位符只换 `Changed`——模型看到的旧内容仍然可信，只是行号可能移位，没必要付一次缓存失效；写门禁只认 `SameVersion`——整份覆盖授权不能抹掉没看见的改动（版本变了就必须重读）。同一份读在两个地方可能得到不同结论，这是设计而不是不一致（两个策略分别落在 `src/units/business/agentloop/engine/driver.rs` 的 `freshness_now` 与 `src/units/business/tools/api.rs` 的 `SessionWriteGate`）。
+- **两个消费者对 `Shifted` 刻意取不同答案**：占位符只换 `Changed`——模型看到的旧内容仍然可信，只是行号可能移位，没必要付一次缓存失效；写门禁只认 `SameVersion`——整份覆盖授权不能抹掉没看见的改动（版本变了就必须重读）。同一份读在两个地方可能得到不同结论，这是设计而不是不一致（两个策略分别落在 `src/units/business/agentloop/engine/driver.rs` 的 `freshness_now` 与 `src/units/business/versions/service/driver.rs` 的 `SessionWriteGate`）。
 - **过期只换那一条工具结果**：整条换成 `[已过期：<path> 第a-b、c-d行，读取后文件已修改；需要时重新 read]`；同一条工具结果里的多段读按消息归并成一个占位符（相邻/重叠区间合并，隔开的用顿号分开）。按**正文**定位消息（压缩会移走旧消息、下标会漂），正文找不到就跳过。
 - **保底 = 只替换前缀之后**：先按字符数（≈4 字符 / token）估出发送视图总量，前 `freshness_keep_percent`% 的消息原样保留、只替换其后的过期读——KV 缓存是位置绑定的前缀缓存，保住前缀才保得住命中。这个估算只用来切前缀，不参与用量与计费口径。
 - **省得不够就不换**：一次替换省下的正文不到 8000 字符（≈2K tokens）时整次回退、原样发送——换一次要付一次缓存失效，不值。判定失败、没有工作区、开关关、省得不够，都原样发送——不静默丢内容。

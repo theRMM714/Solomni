@@ -22,3 +22,19 @@ pub struct ReadFact {
     /// 目的：读的那一刻整份内容的指纹。
     pub blob: String,
 }
+
+/// 目的：一条待判定的读取（一次 `read` 读到的行区间 + 当时的整份指纹）——判过期用，与 `ReadFact` 同口径。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadQuery {
+    /// 目的：工作树内的相对路径（斜杠分隔）。
+    pub path: String,
+    /// 目的：读的那一刻整份内容的指纹。
+    pub blob: String,
+    /// 目的：读到的第一行（从 1 数起）。
+    pub from: u64,
+    /// 目的：读到的最后一行（含）。
+    pub to: u64,
+    /// 目的：这次读发生在该 agent 的私有沙箱里——对照物是沙箱当前内容，不是主副本。
+    /// 约束：沙箱里已经没这条路径 = 过期（读到的内容不在了，模型该重读）。
+    pub sandbox: bool,
+}

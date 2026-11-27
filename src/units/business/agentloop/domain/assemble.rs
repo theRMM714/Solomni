@@ -101,9 +101,10 @@ pub struct FaceInput<'a> {
     pub bench: &'a Bench,
     pub prompt: &'a dyn Prompt,
     pub residents: &'a dyn ResidentOps,
-    /// 目的：版本库用例面（一席的 `work_*` 执行者按它造）；没有工作区的席位给 None（一个 `work_*` 也不发）。
-    pub versions:
-        Option<&'a Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>>,
+    /// 目的：这一席工作台策略（按它开工具、执行者与回合钩子）；没有工作区的席位给 None。
+    pub policy: Option<Arc<dyn crate::units::business::workbench::api::BenchPolicy>>,
+    /// 目的：工作台策略参数（会话声明里那一段不透明 JSON；策略自己解释）。
+    pub workspace_params: &'a serde_json::Value,
 }
 
 /// 目的：一席工具面装配出的**纯值**：发放名单、模块工具表、说明块与共享区工具的执行者。
@@ -119,6 +120,8 @@ pub struct SeatFace {
     pub sources: Vec<String>,
     pub notes: ToolNotes,
     pub handlers: Vec<Arc<dyn ToolHandler>>,
+    /// 目的：这一席的回合边界钩子（版本化策略才有）；引擎只按它调，不认识版本库。
+    pub driver: Option<Arc<dyn crate::units::business::workbench::api::BenchDriver>>,
 }
 
 /// 目的：**会话唯一的工具面装配机**：来源交 id → 去重成面 → 共享区执行者 → 模块工具表与已就绪服务 → 说明块。
@@ -148,14 +151,27 @@ pub fn assemble(input: FaceInput<'_>) -> SeatFace {
         .and_then(|loops| loops.cast_of(input.loop_id, input.role))
         .map(|cast| cast.tools.clone())
         .unwrap_or_default();
-    let sources = build_sources(input.source_ids, &table, input.system_tools, &loop_tools);
-    let (allowed, used) = face_of(&ctx, &sources);
-    let handlers = match (input.workspace_name.is_some(), input.versions) {
-        (true, Some(versions)) => {
-            crate::units::business::versions::api::work_handlers(versions, input.bench, &allowed)
-        }
-        _ => Vec::new(),
+    // 工作台策略开这一席：共享区动作名单、它们的执行者、回合边界钩子——会话不认识版本库。
+    let plan = match (input.workspace_name.is_some(), input.policy.as_ref()) {
+        (true, Some(policy)) => policy
+            .plan(&crate::units::business::workbench::api::PlanRequest {
+                bench: Some(input.bench),
+                abilities: input.abilities,
+                params: input.workspace_params,
+            })
+            .unwrap_or_default(),
+        _ => crate::units::business::workbench::api::BenchPlan::default(),
     };
+    let sources = build_sources(
+        input.source_ids,
+        &table,
+        input.system_tools,
+        &loop_tools,
+        &plan.tools,
+    );
+    let (allowed, used) = face_of(&ctx, &sources);
+    let handlers = plan.handlers;
+    let driver = plan.driver;
     let mut notes = tool_notes(
         input.prompt,
         input.bench,
@@ -173,6 +189,7 @@ pub fn assemble(input: FaceInput<'_>) -> SeatFace {
         sources: used,
         notes,
         handlers,
+        driver,
     }
 }
 
@@ -251,6 +268,10 @@ pub fn role_face(loops: &Loops, role_id: &str) -> Vec<String> {
         .cast_of(loop_id, role_id)
         .map(|c| c.tools.clone())
         .unwrap_or_default();
-    let sources = build_sources(&ids, &BTreeMap::new(), &[], &loop_tools);
+    let shared: Vec<String> = crate::units::business::workbench::api::SHARED_TOOLS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let sources = build_sources(&ids, &BTreeMap::new(), &[], &loop_tools, &shared);
     face_of(&ctx, &sources).0
 }

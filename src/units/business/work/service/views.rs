@@ -210,6 +210,14 @@ impl Work {
                         note: String::new(),
                     },
                 };
+                // 能力位来自会话声明的策略：不版本化的会话一个都不给，界面据此不渲染回档 / 留档。
+                let capabilities: Vec<String> = self
+                    .history
+                    .meta(&sid)
+                    .ok()
+                    .and_then(|m| self.bench_policies.get(&m.workspace.policy))
+                    .map(|p| p.capabilities().iter().map(|s| s.to_string()).collect())
+                    .unwrap_or_default();
                 SessionView {
                     running,
                     sid,
@@ -237,6 +245,7 @@ impl Work {
                     shell,
                     workspace: entry.and_then(|h| h.workspace.clone()),
                     workspace_missing: entry.map(|h| h.workspace_missing).unwrap_or(false),
+                    capabilities,
                 }
             })
             .collect()

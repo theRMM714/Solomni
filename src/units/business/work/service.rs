@@ -60,6 +60,8 @@ pub struct Work {
     vm: Arc<dyn Vm + Send + Sync>,
     /// 执行环境策略注册表（**值不是端口**）：声明解析成事实、就绪判定与选型派生都经它。
     policies: crate::units::business::sandbox::api::SandboxPolicies,
+    /// 工作台策略表（**值不是端口**）：视图里的能力位按会话声明的策略 id 查它。
+    bench_policies: Arc<dyn crate::units::business::workbench::api::BenchPolicies>,
     /// 运行包能力（**不持它的端口**，R12）：包库、选型诊断与计划走它。
     packages: Arc<dyn Packages + Send + Sync>,
     /// 依赖补齐面（**不持它的端口**，R12）：虚拟根清单与装没装齐从它读。
@@ -91,6 +93,7 @@ impl Work {
         versions: Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>,
         vm: Arc<dyn Vm + Send + Sync>,
         policies: crate::units::business::sandbox::api::SandboxPolicies,
+        bench_policies: Arc<dyn crate::units::business::workbench::api::BenchPolicies>,
         packages: Arc<dyn Packages + Send + Sync>,
         provision: Arc<dyn Provision + Send + Sync>,
         modules: Arc<dyn Modules + Send + Sync>,
@@ -108,6 +111,7 @@ impl Work {
             versions,
             vm,
             policies,
+            bench_policies,
             packages,
             provision,
             modules,

@@ -504,6 +504,7 @@ impl WorkOps for FakeFaces {
                 shell: None,
                 workspace: h.workspace.clone(),
                 workspace_missing: h.workspace_missing,
+                capabilities: Vec::new(),
             })
             .collect())
     }
@@ -625,6 +626,7 @@ impl RuntimeOps for FakeFaces {
             shell: None,
             workspace: Default::default(),
             workspace_missing: false,
+            capabilities: Vec::new(),
         })
     }
     fn rewind(

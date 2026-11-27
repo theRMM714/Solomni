@@ -10,12 +10,14 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/units/business/workbench.rs` | 单元根：只写目的 / 管 / 不管 / 联动与 `api` / `domain` 的 mod 声明 |
-| `src/units/business/workbench/api.rs` | 入站面：工作面形状（`Area` / `Bench` / `Benches`）、寻址根与用量（`WorkRoots` / `WorkFiles` / `AreaUsage` / `WorkUsage` / `safe_file_name`）、过滤名单（`filter` 一族）、门禁形状（`VersionRef` / `Need` / `GateFault` / `GateItem` / `WriteGate`）与读取事实 `ReadFact` |
-| `src/units/business/workbench/domain.rs` | 纯定义的入口：声明 `area` / `bench` / `benches` / `filter` / `gate` / `readfact` / `roots` 七个概念子模块 |
+| `src/units/business/workbench/api.rs` | 入站面：工作面形状（`Area` / `Bench` / `Benches`）、寻址根与用量（`WorkRoots` / `WorkFiles` / `AreaUsage` / `WorkUsage` / `safe_file_name`）、过滤名单（`filter` 一族）、门禁形状（`VersionRef` / `Need` / `GateFault` / `GateItem` / `WriteGate`）、读取事实 `ReadFact` / `ReadQuery`、观察事实（`Coverage` / `LineRange` / `ObservationFact` / `ObservationSource` / `OBSERVATION_FORMAT`）、工作台策略（`BenchPolicy` / `BenchPolicies` / `Policies` / `BenchPlan` / `BenchDriver` / `PlanRequest` / `GateRequest` / `CallRequest` / `WriteDone` / `BatchDone` / `SHARED_TOOLS` / `VERSIONS_CAP` / `VERSIONED_POLICY` / `PLAIN_POLICY`） |
+| `src/units/business/workbench/domain.rs` | 纯定义的入口：声明 `area` / `bench` / `benches` / `filter` / `gate` / `observed` / `policy` / `readfact` / `roots` 九个概念子模块 |
 | `src/units/business/workbench/domain/gate.rs` | 写入门禁的形状：某个路径的某一版 `VersionRef`（指纹 + 可选字节数）、判据 `Need`（观察过 / 全文）、四种拒绝 `GateFault`（含 `code` 与给模型看的文案）、逐条输入 `GateItem` 与判定契约 `WriteGate`（`check` / `check_many`，默认逐条走到第一条拒绝） |
 | `src/units/business/workbench/domain/area.rs` | `Area`：一席看到的路径先归到哪一区（共享 / 私有 / 模块）；形状进契约单元，具体布局由 `workspace` 铺 |
 | `src/units/business/workbench/domain/bench.rs` | 一席工作面 `Bench`：解析路径到区、问可读可写、拒写文案、相对路径与根清单；字段即布局事实（工作名 / 会话 / 私沙根 / 模块目录 / 权限面 / 共享区归属 / 路径翻译器 / 过滤名单路径），不认识版本库 |
 | `src/units/business/workbench/domain/benches.rs` | 一次工作的全部工作面 `Benches`（共享区根 / 会话根 / 每席一份 `Bench` / 路径翻译器），按 agent 取 |
 | `src/units/business/workbench/domain/filter.rs` | 工作区过滤的唯一名单与匹配规则：`.workignore` 的文件名与播种内容、把规则文本编译成与 git 同引擎的匹配器（`Rules`）、按相对路径判定忽略（命中的目录连带整棵子树）；内容面与检索面都从这里取规则 |
 | `src/units/business/workbench/domain/roots.rs` | 寻址根与用量（`WorkRoots` / `WorkFiles` / `AreaUsage` / `WorkUsage`）与文件名净化 `safe_file_name` |
-| `src/units/business/workbench/domain/readfact.rs` | 读取事实 `ReadFact`：哪个工作树、哪个路径、读到哪几行、当时的整份指纹（随工具行落盘，过期由它派生） |
+| `src/units/business/workbench/domain/readfact.rs` | 读取事实 `ReadFact` 与过期判定用的查询 `ReadQuery`：哪个工作树、哪个路径、读到哪几行、当时的整份指纹（随工具行落盘，过期由它派生） |
+| `src/units/business/workbench/domain/observed.rs` | 观察事实 `ObservationFact`：工具行落盘的「读过没有、读到哪」（路径、版本、覆盖行段 `Coverage`、总行数、来源）与格式号 `OBSERVATION_FORMAT`；门禁与写回执都从这里取 |
+| `src/units/business/workbench/domain/policy.rs` | 工作台策略的契约：策略 id 与能力位（`BenchPolicy`）、开一席的现场 `PlanRequest` 与产出 `BenchPlan`（工具 id、执行者、回合钩子 `BenchDriver`）、策略表 `BenchPolicies` 与按 id 取的 `Policies`；共享区版本化动作的整组名单 `SHARED_TOOLS` 与能力位 `VERSIONS_CAP`；实现分别在 `versions`（versioned）与 `workspace`（plain） |

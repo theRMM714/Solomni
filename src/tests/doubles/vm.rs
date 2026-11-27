@@ -485,6 +485,25 @@ pub(crate) fn test_policies_at_with(
     ])
 }
 
+/// 目的：测试用的**工作台策略表**——版本化（拿得到版本库）与不版本化（单树直写）两条，与生产同一份形状。
+pub(crate) fn test_bench_policies() -> Arc<dyn crate::units::business::workbench::api::BenchPolicies>
+{
+    let work = crate::tests::doubles::assembly::test_workspace(Arc::new(
+        crate::tests::doubles::registry::InMemoryWorkspace::new(),
+    ));
+    test_bench_policies_with(work.versions)
+}
+
+/// 目的：同上，但版本化策略用调用方给的版本库（要观察会话动没动版本库时用这一条）。
+pub(crate) fn test_bench_policies_with(
+    versions: Arc<dyn crate::units::business::versions::api::Versions + Send + Sync>,
+) -> Arc<dyn crate::units::business::workbench::api::BenchPolicies> {
+    Arc::new(crate::units::business::workbench::api::Policies::new(vec![
+        crate::units::business::versions::api::versioned_policy(versions),
+        crate::units::business::workspace::api::plain_policy(),
+    ]))
+}
+
 /// 目的：测试用的 **packages 入站面**——把内存包库装进 `PackagesService`（与生产同一条路，R12）。
 pub(crate) fn test_packages(
     packages: Arc<dyn PackageSource + Send + Sync>,
