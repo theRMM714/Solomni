@@ -21,7 +21,7 @@ pub(super) fn num(args: &Value, name: &str) -> Option<u64> {
 
 /// 目的：只读诊断一条虚拟机档会话的 guest：输出结构化 JSON（进程 / CPU / 内存 / 负载 / 挂载）。
 pub(super) fn diagnose_cmd(faces: &Faces, args: &Value, json: bool) -> i32 {
-    let Some(sid) = text(args, "session_id") else {
+    let Some(sid) = text(args, "session") else {
         println!("[用法] diagnose <会话>");
         return 2;
     };
