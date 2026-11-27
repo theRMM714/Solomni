@@ -111,30 +111,27 @@ impl Work {
         Ok((channels, core))
     }
 
-    /// 目的：解析本次创建的工作区绑定：只有顶层会话能指定，路径按档位策略校验（见 `workspace::api::resolve`）；
-    ///   子会话沿父链继承同一个根，不接受自选。
-    fn resolve_workspace_binding(
+    /// 目的：解析本次创建要的工作台声明：只有顶层会话能指定外部根，路径按档位策略校验（见 `workspace::api::resolve`）；
+    ///   子会话沿父链继承同一个根，不接受自选，自己只写一份没有外部根的声明。
+    fn resolve_workspace_decl(
         &self,
         probe: &dyn HostProbe,
         raw: Option<&std::path::Path>,
         tier: crate::units::pure::exec_model::api::Tier,
         parent: Option<&str>,
-    ) -> Result<Option<crate::units::business::session_model::api::WorkspaceBinding>, String> {
-        if let Some(p) = parent {
+    ) -> Result<crate::units::business::session_model::api::WorkspaceDecl, String> {
+        if let Some(_p) = parent {
             if raw.is_some() {
                 return Err("子会话不能自选工作区：沿父会话继承".to_string());
             }
-            let top = work_root(self.history.as_ref(), p)?;
-            return Ok(self.history.meta(&top)?.workspace);
+            return Ok(crate::units::business::session_model::api::WorkspaceDecl::layout());
         }
         let Some(raw) = raw else {
-            return Ok(None);
+            return Ok(crate::units::business::session_model::api::WorkspaceDecl::layout());
         };
         let product = crate::units::business::workspace::api::product_root(&self.root, probe);
         let root = crate::units::business::workspace::api::resolve(raw, tier, &product, probe)?;
-        Ok(Some(
-            crate::units::business::session_model::api::WorkspaceBinding { root },
-        ))
+        Ok(crate::units::business::session_model::api::WorkspaceDecl::at(root))
     }
 
     /// 目的：创建的第一段（核心，毫秒级）——校验 / 占名 / 建工作区 / 出计划；要起 guest 时把那一段交出去。
@@ -166,7 +163,7 @@ impl Work {
             return Err(format!("工作名已存在：{}", spec.name));
         }
         let workspace =
-            self.resolve_workspace_binding(host, spec.workspace.as_deref(), spec.tier, parent)?;
+            self.resolve_workspace_decl(host, spec.workspace.as_deref(), spec.tier, parent)?;
         // **代理形态**（第三人形态）：没有名单、没有需求——用户选这一形态就是**授予全权**。
         // 它不是一个 agent 工作，装配与其余形态没有共同点，所以在这里就地分岔、不往下走。
         if !driven && decl.auto {
@@ -320,11 +317,11 @@ impl Work {
                     ..crate::units::pure::exec_model::api::ExecSpec::default()
                 },
             },
-            // 绑定只写在工作根上；子会话沿 parent 链继承，不复制一份。
+            // 外部根只写在工作根上；子会话沿 parent 链继承，自己只写一份没有根的声明。
             workspace: if parent.is_none() {
                 workspace.clone()
             } else {
-                None
+                Default::default()
             },
             sandbox: match parent {
                 // 子会话只带自己的 narrowing；根 ceiling 沿祖先链现算，不再复制父权限。
@@ -338,8 +335,6 @@ impl Work {
                     narrowing: None,
                 },
             },
-            // 共享区归属：只在设置里给全局默认；根会话按需在会话配置里覆盖。
-            shared: Default::default(),
             thinking: None,
             run: RunState::Active,
         };
@@ -355,10 +350,9 @@ impl Work {
         }
         // 工作区：整棵树只有顶层一个 work/（或外部绑定的根）；各 agent 沙箱按实例名建在会话目录下。
         // 先把绑定刷成布局投影，再建沙箱；失败即失败，不假装已建。
-        self.workspace
-            .bind(&root, workspace.as_ref().map(|w| w.root.as_path()))?;
+        self.workspace.bind(&root, workspace.root.as_deref())?;
         self.workspace.ensure_layout(&root, &agent_names)?;
-        if workspace.is_some() {
+        if workspace.root.is_some() {
             // 首次绑定：把工作区现有文件导入成初始提交，agent 立刻就能 pull；失败不挡建会话。
             if let Err(e) = self
                 .workspace
@@ -417,7 +411,7 @@ impl Work {
             &session_modules,
             &missing,
             meta.exec.guest.as_deref(),
-            crate::units::business::turn::env::api::network_allowed(registry.app()),
+            registry.app().sandbox.policy.network,
         )?;
         self.log.info(
             "work::create_work",
@@ -571,7 +565,7 @@ impl Work {
                     channel,
                     &sb,
                     unavailable,
-                    crate::units::business::turn::env::api::network_allowed(registry.app()),
+                    registry.app().sandbox.policy.network,
                     meta.exec.tier,
                     guest,
                     guest_lease_for(self.history.as_ref(), &meta)?,
@@ -708,12 +702,14 @@ impl Work {
             Arc::clone(probe),
             Arc::clone(&self.log),
             registry.app().max_guests,
-            crate::units::business::turn::env::api::host_read_roots(registry.app()),
+            crate::units::business::tools::api::host_read_roots(
+                &registry.app().sandbox.policy.host_read_roots,
+            ),
             tools.qemu.located().map(str::to_string),
             share_tool,
             shares,
             lease.to_string(),
-            crate::units::business::turn::env::api::network_allowed(registry.app()),
+            registry.app().sandbox.policy.network,
             plan.clone(),
             sandboxes.clone(),
             restart,
@@ -792,7 +788,6 @@ impl Work {
                 }),
                 narrowing: None,
             },
-            shared: Default::default(),
             parent: None,
             node: None,
             delegation: Some(Delegation { granted_at }),
@@ -800,11 +795,10 @@ impl Work {
             workspace: workspace.clone(),
             run: RunState::Active,
         };
-        self.workspace
-            .bind(name, workspace.as_ref().map(|w| w.root.as_path()))?;
+        self.workspace.bind(name, workspace.root.as_deref())?;
         self.workspace
             .ensure_layout(name, &[PROXY_PRIVATE_DIR.to_string()])?;
-        if workspace.is_some()
+        if workspace.root.is_some()
             && let Err(e) = self
                 .workspace
                 .work_import_root(name, crate::kernel::api::procs::unix_seconds())

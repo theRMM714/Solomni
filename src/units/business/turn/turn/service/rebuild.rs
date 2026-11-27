@@ -18,7 +18,6 @@ use crate::units::business::llm::api::{Channel, Msg};
 use crate::units::business::session_model::api::SessionMeta;
 use crate::units::business::turn_state::api::Session;
 use crate::units::business::turn_state::api::Turn;
-use crate::units::business::workspace::api::{Sandbox, WORKIGNORE};
 
 /// 目的：代理会话的私有沙箱目录名（只有这一处）。
 pub const PROXY_PRIVATE_DIR: &str = ".proxy";
@@ -27,23 +26,23 @@ pub const SPEAKER: &str = "核心";
 
 /// 目的：会话重建与代理会话装配。
 impl Turn {
-    /// 目的：这条会话的外部工作区绑定：自己或顶层会话写过绑定就复检并返回根，没写过就是 None。
+    /// 目的：这条会话的外部根：自己或顶层会话的声明里写过就复检并返回，没写过就是 None。
     /// 参数：`probe` = 宿主探针（复检要规范化路径与读元数据）。
-    /// 错误：绑定路径已失效或不可写时如实报错（加载复检，见 `workspace::api::recheck`）。
+    /// 错误：外部根已失效或不可写时如实报错（加载复检，见 `workspace::api::recheck`）。
     pub fn workspace_binding_of(
         &self,
         meta: &SessionMeta,
         probe: &dyn HostProbe,
     ) -> Result<Option<std::path::PathBuf>, String> {
-        let (root, tier) = match &meta.workspace {
-            Some(binding) => (binding.root.clone(), meta.exec.tier),
+        let (root, tier) = match &meta.workspace.root {
+            Some(root) => (root.clone(), meta.exec.tier),
             None => match &meta.parent {
                 None => return Ok(None),
                 Some(p) => {
                     let top = work_root(self.history.as_ref(), p)?;
                     let top_meta = self.history.meta(&top)?;
-                    match top_meta.workspace {
-                        Some(binding) => (binding.root, top_meta.exec.tier),
+                    match top_meta.workspace.root {
+                        Some(root) => (root, top_meta.exec.tier),
                         None => return Ok(None),
                     }
                 }
@@ -197,7 +196,7 @@ impl Turn {
                         registry,
                         &modules,
                         &sb,
-                        crate::units::business::turn::env::api::network_allowed(registry.app()),
+                        registry.app().sandbox.policy.network,
                         meta.exec.tier,
                         &host_plan,
                     ),
@@ -526,26 +525,33 @@ impl Turn {
         let roots = self
             .workspace
             .roots(&meta.name, &[PROXY_PRIVATE_DIR.to_string()])?;
-        let private = roots
-            .agents
-            .get(PROXY_PRIVATE_DIR)
-            .cloned()
+        // 沙箱清单只有一处构造点：代理发言席也是一席，只是私有目录名与发言人不一致。
+        let app = registry.app();
+        let params = self.workspace_params_chain(meta)?;
+        let mut seats = crate::units::business::workspace::api::seat_sandboxes(
+            &crate::units::business::workspace::api::SeatFacts {
+                work: &meta.name,
+                session: &meta.name,
+                roots: &roots,
+                // 代理发言席自己住在宿主上（文件工具也跑在宿主），不需要 guest 翻译；
+                // 但视图盘打开时仍要同一个视图写法，否则环境块渲染视图路径、寻址却按宿主根判越界。
+                codec: crate::kernel::api::view_drive::view_codec(),
+                base_scope: &app.sandbox.scope,
+                hard_deny: &app.sandbox.policy.deny,
+                modules: &[],
+                seats: &[crate::units::business::workspace::api::SeatPlan {
+                    agent: SPEAKER.to_string(),
+                    modules: Vec::new(),
+                    permissions: self.permissions_for(registry, meta)?,
+                    params,
+                    private: roots.agents.get(PROXY_PRIVATE_DIR).cloned(),
+                }],
+            },
+        )?;
+        let sb = seats
+            .list
+            .pop()
             .ok_or_else(|| "代理会话没有私有沙箱路径".to_string())?;
-        let sb = Sandbox {
-            work_name: meta.name.clone(),
-            session: meta.name.clone(),
-            agent: SPEAKER.to_string(),
-            shared: roots.shared.clone(),
-            private,
-            modules: BTreeMap::new(),
-            module_data: std::collections::BTreeMap::new(),
-            permissions: self.permissions_for(registry, meta)?,
-            scope: self.shared_scope_for(registry, meta)?,
-            // 代理发言席自己住在宿主上（文件工具也跑在宿主），不需要 guest 翻译；
-            // 但视图盘打开时仍要同一个视图写法，否则环境块渲染视图路径、寻址却按宿主根判越界。
-            path_codec: crate::kernel::api::view_drive::view_codec(),
-            filter_rules: roots.store.join(WORKIGNORE),
-        };
         let tool_mode = registry.tool_mode(None);
         // 身份是**席位提示词**（core_proxy），不是某个 agent 的模块能力包：
         // 流程 / 环境 / 调用约定仍与 agent 身份同一份口径（见 workspace 的 render_system）。
@@ -566,7 +572,7 @@ impl Turn {
                 registry,
                 &[],
                 &sb,
-                crate::units::business::turn::env::api::network_allowed(registry.app()),
+                registry.app().sandbox.policy.network,
                 crate::units::pure::exec_model::api::Tier::Host,
                 &crate::units::business::catalog::packages::api::PackagePlan::default(),
             ),

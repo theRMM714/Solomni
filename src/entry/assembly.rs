@@ -473,6 +473,6 @@ pub(crate) fn system_with(
 /// 目的：构建期的全局网络开关（与主程序同一份 settings.yaml；读不到 / 非法按拒绝）。
 fn network_allowed(root: &Path) -> bool {
     read_settings(root)
-        .map(|a| crate::units::business::turn::env::api::network_allowed(&a))
+        .map(|a| a.sandbox.policy.network)
         .unwrap_or(false)
 }

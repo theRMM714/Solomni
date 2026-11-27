@@ -5,9 +5,6 @@
 unit: turn
 title: 一轮推进与环境
 cases:
-  - id: cargo/tests::env
-    tier: T1
-    note: 环境快照
   - id: cargo/tests::flow
     tier: T1
     note: 流程面：替身流程跑在同一条驱动循环上

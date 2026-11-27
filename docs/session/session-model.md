@@ -28,7 +28,7 @@
 
 ```text
 session/<工作名>/
- meta.yaml          # 身份与选型：形态、agent 名单（名字 / 人设 / 模块 / 模型）、需求、会话权限覆盖（sandbox）、执行档位（exec 段）
+ meta.yaml          # 身份与选型：形态、agent 名单（名字 / 人设 / 模块 / 模型）、需求、会话权限覆盖（sandbox）、工作台声明（workspace 段）、执行档位（exec 段）
  transcript.jsonl   # 事件流水（留档只追加 rewind；删除 / 恢复整体重写）
  work/              # 本次工作的共享区**主副本**：用户投喂与成品（默认位置；外部绑定时不存在）
  .work-root         # 外部工作区绑定的布局投影（根会话才有；权威在 meta.yaml 的 workspace 段）
@@ -46,13 +46,13 @@ session/<工作名>/
 - **落盘在主会话目录内部**：`data/session/<工作>/children/<工作>--<名字>/`——位置与 `meta.parent` 同源（看位置就知道归属）；`data/session/` 下不出现与主会话并列的子会话目录，**删主会话就是删一个目录**。
 - **可以再往下嵌套**：子会话自己还能有子会话（代理建的协作子工作会派生节点子会话），每一层都是父会话目录下的 `children/<名字>/`；查找、列清单、级联删除都按**任意深度**走整棵 children/ 树。
 - **整棵树只有一个共享区根**：不论嵌套多少层，共享区始终是**顶层**那一个（工作根 = 沿 `meta.parent` 走到顶；默认是顶层 `work/`，根会话绑定外部工作区时是 `meta.yaml` 的 `workspace.root`），各 agent 沙箱也建在工作根下；实例名因此在**整棵子树**里唯一（重名自动带尾号，见 registry 的命名策略）。
-- **外部工作区绑定**：根会话可在创建时把共享区主副本绑定到产品目录之外的绝对路径；绑定写进 `meta.yaml` 的 `workspace` 段，整棵子树只读继承，**创建后不可改**。CLI 启动的会话默认就把**启动目录**绑成外部工作区（在哪个目录启动就绑哪个；`ambient` 与 `resolve` 共用一条阶梯但不探可写，启动目录是产品根 / 不可达 / 不是目录时回退产品内 `work/` 并打印原因，`--no-workspace` 关闭这次启动的自动绑定）。`.work/` 与各 agent 沙箱永远留在会话目录内，外部目录里不出现本产品的状态；`.work-root` 只是布局投影，打开 / 重建时按 meta 刷新。
+- **外部工作区绑定**：根会话可在创建时把共享区主副本绑定到产品目录之外的绝对路径；绑定写进 `meta.yaml` 的 `workspace.root`（工作台声明的外部根），整棵子树只读继承，**创建后不可改**。CLI 启动的会话默认就把**启动目录**绑成外部工作区（在哪个目录启动就绑哪个；`ambient` 与 `resolve` 共用一条阶梯但不探可写，启动目录是产品根 / 不可达 / 不是目录时回退产品内 `work/` 并打印原因，`--no-workspace` 关闭这次启动的自动绑定）。`.work/` 与各 agent 沙箱永远留在会话目录内，外部目录里不出现本产品的状态；`.work-root` 只是布局投影，打开 / 重建时按 meta 刷新。
 - **虚拟机档的挂载布局**：起 guest 时把**会话树根**（`data/session/<工作名>`，各 agent 私沙与 `.work` 的父目录）与**外部工作区根**（仅外部绑定时）各挂一条稳定挂载，另加模块树根——三根互不包含，guest 内的路径写法由同一座路径桥给出；外部根是 UNC / 网络路径时只有虚拟机档支持（guest 内写成 `/solomni-host/unc/<server>/<share>/…`；本机档因容器围栏拒绝网络工作区）；挂载只表达可见范围，共享区主副本不进按次允许集（容器里的进程要读先 `work_pull`）。
 - **环境属于顶层工作**：`exec`（档位 / 虚拟根 / 定版）由人建主会话时决定，整棵子树只读继承；核心代理建子会话时不能自选环境。**同一 agent 全树只有一份名单**：子会话编辑模块 / 模型时写回这份名单，guest 装配按整棵树重新聚合；只改模型 / 权限不重建 guest，改模块 / 环境才重建。
-- 会话权限是**根 ceiling + 子会话逐层 narrowing**：根写 sandbox.ceiling，子写 sandbox.narrowing；子只能换更低档、只能收窄，父编辑只改 ceiling 并与子 narrowing 求交，不覆盖子收窄（`src/units/pure/permission/domain/permission.rs`）。共享区归属单独一层：根写 `shared`、子只能更窄（`src/units/business/workspace/domain/scope.rs`）。
+- 会话权限是**根 ceiling + 子会话逐层 narrowing**：根写 sandbox.ceiling，子写 sandbox.narrowing；子只能换更低档、只能收窄，父编辑只改 ceiling 并与子 narrowing 求交，不覆盖子收窄（`src/units/pure/permission/domain/permission.rs`）。共享区归属单独一层：根写 `workspace.params`、子只能更窄（`src/units/business/workspace/domain/scope.rs`）。
 - **共享区是版本化工作区**：共享区根（默认 `work/`，或外部工作区）与版本库 `.work/` 都锚在顶层工作上；agent 只写自己的沙箱，`work_pull` 拉取；写工具落地后由核心把整棵沙箱自动记进该 agent 的**存档线**（`refs/agents/<agent>/saves`，不动共享区，只服务回档 / 删除 / 留档 / 恢复）；shell / 模块工具这类不经过写工具的改动，在同一工具批次结束时由核心扫一遍沙箱采纳进同一条存档线（逐条点名没采纳的路径；Windows 本机档容器自己的运行缓存——`AppData/Local/Packages/<容器名>/` 与 `Packages/<容器名>/`，容器名以 `Solomni.Agent.` 开头——不是产物，扫描时跳过，`src/units/business/workspace/service/sync.rs`），要发布时先用 `work_commit` 把显式路径记进**工作线**（`refs/agents/<agent>`，本地提交、不判别人的基线），再用 `work_push` 与主线三方合并（干净则主线落一条提交并物化共享区，冲突整次拒绝并点名路径）；`work_versions` 看三方，`work_resolve` 显式选边，`work_status` 看状态。
 - 文本、图片、视频与其它二进制都按字节处理（内容流式读写、不整份进上下文；单文件有上限）；`work_versions` 给 hash、大小与扩展名媒体类型提示；文本可人工合并后用 `take=local`，图片 / 视频 / 二进制只能选边，不做自动合并（`src/units/business/workspace/service.rs`）。
-- **会话权限层**只有网络两档：meta.yaml 的 sandbox.ceiling（根）与 sandbox.narrowing（子）只写 profile（offline / online），缺省继承 settings.yaml 的 sandbox.defaults；共享区归属是三态（all / none / 路径数组）+ 黑名单，写在 meta.yaml 的 `shared`，缺省继承 settings.yaml 的 sandbox.scope，sandbox.policy.deny 是硬底线，会话只能追加、不能清空。语义见 [docs/permission/README.md](../permission/README.md) 与 [docs/workspace/README.md](../workspace/README.md)。
+- **会话权限层**只有网络两档：meta.yaml 的 sandbox.ceiling（根）与 sandbox.narrowing（子）只写 profile（offline / online），缺省继承 settings.yaml 的 sandbox.defaults；共享区归属是三态（all / none / 路径数组）+ 黑名单，写在 meta.yaml 的 `workspace.params`（会话只说声明，参数由工作台单元解释），缺省继承 settings.yaml 的 sandbox.scope，sandbox.policy.deny 是硬底线，会话只能追加、不能清空。语义见 [docs/permission/README.md](../permission/README.md) 与 [docs/workspace/README.md](../workspace/README.md)。
 - **出站网络是全局开关**（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；虚拟机档决定 guest 网卡；本机档 Windows 授 `internetClient`、macOS 放行 `network-outbound`、Linux `net=false` 用 seccomp 拒绝非本地 socket（`net=true` 不装网络过滤器，不限制入站/绑定）。
 - Windows 只放行公网出站，不授 private network / loopback（回环默认全禁；要容器内连宿主端口只能走中继，见 [docs/kernel/README.md](../kernel/README.md)）；Windows 未授权 `windows.write_acl` 时容器不装，网络不生效。
 - 侧栏**可见**：agent 会话挂在主会话下（`meta.parent`），用户可进入查看与发言干预。

@@ -3,7 +3,7 @@
 //!   以及条目写法与命中规则（`hit` / `normalize` / `validate_entry`）。
 //! 不管：档位与网络（在 `permission`）；读写落点的寻址（在 `workspace`）；版本库如何提交（在 `service/`）。
 //! 联动：`Sandbox.scope` 持生效态，内置文件工具与 `work_*` 都只经它判共享区归属；
-//!   全局默认在 `catalog` 的 `SandboxSettings.scope`，会话覆盖在 `SessionMeta.shared`。
+//!   全局默认在设置里，会话声明在 `SessionMeta.workspace.params`（只有本单元解释它）。
 
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -352,4 +352,37 @@ fn append_deny(out: &mut Vec<String>, add: &[String]) {
             out.push(entry.clone());
         }
     }
+}
+
+/// 目的：从策略参数里读出一层共享区覆盖；没写过参数 = 这一层不覆盖。
+/// 参数：`params` = 会话落盘的不透明参数（只有本单元解释它）。
+/// 错误：参数不是这一层认的形状时如实报错（文案带解析原因）。
+pub fn edit_of(params: &serde_json::Value) -> Result<SharedEdit, String> {
+    if params.is_null() {
+        return Ok(SharedEdit::default());
+    }
+    serde_json::from_value(params.clone()).map_err(|e| format!("参数不是这个策略认的形状：{e}"))
+}
+
+/// 目的：把一层共享区覆盖序列化成策略参数；会话侧只搬值，不解释里面的字段。
+/// 参数：`edit` = 要落的一层覆盖。
+/// 错误：序列化失败时如实报错（理论上不会发生）。
+pub fn edit_params(edit: &SharedEdit) -> Result<serde_json::Value, String> {
+    serde_json::to_value(edit).map_err(|e| format!("共享区声明写不进参数：{e}"))
+}
+
+/// 目的：一条参数链的生效共享区归属：全局默认 → 根覆盖 → 每层收窄 → 全局硬黑名单。
+/// 参数：`params` = 根在前的策略参数链；`base` = 设置里的全局默认范围；`hard_deny` = 全局硬黑名单。
+/// 错误：链为空报「会话权限链为空」；某层试图放宽父层时由 `apply_narrowing` 如实拒绝。
+pub fn scope_from(
+    params: &[serde_json::Value],
+    base: &SharedScope,
+    hard_deny: &[String],
+) -> Result<SharedScope, String> {
+    let root = params.first().ok_or_else(|| "会话权限链为空".to_string())?;
+    let mut out = base.apply_root(&edit_of(root)?)?;
+    for child in params.iter().skip(1) {
+        out = out.apply_narrowing(&edit_of(child)?)?;
+    }
+    Ok(out.with_hard_deny(hard_deny))
 }

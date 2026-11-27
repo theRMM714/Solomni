@@ -55,7 +55,7 @@ impl Work {
             tier_locked: meta.parent.is_some(),
             guest: meta.exec.guest.clone(),
             guests: self.provision.guest_bases()?,
-            net: crate::units::business::turn::env::api::network_allowed(registry.app()),
+            net: registry.app().sandbox.policy.network,
             permission: self.permission_view(turn, registry, &meta)?,
             thinking: self.thinking_view_for_root(registry, &root),
             context_freshness: root_meta.context_freshness,
@@ -250,7 +250,7 @@ impl Work {
             &session_modules,
             &missing,
             spec.guest.as_deref(),
-            crate::units::business::turn::env::api::network_allowed(registry.app()),
+            registry.app().sandbox.policy.network,
         )?;
 
         let mut new_meta = meta.clone();
@@ -278,7 +278,6 @@ impl Work {
             if meta.parent.is_none() {
                 // 根：读 / 写范围整体覆盖，黑名单追加；先按当前生效范围校验写法。
                 turn.shared_scope_for(registry, &meta)?.apply_root(s)?;
-                new_meta.shared = s.clone();
             } else {
                 // 子：只能收窄；父的生效范围是校验基线。
                 let parent = self
@@ -286,8 +285,9 @@ impl Work {
                     .meta(meta.parent.as_deref().unwrap_or_default())?;
                 turn.shared_scope_for(registry, &parent)?
                     .apply_narrowing(s)?;
-                new_meta.shared = s.clone();
             }
+            // 会话只搬声明：这一层覆盖进参数，怎么解释归工作台单元。
+            new_meta.workspace.params = crate::units::business::workspace::api::edit_params(s)?;
         }
         // 同一 agent 全树只有一份配置：子会话编辑写回所属名单；主会话 / proxy 子工作编辑同步整棵子树。
         let mut new_children: Vec<SessionMeta> = Vec::new();
@@ -483,7 +483,7 @@ impl Work {
             "kind": meta.spec.kind,
             "tier": meta.exec.tier.as_str(),
             "guest": meta.exec.guest,
-            "net": crate::units::business::turn::env::api::network_allowed(registry.app()),
+            "net": registry.app().sandbox.policy.network,
             "pins": meta.exec.pins,
             "thinking": meta.thinking,
             "context_freshness": meta.context_freshness,

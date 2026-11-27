@@ -1,5 +1,5 @@
 //! 目的：会话历史的内存形态——会话元信息与历史视图。
-//! 管：`SessionMeta` / `HistoryView` / `Delegation` / `RunState` / `WorkspaceBinding` 等落盘事实的类型；
+//! 管：`SessionMeta` / `HistoryView` / `Delegation` / `RunState` 等落盘事实的类型；
 //!   agent 实例（`AgentMeta`）归登记处（`registry::api`），这里只持有快照。
 //! 不管：落盘机制（在 `detail/fs_history.rs` 的 `HistoryStore` 实现）；会话状态派生（在 `session.rs`）。
 //! 联动：由 `service.rs` 与 `ports.rs` 使用，`api.rs` 对外重导出。
@@ -34,17 +34,15 @@ pub struct SessionMeta {
     /// 目的：执行档位与运行包选型（exec 段；缺字段按默认 = 本机档读回）。
     #[serde(default)]
     pub exec: crate::units::pure::exec_model::api::ExecSpec,
-    /// 目的：共享区主副本绑定的外部工作区根；`None` = 产品内的 `session/<名>/work`。
-    /// 约束：只写在工作根上（子会话沿 `parent` 继承同一个根），创建后不可改。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workspace: Option<WorkspaceBinding>,
+    /// 目的：这条会话要的工作台（策略 id / 外部根 / 策略自己的参数）。
+    /// 约束：外部根只写在工作根上（子会话沿 `parent` 链继承同一个根），创建后不可改；
+    ///   `params` 由工作台单元解释，会话不认里面的字段。
+    #[serde(default)]
+    pub workspace: crate::units::business::session_model::domain::workspace::WorkspaceDecl,
     /// 目的：这条会话的权限层：根是 ceiling，子是 narrowing。全局给默认值，这里只覆盖显式字段。
     #[serde(default)]
     pub sandbox: crate::units::pure::permission::api::SessionSandbox,
-    /// 目的：这条会话对共享区归属的覆盖：根是覆盖（可放宽到全局默认之外），子是收窄。
-    ///   空 = 完全沿用上一层的范围。
-    #[serde(default)]
-    pub shared: crate::units::business::workspace::api::SharedEdit,
+
     /// 目的：思考强度（会话级，只记在**工作根**上；子会话沿 parent 链共享同一个值）。
     /// 约束：None = 随模型默认；各模型是否支持由登记处的 thinking 映射决定（不支持的档拒绝切换）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -117,15 +115,6 @@ impl UsageTotals {
         self.cache_read += other.cache_read;
         self.cache_creation += other.cache_creation;
     }
-}
-
-/// 目的：根会话绑定到产品目录之外的共享区主副本时记录的工作区根（绝对路径）。
-/// 约束：子会话不写这个字段（沿 `parent` 链继承工作根的绑定）；会话建好后不再改。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WorkspaceBinding {
-    /// 目的：规范化后的绝对路径（创建时校验；之后只读）。
-    pub root: std::path::PathBuf,
 }
 
 /// 目的：会话运行态（**持久**事实，落在 meta.yaml）：派发与唤醒都要先过它。

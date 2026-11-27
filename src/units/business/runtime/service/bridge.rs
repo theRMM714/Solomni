@@ -275,7 +275,7 @@ impl Core {
                     tier: crate::units::pure::exec_model::api::Tier::Host,
                     guest: None,
                     profile: crate::units::pure::permission::api::ProfileId::Online,
-                    workspace: None,
+                    workspace: Default::default(),
                     freshness: None,
                 },
             )

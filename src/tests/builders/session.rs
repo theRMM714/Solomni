@@ -124,7 +124,7 @@ pub(crate) fn member_with_tools(
             vm: test_vm(),
             residents: Arc::new(crate::units::business::residents::api::NoResidents),
             // 这些用例只跑工具面：写工具落地后不自动提交（没有工作区）。
-            workspace: None,
+            workspace: Default::default(),
             observations: crate::units::business::tools::api::Observations::default(),
             shell_live: None,
             reply_seq: 0,
@@ -188,13 +188,12 @@ pub(crate) fn seed_session(
         agents,
         exec,
         sandbox: Default::default(),
-        shared: Default::default(),
         parent: None,
         node: None,
         delegation: None,
         thinking: None,
         run: RunState::Active,
-        workspace: None,
+        workspace: Default::default(),
     })
     .unwrap();
 }
