@@ -125,6 +125,12 @@ Loop { id: "discuss", builder: Some("discuss"), cast: vec![Cast { role: "core_pr
 - 越权调用 → **如实拒绝 + 落工具行**（用户要能看到"它越权了"）。
 - **悬空引用**（角色位或会话类型引用总表里不存在的 id）→ **装配期 `loop_check::problems()` 硬失败**（`src/tests/detail/` 锁死）。`SystemTools::problems()` 另管总表自身：id 非空且无空白。
 - `--audit=structure` 只比文件与文档结构，不解析这些声明；改角色 / 工具表要跑全量入口（或至少 `src/tests/detail/` 的用例）。
+- 可解释性的约束：
+
+- **工具面能被问出来**：`explain_tools`（`session_id` 必填，`agent` / `loop` / `role` 可选）按会话 meta 重算面并回一份报告——每个来源交了哪些 id、合并后的面、每个 id 的授权判定与理由（`Allow` / `Ask` / `Deny`）、面里有但总表与模块工具表都没有的孤儿 id（`src/units/business/agentloop/domain/explain.rs`）。
+- **解释与装配同源**：报告走同一条取数（`tool_table` → 角色位动作 → `build_sources` → 逐个 `offer` 再合并，`offers_of` / `merge_offers` 由 `face_of` 与解释共用），所以解释不会与真实放行不一致。
+- **拒绝也说得清上下文**：越权（`note_unauthorized`）与未知工具（`check_call`）的回执写明当时在哪个段 / 角色、这一回合的面里实际有哪些 id（`src/units/business/agentloop/engine/tools.rs`），模型据此换来源或改口，不必反复试同一个名字。
+- CLI 入口：`explain <会话> [--agent <名>] [--loop <段>] [--role <角色>]` 打印可读行文（头行 → 来源 → 逐 id 判定与理由 → 孤儿），`--json` 打原始报告。
 
 ## 四、动作与分发（一张表，两条执行路径）
 
@@ -137,6 +143,7 @@ Loop { id: "discuss", builder: Some("discuss"), cast: vec![Cast { role: "core_pr
 - **工作区回滚动作也只给 user**：`restore_work_commit`（`session_id` / `commit` / `expect_head`）——非破坏性物化共享区，目标之后的提交仍保留；同一工作子树里有会话在生成时拒绝；成功后由核心落一条可回放的 `notice` 行。
 - 提交历史 / 详情 / 文件预览是**只读视图**（`WorkOps::work_log` / `work_commit_view` / `work_commit_file`），不进动作表。
 - **guest 只读诊断动作也只给 user**：`guest_diagnose`（`session_id` 必填非空）——诊断虚拟机档会话的 guest：进程表（pid / ppid / 状态 / CPU / 内存 / 运行时长 / 命令与参数）、CPU 汇总、内存、负载、挂载与内核 / 核数；只读、不写 guest 文件（沿用既有 fenced 执行的临时策略文件，helper 读取后即删）、不改会话状态，不是 agent 工具、不进任何工具面（`systools/tools.yaml`）。它在 guest 内走 helper 的只读诊断模式（不套 per-agent 围栏），宿主侧只用已持有的 QGA 通道、不新增外部端口（`src/units/business/vm/service.rs` 的 `guest_diagnose`）。
+- **工具面解释动作也只给 user**：`explain_tools`（`session_id` 必填非空，`agent` / `loop` / `role` 可选）——按会话 meta 重算这一回合的工具面并回结构化报告（来源归属 / 授权判定与理由 / 孤儿 id）；只读、不改会话状态、不进任何工具面、不替模型决定该用什么工具。
 - **常驻服务的生命周期动作也只给 user**：`control_resident`（`start` / `stop` / `enable` / `disable`，参数 `module` / `name` / `action` / `lease`）——agent 用已启动的实例，不负责拉起；服务清单是独立只读视图（`ResidentOps::services`，CLI `resident`）。会话删除时按租约回收该会话拉起的实例。
 - **已启动常驻服务的操作也走模块动作**：id = `module.<模块id>.<服务名>.<操作名>`（静态模块工具优先，其次常驻服务操作）。
   - 人可直接调（`ResidentOps::call`）。

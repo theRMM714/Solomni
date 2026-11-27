@@ -67,6 +67,7 @@ pub const HUMAN_ACTIONS: &[&str] = &[
     "control_session",
     "activate_session",
     "guest_diagnose",
+    "explain_tools",
     "set_secret",
     "clear_secret",
     "control_resident",

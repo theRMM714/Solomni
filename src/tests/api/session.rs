@@ -852,3 +852,59 @@ fn thinking_view_uses_the_common_default_and_hides_unmapped_levels() {
         "没映射的档不列出来"
     );
 }
+
+/// 目的：工具面解释动作按会话 meta 重算这一回合的面——来源归属、逐 id 判定与孤儿都在报告里。
+#[test]
+fn explain_tools_reports_the_face_the_session_would_hand_out() {
+    let handle = spawn(vec![module_of("a")], vec!["收到"]);
+    let faces = Faces::from_handle(&handle);
+    let (opened, _) = faces
+        .work
+        .create_work(single_work("w-explain", &["a"]))
+        .expect("建会话");
+    let v = match faces
+        .actions
+        .act(ActionCall {
+            id: "explain_tools".to_string(),
+            args: serde_json::json!({ "session_id": opened.sid }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("解释工具面")
+    {
+        Acted::Done(v) => v,
+        other => panic!("解释要给结构化报告，不是 {:?}", other),
+    };
+    let face: Vec<&str> = v["face"]
+        .as_array()
+        .expect("报告有面")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert!(face.contains(&"read"), "读面恒发：{:?}", face);
+    let sources: Vec<&str> = v["sources"]
+        .as_array()
+        .expect("报告有来源")
+        .iter()
+        .filter_map(|s| s["source"].as_str())
+        .collect();
+    assert_eq!(
+        sources,
+        ["agent", "workspace"],
+        "模块没声明工具时不出现在来源里；有工作区就有共享区工具"
+    );
+    assert_eq!(v["loop_id"].as_str(), Some("standard"), "静止段");
+    assert!(
+        v["tools"]
+            .as_array()
+            .expect("报告逐 id 有判定")
+            .iter()
+            .all(|t| t["verdict"].as_str() != Some("deny")),
+        "静止段不抑制任何能力组"
+    );
+    assert_eq!(
+        v["orphans"].as_array().map(Vec::len),
+        Some(0),
+        "没有孤儿 id"
+    );
+}

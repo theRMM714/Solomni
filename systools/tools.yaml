@@ -407,6 +407,26 @@ tools:
         required: true
         non_empty: true
         desc: 要诊断的会话 id（虚拟机档）
+  explain_tools:
+    desc: |
+      只读诊断一条会话的工具面：按会话 meta 重算这一刻的发放名单，逐条说清 id 从哪个来源来
+      （agent / 模块 / 流程段 / 共享区 / 会话类型）、这一段准不准（allow / ask / deny 与理由），并点名
+      面里没有形状的孤儿 id。**不改会话状态、不执行任何工具**。
+    params:
+      session_id:
+        type: string
+        required: true
+        non_empty: true
+        desc: 要解释的会话 id
+      agent:
+        type: string
+        desc: 看哪个 agent 的工具面；省略 = 会话里的第一个 agent
+      loop:
+        type: string
+        desc: 按哪个流程段看；省略 = 会话 meta 里记的段
+      role:
+        type: string
+        desc: 按哪个角色看；省略 = 会话 meta 里记的角色
 
   # —— 共享区版本化工作区：agent 只写自己的沙箱，用 pull / commit / push 与主副本同步 ——
   work_pull:

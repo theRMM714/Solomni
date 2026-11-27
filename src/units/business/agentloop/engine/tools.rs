@@ -301,7 +301,36 @@ fn handler_for<'a>(
     ctx.handlers.iter().find(|h| h.owns(name))
 }
 
+/// 目的：现在在哪个段、哪个角色（回执里说清"我是谁"，模型才知道该换哪个来源要工具）。
+fn where_of(ctx: &MemberTools) -> String {
+    if ctx.face.loop_id.is_empty() {
+        format!("角色 {}", ctx.face.role)
+    } else {
+        format!("段 {} · 角色 {}", ctx.face.loop_id, ctx.face.role)
+    }
+}
+
+/// 目的：这一回合的面长什么样（前若干个 id + 总数），给越权与未知工具的回执用。
+fn face_preview(ctx: &MemberTools, max: usize) -> String {
+    if ctx.face.allowed.is_empty() {
+        return "空".to_string();
+    }
+    let head: Vec<&str> = ctx
+        .face
+        .allowed
+        .iter()
+        .take(max)
+        .map(String::as_str)
+        .collect();
+    if ctx.face.allowed.len() > max {
+        format!("{}… 共 {} 个", head.join("、"), ctx.face.allowed.len())
+    } else {
+        format!("{}（共 {} 个）", head.join("、"), ctx.face.allowed.len())
+    }
+}
+
 /// 目的：本回合的工具面之外的调用：**如实说一句**（用户可见），执行侧负责不执行（见 run_branch）。
+/// 约束：回执必须说清当时在哪个段/角色、面里实际有哪些 id——模型据此换来源或改口，而不是反复试同一个名字。
 pub(crate) fn note_unauthorized(
     ctx: &MemberTools,
     plan: &[(Option<String>, String, String)],
@@ -310,8 +339,10 @@ pub(crate) fn note_unauthorized(
     for (module, tool, _args) in plan {
         if !face_has(ctx, module.as_deref(), tool) {
             sink(SessionEvent::Notice(format!(
-                "[越权] 本席位没有工具 {}：本轮不执行、不当表态（如实拒绝）",
-                tool
+                "[越权] 本席位没有工具 {}：{}，这一回合的面有 {}。本轮不执行、不当表态（如实拒绝）",
+                tool,
+                where_of(ctx),
+                face_preview(ctx, 8)
             )));
         }
     }
@@ -380,7 +411,14 @@ fn check_call(
         Some(s) => s,
         // 模块工具的名字/归属由 dispatch 如实说清（没指明模块、没有这个模块、模块没声明这个工具）。
         None if !ctx.face.modules.is_empty() => module_schema(),
-        None => return Err(format!("未知工具：{}", tool)),
+        None => {
+            return Err(format!(
+                "未知工具：{}（{}，这一回合的面有 {}）",
+                tool,
+                where_of(ctx),
+                face_preview(ctx, 8)
+            ));
+        }
     };
     // shell 的语义校验（命令长度 / timeout）放在执行前：非法命令不落进程。
     if crate::units::business::tools::api::is_exec(tool) {

@@ -53,6 +53,47 @@ pub(super) fn diagnose_cmd(faces: &Faces, args: &Value, json: bool) -> i32 {
     }
 }
 
+/// 目的：解释一条会话的工具面：每个 id 从哪个来源来、授权判定与理由、面里的孤儿 id。
+/// 参数：`faces` = 入站面；`args` = 已校验的命令参数（`session` 必填，`agent` / `loop` / `role` 可选）；`json` = 打原始 JSON。
+/// 返回：进程退出码（0 成功，1 出错，2 用法不对）。
+pub(super) fn explain_cmd(faces: &Faces, args: &Value, json: bool) -> i32 {
+    let Some(sid) = text(args, "session") else {
+        println!("[用法] explain <会话> [--agent <名>] [--loop <段>] [--role <角色>]");
+        return 2;
+    };
+    let mut payload = json!({ "session_id": sid });
+    for key in ["agent", "loop", "role"] {
+        if let Some(v) = text(args, key) {
+            payload[key] = Value::String(v);
+        }
+    }
+    match faces.actions.act(ActionCall {
+        id: "explain_tools".to_string(),
+        args: payload,
+        caller: Caller::User,
+        out: Output::Final,
+    }) {
+        Ok(Acted::Done(v)) => {
+            if json {
+                println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+            } else {
+                for line in view::explain_lines(&v) {
+                    term::line(&line);
+                }
+            }
+            0
+        }
+        Ok(_) => {
+            println!("[完成]");
+            0
+        }
+        Err(e) => {
+            println!("[错误] {}", e);
+            1
+        }
+    }
+}
+
 /// 目的：列模块声明的隐秘字段；置值与清除都走统一动作面（值不回显）。
 pub(super) fn secret_cmd(faces: &Faces, args: &Value, json: bool) -> i32 {
     match text(args, "action").as_deref() {

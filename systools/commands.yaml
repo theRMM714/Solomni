@@ -106,6 +106,29 @@ commands:
         positional: 1
         desc: 会话 id
 
+  - name: explain
+    group: 转录
+    phase: core
+    executor: core
+    runtime: services
+    brief: 只读解释一条会话的工具面（来源归属 / 授权判定 / 孤儿 id）
+    params:
+      session:
+        type: string
+        required: true
+        non_empty: true
+        positional: 1
+        desc: 会话 id
+      agent:
+        type: string
+        desc: 看哪个 agent 的面（省略 = 会话里第一个）
+      loop:
+        type: string
+        desc: 按哪一段算（省略 = 会话 meta 里的段）
+      role:
+        type: string
+        desc: 按哪个角色算（省略 = 会话 meta 里的角色）
+
   - name: provider
     group: 注册处
     phase: core

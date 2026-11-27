@@ -7,6 +7,113 @@ use super::*;
 use crate::presentation::faces::Faces;
 use crate::units::business::collab::api::CollabEvent;
 
+/// 目的：工具面解释的可读行文：会话形状、来源归属、逐 id 的判定，再补孤儿与不一致。
+/// 参数：`v` = `explain_tools` 动作的回包（解释报告的 JSON）。
+/// 返回：要打印的行（头信息 → 来源 → 逐 id → 孤儿 → 不一致）。
+pub(super) fn explain_lines(v: &serde_json::Value) -> Vec<String> {
+    let s = |key: &str| -> String {
+        v.get(key)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    let strings = |key: &str| -> Vec<String> {
+        v.get(key)
+            .and_then(serde_json::Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let joined = |list: &[String]| -> String {
+        if list.is_empty() {
+            "无".to_string()
+        } else {
+            list.join("、")
+        }
+    };
+    let mut out: Vec<String> = Vec::new();
+    let workspace = s("workspace");
+    out.push(format!(
+        "[工具面] {} · 类型 {} · 段 {} · 角色 {}{}",
+        s("agent"),
+        s("kind"),
+        s("loop_id"),
+        s("role"),
+        if workspace.is_empty() {
+            String::new()
+        } else {
+            format!(" · 工作区 {}", workspace)
+        }
+    ));
+    out.push(format!("  能力组 {}", joined(&strings("abilities"))));
+    out.push(format!("  抑制（deny）{}", joined(&strings("deny"))));
+    out.push(format!("  要点头（ask）{}", joined(&strings("ask"))));
+    let offers: Vec<serde_json::Value> = v
+        .get("sources")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    out.push(format!("  来源 {} 个", offers.len()));
+    for offer in &offers {
+        let id = offer
+            .get("source")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let tools: Vec<String> = offer
+            .get("tools")
+            .and_then(serde_json::Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.push(format!("    {} 交 {}", id, joined(&tools)));
+    }
+    let lines: Vec<serde_json::Value> = v
+        .get("tools")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    out.push(format!("  面 {} 个 id", lines.len()));
+    for line in &lines {
+        let tool = line
+            .get("tool")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let verdict = line
+            .get("verdict")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let why = line
+            .get("why")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let from: Vec<String> = line
+            .get("from")
+            .and_then(serde_json::Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.push(format!("    {:<5} {} ← {}", verdict, tool, joined(&from)));
+        out.push(format!("          {}", why));
+    }
+    let orphans = strings("orphans");
+    if !orphans.is_empty() {
+        out.push(format!("  孤儿（面里有、总表没有）{}", joined(&orphans)));
+    }
+    for note in strings("notes") {
+        out.push(format!("  注意 {}", note));
+    }
+    out
+}
+
 /// 目的：启动页副行：终端转录中心、版本与根路径。
 pub(super) fn startup_tagline() -> String {
     let root = std::env::current_dir()

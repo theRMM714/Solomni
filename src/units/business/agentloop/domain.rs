@@ -5,6 +5,7 @@
 
 pub mod assemble;
 pub mod assembly;
+pub mod explain;
 pub mod member_tools;
 pub mod policy;
 pub mod ports;

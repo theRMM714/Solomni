@@ -271,6 +271,7 @@ fn dispatch(faces: &Faces, system: &dyn System, op: &Op, args: &Value, opts: &Op
         "resident" => resident_cmd(faces, args, json),
         "secret" => secret_cmd(faces, args, json),
         "diagnose" => diagnose_cmd(faces, args, json),
+        "explain" => explain_cmd(faces, args, json),
         other => {
             println!("[提示] {} 还没有接上执行者（装配时漏了）", other);
             2
