@@ -23,23 +23,17 @@ impl Work {
         let root = work_root(self.history.as_ref(), sid).unwrap_or_else(|_| sid.to_string());
         let root_meta = self.history.meta(&root)?;
         // 机器能力（与某条会话无关）：界面据此决定 guest 侧能不能**选**；虚拟根是会话级，另行校验。
-        let tools = self.virtual_tools(registry);
-        let inputs = crate::units::business::vm::api::VmInputs {
-            tools: &tools,
-            probe,
-        };
-        let cap = crate::units::business::vm::api::vm_capability(&inputs);
-        let vm_available = cap.ready();
-        let vm_reason =
-            crate::units::business::vm::api::capability_refusal(&inputs).unwrap_or_default();
-        let vm_requirements = cap.requirements;
+        let machine = self
+            .policies
+            .machine(crate::units::business::sandbox::api::VM_POLICY);
+        let vm_available = machine.ready();
+        let vm_reason = self
+            .policies
+            .machine_refusal(crate::units::business::sandbox::api::VM_POLICY)
+            .unwrap_or_default();
+        let vm_requirements = machine.requirements;
         // 会话级判据（机器能力 + 这条会话选的虚拟根）只算一次：两处读同一个结论，不各算一遍。
-        let readiness = crate::units::business::vm::api::tier_readiness(
-            &self.root,
-            &meta.target(),
-            &tools,
-            probe,
-        );
+        let readiness = self.policies.readiness(&meta.sandbox, &meta.target());
         Ok(SessionConfig {
             sid: meta.name.clone(),
             kind: meta.spec.kind.clone(),
@@ -64,7 +58,7 @@ impl Work {
             context_freshness: root_meta.context_freshness,
             freshness_keep_percent: root_meta.freshness_keep_percent,
             pins: meta.sandbox.pins.clone(),
-            runtime: self.runtime_report_for(registry, probe, &meta.target()),
+            runtime: self.runtime_report_for(probe, &meta.sandbox),
             runtimes_dir: crate::kernel::api::path::slash(&self.packages.runtimes_dir()),
             sandbox_ready: readiness.ready(),
             sandbox_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
@@ -207,23 +201,18 @@ impl Work {
         if staying_vm {
             // 留在 vm 档：只校验用户这次填的基础根（填错路径就是填错路径），
             // 不拿"本机能不能提供 vm 档"去拦一条已经存在的会话。
-            let tools = self.virtual_tools(registry);
-            let base_item =
-                crate::units::business::vm::api::tier_readiness(&self.root, &target, &tools, host)
-                    .requirements
-                    .into_iter()
-                    .find(|r| r.id == "base");
+            let base_item = self
+                .policies
+                .readiness(&decl, &target)
+                .requirements
+                .into_iter()
+                .find(|r| r.id == "base");
             if let Some(item) = base_item
                 && !item.met
             {
                 return Err(format!("{}：{}", item.detail, item.how));
             }
-        } else if let Some(why) = crate::units::business::vm::api::tier_refusal(
-            &self.root,
-            &target,
-            &self.virtual_tools(registry),
-            host,
-        ) {
+        } else if let Some(why) = self.policies.refusal(&decl, &target) {
             return Err(why);
         }
         let module_ids = flat_modules(&metas);

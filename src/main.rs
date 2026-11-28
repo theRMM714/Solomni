@@ -689,12 +689,15 @@ fn main() {
         }
     };
     // **执行环境注册表**：本机与客机两个策略；会话 meta 只写策略 id 与参数，解释权在实现方。
+    // 客机策略要回答就绪判定（机器能力 + 这条会话选的虚拟根），外部工具位置事实按设置现算。
+    let vm_tools = entry::assembly::vm_tools_reader(&root, Arc::clone(&provision));
     let policies = units::business::sandbox::api::SandboxPolicies::new(vec![
         units::business::tools::api::host_policy(toolexec.clone()),
         units::business::vm::api::vm_policy(
             root.clone(),
             Arc::new(kernel::detail::HostProbeAdapter),
             Arc::clone(&vm),
+            vm_tools,
         ),
     ]);
     // **工作台策略表**：版本化（主副本只读、共享区动作走 work_*）与不版本化（单树直写）两个策略；

@@ -29,6 +29,8 @@
 - 共享要隧道时给 `restrict=on` 网卡；共享挂载（Windows 的 SMB/cifs）有界重试 3 次，仍失败才判这次起 guest 失败，并在回执里给出尝试次数与最后一次 mount 报错；smbd 自己的输出带 `[虚拟机] smbd：` 前缀转出来，不和 guest 侧现场混在一起。
 
 ## 二、执行分派与就绪
+
+> 就绪判定的**问法**在 `sandbox`（`SandboxPolicies::machine` / `readiness` / `refusal`）：本单元只实现虚拟机策略要答的那几项，会话侧（`work` / `turn` / `system`）不认策略 id、不拼判据。
 - 会话的事实是客机侧（`SandboxFacts.side == guest`）时把模块命令交给 guest；建会话 / 启用历史会话时装配并拉起，删除会话时销毁。
 - 改配按装配输入变化重建：模块集合 / 执行环境策略 / 虚拟根 / 定版变了才重建；只改模型或权限不重建；网络是全局开关（`sandbox.policy.network`），改它走整体重启，不按会话重建。
 - 一个主会话树共用一台 guest：guest 租约 = 顶层工作名（proxy 树 = 代理根名），协作 / 节点 / proxy 子工作的工具租约都指向它；主机围栏租约仍按子会话（`FencePlan.lease` 与客机租约分开：客机租约在装配期经 `sandbox::api::OpenRequest.lease` 交给执行句柄）。

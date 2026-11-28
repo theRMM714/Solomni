@@ -12,25 +12,23 @@ impl Work {
     ///  「清单即事实」：每次调用重扫模块清单与包库；host 侧按宿主目标选包，missing 只保留这一侧确实用不了的能力。
     pub fn runtime_report(
         &self,
-        registry: &dyn Registry,
         probe: &dyn HostProbe,
         sandbox: &crate::units::business::sandbox::api::SandboxDecl,
     ) -> RuntimeReport {
-        let facts = self.policies.facts(sandbox).unwrap_or_default();
-        self.runtime_report_for(registry, probe, &sandbox.target(&facts))
+        self.runtime_report_for(probe, sandbox)
     }
 
     /// 目的：这份执行规格下的运行能力报告——会话配置用（选定虚拟根在场时把 guest 自带的运行能力并进来）。
     pub(crate) fn runtime_report_for(
         &self,
-        registry: &dyn Registry,
         probe: &dyn HostProbe,
-        spec: &crate::units::pure::exec_model::api::TargetSpec,
+        sandbox: &crate::units::business::sandbox::api::SandboxDecl,
     ) -> RuntimeReport {
         let roster = self.modules.roster();
         let lib = self.packages.library();
-        let guest_runtimes =
-            crate::units::business::vm::api::guest_runtimes_of(&self.root, probe, spec);
+        let facts = self.policies.facts(sandbox).unwrap_or_default();
+        let spec = &sandbox.target(&facts);
+        let guest_runtimes = self.policies.provided(sandbox, spec);
         let vm = spec.side.on_guest();
         let (diagnoses, mut missing, available) = if vm {
             let diagnoses = pkgs::diagnoses(&roster.modules, &lib, spec, &guest_runtimes)
@@ -62,9 +60,7 @@ impl Work {
             (diagnoses, plan.unusable, available)
         };
         missing.retain(|_, caps| !caps.is_empty());
-        let tools = self.virtual_tools(registry);
-        let readiness =
-            crate::units::business::vm::api::tier_readiness(&self.root, spec, &tools, probe);
+        let readiness = self.policies.readiness(sandbox, spec);
         RuntimeReport {
             side: spec.side.as_str().to_string(),
             declared: declared(&roster.modules),
@@ -81,11 +77,7 @@ impl Work {
     /// 目的：新建工作的**执行环境选择**（默认策略 + guest 侧可用性与逐项前置）：与「开始」的校验同源。
     ///  为什么单独一条读面：创建向导还没有 sid，拿不到会话配置视图；而设置里的默认策略与
     ///  guest 侧的承载探针是**与某条会话无关**的事实。
-    pub fn sandbox_choices(
-        &self,
-        registry: &dyn Registry,
-        probe: &dyn HostProbe,
-    ) -> SandboxChoices {
+    pub fn sandbox_choices(&self, registry: &dyn Registry) -> SandboxChoices {
         // 设置里写的策略可能已不在注册表里：以注册表为准回落，不让界面拿到点不动的默认值。
         let configured = registry.app().default_sandbox.policy.clone();
         let default = if self.policies.of(&configured).is_some() {
@@ -94,20 +86,19 @@ impl Work {
             self.policies.default_id()
         };
         // 这是**与某条会话无关的机器能力**：虚拟根属于会话选型，不在这里判（创建时另行收集）。
-        let tools = self.virtual_tools(registry);
-        let inputs = crate::units::business::vm::api::VmInputs {
-            tools: &tools,
-            probe,
-        };
-        let cap = crate::units::business::vm::api::vm_capability(&inputs);
-        let available = cap.ready();
+        let machine = self
+            .policies
+            .machine(crate::units::business::sandbox::api::VM_POLICY);
+        let available = machine.ready();
         SandboxChoices {
             default,
             policies: self.policies.decls(),
             guest_available: available,
-            guest_unavailable_reason: crate::units::business::vm::api::capability_refusal(&inputs)
+            guest_unavailable_reason: self
+                .policies
+                .machine_refusal(crate::units::business::sandbox::api::VM_POLICY)
                 .unwrap_or_default(),
-            guest_requirements: cap.requirements,
+            guest_requirements: machine.requirements,
             // 虚拟根清单是**事实**：读不到就空表（界面据此说"没有可选虚拟根"，不编造）。
             guests: self.provision.guest_bases().unwrap_or_default(),
             // 包库可用能力同样是事实：界面按它 + 虚拟根自带能力预判缺口，判据仍以后端为准。

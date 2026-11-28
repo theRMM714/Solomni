@@ -267,7 +267,6 @@ impl Core {
             .create_proxy_with_facts(
                 &mut self.turn,
                 self.registry.as_ref(),
-                self.probe.as_ref(),
                 crate::units::business::work::api::ProxySeed {
                     name,
                     kind: crate::units::business::session_model::api::PROXY,

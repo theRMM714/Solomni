@@ -1,14 +1,14 @@
 //! 目的：虚拟机策略——把「客机」这条执行环境登记进 `sandbox` 的注册表。
-//! 管：`VmPolicy`（自我介绍、声明校验、客机事实、开句柄）、`VmSandbox`（把命令送进 guest）。
+//! 管：`VmPolicy`（自我介绍、声明校验、客机事实、就绪与自带能力、开句柄）、`VmSandbox`（把命令送进 guest）。
 //! 不管：guest 怎么起停（`vm::service`）；会话怎么用它（`work`）。
 //! 联动：组合根在装配期经 `vm::api::vm_policy` 建实例并登记。
 
 use crate::kernel::ports::HostProbe;
 use crate::units::business::sandbox::api::{
-    ExecKind, ExecOutcome, ExecRequest, OpenRequest, PolicyDecl, Sandbox, SandboxDecl,
-    SandboxFacts, SandboxPolicy, VM_POLICY,
+    ExecKind, ExecOutcome, ExecRequest, Machine, OpenRequest, PolicyDecl, Readiness, Requirement,
+    Sandbox, SandboxDecl, SandboxFacts, SandboxPolicy, VM_POLICY,
 };
-use crate::units::business::vm::api::{GuestRun, OutputLimit, Vm};
+use crate::units::business::vm::api::{GuestRun, OutputLimit, Vm, VmInputs, VmTools};
 use crate::units::pure::exec_model::api::{Side, TargetSpec};
 use crate::units::pure::registry_model::api::{Param, ParamType};
 use std::collections::BTreeMap;
@@ -20,16 +20,23 @@ pub struct VmPolicy {
     root: PathBuf,
     probe: Arc<dyn HostProbe + Send + Sync>,
     vm: Arc<dyn Vm + Send + Sync>,
+    tools: Arc<dyn Fn() -> VmTools + Send + Sync>,
 }
 
 impl VmPolicy {
-    /// 目的：按项目根、宿主探针与客机执行面建策略（判镜像与跑命令要用它们）。
+    /// 目的：按项目根、宿主探针、客机执行面与外部工具位置事实建策略（判镜像与就绪要用它们）。
     pub fn new(
         root: PathBuf,
         probe: Arc<dyn HostProbe + Send + Sync>,
         vm: Arc<dyn Vm>,
+        tools: Arc<dyn Fn() -> VmTools + Send + Sync>,
     ) -> VmPolicy {
-        VmPolicy { root, probe, vm }
+        VmPolicy {
+            root,
+            probe,
+            vm,
+            tools,
+        }
     }
 
     fn guest_of(decl: &SandboxDecl) -> Result<String, String> {
@@ -111,6 +118,59 @@ impl SandboxPolicy for VmPolicy {
             guest: Some(guest),
             guest_os: Some(image.os.as_str().to_string()),
             guest_arch: Some(image.arch.as_str().to_string()),
+        })
+    }
+
+    fn machine(&self) -> Machine {
+        let tools = (self.tools)();
+        Machine {
+            policy: VM_POLICY.to_string(),
+            name: self.decl().name,
+            requirements: crate::units::business::vm::api::vm_requirements(&VmInputs {
+                tools: &tools,
+                probe: self.probe.as_ref(),
+            })
+            .into_iter()
+            .map(requirement_of)
+            .collect(),
+        }
+    }
+
+    fn readiness(&self, target: &TargetSpec) -> Readiness {
+        let tools = (self.tools)();
+        Readiness {
+            requirements: crate::units::business::vm::api::tier_readiness(
+                &self.root,
+                target,
+                &tools,
+                self.probe.as_ref(),
+            )
+            .requirements
+            .into_iter()
+            .map(requirement_of)
+            .collect(),
+        }
+    }
+
+    fn provided(&self, target: &TargetSpec) -> Vec<String> {
+        crate::units::business::vm::api::guest_runtimes_of(&self.root, self.probe.as_ref(), target)
+    }
+
+    fn refusal(&self, target: &TargetSpec) -> Option<String> {
+        let tools = (self.tools)();
+        crate::units::business::vm::api::tier_refusal(
+            &self.root,
+            target,
+            &tools,
+            self.probe.as_ref(),
+        )
+    }
+
+    fn machine_refusal(&self) -> Option<String> {
+        let tools = (self.tools)();
+        crate::units::business::vm::api::capability_refusal(&VmInputs {
+            tools: &tools,
+            probe: self.probe.as_ref(),
         })
     }
 
@@ -206,5 +266,15 @@ impl Sandbox for VmSandbox {
                 ExecOutcome::plain(self.vm.guest_run_fenced(&self.lease, &run, &req.fence))
             }
         }
+    }
+}
+
+/// 目的：把虚拟机档的一项前置翻成执行环境的通用前置（形状一样，id 从静态串换成字符串）。
+fn requirement_of(req: crate::units::business::vm::api::VmRequirement) -> Requirement {
+    Requirement {
+        id: req.id.to_string(),
+        met: req.met,
+        detail: req.detail,
+        how: req.how,
     }
 }

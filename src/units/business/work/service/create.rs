@@ -190,7 +190,6 @@ impl Work {
             let (sid, facts) = self.create_proxy_with_facts(
                 turn,
                 registry,
-                host,
                 ProxySeed {
                     name: &spec.name,
                     kind: &spec.kind,
@@ -347,12 +346,7 @@ impl Work {
         };
         // 承载校验：默认档位的前置条件不具备时**不允许创建虚拟机档会话**（用户环境问题，不是选型问题）。
         // 必须在建工作区之前收口——拒绝就该什么都不留下。
-        if let Some(why) = crate::units::business::vm::api::tier_refusal(
-            &self.root,
-            &meta.target(),
-            &self.virtual_tools(registry),
-            host,
-        ) {
+        if let Some(why) = self.policies.refusal(&meta.sandbox, &meta.target()) {
             return Err(why);
         }
         // 工作区：整棵树只有顶层一个 work/（或外部绑定的根）；各 agent 沙箱按实例名建在会话目录下。
@@ -739,7 +733,6 @@ impl Work {
         &mut self,
         turn: &mut Turn,
         registry: &dyn Registry,
-        probe: &dyn HostProbe,
         seed: ProxySeed<'_>,
     ) -> Result<(String, Vec<SessionEvent>), String> {
         let ProxySeed {
@@ -760,12 +753,7 @@ impl Work {
         let facts = self.policies.facts(&sandbox)?;
         let target = sandbox.target(&facts);
         // 与其余形态同一把尺子：虚拟机档的承载不成立就不建（用户环境问题，不是选型问题）。
-        if let Some(why) = crate::units::business::vm::api::tier_refusal(
-            &self.root,
-            &target,
-            &self.virtual_tools(registry),
-            probe,
-        ) {
+        if let Some(why) = self.policies.refusal(&sandbox, &target) {
             return Err(why);
         }
         // 先解析核心通道：没有模型就不建（工作区都还没有，失败什么都不留）。

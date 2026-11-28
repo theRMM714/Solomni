@@ -23,6 +23,18 @@ fn runtime_rooted(
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     let work = test_workspace(Arc::new(InMemoryWorkspace::new()));
+    // 客机策略的就绪判据要问「外部工具这次用哪份」：设置登记 + 项目内补齐，与本用例注入的那两面同一份事实。
+    let app = settings.s.lock().expect("锁").app.clone();
+    let provision_for_tools = Arc::clone(&provision);
+    let vm_tools = Arc::new(move || {
+        crate::units::business::provision::api::vm_tools(
+            provision_for_tools.as_ref(),
+            std::env::consts::OS,
+            &app.qemu_path,
+            &app.virtiofsd_path,
+            &app.smbd_path,
+        )
+    });
     Core::new(
         root.to_path_buf(),
         registry_service(settings, Arc::clone(&llm)),
@@ -30,7 +42,15 @@ fn runtime_rooted(
         work.layout.clone(),
         work.versions.clone(),
         test_vm(),
-        test_policies(),
+        crate::tests::doubles::test_policies_at_with_tools(
+            root.to_path_buf(),
+            test_tools_svc_with(
+                Arc::new(SilentRunner),
+                Arc::new(InMemorySysIo::new()),
+                Arc::new(NoFenceHost),
+            ),
+            vm_tools,
+        ),
         test_bench_policies_with(work.versions.clone()),
         test_packages(Arc::new(InMemoryPackages::empty())),
         provision,
@@ -1271,12 +1291,7 @@ pub(crate) fn stale_read_turns_into_a_placeholder_in_the_next_send_view() {
 
     let view = core
         .work
-        .session_view(
-            &core.turn,
-            core.registry.as_ref(),
-            core.probe.as_ref(),
-            &sid,
-        )
+        .session_view(&core.turn, core.registry.as_ref(), &sid)
         .expect("会话视图");
     let stats = view.freshness_stats.expect("这一轮要留下替换统计");
     assert_eq!(stats.judged, 1, "判出 1 条过期读");
@@ -1406,12 +1421,7 @@ pub(crate) fn stale_read_of_a_large_file_is_replaced_segment_by_segment() {
 
     let view = core
         .work
-        .session_view(
-            &core.turn,
-            core.registry.as_ref(),
-            core.probe.as_ref(),
-            &sid,
-        )
+        .session_view(&core.turn, core.registry.as_ref(), &sid)
         .expect("会话视图");
     let stats = view.freshness_stats.expect("这一轮要留下替换统计");
     assert_eq!(stats.judged, 2, "两段都过期");

@@ -565,14 +565,12 @@ impl Core {
 
     /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。
     pub fn runtime_report(&self, sandbox: &SandboxDecl) -> RuntimeReport {
-        self.work
-            .runtime_report(self.registry.as_ref(), self.probe.as_ref(), sandbox)
+        self.work.runtime_report(self.probe.as_ref(), sandbox)
     }
 
     /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。
     pub fn sandbox_choices(&self) -> SandboxChoices {
-        self.work
-            .sandbox_choices(self.registry.as_ref(), self.probe.as_ref())
+        self.work.sandbox_choices(self.registry.as_ref())
     }
 
     /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。
@@ -623,12 +621,8 @@ impl Core {
 
     /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。
     pub fn session_views(&self, history: &[HistoryView]) -> Vec<SessionView> {
-        self.work.session_views(
-            &self.turn,
-            self.registry.as_ref(),
-            self.probe.as_ref(),
-            history,
-        )
+        self.work
+            .session_views(&self.turn, self.registry.as_ref(), history)
     }
 
     /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。
