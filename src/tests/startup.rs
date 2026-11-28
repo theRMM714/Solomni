@@ -476,6 +476,23 @@ fn existing_settings_file_must_be_self_consistent() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// 目的：settings.yaml 里有不认识的键时，报错要点名文件位置与出路（不能只丢 serde 行号）。
+#[test]
+fn unknown_settings_key_names_the_file_and_the_way_out() {
+    let dir = crate::tests::scratch("settings-unknown-key");
+    let store = crate::entry::assembly::settings_store(&dir);
+    std::fs::create_dir_all(crate::kernel::domain::layout::home(&dir)).expect("建 .home");
+    std::fs::write(
+        crate::kernel::domain::layout::home(&dir).join("settings.yaml"),
+        "tier: host\n",
+    )
+    .expect("写 settings.yaml");
+    let err = store.load().expect_err("未知键要被拒绝");
+    assert!(err.contains("tier"), "{err}");
+    assert!(err.contains("data/.home/settings.yaml"), "{err}");
+    assert!(err.contains("删掉多出来的键"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
 /// 目的：`--setup fence` 的落盘面：不装登记处也能记授权——首启没有 settings.yaml 时按默认写，已有文件只改这一项。
 #[test]
 fn grant_write_acl_records_the_authorization_on_disk() {

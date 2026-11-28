@@ -40,6 +40,15 @@ struct ModelsFile {
     core: Option<String>,
 }
 
+/// 目的：settings.yaml 读不懂、或读懂了却自相矛盾时的报错——点名文件与两条出路，别让人对着 serde 行号猜。
+/// 参数：`reason` = 解码器或校验给的原文。
+/// 返回：带 `data/.home/settings.yaml` 位置与出路的整句。
+fn settings_error(reason: &str) -> String {
+    format!(
+        "settings.yaml 配置非法：{reason}（文件在 data/.home/settings.yaml：删掉多出来的键，或删掉整份文件后重启，会按默认重建）"
+    )
+}
+
 impl YamlSettingsStore {
     /// 目的：用登记处读写面造一个存储（组合根给 `data/.home`）。
     pub fn new(home: Arc<dyn Home>) -> YamlSettingsStore {
@@ -68,12 +77,12 @@ impl SettingsStore for YamlSettingsStore {
         let app = match self.home.read(Doc::Settings)? {
             Some(t) => {
                 let app = yaml_serde::from_str::<AppSettings>(&t)
-                    .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+                    .map_err(|e| settings_error(&e.to_string()))?;
                 // 首启没有文件时上面的 None 分支不拦（交给引导决定）；已存在的文件必须自洽。
                 crate::units::business::catalog::registry::domain::providers::validate_sandbox_authorization(
                     &app.sandbox.policy,
                 )
-                .map_err(|e| format!("settings.yaml 配置非法：{}", e))?;
+                .map_err(|e| settings_error(&e))?;
                 app
             }
             None => AppSettings::default(),
