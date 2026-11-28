@@ -46,7 +46,7 @@ const HINTS = {
   overview:
     "<h2>怎么看 · 全景</h2><p class=hint>四层从上到下：entry 装配 → presentation 屏 → units 单元 → kernel 机制。带内数字是聚合事实，细边在各自的视图里。点任一带进入该视图；红边是门禁会拦的向上/同层依赖。</p>",
   caps:
-    "<h2>怎么看 · 单元环</h2><p class=hint>边是单元之间的引用（数字为引用处数，粗细按它放大）；红色边是门禁会拦的向上依赖或同环逆序。环间只向内，同环只按 rank 先后（rank 只回执）。虚线框是扇出最大的三个单元（只回执，不设预算）。点节点下钻，点文件看目的 / 管 / 不管 / 联动。</p>",
+    "<h2>怎么看 · 单元依赖</h2><p class=hint>矩阵的行是引用方、列是被引用方，格内数字是引用处数，颜色越深越多；红框是门禁会拦的向上依赖或同环逆序（当前为 0）。行按环分块，越靠上环号越大；右侧「出」是该单元对其它单元的总引用处数。悬停一格只看它的一行一列；点格或点名字进单元详情，再点文件看目的 / 管 / 不管 / 联动。下方按引用处数列出强边，供直接读「谁最依赖谁」。</p>",
   mech:
     "<h2>怎么看 · kernel 机制</h2><p class=hint>一个机制管一种机制，边是机制之间的引用；严格向下，同层与向上都是红色。层号以 docs/kernel/mechanisms.yaml 为准（它是按依赖重算的事实缓存）。虚线框是扇出前三。</p>",
   entry:
@@ -564,6 +564,118 @@ function presSvg(pres, wide) {
   return out.join("");
 }
 
+/** 单元依赖矩阵：行=引用方，列=被引用方，格内数字=引用处数（颜色按它加深），红框=门禁会拦的边。
+ * 33 个单元、130 多条边的曲线图看不出谁依赖谁；矩阵把「谁 → 谁、几处」摊成可数的格子。
+ * 只留有跨单元出边/入边的单元作图，其余列成一笔；下方再按引用处数排强边清单。只读 layers.js 的事实。 */
+function capsSvg(nodes, edges, wide) {
+  const CW = 26;
+  const RH = 26;
+  const LAB = 128;
+  const TOP = 126;
+  const BANDGAP = 10;
+  const byName = new Map(nodes.map((c) => [c.name, c]));
+  const byKey = new Map();
+  for (const e of edges) byKey.set(e.from + "\u0000" + e.to, e);
+  let maxRefs = 1;
+  for (const e of edges) maxRefs = Math.max(maxRefs, e.refs);
+  const outRefs = new Map();
+  const inRefs = new Map();
+  for (const e of edges) {
+    outRefs.set(e.from, (outRefs.get(e.from) || 0) + e.refs);
+    inRefs.set(e.to, (inRefs.get(e.to) || 0) + e.refs);
+  }
+  const sorter = (a, b) => b.layer - a.layer || a.name.localeCompare(b.name);
+  const rows = nodes.filter((c) => (outRefs.get(c.name) || 0) > 0).sort(sorter);
+  const cols = nodes.filter((c) => (inRefs.get(c.name) || 0) > 0).sort(sorter);
+  const nr = rows.length;
+  const nc = cols.length;
+  const W = LAB + nc * CW + 60;
+  const yOf = [];
+  let y = TOP;
+  for (let i = 0; i < nr; i++) {
+    if (i && rows[i].layer !== rows[i - 1].layer) y += BANDGAP;
+    yOf.push(y);
+    y += RH;
+  }
+  const H = y + 30;
+  const xOf = (i) => LAB + i * CW;
+  const ringName = (l) => (l === 0 ? "环 0" : "环 " + l);
+  const ringFull = (l) => (l === 0 ? "环 0 地基" : l === 1 ? "环 1 纯（无 IO）" : l === 2 ? "环 2 状态与机制" : "环 3 用例");
+  const out = [];
+  out.push('<div class="caps">');
+  const rowBands = [];
+  for (let i = 0; i < nr; i++) {
+    const last = rowBands[rowBands.length - 1];
+    if (last && last.layer === rows[i].layer) last.to = i;
+    else rowBands.push({ layer: rows[i].layer, from: i, to: i });
+  }
+  const sums = { "3>2": [0, 0], "3>1": [0, 0], "2>1": [0, 0] };
+  for (const e of edges) {
+    const a = byName.get(e.from);
+    const b = byName.get(e.to);
+    if (!a || !b) continue;
+    const k = a.layer + ">" + b.layer;
+    if (sums[k]) {
+      sums[k][0]++;
+      sums[k][1] += e.refs;
+    }
+  }
+  out.push('<svg class="matrix" viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" role="img" aria-label="单元依赖矩阵">');
+  for (const b of rowBands) {
+    out.push('<rect x="' + LAB + '" y="' + (yOf[b.from] - 5) + '" width="' + nc * CW + '" height="' + ((b.to - b.from + 1) * RH + 10) + '" fill="' + (b.layer === 3 ? "#f8fafc" : b.layer === 2 ? "#ffffff" : "#f1f5f9") + '"/>');
+    out.push('<text x="6" y="' + (yOf[b.from] + 15) + '" class="band rband"><title>' + esc(ringFull(b.layer)) + " · " + (b.to - b.from + 1) + ' 个有出边的单元</title>' + esc(ringName(b.layer)) + "</text>");
+  }
+  // 列按环分组：组间一条细竖线，读列头时能看出它在哪一层。
+  for (let j = 1; j < nc; j++) {
+    if (cols[j].layer === cols[j - 1].layer) continue;
+    out.push('<line x1="' + xOf(j) + '" y1="' + (TOP - 4) + '" x2="' + xOf(j) + '" y2="' + (y - 4) + '" stroke="#cbd5e1" stroke-dasharray="2 3"/>');
+  }
+  for (let i = 0; i < nr; i++) {
+    out.push('<line x1="' + LAB + '" y1="' + (yOf[i] + RH) + '" x2="' + (LAB + nc * CW) + '" y2="' + (yOf[i] + RH) + '" stroke="#eef2f7"/>');
+  }
+  for (let i = 0; i < nr; i++) {
+    const from = rows[i];
+    for (let j = 0; j < nc; j++) {
+      const to = cols[j];
+      const e = byKey.get(from.name + "\u0000" + to.name);
+      if (!e) continue;
+      const a = 0.2 + 0.55 * Math.min(1, Math.log2(1 + e.refs) / Math.log2(1 + maxRefs));
+      const cx = xOf(j);
+      const cy = yOf[i];
+      out.push('<g class="mcell" data-from="' + esc(from.name) + '" data-to="' + esc(to.name) + '" data-refs="' + e.refs + '"><title>' + esc(from.name + " → " + to.name + "：" + e.refs + " 处引用" + (e.violation ? "（越界）" : "") + "\n首个引用点：" + e.file) + "</title>");
+      out.push('<rect x="' + (cx + 1) + '" y="' + (cy + 1) + '" width="' + (CW - 2) + '" height="' + (RH - 2) + '" rx="3" fill="rgba(37,99,235,' + a.toFixed(2) + ')"' + (e.violation ? ' stroke="#dc2626" stroke-width="1.5"' : "") + "/>");
+      out.push('<text x="' + (cx + CW / 2) + '" y="' + (cy + RH / 2 + 3.5) + '" text-anchor="middle" class="mnum" fill="' + (a > 0.5 ? "#fff" : "#1e293b") + '">' + e.refs + "</text></g>");
+    }
+  }
+  for (let i = 0; i < nr; i++) {
+    const c = rows[i];
+    const w = wide.indexOf(c.name) >= 0;
+    out.push('<g class="node mhead' + (w ? " wide" : "") + '" data-view="caps" data-name="' + esc(c.name) + '" data-axis="row" transform="translate(0,' + yOf[i] + ')"><title>' + esc(c.name + " · " + ringFull(c.layer) + " · 出 " + c.out + " 边 / " + (outRefs.get(c.name) || 0) + " 处引用 · 入 " + (inRefs.get(c.name) || 0) + " 处") + "</title>");
+    out.push('<rect width="' + (LAB - 6) + '" height="' + RH + '" fill="transparent"/>');
+    out.push('<text x="' + (LAB - 8) + '" y="' + (RH / 2 + 4) + '" text-anchor="end" class="rname">' + esc(c.name) + "</text>");
+    out.push('<text x="' + (LAB + nc * CW + 8) + '" y="' + (RH / 2 + 4) + '" class="tot">' + (outRefs.get(c.name) || 0) + "</text></g>");
+  }
+  for (let j = 0; j < nc; j++) {
+    const c = cols[j];
+    out.push('<g class="node mhead" data-view="caps" data-name="' + esc(c.name) + '" data-axis="col" transform="translate(' + (xOf(j) + CW / 2) + "," + (TOP - 6) + ')"><title>' + esc(c.name + " · 入 " + (inRefs.get(c.name) || 0) + " 处引用") + "</title>");
+    out.push('<text transform="rotate(-90)" text-anchor="start" class="cname">' + esc(c.name) + "</text></g>");
+  }
+  out.push('<text x="' + (LAB + nc * CW + 8) + '" y="' + (TOP - 8) + '" class="band">出</text>');
+  out.push("</svg>");
+  const noOut = nodes.filter((c) => !(outRefs.get(c.name) > 0)).map((c) => c.name);
+  const noIn = nodes.filter((c) => !(inRefs.get(c.name) > 0)).map((c) => c.name);
+  const rank = edges.slice().sort((a, b) => b.refs - a.refs || a.from.localeCompare(b.from)).slice(0, 20);
+  out.push('<div class="capnote"><span class="band">行 = 引用方，列 = 被引用方；格内是引用处数，颜色越深越多，红框是门禁会拦的边；右侧「出」是该单元对其它单元的总引用处数。</span>');
+  out.push('<span class="band">环间边：环 3→2 ' + (sums["3>2"][0] || 0) + " 条 / " + (sums["3>2"][1] || 0) + " 处 · 环 3→1 " + (sums["3>1"][0] || 0) + " 条 / " + (sums["3>1"][1] || 0) + " 处 · 环 2→1 " + (sums["2>1"][0] || 0) + " 条 / " + (sums["2>1"][1] || 0) + " 处 · 同环 0 条</span>");
+  out.push('<span class="band">只画有出边/入边的单元：无跨单元出边 ' + noOut.length + " 个（" + esc(noOut.join("、")) + "）；无入边 " + noIn.length + " 个（" + esc(noIn.join("、")) + "）。</span></div>");
+  out.push('<ol class="rank"><li class="rh">引用处数前 ' + rank.length + " 的强边（点单元名看详情）</li>");
+  for (const e of rank) {
+    out.push("<li><a class=\"node\" data-view=\"caps\" data-name=\"" + esc(e.from) + "\">" + esc(e.from) + "</a> → <a class=\"node\" data-view=\"caps\" data-name=\"" + esc(e.to) + "\">" + esc(e.to) + "</a><span class=\"n\">" + e.refs + " 处 · " + esc(e.file) + "</span></li>");
+  }
+  out.push("</ol></div>");
+  return out.join("");
+}
+
 /** 全景：entry 一列装配三层，主链 presentation → units → kernel；只画聚合数。 */
 function overviewSvg(meta, entry) {
   const W = 1080;
@@ -624,7 +736,7 @@ function page(data) {
   const m = data.meta;
   const svg = {
     overview: overviewSvg(m, data.entry),
-    caps: bandSvg({ nodes: data.caps, edges: data.edges }, { nodeW: 150, nodeH: 44, wide: m.wide, bandLabel: (l) => (l === 0 ? "环 0 地基" : "环 " + l + (l === 1 ? " 纯" : l === 2 ? " 状态与机制" : " 用例")), aria: "单元环依赖图", id: "cap", view: "caps" }),
+    caps: capsSvg(data.caps, data.edges, m.wide),
     mech: bandSvg({ nodes: data.mech.nodes, edges: data.mech.edges }, { nodeW: 165, nodeH: 44, wide: m.wideMech, bandLabel: (l) => "第 " + l + " 层", aria: "kernel 机制分层图", id: "mech", view: "mech" }),
     entry: bandSvg({ nodes: data.entry.nodes, edges: data.entry.edges }, { nodeW: 140, nodeH: 44, wide: m.wideEntry, bandLabel: (l) => "第 " + l + " 段", aria: "入口分段图", id: "entry", view: "entry" }),
     pres: presSvg(data.pres),
@@ -674,6 +786,18 @@ function page(data) {
     "svg .fnode{cursor:pointer}svg .fnode rect{fill:#fff;stroke:#cbd5e1}svg .fnode:hover rect{fill:#eff6ff}",
     "svg .fnode.hit rect{stroke:#dc2626;stroke-width:2}",
     "svg .fline{stroke:#94a3b8;stroke-opacity:.45;fill:none}",
+    ".caps svg.matrix{display:block;margin:0 auto}",
+    ".capnote{display:flex;flex-wrap:wrap;gap:2px 18px;padding:8px 12px;border-top:1px solid #e2e8f0}",
+    ".caps .rank{columns:2;column-gap:26px;margin:8px 12px 14px;padding:0 0 0 18px;font-size:12px;color:#334155}",
+    ".caps .rank li{margin:3px 0;break-inside:avoid}",
+    ".caps .rank li.rh{list-style:none;margin-left:-18px;font-weight:600;color:#0f172a;margin-bottom:4px}",
+    ".caps .rank .n{color:#94a3b8;font-size:10.5px;margin-left:6px}",
+    ".caps .rank a{color:#1d4ed8;cursor:pointer;text-decoration:none}.caps .rank a:hover{text-decoration:underline}",
+    "svg .rname{font-size:11.5px;fill:#0f172a}svg .cname{font-size:10px;fill:#334155}",
+    "svg .rband{font-size:10.5px;fill:#94a3b8;letter-spacing:.02em}",
+    "svg .tot{font-size:10px;fill:#94a3b8}svg g.node.wide .rname{fill:#b45309;font-weight:700}",
+    "svg .mnum{font-size:9px;font-weight:600;pointer-events:none}svg .mcell{cursor:pointer}",
+    "svg .mcell.dim{opacity:.2}svg .mcell.hot rect{stroke:#2563eb;stroke-width:2}",
   ].join("");
   const java = [
     "var D=JSON.parse(document.getElementById('graph-data').textContent),HINTS=D.hints;",
@@ -689,6 +813,8 @@ function page(data) {
     "D.pres.screens.forEach(function(s){s.files.forEach(function(f){FA[f.path]={view:'pres',node:s.file};});});",
     "function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');}",
     "function cut(s,n){s=String(s==null?'':s);return s.length>n?s.slice(0,n-1)+'…':s;}",
+    "function mhot(f,t){stage.querySelectorAll('.mcell').forEach(function(c){var on=(f&&c.getAttribute('data-from')===f)||(t&&c.getAttribute('data-to')===t);c.classList.toggle('hot',!!on);c.classList.toggle('dim',!on);});}",
+    "function mclear(){stage.querySelectorAll('.mcell').forEach(function(c){c.classList.remove('hot');c.classList.remove('dim');});}",
     "function issues(arr){if(!arr||!arr.length)return '<p class=tag>无命中</p>';return '<ul>'+arr.map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul>';}",
     "function crumb(parts){crumbs.innerHTML=parts.map(function(p,i){return i? '<span>›</span> <a data-go=\"'+esc(p[1])+'\">'+esc(p[0])+'</a>':'<a data-go=\"'+esc(p[1])+'\">'+esc(p[0])+'</a>';}).join(' ');}",
     "function show(v){",
@@ -738,7 +864,11 @@ function page(data) {
     "  g.addEventListener('click',function(){nav(name?{t:'node',v:view,n:name}:{t:'home',v:view});});",
     "  g.addEventListener('mouseenter',function(){if(!name)return;stage.querySelectorAll('path.edge').forEach(function(p){if(p.getAttribute('data-from')===name||p.getAttribute('data-to')===name)p.classList.add('hot');});});",
     "  g.addEventListener('mouseleave',function(){stage.querySelectorAll('path.edge').forEach(function(p){p.classList.remove('hot');});});});",
-    " document.querySelectorAll('#tabs button').forEach(function(b){b.addEventListener('click',function(){nav({t:'home',v:b.getAttribute('data-tab')});});});}",
+    " document.querySelectorAll('#tabs button').forEach(function(b){b.addEventListener('click',function(){nav({t:'home',v:b.getAttribute('data-tab')});});});",
+    " stage.querySelectorAll('.mcell').forEach(function(c){c.addEventListener('mouseenter',function(){mhot(c.getAttribute('data-from'),c.getAttribute('data-to'));});c.addEventListener('mouseleave',mclear);c.addEventListener('click',function(){nav({t:'node',v:'caps',n:c.getAttribute('data-from')});});});",
+    " stage.querySelectorAll('a.node').forEach(function(a){a.addEventListener('click',function(){nav({t:'node',v:a.getAttribute('data-view'),n:a.getAttribute('data-name')});});});",
+    " stage.querySelectorAll('.mhead').forEach(function(g){var nm=g.getAttribute('data-name'),ax=g.getAttribute('data-axis');g.addEventListener('mouseenter',function(){mhot(ax==='row'?nm:null,ax==='col'?nm:null);});g.addEventListener('mouseleave',mclear);});",
+    "}",
     "document.addEventListener('click',function(ev){var a=ev.target.closest('a[data-go]');if(!a)return;var v=a.getAttribute('data-go');",
     " if(!v){nav({t:'home',v:'overview'});}else if(v.indexOf('view:')===0){nav({t:'home',v:v.slice(5)});}else if(v.indexOf('v:')===0){var r=v.slice(2).split(':');nav({t:'node',v:r[0],n:v.slice(2+r[0].length+1)});}else if(v.indexOf('file:')===0){nav({t:'file',p:v.slice(5)});}});",
     "backBtn.addEventListener('click',function(){back();});",
