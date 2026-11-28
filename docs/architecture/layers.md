@@ -1,7 +1,7 @@
 <!-- docs-template: spec -->
 # 分层与依赖方向
 > 定位：依赖方向的唯一权威：四环怎么分、环间与环内的规则（H1/H2）、kernel 机制与入口分段两张副表怎么算。
-> 效力：规范｜核对：2026-11-25｜依据：`layers.yaml`、`docs/kernel/mechanisms.yaml`、`tests/gates/structure/layers.js`、`tests/gates/structure/kernel-mechanisms.js`
+> 效力：规范｜核对：2026-11-28｜依据：`layers.yaml`、`docs/kernel/mechanisms.yaml`、`tests/gates/structure/layers.js`、`tests/gates/structure/kernel-mechanisms.js`
 
 ## 适用与判据
 - 改代码前先读本文；归环与依赖方向以本文为准，违规由 T0 结构审查判定（`tests/gates/structure/layers.js`、`kernel-mechanisms.js`、`dependency.js`），零豁免。
@@ -13,6 +13,8 @@
 环 4 适配器（entry/、presentation/）
   └──▶ 环 3 用例 ──▶ 环 2 状态与机制 ──▶ 环 1 纯 ──▶ 环 0 kernel
 ```
+
+- 同一张图的可交互版：[overview.html](overview.html)（4 环 + 适配器、每环单元数、跨环引用数；由 archify 生成，数据同本节与 `Structure.html` 的单元环视图）。细到 33 个单元、136 条边的依赖矩阵与门禁问题清单在结构审查产物 `Structure.html`（`node tests/gates/structure/graph.js` 生成，不入库）。
 
 - **环是架构地位，路径只编码「角色」**。谁在哪个环只由 `layers.yaml` 决定；路径只回答「这一类单元是什么」，三桶各收一类角色：环 1 的纯单元住 `src/units/pure/<单元>/`，盘主单元住 `src/units/resource/<单元>/`，其余业务单元（有副作用、有状态或编排用例）住 `src/units/business/<单元>/`，顶层不再有平铺单元——`business` 同时住环 2 与环 3 的单元，正是「桶不编码环」的证据。三桶各自双向判：`src/units/pure/` 下的目录必须正好是环 1，环 1 的单元也必须住在这里（判据：`tests/gates/structure/layers.js` 的 `shapeProblems`）；`src/units/resource/` 只收盘主，盘面归属由主人表判（判据：`tests/gates/structure/disk-owners.js`，口径见 [io.md](io.md)）；每个单元恰好住一个桶、`src/units/` 下只许三个桶（判据：`tests/gates/structure/unit-buckets.js`）。桶编号角色、不编号环——换环只改一行表，不会引发全量改名，也不会出现「路径与表两个权威」。门禁认单元名一律走 `tests/gates/structure/unitpath.js`（`unitOfPath` / `unitOfModule` / `unitDir` / `BUCKETS`），禁止位次假设。
 - **环 1 的判据是「无 IO、无状态、无端口、可穷举测试」**，不是「没有业务语义」。权限判定、任务链推演这类有领域词但全部可穷举的规则就该在环 1；否则它们无家可归，只能被各切片复制一遍（违反 R13）；纯层判据由 `tests/gates/structure/layers.js` 的 `pureProblems` 机器判定。按**概念**切（transcript、session-model、registry-model），不按类型切。
