@@ -1,0 +1,36 @@
+   Compiling solomni v0.1.0 (D:\a\Solomni\Solomni)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.04s
+     Running tests\windows\main.rs (target\debug\build\solomni/b65d63ce3133bae3\out\windows-b65d63ce3133bae3.exe)
+
+running 15 tests
+[诊断] 能力名 solomni.fence.baseline → S-1-15-3-1024-2951083820-3801417277-1959969226-3077295246-350581633-2893898559-3475184837-4612892
+[诊断] with容器写工作目录：exit=0 拿到 "alive"；work 条目 ["alive-with.txt"]
+[诊断] without容器写工作目录：exit=0 拿到 "alive"；work 条目 ["alive-with.txt", "alive-without.txt"]
+[诊断] 带能力容器读能力专属文件：exit=0 拿到 "CAPABILITY-ONLY-SECRET"
+[诊断] 能力 SID 正反对照成立：带能力读得到、不带能力读不到（exit=1）
+test probes::capability::capability_sid_is_grantable_and_not_blanket ... ok
+test probes::container::container_cannot_read_outside_its_roots ... ok
+test probes::container::container_cannot_write_outside_its_roots ... ok
+test probes::container::container_starts_and_passes_stdio_through ... ok
+test probes::container::container_keeps_the_shared_area_out_of_reach ... ok
+test probes::container::env_unavailable_degrades_and_still_runs_the_command ... ok
+test probes::container::node_commands_carry_the_realpath_skip_in_the_runtime_env ... ok
+test probes::container::verify_separates_env_unavailable_from_broken_container_steps ... ok
+test probes::container::container_network_follows_the_net_flag ... ok
+test probes::ledger::fence_reconcile_reclaims_dead_owners_and_reports_unjudgeable ... ok
+[HTTPS] ok 200 native-tls https://example.com/
+test probes::https::https_reaches_a_public_endpoint_through_the_product_chain ... ok
+test probes::ledger::ledger_listing_and_per_item_commands_are_machine_readable_and_honest ... ok
+test probes::startup::web_does_not_start_without_fence_authorization ... ok
+围栏收尾：[围栏] 清理完成：没有台账：本程序没在本机写过权限项
+[围栏] 清理完成：产品根内孤儿授权清扫：连树撤掉 1 处
+[围栏] 清理完成：扫掉 15 个本程序建过的容器 profile
+[围栏] 清理完成：没有残留的视图盘盘符映射[工具链] 项目内未安装：python、node、cc；补全：solomni --provision --ensure=toolchain --yes
+[工具链] 宿主回退 python → D:\a\Solomni\Solomni\.tools\toolchains\windows-x86_64\python\3.14.9\python\python.exe（围栏可用）
+[工具链] 宿主回退 node → D:\a\Solomni\Solomni\.tools\toolchains\windows-x86_64\node\24.11.0\node-v24.11.0-win-x64\node.exe（围栏可用）
+[工具链] 宿主回退 cc → D:\a\Solomni\Solomni\.tools\mingw64\bin\gcc.exe（围栏可用）
+test probes::container::container_reaches_listed_host_ports_through_the_relay ... ok
+test probes::container::internet_client_does_not_open_loopback ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.58s
+
