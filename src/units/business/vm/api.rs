@@ -1,5 +1,6 @@
 //! 目的：vm 单元的入站面——其它单元与呈现层只准用这里。
 //! 管：Vm 用例 trait（guest 生命周期）与销毁任务 `GuestStop`，以及档位、计划、入口诊断、就绪检测、运行计划派生（宿主/guest 包选型、模块可用性、路径翻译器）的重导出。
+//! 约束：就绪检测（`vm_requirements` / `tier_readiness`）与运行计划派生是**策略实现与自检**用的；会话侧只经 `sandbox::api::SandboxPolicies` 问。
 //! 不管：纯逻辑实现（domain/）与端口（ports.rs）；运行包契约与选包在 packages 能力。
 //! 联动：被 runtime / collab / cli 与入口层消费。
 
@@ -7,11 +8,13 @@ pub use crate::kernel::api::path_bridge::PathBridge;
 pub use crate::units::business::sandbox::api::GuestOs;
 pub use crate::units::business::vm::detail::qemu::create_disk;
 pub use crate::units::business::vm::domain::diagnose::GuestDiagnosis;
+#[allow(unused_imports)] // 入站面：机器能力判定只被自检与用例读，bin 本体不用
+pub use crate::units::business::vm::domain::exec::vm_capability;
 pub use crate::units::business::vm::domain::exec::{
     COPY_SHARE_ENV, ExecPlan, MissingEntry, QEMU_BIN, SMBD_BIN, VIRTIOFSD_BIN, VmInputs,
     VmRequirement, admit_guest, capability_refusal, copy_share_enabled, diagnose_text_for,
     missing_entries_for, plan, plan_summary, runs_on_target, share_chain, tier_readiness,
-    tier_refusal, vm_capability, vm_requirements,
+    tier_refusal, vm_requirements,
 };
 pub use crate::units::business::vm::domain::guest::{
     GuestRun, GuestSpec, OutputLimit, SeedDocs, mounts_from, package_setup_scripts,
@@ -88,8 +91,9 @@ pub fn vm_policy(
     root: std::path::PathBuf,
     probe: std::sync::Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
     vm: std::sync::Arc<dyn Vm + Send + Sync>,
+    tools: std::sync::Arc<dyn Fn() -> VmTools + Send + Sync>,
 ) -> std::sync::Arc<dyn crate::units::business::sandbox::api::SandboxPolicy> {
     std::sync::Arc::new(crate::units::business::vm::domain::policy::VmPolicy::new(
-        root, probe, vm,
+        root, probe, vm, tools,
     ))
 }

@@ -36,12 +36,9 @@ impl Work {
             return Err(format!("会话 {} 已归档：先「恢复归档」再启用", sid));
         }
         if turn.is_running(sid) {
-            return Ok(PreparedActivation::Running(Box::new(self.session_view(
-                turn,
-                registry,
-                probe.as_ref(),
-                sid,
-            )?)));
+            return Ok(PreparedActivation::Running(Box::new(
+                self.session_view(turn, registry, sid)?,
+            )));
         }
         let boot = self.prepare_guest_boot(turn, registry, probe, sid)?;
         let lease = boot.as_ref().map(|b| b.lease().to_string());
@@ -81,7 +78,7 @@ impl Work {
                     }
                     return Err(e);
                 }
-                self.session_view(turn, registry, probe, &sid)
+                self.session_view(turn, registry, &sid)
             }
         }
     }

@@ -78,10 +78,9 @@ impl Work {
         &self,
         turn: &Turn,
         registry: &dyn Registry,
-        probe: &dyn HostProbe,
         sid: &str,
     ) -> Result<SessionView, String> {
-        self.session_views(turn, registry, probe, &self.history_list())
+        self.session_views(turn, registry, &self.history_list())
             .into_iter()
             .find(|v| v.sid == sid)
             .ok_or_else(|| format!("无此会话：{}", sid))
@@ -92,7 +91,6 @@ impl Work {
         &self,
         turn: &Turn,
         registry: &dyn Registry,
-        probe: &dyn HostProbe,
         history: &[HistoryView],
     ) -> Vec<SessionView> {
         // 在表里的会话 + **正在生成的会话**（后者对象在工作线程上，但它确实存在、也确实在跑）。
@@ -128,13 +126,7 @@ impl Work {
                 // 记的档位来自落盘 meta（权威）：环境变了也要如实提示——**不拦打开**（记录是用户的）。
                 let sandbox = entry.map(|h| h.sandbox.clone()).unwrap_or_default();
                 let facts = entry.map(|h| h.facts.clone()).unwrap_or_default();
-                let tools = self.virtual_tools(registry);
-                let readiness = crate::units::business::vm::api::tier_readiness(
-                    &self.root,
-                    &sandbox.target(&facts),
-                    &tools,
-                    probe,
-                );
+                let readiness = self.policies.readiness(&sandbox, &sandbox.target(&facts));
                 // 「改需求」能力位：有本次需求行才给。在表里看会话种类；不在表里（生成中/未打开）
                 // 看落盘 meta 的形态（那是名单与形态的单一真相）。
                 let can_update_task = match turn.session(&sid) {

@@ -64,3 +64,20 @@ pub(crate) fn vm_capability_is_machine_only_while_session_readiness_needs_base()
         session.requirements
     );
 }
+
+/// 目的：未登记的策略 id 也要如实说缺什么——注册表不把不认识的策略静默当成可用。
+/// 约束：这条判据只在注册表这一层，调用方（`work` / `turn` / `system`）不按策略 id 分支。
+#[test]
+pub(crate) fn an_unregistered_policy_reports_what_is_missing() {
+    let policies = crate::tests::doubles::test_policies();
+    let machine = policies.machine("no-such-policy");
+    assert!(!machine.ready(), "不认识的策略不能判成可用");
+    assert!(
+        machine
+            .requirements
+            .iter()
+            .any(|r| r.id == "policy" && r.detail.contains("没有这个执行环境策略")),
+        "要如实说缺这一项：{:?}",
+        machine.requirements
+    );
+}

@@ -474,6 +474,7 @@ pub(crate) fn module_tools_go_into_the_guest_on_vm_tier() {
                 crate::tests::root_dir(),
                 Arc::new(crate::kernel::detail::HostProbeAdapter),
                 vm.clone(),
+                Arc::new(crate::units::business::vm::api::VmTools::default),
             ),
         ]);
         let decl = crate::units::business::sandbox::api::SandboxDecl {

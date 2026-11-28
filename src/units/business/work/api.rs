@@ -100,7 +100,7 @@ pub struct RuntimeReport {
     /// 目的：本执行环境下不能成立的诊断（包选择 + 模块入口）；空 = 没有。
     pub diagnoses: Vec<RuntimeDiagnosis>,
     /// 目的：本机能不能承载**当前执行环境**（guest 侧策略的前置条件；本机策略恒为可）。
-    ///   界面据此决定 guest 侧策略能不能选，并与「开始」/编辑的校验同源（`crate::units::business::vm::api::tier_readiness`）。
+    ///   界面据此决定 guest 侧策略能不能选，并与「开始」/编辑的校验同源（`crate::units::business::sandbox::api::SandboxPolicies::readiness`）。
     pub sandbox_ready: bool,
     /// 目的：承载不了时缺什么（空 = 齐了）。
     pub sandbox_missing: Vec<String>,
@@ -122,7 +122,7 @@ pub struct SandboxChoices {
     /// 目的：不能选时的理由（能选 = 空）。
     pub guest_unavailable_reason: String,
     /// 目的：guest 侧策略的**逐项前置**（缺哪几项、每项怎么补）：界面照抄，不自己编话。
-    pub guest_requirements: Vec<crate::units::business::vm::api::VmRequirement>,
+    pub guest_requirements: Vec<crate::units::business::sandbox::api::Requirement>,
     /// 目的：本机可选的**虚拟根**（guest 侧那一步的下拉项）——界面照抄，不自己编列表。
     pub guests: Vec<crate::units::business::provision::api::GuestBase>,
     /// 目的：包库里可用的能力名（→ 版本）：界面据此预判"这个虚拟根 + 包库满足不了哪些模块"。
@@ -209,7 +209,7 @@ pub struct SessionConfig {
     /// 目的：虚拟机档为什么不能选（`vm_available` 为真时为空）。
     pub vm_unavailable_reason: String,
     /// 目的：虚拟机档的**逐项前置**（缺哪几项、每项怎么补）：界面照抄，不自己编话。
-    pub vm_requirements: Vec<crate::units::business::vm::api::VmRequirement>,
+    pub vm_requirements: Vec<crate::units::business::sandbox::api::Requirement>,
     /// 目的：运行能力报告（模块声明 / 包库可用 / 缺包 / 虚拟机档诊断 / 拒收原因）。
     pub runtime: RuntimeReport,
     /// 目的：依赖文件夹（把运行包放进这里；真实路径，给用户看）。
@@ -489,7 +489,7 @@ pub trait WorkOps: Send + Sync {
         sandbox: &crate::units::business::sandbox::api::SandboxDecl,
     ) -> Result<RuntimeReport, String>;
     /// 目的：新建工作时的**执行环境选择**（默认策略 + guest 侧策略可用性与逐项前置）。
-    /// 与「开始」的校验同源（同一把 `tier_readiness` 尺子），界面照抄，不自己编话。
+    /// 与「开始」的校验同源（同一把 `SandboxPolicies::readiness` 尺子），界面照抄，不自己编话。
     fn sandbox_choices(&self) -> Result<SandboxChoices, String>;
     /// 目的：核心按任务推荐的 agent 草案（带理由；用户可改）。
     fn suggest_models(&self, task: &str, kind: &str) -> Result<Vec<AgentSuggestion>, String>;

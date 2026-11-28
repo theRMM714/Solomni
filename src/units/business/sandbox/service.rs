@@ -1,5 +1,5 @@
 //! 目的：沙箱注册表——按策略 id 找实现，并把声明翻成事实。
-//! 管：`SandboxPolicies`（登记、查找、事实、开执行句柄）。
+//! 管：`SandboxPolicies`（登记、查找、事实、就绪与自带能力、开执行句柄）。
 //! 不管：策略内部怎么算（实现方）；会话怎么建（`work`）。
 //! 联动：组合根在装配期登记；消费方只经本单元的 `api` 取。
 
@@ -7,6 +7,8 @@ use crate::units::business::sandbox::domain::decl::{HOST_POLICY, SandboxDecl};
 use crate::units::business::sandbox::domain::exec::Sandbox;
 use crate::units::business::sandbox::domain::facts::{PolicyDecl, SandboxFacts};
 use crate::units::business::sandbox::domain::policy::{OpenRequest, SandboxPolicy};
+use crate::units::business::sandbox::domain::readiness::{Machine, Readiness};
+use crate::units::pure::exec_model::api::TargetSpec;
 use std::sync::Arc;
 
 /// 目的：执行环境策略的注册表（键是策略 id）。
@@ -87,6 +89,54 @@ impl SandboxPolicies {
                 decl.policy,
                 self.ids().join(" / ")
             )),
+        }
+    }
+    /// 目的：这个策略的机器能力（与某条会话无关）；没登记的 id 给一条"没有这个策略"的不满足项。
+    pub fn machine(&self, policy: &str) -> Machine {
+        match self.of(policy) {
+            Some(p) => p.machine(),
+            None => Machine::absent(policy),
+        }
+    }
+
+    /// 目的：机器能力不成立时的可读拒绝理由（能选 = None）。
+    pub fn machine_refusal(&self, policy: &str) -> Option<String> {
+        match self.of(policy) {
+            Some(p) => p.machine_refusal(),
+            None => Machine::absent(policy)
+                .requirements
+                .first()
+                .map(|r| r.detail.clone()),
+        }
+    }
+
+    /// 目的：这条执行目标在这个策略下的逐项前置（空表 = 齐了）。
+    /// 约束：判据只在策略实现里；调用方不按策略 id 分支。
+    pub fn readiness(&self, decl: &SandboxDecl, target: &TargetSpec) -> Readiness {
+        match self.of(&decl.policy) {
+            Some(p) => p.readiness(target),
+            None => Readiness {
+                requirements: Machine::absent(&decl.policy).requirements,
+            },
+        }
+    }
+
+    /// 目的：这条目标的执行环境自带哪些运行能力（本机侧为空）。
+    pub fn provided(&self, decl: &SandboxDecl, target: &TargetSpec) -> Vec<String> {
+        match self.of(&decl.policy) {
+            Some(p) => p.provided(target),
+            None => Vec::new(),
+        }
+    }
+
+    /// 目的：承载不成立时的可读拒绝理由（能承载 = None）。
+    pub fn refusal(&self, decl: &SandboxDecl, target: &TargetSpec) -> Option<String> {
+        match self.of(&decl.policy) {
+            Some(p) => p.refusal(target),
+            None => Machine::absent(&decl.policy)
+                .requirements
+                .first()
+                .map(|r| r.detail.clone()),
         }
     }
 }

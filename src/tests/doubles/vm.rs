@@ -471,16 +471,31 @@ pub(crate) fn test_policies_at(
 }
 
 /// 目的：同上，但本机执行面与客机执行面都用调用方给的实例。
+/// 约束：客机策略的探测用「本机能起虚拟机 + 共享工具在场」的替身，测试不该因开发机没装 qemu 少验一条路径。
 pub(crate) fn test_policies_at_with(
     root: std::path::PathBuf,
     toolexec: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync>,
+) -> crate::units::business::sandbox::api::SandboxPolicies {
+    test_policies_at_with_tools(
+        root,
+        toolexec,
+        Arc::new(crate::units::business::vm::api::VmTools::default),
+    )
+}
+
+/// 目的：同上，但客机策略每次判据取用的外部工具位置由调用方给（验"设置登记 / 项目内补齐"两种取法时用）。
+pub(crate) fn test_policies_at_with_tools(
+    root: std::path::PathBuf,
+    toolexec: Arc<dyn crate::units::business::tools::api::ToolExec + Send + Sync>,
+    tools: Arc<dyn Fn() -> crate::units::business::vm::api::VmTools + Send + Sync>,
 ) -> crate::units::business::sandbox::api::SandboxPolicies {
     crate::units::business::sandbox::api::SandboxPolicies::new(vec![
         crate::units::business::tools::api::host_policy(toolexec),
         crate::units::business::vm::api::vm_policy(
             root,
-            Arc::new(crate::kernel::detail::HostProbeAdapter),
+            crate::tests::doubles::vm_capable_host_probe(),
             test_vm(),
+            tools,
         ),
     ])
 }
