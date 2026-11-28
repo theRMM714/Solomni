@@ -195,9 +195,8 @@ impl Work {
                     kind: &spec.kind,
                     granted_at: crate::kernel::api::procs::unix_seconds(),
                     sandbox: spec.sandbox.clone(),
-                    profile: spec
-                        .permission
-                        .unwrap_or(crate::units::pure::permission::api::ProfileId::Online),
+                    // 代理不特殊：创建时给什么档就是什么档，没给就跟随全局默认。
+                    profile: spec.permission,
                     workspace,
                     freshness: spec.freshness,
                 },
@@ -344,8 +343,11 @@ impl Work {
             thinking: None,
             run: RunState::Active,
         };
-        // 承载校验：默认档位的前置条件不具备时**不允许创建虚拟机档会话**（用户环境问题，不是选型问题）。
+        // 联网档的前置条件不具备时不允许创建：先算这条会话的生效权限，再问全局总开关。
         // 必须在建工作区之前收口——拒绝就该什么都不留下。
+        let effective = turn.permissions_for(registry, &meta)?;
+        ensure_online_allowed(registry, effective.profile)?;
+        // 承载校验：默认档位的前置条件不具备时**不允许创建虚拟机档会话**（用户环境问题，不是选型问题）。
         if let Some(why) = self.policies.refusal(&meta.sandbox, &meta.target()) {
             return Err(why);
         }
@@ -787,8 +789,8 @@ impl Work {
             sandbox: sandbox.clone(),
             facts,
             permission: crate::units::pure::permission::api::PermissionOverride {
-                ceiling: Some(crate::units::pure::permission::api::PermissionLayer {
-                    profile: Some(profile),
+                ceiling: profile.map(|p| crate::units::pure::permission::api::PermissionLayer {
+                    profile: Some(p),
                 }),
                 narrowing: None,
             },
@@ -799,6 +801,9 @@ impl Work {
             workspace: workspace.clone(),
             run: RunState::Active,
         };
+        // 代理会话与普通会话同一把尺子：生效档为联网时，全局总开关必须已经打开。
+        let effective = turn.permissions_for(registry, &meta)?;
+        ensure_online_allowed(registry, effective.profile)?;
         self.workspace.bind(name, workspace.root.as_deref())?;
         self.workspace
             .ensure_layout(name, &[PROXY_PRIVATE_DIR.to_string()])?;

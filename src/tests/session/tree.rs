@@ -374,13 +374,14 @@ pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
     use crate::units::pure::permission::api::{PermissionLayer, ProfileId};
     use crate::units::pure::permission::api::{ScopeMode, SharedEdit};
     let hist = Arc::new(InMemoryHistory::new());
-    let mut core = core_with_all(
+    let mut core = core_with_all_network(
         vec![module_of("a")],
         gw(BTreeMap::new(), vec!["[]".into()]),
         Arc::new(SilentRunner),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
         Arc::clone(&hist),
         Arc::new(InMemorySysIo::new()),
+        true,
     );
     let parent = core
         .create_work(execute_work("p", &["a"], "需求"))
@@ -465,13 +466,14 @@ pub(crate) fn root_edit_keeps_child_narrowing_and_child_cannot_widen() {
 pub(crate) fn creation_writes_the_chosen_profile_into_the_root_ceiling() {
     use crate::units::pure::permission::api::ProfileId;
     let hist = Arc::new(InMemoryHistory::new());
-    let mut core = core_with_all(
+    let mut core = core_with_all_network(
         vec![module_of("a")],
         gw(BTreeMap::new(), vec!["[]".into()]),
         Arc::new(SilentRunner),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
         Arc::clone(&hist),
         Arc::new(InMemorySysIo::new()),
+        true,
     );
     let mut spec = work("wv", SINGLE, &["a"]);
     spec.permission = Some(ProfileId::Online);
@@ -487,18 +489,74 @@ pub(crate) fn creation_writes_the_chosen_profile_into_the_root_ceiling() {
     );
 }
 
-/// 目的：快速切档是根级动作——更新根 ceiling，子会话只能再收窄。
+/// 目的：全局网络没开时创建联网档会话必须被拒，且失败不留会话。
 #[test]
-pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
+pub(crate) fn creation_rejects_online_profile_when_global_network_is_off() {
     use crate::units::pure::permission::api::ProfileId;
     let hist = Arc::new(InMemoryHistory::new());
-    let mut core = core_with_all(
+    let mut core = core_with_all_network(
         vec![module_of("a")],
         gw(BTreeMap::new(), vec!["[]".into()]),
         Arc::new(SilentRunner),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
         Arc::clone(&hist),
         Arc::new(InMemorySysIo::new()),
+        false,
+    );
+    let mut spec = work("wv-off", SINGLE, &["a"]);
+    spec.permission = Some(ProfileId::Online);
+    let err = core.create_work(spec).unwrap_err();
+    assert!(err.contains("允许出站网络"), "{}", err);
+    assert!(
+        core.lifecycle.history_open("wv-off").is_err(),
+        "拒绝后不能留下会话"
+    );
+}
+
+/// 目的：全局网络没开时，从“更多权限设置”把会话编辑成联网档也必须被拒，不能绕过快速切档的守卫。
+#[test]
+pub(crate) fn edit_rejects_online_profile_when_global_network_is_off() {
+    use crate::units::pure::permission::api::{PermissionLayer, ProfileId};
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut core = core_with_all_network(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+        false,
+    );
+    let sid = core
+        .create_work(work("wv-edit-off", SINGLE, &["a"]))
+        .unwrap()
+        .sid;
+    let mut edit = edit_of(vec![("a", &["a"], "")]);
+    edit.permission = Some(PermissionLayer {
+        profile: Some(ProfileId::Online),
+    });
+    let err = core.edit_session(&sid, edit).unwrap_err();
+    assert!(err.contains("允许出站网络"), "{}", err);
+    assert_eq!(
+        core.session_config(&sid).unwrap().permission.profile,
+        ProfileId::Offline,
+        "拒绝后仍是离线档"
+    );
+}
+
+/// 目的：快速切档是根级动作——更新根 ceiling，子会话只能再收窄。
+#[test]
+pub(crate) fn quick_profile_switch_updates_root_and_children_cannot_widen() {
+    use crate::units::pure::permission::api::ProfileId;
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut core = core_with_all_network(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+        true,
     );
     let mut spec = execute_work("p", &["a"], "需求");
     spec.permission = Some(ProfileId::Online);

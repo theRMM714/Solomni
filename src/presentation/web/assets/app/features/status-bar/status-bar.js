@@ -21,6 +21,12 @@ const refreshState = (...a) => app.refreshState(...a);
 /// 选择器简写：模块内的 DOM 查找一律走注入的 doc。
 const $ = (sel) => doc.querySelector(sel);
 
+/// 全局总开关：会话档位只是意图，实际出站由它兜底；只有明确读到 false 才提示。
+function globalNetworkOff() {
+  const policy = state.settings && state.settings.sandbox && state.settings.sandbox.policy;
+  return !!policy && policy.network === false;
+}
+
 /* 网络档位小卡片：只列两档 + 一个“更多设置”。子会话禁用比父档更宽的选项；
  * 生成中禁用全部（后端也会拒绝，这里先给出原因，免得白点一下）。 */
 function openPermissionMenu(chip, s) {
@@ -28,7 +34,17 @@ function openPermissionMenu(chip, s) {
   const parent = s.permission_parent || null;
   const parentIdx = parent ? PERMISSION_ORDER.indexOf(parent) : PERMISSION_ORDER.length - 1;
   /** @type {Array<{label?: string, icon?: string, disabled?: boolean, reason?: string, sep?: boolean, danger?: boolean, onClick?: () => void}>} */
-  const items = PERMISSION_ORDER.map((id, i) => {
+  const items = [];
+  if (current === 'online' && globalNetworkOff()) {
+    items.push({
+      icon: 'alert',
+      label: '全局网络已关闭：本会话实际已断网',
+      disabled: true,
+      reason: '在设置里打开「允许出站网络」后才会恢复；不会自动降档',
+    });
+    items.push({ sep: true });
+  }
+  items.push(...PERMISSION_ORDER.map((id, i) => {
     const disabled = s.running || (!!parent && i > parentIdx);
     const reason = s.running
       ? '会话正在生成：先停止再切网络档位'
@@ -40,7 +56,7 @@ function openPermissionMenu(chip, s) {
       reason,
       onClick: () => { if (id !== current) switchPermission(s.sid, id); },
     };
-  });
+  }));
   if (!s.auto) {
     items.push({ sep: true });
     items.push({ icon: 'gear', label: '更多权限设置…', onClick: () => openConfig(s.sid) });
@@ -209,13 +225,17 @@ function syncStatusbar(s) {
   inner.setAttribute('aria-label', '会话状态，可横向滚动');
   bindStatusDrag(inner);
 
-  // 权限档位：proxy 与子会话都必须看得见它实际用的档。
+  // 权限档位：proxy 与子会话都必须看得见它实际用的档；全局断网时档位旁边直接标出来。
   if (s.permission_label) {
+    const cutOff = s.permission_profile === 'online' && globalNetworkOff();
     const permChip = ui.statusChip({
-      icon: 'shield',
-      text: s.permission_label + (s.permission_narrowed ? '（收窄）' : ''),
+      icon: cutOff ? 'alert' : 'shield',
+      text: s.permission_label + (s.permission_narrowed ? '（收窄）' : '') + (cutOff ? '（全局断网）' : ''),
       label: '权限档位',
-      title: '当前网络档位：' + s.permission_label + '（点开可切换；子会话只能收窄）',
+      title: cutOff
+        ? '当前网络档位：' + s.permission_label + '，但全局网络已关闭，实际无法出站（点开可切换）'
+        : '当前网络档位：' + s.permission_label + '（点开可切换；子会话只能收窄）',
+      cls: cutOff ? 'warn' : '',
     });
     permChip.onclick = () => openPermissionMenu(permChip, s);
     inner.appendChild(permChip);

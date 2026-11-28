@@ -580,6 +580,32 @@ pub(crate) fn core_with_pkgs_probe(
     packages: Arc<InMemoryPackages>,
     probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
 ) -> Core {
+    core_with_pkgs_probe_settings(
+        modules,
+        gateway,
+        runner,
+        catalog,
+        history,
+        io,
+        packages,
+        probe,
+        InMemorySettings::new(),
+    )
+}
+
+/// 目的：与 core_with_pkgs_probe 同形，但允许指定全局设置（断言网络总开关对创建 / 切档的影响）。
+#[allow(clippy::too_many_arguments)]
+fn core_with_pkgs_probe_settings(
+    modules: Vec<Module>,
+    gateway: ScriptGateway,
+    runner: Arc<impl ProcessRunner + 'static>,
+    catalog: Arc<FakeCatalog>,
+    history: Arc<InMemoryHistory>,
+    io: Arc<InMemorySysIo>,
+    packages: Arc<InMemoryPackages>,
+    probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
+    settings: InMemorySettings,
+) -> Core {
     let gateway: Arc<dyn crate::units::business::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
     let llm = test_llm(Arc::clone(&gateway), catalog);
@@ -608,7 +634,7 @@ pub(crate) fn core_with_pkgs_probe(
         test_tools_svc_with(runner, io, Arc::new(NoFenceHost));
     Core::new(
         crate::tests::root_dir(),
-        registry_service(InMemorySettings::new(), Arc::clone(&llm)),
+        registry_service(settings, Arc::clone(&llm)),
         test_history_of(history),
         work.layout.clone(),
         work.versions.clone(),
@@ -628,6 +654,30 @@ pub(crate) fn core_with_pkgs_probe(
         Arc::new(crate::units::business::residents::api::NoResidents),
         Arc::new(crate::units::business::catalog::secrets::api::NoSecrets),
         test_decls(),
+    )
+}
+
+/// 目的：指定历史与全局网络开关的装配（断言创建守卫在失败时不落会话）。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn core_with_all_network(
+    modules: Vec<Module>,
+    gateway: ScriptGateway,
+    runner: Arc<impl ProcessRunner + 'static>,
+    catalog: Arc<FakeCatalog>,
+    history: Arc<InMemoryHistory>,
+    io: Arc<InMemorySysIo>,
+    network: bool,
+) -> Core {
+    core_with_pkgs_probe_settings(
+        modules,
+        gateway,
+        runner,
+        catalog,
+        history,
+        io,
+        Arc::new(InMemoryPackages::empty()),
+        test_host_probe(),
+        InMemorySettings::with_network(network),
     )
 }
 

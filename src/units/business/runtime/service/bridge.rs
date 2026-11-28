@@ -272,7 +272,7 @@ impl Core {
                     kind: crate::units::business::session_model::api::PROXY,
                     granted_at,
                     sandbox: Default::default(),
-                    profile: crate::units::pure::permission::api::ProfileId::Online,
+                    profile: None,
                     workspace: Default::default(),
                     freshness: None,
                 },

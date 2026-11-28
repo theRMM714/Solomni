@@ -7,7 +7,9 @@
 //! 联动：机制不可用时（老内核、规则被内核拒、seccomp 不可用）如实降级并打印说明；能力等级在启动报告里已如实告知。
 
 use super::{Capability, FENCE_FAILED, FenceVerdict, shell_command};
-use crate::kernel::contracts::fence::{Access, FencePlan};
+use crate::kernel::contracts::fence::{
+    Access, FencePlan, LINUX_READ_ONLY_BASELINE, LINUX_WRITABLE_BASELINE,
+};
 use crate::kernel::detail::io::env;
 use crate::kernel::detail::launch::interpreter_dirs;
 use std::ffi::CString;
@@ -31,34 +33,6 @@ pub const NETWORK_NOT_ENFORCED: &str = "网络围栏未生效";
 fn rules_rejected(reason: String) -> String {
     format!("{}：{}", RULES_REJECTED_MARK, reason)
 }
-
-/// 只读运行基线：解释器与系统运行库所在处（脚本要跑起来必须读得到这些）。
-const READ_ONLY_BASELINE: &[&str] = &[
-    "/usr",
-    "/bin",
-    "/sbin",
-    "/lib",
-    "/lib64",
-    "/lib32",
-    "/etc/ld.so.cache",
-    "/etc/localtime",
-    "/etc/terminfo",
-    // Node 起进程时初始化 OpenSSL 会读系统配置（python / C++ 不读）：不放行它，
-    // JS 模块工具连 `node -e` 都起不来。两个常见落点各守一处，不存在的由 exists() 跳过。
-    "/etc/ssl/openssl.cnf",
-    "/etc/pki/tls/openssl.cnf",
-    "/dev/null",
-    "/dev/zero",
-    "/dev/urandom",
-    "/dev/random",
-    "/proc/self",
-    "/proc/meminfo",
-    "/sys/devices/system/cpu",
-];
-
-/// 目的：运行时基线里**要可写**的设备文件——不是数据落点，是标准重定向要能丢弃输出（`>/dev/null` / `2>/dev/null`）。
-/// 约束：只给这些设备文件本身，不给整个 /dev；其余基线路径仍只读。
-const WRITABLE_BASELINE: &[&str] = &["/dev/null"];
 
 const LANDLOCK_CREATE_RULESET_VERSION: u32 = 1;
 const LANDLOCK_RULE_PATH_BENEATH: u32 = 1;
@@ -99,7 +73,7 @@ const RW_ALL: u64 = FS_EXECUTE
 const RO_ALL: u64 = FS_EXECUTE | FS_READ_FILE | FS_READ_DIR;
 
 /// 目录专属位：规则挂在**普通文件/设备**上时，内核对这些位直接回 EINVAL。
-/// （READ_ONLY_BASELINE 里的 /etc/ld.so.cache、/dev/null 等是文件，不能带着 FS_READ_DIR 去 add_rule。）
+/// （LINUX_READ_ONLY_BASELINE 里的 /etc/ld.so.cache、/dev/null 等是文件，不能带着 FS_READ_DIR 去 add_rule。）
 const DIR_ONLY: u64 = FS_READ_DIR
     | FS_REMOVE_DIR
     | FS_REMOVE_FILE
@@ -550,8 +524,8 @@ fn install_rules(spec: &FencePlan, command: &str) -> Result<(), String> {
             wanted.push((grant.path.clone(), RO_ALL));
         }
     }
-    for p in READ_ONLY_BASELINE {
-        if WRITABLE_BASELINE.contains(p) {
+    for p in LINUX_READ_ONLY_BASELINE {
+        if LINUX_WRITABLE_BASELINE.contains(p) {
             continue;
         }
         let path = Path::new(*p);
@@ -559,7 +533,7 @@ fn install_rules(spec: &FencePlan, command: &str) -> Result<(), String> {
             wanted.push((path.to_path_buf(), RO_ALL));
         }
     }
-    for p in WRITABLE_BASELINE {
+    for p in LINUX_WRITABLE_BASELINE {
         let path = Path::new(p);
         if path.exists() {
             wanted.push((path.to_path_buf(), mask_for(abi, RO_ALL | FS_WRITE_FILE)));

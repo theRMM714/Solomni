@@ -12,6 +12,47 @@ use std::path::{Path, PathBuf};
 /// 约束：这是**守门进程协议的**退出码（守门进程返它，调用方按它判失败），改它等于改协议。
 pub const FENCE_FAILED: i32 = 111;
 
+/// 目的：Linux 围栏的只读运行基线——解释器、运行库与系统配置所在处；本机后端与 guest 助手共用这一份。
+/// 约束：guest 里也必须能读到 DNS 与 CA 配置，否则联网档的域名解析与 TLS 校验会失败；
+///   路径不存在时由各消费者跳过，不在这里按发行版裁剪。
+pub const LINUX_READ_ONLY_BASELINE: &[&str] = &[
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/lib",
+    "/lib64",
+    "/lib32",
+    "/etc/ld.so.cache",
+    "/etc/localtime",
+    "/etc/terminfo",
+    // DNS：glibc 解析域名要读这三个文件；不放行时 getaddrinfo 直接失败（EAI_NONAME）。
+    // /etc/resolv.conf 常是指向 /run 下运行时文件的符号链接，目标也要可达。
+    "/etc/resolv.conf",
+    "/etc/hosts",
+    "/etc/nsswitch.conf",
+    "/run/systemd/resolve",
+    "/run/resolvconf",
+    // TLS：Node 初始化 OpenSSL 读配置；curl / Python 校验服务端证书读 CA 目录。
+    "/etc/ssl/openssl.cnf",
+    "/etc/pki/tls/openssl.cnf",
+    // Debian / Ubuntu 的 CA 目录；其中条目可能指向 /usr/share/ca-certificates（/usr 已放行）。
+    "/etc/ssl/certs",
+    // RHEL / Fedora 的 CA 目录与实际的信任库（ca-bundle.crt 常是指向这里的符号链接）。
+    "/etc/pki/tls/certs",
+    "/etc/pki/ca-trust",
+    "/dev/null",
+    "/dev/zero",
+    "/dev/urandom",
+    "/dev/random",
+    "/proc/self",
+    "/proc/meminfo",
+    "/sys/devices/system/cpu",
+];
+
+/// 目的：Linux 运行时基线里**要可写**的设备文件——标准重定向要能丢弃输出。
+/// 约束：只给这些设备文件本身，不给整个 /dev；其余基线路径仍只读。
+pub const LINUX_WRITABLE_BASELINE: &[&str] = &["/dev/null"];
+
 /// 目的：守门进程执行时的全局沙箱要求——机制装不上时是降级还是拒绝。
 /// 约束：`allow_degraded` 只来自本进程的启动问答；不落盘。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
