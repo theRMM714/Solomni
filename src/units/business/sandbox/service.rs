@@ -5,10 +5,10 @@
 
 use crate::units::business::sandbox::domain::decl::{HOST_POLICY, SandboxDecl};
 use crate::units::business::sandbox::domain::exec::Sandbox;
-use crate::units::business::sandbox::domain::facts::{PolicyDecl, SandboxFacts};
+use crate::units::business::sandbox::domain::facts::SandboxFacts;
 use crate::units::business::sandbox::domain::policy::{OpenRequest, SandboxPolicy};
-use crate::units::business::sandbox::domain::readiness::{Machine, Readiness};
-use crate::units::pure::exec_model::api::TargetSpec;
+use crate::units::business::sandbox::domain::readiness::{Machine, PolicyView, Readiness};
+use crate::units::pure::exec_model::api::{Fixer, TargetSpec};
 use std::sync::Arc;
 
 /// 目的：执行环境策略的注册表（键是策略 id）。
@@ -33,9 +33,21 @@ impl SandboxPolicies {
         self.policies.iter().map(|p| p.decl().id).collect()
     }
 
-    /// 目的：登记的策略自我介绍（呈现层的选择器照抄，不自己编名字与说明）。
-    pub fn decls(&self) -> Vec<PolicyDecl> {
-        self.policies.iter().map(|p| p.decl()).collect()
+    /// 目的：全部策略的全貌（按登记顺序）：呈现层按这张表渲染选择器，不写死任何策略名。
+    pub fn catalog(&self) -> Vec<PolicyView> {
+        self.policies
+            .iter()
+            .map(|p| PolicyView {
+                decl: p.decl(),
+                machine: p.machine(),
+            })
+            .collect()
+    }
+
+    /// 目的：这个策略的补齐端口（没登记或这个策略补不了 = None）。
+    /// 约束：呈现层只问"能不能补"，不关心谁来补。
+    pub fn fixer(&self, policy: &str) -> Option<Arc<dyn Fixer>> {
+        self.of(policy).and_then(|p| p.fixer())
     }
 
     /// 目的：按策略自己的规则校验声明（建会话时先过这一关，非法参数当场拒）。
@@ -91,14 +103,6 @@ impl SandboxPolicies {
             )),
         }
     }
-    /// 目的：这个策略的机器能力（与某条会话无关）；没登记的 id 给一条"没有这个策略"的不满足项。
-    pub fn machine(&self, policy: &str) -> Machine {
-        match self.of(policy) {
-            Some(p) => p.machine(),
-            None => Machine::absent(policy),
-        }
-    }
-
     /// 目的：机器能力不成立时的可读拒绝理由（能选 = None）。
     pub fn machine_refusal(&self, policy: &str) -> Option<String> {
         match self.of(policy) {

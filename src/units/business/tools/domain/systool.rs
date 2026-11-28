@@ -564,6 +564,10 @@ pub fn arg_fault_text(name: &str, schema: &ToolSchema, fault: &ArgFault) -> Stri
         ArgFault::TooSmall { name, min } => format!("参数 {} 不能小于 {}", name, min),
         ArgFault::TooBig { name, max } => format!("参数 {} 不能大于 {}", name, max),
         ArgFault::Unknown(n) => format!("没有参数 {}", n),
+        ArgFault::HumanOnly(n) => format!(
+            "参数 {} 只有人经呈现层能给：会话的执行环境与权限继承父会话，模型不用也不能选",
+            n
+        ),
         ArgFault::NotInValues { name, values } => {
             format!("参数 {} 只能是 {}", name, values.join(" / "))
         }

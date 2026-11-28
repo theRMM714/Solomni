@@ -63,7 +63,7 @@ pub(crate) fn a_guest_without_supported_clients_is_rejected_before_boot() {
     let bad = find("bad");
     assert!(!bad.met, "没声明客户端的 guest 必须拒绝：{:?}", bad);
     assert!(
-        bad.detail.contains("未声明") && bad.how.contains("guest.yaml"),
+        bad.detail.contains("未声明") && bad.fix.summary.contains("guest.yaml"),
         "拒绝要说清缺什么、怎么补：{:?}",
         bad
     );

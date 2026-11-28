@@ -35,10 +35,10 @@ pub const MAX_LOCAL_PORTS: usize = 8;
 pub fn parse(schema: &ToolSchema, args_json: &str) -> Result<ShellCall, String> {
     let mut args: serde_json::Value =
         serde_json::from_str(args_json).map_err(|e| format!("参数不是合法 JSON：{}", e))?;
-    if let Err(fault) = schema.check(&args) {
+    if let Err(fault) = schema.check_model(&args) {
         return Err(arg_fault_text(SHELL, schema, &fault));
     }
-    schema.apply_defaults(&mut args);
+    schema.apply_model_defaults(&mut args);
     let script = args
         .get("command")
         .and_then(|v| v.as_str())

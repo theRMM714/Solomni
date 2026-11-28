@@ -21,6 +21,8 @@ pub use crate::units::business::sandbox::domain::image::{
 #[allow(unused_imports)]
 pub use crate::units::business::sandbox::domain::policy::{OpenRequest, SandboxPolicy};
 #[allow(unused_imports)]
-pub use crate::units::business::sandbox::domain::readiness::{Machine, Readiness, Requirement};
+pub use crate::units::business::sandbox::domain::readiness::{
+    Machine, PolicyView, Readiness, Requirement,
+};
 #[allow(unused_imports)]
 pub use crate::units::business::sandbox::service::SandboxPolicies;

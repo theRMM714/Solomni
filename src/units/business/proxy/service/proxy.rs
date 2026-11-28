@@ -38,11 +38,11 @@ impl ProxyTools {
             Ok(v) => v,
             Err(e) => return deny(format!("{} 的参数不是合法 JSON：{}", name, e)),
         };
-        if let Err(fault) = schema.check(&value) {
+        if let Err(fault) = schema.check_model(&value) {
             return deny(arg_fault_text(name, schema, &fault));
         }
         let mut value = value;
-        schema.apply_defaults(&mut value);
+        schema.apply_model_defaults(&mut value);
         if name == d::CATALOG {
             self.catalog(ctx, &value)
         } else if name == d::CREATE {

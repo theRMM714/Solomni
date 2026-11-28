@@ -77,6 +77,13 @@ pub enum HostTool {
     Smbd,
 }
 
+/// 目的：补齐端口的适配器——执行环境策略按它把"缺的依赖 id"补上。
+pub fn fixer(
+    provision: std::sync::Arc<dyn Provision + Send + Sync>,
+) -> std::sync::Arc<dyn crate::units::pure::exec_model::api::Fixer> {
+    std::sync::Arc::new(crate::units::business::provision::fixer::ProvisionFixer::new(provision))
+}
+
 /// 目的：依赖补齐的入站用例面——状态、虚拟根清单、宿主工具取法、作业快照、起作业、取消。
 pub trait Provision: Send + Sync {
     /// 目的：本机依赖状态（缺什么、装到哪、从哪来）。

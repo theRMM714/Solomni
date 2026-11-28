@@ -140,7 +140,7 @@ function renderHistory() {
       const recorded = (h.sandbox && h.sandbox.policy) || '';
       const liveView = state.views.get(h.name);
       mode.textContent = app.typeLabel(h.kind) +
-        (recorded === 'vm' && liveView && liveView.sandbox_ready === false ? '·虚拟机档不可用' : '') +
+        (liveView && liveView.sandbox_ready === false ? '·执行环境不可用' + (recorded ? '（' + recorded + '）' : '') : '') +
         (h.workspace_missing ? '·工作区不存在' : '');
       const pencil = ui.iconButton({ icon: 'pencil', label: '会话操作', tip: '', cls: 'hpen' });
       pencil.onclick = (e) => { e.stopPropagation(); ui.menu(pencil, historyMenu(h)); };
@@ -214,18 +214,17 @@ function archivedRow(it) {
   return row;
 }
 
-/* 记的是虚拟机档、但本机现在承载不了：**不拦打开**（记录是用户的），只主动把原因与出路说清。
- * 为什么必须提示：虚拟机档的 guest 本体尚未接入，此刻选它只会得到一个更差的本机档——
- * 用户有权知道这一点，也有权知道怎么才能用上。 */
-function warnIfTierUnavailable(name) {
+/* 记的执行环境在本机现在跑不了：**不拦打开**（记录是用户的），只主动把原因与出路说清。
+ * 判据只有后端给的 sandbox_ready，不按策略名分支——新增策略不改这里。 */
+function warnIfSandboxUnavailable(name) {
   const view = (state.history || []).find((h) => h.name === name);
   const recorded = (view && view.sandbox && view.sandbox.policy) || '';
   const live = state.views.get(name);
-  if (recorded !== 'vm' || !live || live.sandbox_ready !== false) return;
-  const missing = (live.sandbox_missing || []).join('；') || '本机不具备虚拟机档的前置条件';
+  if (!live || live.sandbox_ready !== false) return;
+  const missing = (live.sandbox_missing || []).join('；') || '本机不具备这个执行环境的前置条件';
   ui.notice(
-    sidebarCopy.vmUnavailable.title,
-    '原因：' + missing + '。\n\n' + sidebarCopy.vmUnavailable.kept + '\n' + sidebarCopy.vmUnavailable.enable,
+    sidebarCopy.sandboxUnavailable.title + (recorded ? '（' + recorded + '）' : ''),
+    '原因：' + missing + '。\n\n' + sidebarCopy.sandboxUnavailable.kept + '\n' + sidebarCopy.sandboxUnavailable.enable,
     'warn'
   );
 }
@@ -267,7 +266,7 @@ async function openHistory(name) {
     // 事件建出来的会话还没补过盘上转录：先补，再显示（否则只有刷新之后的新行）。
     hydrateHistory(existing);
     setActive(name);
-    warnIfTierUnavailable(name);
+    warnIfSandboxUnavailable(name);
     if (isNarrow()) closeDrawer();
     return;
   }
@@ -302,7 +301,7 @@ async function openHistory(name) {
     for (const ev of (r.live || [])) absorb(s, ev);
     setActive(name);
     renderAll();
-    warnIfTierUnavailable(name);
+    warnIfSandboxUnavailable(name);
     // 窄屏是抽屉：选完会话就收起来，否则正文被挤成一条窄缝。
     if (isNarrow()) closeDrawer();
   } catch (err) { ui.notice('操作失败', err.message, 'err'); }
@@ -479,5 +478,5 @@ function setupSidebar() {
 export function mount(root, deps) {
   ({ g, doc, state, api, ui, app } = deps);
   ({ fold, h, icon } = ui);
-  Object.assign(root, { lampOf, historyMenu, renderHistory, warnIfTierUnavailable, hydrateHistory, openHistory, deleteHistory, renderSidebar, RAIL_KEY, isNarrow, readRail, saveRail, applyRail, openDrawer, closeDrawer, toggleSidebar, setupSidebar });
+  Object.assign(root, { lampOf, historyMenu, renderHistory, warnIfSandboxUnavailable, hydrateHistory, openHistory, deleteHistory, renderSidebar, RAIL_KEY, isNarrow, readRail, saveRail, applyRail, openDrawer, closeDrawer, toggleSidebar, setupSidebar });
 }

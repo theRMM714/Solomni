@@ -75,4 +75,9 @@ pub struct PolicyDecl {
     pub hint: String,
     /// 目的：参数声明（与工具、命令同一套 `Param`）。
     pub params: Option<BTreeMap<String, Param>>,
+    /// 目的：参数名 → **取值域 id**：这个参数的候选值由别处的事实给（如虚拟根清单），
+    ///   声明方不自己编清单；呈现层按解析后的 `Param.values` 画下拉。
+    /// 约束：解析归工作台（它手上有那些事实）；认不出的域 = 空表（退化成手填，不编造）。
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub choices: BTreeMap<String, String>,
 }

@@ -462,10 +462,28 @@ pub(crate) fn create_session_action(faces: &Faces, ask: SessionAsk<'_>) -> Resul
         })
         .collect();
     // 形状只由会话类型定：参数表里只有 kind，没有现拼流程的位置。
+    // 执行环境按声明对象给（策略 id + 参数 + 定版）：CLI 不拼平铺字段，与 Web / 代理走同一个形状。
+    let mut decl = crate::units::business::sandbox::api::SandboxDecl::of(&sandbox);
+    // guest 侧要选一个虚拟根（人默认是设置里的执行环境）：本机只有一个就自动用它，
+    // 多个就如实说清有哪些（CLI 不代人挑），一个都没装就交给后端给"怎么补"。
+    if sandbox != crate::units::business::sandbox::api::HOST_POLICY {
+        // 读不到清单（比如补齐面没接入）时不给 guest：交给后端按同一份清单如实拒绝。
+        if let Ok(t) = faces.work.sandbox_choices() {
+            match pick_guest(&t.guests) {
+                Some(g) => decl.params = serde_json::json!({ "guest": g }),
+                None => {
+                    return Err(
+                        "虚拟机档要选一个虚拟根：跑 solomni --provision --ensure --yes 装好之后会列出可选的那些"
+                            .to_string(),
+                    )
+                }
+            }
+        }
+    }
     let mut args = serde_json::json!({
         "agents": agents,
         "kind": kind,
-        "sandbox": sandbox,
+        "sandbox": decl,
     });
     // 没点名就不带 name：缺省名归后端（同一处派生，Web / 代理建子会话也走它）。
     if let Some(n) = name.map(str::trim).filter(|n| !n.is_empty()) {
@@ -477,22 +495,6 @@ pub(crate) fn create_session_action(faces: &Faces, ask: SessionAsk<'_>) -> Resul
     // 启动目录收成的工作区（`--no-workspace` 或判定不过时没有）：绑定与校验都在后端。
     if let Some(w) = workspace {
         args["workspace"] = serde_json::json!(w.to_string_lossy());
-    }
-    // guest 侧要选一个虚拟根（人默认是设置里的执行环境）：本机只有一个就自动用它，
-    // 多个就如实说清有哪些（CLI 不代人挑），一个都没装就交给后端给"怎么补"。
-    if sandbox != crate::units::business::sandbox::api::HOST_POLICY {
-        // 读不到清单（比如补齐面没接入）时不给 guest：交给后端按同一份清单如实拒绝。
-        if let Ok(t) = faces.work.sandbox_choices() {
-            match pick_guest(&t.guests) {
-                Some(g) => args["guest"] = serde_json::json!(g),
-                None => {
-                    return Err(
-                        "虚拟机档要选一个虚拟根：跑 solomni --provision --ensure --yes 装好之后会列出可选的那些"
-                            .to_string(),
-                    )
-                }
-            }
-        }
     }
     match faces.actions.act(ActionCall {
         id: "create_session".to_string(),

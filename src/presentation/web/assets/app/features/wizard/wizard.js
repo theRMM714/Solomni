@@ -11,7 +11,6 @@ const actionUrl = (...a) => app.actionUrl(...a);
 const atClose = (...a) => app.atClose(...a);
 const atLoad = (...a) => app.atLoad(...a);
 const buildRootList = (...a) => app.buildRootList(...a);
-const guestPicker = (...a) => app.guestPicker(...a);
 const hydrateHistory = (...a) => app.hydrateHistory(...a);
 const loadWork = (...a) => app.loadWork(...a);
 const refreshState = (...a) => app.refreshState(...a);
@@ -38,23 +37,34 @@ async function openWizard(draft) {
   if (!Array.isArray(w.agents)) w.agents = [];
   // 名称与需求是**弹层里**输入框的现值（在本作用域之外）：由弹层装好后把取值钩子挂上来。
   let snapshotDraft = () => {};
-  // 档位选择：默认档与虚拟机档可用性由后端给（GET /api/tiers，与「开始」的校验同源）。
+  // 执行环境：可选项、可用性、逐项前置与"能不能补"全部来自后端（GET /api/tiers 的 policies 表）；
+  // 界面按表渲染，不写死任何策略名——新增一个策略只要在组合根登记，这里不用动。
   let sandboxChoices = null;
   try { const r = await api('GET', '/api/tiers'); sandboxChoices = (r && r.tiers) || null; } catch (e) { sandboxChoices = null; }
+  const policies = (sandboxChoices && sandboxChoices.policies) || [];
   if (!resumed && sandboxChoices && sandboxChoices.default) w.sandbox = sandboxChoices.default;
-  // 档位那一格：虚拟机档不可用时禁用，并逐项说明缺什么、怎么补（照抄后端事实，不自己编话）。
+  if (!w.sandboxParams || typeof w.sandboxParams !== 'object') w.sandboxParams = {};
+  const policyNow = () => policies.find((p) => p.decl && p.decl.id === w.sandbox) || null;
+  const guestList = (sandboxChoices && sandboxChoices.guests) || [];
+  // 参数里选了虚拟根时，它的装机事实按值去 guests 表里查（表是引擎给的，不按策略 id 分支）。
+  const guestInfoNow = () => guestList.find((g) => g.guest === w.sandboxParams.guest) || null;
   const sandboxField = doc.createElement('div'); sandboxField.className = 'wf-field';
-  const sandboxLabel = doc.createElement('div'); sandboxLabel.className = 'wf-label'; sandboxLabel.textContent = '执行档位';
-  const hostR = ui.radio('本机档', w.sandbox !== 'vm', 'wf-sandbox');
-  const vmOk = !!(sandboxChoices && sandboxChoices.vm_available);
-  const vmR = ui.radio('虚拟机档', w.sandbox === 'vm', 'wf-sandbox', !vmOk);
-  hostR.box.addEventListener('change', () => { if (hostR.box.checked) { w.sandbox = 'host'; syncWizardSandbox(); } });
-  vmR.box.addEventListener('change', () => { if (vmR.box.checked) { w.sandbox = 'vm'; syncWizardSandbox(); } });
+  const sandboxLabel = doc.createElement('div'); sandboxLabel.className = 'wf-label'; sandboxLabel.textContent = '执行环境';
   const sandboxGroup = doc.createElement('div'); sandboxGroup.className = 'form-col';
-  sandboxGroup.appendChild(hostR.wrap); sandboxGroup.appendChild(vmR.wrap);
+  for (const p of policies) {
+    const rr = ui.radio(p.decl.name || p.decl.id, w.sandbox === p.decl.id, 'wf-sandbox', !p.available);
+    rr.box.addEventListener('change', () => {
+      if (!rr.box.checked) return;
+      w.sandbox = p.decl.id; w.sandboxParams = {};
+      renderSandbox();
+    });
+    sandboxGroup.appendChild(rr.wrap);
+    // 每个策略的说明由它自己的声明给（界面不编、也不写死名字）。
+    if (p.decl.hint) sandboxGroup.appendChild(ui.hint(p.decl.hint));
+  }
   sandboxField.appendChild(sandboxLabel); sandboxField.appendChild(sandboxGroup);
   ui.attachHelp(sandboxField, wizardCopy.sandbox);
-  // 上下文：过期内容替换与保底。挂在形态与档位之后：先定形态，再定这轮的上下文策略。
+  // 上下文：过期内容替换与保底。挂在形态与执行环境之后：先定形态与环境，再定这轮的上下文策略。
   const ctxField = doc.createElement('div'); ctxField.className = 'wf-field';
   const ctxLabel = doc.createElement('div'); ctxLabel.className = 'wf-label'; ctxLabel.textContent = '上下文';
   const freshOn = checkbox('过期内容换成占位符', !!w.context_freshness, wizardCopy.context.lead);
@@ -69,6 +79,7 @@ async function openWizard(draft) {
   ctxField.appendChild(ctxLabel); ctxField.appendChild(freshOn.wrap); ctxField.appendChild(freshKeep.wrap);
   ui.attachHelp(ctxField, wizardCopy.context);
   syncCtx();
+  // 网络档位：只影响出站网络；执行环境自己的围栏另算。
   const profileField = doc.createElement('div'); profileField.className = 'wf-field';
   const profileLabel = doc.createElement('div'); profileLabel.className = 'wf-label'; profileLabel.textContent = '网络档位';
   const profileSel = selectInput([
@@ -78,42 +89,28 @@ async function openWizard(draft) {
   profileSel.addEventListener('change', () => { w.permission = profileSel.value; });
   profileField.appendChild(profileLabel); profileField.appendChild(profileSel);
   profileField.appendChild(ui.hint(wizardCopy.permission));
-  if (!vmOk) {
-    const reqs = (sandboxChoices && sandboxChoices.vm_requirements) || [];
-    // 只列**现状**：怎么补这件事由下面的按钮承担（把指引和动作分成两件事，用户不会只看到话看不到路）。
-    const lines = reqs.filter((r) => !r.met).map((r) => '· ' + r.detail);
-    sandboxField.appendChild(ui.hint(
-      '虚拟机档现在不能选：' + ((sandboxChoices && sandboxChoices.vm_unavailable_reason) || '本机不具备虚拟机档的前置条件') +
-      (lines.length ? '\n' + lines.join('\n') : ''),
-      'err'
-    ));
-    // 装完把向导按草稿重开：判据是后端按新状态算的，界面不自己改结论。
-    // 先把用户填的名称与需求抄进草稿（它们只在弹层里读得到），否则重开会把它们清掉。
-    sandboxField.appendChild(app.setupAction(snapshotDraft, () => openWizard(w)));
-  }
-
-  // 虚拟机档在**创建时**就要选一个虚拟根（会话级选择；机器能力已在上面判过）。
-  let syncGuestSetup = () => {};
-  const pick = guestPicker(sandboxChoices && sandboxChoices.guests, w.guest, (v, g) => {
-    w.guest = v; w.guestInfo = g; syncGuestSetup();
-  });
-  // 机器前置齐、但选中的虚拟根没装齐时，虚拟根选择器下面给同一个补齐动作（与机器前置入口不重复）。
-  const guestSetup = app.setupAction(snapshotDraft, () => openWizard(w));
-  guestSetup.classList.add('hidden');
-  syncGuestSetup = () => {
-    const show = vmOk && w.sandbox === 'vm' && (!w.guestInfo || !w.guestInfo.ready);
-    if (show) guestSetup.classList.remove('hidden');
-    else guestSetup.classList.add('hidden');
-  };
-  // 预判：这个虚拟根（+ 包库）满足不了本次点到的哪些模块——**只是提示**，判据仍以创建时的后端校验为准。
+  // 选中策略的现状与补法：缺项逐条列现状，能补就给一个入口（补法由后端说，界面不编话）。
+  const needBox = doc.createElement('div'); needBox.className = 'form-col';
+  // 选中策略的参数：取值域由后端解析好（如虚拟根清单），界面只按下拉/输入框画。
+  const paramBox = doc.createElement('div'); paramBox.className = 'form-col';
   const gapHint = ui.hint('');
-  function syncGuestGap() {
-    if (w.sandbox !== 'vm') { gapHint.textContent = ''; return; }
-    const g = w.guestInfo;
-    if (!g || !g.ready) { gapHint.textContent = ''; return; }
+  /// 选中参数值在本机的事实（如虚拟根装了哪些运行能力、还缺什么）：按值查表，不按策略名分支。
+  const guestHint = ui.hint('');
+  function renderGuestHint() {
+    const g = guestInfoNow();
+    if (!g) { guestHint.textContent = ''; guestHint.className = 'wf-hint hidden'; return; }
+    guestHint.className = 'wf-hint';
+    guestHint.textContent = (g.os + ' / ' + g.arch) +
+      (g.ready ? '：已装齐。' : '：还没装齐（缺 ' + (g.missing || []).join('、') + '）——点「补齐依赖…」装上再用。') +
+      ((g.runtimes || []).length ? ' 自带运行能力：' + g.runtimes.join('、') + '。' : ' 它没有声明自带的运行能力。');
+  }
+  function syncGap() {
+    const g = guestInfoNow();
+    w.guestInfo = g;
+    if (!g || !g.ready) { gapHint.textContent = ''; gapHint.className = 'wf-hint hidden'; return; }
     const covered = {};
     (g.runtimes || []).forEach((c) => { covered[c] = true; });
-    Object.keys((sandboxChoices && sandboxChoices.available) || {}).forEach((c) => { covered[c] = true; });
+    Object.keys((sandboxChoices && sandboxChoices.capabilities) || {}).forEach((c) => { covered[c] = true; });
     const ids = w.agents.reduce((acc, a) => acc.concat(a.modules || []), []);
     const lack = [];
     for (const id of ids) {
@@ -122,17 +119,61 @@ async function openWizard(draft) {
       const miss = (m.runtimes || []).filter((c) => !covered[c]);
       if (miss.length) lack.push(id + ' 需要 ' + miss.join('/'));
     }
+    gapHint.className = 'wf-hint' + (lack.length ? '' : ' hidden');
     gapHint.textContent = lack.length
       ? wizardCopy.gapLead + lack.join('；') + '。' + wizardCopy.gapDetail
       : '';
   }
-  function syncWizardSandbox() {
-    pick.wrap.className = w.sandbox === 'vm' ? 'wf-field' : 'wf-field hidden';
-    pick.hint.className = 'wf-hint' + (w.sandbox === 'vm' ? '' : ' hidden');
-    gapHint.className = 'wf-hint' + (w.sandbox === 'vm' ? '' : ' hidden');
-    pick.sync();
-    syncGuestSetup();
-    syncGuestGap();
+  /// 按当前选中的策略重画：前置（缺什么、怎么补）+ 参数（取值域由后端给）。
+  function renderSandbox() {
+    needBox.innerHTML = '';
+    paramBox.innerHTML = '';
+    // 前置逐项照抄后端：**每个当前不可用的策略**都列（不只选中的——选不中才更需要知道怎么修）。
+    for (const p of policies) {
+      const unmet = (p.needs || []).filter((n) => !n.met);
+      if (!unmet.length) continue;
+      needBox.appendChild(ui.hint(
+        '「' + (p.decl.name || p.decl.id) + '」现在不能选：' + (p.refusal || '本机不具备它的前置条件') +
+        '\n' + unmet.map((n) => '· ' + n.label + '：' + n.detail + (n.fix && n.fix.summary ? '（' + n.fix.summary + '）' : '')).join('\n'),
+        'err'
+      ));
+      if (p.fixable) {
+        needBox.appendChild(app.setupAction(snapshotDraft, { policy: p.decl.id, name: p.decl.name || p.decl.id }, () => openWizard(w)));
+      }
+    }
+    const p = policyNow();
+    const params = (p && p.decl && p.decl.params) || {};
+    for (const name of Object.keys(params)) {
+      const spec = params[name] || {};
+      const label = spec.desc || name;
+      let input;
+      const isSelect = Array.isArray(spec.values) && spec.values.length > 0;
+      if (isSelect) {
+        const opts = spec.values.map((v) => ({ value: v, label: v }));
+        let cur = w.sandboxParams[name] == null ? '' : String(w.sandboxParams[name]);
+        if (!cur) { cur = opts[0].value; w.sandboxParams[name] = cur; }
+        input = selectInput(opts, cur);
+      } else {
+        input = textInput(label + (spec.required ? '（必填）' : ''));
+        if (w.sandboxParams[name] != null) input.value = String(w.sandboxParams[name]);
+      }
+      // 下拉（取值域由后端解析，如虚拟根）换值 = 换了一台机器的事实：整段重画（含"还缺什么/能不能补"）。
+      const onChange = () => {
+        w.sandboxParams[name] = input.value;
+        if (isSelect) renderSandbox(); else syncGap();
+      };
+      input.addEventListener('change', onChange);
+      if (input.tagName === 'INPUT') input.addEventListener('input', onChange);
+      paramBox.appendChild(field(label, input));
+    }
+    paramBox.appendChild(guestHint);
+    renderGuestHint();
+    // 选中的虚拟根还没装齐：补法是同一个（策略自己登记的补齐器），这里给一个入口而不是让用户猜。
+    const gNow = guestInfoNow();
+    if (gNow && !gNow.ready && p && p.fixable) {
+      paramBox.appendChild(app.setupAction(snapshotDraft, { policy: p.decl.id, name: p.decl.name || p.decl.id }, () => openWizard(w)));
+    }
+    syncGap();
   }
 /* 选择工作区目录：目录列表来自本机 Web 的 /api/dirs；只选路径，不开文件。 */
 function pickWorkspaceDir(onPick) {
@@ -399,7 +440,7 @@ function pickWorkspaceDir(onPick) {
       }
     }
 
-    function renderAll() { renderParts(); renderModels(); syncGuestGap(); syncCreateButton(); }
+    function renderAll() { renderParts(); renderModels(); syncGap(); syncCreateButton(); }
 
     typeSel.addEventListener('change', () => {
       w.kind = typeSel.value;
@@ -452,7 +493,7 @@ function pickWorkspaceDir(onPick) {
     async function submit(body) {
       const release = busyButton(createBtn, '正在创建…');
       cancelBtn.disabled = true;
-      c.setMsg(w.sandbox === 'vm' ? wizardCopy.creatingVm : wizardCopy.creatingHost);
+      c.setMsg(wizardCopy.creating);
       try {
         await startSession(body);
         ui.closeModal();
@@ -470,21 +511,28 @@ function pickWorkspaceDir(onPick) {
       const name = nameIn.value.trim();
       if (!name) { c.setMsg('工作名称必填', true); return; }
       const task = taskIn.value.trim();
-      const vmGuest = (w.guest || '').trim();
-      if (w.sandbox === 'vm' && !vmGuest) {
-        c.setMsg(wizardCopy.vmRequired, true);
+      // 策略声明的必填参数（虚拟根这类）：缺了先在这里拦，说法照抄声明，不按策略名编话。
+      const pNow = policyNow();
+      const paramsNow = (pNow && pNow.decl && pNow.decl.params) || {};
+      for (const key of Object.keys(paramsNow)) {
+        const spec = paramsNow[key] || {};
+        if (spec.required && !String(w.sandboxParams[key] || '').trim()) {
+          c.setMsg('执行环境「' + ((pNow.decl && pNow.decl.name) || w.sandbox) + '」要填参数 ' + key + (spec.desc ? '：' + spec.desc : ''), true);
+          return;
+        }
+      }
+      const gNow = guestInfoNow();
+      if (gNow && !gNow.ready) {
+        const miss = (gNow.missing || []).join('、');
+        c.setMsg('这个虚拟根还没装齐' + (miss ? '（缺 ' + miss + '）' : '') + '：先点「补齐依赖…」装上再用。', true);
         return;
       }
-      if (w.sandbox === 'vm' && w.guestInfo && !w.guestInfo.ready) {
-        const miss = (w.guestInfo.missing || []).join('、');
-        c.setMsg('这个虚拟根还没装齐' + (miss ? '（缺 ' + miss + '）' : '') + '：先点「补齐虚拟机依赖…」装上再用。', true);
-        return;
-      }
+      const sandboxDecl = { policy: w.sandbox, params: w.sandboxParams, pins: {} };
       let agents;
       const t = typeNow() || {};
       if (!t.roster) {
         // 决定权交给核心的类型：没有名单、没有需求——选这个类型就是授予全权（档位由上面的选择显式落盘）。
-        const proxyBody = { name, kind: w.kind, agents: [], sandbox: w.sandbox, guest: w.sandbox === 'vm' ? vmGuest : null, permission: w.permission || 'online' };
+        const proxyBody = { name, kind: w.kind, agents: [], sandbox: sandboxDecl, permission: w.permission || 'online' };
         proxyBody.context_freshness = !!w.context_freshness;
         proxyBody.freshness_keep_percent = keepNow();
         const proxyWs = workspaceIn.value.trim();
@@ -521,14 +569,13 @@ function pickWorkspaceDir(onPick) {
       }
       const names = agents.map((a) => a.name);
       const dup = names.filter((n, i) => names.indexOf(n) !== i)[0];
-      const body = { name, kind: w.kind, agents, sandbox: w.sandbox, permission: w.permission || 'offline' };
+      const body = { name, kind: w.kind, agents, sandbox: sandboxDecl, permission: w.permission || 'offline' };
       body.context_freshness = !!w.context_freshness;
       body.freshness_keep_percent = keepNow();
       const bodyWs = workspaceIn.value.trim();
       if (bodyWs) {
         body.workspace = bodyWs;
       }
-      if (w.sandbox === 'vm') body.guest = vmGuest;
       if (task) body.task = task;
       if (dup) {
         app.choiceModal('agent 重名', '本次工作里有同名 agent「' + dup + '」。', [
@@ -547,9 +594,8 @@ function pickWorkspaceDir(onPick) {
     c.body.appendChild(sandboxField);
     c.body.appendChild(ctxField);
     c.body.appendChild(profileField);
-    c.body.appendChild(pick.wrap);
-    c.body.appendChild(pick.hint);
-    c.body.appendChild(guestSetup);
+    c.body.appendChild(needBox);
+    c.body.appendChild(paramBox);
     c.body.appendChild(gapHint);
     c.body.appendChild(partWrap);
     c.body.appendChild(modelWrap);
@@ -562,7 +608,7 @@ function pickWorkspaceDir(onPick) {
     // 有 foot 就固定在底部；没有（老调用）仍随正文走。
     (c.foot || c.body).appendChild(actions);
 
-    renderParts(); renderModels(); syncWizardSandbox(); syncCreateButton();
+    renderParts(); renderModels(); renderSandbox(); syncCreateButton();
     // 别的标签页 / 设置在轮询后改了登记处：只换模型提示与创建按钮，不重建名字 / 需求输入框。
     c.onRegistryChange(() => { renderModels(); syncCreateButton(); });
   }, true);

@@ -698,6 +698,9 @@ fn main() {
             Arc::new(kernel::detail::HostProbeAdapter),
             Arc::clone(&vm),
             vm_tools,
+            Some(units::business::provision::api::fixer(Arc::clone(
+                &provision,
+            ))),
         ),
     ]);
     // **工作台策略表**：版本化（主副本只读、共享区动作走 work_*）与不版本化（单树直写）两个策略；

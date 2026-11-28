@@ -366,13 +366,8 @@ impl MemberTools {
         if !native {
             for id in ids {
                 if let Some(schema) = self.face.builtin_tools.get(id) {
-                    // 环境参数只属于人经呈现层：核心代理的 create_session 工具面不列 side / guest。
-                    let text = if self.face.role == "core_proxy" && id == "create_session" {
-                        schema.render_for_prompt_hiding(&["tier", "guest"])
-                    } else {
-                        schema.render_for_prompt()
-                    };
-                    parts.push(format!("{}\n{}", id, text));
+                    // 人用参数（`human` 声明）由声明自己裁掉，这里不再按角色/工具名写死。
+                    parts.push(format!("{}\n{}", id, schema.render_for_prompt()));
                 }
             }
         }

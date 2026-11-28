@@ -213,9 +213,7 @@ pub(crate) fn edit_of(agents: Vec<(&str, &[&str], &str)>) -> SessionEdit {
                 chara: String::new(),
             })
             .collect(),
-        sandbox: "host".to_string(),
-        guest: None,
-        pins: BTreeMap::new(),
+        sandbox: crate::units::business::sandbox::api::SandboxDecl::host(),
         permission: None,
         shared: None,
     }

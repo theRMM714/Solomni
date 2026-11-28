@@ -133,19 +133,28 @@ const sandbox = {
       return new Promise(() => {}); // 长轮询挂着等新事件（不空转）
     }
     if (u.indexOf("/api/tiers") === 0) {
+      // 执行环境的选择表由后端给：策略自带可用性、逐项前置、参数与补法；界面照抄，不写死策略名。
       return {
         ok: true,
         json: async () => ({
           tiers: {
             default: "host",
-            vm_available: true,
-            vm_unavailable_reason: "",
-            vm_requirements: [],
+            policies: [
+              { decl: { id: "host", name: "本机", hint: "直接在本机跑（不套客机）", params: null }, needs: [], available: true, refusal: "", fixable: false },
+              {
+                decl: {
+                  id: "vm", name: "客机", hint: "在虚拟机里跑（镜像与运行包按 guest 走）",
+                  params: { guest: { type: "string", required: true, non_empty: true, desc: "虚拟根名", values: ["debian"] } },
+                  choices: { guest: "guests" },
+                },
+                needs: [], available: true, refusal: "", fixable: true,
+              },
+            ],
             guests: [{
               guest: "debian", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64",
               ready: true, missing: [], install: "data/.vm/guest/debian-13", runtimes: ["python"],
             }],
-            available: {},
+            capabilities: {},
           },
         }),
       };
@@ -201,7 +210,7 @@ setTimeout(async () => {
       vm.runInNewContext(
         "state.history = [{ name: 'w', kind: 'single', ts: 1, done: true, sandbox: { policy: 'vm' } }];" +
           "state.views = new Map([['w', { sid: 'w', sandbox: 'vm', sandbox_ready: false, sandbox_missing: ['本机虚拟机监视器不可用'] }]]);" +
-          "warnIfTierUnavailable('w');",
+          "warnIfSandboxUnavailable('w');",
         sandbox
       );
       tierWarned = noticeRoot.children.length > 0;
@@ -771,13 +780,14 @@ setTimeout(async () => {
           (back._h.change || []).forEach((fn) => fn());
         }
       }
-      // 虚拟机档那一步：选的是**虚拟机**（虚拟根），并且按所选模块预判"可能要缺什么"。
+      // 换到第二个策略：它的参数（虚拟根）按后端给的取值域画下拉；选中值后按 guest 表如实说装机事实，
+      // 并按所选模块预判"可能要缺什么"——全程不出现策略名判断。
       const now = [];
       (function walk(n) { for (const c of (n.children || [])) { now.push(c); walk(c); } })(root);
       const radios = now.filter((n) => n.type === "radio" && n.name === "wf-sandbox");
       const vmRadio = radios[1];
       if (!vmRadio) {
-        loadErrors.push("向导虚拟根检查：没有找到虚拟机档 radio");
+        loadErrors.push("向导执行环境检查：没有找到第二个策略的 radio");
       } else {
         vmRadio.checked = true;
         (vmRadio._h.change || []).forEach((f) => f());
@@ -813,14 +823,20 @@ setTimeout(async () => {
               else join.onclick();
             }
           }
+          // 参数下拉的候选来自 tiers.guests 解析出的取值域（这里有 debian）。
+          const guestSel = find((n) => n.tag === "select" && (n.children || []).some((o) => String(o.value) === "debian"));
+          if (guestSel) {
+            guestSel.value = "debian";
+            (guestSel._h.change || []).forEach((f) => f());
+          }
           const all2 = [];
           (function walk(n) { for (const c of (n.children || [])) { all2.push(c); walk(c); } })(root);
           const t2 = all2.map((n) => String(n.textContent || "")).join("|");
-          wizardGuest = t2.indexOf("虚拟机（虚拟根）") >= 0
+          wizardGuest = !!guestSel
             && t2.indexOf("已装齐") >= 0
             && t2.indexOf("自带运行能力：python") >= 0
-            && t2.indexOf("这个虚拟机可能要缺：research 需要 ruby") >= 0;
-          if (!wizardGuest) loadErrors.push("向导虚拟根检查：" + t2.slice(0, 900));
+            && t2.indexOf("这个执行环境可能要缺：research 需要 ruby") >= 0;
+          if (!wizardGuest) loadErrors.push("向导执行环境检查：" + t2.slice(0, 900));
         }
       }
     } catch (e) { loadErrors.push("向导代理形态检查失败：" + e.message); }

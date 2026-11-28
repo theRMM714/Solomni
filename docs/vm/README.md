@@ -10,7 +10,7 @@
 - 不管：运行包契约、包库与选包（`packages`）、会话与档案（`session`）、工作区与沙箱（`workspace`，本单元只收它给的中立路径）、模块清单（`modules`，只消费它声明的 `runtimes`）、实际执行工具（`tools`）。
 
 ## 入站契约与状态归属
-- 入站面：`api::Vm`（`guest_start` / `guest_run` / `guest_wait_agent` / `guest_stop` / `guest_leases` / `guest_diagnose`）+ 就绪与共享链的纯函数（`tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_capability` / `capability_refusal` / `share_chain`）+ `vm_policy(root, probe, vm, tools)`（组合根用它把 `vm` 策略登记进 `SandboxPolicies`）；执行计划与入口诊断在 `catalog`（`packages` / `modules`），镜像派生在 `sandbox`。
+- 入站面：`api::Vm`（`guest_start` / `guest_run` / `guest_wait_agent` / `guest_stop` / `guest_leases` / `guest_diagnose`）+ 就绪与共享链的纯函数（`tier_readiness` / `tier_refusal` / `vm_requirements` / `capability_refusal` / `share_chain`）+ `vm_policy(root, probe, vm, tools, fixer)`（组合根用它把 `vm` 策略登记进 `SandboxPolicies`；第五参是策略自己登记的补齐器）；执行计划与入口诊断在 `catalog`（`packages` / `modules`），镜像派生在 `sandbox`。
 - 管：**一次销毁的自足任务** `GuestStop`（`src/units/business/vm/service/job.rs`）——调用方算出租约、在本线程 `run`，销毁要等 guest 落盘。
 - 出站端口 `VmEngine` / `ShareBackend` 只由 `service.rs` 持有（R12）；`GuestVm` / `GuestChannel` 由引擎在 boot 时交出。
 - `TargetSpec`（侧 + 客机名 + 定版）是共享形状（在 `exec_model`），本单元只读它；策略声明到它的换算是 `SandboxDecl::target(&facts)`。包库与选包在 `packages`。

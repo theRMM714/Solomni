@@ -328,10 +328,14 @@ impl WorkOps for FakeFaces {
                 model: String::new(),
                 chara: String::new(),
             }],
-            sandbox: "host".to_string(),
+            sandbox: SandboxDecl::host(),
             sandbox_locked: false,
-            guest: None,
-            guests: Vec::new(),
+            choices: SandboxChoices {
+                default: "host".to_string(),
+                policies: Vec::new(),
+                guests: Vec::new(),
+                capabilities: BTreeMap::new(),
+            },
             net: false,
             thinking: crate::units::business::work::api::ThinkingView {
                 level: None,
@@ -353,12 +357,8 @@ impl WorkOps for FakeFaces {
                 parent_profile: None,
                 profiles: Vec::new(),
             },
-            pins: BTreeMap::new(),
             sandbox_ready: true,
             sandbox_missing: Vec::new(),
-            vm_available: true,
-            vm_unavailable_reason: String::new(),
-            vm_requirements: Vec::new(),
             runtime: report(),
             runtimes_dir: "runtimes".to_string(),
         })
@@ -517,12 +517,31 @@ impl WorkOps for FakeFaces {
         Ok(SandboxChoices {
             default: "host".to_string(),
             policies: Vec::new(),
-            guest_available: false,
-            guest_unavailable_reason: "guest 本体尚未接入".to_string(),
-            guest_requirements: Vec::new(),
             guests: Vec::new(),
-            available: BTreeMap::new(),
+            capabilities: BTreeMap::new(),
         })
+    }
+    fn fix_plan(
+        &self,
+        _: &str,
+        ids: &[String],
+    ) -> Result<Vec<crate::units::pure::exec_model::api::FixStep>, String> {
+        self.guard()?;
+        let step = crate::units::pure::exec_model::api::FixStep {
+            id: "vm.virtiofsd.linux".to_string(),
+            label: "virtiofsd 便携包".to_string(),
+            url: None,
+            size_mb: 12,
+            note: String::new(),
+        };
+        Ok(if ids.is_empty() || ids.iter().any(|i| i == &step.id) {
+            vec![step]
+        } else {
+            Vec::new()
+        })
+    }
+    fn fix_start(&self, _: &str, _: Vec<String>) -> Result<(), String> {
+        self.guard()
     }
     fn suggest_models(&self, _task: &str, _kind: &str) -> Result<Vec<AgentSuggestion>, String> {
         self.guard()?;
@@ -882,6 +901,9 @@ fn sample_url(route: &routes::Route) -> String {
     if route.id == "events" {
         path.push_str("?sid=&since=0");
     }
+    if route.id == "setup.plan" {
+        path.push_str("?policy=vm");
+    }
     path
 }
 
@@ -910,6 +932,7 @@ fn sample_body(route: &routes::Route) -> &'static str {
         "action" => r#"{"kind":"single","agents":[]}"#,
         "suggest" => r#"{"task":"t","kind":"single"}"#,
         "storage.clean" => r#"{"kind":"build-cache","confirm":true}"#,
+        "setup.ensure" => r#"{"policy":"vm"}"#,
         _ => "{}",
     }
 }
@@ -1393,6 +1416,7 @@ fn success_shapes_are_pinned_per_route() {
         ),
         ("GET", "/api/processes", "", 200, "\"procs\""),
         ("GET", "/api/setup/status", "", 200, "\"pending\""),
+        ("GET", "/api/setup/plan?policy=vm", "", 200, "\"steps\""),
         ("GET", "/api/storage", "", 200, "\"report\""),
         ("POST", "/api/storage/gc", "{}", 200, "\"report\""),
         (
@@ -1402,7 +1426,13 @@ fn success_shapes_are_pinned_per_route() {
             200,
             "\"result\"",
         ),
-        ("POST", "/api/setup/ensure", "{}", 200, "\"preview\""),
+        (
+            "POST",
+            "/api/setup/ensure",
+            r#"{"policy":"vm"}"#,
+            200,
+            "\"steps\"",
+        ),
         ("DELETE", "/api/setup/job", "", 200, "\"ok\""),
     ];
     for (method, url, body, want_code, needle) in &cases {
@@ -1437,33 +1467,37 @@ fn success_shapes_are_pinned_per_route() {
     }
 }
 
-/// 补齐入口的**取舍在后端**：status 给出 pending（只列没在场的），ensure 不点名时按它起作业。
+/// 补齐入口的**取舍在后端**：plan 给出这个策略缺的那些，ensure 不点名时按它起作业。
 /// 为什么钉：界面的"补齐"按钮不该自己去挑条目——挑错了就是把已装好的东西重下一遍（清单里的条目不跳过在位项）。
 #[test]
-fn setup_status_lists_pending_and_ensure_defaults_to_it() {
+fn setup_plan_lists_what_the_policy_needs_and_ensure_defaults_to_it() {
     let ops = fake_ops(None);
-    let (code, text) = call(&ops, "GET", "/api/setup/status", "");
+    let (code, text) = call(&ops, "GET", "/api/setup/plan?policy=vm", "");
     assert_eq!(code, 200);
     let v: serde_json::Value = serde_json::from_str(&text).expect("JSON");
     assert_eq!(
-        v["pending"],
-        json!(["vm.virtiofsd.linux"]),
-        "pending 只列没在场的：{}",
+        v["steps"][0]["id"],
+        json!("vm.virtiofsd.linux"),
+        "plan 只列缺的那条：{}",
         text
     );
-    assert_eq!(v["missing"], json!(1), "个数与列表同一份事实：{}", text);
     // 预览：不点名 = 只挑缺的那条
-    let (code, text) = call(&ops, "POST", "/api/setup/ensure", "{}");
+    let (code, text) = call(&ops, "POST", "/api/setup/ensure", r#"{"policy":"vm"}"#);
     assert_eq!(code, 200);
     let v: serde_json::Value = serde_json::from_str(&text).expect("JSON");
     assert_eq!(
-        v["preview"][0]["id"],
+        v["steps"][0]["id"],
         json!("vm.virtiofsd.linux"),
         "预览只列要装的那条：{}",
         text
     );
     // 确认：起的就是那一条（显式点名 → 逐条失败硬报）
-    let (code, text) = call(&ops, "POST", "/api/setup/ensure", r#"{"confirm":true}"#);
+    let (code, text) = call(
+        &ops,
+        "POST",
+        "/api/setup/ensure",
+        r#"{"policy":"vm","confirm":true}"#,
+    );
     assert_eq!(code, 200);
     let v: serde_json::Value = serde_json::from_str(&text).expect("JSON");
     assert_eq!(

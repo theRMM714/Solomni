@@ -116,6 +116,21 @@ impl WorkOps for Handle {
         self.call(|core| Ok(core.sandbox_choices()))
     }
 
+    fn fix_plan(
+        &self,
+        policy: &str,
+        ids: &[String],
+    ) -> Result<Vec<crate::units::pure::exec_model::api::FixStep>, String> {
+        let policy = policy.to_string();
+        let ids = ids.to_vec();
+        self.call(move |core| core.fix_plan(&policy, &ids))
+    }
+
+    fn fix_start(&self, policy: &str, ids: Vec<String>) -> Result<(), String> {
+        let policy = policy.to_string();
+        self.call(move |core| core.fix_start(&policy, ids))
+    }
+
     fn suggest_models(&self, task: &str, kind: &str) -> Result<Vec<AgentSuggestion>, String> {
         let task = task.to_string();
         let kind = kind.to_string();

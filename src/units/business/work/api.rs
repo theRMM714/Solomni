@@ -111,23 +111,34 @@ pub struct RuntimeReport {
     pub rejected_packages: Vec<String>,
 }
 
-/// 目的：新建工作时的执行环境选择视图（创建向导用）：默认策略 + guest 侧策略为什么不能选（逐项前置）。
+/// 目的：**一个执行环境策略**在呈现层的样子：声明 + 现在能不能选 + 缺什么 + 能不能补。
+///   约束：所有字段都由策略自己给（`SandboxPolicy::decl/machine/fixer`），呈现层照抄；
+///   新增一个策略 = 在组合根登记，**不需要改呈现层**。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SandboxChoice {
+    /// 目的：策略的自我介绍（名字、说明、参数表；`params[].values` 已由后端填成可选项）。
+    pub decl: crate::units::business::sandbox::api::PolicyDecl,
+    /// 目的：逐项前置（缺哪几项、每项怎么补）：界面照抄，不自己编话。
+    pub needs: Vec<crate::units::business::sandbox::api::Requirement>,
+    /// 目的：现在能不能选（= 前置全满足）。
+    pub available: bool,
+    /// 目的：不能选时的理由（能选 = 空）。
+    pub refusal: String,
+    /// 目的：缺的项能不能在这里补齐（策略带补齐器且缺项都是可下载的）。
+    pub fixable: bool,
+}
+
+/// 目的：新建工作 / 会话配置时的执行环境选择视图（默认策略 + 每个策略的可用性与逐项前置）。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SandboxChoices {
     /// 目的：默认执行环境策略 id（设置里的 `default_sandbox`；没登记就回落到注册表第一项）。
     pub default: String,
-    /// 目的：登记的执行环境策略（呈现层照抄名字与说明，不自己编）。
-    pub policies: Vec<crate::units::business::sandbox::api::PolicyDecl>,
-    /// 目的：**guest 侧策略**能不能选（与当前执行环境无关）。
-    pub guest_available: bool,
-    /// 目的：不能选时的理由（能选 = 空）。
-    pub guest_unavailable_reason: String,
-    /// 目的：guest 侧策略的**逐项前置**（缺哪几项、每项怎么补）：界面照抄，不自己编话。
-    pub guest_requirements: Vec<crate::units::business::sandbox::api::Requirement>,
-    /// 目的：本机可选的**虚拟根**（guest 侧那一步的下拉项）——界面照抄，不自己编列表。
+    /// 目的：登记的执行环境策略（按登记序；呈现层照抄，不自己编）。
+    pub policies: Vec<SandboxChoice>,
+    /// 目的：本机可选的**虚拟根**（`choices` 域 `guests` 的来源，也给界面显示标签）——照抄，不自己编。
     pub guests: Vec<crate::units::business::provision::api::GuestBase>,
     /// 目的：包库里可用的能力名（→ 版本）：界面据此预判"这个虚拟根 + 包库满足不了哪些模块"。
-    pub available: BTreeMap<String, Vec<String>>,
+    pub capabilities: BTreeMap<String, Vec<String>>,
 }
 
 /// 目的：配置界面里的一个 agent（名字冻结时仍要显示）。
@@ -183,13 +194,12 @@ pub struct SessionConfig {
     /// 目的：会话已经开过（流水里有内容）= agent 名单与形态冻结。
     pub started: bool,
     pub agents: Vec<ConfigAgent>,
-    pub sandbox: String,
+    /// 目的：这条会话的执行环境声明（策略 + 参数 + 定版）：界面照抄当前值，改也是整份提交。
+    pub sandbox: crate::units::business::sandbox::api::SandboxDecl,
     /// 目的：执行环境是否随主会话（子会话为 true）：界面不渲染选择，后端拒绝子会话改。
     pub sandbox_locked: bool,
-    /// 目的：这条会话选的虚拟根名（本机策略为空）。
-    pub guest: Option<String>,
-    /// 目的：本机有哪些虚拟根可选（含"装没装齐"）——界面据此渲染下拉，不自己编列表。
-    pub guests: Vec<crate::units::business::provision::api::GuestBase>,
+    /// 目的：可选执行环境表（默认策略 + 每个策略的可用性 / 缺什么 / 能不能补），与本工作台 `sandbox_choices` 同源。
+    pub choices: SandboxChoices,
     /// 目的：当前生效的网络开关（全局策略，只读展示）。
     pub net: bool,
     /// 目的：当前生效的会话权限（档位 / reach / decision / 共享区范围）。
@@ -200,17 +210,10 @@ pub struct SessionConfig {
     pub context_freshness: bool,
     /// 目的：过期内容保底百分比（0 = 不保底；只写工作根）。
     pub freshness_keep_percent: u8,
-    pub pins: BTreeMap<String, String>,
-    /// 目的：本机能不能承载**当前执行环境**：界面据此决定 guest 侧策略能不能选。
+    /// 目的：本机能不能承载**当前执行环境**：界面据此决定"开始"能不能点。
     pub sandbox_ready: bool,
     /// 目的：承载不了时缺什么（空 = 齐了）。
     pub sandbox_missing: Vec<String>,
-    /// 目的：**guest 侧策略**能不能选（与当前执行环境无关）：为假时界面禁用，编辑与「开始」也会拒绝。
-    pub vm_available: bool,
-    /// 目的：虚拟机档为什么不能选（`vm_available` 为真时为空）。
-    pub vm_unavailable_reason: String,
-    /// 目的：虚拟机档的**逐项前置**（缺哪几项、每项怎么补）：界面照抄，不自己编话。
-    pub vm_requirements: Vec<crate::units::business::sandbox::api::Requirement>,
     /// 目的：运行能力报告（模块声明 / 包库可用 / 缺包 / 虚拟机档诊断 / 拒收原因）。
     pub runtime: RuntimeReport,
     /// 目的：依赖文件夹（把运行包放进这里；真实路径，给用户看）。
@@ -223,11 +226,8 @@ pub struct SessionConfig {
 #[serde(deny_unknown_fields)]
 pub struct SessionEdit {
     pub agents: Vec<ConfigAgent>,
-    pub sandbox: String,
-    #[serde(default)]
-    pub guest: Option<String>,
-    #[serde(default)]
-    pub pins: BTreeMap<String, String>,
+    /// 目的：整份执行环境声明（策略 + 参数 + 定版）；`policy` 留空 = 保留当前的策略。
+    pub sandbox: crate::units::business::sandbox::api::SandboxDecl,
     /// 目的：会话级网络档位层（根 ceiling / 子 narrowing）。`None` = 保留现值。
     #[serde(default)]
     pub permission: Option<crate::units::pure::permission::api::PermissionLayer>,
@@ -492,6 +492,15 @@ pub trait WorkOps: Send + Sync {
     /// 目的：新建工作时的**执行环境选择**（默认策略 + guest 侧策略可用性与逐项前置）。
     /// 与「开始」的校验同源（同一把 `SandboxPolicies::readiness` 尺子），界面照抄，不自己编话。
     fn sandbox_choices(&self) -> Result<SandboxChoices, String>;
+    /// 目的：某个执行环境策略缺的依赖**怎么补**（逐条的下载清单）；`ids` 为空 = 现在缺的那些。
+    /// 约束：只有策略自己登记了补齐器才成立；没有 = 如实拒绝（不是所有策略都需要装东西）。
+    fn fix_plan(
+        &self,
+        policy: &str,
+        ids: &[String],
+    ) -> Result<Vec<crate::units::pure::exec_model::api::FixStep>, String>;
+    /// 目的：按策略起补齐作业（`ids` 为空 = 现在缺的那些）。
+    fn fix_start(&self, policy: &str, ids: Vec<String>) -> Result<(), String>;
     /// 目的：核心按任务推荐的 agent 草案（带理由；用户可改）。
     fn suggest_models(&self, task: &str, kind: &str) -> Result<Vec<AgentSuggestion>, String>;
     /// 目的：会话类型表给界面看的那份（选类型时的名字与说明、要不要名单与需求）。

@@ -60,7 +60,8 @@ pub(crate) fn build(
         "vm_tier": {
             "available": vm.iter().all(|r| r.met),
             "requirements": vm.iter().map(|r| serde_json::json!({
-                "id": r.id, "met": r.met, "detail": r.detail, "how": r.how,
+                "id": r.id, "label": r.label, "met": r.met, "detail": r.detail,
+                "fix": r.fix.summary, "fixKind": r.fix.kind, "deps": r.fix.deps,
             })).collect::<Vec<_>>(),
         },
         "storage": match storage.report() {

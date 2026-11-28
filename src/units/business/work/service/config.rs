@@ -22,16 +22,6 @@ impl Work {
         // 过期内容替换与保底是**工作根**的会话级事实：配置界面读根上的值。
         let root = work_root(self.history.as_ref(), sid).unwrap_or_else(|_| sid.to_string());
         let root_meta = self.history.meta(&root)?;
-        // 机器能力（与某条会话无关）：界面据此决定 guest 侧能不能**选**；虚拟根是会话级，另行校验。
-        let machine = self
-            .policies
-            .machine(crate::units::business::sandbox::api::VM_POLICY);
-        let vm_available = machine.ready();
-        let vm_reason = self
-            .policies
-            .machine_refusal(crate::units::business::sandbox::api::VM_POLICY)
-            .unwrap_or_default();
-        let vm_requirements = machine.requirements;
         // 会话级判据（机器能力 + 这条会话选的虚拟根）只算一次：两处读同一个结论，不各算一遍。
         let readiness = self.policies.readiness(&meta.sandbox, &meta.target());
         Ok(SessionConfig {
@@ -48,25 +38,18 @@ impl Work {
                     chara: a.chara.clone(),
                 })
                 .collect(),
-            sandbox: meta.sandbox.policy.clone(),
+            sandbox: meta.sandbox.clone(),
             sandbox_locked: meta.parent.is_some(),
-            guest: meta.facts.guest.clone(),
-            guests: self.provision.guest_bases()?,
+            choices: self.sandbox_choices(registry),
             net: registry.app().sandbox.policy.network,
             permission: self.permission_view(turn, registry, &meta)?,
             thinking: self.thinking_view_for_root(registry, &root),
             context_freshness: root_meta.context_freshness,
             freshness_keep_percent: root_meta.freshness_keep_percent,
-            pins: meta.sandbox.pins.clone(),
             runtime: self.runtime_report_for(probe, &meta.sandbox),
             runtimes_dir: crate::kernel::api::path::slash(&self.packages.runtimes_dir()),
             sandbox_ready: readiness.ready(),
             sandbox_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
-            // 虚拟机档能不能选**与当前档位无关**：本机档会话也要如实告诉用户 vm 现在不可用（界面据此禁用）。
-            // 逐项清单一起给出：界面照抄"缺哪几项、每项怎么补"，不自己编话。
-            vm_available,
-            vm_unavailable_reason: vm_reason,
-            vm_requirements,
         })
     }
 
@@ -175,16 +158,12 @@ impl Work {
             }
         }
         // 执行环境：与「开始」同一把尺子——策略不认识、选型不成立（多版本未定版 / 定版不存在 / 路径冲突）如实拒绝。
-        let policy = if edit.sandbox.trim().is_empty() {
-            meta.sandbox.policy.clone()
-        } else {
-            edit.sandbox.trim().to_string()
-        };
-        let mut decl = crate::units::business::sandbox::api::SandboxDecl::of(&policy);
-        decl.pins = edit.pins.clone();
-        if let Some(g) = edit.guest.as_deref().filter(|g| !g.is_empty()) {
-            decl.params = serde_json::json!({ "guest": g });
+        // 策略留空 = 保留当前策略（参数与定版仍按这次提交的算）。
+        let mut decl = edit.sandbox.clone();
+        if decl.policy.trim().is_empty() {
+            decl.policy = meta.sandbox.policy.clone();
         }
+        decl.policy = decl.policy.trim().to_string();
         let facts = self.policies.facts(&decl)?;
         let target = decl.target(&facts);
         // 子会话的执行环境只随主会话：这里只锁策略与 guest，模块与模型仍按各自规则（后续再收口）。
@@ -210,7 +189,7 @@ impl Work {
             if let Some(item) = base_item
                 && !item.met
             {
-                return Err(format!("{}：{}", item.detail, item.how));
+                return Err(format!("{}：{}", item.detail, item.fix.summary));
             }
         } else if let Some(why) = self.policies.refusal(&decl, &target) {
             return Err(why);

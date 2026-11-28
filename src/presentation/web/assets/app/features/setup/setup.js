@@ -14,71 +14,70 @@ export function mount(root, deps) {
   Object.assign(root, { setupAction, openSetupModal, diagnosisText });
 }
 /* ---------- 依赖补齐：把"缺什么"变成"点一下装上" ----------
- * 判据全在后端：`/api/setup/status` 的 `pending` 决定装什么（界面不自己挑条目——挑错了会把已装的重下一遍）。
+ * 判据全在后端：`/api/setup/plan?policy=` 由那个策略自己登记的补齐器列清单（界面不自己挑条目——挑错了会把已装的重下一遍）。
  * 这里只做两步确认（先看清单、再下载）与进度；装完即生效，不需要重启。
  * 进度必须**看得见**：作业一起就进进度视图（当前步骤 + 滚动日志 + 取消）；关掉窗再打开也接着显示正在跑的那一次。 */
-function setupAction(before, onDone) {
-  const b = btn('补齐虚拟机依赖…', 'btn btn-block');
+function setupAction(before, target, onDone) {
+  const name = (target && target.name) || '';
+  const b = btn('补齐依赖…' + (name ? '（' + name + '）' : ''), 'btn btn-block');
   b.onclick = () => {
     try {
       if (before) before();
-      openSetupModal(onDone);
+      openSetupModal(target || {}, onDone);
     } catch (e) { ui.notice('打开补齐弹层失败', e.message, 'err'); }
   };
   return b;
 }
 
-function openSetupModal(onDone) {
-  ui.openModal('补齐虚拟机依赖', (c) => {
+function openSetupModal(target, onDone) {
+  const policy = (target && target.policy) || '';
+  const name = (target && target.name) || policy;
+  ui.openModal('补齐依赖' + (name ? '（' + name + '）' : ''), (c) => {
     const box = doc.createElement('div'); box.className = 'cfg';
     c.body.appendChild(box);
     const log = doc.createElement('div'); log.className = 'cfg-log';
     c.body.appendChild(log);
     const finish = () => { c.close(); if (onDone) onDone(); };
 
-    // 依赖状态 → 三种视图：已在跑（进度）/ 要装什么（清单）/ 都齐了。
+    // 缺什么由策略说（plan），作业进度由引擎说（status）：两步各读各的，界面不自己推。
     async function load() {
       box.innerHTML = '';
       log.textContent = '';
-      box.appendChild(ui.hint('正在读本机的依赖状态…'));
+      box.appendChild(ui.hint('正在读这个执行环境缺什么…'));
+      let plan = null;
       let st = null;
-      try { st = await api('GET', '/api/setup/status'); }
-      catch (e) {
+      try {
+        plan = await api('GET', '/api/setup/plan?policy=' + encodeURIComponent(policy));
+        st = await api('GET', '/api/setup/status');
+      } catch (e) {
         box.innerHTML = '';
         box.appendChild(ui.hint('读不到依赖状态：' + e.message, 'err'));
         return;
       }
       box.innerHTML = '';
-      const job = st.job || {};
+      const job = (st && st.job) || {};
       // 关掉窗又打开：这一次还在跑就接着显示它，而不是再起一个（后端会拒绝第二个作业）。
       if (job.running) { watch(st); return; }
-      const pending = Array.isArray(st.pending) ? st.pending : null;
-      if (!pending) {
-        box.appendChild(ui.hint('这个进程没有给出要补哪些条目（界面与核心版本不一致）：重启应用后再试。', 'err'));
+      const steps = (plan && plan.steps) || [];
+      if (!steps.length) {
+        box.appendChild(ui.hint('这个执行环境不缺依赖：不需要补齐。', 'ok'));
         const close = btn('关闭', 'btn btn-block'); close.onclick = finish;
         box.appendChild(close);
         return;
       }
-      if (!pending.length) {
-        box.appendChild(ui.hint('依赖都已在场：不需要补齐。', 'ok'));
-        const close = btn('关闭', 'btn btn-block'); close.onclick = finish;
-        box.appendChild(close);
-        return;
-      }
-      const deps = (st.deps || []).filter((d) => pending.indexOf(d.id) >= 0);
-      box.appendChild(ui.div('cfg-sec-title', '要装 ' + deps.length + ' 条（只写项目内，不动系统）'));
+      box.appendChild(ui.div('cfg-sec-title', '要装 ' + steps.length + ' 条（只写项目内，不动系统）'));
       let total = 0;
-      for (const d of deps) {
+      for (const d of steps) {
         total += d.size_mb || 0;
         const line = doc.createElement('div');
         line.className = 'cfg-line';
-        line.textContent = '· ' + d.id + (d.size_mb ? '（约 ' + d.size_mb + ' MB）' : '') + (d.note ? '：' + d.note : '');
+        line.textContent = '· ' + (d.label || d.id) + (d.size_mb ? '（约 ' + d.size_mb + ' MB）' : '') + (d.note ? '：' + d.note : '');
         box.appendChild(line);
         if (d.url) { const u = doc.createElement('div'); u.className = 'cfg-dir'; u.textContent = d.url; box.appendChild(u); }
       }
       box.appendChild(ui.hint('合计约 ' + total + ' MB：从网络下载后解包进项目内的 .vm/。'));
       const go = btn('开始下载安装', 'btn btn-primary btn-block');
-      go.onclick = () => start(pending, go);
+      go.onclick = () => start(steps.map((s) => s.id), go);
       box.appendChild(go);
       const later = btn('取消', 'btn btn-block'); later.onclick = c.close;
       box.appendChild(later);
@@ -87,7 +86,7 @@ function openSetupModal(onDone) {
     async function start(ids, go) {
       go.disabled = true;
       c.setMsg('正在起补齐作业…');
-      try { await api('POST', '/api/setup/ensure', { deps: ids, confirm: true }); }
+      try { await api('POST', '/api/setup/ensure', { policy, deps: ids, confirm: true }); }
       catch (e) { go.disabled = false; c.setMsg('起作业失败：' + e.message, true); return; }
       c.setMsg('作业已开始：正在下载并解包（进度见下面）');
       watch({ job: { seq: 0, running: true } });

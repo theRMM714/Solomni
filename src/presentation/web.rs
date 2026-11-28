@@ -537,11 +537,32 @@ pub(crate) fn route(
                 Err(e) => complaint(400, e),
             }
         }
+        "setup.plan" => {
+            let q = url.split('?').nth(1).unwrap_or("");
+            let mut policy = String::new();
+            for pair in q.split('&') {
+                let mut kv = pair.splitn(2, '=');
+                if let (Some("policy"), Some(v)) = (kv.next(), kv.next()) {
+                    policy = v.to_string();
+                }
+            }
+            if policy.trim().is_empty() {
+                return complaint(400, "要指定执行环境策略（?policy=<id>）");
+            }
+            match faces.work.fix_plan(&policy, &[]) {
+                Ok(steps) => ok_json(json!({ "steps": steps })),
+                Err(e) => complaint(400, e),
+            }
+        }
         "setup.ensure" => {
             let req = match parse_body(body) {
                 Ok(v) => v,
                 Err(e) => return complaint(400, e),
             };
+            let policy = str_field(&req, "policy");
+            if policy.trim().is_empty() {
+                return complaint(400, "要指定执行环境策略（policy）");
+            }
             let ids: Vec<String> = req
                 .get("deps")
                 .and_then(|v| v.as_array())
@@ -555,34 +576,24 @@ pub(crate) fn route(
                 .get("confirm")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            match faces.provision.status() {
-                Ok(all) => {
-                    // 没点名 = 补**现在缺的那几条**（不是全量）：已在场的不重下、不重解（清单里的条目不跳过在位项）。
-                    let picked: Vec<_> = if ids.is_empty() {
-                        all.iter().filter(|d| !d.present).collect()
-                    } else {
-                        all.iter()
-                            .filter(|d| ids.iter().any(|x| x == &d.id))
-                            .collect()
-                    };
-                    if picked.is_empty() {
+            // 缺什么、怎么补由策略自己说（Fixer）：这里只做两步确认与起作业。
+            match faces.work.fix_plan(&policy, &ids) {
+                Ok(steps) => {
+                    if steps.is_empty() {
                         // 都装好了：不起作业（起一个"没东西可装"的作业只会给一条无意义错误）。
                         return ok_json(json!({
-                            "ok": true, "deps": Vec::<String>::new(), "preview": Vec::<String>::new(),
-                            "note": "依赖都已在场，不需要补齐",
+                            "ok": true, "deps": Vec::<String>::new(), "steps": Vec::<String>::new(),
+                            "note": "这个执行环境不缺依赖，不需要补齐",
                         }));
                     }
                     if !confirm {
                         ok_json(json!({
-                            "preview": picked.iter().map(|d| json!({
-                                "id": d.id, "url": d.url, "size_mb": d.size_mb, "present": d.present, "stale": d.stale,
-                            })).collect::<Vec<_>>(),
+                            "steps": steps,
                             "note": "确认后按这些条目起下载安装作业（只写项目内）",
                         }))
                     } else {
-                        // 显式点名再起作业：逐条失败要硬报（不是全量补齐那种"跳过继续"）。
-                        let picked: Vec<String> = picked.iter().map(|d| d.id.clone()).collect();
-                        match faces.provision.start(picked.clone()) {
+                        let picked: Vec<String> = steps.iter().map(|s| s.id.clone()).collect();
+                        match faces.work.fix_start(&policy, picked.clone()) {
                             Ok(()) => ok_json(json!({ "ok": true, "deps": picked })),
                             Err(e) => complaint(400, e),
                         }

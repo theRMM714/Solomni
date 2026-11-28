@@ -496,6 +496,7 @@ pub(crate) fn test_policies_at_with_tools(
             crate::tests::doubles::vm_capable_host_probe(),
             test_vm(),
             tools,
+            None,
         ),
     ])
 }

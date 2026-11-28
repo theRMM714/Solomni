@@ -277,6 +277,16 @@ impl WorkOps for FakeCore {
     fn sandbox_choices(&self) -> Result<SandboxChoices, String> {
         Err("没装执行环境选择".into())
     }
+    fn fix_plan(
+        &self,
+        _: &str,
+        _: &[String],
+    ) -> Result<Vec<crate::units::pure::exec_model::api::FixStep>, String> {
+        Err("没装补齐".into())
+    }
+    fn fix_start(&self, _: &str, _: Vec<String>) -> Result<(), String> {
+        Err("没装补齐".into())
+    }
     fn suggest_models(&self, _: &str, _: &str) -> Result<Vec<AgentSuggestion>, String> {
         Err("没装推荐".into())
     }

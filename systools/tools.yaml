@@ -279,11 +279,10 @@ tools:
         type: string
         desc: 工作名（落盘目录名）；省略 = 由核心派生并保证不重名
       sandbox:
-        type: string
-        desc: 执行环境策略 id（catalog_agents 的 sandbox_choices 给出可选；如 host / vm）。仅人经呈现层可用（核心代理建子会话时**永远继承主会话**；模型给了也忽略，不接受子会话自选环境）
-      guest:
-        type: string
-        desc: 仅人经呈现层可用（核心代理建子会话时**永远继承主会话的虚拟根**；模型给了也忽略）
+        type: object
+        desc: |-
+          执行环境声明 {"policy":"策略 id","params":{"guest":"虚拟根名"},"pins":{}}——可选策略与参数由后端按策略自己的声明给
+          （工作台的新建向导与配置界面读同一份）。仅人经呈现层可用：代理建的子会话**永远继承**父会话的执行环境
       workspace:
         type: string
         desc: 仅人经呈现层可用：共享区主副本绑定的外部工作区根（已存在的绝对目录）；省略 = 会话内 work/。子会话继承父会话，不接受自选
@@ -299,6 +298,7 @@ tools:
       request_id:
         type: string
         desc: 幂等标识（核心代理必填）：同一个 request_id 重放不会重复创建
+    human: [sandbox, workspace, permission, context_freshness, freshness_keep_percent]
   send_session_message:
     desc: |
       代替用户向子会话转达消息（后续补充 / 返工 / 代答门）。核心转达的每一条都留一条

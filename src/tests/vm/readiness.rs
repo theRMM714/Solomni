@@ -1,15 +1,15 @@
 //! 目的：承载判定与就绪说明同源——能不能选、缺什么，用一把尺子。
-//! 管：tier_readiness、vm_capability、已验平台表。
+//! 管：tier_readiness、vm_requirements、已验平台表。
 //! 不管：共享后端在场（`share.rs`）。
 //! 联动：`src/units/business/vm/domain/tier.rs`。
 
 use super::super::prelude::*;
 
-/// 目的：机器能力与会话选型分开——vm_capability 不问 base；tier_readiness（保存/开始）才要求 base。
+/// 目的：机器能力与会话选型分开——vm_requirements 不问 base；tier_readiness（保存/开始）才要求 base。
 #[test]
-pub(crate) fn vm_capability_is_machine_only_while_session_readiness_needs_base() {
+pub(crate) fn vm_requirements_is_machine_only_while_session_readiness_needs_base() {
     use crate::tests::doubles::FixedProbe;
-    use crate::units::business::vm::api::{VmInputs, vm_capability};
+    use crate::units::business::vm::api::{VmInputs, vm_requirements};
     let qemu = std::path::PathBuf::from("/opt/qemu-system-x86_64");
     let mut probe = FixedProbe {
         hypervisor: true,
@@ -24,10 +24,12 @@ pub(crate) fn vm_capability_is_machine_only_while_session_readiness_needs_base()
         qemu: crate::units::business::vm::api::ToolPath::new(Some(&q), None),
         share: crate::units::business::vm::api::ToolPath::default(),
     };
-    let cap = vm_capability(&VmInputs {
-        tools: &tools,
-        probe: &probe,
-    });
+    let cap = crate::units::pure::exec_model::api::Readiness {
+        requirements: vm_requirements(&VmInputs {
+            tools: &tools,
+            probe: &probe,
+        }),
+    };
     if cfg!(any(target_os = "windows", target_os = "linux")) {
         assert!(
             cap.ready(),
@@ -70,14 +72,16 @@ pub(crate) fn vm_capability_is_machine_only_while_session_readiness_needs_base()
 #[test]
 pub(crate) fn an_unregistered_policy_reports_what_is_missing() {
     let policies = crate::tests::doubles::test_policies();
-    let machine = policies.machine("no-such-policy");
-    assert!(!machine.ready(), "不认识的策略不能判成可用");
+    let refusal = policies.machine_refusal("no-such-policy");
     assert!(
-        machine
-            .requirements
-            .iter()
-            .any(|r| r.id == "policy" && r.detail.contains("没有这个执行环境策略")),
-        "要如实说缺这一项：{:?}",
-        machine.requirements
+        refusal
+            .as_deref()
+            .is_some_and(|t| t.contains("没有这个执行环境策略")),
+        "不认识的策略不能判成可用，要如实说缺这一项：{:?}",
+        refusal
+    );
+    assert!(
+        policies.fixer("no-such-policy").is_none(),
+        "不认识的策略也没有补齐器"
     );
 }

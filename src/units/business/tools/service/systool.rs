@@ -91,10 +91,10 @@ pub fn execute_with_budget(
     let Some(schema) = book.get(name) else {
         return fail(format!("未知的内置工具：{}", name));
     };
-    if let Err(fault) = schema.check(&args) {
+    if let Err(fault) = schema.check_model(&args) {
         return fail(arg_fault_text(name, schema, &fault));
     }
-    schema.apply_defaults(&mut args);
+    schema.apply_model_defaults(&mut args);
     // 回报工具：不碰文件，回执就是把回报原样带出来（节点产出由它承载）。
     if name == REPORT {
         let get = |k: &str| {

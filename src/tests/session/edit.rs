@@ -49,9 +49,11 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
                 model: "m".to_string(),
                 chara: String::new(),
             }],
-            sandbox: "vm".to_string(),
-            guest: Some(guest.clone()),
-            pins: BTreeMap::new(),
+            sandbox: crate::units::business::sandbox::api::SandboxDecl {
+                policy: "vm".to_string(),
+                params: serde_json::json!({ "guest": guest.clone() }),
+                pins: BTreeMap::new(),
+            },
             permission: None,
             shared: Some(crate::units::pure::permission::api::SharedEdit {
                 write: Some(crate::units::pure::permission::api::ScopeMode::Paths(vec![
@@ -64,7 +66,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     .unwrap();
     let cfg = core.session_config(&sid).unwrap();
     assert_eq!(cfg.agents[0].modules, vec!["b".to_string()]);
-    assert_eq!(cfg.sandbox, "vm");
+    assert_eq!(cfg.sandbox.policy, "vm");
     assert_eq!(
         cfg.permission.shared.write,
         crate::units::pure::permission::api::ScopeMode::Paths(vec!["docs".to_string()])
@@ -212,14 +214,14 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
             .all(|a| a.modules == vec!["a".to_string()])
     );
     let mut bad_tier = edit_of(vec![("x", &["a"], "")]);
-    bad_tier.sandbox = "docker".to_string();
+    bad_tier.sandbox = crate::units::business::sandbox::api::SandboxDecl::of("docker");
     assert!(
         core.edit_session("c", bad_tier)
             .unwrap_err()
             .contains("没有这个执行环境策略")
     );
     let mut two_agents = edit_of(vec![("x", &["a"], ""), ("y", &["b"], "")]);
-    two_agents.sandbox = "host".to_string();
+    two_agents.sandbox = crate::units::business::sandbox::api::SandboxDecl::host();
     assert!(
         core.edit_session("w", two_agents)
             .unwrap_err()
@@ -255,17 +257,21 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
         ])),
     );
     let mut vm_edit = edit_of(vec![("x", &["a"], "")]);
-    vm_edit.sandbox = "vm".to_string();
-    vm_edit.guest = Some(vm_guest.clone());
+    vm_edit.sandbox = crate::units::business::sandbox::api::SandboxDecl {
+        policy: "vm".to_string(),
+        params: serde_json::json!({ "guest": vm_guest.clone() }),
+        pins: BTreeMap::new(),
+    };
     let e = core2.edit_session("c", vm_edit.clone()).unwrap_err();
     assert!(e.contains("多个版本"), "{}", e);
     // 定版之后可以提交（缺包不拦：那只是该模块工具不可用）。
-    vm_edit.pins = BTreeMap::from([("python".to_string(), "3.12.4".to_string())]);
+    vm_edit.sandbox.pins = BTreeMap::from([("python".to_string(), "3.12.4".to_string())]);
     core2.edit_session("c", vm_edit).unwrap();
     assert_eq!(
         core2
             .session_config("c")
             .unwrap()
+            .sandbox
             .pins
             .get("python")
             .map(String::as_str),
