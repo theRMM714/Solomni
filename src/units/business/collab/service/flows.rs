@@ -9,7 +9,7 @@ use crate::kernel::ports::Log;
 use crate::units::business::catalog::modules::api::Modules;
 use crate::units::business::llm::api::Llm;
 use crate::units::business::prompt::api::Prompt;
-use crate::units::business::session_model::api::SessionDecls;
+use crate::units::business::session_model::api::{SessionDecls, SessionMeta};
 use crate::units::business::tools::api::{ToolExec, Tools};
 use crate::units::business::turn_state::api::{Flow, FlowSetup, Flows};
 
@@ -56,7 +56,12 @@ impl Flows for CollabFlows {
         &self.decls
     }
 
-    fn build(&self, id: &str, setup: &FlowSetup<'_>) -> Result<Box<dyn Flow>, String> {
+    fn build(
+        &self,
+        id: &str,
+        setup: &FlowSetup,
+        restore: Option<(&SessionMeta, &[serde_json::Value])>,
+    ) -> Result<Box<dyn Flow>, String> {
         // 段 id 与实现的对应关系只在数据里：这里只认段声明写的实现名。
         let loops = self.decls.loops();
         let seg = loops
@@ -81,7 +86,7 @@ impl Flows for CollabFlows {
             .map(|role| (id.to_string(), role.to_string()));
         let min_members = loops.min_members(id);
         // 两段共用同一份落盘事实：有重建现场就按转录恢复，没有就新建。
-        let session = match setup.restore {
+        let session = match restore {
             Some((meta, events)) => CollabSession::restore(
                 Arc::clone(&self.llm),
                 Arc::clone(&self.modules),

@@ -22,6 +22,23 @@ impl Kind {
             Kind::Summary => "上一段的总结",
         }
     }
+
+    /// 目的：线格式上的名字（进度事实与声明文件共用同一套词汇）。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Kind::Requirement => "requirement",
+            Kind::Summary => "summary",
+        }
+    }
+
+    /// 目的：从线格式回到种类；不认识的词返回 `None`（调用方如实拒绝）。
+    pub fn parse(name: &str) -> Option<Kind> {
+        match name {
+            "requirement" => Some(Kind::Requirement),
+            "summary" => Some(Kind::Summary),
+            _ => None,
+        }
+    }
 }
 
 /// 目的：一段流程交给下一段的东西（带内容）。
@@ -35,10 +52,33 @@ pub enum Artifact {
 }
 
 impl Artifact {
+    /// 目的：这件产物是哪一种（推进时对照声明用；组合子只看种类，不看内容）。
+    pub fn kind_of(&self) -> Kind {
+        match self {
+            Artifact::Requirement(_) => Kind::Requirement,
+            Artifact::Summary(_) => Kind::Summary,
+        }
+    }
+
     /// 目的：取内容（接收方自己解释它；组合子不调这个）。
     pub fn text(self) -> String {
         match self {
             Artifact::Requirement(text) | Artifact::Summary(text) => text,
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 目的：线格式的词汇只有一套：`as_str` / `parse` 与声明文件的 serde 名字必须一致。
+    #[test]
+    fn the_wire_names_are_the_declared_ones() {
+        for kind in [Kind::Requirement, Kind::Summary] {
+            let serde_name = serde_json::to_value(kind).expect("种类能序列化");
+            assert_eq!(serde_name.as_str(), Some(kind.as_str()), "{:?}", kind);
+            assert_eq!(Kind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(Kind::parse("ghost"), None);
     }
 }

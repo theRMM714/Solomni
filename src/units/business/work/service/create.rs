@@ -605,12 +605,12 @@ impl Work {
                     delegated: delegate,
                     sandboxes: sandboxes.clone(),
                     ask: crate::units::business::turn_state::api::desk_face(Arc::clone(&door)),
-                    restore: None,
                 };
                 let mut pipeline = crate::units::business::turn_state::api::sequence_of(
                     &ids,
                     &setup,
                     &*self.flows,
+                    None,
                 )?;
                 let mut out = Vec::new();
                 crate::units::business::turn_state::api::Flow::begin_with(

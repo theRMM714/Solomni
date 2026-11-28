@@ -264,7 +264,8 @@ impl CollabSession {
                 }
             }
         }
-        let total = all_lines.len() as u64;
+        // 行号只增不退：窗口可能从中途开始，基线取窗口里最大行 id + 1（没有行就是 0，接着从 1 数）。
+        let next_line = all_lines.iter().map(|l| l.id).max().map_or(0, |m| m + 1);
         let core_channel = settings.core_channel()?;
         let core_chat = llm.core_channel(&core_channel);
         // 形态要在 settings 被移进结构体之前算出来。
@@ -299,7 +300,7 @@ impl CollabSession {
             turn_error: None,
             pending_ask: None,
             emitted: 0,
-            next_line: total,
+            next_line,
             core_chat,
             core_mode,
             prompts: prompts.clone(),

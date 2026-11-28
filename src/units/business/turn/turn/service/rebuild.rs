@@ -107,12 +107,12 @@ impl Turn {
                     sandboxes: sandboxes.clone(),
                     // 重建出来的整队进**同一条队**（按转录里已发出的卡号续号，已答过的不重问）。
                     ask: crate::units::business::turn_state::api::desk_face(Arc::clone(&desk)),
-                    restore: Some((meta, events)),
                 };
                 let pipeline = crate::units::business::turn_state::api::sequence_of(
                     &ids,
                     &setup,
                     &*self.flows,
+                    Some((meta, events)),
                 )?;
                 Session::Flow(Box::new(pipeline))
             }
