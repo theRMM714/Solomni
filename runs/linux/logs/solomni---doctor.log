@@ -1,0 +1,145 @@
+[工具链] 项目内：python 3.14.9、node 24.11.0
+[工具链] 项目内未安装：cc；补全：solomni --provision --ensure=toolchain --yes
+[工具链] 宿主回退 cc → /usr/bin/gcc（围栏可用）
+{
+  "arch": "x86_64",
+  "externals": {
+    "curl": "/usr/bin/curl",
+    "node": "/home/runner/work/Solomni/Solomni/.tools/toolchains/linux-x86_64/node/24.11.0/node-v24.11.0-linux-x64/bin/node",
+    "python": "/home/runner/work/Solomni/Solomni/.tools/toolchains/linux-x86_64/python/3.14.9/python/bin/python"
+  },
+  "fence": {
+    "fs": true,
+    "net": true,
+    "note": "Linux：Landlock（ABI 8）强制文件系统可达范围；seccomp 强制断网（net=false 时拒绝非本地 socket）",
+    "tree": true
+  },
+  "platform": "linux",
+  "processes": [],
+  "storage": {
+    "cap_bytes": 21474836480,
+    "categories": [
+      {
+        "auto": true,
+        "bytes": 0,
+        "id": "build-cache",
+        "items": 0
+      },
+      {
+        "auto": true,
+        "bytes": 0,
+        "id": "download-cache",
+        "items": 0
+      },
+      {
+        "auto": true,
+        "bytes": 0,
+        "id": "overlays",
+        "items": 0
+      },
+      {
+        "auto": true,
+        "bytes": 0,
+        "id": "logs",
+        "items": 0
+      },
+      {
+        "auto": false,
+        "bytes": 0,
+        "id": "guest-bases",
+        "items": 0
+      },
+      {
+        "auto": false,
+        "bytes": 0,
+        "id": "sessions",
+        "items": 0
+      },
+      {
+        "auto": false,
+        "bytes": 0,
+        "id": "module-outputs",
+        "items": 0
+      }
+    ],
+    "free_bytes": 89032933376,
+    "last_gc": null,
+    "managed_bytes": 0,
+    "over_cap": false
+  },
+  "toolchains": {
+    "active": [
+      {
+        "id": "python",
+        "version": "3.14.9"
+      },
+      {
+        "id": "node",
+        "version": "24.11.0"
+      }
+    ],
+    "fallback": {
+      "cc": {
+        "fenced": true,
+        "path": "/usr/bin/gcc",
+        "why": ""
+      }
+    },
+    "lines": [
+      "项目内：python 3.14.9、node 24.11.0",
+      "项目内未安装：cc；补全：solomni --provision --ensure=toolchain --yes",
+      "宿主回退 cc → /usr/bin/gcc（围栏可用）"
+    ],
+    "missing": [
+      "cc"
+    ],
+    "profile": [
+      "python",
+      "node",
+      "cc"
+    ]
+  },
+  "vm_tier": {
+    "available": false,
+    "requirements": [
+      {
+        "deps": [],
+        "detail": "本机虚拟机监视器可用（Linux KVM（/dev/kvm））；虚拟机档只走硬件加速，不退回软件模拟",
+        "fix": "",
+        "fixKind": "none",
+        "id": "hypervisor",
+        "label": "虚拟机监视器",
+        "met": true
+      },
+      {
+        "deps": [],
+        "detail": "guest 后端已就位，本平台默认组合 qemu/9p 已通过真机验收",
+        "fix": "",
+        "fixKind": "none",
+        "id": "guest",
+        "label": "guest 后端验收",
+        "met": true
+      },
+      {
+        "deps": [],
+        "detail": "共享档 virtiofs 不可用（PATH 上没有，项目内也没有补齐）：使用 9p",
+        "fix": "",
+        "fixKind": "none",
+        "id": "share",
+        "label": "共享档",
+        "met": true
+      },
+      {
+        "deps": [
+          "vm.qemu.linux"
+        ],
+        "detail": "没有找到 qemu-system-x86_64（PATH 上没有，项目内也没有补齐）",
+        "fix": "在创建向导或配置界面点「补齐虚拟机依赖」把它下载进项目内（只写项目内，需用户同意）；也可自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径（登记值失效时清空即可恢复自动发现）。集成环境里没有界面时可用 solomni --provision --ensure --yes",
+        "fixKind": "download",
+        "id": "qemu",
+        "label": "QEMU",
+        "met": false
+      }
+    ]
+  }
+}
