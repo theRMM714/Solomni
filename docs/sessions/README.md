@@ -1,7 +1,7 @@
 # sessions（会话盘资源）
 
 > 定位：`data/session` 这块盘的唯一主人——会话根归谁拼、某个会话在不在盘上。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/resource/sessions/api.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/units/resource/sessions/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)。
 > 与 [session/（会话业务）](../session/README.md) 的分工：那边管**会话是什么**（身份、meta、转录语义），本单元只管**那块盘在哪、有没有**。
 

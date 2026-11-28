@@ -1,7 +1,7 @@
 # 会话模型与上下文压缩
 
 > 定位：一次工作里有哪些会话、它们怎么对话、怎么同步、上下文怎么压的唯一权威。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/agentloop/domain/session.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/units/business/agentloop/domain/session.rs`
 
 ## 适用与判据
 - 会话形态、回合、派发、回档与压缩以本文为准（`docs/session/session-model.md`）。

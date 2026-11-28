@@ -1,7 +1,7 @@
 # assets（随包只读内容）
 
 > 定位：`prompts/`、`systools/`、`locales/` 这三块**随包只读内容**的唯一主人——介质名、固定文档清单、按文档读文本、提示词册的目录枚举与排序。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/resource/assets/api.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/units/resource/assets/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -53,7 +53,7 @@
 
 - **`locales/` 没有运行期读者**：文案编译期编入，因此 `AssetPaths::locales()` 与 `layout::locales()` 今天只有测试在读（已注明 `#[allow(dead_code)]`）。真要支持多语言热加载，从这里起步。
 - **没有热更新 / 安装**：随包内容只随发行版走；要支持"安装语言包 / 提示词包"，得先给本单元加写入面与清单（不是拼路径的事）。
-- **`systools/` 的其余文档**：今天只有三份在 `Doc` 里；新增一份 = 加一个变体 + 一行 `file_name`/`label`，并同步本页 §一 的表格。
+- **`systools/` 的其余文档**：今天四份都在 `Doc` 里；新增一份 = 加一个变体 + 一行 `file_name`/`label`，并同步本页 §一 的表格。
 
 ## 改动本单元时必须同步
 

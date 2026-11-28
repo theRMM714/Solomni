@@ -1,7 +1,7 @@
 # tools（工具与围栏）
 
 > 定位：系统工具总表与一次工具执行的围栏。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/tools/api.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/units/business/tools/api.rs`
 > 系统侧的门户是 [SYSTOOL.md](../../SYSTOOL.md)（入口与真相源表）；本目录是它的细则。本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -18,7 +18,7 @@
 ## 入站契约与状态归属
 
 - 入站面：`api::Tools`（总表 / 保留名 / 自检）+ `api::ToolExec`（跑模块工具与系统工具、释放围栏）+ `api::member_env` / `api::host_read_roots`（一席的工具运行环境，纯派生）。
-- 出站端口：`SysIo` 与 kernel 共享的 `ProcessRunner` / `FenceHost` 由 `src/units/business/tools/service.rs` 持有（R12）；`SystoolsSource` 只在装配时读一次，不持有。
+- 出站端口：`SysIo` 与 kernel 共享的 `ProcessRunner` / `FenceHost` / `FenceGate` 由 `src/units/business/tools/service.rs` 持有（R12）；`SystoolsSource` 只在装配时读一次，不持有。
 - 模块工具的一次执行经 `--fence-run` 守门进程完成（命令与参数分开、环境白名单、超时杀树），协议见 [kernel 的「工具进程与守门协议」](../kernel/README.md)。
 - `shell` 是执行类系统工具：host 走同一个 `ProcessRunner`（Unix `sh`、Windows PowerShell），VM 走 guest helper；授予固定（私有沙箱 rw、模块目录与主机只读根 ro），profile 只决定出站网络。Windows 上每次宿主调用都用按次容器 profile（W1）把 ACL 收窄做实（shell、模块工具、独立调用、构建同一口径）；细节见 [tools-and-roles.md](tools-and-roles.md) 的「执行类系统工具：shell」。
 - 状态归属：工具面与围栏描述符按调用现算；本单元不持会话状态，工具表只读。

@@ -1,7 +1,7 @@
 # 单元地图 · provision
 
 > 定位：provision（依赖补齐）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-25｜依据：`src/units/business/provision/api.rs`
+> 效力：契约｜核对：2026-11-28｜依据：`src/units/business/provision/api.rs`
 
 > 本文是 **provision** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -12,7 +12,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/units/business/provision.rs` | 单元入口：分区声明（`api` / `detail` / `domain` / `guest` / `ports` / `service`）与两处 `#[cfg(test)]` 重导出；装配工厂在组合根（`src/entry/assembly.rs` 的 `provision` / `provision_with_vm` / `provision_with_guest_vm`） |
-| `src/units/business/provision/api.rs` | 入站契约：`Provision` trait（含 `tool_location` 宿主工具取法）+ `DepStatus`（含 `stale`：探针在场但装的不是当前清单那版）/ `HostTool` DTO（`JobState` 在 `exec_model`） + `NoProvision` + 自由函数 `vm_tools` / `vm_tools_report` |
+| `src/units/business/provision/api.rs` | 入站契约：`Provision` trait（状态 / 虚拟根清单 / 进程账 / 作业 / 起停 / 还原 / 补齐 / `tool_location` 宿主工具取法）+ `DepStatus`（含 `stale`：探针在场但装的不是当前清单那版）/ `GuestBase` / `ProcInfo` / `HostTool` DTO（`JobState` 在 `exec_model`）+ `NoProvision` + 自由函数 `vm_tools` / `vm_tools_report` |
 | `src/units/business/provision/domain.rs` | 清单语义：`dependencies.yaml` / `links.yaml` 解析、按本机筛选、安装身份（只算内容，不算落点）、落点 `Placement` 与台账条目 `Entry`、pin 与 guest 画像 `GuestProfile` |
 | `src/units/business/provision/ports.rs` | 出站端口：`Fetcher`（取数）/ `HostFs`（宿主落点）/ `Ledger`（台账与在场判定、位置变了只搬家 `relocate`）/ `Installers`（按 kind 落盘）/ `GuestImage`（rootfs 镜像构造）/ `Procs`（进程台账） |
 | `src/units/business/provision/service.rs` | 编排：状态与台账快照、依赖选择（`split_ensure_spec` / `pending_of_kinds`）、每条的装 / 验 / 记、作业与取消、身份没变只改落点时先搬家再记账；只经端口触达 IO |

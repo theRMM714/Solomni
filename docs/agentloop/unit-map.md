@@ -1,7 +1,7 @@
 # 单元地图 · agentloop
 
 > 定位：agentloop（单会话运行时）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-25｜依据：`src/units/business/agentloop/api.rs`
+> 效力：契约｜核对：2026-11-28｜依据：`src/units/business/agentloop/api.rs`
 
 > 本文是 **agentloop** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -10,8 +10,8 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/units/business/agentloop.rs` | 单元根：声明 `api` / `domain` / `engine` 三个入口 |
-| `src/units/business/agentloop/api.rs` | 入站面：重导出会话对象与回合事实、面装配与整场装配（含 `SessionPorts` 与三种在世形态的入口）、核实环境、回档算术、消息回灌与核心操作回路 |
-| `src/units/business/agentloop/domain.rs` | 定义入口：声明 `assemble` / `assembly` / `explain` / `member_tools` / `policy` / `ports` / `reply` / `rewind` / `session` / `sources` / `verify` 十一个概念子模块 |
+| `src/units/business/agentloop/api.rs` | 入站面：重导出会话对象与回合事实、面装配与整场装配（含 `SessionPorts` 与三种在世形态的入口）、核实环境、消息回灌与核心操作回路 |
+| `src/units/business/agentloop/domain.rs` | 定义入口：声明 `assemble` / `assembly` / `explain` / `member_tools` / `policy` / `ports` / `reply` / `session` / `sources` / `verify` 十个概念子模块 |
 | `src/units/business/agentloop/domain/session.rs` | 单 agent 会话运行时：上下文、行 id、回合与回复簿记、压缩与回档、观察账本与新鲜度判定 |
 | `src/units/business/agentloop/domain/session/prompt.rs` | 系统提示拼装：agent 与角色两条身份入口、模块提示、回合参数、环境块 |
 | `src/units/business/agentloop/domain/member_tools.rs` | 成员工具面：本回合可调的工具、观察账本与执行面句柄 `exec: Arc<dyn sandbox::api::Sandbox>`（本机 / 客机由策略在装配期开出，`ToolFace` 不再带 `side` / `guest_lease` / 运行期路径）；工作台策略与它给的回合钩子 `driver: Option<Arc<dyn BenchDriver>>`（换席时随面重开）；只含值的 `ToolFace` 与核实用例端口 `CoreVerify`；shell 状态槽与按内容日志派生最近一次 shell（`last_shell`） |

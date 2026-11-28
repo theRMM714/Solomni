@@ -1,7 +1,7 @@
 # 文档审计与治理
 
 > 定位：用户启动「文档审计 / 治理」时的专用流程：怎么检查、改什么、按什么验收。
-> 效力：规范｜核对：2026-11-25｜依据：`tests/docs-gov.mjs`、`tests/docs-audit.mjs`、`tests/docs-sync.mjs`
+> 效力：规范｜核对：2026-11-28｜依据：`tests/docs-gov.mjs`、`tests/docs-audit.mjs`、`tests/docs-sync.mjs`
 
 ## 适用与判据
 
@@ -30,7 +30,7 @@
 - 散文收敛：段落拆成带锚点的断言；没有锚点的判断只能写「原则 / 建议」（`AGENTS.md` 九）。
 - 过时修正：依据变更、状态词无证据、命令 / 路径失效、章节引用失效，四类都算过时（`tests/docs-audit.mjs`）。
 - 不做加法：不新增无约束、无行为、无使用价值的文档（`docs/conventions.md`）。
-- 例外文档：`AGENTS.md`、`README*.md`、`docs/presentation/contracts.md`、`docs/prompt/prompts.md` 只能人工复核，不套模板（`docs/templates/index.json`）。
+- 例外文档：`AGENTS.md`、`README*.md`、`.github/pull_request_template.md`、`docs/presentation/contracts.md`、`docs/prompt/prompts.md`、`docs/templates/**` 只能人工复核，不套模板（`docs/templates/index.json` 的 `exceptions`）。
 
 ## 四、修改规则
 
@@ -56,9 +56,9 @@
 
 ## 检查
 
-- 结构与锚点 → `tests/docs-gov.mjs`（`node run-tests.js --docs` 调用）；判据实现在 `tests/gates/docs/`（4 文件）与 `tests/gates/structure/`（9 文件）。
+- 结构与锚点 → `tests/docs-gov.mjs`（`node run-tests.js --docs` 调用）；判据实现在 `tests/gates/docs/` 与 `tests/gates/structure/`，文件清单以两个目录为准。
 - 候选清单可复现 → `tests/docs-audit.mjs`。
-- 生成段一致 → `tests/docs-sync.mjs`（6 个目标：平台验收状态 ×4、T0 步骤、成功标记）。
+- 生成段一致 → `tests/docs-sync.mjs`（11 个目标：平台验收状态 ×4、T0 步骤、成功标记、变更测试范围、分层表、依赖图四段；清单见该文件的 `TARGETS`）。
 
 ## 路由
 

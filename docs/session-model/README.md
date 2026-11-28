@@ -1,7 +1,7 @@
 # session_model（会话身份与声明）
 
 > 定位：会话的身份与声明——元信息、类型声明、流程段与角色、工具来源端口、留档策略的唯一家（环 2）。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/session_model/api.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/units/business/session_model/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么

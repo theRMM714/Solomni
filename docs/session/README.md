@@ -1,7 +1,7 @@
 # session（会话）
 
 > 定位：会话用例与编排——历史落盘、会话树与一席的装配（单会话运行时在 `agentloop`，裁决队与流程面在 `turn_state`）。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/conversation/session/api.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/units/business/conversation/session/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么

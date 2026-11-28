@@ -1,7 +1,7 @@
 # 多 agent 工作流
 
 > 定位：多个 agent 并行调查或实施：Lead 开工、派发、逐片集成与收口细则。
-> 效力：规范｜核对：2026-11-25｜依据：`AGENTS.md`
+> 效力：规范｜核对：2026-11-28｜依据：`AGENTS.md`
 
 ## 适用与判据
 
@@ -31,7 +31,7 @@
   ```
 
 - 有依赖的分片等依赖集成后再建 worktree；依赖在任务板记 `blocked_by`，不靠口头顺序。
-- 共享目录用链接指回主工作区：`target`、`platform`、`node_modules`、`.tools`（Windows 用 `mklink /J`，macOS / Linux 用 `ln -s`）；`.home` 不共享。
+- 共享目录用链接指回主工作区：`target`、`platform`、`node_modules`、`.tools`（Windows 用 `mklink /J`，macOS / Linux 用 `ln -s`）；`data/` 不共享（`.gitignore` 的 `/data/*`：`.home` / `session` / `state` / `logs` / `modules` / `runtimes` / `.vm` 都在其下）。
 - 分片测试与全量门禁串行：共享 `target` 同时跑会抢锁、写同一份报告。
 
 ## 三、派发：派发单与任务板

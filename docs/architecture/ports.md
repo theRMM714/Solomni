@@ -1,7 +1,7 @@
 <!-- docs-template: spec -->
 # 端口：只画在 IO 与可替换点上
 > 定位：端口的唯一权威：什么该是端口、有哪些端口、谁是持有者。
-> 效力：规范｜核对：2026-11-25｜依据：`src/kernel/ports.rs`、各单元 `ports.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/kernel/ports.rs`、各单元 `ports.rs`
 
 ## 适用与判据
 - 新增或改造端口前读本文；判据只有一条：**这里有 IO，或者这里有可替换的实现**（`tests/gates/structure/capability.js`）。

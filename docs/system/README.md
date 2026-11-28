@@ -1,7 +1,7 @@
 # system（系统维护与自检）
 
 > 定位：系统维护与自检——把「这台机器能承载什么、占了多少钱、缺什么、怎么清」做成一份可执行的结论，供启动相命令与 Web 共用。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/system/api.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/units/business/system/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -11,7 +11,7 @@
 - 管：依赖补齐的状态查询、补齐执行与虚拟根还原的确认门槛。
 - 管：工作区回收与模块构建在维护视角下的前置校验（名字合法、工作存在、模块存在、目标与出网开关）。
 - 管：便携维护（`--setup`）——用户 PATH 的 shim 追加 / 摘除 / 还原、只读状态视图、围栏机器级预授（预授成功顺手把授权记进设置）；写入结果按一句话回执交呈现层排版。
-- 不管：回收与补齐的实现（归 `storage` / `provision`）、构建编排（归 `builds`）、工作区对象图（归 `workspace`）、模块清单（归 `modules`）、工具链条目解析（归 `src/entry/toolchains.rs`）。
+- 不管：回收与补齐的实现（缓存回收归 `storage`、工作区对象回收归 `versions`、补齐归 `provision`）、构建编排（归 `builds`）、工作区对象图（归 `workspace`）、模块清单（归 `modules`）、工具链条目解析（归 `src/entry/toolchains.rs`）。
 - 不管：命令名、别名、分组与手册排版（归 `systools/commands.yaml` 与 `src/presentation/cli/catalog.rs`）；也不解析 argv（归 `src/presentation/cli/boot.rs`）。
 
 ## 入站契约与状态归属
@@ -23,7 +23,7 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`catalog`、`exec_model`、`kernel`、`maintenance`、`provision`、`vm`、`workspace`
+- 经 `::api` 用到：`catalog`、`exec_model`、`kernel`、`maintenance`、`provision`、`versions`、`vm`、`workspace`
 - 谁在用我：`entry`、`presentation`
 
 ## 一、命令面与执行面的分工

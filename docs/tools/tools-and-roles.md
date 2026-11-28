@@ -1,7 +1,7 @@
 # 工具、流程段与角色
 
 > 定位：系统工具、流程段与角色（身份）与"谁能用哪些工具"的唯一权威。
-> 效力：规范｜核对：2026-11-25｜依据：`systools/tools.yaml`、`systools/loops.yaml`、`src/units/business/session_model/domain/mechanism.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`systools/tools.yaml`、`systools/loops.yaml`、`src/units/business/session_model/domain/mechanism.rs`
 
 ## 适用与判据
 - 声明系统工具、流程段与角色和越权校验时以本文为准（`docs/tools/tools-and-roles.md`）。

@@ -1,7 +1,7 @@
 # home（登记处资源）
 
 > 定位：`data/.home` 这块盘的唯一主人——哪几份登记处文档能存在、怎么读、怎么写（原子、私密）。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/resource/home/api.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/units/resource/home/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么

@@ -1,7 +1,7 @@
 # presentation（前端 / 交付机制）
 
 > 定位：前端交付机制的归类——`cli/`（终端）与 `web/`（本地网页）按渠道各一个目录。
-> 效力：规范｜核对：2026-11-25｜依据：`src/presentation.rs`、`docs/presentation/inbound.yaml`
+> 效力：规范｜核对：2026-11-28｜依据：`src/presentation.rs`、`docs/presentation/inbound.yaml`
 > 本目录是单元唯一细则入口：本页 → 两个渠道各自的 [`README.md`](cli/README.md) 与 unit-map（逐文件职责，机器比对）。
 
 ## 管什么 / 不管什么
@@ -18,7 +18,7 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`runtime`（`RuntimeOps` / `ActionOps` / `LogOps`）、`work`（`WorkOps`）、`turn`（`TurnOps`）、`modules` / `registry` / `vm`（经 `Faces` 字段）。
+- 经 `::api` 用到：`runtime`（`RuntimeOps` / `ActionOps` / `LogOps`）、`work`（`WorkOps`）、`turn`（`TurnOps`）、`modules` / `registry` / `vm_tools`（经 `Faces` 字段）。
 - 谁在用我：（无——流程终点，没有下游业务依赖本层）
 - 分层依据：见 [layers.md](../architecture/layers.md)（`cli/` + `web/` 一行）。
 

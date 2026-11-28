@@ -1,7 +1,7 @@
 # content（内容盘资源）
 
 > 定位：`data/modules`（模块私有区）与 `data/runtimes`（运行包）这块盘的唯一主人——落点怎么算、私有区谁来建、安装/卸载的形状。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/resource/content/api.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/units/resource/content/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
