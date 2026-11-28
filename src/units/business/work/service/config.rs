@@ -224,20 +224,22 @@ impl Work {
             .collect();
         // 入口按**目标环境**判：虚拟机档在 guest 里跑（guest 的 os），本机档在宿主；
         // 跨平台时还要看文件形式——宿主编出来的产物（如 Windows 的 .exe）在 linux guest 里跑不了。
-        let guest = crate::units::business::vm::api::guest_os_of(&self.root, host, &target)
+        let guest = crate::units::business::sandbox::api::guest_os_of(&self.root, host, &target)
             .map(|g| g.as_str());
         let target_os = guest.unwrap_or(std::env::consts::OS);
-        let missing: Vec<crate::units::business::vm::api::MissingEntry> =
-            crate::units::business::vm::api::missing_entries_for(
+        let missing: Vec<crate::units::business::catalog::modules::api::MissingEntry> =
+            crate::units::business::catalog::modules::api::missing_entries_for(
                 &session_modules,
                 target_os,
                 &|p| {
                     host.is_executable(p)
                         && (target_os == std::env::consts::OS
-                            || crate::units::business::vm::api::runs_on_target(p, target_os))
+                            || crate::units::business::catalog::modules::api::runs_on_target(
+                                p, target_os,
+                            ))
                 },
             );
-        crate::units::business::vm::api::plan_for_spec(
+        crate::units::business::catalog::packages::api::plan_for_spec(
             &self.root,
             host,
             &self.packages.library(),
@@ -328,7 +330,7 @@ impl Work {
                 &format!(
                     "sid={}；{}",
                     sid,
-                    crate::units::business::vm::api::plan_summary(&plan)
+                    crate::units::business::catalog::packages::api::plan_summary(&plan)
                 ),
             );
             (Some(lease), Some(tree), Some(plan))

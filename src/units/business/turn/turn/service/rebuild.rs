@@ -154,26 +154,27 @@ impl Turn {
                     &meta.spec.role,
                 )
                 .with_chara(a.chara.clone())
-                .with_guest(crate::units::business::vm::api::guest_os_of(
+                .with_guest(crate::units::business::sandbox::api::guest_os_of(
                     &self.root,
                     probe,
                     &meta.target(),
                 ));
                 let (history, marks, line_reply, line_ids, compacted_upto, compacted_line) =
                     replay_dialogue(events, mode);
-                let unavailable = crate::units::business::vm::api::unavailable_modules(
-                    &self.root,
-                    probe,
-                    &self.packages.library(),
-                    &self.packages.base(),
-                    &meta.target(),
-                    &modules,
-                );
+                let unavailable =
+                    crate::units::business::catalog::packages::api::unavailable_modules(
+                        &self.root,
+                        probe,
+                        &self.packages.library(),
+                        &self.packages.base(),
+                        &meta.target(),
+                        &modules,
+                    );
                 // 段与角色取落盘声明里的那一份（成员 / 节点会话是流程的成员角色）——与实时同一个口径。
                 let (loop_id, role) = (meta.spec.loop_id.clone(), meta.spec.role.clone());
                 let host_plan =
                     if meta.facts.side == crate::units::pure::exec_model::api::Side::Host {
-                        crate::units::business::vm::api::host_plan_for(
+                        crate::units::business::catalog::packages::api::host_plan_for(
                             &self.packages.library(),
                             &self.packages.base(),
                             probe,

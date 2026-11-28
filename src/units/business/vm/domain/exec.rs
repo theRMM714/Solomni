@@ -1,11 +1,9 @@
-//! 目的：执行档位与执行计划的纯逻辑——档位诊断、计划派生、承载判定与就绪检测。
-//! 管：TargetSpec 的档位诊断、ExecPlan 的装载顺序、本机能否承载虚拟机档。
-//! 不管：包库与选包（packages）、目录遍历与 guest 启动（在 detail/ 与 guest 后端）、会话档案（session）、实际的工具进程执行（tools）。
+//! 目的：执行档位的纯逻辑——承载判定与就绪检测（这一档现在能不能跑）。
+//! 管：虚拟机档的前置条件清单（`VmRequirement` / `TierReadiness`）、共享档选择、本机能否承载虚拟机档。
+//! 不管：执行计划与入口诊断（`catalog` 的 `packages` 与 `modules`）、包库与选包（`packages`）、目录遍历与 guest 启动（`detail/` 与 guest 后端）、会话档案（`session`）、实际的工具进程执行（`tools`）。
 //! 联动：契约见 docs/vm/README.md 与 RUNTIME_SPEC.md；TargetSpec 是 kernel 的共享形状；被 runtime 与呈现层经 api.rs 消费。
 
 use crate::kernel::ports::HostProbe;
-use crate::units::business::catalog::modules::api::Module;
-use crate::units::business::catalog::packages::api::PlannedPackage;
 use crate::units::business::sandbox::api::{GuestAgent, GuestImage, GuestOs};
 use crate::units::business::vm::domain::tool::{ToolPath, ToolSource, VmTools};
 use crate::units::pure::exec_model::api::Side;
@@ -13,76 +11,6 @@ use crate::units::pure::exec_model::api::TargetSpec;
 use crate::units::resource::vmstore::api::resolve_guest;
 use serde::Serialize;
 use std::path::Path;
-
-/// 目的：一条**模块入口**诊断：结构化事实（界面文案由呈现层渲染；模型侧文案在提示词册）。
-/// 约束：包选择问题归 `packages::api::Problem`，不混进这里。
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub enum EntryProblem {
-    /// 模块工具的入口（模块内产物）不在场——命令是相对路径，模块根下却没有这个能直接跑的文件。
-    MissingEntry {
-        module: String,
-        tool: String,
-        command: String,
-        /// 目的：这个模块声明了 `build:`（系统可以照它在目标环境里编出来）——拒绝理由据此指路。
-        buildable: bool,
-    },
-}
-
-/// 目的：一条"模块工具的入口不在场"的**事实**（谁、哪个工具、命令里写的那个入口）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MissingEntry {
-    pub module: String,
-    pub tool: String,
-    /// 目的：命令里写的相对入口（如 `build/indexer`）。
-    pub command: String,
-    /// 目的：这个模块声明了 `build:`（见 MODULE_SPEC）——拒绝理由里就能给出"怎么编"的路。
-    pub buildable: bool,
-}
-
-/// 目的：挑出"入口不在场"的模块工具——相对路径入口必须在**目标环境**里存在且能直接执行。
-/// 参数：os = 目标系统（本机档 = 宿主，虚拟机档 = guest 的 os）；is_executable = "这个路径在目标环境里能不能直接跑"的事实。
-/// 约束：裸名（`python` / `node` / `indexer`）走 PATH 与运行能力，不在本判据里；绝对路径同样不在模块目录里找。
-/// 约束：名字按目标环境的壳解析（见 `entry_candidates`），跨平台时调用方还要按文件形式筛（见 `runs_on_target`）。
-pub fn missing_entries_for(
-    modules: &[Module],
-    os: &str,
-    is_executable: &dyn Fn(&Path) -> bool,
-) -> Vec<MissingEntry> {
-    let mut out = Vec::new();
-    for m in modules {
-        for (tool, decl) in &m.manifest.tools {
-            let Some(entry) =
-                crate::units::business::catalog::modules::api::local_entry(&decl.command)
-            else {
-                continue;
-            };
-            // 壳怎么解析这个名字，就按它的候选去验（Windows 上 `build/indexer` 实际落在 `.exe`）。
-            let found = crate::units::business::catalog::modules::api::entry_candidates(entry, os)
-                .iter()
-                .any(|c| is_executable(&m.root.join(c)));
-            if !found {
-                out.push(MissingEntry {
-                    module: m.manifest.id.clone(),
-                    tool: tool.clone(),
-                    command: entry.to_string(),
-                    buildable: m.manifest.build.is_some(),
-                });
-            }
-        }
-    }
-    out
-}
-
-/// 目的：执行计划：运行时派生，从不落盘（装配阶段按 (id, version) 去包里定位内容）。
-#[derive(Debug, Clone)]
-pub struct ExecPlan {
-    pub side: Side,
-    pub net: bool,
-    /// 目的：这次执行用的虚拟根名（本机档为空）——装配阶段按它解析出那一格目录。
-    pub guest: Option<String>,
-    /// 目的：装载顺序：先独立前缀（互不干扰），后写进系统路径的包（叠层）。
-    pub packages: Vec<PlannedPackage>,
-}
 
 /// 目的：执行档位的能力前置条件（本机档没有额外前置）。
 /// 约束：`RUNTIME_SPEC.md` 把「选型」与「本机能不能承载」分开：定版/缺包/冲突是选型，这里是承载。
@@ -416,43 +344,6 @@ pub fn share_chain(host: &str, share_tool: &ToolPath, probe: &dyn HostProbe) -> 
         .filter(|c| c.engine == "qemu" && share_available(c.share, share_tool, probe))
         .map(|c| c.share)
         .collect()
-}
-
-/// 目的：这个文件在**目标平台**上能直接跑吗——看形式（ELF / Mach-O / PE / 脚本头 / Windows 的批处理扩展名）。
-/// 参数：path = 模块目录里的入口文件；target_os = 目标平台（`std::env::consts::OS` 的取值）。
-/// 约束：名字层面的解析由 `entry_candidates` 管，这里只管**内容**；跨平台时"宿主编出来的产物"与目标格式不符，
-///   必须在预检就判否，而不是等 guest 里报 `not found` / `Exec format error`。
-pub fn runs_on_target(path: &Path, target_os: &str) -> bool {
-    use std::io::Read;
-    let Ok(mut f) = std::fs::File::open(path) else {
-        return false;
-    };
-    let mut head = [0u8; 4];
-    let n = f.read(&mut head).unwrap_or(0);
-    let head = &head[..n];
-    let elf = head == b"\x7fELF";
-    let pe = head.starts_with(b"MZ");
-    let script = head.starts_with(b"#!");
-    let mach = matches!(
-        head,
-        [0xfe, 0xed, 0xfa, 0xce]
-            | [0xcf, 0xfa, 0xed, 0xfe]
-            | [0xca, 0xfe, 0xba, 0xbe]
-            | [0xbe, 0xba, 0xfe, 0xca]
-    );
-    match target_os {
-        // Windows 的壳按扩展名认批处理与命令脚本；可执行体是 PE。
-        "windows" => {
-            pe || script
-                || path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .map(|e| matches!(e.to_ascii_lowercase().as_str(), "cmd" | "bat" | "com"))
-                    .unwrap_or(false)
-        }
-        "macos" => mach || script,
-        _ => elf || script,
-    }
 }
 
 /// 目的：某个用户共享档在不在场：先要是用户档，再要它要的外部工具在场（不需要工具的档恒在场）。
@@ -808,92 +699,4 @@ pub fn admit_guest(running: &[String], lease: &str, max: u32) -> Result<(), Stri
         ));
     }
     Ok(())
-}
-
-/// 目的：派生执行计划：入口判据与档位无关；运行包由 packages 能力选好，这里只负责落进 ExecPlan。
-/// 约束：本机档的 `packages` 为空（运行包由 packages 注入本次 PATH，不进 guest 装配）；虚拟机档的包选择与诊断在 `packages::api::plan_guest`。
-pub fn plan(
-    spec: &TargetSpec,
-    packages: Vec<PlannedPackage>,
-    missing: &[MissingEntry],
-    net: bool,
-) -> Result<ExecPlan, Vec<EntryProblem>> {
-    // 入口判据与档位无关：模块根下没有那个能直接跑的产物，两档都当场拒绝（一次把话说全）。
-    let entries: Vec<EntryProblem> = missing
-        .iter()
-        .map(|m| EntryProblem::MissingEntry {
-            module: m.module.clone(),
-            tool: m.tool.clone(),
-            command: m.command.clone(),
-            buildable: m.buildable,
-        })
-        .collect();
-    if !entries.is_empty() {
-        return Err(entries);
-    }
-    match spec.side {
-        Side::Host => Ok(ExecPlan {
-            side: Side::Host,
-            net,
-            guest: None,
-            packages: Vec::new(),
-        }),
-        Side::Guest => Ok(ExecPlan {
-            side: Side::Guest,
-            net,
-            guest: spec.guest.clone(),
-            packages,
-        }),
-    }
-}
-
-/// 目的：同上，但"怎么补"按**目标环境**说：虚拟机档的入口要在那个虚拟根里编（宿主上编出来的产物在 guest 里跑不了）。
-/// 参数：guest = 这次会话的虚拟根名（None = 本机档，在宿主编）。
-pub fn diagnose_text_for(diags: &[EntryProblem], guest: Option<&str>) -> String {
-    let lines: Vec<String> = diags
-        .iter()
-        .map(|d| match d {
-            EntryProblem::MissingEntry {
-                module,
-                tool,
-                command,
-                buildable,
-            } => {
-                let how = match (buildable, guest) {
-                    (true, Some(g)) => format!(
-                        "跑 solomni --build={} --guest={} 让系统在虚拟根里照模块声明编一次（宿主上编出来的产物在 guest 里跑不了）",
-                        module, g
-                    ),
-                    (true, None) => {
-                        format!("跑 solomni --build={} 让系统照模块声明的构建方法编一次", module)
-                    }
-                    (false, _) => {
-                        "模块要自带这个产物，或先按模块自己的 README 构建一次".to_string()
-                    }
-                };
-                format!("模块 {} 的工具 {} 入口不在场：{}（{}）", module, tool, command, how)
-            }
-        })
-        .collect();
-    lines.join("；")
-}
-
-/// 目的：计划的一句话摘要（日志用）：只报事实，不含真实路径。
-pub fn plan_summary(plan: &ExecPlan) -> String {
-    let net = if plan.net { "放行" } else { "不放行" };
-    if plan.side == Side::Host {
-        return format!("执行档位 本机（不装载运行包）；网络 {}", net);
-    }
-    let pkgs: Vec<String> = plan
-        .packages
-        .iter()
-        .map(|p| format!("{}@{}（{}）", p.id, p.version, p.kind))
-        .collect();
-    format!(
-        "执行档位 虚拟机；虚拟根 {}；装载 {} 个包：{}；网络 {}",
-        plan.guest.as_deref().unwrap_or("（未指定）"),
-        plan.packages.len(),
-        pkgs.join("、"),
-        net
-    )
 }

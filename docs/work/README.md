@@ -15,7 +15,7 @@
 - 管：**guest 生命周期**——`GuestBoot` / `EditGuest` / `GuestDiagnose` 的起停诊断两段式（单次销毁的 `GuestStop` 归 `vm`），以及稳定根的判据（`stable_roots` / `check_stable_roots`）。
 - 管：**建议与激活**——`suggest_models` 按需求拟名单、`activation_build_request` / `prepare_activation` / `commit_activation` 启用历史会话的两段。
 - 不管：命令队列与生成驱动——谁在什么时候取走会话、生成完怎么放回，由 `runtime` 决定（本单元只提供用例方法）。
-- 不管：会话本体（`turn` 的 `AgentSession`）、在世表与运行态（`turn_state`）、落盘与转录（`session`）、沙箱与工作区机制（`workspace`）、虚拟机实现与计划派生（`vm`）。
+- 不管：会话本体（`turn` 的 `AgentSession`）、在世表与运行态（`turn_state`）、落盘与转录（`session`）、沙箱与工作区机制（`workspace`）、虚拟机实现（`vm`）与执行计划派生（`catalog` 的 `packages`）。
 - 不管：登记处与探针本体——`&dyn Registry` / `&dyn HostProbe` 由调用方按次传入，`Work` 不持有它们（R12）。
 
 ## 入站契约与状态归属

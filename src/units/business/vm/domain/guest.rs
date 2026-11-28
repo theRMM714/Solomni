@@ -5,8 +5,8 @@
 
 use crate::kernel::api::fence::{Access, FencePlan, Reach};
 use crate::kernel::api::path_bridge::PathBridge;
+use crate::units::business::catalog::packages::api::ExecPlan;
 use crate::units::business::catalog::packages::api::{KIND_SYSTEM, PlannedPackage};
-use crate::units::business::vm::domain::exec::ExecPlan;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 

@@ -1,16 +1,16 @@
 # vm（虚拟机档）
 
 > `vm` 是一种**执行环境策略**，登记进 `sandbox` 的注册表（`src/units/business/vm/domain/policy.rs` 的 `VmPolicy`）；会话只说「用 `vm` 策略 + 参数 `guest: <虚拟根名>`」，解释权在本单元（口径见 [docs/sandbox/README.md](../sandbox/README.md)）。
-> 定位：客机侧的选型诊断、就绪检测与 guest 生命周期；运行包由 `packages` 选好，本单元只消费 `PackagePlan`。
+> 定位：客机侧的承载判定、就绪检测与 guest 生命周期；运行包由 `packages` 选好并派生执行计划（`catalog::packages::api::ExecPlan`），本单元只消费它。
 > 效力：规范｜核对：2026-11-25｜依据：`src/units/business/vm/api.rs`
 
 ## 管什么 / 不管什么
-- 管：**执行环境策略 `vm`**（自我介绍、声明校验、把「虚拟根名」解成客机事实）、客机侧选型诊断、执行计划派生（`src/units/business/vm/service/plan.rs`：运行包由 `packages` 选好，本单元只消费 `PackagePlan`）、就绪检测（本机能不能承载虚拟机；缺哪几项、每项怎么补），以及 guest 生命周期（按会话租约起 / 跑 / 销毁）与 guest 只读诊断。
+- 管：**执行环境策略 `vm`**（自我介绍、声明校验、把「虚拟根名」解成客机事实）、客机侧承载判定与就绪检测（本机能不能承载虚拟机；缺哪几项、每项怎么补），以及 guest 生命周期（按会话租约起 / 跑 / 销毁）与 guest 只读诊断。
 - 不管：**会话怎么选执行环境**（会话只存 `SandboxDecl` 与 `SandboxFacts`，见 `docs/session/session-model.md`）、**本机侧怎么隔离**（内核围栏与 `tools` 的 `host` 策略）。
 - 不管：运行包契约、包库与选包（`packages`）、会话与档案（`session`）、工作区与沙箱（`workspace`，本单元只收它给的中立路径）、模块清单（`modules`，只消费它声明的 `runtimes`）、实际执行工具（`tools`）。
 
 ## 入站契约与状态归属
-- 入站面：`api::Vm`（`guest_start` / `guest_run` / `guest_wait_agent` / `guest_stop` / `guest_leases` / `guest_diagnose`）+ 计划与就绪的纯函数（`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_capability` / `capability_refusal` / `guest_image_of` / …）+ `vm_policy(root, probe)`（组合根用它把 `vm` 策略登记进 `SandboxPolicies`）。
+- 入站面：`api::Vm`（`guest_start` / `guest_run` / `guest_wait_agent` / `guest_stop` / `guest_leases` / `guest_diagnose`）+ 就绪与共享链的纯函数（`tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_capability` / `capability_refusal` / `share_chain`）+ `vm_policy(root, probe, vm, tools)`（组合根用它把 `vm` 策略登记进 `SandboxPolicies`）；执行计划与入口诊断在 `catalog`（`packages` / `modules`），镜像派生在 `sandbox`。
 - 管：**一次销毁的自足任务** `GuestStop`（`src/units/business/vm/service/job.rs`）——调用方算出租约、在本线程 `run`，销毁要等 guest 落盘。
 - 出站端口 `VmEngine` / `ShareBackend` 只由 `service.rs` 持有（R12）；`GuestVm` / `GuestChannel` 由引擎在 boot 时交出。
 - `TargetSpec`（侧 + 客机名 + 定版）是共享形状（在 `exec_model`），本单元只读它；策略声明到它的换算是 `SandboxDecl::target(&facts)`。包库与选包在 `packages`。

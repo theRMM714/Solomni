@@ -373,7 +373,7 @@ impl Work {
             .cloned()
             .collect();
         if meta.facts.on_guest() {
-            let guest_runtimes = crate::units::business::vm::api::guest_runtimes_of(
+            let guest_runtimes = crate::units::business::sandbox::api::guest_runtimes_of(
                 &self.root,
                 host,
                 &meta.target(),
@@ -394,20 +394,23 @@ impl Work {
         }
         // 执行选型完整性（「开始」即冻结）：选型不成立或**缺包**都如实拒绝（没有工具，用户完不成工作）。
         // 入口**按目标环境**判：虚拟机档按 guest 的 os 解析名字，跨平台还看文件形式（宿主编的产物跑不了）。
-        let guest = crate::units::business::vm::api::guest_os_of(&self.root, host, &meta.target())
-            .map(|g| g.as_str());
+        let guest =
+            crate::units::business::sandbox::api::guest_os_of(&self.root, host, &meta.target())
+                .map(|g| g.as_str());
         let target_os = guest.unwrap_or(std::env::consts::OS);
-        let missing: Vec<crate::units::business::vm::api::MissingEntry> =
-            crate::units::business::vm::api::missing_entries_for(
+        let missing: Vec<crate::units::business::catalog::modules::api::MissingEntry> =
+            crate::units::business::catalog::modules::api::missing_entries_for(
                 &session_modules,
                 target_os,
                 &|p| {
                     host.is_executable(p)
                         && (target_os == std::env::consts::OS
-                            || crate::units::business::vm::api::runs_on_target(p, target_os))
+                            || crate::units::business::catalog::modules::api::runs_on_target(
+                                p, target_os,
+                            ))
                 },
             );
-        let plan = crate::units::business::vm::api::plan_for_spec(
+        let plan = crate::units::business::catalog::packages::api::plan_for_spec(
             &self.root,
             host,
             &self.packages.library(),
@@ -419,7 +422,7 @@ impl Work {
         )?;
         self.log.info(
             "work::create_work",
-            &crate::units::business::vm::api::plan_summary(&plan),
+            &crate::units::business::catalog::packages::api::plan_summary(&plan),
         );
 
         // 占名：准备与提交之间隔着一次 guest 启动，同名并发创建不能都通过上面那道检查。
@@ -537,19 +540,23 @@ impl Work {
                 let channel = channels
                     .remove(&a.name)
                     .ok_or_else(|| format!("缺少 agent {} 的模型通道", a.name))?;
-                let unavailable = crate::units::business::vm::api::unavailable_modules(
+                let unavailable =
+                    crate::units::business::catalog::packages::api::unavailable_modules(
+                        &self.root,
+                        probe,
+                        &self.packages.library(),
+                        &self.packages.base(),
+                        &meta.target(),
+                        &chosen,
+                    );
+                let guest = crate::units::business::sandbox::api::guest_os_of(
                     &self.root,
                     probe,
-                    &self.packages.library(),
-                    &self.packages.base(),
                     &meta.target(),
-                    &chosen,
                 );
-                let guest =
-                    crate::units::business::vm::api::guest_os_of(&self.root, probe, &meta.target());
                 let host_plan =
                     if meta.facts.side == crate::units::pure::exec_model::api::Side::Host {
-                        crate::units::business::vm::api::host_plan_for(
+                        crate::units::business::catalog::packages::api::host_plan_for(
                             &self.packages.library(),
                             &self.packages.base(),
                             probe,
@@ -684,7 +691,7 @@ impl Work {
         &self,
         registry: &dyn Registry,
         probe: &Arc<dyn HostProbe + Send + Sync>,
-        plan: &crate::units::business::vm::api::ExecPlan,
+        plan: &crate::units::business::catalog::packages::api::ExecPlan,
         sandboxes: &crate::units::business::workbench::api::Benches,
         restart: bool,
         lease: &str,

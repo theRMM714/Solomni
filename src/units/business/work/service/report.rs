@@ -42,7 +42,7 @@ impl Work {
             }
             (diagnoses, missing, lib.capability_versions())
         } else {
-            let plan = crate::units::business::vm::api::host_plan_for(
+            let plan = crate::units::business::catalog::packages::api::host_plan_for(
                 &self.packages.library(),
                 &self.packages.base(),
                 probe,
@@ -106,7 +106,7 @@ impl Work {
         }
     }
 
-    /// 目的：这份会话的执行计划（清单先按会话用到的模块收窄，再交给 `vm::api::plan_for_spec` 派生）。
+    /// 目的：这份会话的执行计划（清单先按会话用到的模块收窄，再交给 `catalog::packages::api::plan_for_spec` 派生）。
     /// 约束：模块集合只取清单里、且该会话某个 agent 声明过的；缺什么按 guest 目标判（与计划同一把尺子）。
     pub(crate) fn plan_for_meta_with(
         &self,
@@ -114,7 +114,7 @@ impl Work {
         probe: &dyn HostProbe,
         meta: &SessionMeta,
         roster: &crate::units::business::catalog::modules::api::Roster,
-    ) -> Result<crate::units::business::vm::api::ExecPlan, String> {
+    ) -> Result<crate::units::business::catalog::packages::api::ExecPlan, String> {
         let mut ids: Vec<&str> = meta
             .agents
             .iter()
@@ -128,20 +128,23 @@ impl Work {
             .filter(|m| ids.iter().any(|id| *id == m.manifest.id))
             .cloned()
             .collect();
-        let guest = crate::units::business::vm::api::guest_os_of(&self.root, probe, &meta.target())
-            .map(|g| g.as_str());
+        let guest =
+            crate::units::business::sandbox::api::guest_os_of(&self.root, probe, &meta.target())
+                .map(|g| g.as_str());
         let target_os = guest.unwrap_or(std::env::consts::OS);
-        let missing: Vec<crate::units::business::vm::api::MissingEntry> =
-            crate::units::business::vm::api::missing_entries_for(
+        let missing: Vec<crate::units::business::catalog::modules::api::MissingEntry> =
+            crate::units::business::catalog::modules::api::missing_entries_for(
                 &session_modules,
                 target_os,
                 &|p| {
                     probe.is_executable(p)
                         && (target_os == std::env::consts::OS
-                            || crate::units::business::vm::api::runs_on_target(p, target_os))
+                            || crate::units::business::catalog::modules::api::runs_on_target(
+                                p, target_os,
+                            ))
                 },
             );
-        crate::units::business::vm::api::plan_for_spec(
+        crate::units::business::catalog::packages::api::plan_for_spec(
             &self.root,
             probe,
             &self.packages.library(),
@@ -154,13 +157,13 @@ impl Work {
     }
 
     /// 目的：人直接跑模块工具（无会话）时的宿主包计划——按**宿主**目标选包，没有定版入口，多版本取稳定序第一个。
-    /// 约束：与成员循环同一把尺子（`vm::api::host_plan_for`）；api 层只经这里取无会话的包计划，自己碰不到包库与探针。
+    /// 约束：与成员循环同一把尺子（`catalog::packages::api::host_plan_for`）；api 层只经这里取无会话的包计划，自己碰不到包库与探针。
     pub(crate) fn host_plan_now(
         &self,
         probe: &dyn HostProbe,
         modules: &[Module],
     ) -> pkgs::PackagePlan {
-        crate::units::business::vm::api::host_plan_for(
+        crate::units::business::catalog::packages::api::host_plan_for(
             &self.packages.library(),
             &self.packages.base(),
             probe,

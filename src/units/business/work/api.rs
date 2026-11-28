@@ -7,9 +7,10 @@
 
 use crate::kernel::api::types::SessionId;
 use crate::kernel::ports::{HostProbe, Log};
+use crate::units::business::catalog::packages::api::ExecPlan;
 use crate::units::business::session_model::api::HistoryView;
 use crate::units::business::transcript::api::{OptionView, SessionEvent};
-use crate::units::business::vm::api::{ExecPlan, GuestStop, Vm};
+use crate::units::business::vm::api::{GuestStop, Vm};
 use crate::units::business::workbench::api::Benches;
 use crate::units::pure::registry_model::api::AgentMeta;
 use std::collections::BTreeMap;
