@@ -1,5 +1,5 @@
 //! 目的：复合流程——装配期把若干段流程串成一条：前一段收尾就把产物交给下一段（intake），转录行号接上。
-//! 管：按序推进、交接产物与行号；把流程面整套转给**当前这一段**。
+//! 管：按序推进、交接产物与行号、把每段的进度写成落盘事实；把流程面整套转给**当前这一段**。
 //! 不管：任何一段自己的状态机（归各流程）；会话类型表与装配（归会话单元的装配与组合根）。
 //! 联动：`systools/profiles.yaml` 里一条会话类型的 flows 序列由它承载；驱动只认 `Flow`。
 
@@ -8,25 +8,61 @@ use std::sync::atomic::AtomicBool;
 
 use crate::kernel::api::types::Ask;
 use crate::units::business::agentloop::api::MemberTurn;
-use crate::units::business::session_model::api::Artifact;
+use crate::units::business::session_model::api::{Artifact, Kind};
 use crate::units::business::transcript::api::SessionEvent;
 use crate::units::business::turn_state::domain::decisions::GateTicket;
 use crate::units::business::turn_state::domain::flow::{
     Flow, Handback, MemberAsk, Settle, WorkPlan,
 };
+use crate::units::business::turn_state::domain::stage;
 use crate::units::business::workbench::api::Benches;
 use crate::units::pure::registry_model::api::AgentMeta;
 
+/// 目的：一段在声明里的产物契约（推进时对照：这一段交什么、下一段收什么）。
+#[derive(Debug, Clone)]
+pub struct StepDecl {
+    /// 目的：段 id（文案点名用）。
+    pub id: String,
+    /// 目的：这一段收得下的产物种类。
+    pub accepts: Vec<Kind>,
+    /// 目的：这一段声明交出的产物种类（`None` = 不交）。
+    pub produces: Option<Kind>,
+}
+
 /// 目的：一串按顺序跑的流程段：前一段收尾后产物交给下一段，行号接着上一段。
+/// 约束：恢复时只造起跑点之后的段（`origin` 是它们在整条流水线里的绝对位置）。
 pub struct Sequence {
     steps: Vec<Box<dyn Flow>>,
+    decls: Vec<StepDecl>,
+    origin: usize,
     at: usize,
+    pending: Vec<SessionEvent>,
 }
 
 impl Sequence {
-    /// 目的：按给定顺序造一条复合流程（装配期只造一次；顺序即执行顺序）。
-    pub fn new(steps: Vec<Box<dyn Flow>>) -> Sequence {
-        Sequence { steps, at: 0 }
+    /// 目的：恢复出来的流水线：`steps` 从绝对第 `origin` 段开始，`line` 是这一段的行号基线，
+    ///   `handoff` 是切点交给它的产物（老段已收尾，不再造也不再走一遍）。
+    pub fn resumed(
+        steps: Vec<Box<dyn Flow>>,
+        decls: Vec<StepDecl>,
+        origin: usize,
+        line: u64,
+        handoff: Option<Artifact>,
+    ) -> Sequence {
+        let mut seq = Sequence {
+            steps,
+            decls,
+            origin,
+            at: 0,
+            pending: Vec::new(),
+        };
+        if let Some(first) = seq.steps.first_mut() {
+            first.set_next_line(line);
+            if let Some(artifact) = handoff {
+                first.intake(artifact);
+            }
+        }
+        seq
     }
 
     fn current(&self) -> Option<&dyn Flow> {
@@ -39,18 +75,65 @@ impl Sequence {
             .map(|s| &mut **s as &mut dyn Flow)
     }
 
-    /// 目的：当前这一段已收尾就往下一段交：产物给 intake，行号接着上一段（没交东西也接行号）。
-    fn settle_forward(&mut self) {
+    /// 目的：交出产物前先对照声明：这一段交的种类要在自己的 `produces` 里，下一段要收得下。
+    /// 返回：`Some(原因)` = 不许推进（原因会记成提示，停在原地）；`None` = 可以交。
+    fn handoff_problem(&self, made: Option<&Artifact>) -> Option<String> {
+        let artifact = made?;
+        let kind = artifact.kind_of();
+        let cur = self.decls.get(self.at)?;
+        match cur.produces {
+            Some(declared) if declared == kind => {}
+            Some(declared) => {
+                return Some(format!(
+                    "流程段 {} 声明交出{}，实际交出的是{}：停在原地，不往下走（systools/loops.yaml）",
+                    cur.id,
+                    declared.name(),
+                    kind.name()
+                ));
+            }
+            None => {
+                return Some(format!(
+                    "流程段 {} 没声明产物，却交出了{}：停在原地，不往下走（systools/loops.yaml）",
+                    cur.id,
+                    kind.name()
+                ));
+            }
+        }
+        let next = self.decls.get(self.at + 1)?;
+        if !next.accepts.contains(&kind) {
+            return Some(format!(
+                "下一段 {} 不收{}（accepts 里没有它）：停在原地，不往下走（systools/loops.yaml）",
+                next.id,
+                kind.name()
+            ));
+        }
+        None
+    }
+
+    /// 目的：当前这一段已收尾就往下一段交：产物给 intake，行号接着上一段，并写下进度事实。
+    fn settle_forward(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
         while self.at + 1 < self.steps.len() && self.steps[self.at].is_done() {
             let line = self.steps[self.at].next_line();
             let made = self.steps[self.at].output();
+            if let Some(why) = self.handoff_problem(made.as_ref()) {
+                sink(SessionEvent::Notice(why));
+                return;
+            }
             self.at += 1;
+            sink(stage::mark(self.origin + self.at, line, made.as_ref()));
             let next = &mut self.steps[self.at];
             next.set_next_line(line);
             if let Some(artifact) = made {
                 // 原样搬运：组合子不解释产物的内容，接不接得住由声明与装配期校验管。
                 next.intake(artifact);
             }
+        }
+    }
+
+    /// 目的：把还没有 sink 时攒下的进度事件交出去（`take_ask` 没有 sink，先存着）。
+    fn flush(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
+        for ev in std::mem::take(&mut self.pending) {
+            sink(ev);
         }
     }
 }
@@ -63,28 +146,34 @@ impl Flow for Sequence {
     }
 
     fn start(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
-        self.settle_forward();
+        self.flush(sink);
+        self.settle_forward(sink);
         if let Some(step) = self.current_mut() {
             step.start(sink);
         }
     }
 
     fn resume(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
-        self.settle_forward();
+        self.flush(sink);
+        self.settle_forward(sink);
         if let Some(step) = self.current_mut() {
             step.resume(sink);
         }
     }
 
     fn step(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
-        self.settle_forward();
+        self.flush(sink);
+        self.settle_forward(sink);
         if let Some(step) = self.current_mut() {
             step.step(sink);
         }
     }
 
     fn take_ask(&mut self) -> Option<MemberAsk> {
-        self.settle_forward();
+        // 这里没有 sink：推进产生的进度事件先攒着，下一次有人收事件时再交出去。
+        let mut held = Vec::new();
+        self.settle_forward(&mut |ev| held.push(ev));
+        self.pending.extend(held);
         self.current_mut().and_then(|step| step.take_ask())
     }
 
@@ -114,9 +203,10 @@ impl Flow for Sequence {
     }
 
     fn begin_with(&mut self, task: &str, sink: &mut dyn FnMut(SessionEvent)) {
-        // 需求只交给第一段：后面的段从上一段的产物接手。
-        if let Some(first) = self.steps.first_mut() {
-            first.begin_with(task, sink);
+        // 需求只交给当前这一段：恢复出来的流水线当前段就是起跑点那一段。
+        self.flush(sink);
+        if let Some(step) = self.current_mut() {
+            step.begin_with(task, sink);
         }
     }
 
@@ -193,7 +283,8 @@ impl Flow for Sequence {
         ticket: &GateTicket,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<Settle, String> {
-        self.settle_forward();
+        self.flush(sink);
+        self.settle_forward(sink);
         let at = self.at;
         // 卡也可能来自前面那一段（回档后两段的事实交叠）：先试当前段，再按段找一次。
         if let Some(step) = self.steps.get_mut(at)
@@ -217,8 +308,9 @@ impl Flow for Sequence {
     }
 
     fn intake(&mut self, artifact: Artifact) {
-        if let Some(first) = self.steps.first_mut() {
-            first.intake(artifact);
+        // 交给本段（复合流程嵌在别人里面时，收到的就是当前这一段的输入）。
+        if let Some(step) = self.current_mut() {
+            step.intake(artifact);
         }
     }
 
@@ -226,19 +318,31 @@ impl Flow for Sequence {
         self.current().and_then(|s| s.output())
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
-    use crate::units::business::session_model::api::Artifact;
-
-    /// 目的：假流程：收下交来的产物（记进自己的格子），可以立刻收尾并交出产物。
+    /// 目的：测试替身：一段只会收尾 / 交产物 / 记下收到了什么的流程。
     struct Fake {
         done: bool,
         out: Option<Artifact>,
-        got: Arc<Mutex<Vec<Artifact>>>,
+        got: Arc<std::sync::Mutex<Vec<Artifact>>>,
+        next: u64,
+    }
+
+    impl Fake {
+        fn new(done: bool, out: Option<Artifact>) -> (Fake, Arc<std::sync::Mutex<Vec<Artifact>>>) {
+            let got = Arc::new(std::sync::Mutex::new(Vec::new()));
+            (
+                Fake {
+                    done,
+                    out,
+                    got: Arc::clone(&got),
+                    next: 0,
+                },
+                got,
+            )
+        }
     }
 
     impl Flow for Fake {
@@ -250,7 +354,7 @@ mod tests {
             None
         }
         fn handback(&mut self, _ask: &MemberAsk, _turn: &MemberTurn) -> Handback {
-            Handback::Fed
+            Handback::PassOver
         }
         fn feed(
             &mut self,
@@ -262,9 +366,11 @@ mod tests {
         fn pass_over(&mut self, _ask: &MemberAsk, _sink: &mut dyn FnMut(SessionEvent)) {}
         fn failed(&mut self, _err: &str) {}
         fn next_line(&self) -> u64 {
-            0
+            self.next
         }
-        fn set_next_line(&mut self, _next: u64) {}
+        fn set_next_line(&mut self, next: u64) {
+            self.next = next;
+        }
         fn intake(&mut self, artifact: Artifact) {
             self.got.lock().unwrap().push(artifact);
         }
@@ -276,56 +382,99 @@ mod tests {
         }
     }
 
-    /// 目的：复合流程把上一段的产物原样交给下一段——种类与内容都不动，组合子不解释。
+    fn decl(id: &str, accepts: &[Kind], produces: Option<Kind>) -> StepDecl {
+        StepDecl {
+            id: id.to_string(),
+            accepts: accepts.to_vec(),
+            produces,
+        }
+    }
+
+    /// 目的：前一段收尾就把产物原样交给下一段。
     #[test]
     fn the_composite_hands_the_artifact_over_untouched() {
-        let first = Arc::new(Mutex::new(Vec::new()));
-        let second = Arc::new(Mutex::new(Vec::new()));
-        let mut seq = Sequence::new(vec![
-            Box::new(Fake {
-                done: true,
-                out: Some(Artifact::Summary("讨论完的总结".to_string())),
-                got: Arc::clone(&first),
-            }),
-            Box::new(Fake {
-                done: false,
-                out: None,
-                got: Arc::clone(&second),
-            }),
-        ]);
+        let (first, _a) = Fake::new(true, Some(Artifact::Summary("总结".to_string())));
+        let (second, b) = Fake::new(false, None);
+        let mut seq = Sequence::resumed(
+            vec![Box::new(first), Box::new(second)],
+            Vec::new(),
+            0,
+            0,
+            None,
+        );
         seq.start(&mut |_| {});
-        assert!(first.lock().unwrap().is_empty(), "第一段不收自己的产物");
-        let seen = second.lock().unwrap();
-        assert_eq!(seen.len(), 1, "第二段收到一件");
         assert_eq!(
-            seen[0],
-            Artifact::Summary("讨论完的总结".to_string()),
-            "种类与内容都原样"
+            b.lock().unwrap().as_slice(),
+            &[Artifact::Summary("总结".to_string())]
+        );
+        assert_eq!(seq.next_line(), 0);
+        assert!(!seq.is_done());
+    }
+
+    /// 目的：需求交给当前这一段收下（恢复出来的流水线也一样交给起跑点那段）。
+    #[test]
+    fn an_incoming_requirement_lands_on_the_first_step() {
+        let (first, a) = Fake::new(false, None);
+        let (second, _b) = Fake::new(false, None);
+        let mut seq = Sequence::resumed(
+            vec![Box::new(first), Box::new(second)],
+            Vec::new(),
+            0,
+            0,
+            None,
+        );
+        seq.begin_with("需求", &mut |_| {});
+        assert_eq!(
+            a.lock().unwrap().as_slice(),
+            &[Artifact::Requirement("需求".to_string())]
         );
     }
 
-    /// 目的：外面交给整条流水线的需求只落在第一段（后面的段从上一段接手）。
+    /// 目的：推进一段就在转录里落下一条进度事实（切点行号与产物都在里面）。
     #[test]
-    fn an_incoming_requirement_lands_on_the_first_step() {
-        let first = Arc::new(Mutex::new(Vec::new()));
-        let second = Arc::new(Mutex::new(Vec::new()));
-        let mut seq = Sequence::new(vec![
-            Box::new(Fake {
-                done: false,
-                out: None,
-                got: Arc::clone(&first),
-            }),
-            Box::new(Fake {
-                done: false,
-                out: None,
-                got: Arc::clone(&second),
-            }),
-        ]);
-        seq.intake(Artifact::Requirement("做一件小事".to_string()));
-        assert_eq!(
-            first.lock().unwrap().as_slice(),
-            &[Artifact::Requirement("做一件小事".to_string())]
+    fn advancing_leaves_a_stage_fact() {
+        let (first, _a) = Fake::new(true, Some(Artifact::Summary("总结".to_string())));
+        let (second, b) = Fake::new(false, None);
+        let decls = vec![
+            decl("discuss", &[Kind::Requirement], Some(Kind::Summary)),
+            decl("execute", &[Kind::Summary], None),
+        ];
+        let mut seq =
+            Sequence::resumed(vec![Box::new(first), Box::new(second)], decls, 0, 12, None);
+        let mut seen = Vec::new();
+        seq.start(&mut |ev| seen.push(ev.to_json()));
+        let mark = seen
+            .iter()
+            .find(|ev| ev.get("type").and_then(|t| t.as_str()) == Some("stage"))
+            .expect("推进一段要写一条进度事实");
+        assert_eq!(mark.get("path").and_then(|p| p.as_str()), Some("seq[1]"));
+        assert_eq!(mark.get("at").and_then(|v| v.as_u64()), Some(1));
+        assert_eq!(mark.get("line").and_then(|v| v.as_u64()), Some(12));
+        assert_eq!(b.lock().unwrap().len(), 1, "产物要交给下一段");
+    }
+
+    /// 目的：下一段收不下这个种类就停在原地，不写进度事实、也不把产物塞进去。
+    #[test]
+    fn a_handoff_the_next_step_does_not_take_stops_right_here() {
+        let (first, _a) = Fake::new(true, Some(Artifact::Summary("总结".to_string())));
+        let (second, b) = Fake::new(false, None);
+        let decls = vec![
+            decl("discuss", &[Kind::Requirement], Some(Kind::Summary)),
+            decl("execute", &[Kind::Requirement], None),
+        ];
+        let mut seq = Sequence::resumed(vec![Box::new(first), Box::new(second)], decls, 0, 0, None);
+        let mut seen = Vec::new();
+        seq.start(&mut |ev| seen.push(ev.to_json()));
+        assert!(
+            seen.iter()
+                .all(|ev| ev.get("type").and_then(|t| t.as_str()) != Some("stage")),
+            "不许推进"
         );
-        assert!(second.lock().unwrap().is_empty(), "第二段还没轮到");
+        let notice = seen
+            .iter()
+            .find(|ev| ev.get("type").and_then(|t| t.as_str()) == Some("notice"))
+            .expect("要给出停在原地的原因");
+        assert!(notice.to_string().contains("不收"), "{}", notice);
+        assert!(b.lock().unwrap().is_empty());
     }
 }

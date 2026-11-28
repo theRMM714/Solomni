@@ -46,11 +46,11 @@ flowchart RL
 | 环 2 · 状态与机制 | `workspace` | `workbench` | 10 |
 | 环 2 · 状态与机制 | `versions` | `workbench` | 9 |
 | 环 2 · 状态与机制 | `vm` | `catalog` | 9 |
+| 环 2 · 状态与机制 | `turn_state` | `session_model` | 8 |
 | 环 2 · 状态与机制 | `agentloop` | `catalog` | 7 |
 | 环 2 · 状态与机制 | `agentloop` | `residents` | 6 |
-| 环 2 · 状态与机制 | `turn_state` | `session_model` | 6 |
+| 环 2 · 状态与机制 | `turn_state` | `transcript` | 6 |
 | 环 2 · 状态与机制 | `turn_state` | `agentloop` | 6 |
-| 环 2 · 状态与机制 | `turn_state` | `transcript` | 5 |
 | 环 2 · 状态与机制 | `session_model` | `sandbox` | 4 |
 | 环 2 · 状态与机制 | `tools` | `llm` | 4 |
 | 环 2 · 状态与机制 | `turn_state` | `workbench` | 4 |
