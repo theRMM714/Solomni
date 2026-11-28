@@ -85,25 +85,91 @@ impl Work {
         } else {
             self.policies.default_id()
         };
-        // 这是**与某条会话无关的机器能力**：虚拟根属于会话选型，不在这里判（创建时另行收集）。
-        let machine = self
-            .policies
-            .machine(crate::units::business::sandbox::api::VM_POLICY);
-        let available = machine.ready();
         SandboxChoices {
             default,
-            policies: self.policies.decls(),
-            guest_available: available,
-            guest_unavailable_reason: self
-                .policies
-                .machine_refusal(crate::units::business::sandbox::api::VM_POLICY)
-                .unwrap_or_default(),
-            guest_requirements: machine.requirements,
+            policies: self.policy_views(),
             // 虚拟根清单是**事实**：读不到就空表（界面据此说"没有可选虚拟根"，不编造）。
             guests: self.provision.guest_bases().unwrap_or_default(),
             // 包库可用能力同样是事实：界面按它 + 虚拟根自带能力预判缺口，判据仍以后端为准。
-            available: self.packages.library().capability_versions(),
+            capabilities: self.packages.library().capability_versions(),
         }
+    }
+
+    /// 目的：某个执行环境策略缺的依赖怎么补（逐条下载清单）；`ids` 为空 = 现在缺的那些。
+    /// 约束：补齐能力来自策略自己（`SandboxPolicy::fixer`）：没登记策略 / 策略没有补齐器都如实拒绝。
+    pub fn fix_plan(
+        &self,
+        policy: &str,
+        ids: &[String],
+    ) -> Result<Vec<crate::units::pure::exec_model::api::FixStep>, String> {
+        self.fixer_of(policy)?.plan(ids)
+    }
+
+    /// 目的：按策略起补齐作业（`ids` 为空 = 现在缺的那些）。
+    pub fn fix_start(&self, policy: &str, ids: Vec<String>) -> Result<(), String> {
+        self.fixer_of(policy)?.start(ids)
+    }
+
+    /// 目的：取某个策略登记的补齐器；没有就如实说明是"没这个策略"还是"这个策略不用装东西"。
+    fn fixer_of(
+        &self,
+        policy: &str,
+    ) -> Result<std::sync::Arc<dyn crate::units::pure::exec_model::api::Fixer>, String> {
+        if self.policies.of(policy).is_none() {
+            return Err(format!("没有登记这个执行环境策略：{}", policy));
+        }
+        self.policies.fixer(policy).ok_or_else(|| {
+            format!(
+                "执行环境策略「{}」不需要补齐依赖（它没有登记补齐器）",
+                policy
+            )
+        })
+    }
+
+    /// 目的：把注册表里的策略逐个翻成呈现层的一项：自我介绍、逐项前置、能不能选、能不能补。
+    /// 约束：这一层不产生判断——可用性来自策略自己的 `machine`，补齐能力来自它自己的 `fixer`；
+    ///   取值域（`PolicyDecl::choices`）在这里解析成实际清单（认不出的域留空 = 手填）。
+    pub(crate) fn policy_views(&self) -> Vec<SandboxChoice> {
+        // 虚拟根域：只列装齐了的（没装齐的选了也起不来；缺什么另由 provision 面板说）。
+        let guests: Vec<String> = self
+            .provision
+            .guest_bases()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|g| g.ready)
+            .map(|g| g.guest)
+            .collect();
+        let mut domains: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        domains.insert("guests".to_string(), guests);
+        self.policies
+            .catalog()
+            .into_iter()
+            .map(|view| {
+                let mut decl = view.decl;
+                let declared = decl.choices.clone();
+                if let Some(params) = decl.params.as_mut() {
+                    for (name, domain) in &declared {
+                        if let (Some(values), Some(param)) =
+                            (domains.get(domain), params.get_mut(name))
+                        {
+                            param.values = Some(values.clone());
+                        }
+                    }
+                }
+                // 能补 = 这个策略自己登记了补齐器（它列清单、它起作业）；缺项里哪些能装、哪些只能改本机,
+                // 由补齐器的清单与每条 requirement 的 fix 如实说明，界面不预判。
+                let fixable = self.policies.fixer(&decl.id).is_some();
+                let available = view.machine.ready();
+                let refusal = self.policies.machine_refusal(&decl.id).unwrap_or_default();
+                SandboxChoice {
+                    decl,
+                    needs: view.machine.requirements,
+                    available,
+                    refusal,
+                    fixable,
+                }
+            })
+            .collect()
     }
 
     /// 目的：这份会话的执行计划（清单先按会话用到的模块收窄，再交给 `catalog::packages::api::plan_for_spec` 派生）。

@@ -241,14 +241,14 @@ impl Handle {
                 .get("name")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
-            sandbox: args
-                .get("sandbox")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-            guest: args
-                .get("guest")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
+            // 执行环境是一个声明对象（策略 id + 参数 + 定版），不是几个平铺字段：只照这个形状解析，
+            // 平铺的字符串不认（"策略身份"必须能被策略自己解释，见 sandbox 单元）。
+            sandbox: match args.get("sandbox") {
+                None | Some(serde_json::Value::Null) => None,
+                Some(v) => Some(serde_json::from_value(v.clone()).map_err(|e| {
+                    format!("sandbox 要是执行环境声明 {{policy, params, pins}}：{}", e)
+                })?),
+            },
             parent: None,
             permission: args
                 .get("permission")

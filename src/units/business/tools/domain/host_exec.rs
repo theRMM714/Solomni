@@ -3,6 +3,7 @@
 //! 不管：本机侧怎么隔离（内核围栏）；客机怎么跑（`vm`）。
 //! 联动：组合根把 `host_policy` 登记进注册表；`agentloop` 只经 `sandbox::api::Sandbox` 调它。
 
+use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -40,6 +41,7 @@ impl SandboxPolicy for HostPolicy {
             name: "本机".to_string(),
             hint: "直接在本机跑（不套客机）".to_string(),
             params: None,
+            choices: BTreeMap::new(),
         }
     }
 

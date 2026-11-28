@@ -35,7 +35,7 @@ pub(crate) fn session_config_reports_tier_missing_and_runtimes_dir() {
     assert_eq!(cfg.sid, "w");
     assert_eq!(cfg.kind, SINGLE);
     assert!(!cfg.started, "没有内容的会话 = 还没开过");
-    assert_eq!(cfg.sandbox, "vm");
+    assert_eq!(cfg.sandbox.policy, "vm");
     assert_eq!(cfg.agents[0].model, "m");
     assert_eq!(
         cfg.runtime.missing.get("a"),

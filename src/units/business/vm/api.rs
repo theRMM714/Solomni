@@ -8,12 +8,10 @@ pub use crate::kernel::api::path_bridge::PathBridge;
 pub use crate::units::business::sandbox::api::GuestOs;
 pub use crate::units::business::vm::detail::qemu::create_disk;
 pub use crate::units::business::vm::domain::diagnose::GuestDiagnosis;
-#[allow(unused_imports)] // 入站面：机器能力判定只被自检与用例读，bin 本体不用
-pub use crate::units::business::vm::domain::exec::vm_capability;
+#[allow(unused_imports)] // 入站面：清单只被策略实现与自检读，bin 本体不用
 pub use crate::units::business::vm::domain::exec::{
-    COPY_SHARE_ENV, QEMU_BIN, SMBD_BIN, VIRTIOFSD_BIN, VmInputs, VmRequirement, admit_guest,
-    capability_refusal, copy_share_enabled, share_chain, tier_readiness, tier_refusal,
-    vm_requirements,
+    COPY_SHARE_ENV, QEMU_BIN, SMBD_BIN, VIRTIOFSD_BIN, VmInputs, admit_guest, capability_refusal,
+    copy_share_enabled, share_chain, tier_readiness, tier_refusal, vm_requirements,
 };
 pub use crate::units::business::vm::domain::guest::{
     GuestRun, GuestSpec, OutputLimit, SeedDocs, mounts_from, package_setup_scripts,
@@ -86,8 +84,9 @@ pub fn vm_policy(
     probe: std::sync::Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
     vm: std::sync::Arc<dyn Vm + Send + Sync>,
     tools: std::sync::Arc<dyn Fn() -> VmTools + Send + Sync>,
+    fixer: Option<std::sync::Arc<dyn crate::units::pure::exec_model::api::Fixer>>,
 ) -> std::sync::Arc<dyn crate::units::business::sandbox::api::SandboxPolicy> {
     std::sync::Arc::new(crate::units::business::vm::domain::policy::VmPolicy::new(
-        root, probe, vm, tools,
+        root, probe, vm, tools, fixer,
     ))
 }

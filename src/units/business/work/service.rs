@@ -33,8 +33,8 @@ use crate::units::business::vm::api::Vm;
 use crate::units::business::work::api::{
     AgentSuggestion, ConfigAgent, ContinueView, EditGuest, FilesAgentRootView, FilesAgentView,
     FilesRootsView, FilesView, GuestBoot, PermissionSharedView, PermissionView, PreparedActivation,
-    ProxySeed, ReadyActivation, RuntimeDiagnosis, RuntimeReport, SandboxChoices, SessionConfig,
-    SessionEdit, SessionTypeView, SessionView, ThinkingView, WorkOpened, WorkSpec,
+    ProxySeed, ReadyActivation, RuntimeDiagnosis, RuntimeReport, SandboxChoice, SandboxChoices,
+    SessionConfig, SessionEdit, SessionTypeView, SessionView, ThinkingView, WorkOpened, WorkSpec,
 };
 use crate::units::business::work::domain::{merge_into_one, session_started, validate_work_name};
 use crate::units::business::workspace::api::Workspace;

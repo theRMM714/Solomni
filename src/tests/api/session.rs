@@ -351,9 +351,7 @@ fn editing_is_refused_while_a_session_is_generating() {
     let cfg = faces.work.config(&sid).expect("读配置");
     let edit = || SessionEdit {
         agents: cfg.agents.clone(),
-        sandbox: "host".to_string(),
-        guest: None,
-        pins: std::collections::BTreeMap::new(),
+        sandbox: crate::units::business::sandbox::api::SandboxDecl::host(),
         permission: None,
         shared: None,
     };
@@ -518,7 +516,7 @@ fn create_session_and_config_carry_chara_as_a_snapshot() {
                     "modules": ["a"],
                     "chara": "建会话时写的人设"
                 }],
-                "sandbox": "host"
+                "sandbox": {"policy": "host"}
             }),
             caller: Caller::User,
             out: Output::Final,
@@ -542,9 +540,7 @@ fn create_session_and_config_carry_chara_as_a_snapshot() {
                     model: String::new(),
                     chara: "会话里临时改的人设".to_string(),
                 }],
-                sandbox: "host".to_string(),
-                guest: None,
-                pins: std::collections::BTreeMap::new(),
+                sandbox: crate::units::business::sandbox::api::SandboxDecl::host(),
                 permission: None,
                 shared: None,
             },

@@ -110,8 +110,7 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
     );
     // 子会话不能单独改档位。
     let mut bad = edit_of(vec![("a", &["a"], "")]);
-    bad.sandbox = "host".to_string();
-    bad.guest = None;
+    bad.sandbox = crate::units::business::sandbox::api::SandboxDecl::host();
     let err = core
         .prepare_edit("w--a", bad)
         .err()
@@ -119,8 +118,11 @@ pub(crate) fn child_sessions_share_the_main_guest_and_follow_its_tier() {
     assert!(err.contains("子会话"), "{}", err);
     // 主会话留在 VM 档改配：子会话的 exec 要同步成主会话的。
     let mut edit = edit_of(vec![("a", &["a"], ""), ("b", &["b"], "")]);
-    edit.sandbox = "vm".to_string();
-    edit.guest = Some(crate::tests::test_guest("vm-spec"));
+    edit.sandbox = crate::units::business::sandbox::api::SandboxDecl {
+        policy: "vm".to_string(),
+        params: serde_json::json!({ "guest": crate::tests::test_guest("vm-spec") }),
+        pins: BTreeMap::new(),
+    };
     let (prepared, _job) = core.prepare_edit("w", edit).expect("准备改配");
     let updated = prepared
         .new_children

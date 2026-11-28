@@ -497,23 +497,11 @@ impl Core {
         if let Some(p) = spec.parent.as_deref() {
             return Ok(self.history.meta(p)?.sandbox.clone());
         }
-        let policy = spec
-            .sandbox
-            .as_deref()
-            .map(str::trim)
-            .filter(|t| !t.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| self.registry.app_settings().default_sandbox.policy.clone());
-        let mut decl = SandboxDecl::of(&policy);
-        if let Some(g) = spec
-            .guest
-            .as_deref()
-            .map(str::trim)
-            .filter(|b| !b.is_empty())
-        {
-            decl.params = serde_json::json!({ "guest": g });
-        }
-        Ok(decl)
+        Ok(match &spec.sandbox {
+            // 人给的声明原样用：策略 id、参数（如虚拟根）与定版都在里面，核心不再二次拼装。
+            Some(d) => d.clone(),
+            None => SandboxDecl::of(&self.registry.app_settings().default_sandbox.policy),
+        })
     }
 
     /// 目的：建会话的第一段（核心，毫秒级）——规整载荷、占名、备好工作区与计划。

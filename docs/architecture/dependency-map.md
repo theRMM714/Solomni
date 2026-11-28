@@ -17,14 +17,14 @@ flowchart RL
   R1["环 1 · 纯<br/>4 个单元"]
   R2["环 2 · 状态与机制<br/>20 个单元"]
   R3["环 3 · 用例<br/>9 个单元"]
-  R3 -->|"582 处 / 80 对"| R2
+  R3 -->|"578 处 / 81 对"| R2
 ```
 
 | 从 | 到 | 单元对 | 引用处 |
 | --- | --- | --- | --- |
-| 环 3 · 用例 | 环 2 · 状态与机制 | 80 | 582 |
+| 环 3 · 用例 | 环 2 · 状态与机制 | 81 | 578 |
 
-> 1 种跨环边、80 对单元、582 处引用；本段由 `tests/gates/structure/layers.js` 现算（`node tests/docs-sync.mjs --write`），不手写。
+> 1 种跨环边、81 对单元、578 处引用；本段由 `tests/gates/structure/layers.js` 现算（`node tests/docs-sync.mjs --write`），不手写。
 <!-- END:dependency-rings -->
 
 ## 二、同环：没有层，只有先后
@@ -107,8 +107,8 @@ flowchart RL
 | `work` | `catalog` | 环 3 · 用例 → 环 2 · 状态与机制 | 30 |
 | `turn` | `transcript` | 环 3 · 用例 → 环 2 · 状态与机制 | 29 |
 | `turn` | `agentloop` | 环 3 · 用例 → 环 2 · 状态与机制 | 25 |
-| `work` | `sandbox` | 环 3 · 用例 → 环 2 · 状态与机制 | 24 |
 | `collab` | `agentloop` | 环 3 · 用例 → 环 2 · 状态与机制 | 23 |
+| `work` | `sandbox` | 环 3 · 用例 → 环 2 · 状态与机制 | 20 |
 | `runtime` | `catalog` | 环 3 · 用例 → 环 2 · 状态与机制 | 18 |
 | `runtime` | `turn_state` | 环 3 · 用例 → 环 2 · 状态与机制 | 15 |
 | `turn` | `catalog` | 环 3 · 用例 → 环 2 · 状态与机制 | 15 |
@@ -144,7 +144,6 @@ flowchart RL
 | `collab` | `workspace` | 环 3 · 用例 → 环 2 · 状态与机制 | 4 |
 | `conversation` | `transcript` | 环 3 · 用例 → 环 2 · 状态与机制 | 4 |
 | `work` | `transcript` | 环 3 · 用例 → 环 2 · 状态与机制 | 4 |
-| `work` | `provision` | 环 3 · 用例 → 环 2 · 状态与机制 | 4 |
 | `collab` | `workbench` | 环 3 · 用例 → 环 2 · 状态与机制 | 3 |
 | `conversation` | `catalog` | 环 3 · 用例 → 环 2 · 状态与机制 | 3 |
 | `lifecycle` | `workbench` | 环 3 · 用例 → 环 2 · 状态与机制 | 3 |
@@ -153,6 +152,7 @@ flowchart RL
 | `maintenance` | `vm` | 环 3 · 用例 → 环 2 · 状态与机制 | 3 |
 | `runtime` | `workbench` | 环 3 · 用例 → 环 2 · 状态与机制 | 3 |
 | `system` | `versions` | 环 3 · 用例 → 环 2 · 状态与机制 | 3 |
+| `work` | `provision` | 环 3 · 用例 → 环 2 · 状态与机制 | 3 |
 | `work` | `agentloop` | 环 3 · 用例 → 环 2 · 状态与机制 | 3 |
 | `conversation` | `tools` | 环 3 · 用例 → 环 2 · 状态与机制 | 2 |
 | `conversation` | `turn_state` | 环 3 · 用例 → 环 2 · 状态与机制 | 2 |
@@ -173,6 +173,7 @@ flowchart RL
 | `lifecycle` | `session_model` | 环 3 · 用例 → 环 2 · 状态与机制 | 1 |
 | `lifecycle` | `tools` | 环 3 · 用例 → 环 2 · 状态与机制 | 1 |
 | `proxy` | `session_model` | 环 3 · 用例 → 环 2 · 状态与机制 | 1 |
+| `proxy` | `sandbox` | 环 3 · 用例 → 环 2 · 状态与机制 | 1 |
 | `proxy` | `tools` | 环 3 · 用例 → 环 2 · 状态与机制 | 1 |
 | `runtime` | `prompt` | 环 3 · 用例 → 环 2 · 状态与机制 | 1 |
 | `runtime` | `provision` | 环 3 · 用例 → 环 2 · 状态与机制 | 1 |
@@ -182,7 +183,7 @@ flowchart RL
 | `system` | `workbench` | 环 3 · 用例 → 环 2 · 状态与机制 | 1 |
 | `work` | `prompt` | 环 3 · 用例 → 环 2 · 状态与机制 | 1 |
 
-> 80 对跨环边；方向一律向内（外层 → 内层），向上与同环逆序由 `tests/gates/structure/layers.js` 判红，本表只记现状。
+> 81 对跨环边；方向一律向内（外层 → 内层），向上与同环逆序由 `tests/gates/structure/layers.js` 判红，本表只记现状。
 <!-- END:dependency-cross -->
 
 ## 检查

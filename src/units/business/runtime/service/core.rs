@@ -573,6 +573,20 @@ impl Core {
         self.work.sandbox_choices(self.registry.as_ref())
     }
 
+    /// 目的：薄转发到 `work`：某个执行环境策略缺的依赖怎么补（列清单）。
+    pub fn fix_plan(
+        &self,
+        policy: &str,
+        ids: &[String],
+    ) -> Result<Vec<crate::units::pure::exec_model::api::FixStep>, String> {
+        self.work.fix_plan(policy, ids)
+    }
+
+    /// 目的：薄转发到 `work`：按策略起补齐作业。
+    pub fn fix_start(&self, policy: &str, ids: Vec<String>) -> Result<(), String> {
+        self.work.fix_start(policy, ids)
+    }
+
     /// 目的：薄转发到 `work` 的同名方法（runtime 只做应用编排）。
     pub(crate) fn host_plan_now(
         &self,

@@ -1,41 +1,14 @@
 //! 目的：执行档位的纯逻辑——承载判定与就绪检测（这一档现在能不能跑）。
-//! 管：虚拟机档的前置条件清单（`VmRequirement` / `TierReadiness`）、共享档选择、本机能否承载虚拟机档。
+//! 管：虚拟机档的前置条件清单（`Requirement`，含每项怎么补）、共享档选择、本机能否承载虚拟机档。
 //! 不管：执行计划与入口诊断（`catalog` 的 `packages` 与 `modules`）、包库与选包（`packages`）、目录遍历与 guest 启动（`detail/` 与 guest 后端）、会话档案（`session`）、实际的工具进程执行（`tools`）。
 //! 联动：契约见 docs/vm/README.md 与 RUNTIME_SPEC.md；TargetSpec 是 kernel 的共享形状；被 runtime 与呈现层经 api.rs 消费。
 
 use crate::kernel::ports::HostProbe;
 use crate::units::business::sandbox::api::{GuestAgent, GuestImage, GuestOs};
 use crate::units::business::vm::domain::tool::{ToolPath, ToolSource, VmTools};
-use crate::units::pure::exec_model::api::Side;
-use crate::units::pure::exec_model::api::TargetSpec;
+use crate::units::pure::exec_model::api::{Fix, Readiness, Requirement, Side, TargetSpec};
 use crate::units::resource::vmstore::api::resolve_guest;
-use serde::Serialize;
 use std::path::Path;
-
-/// 目的：执行档位的能力前置条件（本机档没有额外前置）。
-/// 约束：`RUNTIME_SPEC.md` 把「选型」与「本机能不能承载」分开：定版/缺包/冲突是选型，这里是承载。
-/// 约束：**逐项清单**（而不是几个布尔）：用户要看到的是"缺哪几项、每项怎么补"。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TierReadiness {
-    /// 目的：虚拟机档的全部前置要求；本机档为空（没有额外前置）。
-    pub requirements: Vec<VmRequirement>,
-}
-
-impl TierReadiness {
-    pub fn ready(&self) -> bool {
-        self.requirements.iter().all(|r| r.met)
-    }
-
-    /// 目的：缺哪几项（空 = 齐了）：呈现层按它如实说明，不猜。
-    pub fn unmet(&self) -> Vec<&VmRequirement> {
-        self.requirements.iter().filter(|r| !r.met).collect()
-    }
-
-    /// 目的：缺什么（每项一句"现状"）：沿用给日志与拒绝理由用。
-    pub fn missing(&self) -> Vec<&str> {
-        self.unmet().iter().map(|r| r.detail.as_str()).collect()
-    }
-}
 
 /// 目的：虚拟机监视器不可用时该怎么提示（各平台如实说各自的前置条件）。
 pub fn hypervisor_hint() -> &'static str {
@@ -50,17 +23,9 @@ pub fn hypervisor_hint() -> &'static str {
     }
 }
 
-/// 目的：虚拟机档的一项前置要求：**事实 + 怎么解决**（界面与 --doctor 照抄，不各自编话）。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct VmRequirement {
-    /// 目的：要求名（机器可读的稳定短名，界面/日志按它分支）。
-    pub id: &'static str,
-    /// 目的：满没满足。
-    pub met: bool,
-    /// 目的：现状一句话（满足与不满足都要能读）。
-    pub detail: String,
-    /// 目的：没满足时怎么解决（满足了就是空）。
-    pub how: String,
+/// 目的：一条虚拟机相关依赖在 `dependencies.yaml` 里的 id（带宿主平台后缀）：补齐时按它找条目。
+fn dep(base: &str) -> Vec<String> {
+    vec![format!("{}.{}", base, std::env::consts::OS)]
 }
 
 /// 目的：虚拟机档检测的入参：两件外部工具的位置事实（登记值 + 项目内补齐）+ 宿主探测端口。
@@ -77,59 +42,59 @@ pub const QEMU_BIN: &str = "qemu-system-x86_64";
 /// 目的：虚拟机档的**机器能力**清单（**只读事实，不起任何虚拟机**）——与某条会话无关。
 /// 约束：为什么做成清单：用户看到的必须是"缺哪几项、每项怎么补"，而不是一句笼统的"前置条件不具备"。
 /// 约束：虚拟根属于**会话选型**，不在这里；含虚拟根的严格判据见 tier_readiness。
-pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
+pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<Requirement> {
     let hyper = vm.probe.hypervisor_available();
     let combo = effective_combo_label(&vm.tools.share, vm.probe);
-    vec![
-        VmRequirement {
-            id: "hypervisor",
-            met: hyper,
-            // 这一项是虚拟机档**唯一**的硬件前提：只用硬件加速，没有就不成立（不退回软件模拟）。
-            detail: if hyper {
-                format!(
-                    "本机虚拟机监视器可用（{}）；虚拟机档只走硬件加速，不退回软件模拟",
-                    hypervisor_kind()
-                )
-            } else {
-                format!(
-                    "{}；虚拟机档只走硬件加速，不退回软件模拟",
-                    hypervisor_hint()
-                )
-            },
-            how: if hyper {
-                String::new()
-            } else {
-                hypervisor_how().to_string()
-            },
-        },
-        // guest 本体：产品侧的后端与执行分派已就位；**逐平台**真机验收通过后才放开。
-        // 约束：这是"验过没有"的事实，不是环境探测——环境项是上面的 hypervisor / qemu / 虚拟根。
-        VmRequirement {
-            id: "guest",
-            met: guest_backend_verified(),
-            detail: if guest_backend_verified() {
-                if copy_share_enabled() {
-                    "guest 后端已就位，本平台已通过真机验收（当前共享档为开发/应急 copy）"
-                        .to_string()
-                } else if combo == "未定" {
-                    "guest 后端已就位，本平台已通过真机验收；用户共享档当前不可用".to_string()
-                } else {
-                    format!("guest 后端已就位，本平台默认组合 {} 已通过真机验收", combo)
-                }
-            } else if copy_share_enabled() {
-                "guest 后端已就位，但本平台尚未真机验收；当前共享档为开发/应急 copy（就绪项判否）"
-                    .to_string()
+    let hyper_detail = if hyper {
+        format!(
+            "本机虚拟机监视器可用（{}）；虚拟机档只走硬件加速，不退回软件模拟",
+            hypervisor_kind()
+        )
+    } else {
+        format!(
+            "{}；虚拟机档只走硬件加速，不退回软件模拟",
+            hypervisor_hint()
+        )
+    };
+    let mut out = Vec::new();
+    // 这一项是虚拟机档**唯一**的硬件前提：只用硬件加速，没有就不成立（不退回软件模拟）。
+    out.push(if hyper {
+        Requirement::met("hypervisor", "虚拟机监视器", hyper_detail)
+    } else {
+        Requirement::unmet(
+            "hypervisor",
+            "虚拟机监视器",
+            hyper_detail,
+            Fix::host_setting(hypervisor_how()),
+        )
+    });
+    // guest 本体：产品侧的后端与执行分派已就位；**逐平台**真机验收通过后才放开。
+    // 约束：这是"验过没有"的事实，不是环境探测——环境项是上面的 hypervisor / qemu / 虚拟根。
+    {
+        let verified = guest_backend_verified();
+        let detail = if verified {
+            if copy_share_enabled() {
+                "guest 后端已就位，本平台已通过真机验收（当前共享档为开发/应急 copy）".to_string()
             } else if combo == "未定" {
-                "guest 后端已就位，但本平台尚未真机验收（就绪项判否）".to_string()
+                "guest 后端已就位，本平台已通过真机验收；用户共享档当前不可用".to_string()
             } else {
-                format!(
-                    "guest 后端已就位，但本平台默认组合 {} 尚未真机验收（就绪项判否）",
-                    combo
-                )
-            },
-            how: if guest_backend_verified() {
-                String::new()
-            } else if copy_share_enabled() || combo == "未定" {
+                format!("guest 后端已就位，本平台默认组合 {} 已通过真机验收", combo)
+            }
+        } else if copy_share_enabled() {
+            "guest 后端已就位，但本平台尚未真机验收；当前共享档为开发/应急 copy（就绪项判否）"
+                .to_string()
+        } else if combo == "未定" {
+            "guest 后端已就位，但本平台尚未真机验收（就绪项判否）".to_string()
+        } else {
+            format!(
+                "guest 后端已就位，但本平台默认组合 {} 尚未真机验收（就绪项判否）",
+                combo
+            )
+        };
+        out.push(if verified {
+            Requirement::met("guest", "guest 后端验收", detail)
+        } else {
+            let why = if copy_share_enabled() || combo == "未定" {
                 "在该平台真机上跑通一次 vm 档工具后再放开（现状与验收见 tests/macos/gaps.yaml）"
                     .to_string()
             } else {
@@ -137,13 +102,20 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
                     "在该平台真机上跑通一次 vm 档工具（默认组合 {}）后再放开（现状与验收见 tests/macos/gaps.yaml）",
                     combo
                 )
-            },
-        },
-        // 共享档：**硬前置**——用户链为空就判否；copy 只在开发/应急开关下出现。
-        share_requirement(&vm.tools.share, vm.probe),
-        // QEMU：不预置、不分发（可由 setup 脚本装进项目内）。没登记就看项目内那份，再兜底 PATH。
-        qemu_requirement(&vm.tools.qemu, vm.probe),
-    ]
+            };
+            Requirement::unmet(
+                "guest",
+                "guest 后端验收",
+                detail,
+                Fix::blocked(why),
+            )
+        });
+    }
+    // 共享档：**硬前置**——用户链为空就判否；copy 只在开发/应急开关下出现。
+    out.push(share_requirement(&vm.tools.share, vm.probe));
+    // QEMU：不预置、不分发（可由 setup 脚本装进项目内）。没登记就看项目内那份，再兜底 PATH。
+    out.push(qemu_requirement(&vm.tools.qemu, vm.probe));
+    out
 }
 
 /// 本机虚拟机监视器的类型（如实说清是哪一种，不笼统说"虚拟化可用"）。
@@ -375,25 +347,24 @@ fn effective_combo_label(share_tool: &ToolPath, probe: &dyn HostProbe) -> String
 /// 目的：共享档的现状——本平台用户链有没有能用的挂载式后端；没有就如实判否。
 /// 约束：这是**硬前置**，不再回退 copy；Linux 缺 virtiofsd 时 9p 仍算可用。
 ///   "怎么补"写在 how 里；copy 只由开发/应急开关启用，并在 detail 里明确标出。
-fn share_requirement(share_tool: &ToolPath, probe: &dyn HostProbe) -> VmRequirement {
+fn share_requirement(share_tool: &ToolPath, probe: &dyn HostProbe) -> Requirement {
     if copy_share_enabled() {
-        return VmRequirement {
-            id: "share",
-            met: true,
-            detail: format!(
+        return Requirement::met(
+            "share",
+            "共享档",
+            format!(
                 "共享档 copy 已由开发/应急开关启用（{}={}）：性能不可用，不参与用户档",
                 COPY_SHARE_ENV, "copy"
             ),
-            how: String::new(),
-        };
+        );
     }
     let chain = share_chain(std::env::consts::OS, share_tool, probe);
     let top = top_user_combo();
     if chain.is_empty() {
-        let (detail, how) = match top {
+        let (detail, fix) = match top {
             None => (
                 "本平台还没有已实现的用户共享档".to_string(),
-                "换本机档；虚拟机档需要挂载式共享（Linux 9p/virtiofs、Windows smb）".to_string(),
+                Fix::blocked("换本机档；虚拟机档需要挂载式共享（Linux 9p/virtiofs、Windows smb）"),
             ),
             Some(c) => {
                 let detail = match share_tool_of(c.share) {
@@ -404,15 +375,20 @@ fn share_requirement(share_tool: &ToolPath, probe: &dyn HostProbe) -> VmRequirem
                         tool_fault(share_tool, Need::Runnable, probe)
                     ),
                 };
-                (detail, share_how(c.share))
+                // 只有清单里真有的那几条才给下载入口；别的平台补不了就如实说。
+                let fix = match (
+                    c.share,
+                    crate::kernel::api::platform::IS_WINDOWS,
+                    crate::kernel::api::platform::IS_LINUX,
+                ) {
+                    ("smb", true, _) => Fix::download(share_how(c.share), dep("vm.smbd")),
+                    ("virtiofs", _, true) => Fix::download(share_how(c.share), dep("vm.virtiofsd")),
+                    _ => Fix::blocked(share_how(c.share)),
+                };
+                (detail, fix)
             }
         };
-        return VmRequirement {
-            id: "share",
-            met: false,
-            detail,
-            how,
-        };
+        return Requirement::unmet("share", "共享档", detail, fix);
     }
     let best = chain[0];
     let detail = match top {
@@ -436,12 +412,7 @@ fn share_requirement(share_tool: &ToolPath, probe: &dyn HostProbe) -> VmRequirem
         },
         None => format!("共享档 {} 可用", best),
     };
-    VmRequirement {
-        id: "share",
-        met: true,
-        detail,
-        how: String::new(),
-    }
+    Requirement::met("share", "共享档", detail)
 }
 
 /// 目的：本平台用户链里性能最高的那一档（copy 不在其中）。
@@ -474,7 +445,7 @@ fn hypervisor_how() -> &'static str {
 }
 
 /// QEMU 检测：登记值优先，其次项目内补齐那份，最后看 PATH（依赖不预置、不分发，可由 setup 脚本装进项目内）。
-fn qemu_requirement(tool: &ToolPath, probe: &dyn HostProbe) -> VmRequirement {
+fn qemu_requirement(tool: &ToolPath, probe: &dyn HostProbe) -> Requirement {
     let (met, detail) = match choose(tool, QEMU_BIN, Need::Present, probe) {
         Chosen::Usable(p, src) => (true, format!("QEMU 可用（{}：{}）", src.label(), p)),
         _ => (
@@ -486,58 +457,55 @@ fn qemu_requirement(tool: &ToolPath, probe: &dyn HostProbe) -> VmRequirement {
             ),
         ),
     };
-    VmRequirement {
-        id: "qemu",
-        met,
-        detail,
-        how: if met {
-            String::new()
-        } else {
-            "在创建向导或配置界面点「补齐虚拟机依赖」把它下载进项目内（只写项目内，需用户同意）；也可自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径（登记值失效时清空即可恢复自动发现）。集成环境里没有界面时可用 solomni --provision --ensure --yes"
-                .to_string()
-        },
+    if met {
+        return Requirement::met("qemu", "QEMU", detail);
     }
+    let how = "在创建向导或配置界面点「补齐虚拟机依赖」把它下载进项目内（只写项目内，需用户同意）；也可自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径（登记值失效时清空即可恢复自动发现）。集成环境里没有界面时可用 solomni --provision --ensure --yes";
+    let fix = if crate::kernel::api::platform::IS_WINDOWS || crate::kernel::api::platform::IS_LINUX
+    {
+        Fix::download(how, dep("vm.qemu"))
+    } else {
+        Fix::blocked(how)
+    };
+    Requirement::unmet("qemu", "QEMU", detail, fix)
 }
 
 /// 目的：虚拟根就绪检测——名字认得、那一格目录在场、布局可用（rootfs + 内核或磁盘镜像）。
 /// 约束：检测顺序 = 名字合法性 → 在场 → 布局；三种失败给三种可操作的说明，不混成一句。
-fn guest_requirement(root: &Path, guest: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
+fn guest_requirement(root: &Path, guest: Option<&str>, probe: &dyn HostProbe) -> Requirement {
     let how = "在创建向导或配置界面点「补齐虚拟机依赖」把虚拟根装进项目内（只写项目内，需用户同意），或换一个已装好的虚拟根；集成环境里没有界面时可用 solomni --provision --ensure --yes";
+    let base_fix = || {
+        if crate::kernel::api::platform::IS_WINDOWS || crate::kernel::api::platform::IS_LINUX {
+            Fix::download(how, dep("vm.guest"))
+        } else {
+            Fix::blocked(how)
+        }
+    };
     let name = guest.map(str::trim).filter(|g| !g.is_empty());
     let Some(name) = name else {
-        return VmRequirement {
-            id: "base",
-            met: false,
-            detail: "没有选定虚拟根".to_string(),
-            how: how.to_string(),
-        };
+        return Requirement::unmet("base", "虚拟根", "没有选定虚拟根", base_fix());
     };
     let dir = match resolve_guest(root, name) {
         Ok(d) => d,
         Err(why) => {
-            return VmRequirement {
-                id: "base",
-                met: false,
-                detail: why,
-                how: how.to_string(),
-            };
+            return Requirement::unmet("base", "虚拟根", why, base_fix());
         }
     };
     if !probe.is_dir(&dir) {
-        return VmRequirement {
-            id: "base",
-            met: false,
-            detail: format!("虚拟根「{}」不在场：{}", name, dir.display()),
-            how: how.to_string(),
-        };
+        return Requirement::unmet(
+            "base",
+            "虚拟根",
+            format!("虚拟根「{}」不在场：{}", name, dir.display()),
+            base_fix(),
+        );
     }
     match crate::units::business::sandbox::api::classify_base(&dir, probe) {
         Ok(b) => {
             let root_kind = "磁盘镜像 rootfs";
-            VmRequirement {
-                id: "base",
-                met: true,
-                detail: format!(
+            Requirement::met(
+                "base",
+                "虚拟根",
+                format!(
                     "虚拟根「{}」已就位（{}，{}，内核 {}{}）",
                     name,
                     b.id,
@@ -549,15 +517,14 @@ fn guest_requirement(root: &Path, guest: Option<&str>, probe: &dyn HostProbe) ->
                         .unwrap_or_else(|| "自带引导".to_string()),
                     if b.initrd.is_some() { " + initrd" } else { "" }
                 ),
-                how: String::new(),
-            }
+            )
         }
-        Err(why) => VmRequirement {
-            id: "base",
-            met: false,
-            detail: format!("虚拟根「{}」不可用：{}", name, why),
-            how: how.to_string(),
-        },
+        Err(why) => Requirement::unmet(
+            "base",
+            "虚拟根",
+            format!("虚拟根「{}」不可用：{}", name, why),
+            base_fix(),
+        ),
     }
 }
 
@@ -568,7 +535,7 @@ fn guest_share_requirement(
     guest: Option<&str>,
     share_tool: &ToolPath,
     probe: &dyn HostProbe,
-) -> Option<VmRequirement> {
+) -> Option<Requirement> {
     let name = guest.map(str::trim).filter(|g| !g.is_empty())?;
     let dir = resolve_guest(root, name).ok()?;
     if !probe.is_dir(&dir) {
@@ -600,46 +567,47 @@ fn guest_share_requirement(
         } else {
             declared.join("、")
         };
-        return Some(VmRequirement {
-            id: "share-guest",
-            met: false,
-            detail: format!(
+        let why = if copy_share_enabled() {
+            "开发/应急 copy 只支持 Linux guest；换 Linux 虚拟根，或关掉 SOLOMNI_VM_SHARE=copy 后用用户档。"
+        } else {
+            "在 guest.yaml 的 clients 里声明 9p 或 virtiofs（Windows 宿主用 cifs），或换默认虚拟根。"
+        };
+        return Some(Requirement::unmet(
+            "share-guest",
+            "guest 共享客户端",
+            format!(
                 "这份 guest 没有本平台用户共享档能承载的客户端（已声明：{}）；虚拟机档无法挂载工作区",
                 declared
             ),
-            how: if copy_share_enabled() {
-                "开发/应急 copy 只支持 Linux guest；换 Linux 虚拟根，或关掉 SOLOMNI_VM_SHARE=copy 后用用户档。"
-                    .to_string()
-            } else {
-                "在 guest.yaml 的 clients 里声明 9p 或 virtiofs（Windows 宿主用 cifs），或换默认虚拟根。"
-                    .to_string()
-            },
-        });
+            Fix::blocked(why),
+        ));
     }
-    Some(VmRequirement {
-        id: "share-guest",
-        met: true,
-        detail: format!("guest 可用共享档：{}", usable.join("、")),
-        how: String::new(),
-    })
-}
-
-/// 目的：机器能力的就绪视图（不含会话级虚拟根）：界面据此决定虚拟机档能不能**选**。
-pub fn vm_capability(vm: &VmInputs<'_>) -> TierReadiness {
-    TierReadiness {
-        requirements: vm_requirements(vm),
-    }
+    Some(Requirement::met(
+        "share-guest",
+        "guest 共享客户端",
+        format!("guest 可用共享档：{}", usable.join("、")),
+    ))
 }
 
 /// 目的：机器能力不足时的可读拒绝理由（与 tier_refusal 同一套文案，判据只到机器能力）。
 pub fn capability_refusal(vm: &VmInputs<'_>) -> Option<String> {
-    let cap = vm_capability(vm);
-    if cap.ready() {
+    refusal_text("虚拟机档现在不可用", &vm_requirements(vm))
+}
+
+/// 目的：一台机器/一条会话缺项时的同一套拒绝文案（缺几项就列几项，不各自编话）。
+fn refusal_text(what: &str, requirements: &[Requirement]) -> Option<String> {
+    let unmet: Vec<&str> = requirements
+        .iter()
+        .filter(|r| !r.met)
+        .map(|r| r.detail.as_str())
+        .collect();
+    if unmet.is_empty() {
         return None;
     }
     Some(format!(
-        "虚拟机档现在不可用（{}）：请换本机档，或在创建向导 / 配置界面的「虚拟机档前置」里点「补齐虚拟机依赖」把缺的装进项目内",
-        cap.missing().join("；")
+        "{}（{}）：请换本机档，或在创建向导 / 配置界面的「虚拟机档前置」里点「补齐虚拟机依赖」把缺的装进项目内",
+        what,
+        unmet.join("；")
     ))
 }
 
@@ -652,11 +620,9 @@ pub fn tier_readiness(
     spec: &TargetSpec,
     tools: &VmTools,
     probe: &dyn HostProbe,
-) -> TierReadiness {
+) -> Readiness {
     if spec.side != Side::Guest {
-        return TierReadiness {
-            requirements: Vec::new(),
-        };
+        return Readiness::default();
     }
     let mut requirements = vm_requirements(&VmInputs { tools, probe });
     // 虚拟根是这条会话的选型，不是机器能力：保存 /「开始」时才要求它。
@@ -665,7 +631,7 @@ pub fn tier_readiness(
     if let Some(share) = guest_share_requirement(root, spec.guest.as_deref(), &tools.share, probe) {
         requirements.push(share);
     }
-    TierReadiness { requirements }
+    Readiness { requirements }
 }
 
 /// 目的：虚拟机档的可读拒绝理由（创建与编辑共用同一把尺子）。
@@ -675,14 +641,10 @@ pub fn tier_refusal(
     tools: &VmTools,
     probe: &dyn HostProbe,
 ) -> Option<String> {
-    let readiness = tier_readiness(root, spec, tools, probe);
-    if readiness.ready() {
-        return None;
-    }
-    Some(format!(
-        "虚拟机档现在不可用（{}）：请换本机档，或在创建向导 / 配置界面的「虚拟机档前置」里点「补齐虚拟机依赖」把缺的装进项目内",
-        readiness.missing().join("；")
-    ))
+    refusal_text(
+        "虚拟机档现在不可用",
+        &tier_readiness(root, spec, tools, probe).requirements,
+    )
 }
 
 /// 目的：虚拟机档的并发准入——每台 guest 都是实打实的资源（固定 `-m 2048 -smp 2`），

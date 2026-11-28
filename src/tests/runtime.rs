@@ -447,9 +447,11 @@ pub(crate) fn vm_edit_from_host_to_vm_keeps_external_workspace_mounts() {
                 model: String::new(),
                 chara: String::new(),
             }],
-            sandbox: "vm".to_string(),
-            guest: Some(guest),
-            pins: BTreeMap::new(),
+            sandbox: crate::units::business::sandbox::api::SandboxDecl {
+                policy: "vm".to_string(),
+                params: serde_json::json!({ "guest": guest }),
+                pins: BTreeMap::new(),
+            },
             permission: None,
             shared: None,
         },
@@ -544,8 +546,9 @@ pub(crate) fn vm_tool_paths_follow_provisioned_packages_without_restart() {
     );
     let choices = core.sandbox_choices();
     let qemu = choices
-        .guest_requirements
+        .policies
         .iter()
+        .flat_map(|p| p.needs.iter())
         .find(|r| r.id == "qemu")
         .expect("qemu 是一项前置");
     assert!(qemu.met, "没登记时按项目内补齐的那一个判：{}", qemu.detail);
@@ -563,8 +566,9 @@ pub(crate) fn vm_tool_paths_follow_provisioned_packages_without_restart() {
     );
     let qemu = registered
         .sandbox_choices()
-        .guest_requirements
+        .policies
         .into_iter()
+        .flat_map(|p| p.needs)
         .find(|r| r.id == "qemu")
         .expect("qemu 是一项前置");
     assert!(!qemu.met, "登记优先：{:?}", qemu);

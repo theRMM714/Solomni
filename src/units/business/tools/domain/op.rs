@@ -90,6 +90,7 @@ impl OpBook {
                     desc: c.brief.clone(),
                     params: c.params.clone(),
                     parallel: false,
+                    human: Vec::new(),
                 },
                 json: c.json.clone(),
             })

@@ -17,6 +17,7 @@ impl ToolDecl {
                 desc: self.desc.clone(),
                 params: Some(p.clone()),
                 parallel: self.parallel,
+                human: Vec::new(),
             })
     }
 }

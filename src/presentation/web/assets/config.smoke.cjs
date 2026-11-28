@@ -78,9 +78,13 @@ function addTempAgentWithModule(root) {
   join.onclick();
   return "";
 }
-function guestField(n) {
-  return walk(n, []).find((x) => String(x.className).indexOf("wf-field") === 0
-    && (x.children || []).some((c) => String(c.textContent).indexOf("虚拟机（虚拟根）") >= 0));
+/** 执行环境的参数下拉（虚拟根）：候选值由后端把取值域解析出来，这里按值找，不按字段名碰运气。 */
+function sandboxSelect(n) {
+  return walk(n, []).find((x) => x.tag === "select" && (x.children || []).some((o) => String(o.value) === "debian-13"));
+}
+/** 补齐入口：文案带策略名（「补齐依赖…（客机）」），按前缀找。 */
+function findSetupBtn(n) {
+  return walk(n, []).find((x) => x.tag === "button" && String(x.textContent).indexOf("补齐依赖…") === 0);
 }
 function check(name, cond, extra) {
   checks.push((cond ? "PASS " : "FAIL ") + name + (cond ? "" : "  <<< " + (extra === undefined ? "" : extra)));
@@ -88,10 +92,40 @@ function check(name, cond, extra) {
 
 /* ---------- 固定夹具：与 /api/sessions/{sid}/config 的 JSON 形状同形 ---------- */
 /* 路径用中性书写形式（斜杠 + 无盘符），只验呈现，不代表任何机器路径。 */
+const GUESTS = [
+  { guest: "debian-13", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: true, missing: [], install: "data/.vm/guest/debian-13", runtimes: ["python"] },
+  { guest: "debian-12", label: "debian-12-genericcloud-amd64", os: "linux", arch: "amd64", ready: false, missing: ["vm.guest-runtime.linux"], install: "data/.vm/guest/debian-12" },
+];
+/** 一组策略视图：本机恒可选；客机的可用性 / 逐项前置由参数给（呈现层只照抄）。 */
+const POLICY_HOST = {
+  decl: { id: "host", name: "本机", hint: "直接在本机跑（不套客机）", params: null },
+  needs: [], available: true, refusal: "", fixable: false,
+};
+function policyVm(available, needs, guestValues) {
+  return {
+    decl: {
+      id: "vm", name: "客机", hint: "在虚拟机里跑（镜像与运行包按 guest 走）",
+      params: { guest: { type: "string", required: true, non_empty: true, desc: "虚拟根名", values: guestValues } },
+      choices: { guest: "guests" },
+    },
+    needs: needs || [], available: !!available,
+    refusal: available ? "" : "虚拟机档现在不可用（没有找到 qemu-system-x86_64（按PATH找过））",
+    // 能不能补 = 这个策略有没有登记补齐器（与此刻可不可用无关）：客机有，所以恒 true。
+    fixable: true,
+  };
+}
+const VM_NEEDS_STUCK = [
+  { id: "hypervisor", label: "虚拟机监视器", met: false, detail: "本机虚拟机监视器不可用（要启用「虚拟机平台」组件）", fix: { kind: "host_setting", summary: "启用「虚拟机平台」组件，然后重启", deps: [], consent: false } },
+  { id: "guest", label: "guest 后端验收", met: false, detail: "guest 本体尚未接入（工具进程仍在宿主上跑，没有真正的 guest）", fix: { kind: "none", summary: "等产品的 guest 接入", deps: [], consent: false } },
+  { id: "qemu", label: "QEMU", met: false, detail: "没有找到 qemu-system-x86_64.exe（按PATH找过）", fix: { kind: "download", summary: "在创建向导或配置界面点「补齐依赖…」把它下载进项目内；也可自行安装 QEMU 并放进 PATH", deps: ["vm.qemu.windows"], consent: true } },
+  { id: "base", label: "虚拟根", met: false, detail: "没有选定虚拟根", fix: { kind: "download", summary: "在创建向导或配置界面点「补齐依赖…」把虚拟根装进项目内", deps: ["vm.guest.windows"], consent: true } },
+];
 const CFG = {
   sid: "w", kind: "single", flows: false, started: true,
   agents: [{ name: "调研员", modules: ["research"], model: "m1", chara: "会话快照人设" }],
-  sandbox: "vm", guest: "debian-13", net: true,
+  sandbox: { policy: "vm", params: { guest: "debian-13" }, pins: { python: "3.12", ruby: "3.2" } },
+  choices: { default: "host", policies: [POLICY_HOST, policyVm(true, [], ["debian-13", "debian-12"])], guests: GUESTS, capabilities: {} },
+  net: true,
   permission: {
     profile: "offline", label: "离线", summary: "",
     shared: { read: "all", write: ["docs"], deny: [] },
@@ -101,13 +135,7 @@ const CFG = {
       { id: "online", label: "联网", summary: "" },
     ],
   },
-  guests: [
-    { guest: "debian-13", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: true, missing: [], install: "data/.vm/guest/debian-13", runtimes: ["python"] },
-    { guest: "debian-12", label: "debian-12-genericcloud-amd64", os: "linux", arch: "amd64", ready: false, missing: ["vm.guest-runtime.windows"], install: "data/.vm/guest/debian-12" },
-  ],
-  pins: { python: "3.12", ruby: "3.2" },
   thinking: { level: null, default_level: "high", label: "high", options: [{ id: "high", label: "high" }], note: "" },
-  vm_available: true, vm_unavailable_reason: "", vm_requirements: [],
   sandbox_ready: true, sandbox_missing: [],
   runtime: {
     side: "guest",
@@ -128,16 +156,10 @@ const CFG = {
 const RAW = { // 还没开过的协作会话：名字可改、本机档
   sid: "raw", kind: "collab", flows: true, started: false,
   agents: [{ name: "x", modules: ["research"], model: "" }, { name: "y", modules: ["research"], model: "m2" }],
-  sandbox: "host", guest: null, guests: [], net: false, pins: {},
+  sandbox: { policy: "host", params: {}, pins: {} },
+  // 这台机器**不具备**客机策略的前置条件：界面必须禁用客机并给出后端原话（本机不受影响）。
+  choices: { default: "host", policies: [POLICY_HOST, policyVm(false, VM_NEEDS_STUCK, [])], guests: [], capabilities: {} },
   permission: { profile: "offline", label: "离线", summary: "", shared: { read: "all", write: "all", deny: [] }, narrowed: false, parent_profile: null, profiles: [] },
-  // 这台机器**不具备**虚拟机档的前置条件：界面必须禁用虚拟机档并给出后端原话（本机档不受影响）。
-  vm_available: false, vm_unavailable_reason: "虚拟机档现在不可用（guest 本体尚未接入）",
-  vm_requirements: [
-    { id: "hypervisor", met: false, detail: "本机虚拟机监视器不可用（要启用「虚拟机平台」组件）", how: "启用「虚拟机平台」组件，然后重启" },
-    { id: "guest", met: false, detail: "guest 本体尚未接入（工具进程仍在宿主上跑，没有真正的 guest）", how: "等产品的 guest 接入" },
-    { id: "qemu", met: false, detail: "没有找到 qemu-system-x86_64.exe（按PATH找过）", how: "在创建向导或配置界面点「补齐虚拟机依赖」把它下载进项目内；也可自行安装 QEMU 并放进 PATH" },
-    { id: "base", met: false, detail: "没有选定虚拟根", how: "在创建向导或配置界面点「补齐虚拟机依赖」把虚拟根装进项目内" },
-  ],
   sandbox_ready: true, sandbox_missing: [],
   runtime: { side: "host", declared: {}, available: {}, missing: {}, diagnoses: [], rejected: [], rejected_packages: [] },
   runtimes_dir: "/runtimes",
@@ -197,21 +219,23 @@ const sandbox = {
       await new Promise((r) => setTimeout(r, 60));
       return jsonRes({ sid: "new-1", agents: ["research"] });
     }
+    // 补齐器自己列清单：界面上不挑条目（挑错了会把已装的重下一遍）。
+    if (/^\/api\/setup\/plan/.test(String(url))) {
+      return jsonRes({ steps: [{ id: "vm.virtiofsd.windows", label: "virtiofsd 便携包",
+        url: "https://example.invalid/v.zip", size_mb: 3, note: "装到 data/.vm/virtiofsd（来源 release:virtiofsd）" }] });
+    }
     if (url === "/api/setup/ensure") {
       setupStarted = true;
       return jsonRes({ ok: true, deps: ["vm.virtiofsd.windows"] });
     }
-    // 创建向导要读一次档位选择（默认档 + 虚拟机档可用性与逐项前置 + 可选虚拟根）。
+    // 创建向导与配置面板都要读这张表：每个登记的策略自带可用性 / 逐项前置 / 参数取值域。
     if (url === "/api/tiers") {
       return jsonRes({ tiers: {
-        default: "host", vm_available: tiersVmAvailable,
-        vm_unavailable_reason: tiersVmAvailable ? "" : "虚拟机档现在不可用（没有找到 qemu-system-x86_64（按PATH找过））",
-        vm_requirements: tiersVmAvailable ? [] : RAW.vm_requirements,
-        guests: tiersVmAvailable
-          ? [{ guest: "debian-13", label: "debian-13", os: "linux", arch: "amd64", ready: tiersGuestReady,
-              missing: tiersGuestReady ? [] : ["vm.guest-runtime.linux"], install: "data/.vm/guest/debian-13", runtimes: ["python"] }]
-          : [],
-        available: {},
+        default: "host",
+        policies: [POLICY_HOST, policyVm(tiersVmAvailable, tiersVmAvailable ? [] : VM_NEEDS_STUCK, ["debian-13"])],
+        guests: [{ guest: "debian-13", label: "debian-13", os: "linux", arch: "amd64", ready: tiersGuestReady,
+          missing: tiersGuestReady ? [] : ["vm.guest-runtime.linux"], install: "data/.vm/guest/debian-13", runtimes: ["python"] }],
+        capabilities: {},
       } });
     }
     if (/\/api\/history\/[^/]+$/.test(url)) return jsonRes({ meta: { kind: "single" }, events: [] });
@@ -311,20 +335,23 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const selects = walk(modal, []).filter((x) => x.tag === "select");
   const modelSel = selects.find((s) => (s.children || []).some((o) => String(o.textContent).indexOf("核心默认") >= 0));
   check("config: 模型下拉含核心默认空选项", !!modelSel);
-  check("config: 档位二选一（本机/虚拟机各自说明）",
-    t.indexOf("本机档（脚本在宿主上跑）") >= 0 && t.indexOf("虚拟机档（脚本在 guest 里跑）") >= 0 &&
-    t.indexOf("隔离更强、代价更重") >= 0);
+  // 有哪些策略、各自叫什么、说明什么，全由后端那张表给：界面不认识具体策略名。
+  check("config: 执行环境按后端给的表列（名字 + 各自说明）",
+    t.indexOf("本机") >= 0 && t.indexOf("客机") >= 0 &&
+    t.indexOf("在虚拟机里跑（镜像与运行包按 guest 走）") >= 0);
+  check("config: 执行环境的作用域由会话配置文案说清", t.indexOf("执行环境决定会话在哪里跑") >= 0);
   const radios = walk(modal, []).filter((x) => x.type === "radio");
-  check("config: 两个档位 radio 同名互斥且选中当前档位",
+  check("config: 每个策略一个 radio、同名互斥、选中当前策略",
     radios.length === 2 && radios[0].name === radios[1].name && radios[1].checked === true,
     JSON.stringify(radios.map((r) => [r.name, r.checked])));
-  // 承载判定归后端：本机具备前置条件时虚拟机档可选，且 guest 未接入这一点如实标注。
-  check("config: 本机具备前置条件时虚拟机档可选", radios[1].disabled !== true);
-  check("config: 虚拟机档可选时不渲染前置清单（那是禁用态的事）",
-    t.indexOf("虚拟机档前置") < 0);
-  check("config: 虚拟机档给出虚拟根选择器", t.indexOf("虚拟机（虚拟根）") >= 0 && t.indexOf("debian-13-genericcloud-amd64") >= 0);
-check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪」这种会被读成「能用」的词）",
-  t.indexOf("已装齐") >= 0 && t.indexOf("自带运行能力：python") >= 0 && t.indexOf("已就绪") < 0);
+  // 可用性判定归后端：它说可用就可点，说不可用就禁用（界面不自己猜）。
+  check("config: 后端说可用时策略可选", radios[1].disabled !== true);
+  check("config: 可用时不渲染前置清单（那是不可用态的事）", t.indexOf("前置（") < 0);
+  check("config: 参数按策略自己的声明渲染", t.indexOf("虚拟根名") >= 0);
+  const guestSelOk = selects.find((s) => (s.children || []).some((o) => String(o.value) === "debian-13"));
+  check("config: 参数取值域由后端解析成选项", !!guestSelOk && guestSelOk.value === "debian-13", guestSelOk && guestSelOk.value);
+  check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪」这种会被读成「能用」的词）",
+    t.indexOf("已装齐") >= 0 && t.indexOf("自带运行能力：python") >= 0 && t.indexOf("已就绪") < 0);
   check("config: 依赖文件夹真实路径（照它去放包）", t.indexOf("/runtimes") >= 0);
   check("config: declared 呈现", t.indexOf("模块 research 需要：python") >= 0);
   check("config: missing 呈现 + 放进 runtimes_dir 后重新扫描",
@@ -363,14 +390,15 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   check("config: 失败后保存按钮可再点", save.disabled === false);
   const editCall = calls.find((c) => /\/api\/actions\/edit_session$/.test(c.url));
   const sent = JSON.parse(editCall.body);
-  check("config: 提交体形状 {session_id,agents,sandbox,guest,pins,permission,shared}",
-    JSON.stringify(Object.keys(sent).sort()) === JSON.stringify(["agents", "guest", "permission", "pins", "sandbox", "session_id", "shared"])
+  check("config: 提交体形状 {session_id,agents,sandbox,permission,shared}",
+    JSON.stringify(Object.keys(sent).sort()) === JSON.stringify(["agents", "permission", "sandbox", "session_id", "shared"])
       && sent.session_id === "w", editCall.body);
-  check("config: 提交体内容（名单/模块/模型/档位/虚拟根/pins/会话权限）",
-    sent.sandbox === "vm" && sent.guest === "debian-13"
+  // 执行环境整份提交（策略 + 参数 + 定版），不再有顶层 guest / pins：形状对齐 SandboxDecl。
+  check("config: 提交体内容（名单/模块/模型/执行环境/pins/会话权限）",
+    sent.sandbox && sent.sandbox.policy === "vm" && sent.sandbox.params.guest === "debian-13"
     && sent.agents[0].name === "调研员" && JSON.stringify(sent.agents[0].modules) === JSON.stringify(["research"])
     && sent.agents[0].model === "m1" && sent.agents[0].chara === "临时改的人设"
-    && JSON.stringify(sent.pins) === JSON.stringify({ python: "3.12", ruby: "3.2" })
+    && JSON.stringify(sent.sandbox.pins) === JSON.stringify({ python: "3.12", ruby: "3.2" })
     && JSON.stringify(sent.shared.write) === JSON.stringify(["docs"])
     && sent.permission.profile === "offline",
     editCall.body);
@@ -381,7 +409,8 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   findButton(modal, "保存").onclick();
   await sleep(60);
   const sent2 = JSON.parse(calls.filter((c) => /\/api\/actions\/edit_session$/.test(c.url)).pop().body);
-  check("config: 取消定版后不从 pins 提交空串", !("python" in sent2.pins) && sent2.pins.ruby === "3.2", JSON.stringify(sent2.pins));
+  check("config: 取消定版后不从 pins 提交空串",
+    !("python" in sent2.sandbox.pins) && sent2.sandbox.pins.ruby === "3.2", JSON.stringify(sent2.sandbox.pins));
 
   /* ---- 重新扫描 = 重新 GET config 并重绘 ---- */
   const before = calls.filter((c) => /\/config$/.test(c.url)).length;
@@ -390,20 +419,20 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   check("config: 重新扫描再来一次 GET config", calls.filter((c) => /\/config$/.test(c.url)).length === before + 1);
   check("config: 重新扫描后仍渲染出内容", allText(reg.get("#modal-root")).indexOf("模块 research 缺：python") >= 0);
 
-  /* ---- 档位切换：虚拟机档显示虚拟根选择器，本机档隐藏且提交 guest=null ---- */
+  /* ---- 策略切换：客机有参数格，切到本机后参数格清空（不再画别人的参数）；提交跟着换策略 ---- */
   // 「重新扫描」会整块重建表单：radio 节点要重新取（旧节点上的处理器属于旧表单）
-  check("config: 虚拟机档虚拟根选择器可见", String(guestField(reg.get("#modal-root")).className) === "wf-field",
-    guestField(reg.get("#modal-root")).className);
+  check("config: 客机策略的参数格可见", !!sandboxSelect(reg.get("#modal-root")));
   const radios2 = walk(reg.get("#modal-root"), []).filter((x) => x.type === "radio");
   radios2[1].checked = false;
   radios2[0].checked = true;
   radios2[0]._h.change[0]();
-  check("config: 切到本机档后虚拟根选择器隐藏", String(guestField(reg.get("#modal-root")).className).indexOf("hidden") >= 0,
-    guestField(reg.get("#modal-root")).className);
+  check("config: 切到本机后不再渲染别人的参数", !sandboxSelect(reg.get("#modal-root")));
   findButton(reg.get("#modal-root"), "保存").onclick();
   await sleep(60);
   const sent3 = JSON.parse(calls.filter((c) => /\/api\/actions\/edit_session$/.test(c.url)).pop().body);
-  check("config: 本机档提交 sandbox=host 且 guest=null", sent3.sandbox === "host" && sent3.guest === null, JSON.stringify(sent3));
+  check("config: 本机档提交策略 host（参数空）",
+    sent3.sandbox && sent3.sandbox.policy === "host" && !Object.keys(sent3.sandbox.params || {}).length,
+    JSON.stringify(sent3.sandbox));
 
   /* ---- 未开过的会话（started=false）：名字可改、无冻结、跨 agent 共用模块可保存 ---- */
   openConfig("raw");
@@ -414,18 +443,17 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   const nameInputs = walk(m2, []).filter((n) => n.tag === "input" && String(n.placeholder).indexOf("agent 名字") >= 0);
   check("config(raw): 名字可编辑（会话还没开过）", nameInputs.length === 2 && nameInputs.every((n) => n.disabled !== true));
   check("config(raw): 有流程的类型说明", t2.indexOf("会话类型：会议（按流程推进）") >= 0, t2.slice(0, 400));
-  check("config(raw): 本机档不显示虚拟根选择器",
-    t2.indexOf("虚拟机（虚拟根）") >= 0 && String(guestField(m2).className).indexOf("hidden") >= 0, guestField(m2).className);
+  check("config(raw): 本机档不渲染别人的参数", !sandboxSelect(m2));
   // 前置条件不具备 = 虚拟机档禁用（不让选），并把后端给的原因原样呈现；本机档照旧可选。
   const radiosRaw = walk(m2, []).filter((x) => x.type === "radio");
   check("config(raw): 虚拟机档不可用时禁用且本机档仍可选",
     radiosRaw.length === 2 && radiosRaw[1].disabled === true && radiosRaw[0].disabled !== true,
     JSON.stringify(radiosRaw.map((r) => [r.name, r.checked, r.disabled])));
-  check("config(raw): 虚拟机档不可用的原因如实呈现",
-    t2.indexOf("虚拟机档现在不能选") >= 0 && t2.indexOf("本机虚拟机监视器不可用") >= 0);
+  check("config(raw): 不可用的原因如实呈现（带策略名）",
+    t2.indexOf("「客机」现在不能选") >= 0 && t2.indexOf("本机虚拟机监视器不可用") >= 0);
   // 逐项前置照抄后端：缺哪几项、每项怎么补（不笼统说"前置条件不具备"）。
-  check("config(raw): 虚拟机档前置逐项列出并给怎么补",
-    t2.indexOf("虚拟机档前置（") >= 0 && t2.indexOf("guest 本体尚未接入") >= 0 &&
+  check("config(raw): 前置逐项列出并给怎么补",
+    t2.indexOf("前置（4 项未满足）") >= 0 && t2.indexOf("guest 本体尚未接入") >= 0 &&
     t2.indexOf("怎么补：") >= 0 && t2.indexOf("自行安装 QEMU") >= 0 && t2.indexOf("没有选定虚拟根") >= 0);
   const dupHints = findByClass(m2, "cfg-hint").map((x) => x.textContent)
     .filter((x) => String(x).indexOf("同一模块") >= 0);
@@ -440,21 +468,22 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   check("config(raw): 无模型以空串送出", sentRaw.agents[0].model === "" && sentRaw.agents[1].model === "m2", JSON.stringify(sentRaw.agents));
 
   /* ---- 依赖补齐：不可用时给**一个动作**，而不是一句命令行（"用户没有办法装上默认环境"的回归锚） ---- */
-  const setupBtn = findButton(m2, "补齐虚拟机依赖…");
+  const setupBtn = findSetupBtn(m2);
   check("config(raw): 虚拟机档不可用时给出补齐动作", !!setupBtn && typeof setupBtn.onclick === "function");
   setupBtn.onclick();
   await sleep(100);
   const t3 = allText(reg.get("#modal-root"));
   check("setup: 列出要装的条目（含体积与来源说明）",
-    t3.indexOf("vm.virtiofsd.windows") >= 0 && t3.indexOf("约 3 MB") >= 0, t3.slice(0, 400));
+    t3.indexOf("virtiofsd 便携包") >= 0 && t3.indexOf("约 3 MB") >= 0 && t3.indexOf("data/.vm/virtiofsd") >= 0, t3.slice(0, 400));
   check("setup: 说明只写项目内", t3.indexOf("只写项目内") >= 0);
   const goBtn = findButton(reg.get("#modal-root"), "开始下载安装");
   check("setup: 先看清单、再确认下载（两步）", !!goBtn);
   goBtn.onclick();
   await sleep(150);
   const sentEnsure = calls.filter((c) => /\/api\/setup\/ensure$/.test(c.url)).pop();
-  check("setup: 确认后 POST ensure（带 confirm 与后端给的 pending id）",
+  check("setup: 确认后 POST ensure（带策略、confirm 与补齐器给的 id）",
     !!sentEnsure && String(sentEnsure.body).indexOf('"confirm":true') >= 0 &&
+    String(sentEnsure.body).indexOf('"policy":"vm"') >= 0 &&
     String(sentEnsure.body).indexOf("vm.virtiofsd.windows") >= 0, sentEnsure && sentEnsure.body);
   check("setup: 进度走长轮询（since + wait=1）",
     calls.some((c) => /\/api\/setup\/status\?since=\d+&wait=1/.test(c.url)));
@@ -471,14 +500,14 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   setupStarted = false; setupPolls = 0;
   let wizardErrored = null;
   try { await vm.runInContext('openWizard()', ctx); await sleep(80); } catch (e) { wizardErrored = e && e.message; }
-  check('wizard: 打得开且说明虚拟机档不可用', !wizardErrored && allText(reg.get('#modal-root')).indexOf('虚拟机档现在不能选') >= 0, String(wizardErrored));
-  const wizSetup = findButton(reg.get('#modal-root'), '补齐虚拟机依赖…');
+  check('wizard: 打得开且说明客机策略不可用', !wizardErrored && allText(reg.get('#modal-root')).indexOf('现在不能选') >= 0, String(wizardErrored));
+  const wizSetup = findSetupBtn(reg.get('#modal-root'));
   check('wizard: 不可用时给出补齐按钮', !!wizSetup && typeof wizSetup.onclick === 'function');
   let clickErrored = null;
   try { wizSetup.onclick(); await sleep(120); } catch (e) { clickErrored = e && e.message; }
   const wizText = allText(reg.get('#modal-root'));
   check('wizard: 点补齐真的打开补齐弹层（列出要装的条目）',
-    !clickErrored && wizText.indexOf('vm.virtiofsd.windows') >= 0 && wizText.indexOf('只写项目内') >= 0,
+    !clickErrored && wizText.indexOf('virtiofsd 便携包') >= 0 && wizText.indexOf('只写项目内') >= 0,
     'clickErrored=' + String(clickErrored) + ' text=' + wizText.slice(0, 200));
   closeModalIfAny();
 
@@ -493,7 +522,7 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   const wizGuestRadios = walk(wizGuestRoot, []).filter((n) => n.type === 'radio' && n.name === 'wf-sandbox');
   wizGuestRadios[1].checked = true;
   (wizGuestRadios[1]._h.change || []).forEach((f) => f());
-  const wizGuestSetup = findButton(wizGuestRoot, '补齐虚拟机依赖…');
+  const wizGuestSetup = findSetupBtn(wizGuestRoot);
   check('wizard: 虚拟根未装齐时给出补齐按钮', !!wizGuestSetup && typeof wizGuestSetup.onclick === 'function');
   // 填个名字、在 agent 弹层里选个模块，点创建：未装齐应当在本地被拦住，不发 create_session。
   const guestNameInp = walk(wizGuestRoot, []).find((n) => n.tag === 'input' && String(n.placeholder).indexOf('工作名称') >= 0);
@@ -514,7 +543,7 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   try { wizGuestSetup.onclick(); await sleep(120); } catch (e) { guestClickErrored = e && e.message; }
   const guestSetupText = allText(reg.get('#modal-root'));
   check('wizard: 点虚拟根旁的补齐真的打开补齐弹层',
-    !guestClickErrored && guestSetupText.indexOf('vm.virtiofsd.windows') >= 0 && guestSetupText.indexOf('只写项目内') >= 0,
+    !guestClickErrored && guestSetupText.indexOf('virtiofsd 便携包') >= 0 && guestSetupText.indexOf('只写项目内') >= 0,
     'clickErrored=' + String(guestClickErrored) + ' text=' + guestSetupText.slice(0, 200));
   closeModalIfAny();
   tiersGuestReady = true;
@@ -574,17 +603,17 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   openConfig("w");
   await sleep(80);
   const cfgUnreadyRoot = reg.get("#modal-root");
-  const cfgGuestSel = walk(guestField(cfgUnreadyRoot), []).find((n) => n.tag === "select");
-  check("config: 未装齐用例能拿到虚拟根选择器", !!cfgGuestSel);
-  cfgGuestSel.value = "windows";
-  (cfgGuestSel._h.change || []).forEach((f) => f());
-  const cfgGuestSetup = findButton(cfgUnreadyRoot, "补齐虚拟机依赖…");
+  const cfgUnreadySel = sandboxSelect(cfgUnreadyRoot);
+  check("config: 未装齐用例能拿到虚拟根选择器", !!cfgUnreadySel);
+  cfgUnreadySel.value = "debian-12";
+  (cfgUnreadySel._h.change || []).forEach((f) => f());
+  const cfgGuestSetup = findSetupBtn(cfgUnreadyRoot);
   check("config: 虚拟根未装齐时给出补齐按钮",
     !!cfgGuestSetup && typeof cfgGuestSetup.onclick === "function");
   cfgGuestSetup.onclick();
   await sleep(120);
   check("config: 点虚拟根旁的补齐打开同一个弹层",
-    allText(reg.get("#modal-root")).indexOf("vm.virtiofsd.windows") >= 0);
+    allText(reg.get("#modal-root")).indexOf("virtiofsd 便携包") >= 0);
   closeModalIfAny();
 
   finish();

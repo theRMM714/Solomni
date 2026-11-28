@@ -6,6 +6,7 @@
 pub mod api;
 pub mod detail;
 pub mod domain;
+mod fixer;
 pub(crate) mod guest;
 pub mod ports;
 pub(crate) mod service;

@@ -5,12 +5,11 @@
 
 use crate::kernel::ports::HostProbe;
 use crate::units::business::sandbox::api::{
-    ExecKind, ExecOutcome, ExecRequest, Machine, OpenRequest, PolicyDecl, Readiness, Requirement,
-    Sandbox, SandboxDecl, SandboxFacts, SandboxPolicy, VM_POLICY, guest_image_of,
-    guest_runtimes_of,
+    ExecKind, ExecOutcome, ExecRequest, Machine, OpenRequest, PolicyDecl, Readiness, Sandbox,
+    SandboxDecl, SandboxFacts, SandboxPolicy, VM_POLICY, guest_image_of, guest_runtimes_of,
 };
 use crate::units::business::vm::api::{GuestRun, OutputLimit, Vm, VmInputs, VmTools};
-use crate::units::pure::exec_model::api::{Side, TargetSpec};
+use crate::units::pure::exec_model::api::{Fixer, Side, TargetSpec};
 use crate::units::pure::registry_model::api::{Param, ParamType};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -22,21 +21,25 @@ pub struct VmPolicy {
     probe: Arc<dyn HostProbe + Send + Sync>,
     vm: Arc<dyn Vm + Send + Sync>,
     tools: Arc<dyn Fn() -> VmTools + Send + Sync>,
+    fixer: Option<Arc<dyn Fixer>>,
 }
 
 impl VmPolicy {
     /// 目的：按项目根、宿主探针、客机执行面与外部工具位置事实建策略（判镜像与就绪要用它们）。
+    /// 参数：`fixer` 是补齐端口（组合根注入 `provision` 的实现；没有就不给下载入口）。
     pub fn new(
         root: PathBuf,
         probe: Arc<dyn HostProbe + Send + Sync>,
         vm: Arc<dyn Vm>,
         tools: Arc<dyn Fn() -> VmTools + Send + Sync>,
+        fixer: Option<Arc<dyn Fixer>>,
     ) -> VmPolicy {
         VmPolicy {
             root,
             probe,
             vm,
             tools,
+            fixer,
         }
     }
 
@@ -73,6 +76,8 @@ impl SandboxPolicy for VmPolicy {
             name: "客机".to_string(),
             hint: "在虚拟机里跑（镜像与运行包按 guest 走）".to_string(),
             params: Some(params),
+            // 虚拟根清单是 provision 的事实：策略只说"这个参数要从虚拟根域里挑"，不抄清单。
+            choices: BTreeMap::from([("guest".to_string(), "guests".to_string())]),
         }
     }
 
@@ -126,27 +131,22 @@ impl SandboxPolicy for VmPolicy {
             requirements: crate::units::business::vm::api::vm_requirements(&VmInputs {
                 tools: &tools,
                 probe: self.probe.as_ref(),
-            })
-            .into_iter()
-            .map(requirement_of)
-            .collect(),
+            }),
         }
     }
 
     fn readiness(&self, target: &TargetSpec) -> Readiness {
         let tools = (self.tools)();
-        Readiness {
-            requirements: crate::units::business::vm::api::tier_readiness(
-                &self.root,
-                target,
-                &tools,
-                self.probe.as_ref(),
-            )
-            .requirements
-            .into_iter()
-            .map(requirement_of)
-            .collect(),
-        }
+        crate::units::business::vm::api::tier_readiness(
+            &self.root,
+            target,
+            &tools,
+            self.probe.as_ref(),
+        )
+    }
+
+    fn fixer(&self) -> Option<Arc<dyn Fixer>> {
+        self.fixer.clone()
     }
 
     fn provided(&self, target: &TargetSpec) -> Vec<String> {
@@ -263,15 +263,5 @@ impl Sandbox for VmSandbox {
                 ExecOutcome::plain(self.vm.guest_run_fenced(&self.lease, &run, &req.fence))
             }
         }
-    }
-}
-
-/// 目的：把虚拟机档的一项前置翻成执行环境的通用前置（形状一样，id 从静态串换成字符串）。
-fn requirement_of(req: crate::units::business::vm::api::VmRequirement) -> Requirement {
-    Requirement {
-        id: req.id.to_string(),
-        met: req.met,
-        detail: req.detail,
-        how: req.how,
     }
 }

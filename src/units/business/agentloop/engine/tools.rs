@@ -385,6 +385,7 @@ fn module_schema() -> ToolSchema {
         desc: String::new(),
         params: None,
         parallel: false,
+        human: Vec::new(),
     }
 }
 
@@ -843,7 +844,7 @@ pub(crate) fn dispatch_external(
                 let full = format!("{}.{}", module, inv.name);
                 match serde_json::from_str::<serde_json::Value>(&inv.args_json) {
                     Ok(args) => {
-                        if let Err(fault) = book.check(&args) {
+                        if let Err(fault) = book.check_model(&args) {
                             let why = crate::units::business::tools::api::arg_fault_text(
                                 &full, book, &fault,
                             );

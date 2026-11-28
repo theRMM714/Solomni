@@ -136,10 +136,11 @@
 | GET | `/api/history` | `HistoryOps::list` | — | `{sessions}` | 200, 400 |
 | GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events,live,head,shell}`（`shell` 从转录派生：回放/重建后的状态栏快照；读工具行的结构化事实 `tool.shell`，不解析回执正文） | 200, 404 |
 | POST | `/api/history/{name}/delete` | `HistoryOps::delete` | — | `{ok}` | 200, 400 |
-| GET | `/api/tiers` | `WorkOps::sandbox_choices` | — | `{tiers:{default,policies,guest_available,guest_unavailable_reason,guest_requirements,guests,available}}`（路由名与回包键暂留旧名，答的是「可选执行环境策略」） | 200, 400 |
+| GET | `/api/tiers` | `WorkOps::sandbox_choices` | — | `{tiers:{default,policies:[{decl:{id,name,hint,params,choices},needs:[{id,label,met,detail,fix}],available,refusal,fixable}],guests,capabilities}}`（每条都自带可用性、逐项前置与能不能补：呈现层照抄，不写死策略名） | 200, 400 |
 | GET | `/api/processes` | `Provision::processes` | — | `{procs:[{pid,alive,purpose,owner,since,orphanRisk,guardNote}]}` | 200, 400 |
 | GET | `/api/setup/status` | `Provision::status + job` | 查询 `since` / `wait` | `{deps:[{id,guest,present,install,probe,source,url,size_mb,note}],job:{running,seq,lines,error},missing,pending:[id]}` | 200, 400 |
-| POST | `/api/setup/ensure` | `Provision::status + start` | `{deps?:[id],confirm?:bool}`（不点名 = 只补现在缺的） | `{preview:[{id,url,size_mb,present}]}` / `{ok,deps}`（都装好了 → `{ok,deps:[]}`） | 200, 400 |
+| GET | `/api/setup/plan` | `WorkOps::fix_plan` | 查询 `policy` | `{steps:[{id,label,url,size_mb,note}]}`（不缺 = 空表） | 200, 400 |
+| POST | `/api/setup/ensure` | `WorkOps::fix_plan + fix_start` | `{policy,deps?:[id],confirm?:bool}`（不点名 = 这个策略现在缺的） | `{steps:[{id,label,url,size_mb,note}],note}` / `{ok,deps}`（不缺 → `{ok,deps:[]}`） | 200, 400 |
 | DELETE | `/api/setup/job` | `Provision::cancel` | — | `{ok}` | 200 |
 | GET | `/api/storage` | `Storage::report` | — | `{report:{generatedAt,managedBytes,capBytes,categories,policy,job}}` | 200, 400 |
 | POST | `/api/storage/gc` | `Storage::gc` | `{apply?:bool}` | `{ok,report:{actions,skipped,freedBytes,overCap}}` | 200, 400 |

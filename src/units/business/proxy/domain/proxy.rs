@@ -364,10 +364,9 @@ pub struct NewSession {
     pub request_id: String,
     /// 目的：工作名——给了就用它，没给由宿主派生（代理建的子工作按 agent 名派生）。
     pub name: Option<String>,
-    /// 目的：执行环境策略 id——给了就用它，没给由宿主按父会话或设置定。
-    pub sandbox: Option<String>,
-    /// 目的：虚拟机档的虚拟根名——给了就用它，没给由宿主按父会话定（顶层为空，建好后在会话配置里选）。
-    pub guest: Option<String>,
+    /// 目的：执行环境声明（策略 id + 参数 + 定版）——给了就用它，没给由宿主按父会话或设置定。
+    /// 约束：**模型不认识这个字段**（`create_session` 的 `human` 参数）：子会话永远继承父会话。
+    pub sandbox: Option<crate::units::business::sandbox::api::SandboxDecl>,
     /// 目的：父会话——由**机制**从调用上下文填，不从模型参数取（模型不能自选父）。
     pub parent: Option<String>,
     /// 目的：创建时的权限档位；None = 用设置默认（子会话忽略并继承父 ceiling）。
@@ -411,9 +410,6 @@ pub struct CreateArgs {
     /// 目的：工作名（可省 = 由宿主派生）。
     #[serde(default)]
     pub name: Option<String>,
-    /// 目的：创建时的权限档位（只对人经呈现层有效；代理建子会话时忽略并继承父 ceiling）。
-    #[serde(default)]
-    pub permission: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -568,21 +564,17 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
             name, modules, model, chara, transient,
         ));
     }
-    let permission = args
-        .permission
-        .as_deref()
-        .map(crate::units::pure::permission::api::ProfileId::parse)
-        .transpose()?;
     Ok(NewSession {
         kind,
         agents: resolved,
         task,
         request_id,
         name,
+        // 执行环境只由人经呈现层给；核心代理建的子会话整段继承父会话。
         sandbox: None,
-        guest: None,
         parent: None,
-        permission,
+        // 权限只由人经呈现层给：代理建的子会话继承父会话的 ceiling。
+        permission: None,
         // 工作区只由人经呈现层给；核心代理建的子会话整段继承父会话。
         workspace: None,
         // 核心代理建的会话没有上下文开关的人机入口，保底取默认。

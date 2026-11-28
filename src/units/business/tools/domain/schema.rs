@@ -24,12 +24,23 @@ pub struct ToolSchema {
     ///    未声明的（含写入类）独占执行，并作为并发批次之间的屏障。
     #[serde(default)]
     pub parallel: bool,
+    /// 目的：**只在呈现层可用**的参数名（人经界面或文本入口给的）。
+    ///    模型面（提示词说明、原生 JSON Schema、调用校验、缺省值）一律看不到也收不到这些参数，
+    ///    给了就是明确拒绝（`ArgFault::HumanOnly`）——它们表达"只有人能做的选择"（如会话执行环境），
+    ///    模型越权暗示自己选只会得到一条静默继承的会话，比报错更难查。
+    #[serde(default)]
+    pub human: Vec<String>,
 }
 
 impl ToolSchema {
     /// 声明了的参数表；没声明 = 调用方不做校验。
     fn declared(&self) -> Option<&BTreeMap<String, Param>> {
         self.params.as_ref()
+    }
+
+    /// 目的：这个参数是不是**只给人用**（模型面不出现、也不收）。
+    fn human_only(&self, name: &str) -> bool {
+        self.human.iter().any(|h| h == name)
     }
 }
 
@@ -38,18 +49,14 @@ pub type ToolBook = BTreeMap<String, ToolSchema>;
 
 impl ToolSchema {
     /// 目的：模型侧的参数说明：每个参数一行，带类型、必填/缺省与说明。
+    /// 约束：`human` 声明的人用参数不发（模型看不到，也收不到，见 `check_model`）。
     pub fn render_for_prompt(&self) -> String {
-        self.render_for_prompt_hiding(&[])
-    }
-
-    /// 目的：按调用者裁剪版——hide 里的参数名不发给这一席（校验仍按完整声明走）。
-    pub fn render_for_prompt_hiding(&self, hide: &[&str]) -> String {
         let mut lines: Vec<String> = Vec::new();
         if !self.desc.trim().is_empty() {
             lines.push(self.desc.trim().to_string());
         }
         for (name, p) in self.params.iter().flatten() {
-            if hide.iter().any(|h| h == name) {
+            if self.human_only(name) {
                 continue;
             }
             let mut marks: Vec<String> = vec![p.ty.name().to_string()];
@@ -80,10 +87,14 @@ impl ToolSchema {
 
     /// 目的：JSON Schema 形态（同一声明的第二形态：附加属性一律拒收，与主流一致）。
     ///    原生工具调用通道由 decl() 取它渲染工具声明；手写信封通道不发它（模型看的是提示词里的参数说明）。
+    /// 约束：这是**模型面**的声明，`human` 参数不进 properties 也不进 required。
     pub fn to_json_schema(&self) -> serde_json::Value {
         let mut props = serde_json::Map::new();
         let mut required: Vec<serde_json::Value> = Vec::new();
         for (name, p) in self.params.iter().flatten() {
+            if self.human_only(name) {
+                continue;
+            }
             let mut node = serde_json::Map::new();
             node.insert(
                 "type".to_string(),
@@ -145,8 +156,17 @@ impl ToolSchema {
         serde_json::Value::Object(root)
     }
 
-    /// 目的：按声明校验一次调用的参数。返回**事实**（哪个参数、哪种不符），文案由调用方套册子。
+    /// 目的：按**完整声明**校验一次调用（呈现层：人经界面 / 文本入口给的参数）。返回**事实**（哪个参数、哪种不符），文案由调用方套册子。
     pub fn check(&self, args: &serde_json::Value) -> Result<(), ArgFault> {
+        self.check_with(args, false)
+    }
+
+    /// 目的：按**模型面**校验一次调用：`human` 参数不收（给了就是 `HumanOnly`，不是静默忽略），必填也不按它算。
+    pub fn check_model(&self, args: &serde_json::Value) -> Result<(), ArgFault> {
+        self.check_with(args, true)
+    }
+
+    fn check_with(&self, args: &serde_json::Value, model: bool) -> Result<(), ArgFault> {
         let Some(params) = self.declared() else {
             return Ok(());
         };
@@ -155,6 +175,9 @@ impl ToolSchema {
             None => return Err(ArgFault::NotObject),
         };
         for (name, p) in params {
+            if model && self.human_only(name) {
+                continue;
+            }
             match obj.get(name) {
                 None => {
                     if p.required {
@@ -207,9 +230,13 @@ impl ToolSchema {
             }
         }
         // 声明没写的键一律拒收：不猜模型想干什么（与 `additionalProperties: false` 同义）。
+        // 模型面把"人用参数"单列一条事实：它**是**声明过的键，但只有人能填。
         for k in obj.keys() {
             if !params.contains_key(k) {
                 return Err(ArgFault::Unknown(k.clone()));
+            }
+            if model && self.human_only(k) {
+                return Err(ArgFault::HumanOnly(k.clone()));
             }
         }
         Ok(())
@@ -224,8 +251,17 @@ impl ToolSchema {
         }
     }
 
-    /// 目的：补上缺省值（不改动已有键）。
+    /// 目的：补上缺省值（不改动已有键；呈现层的完整声明）。
     pub fn apply_defaults(&self, args: &mut serde_json::Value) {
+        self.apply_defaults_with(args, false);
+    }
+
+    /// 目的：模型面的缺省值补充——`human` 参数的缺省不注入（模型面根本不该出现这些键）。
+    pub fn apply_model_defaults(&self, args: &mut serde_json::Value) {
+        self.apply_defaults_with(args, true);
+    }
+
+    fn apply_defaults_with(&self, args: &mut serde_json::Value, model: bool) {
         let Some(params) = self.declared() else {
             return;
         };
@@ -233,6 +269,9 @@ impl ToolSchema {
             return;
         };
         for (name, p) in params {
+            if model && self.human_only(name) {
+                continue;
+            }
             if !obj.contains_key(name)
                 && let Some(d) = &p.default
             {
@@ -304,6 +343,8 @@ pub enum ArgFault {
     TooBig { name: String, max: String },
     /// 声明里没有这个键。
     Unknown(String),
+    /// 声明过、但**只在呈现层可选**的键被模型给了（会话环境 / 权限这类选择只有人能填）。
+    HumanOnly(String),
     /// 值不在声明的可选值清单里。
     NotInValues { name: String, values: Vec<String> },
     /// 文本入口（CLI/TUI）的词法错误：命令里出现了声明没有的旗语。
@@ -500,9 +541,54 @@ params:
         assert_eq!(js["required"], serde_json::json!(["path"]));
         assert_eq!(js["additionalProperties"], serde_json::json!(false));
 
-        let hidden = s.render_for_prompt_hiding(&["path"]);
-        assert!(!hidden.contains("- path"), "裁掉的参数不发：{}", hidden);
-        assert!(hidden.contains("- offset"), "其余参数照发：{}", hidden);
+        // 人用参数（`human`）在模型面整体消失：说明、原生 schema、必填、缺省都不带它。
+        let h: ToolSchema = yaml_serde::from_str(
+            "desc: 建会话
+params:
+  request_id: { type: string, required: true }
+  sandbox: { type: string, desc: 执行环境策略 }
+human: [sandbox]
+",
+        )
+        .unwrap();
+        let text = h.render_for_prompt();
+        assert!(!text.contains("sandbox"), "人用参数不发：{}", text);
+        assert!(text.contains("- request_id"), "其余参数照发：{}", text);
+        let js = h.to_json_schema();
+        assert!(
+            js["properties"].get("sandbox").is_none(),
+            "原生声明不带人用参数：{}",
+            js
+        );
+        assert_eq!(js["required"], serde_json::json!(["request_id"]));
+        // 模型给了人用参数是**明确拒绝**，不是静默忽略（静默忽略会得到"环境悄悄继承"的会话）。
+        assert_eq!(
+            h.check_model(&serde_json::json!({"request_id": "r", "sandbox": "vm"})),
+            Err(ArgFault::HumanOnly("sandbox".to_string()))
+        );
+        assert!(
+            h.check_model(&serde_json::json!({"request_id": "r"}))
+                .is_ok()
+        );
+        assert!(
+            h.check(&serde_json::json!({"request_id": "r", "sandbox": "vm"}))
+                .is_ok(),
+            "呈现层照完整声明收"
+        );
+        // 人用参数的缺省只注入呈现层，不进模型面。
+        let d: ToolSchema = yaml_serde::from_str(
+            "params:
+  sandbox: { type: string, default: host }
+human: [sandbox]
+",
+        )
+        .unwrap();
+        let mut model_args = serde_json::json!({});
+        d.apply_model_defaults(&mut model_args);
+        assert_eq!(model_args, serde_json::json!({}), "模型面不注入人用缺省");
+        let mut human_args = serde_json::json!({});
+        d.apply_defaults(&mut human_args);
+        assert_eq!(human_args["sandbox"], serde_json::json!("host"));
     }
 
     #[test]

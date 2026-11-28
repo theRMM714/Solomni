@@ -12,7 +12,8 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/units/business/provision.rs` | 单元入口：分区声明（`api` / `detail` / `domain` / `guest` / `ports` / `service`）与两处 `#[cfg(test)]` 重导出；装配工厂在组合根（`src/entry/assembly.rs` 的 `provision` / `provision_with_vm` / `provision_with_guest_vm`） |
-| `src/units/business/provision/api.rs` | 入站契约：`Provision` trait（状态 / 虚拟根清单 / 进程账 / 作业 / 起停 / 还原 / 补齐 / `tool_location` 宿主工具取法）+ `DepStatus`（含 `stale`：探针在场但装的不是当前清单那版）/ `GuestBase` / `ProcInfo` / `HostTool` DTO（`JobState` 在 `exec_model`）+ `NoProvision` + 自由函数 `vm_tools` / `vm_tools_report` |
+| `src/units/business/provision/api.rs` | 入站契约：`Provision` trait（状态 / 虚拟根清单 / 进程账 / 作业 / 起停 / 还原 / 补齐 / `tool_location` 宿主工具取法）+ `DepStatus`（含 `stale`：探针在场但装的不是当前清单那版）/ `GuestBase` / `ProcInfo` / `HostTool` DTO（`JobState` 在 `exec_model`）+ `NoProvision` + 自由函数 `vm_tools` / `vm_tools_report` / `fixer`（把 `Provision` 包成 `exec_model::api::Fixer`，交给策略自己登记） |
+| `src/units/business/provision/fixer.rs` | `ProvisionFixer`：`Fixer` 的实现——`plan` 把 `status` 里缺的条目翻成 `FixStep`（不点名 = 列现在缺的，点名 = 逐条硬报），`start` 直通 `Provision::start`；进度仍由呈现层读 `setup.status` |
 | `src/units/business/provision/domain.rs` | 清单语义：`dependencies.yaml` / `links.yaml` 解析、按本机筛选、安装身份（只算内容，不算落点）、落点 `Placement` 与台账条目 `Entry`、pin 与 guest 画像 `GuestProfile` |
 | `src/units/business/provision/ports.rs` | 出站端口：`Fetcher`（取数）/ `HostFs`（宿主落点）/ `Ledger`（台账与在场判定、位置变了只搬家 `relocate`）/ `Installers`（按 kind 落盘）/ `GuestImage`（rootfs 镜像构造）/ `Procs`（进程台账） |
 | `src/units/business/provision/service.rs` | 编排：状态与台账快照、依赖选择（`split_ensure_spec` / `pending_of_kinds`）、每条的装 / 验 / 记、作业与取消、身份没变只改落点时先搬家再记账；只经端口触达 IO |

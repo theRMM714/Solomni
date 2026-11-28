@@ -10,7 +10,7 @@ use crate::units::business::sandbox::domain::decl::SandboxDecl;
 use crate::units::business::sandbox::domain::exec::Sandbox;
 use crate::units::business::sandbox::domain::facts::{PolicyDecl, SandboxFacts};
 use crate::units::business::sandbox::domain::readiness::{Machine, Readiness};
-use crate::units::pure::exec_model::api::TargetSpec;
+use crate::units::pure::exec_model::api::{Fixer, TargetSpec};
 
 /// 目的：开一席执行句柄时要的东西——会话、租约、声明、事实与运行期的宿主根。
 /// 约束：这里只有装配期就已知的值；实现不得再去读会话或工作区。
@@ -88,6 +88,12 @@ pub trait SandboxPolicy: Send + Sync {
             "这侧执行环境现在不可用（{}）：请换另一侧，或先把缺的补上",
             machine.missing().join("；")
         ))
+    }
+
+    /// 目的：这个策略的补齐端口（能补 = Some）：缺什么由 `machine` 说，补什么都由它做。
+    /// 约束：默认 None——补不了不假装配一个按钮；`vm` 由组合根注入 `provision` 的实现。
+    fn fixer(&self) -> Option<Arc<dyn Fixer>> {
+        None
     }
 
     /// 目的：按这份声明开一席的执行句柄。
