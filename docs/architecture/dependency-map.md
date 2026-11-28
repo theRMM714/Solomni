@@ -44,9 +44,9 @@ flowchart RL
 | 环 2 · 状态与机制 | `agentloop` | `session_model` | 12 |
 | 环 2 · 状态与机制 | `provision` | `vm` | 10 |
 | 环 2 · 状态与机制 | `workspace` | `workbench` | 10 |
+| 环 2 · 状态与机制 | `turn_state` | `session_model` | 9 |
 | 环 2 · 状态与机制 | `versions` | `workbench` | 9 |
 | 环 2 · 状态与机制 | `vm` | `catalog` | 9 |
-| 环 2 · 状态与机制 | `turn_state` | `session_model` | 8 |
 | 环 2 · 状态与机制 | `agentloop` | `catalog` | 7 |
 | 环 2 · 状态与机制 | `agentloop` | `residents` | 6 |
 | 环 2 · 状态与机制 | `turn_state` | `transcript` | 6 |
@@ -108,7 +108,7 @@ flowchart RL
 | `turn` | `agentloop` | 环 3 · 用例 → 环 2 · 状态与机制 | 25 |
 | `collab` | `agentloop` | 环 3 · 用例 → 环 2 · 状态与机制 | 23 |
 | `runtime` | `catalog` | 环 3 · 用例 → 环 2 · 状态与机制 | 18 |
-| `runtime` | `turn_state` | 环 3 · 用例 → 环 2 · 状态与机制 | 14 |
+| `runtime` | `turn_state` | 环 3 · 用例 → 环 2 · 状态与机制 | 15 |
 | `turn` | `catalog` | 环 3 · 用例 → 环 2 · 状态与机制 | 13 |
 | `turn` | `session_model` | 环 3 · 用例 → 环 2 · 状态与机制 | 13 |
 | `collab` | `prompt` | 环 3 · 用例 → 环 2 · 状态与机制 | 12 |
@@ -128,12 +128,12 @@ flowchart RL
 | `runtime` | `llm` | 环 3 · 用例 → 环 2 · 状态与机制 | 7 |
 | `turn` | `workspace` | 环 3 · 用例 → 环 2 · 状态与机制 | 7 |
 | `collab` | `catalog` | 环 3 · 用例 → 环 2 · 状态与机制 | 6 |
-| `collab` | `session_model` | 环 3 · 用例 → 环 2 · 状态与机制 | 6 |
 | `conversation` | `session_model` | 环 3 · 用例 → 环 2 · 状态与机制 | 6 |
 | `system` | `vm` | 环 3 · 用例 → 环 2 · 状态与机制 | 6 |
 | `turn` | `tools` | 环 3 · 用例 → 环 2 · 状态与机制 | 6 |
 | `work` | `workspace` | 环 3 · 用例 → 环 2 · 状态与机制 | 6 |
 | `collab` | `turn_state` | 环 3 · 用例 → 环 2 · 状态与机制 | 5 |
+| `collab` | `session_model` | 环 3 · 用例 → 环 2 · 状态与机制 | 5 |
 | `lifecycle` | `vm` | 环 3 · 用例 → 环 2 · 状态与机制 | 5 |
 | `maintenance` | `vm` | 环 3 · 用例 → 环 2 · 状态与机制 | 5 |
 | `runtime` | `residents` | 环 3 · 用例 → 环 2 · 状态与机制 | 5 |
