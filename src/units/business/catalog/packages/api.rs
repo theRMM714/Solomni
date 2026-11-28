@@ -1,16 +1,20 @@
 //! 目的：packages 子业务的入站面——其它单元与呈现层只准用这里。
-//! 管：Packages 用例 trait、包库快照、目标选择、PackagePlan 与包选择诊断。
+//! 管：Packages 用例 trait、包库快照、目标选择、PackagePlan 与包选择诊断、执行计划的派生。
 //! 不管：纯逻辑实现（domain/）与端口（ports.rs）。
 //! 联动：被 vm / runtime / entry::probes / residents 消费；契约见 RUNTIME_SPEC.md。
 
 pub use crate::units::business::catalog::packages::domain::manifest::{
-    KIND_SYSTEM, Library, Target, library_for_guest,
+    KIND_SYSTEM, Library, Target,
 };
 #[allow(unused_imports)] // 目的：ExecProbe 的实现在测试与组合根；能力内只经 Facts 传。
 pub use crate::units::business::catalog::packages::domain::plan::{
     BaseFacts, ExecProbe, Facts, HostExec, HostFallback, PackagePlan, PinPolicy, PlannedPackage,
     Problem, Provider, absent, build_packages, diagnose_text, diagnoses, plan_guest, plan_host,
     plan_host_requests, requests_for,
+};
+
+pub use crate::units::business::catalog::packages::domain::run_plan::{
+    ExecPlan, host_plan_for, plan_for_spec, plan_summary, unavailable_modules,
 };
 
 /// 目的：运行包库的用例面（service.rs 实现）——包库快照与依赖文件夹路径走这里。

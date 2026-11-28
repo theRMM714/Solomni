@@ -1,8 +1,13 @@
 //! 目的：模块子业务的入站面——契约类型与只读/用例两个 trait。
-//! 管：`ModulesOps`（只读清单事实与启停有效值）与 `Modules`（用例）两个 trait，以及契约类型的重导出。
+//! 管：`ModulesOps`（只读清单事实与启停有效值）与 `Modules`（用例）两个 trait，以及契约类型与入口判定的重导出。
 //! 不管：参数声明的形状（在 `registry_model`）、清单来源机制与端口（在 `ports.rs` / `detail/`）、消费方怎么使用这些事实。
 //! 联动：实现见 `service.rs`；其它单元与呈现层只经这里引用模块事实（R1）；启停语义见 docs/modules/README.md。
 
+pub use crate::units::business::catalog::modules::domain::entry::{
+    EntryProblem, MissingEntry, missing_entries_for, runs_on_target,
+};
+#[allow(unused_imports)]
+// 目的：入口候选只有用例在核（bin 本体只经 missing_entries_for 用它）。
 pub use crate::units::business::catalog::modules::domain::module::{
     BuildDecl, Module, ModuleManifest, Roster, SecretDecl, ServiceDecl, ToolDecl, check_build,
     check_module_id, check_runtimes, check_secrets, check_services, check_tools, check_version,

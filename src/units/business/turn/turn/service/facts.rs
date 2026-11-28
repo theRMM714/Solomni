@@ -50,7 +50,7 @@ impl Turn {
         // 虚拟机档给 guest↔宿主翻译器：system 工具跑在宿主侧，但收模型给的 guest 写法；
         // **同一份**也交给 @ 改写（挂载点、命令装配与用户引用用同一座桥，三处不会各给一种写法）。
         let codec =
-            crate::units::business::vm::api::path_codec_of(&self.root, probe, &meta.target());
+            crate::units::business::sandbox::api::path_codec_of(&self.root, probe, &meta.target());
         let modules: Vec<ModuleDir> = roster
             .modules
             .iter()

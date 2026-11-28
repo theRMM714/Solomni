@@ -6,7 +6,8 @@
 use crate::kernel::ports::HostProbe;
 use crate::units::business::sandbox::api::{
     ExecKind, ExecOutcome, ExecRequest, Machine, OpenRequest, PolicyDecl, Readiness, Requirement,
-    Sandbox, SandboxDecl, SandboxFacts, SandboxPolicy, VM_POLICY,
+    Sandbox, SandboxDecl, SandboxFacts, SandboxPolicy, VM_POLICY, guest_image_of,
+    guest_runtimes_of,
 };
 use crate::units::business::vm::api::{GuestRun, OutputLimit, Vm, VmInputs, VmTools};
 use crate::units::pure::exec_model::api::{Side, TargetSpec};
@@ -101,11 +102,7 @@ impl SandboxPolicy for VmPolicy {
             guest: Some(guest.clone()),
             pins: decl.pins.clone(),
         };
-        let image = crate::units::business::vm::api::guest_image_of(
-            &self.root,
-            self.probe.as_ref(),
-            &target,
-        )
+        let image = guest_image_of(&self.root, self.probe.as_ref(), &target)
         .ok_or_else(|| {
             format!(
                 "没有这个虚拟根：{}（跑 solomni --provision --ensure --yes 装好之后会列出可选的那些）",
@@ -153,7 +150,7 @@ impl SandboxPolicy for VmPolicy {
     }
 
     fn provided(&self, target: &TargetSpec) -> Vec<String> {
-        crate::units::business::vm::api::guest_runtimes_of(&self.root, self.probe.as_ref(), target)
+        guest_runtimes_of(&self.root, self.probe.as_ref(), target)
     }
 
     fn refusal(&self, target: &TargetSpec) -> Option<String> {

@@ -20,7 +20,7 @@
 | `src/units/business/work/service/config.rs` | 会话配置读写：配置视图、改配两段、权限档提交、围栏撤权、配置记录落盘 |
 | `src/units/business/work/service/views.rs` | 会话与文件视图：在世会话 × 历史的并集、继续判据、文件视图 / 上传 / 日志 / 提交恢复 |
 | `src/units/business/work/service/model.rs` | 调用参数与思考档：流式与预算取值、思考片段、树上可用思考档、按根设置 |
-| `src/units/business/work/service/report.rs` | 运行包报告与执行环境视图（`SandboxChoices` 按策略 id 列可选）：模块声明的能力、包库可用版本、缺失清单、权限视图；平台 / 库判定与计划派生在 `vm` 的 `plan`，本文件只留 `plan_for_meta_with` 取会话与名册后转调 |
+| `src/units/business/work/service/report.rs` | 运行包报告与执行环境视图（`SandboxChoices` 按策略 id 列可选）：模块声明的能力、包库可用版本、缺失清单、权限视图；平台 / 库判定与计划派生在 `catalog` 的 `packages`（`run_plan`），本文件只留 `plan_for_meta_with` 取会话与名册后转调 |
 | `src/units/business/work/service/host.rs` | 宿主工具路径：QEMU / virtiofsd / smbd 与共享工具选择（用 kernel 平台事实 `IS_WINDOWS`） |
 | `src/units/business/work/service/guest_job.rs` | 起停 guest 的两段式：核心准备参数（`GuestBoot` / `GuestDiagnose`），调用方线程执行；稳定根判据（`stable_roots` / `check_stable_roots`）也在这里 |
 | `src/units/business/work/service/suggest.rs` | 拟名单入口：按本次需求推荐 agent 名单（队列分发与行解析在 `runtime`） |

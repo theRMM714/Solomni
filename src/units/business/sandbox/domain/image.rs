@@ -1,14 +1,18 @@
 //! 目的：客机镜像的契约——一份虚拟根里有什么、怎么判定、画像（guest.yaml）怎么读写。
-//! 管：`GuestImage` / `GuestClients` / `GuestAgent` 形状、`classify_base` 判定、`write_image` 写画像、`guest_platform` 平台名。
-//! 不管：镜像怎么造出来（`provision`）、客机怎么跑（`vm`）、虚拟根名到目录的解析（`vmstore`）。
+//! 管：`GuestImage` / `GuestClients` / `GuestAgent` 形状、`classify_base` 判定、`write_image` 写画像、`guest_platform` 平台名，
+//!   以及按执行规格派生的 `guest_image_of` / `guest_platform_of` / `guest_os_of` / `guest_runtimes_of` / `path_codec_of`。
+//! 不管：镜像怎么造出来（`provision`）、客机怎么跑（`vm`）、虚拟根名到目录的解析（`vmstore` 的 `resolve_guest`）。
 //! 联动：`vm` 起客机前读它的事实；`provision` 装完按它写画像；`maintenance::builds` 按平台名选运行包。
 
 use crate::kernel::api::layout;
 use crate::kernel::api::path_bridge::PathBridge;
 use crate::kernel::ports::HostProbe;
+use crate::kernel::ports::PathCodec;
 use crate::units::business::sandbox::domain::guest::{GuestArch, GuestOs};
+use crate::units::pure::exec_model::api::{Side, TargetSpec};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 /// 目的：guest 镜像里装的命令通道 agent（命令通道按它选实现）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuestAgent {
@@ -271,4 +275,50 @@ pub fn write_image(
     )
     .map(|_| ())
     .map_err(|fault| format!("写 guest.yaml 失败：{}", fault.message))
+}
+
+/// 目的：这次会话的 guest 镜像（本机档或选定虚拟根判不出来 = None）——平台名与 guest OS 都从它派生。
+/// 约束：虚拟根名先经 `vmstore` 的 `resolve_guest` 解析成那一格目录，再按布局判定；两者任一失败都给 None。
+pub fn guest_image_of(root: &Path, probe: &dyn HostProbe, spec: &TargetSpec) -> Option<GuestImage> {
+    if spec.side != Side::Guest {
+        return None;
+    }
+    let name = spec.guest.as_deref()?;
+    let dir = crate::units::resource::vmstore::api::resolve_guest(root, name).ok()?;
+    classify_base(&dir, probe).ok()
+}
+
+/// 目的：这次虚拟机档会话的 guest 平台名（os-arch）；本机档或判不出来给空串。
+pub fn guest_platform_of(root: &Path, probe: &dyn HostProbe, spec: &TargetSpec) -> String {
+    guest_image_of(root, probe, spec)
+        .map(|image| guest_platform(image.os, image.arch))
+        .unwrap_or_default()
+}
+
+/// 目的：这次虚拟机档会话的 guest OS（本机档或判不出来 = None）——工作环境块按它选 guest 档。
+pub fn guest_os_of(root: &Path, probe: &dyn HostProbe, spec: &TargetSpec) -> Option<GuestOs> {
+    guest_image_of(root, probe, spec).map(|image| image.os)
+}
+
+/// 目的：这场会话的路径翻译器（虚拟机档 guest↔宿主；本机档视图盘打开时宿主↔视图，否则 None = 恒等）。
+/// 约束：它只把模型给的写法译成宿主路径**再送寻址**；安全判断仍在 `workbench` 的寻址里。
+pub fn path_codec_of(
+    root: &Path,
+    probe: &dyn HostProbe,
+    spec: &TargetSpec,
+) -> Option<Arc<dyn PathCodec>> {
+    let Some(guest) = guest_os_of(root, probe, spec) else {
+        return crate::kernel::api::view_drive::view_codec();
+    };
+    Some(Arc::new(PathBridge::for_session(
+        std::env::consts::OS,
+        Some(guest.dialect()),
+    )))
+}
+
+/// 目的：这份规格的 guest 镜像自带哪些运行能力（本机档或判不出来 = 空）。
+pub fn guest_runtimes_of(root: &Path, probe: &dyn HostProbe, spec: &TargetSpec) -> Vec<String> {
+    guest_image_of(root, probe, spec)
+        .map(|image| image.runtimes)
+        .unwrap_or_default()
 }

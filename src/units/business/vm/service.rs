@@ -5,7 +5,6 @@
 //! 联动：端口在 ports.rs；被 api::Vm 的调用方消费。
 
 pub mod job;
-pub mod plan;
 
 use crate::kernel::api::host_probe::FileStamp;
 use crate::kernel::api::host_probe::file_stamp;

@@ -14,7 +14,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 /// 目的：一条**包选择**诊断：结构化事实（界面文案由呈现层渲染）。
-/// 约束：模块内产物不在场是另一类事实，归 `vm::api::EntryProblem`，不混进这里。
+/// 约束：模块内产物不在场是另一类事实，归 `catalog` 的 `modules` 子业务的 `EntryProblem`，不混进这里。
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum Problem {
     /// 模块（含它的包的传递依赖）需要的能力，包库里没有任何包提供。

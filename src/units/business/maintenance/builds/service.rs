@@ -6,6 +6,10 @@
 use crate::kernel::api::fence::FencePlan;
 use crate::kernel::ports::{FenceGate, FenceHost, HostProbe, Log, ProcessRunner};
 use crate::units::business::catalog::modules::api::{BuildDecl, Module};
+use crate::units::business::catalog::modules::api::{
+    MissingEntry, missing_entries_for, runs_on_target,
+};
+use crate::units::business::catalog::packages::api::ExecPlan;
 use crate::units::business::catalog::packages::api::{
     Facts, HostExec, Library, Packages, PinPolicy, PlannedPackage, Provider, build_packages,
     diagnose_text, plan_host_requests, requests_for,
@@ -17,9 +21,7 @@ use crate::units::business::maintenance::builds::ports::{
 use crate::units::business::maintenance::storage::api::Storage;
 use crate::units::business::provision::api::Provision;
 use crate::units::business::sandbox::api::{GuestImage, classify_base, guest_platform};
-use crate::units::business::vm::api::{
-    self as vm, ExecPlan, GuestOs, GuestRun, GuestSpec, MissingEntry, Vm,
-};
+use crate::units::business::vm::api::{self as vm, GuestOs, GuestRun, GuestSpec, Vm};
 use crate::units::pure::exec_model::api::Side;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -114,9 +116,9 @@ impl BuildsService {
     /// 参数：`module` = 模块；`target_os` = 目标平台。
     /// 返回：缺的入口（空 = 都在场）。
     fn entries_left(&self, module: &Module, target_os: &str) -> Vec<MissingEntry> {
-        vm::missing_entries_for(std::slice::from_ref(module), target_os, &|p| {
+        missing_entries_for(std::slice::from_ref(module), target_os, &|p| {
             self.probe.is_executable(p)
-                && (target_os == std::env::consts::OS || vm::runs_on_target(p, target_os))
+                && (target_os == std::env::consts::OS || runs_on_target(p, target_os))
         })
     }
 
