@@ -3,4 +3,5 @@
 //! 不管：会话状态、裁决排队（在会话单元的 decisions）；落盘与回放（在会话单元的 detail 与 service）。
 //! 联动：由 src/units/business/transcript/api.rs 对外导出；归环依据见 docs/architecture/layers.md（环 2：行里嵌 llm / tools 的载荷值）。
 
+pub mod content;
 pub mod events;

@@ -5,6 +5,7 @@
 
 use crate::kernel::api::clock;
 use crate::units::business::tools::api::{ShellFacts, ToolExec};
+use crate::units::business::transcript::api::Content;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -103,69 +104,44 @@ impl ShellSlot {
     }
 }
 
-/// 目的：从转录派生最近一次 shell 的状态（回放 / 重建用）：命令、cwd、耗时、成败、退出码与回执预览。
+/// 目的：从内容日志派生最近一次 shell 的状态（回放 / 重建用）：命令、cwd、耗时、成败、退出码与回执预览。
 /// 约束：只读工具行的结构化字段（tool.name / tool.args / tool.shell / tool.output），不解析正文；
-///   跳过回档折叠的行；参数里没有命令（调用没解析出来）或没有结构化事实的行跳过。
-pub fn last_shell(events: &[serde_json::Value]) -> Option<ShellLive> {
-    let marks = super::rewind::rewind_marks(events);
+///   只在折叠之外的行里找（留档过的行不算「最近一次」）；参数里没有命令（调用没解析出来）或没有结构化事实的行跳过。
+pub fn last_shell(content: &Content) -> Option<ShellLive> {
     let mut found = None;
-    for ev in events {
-        if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
-            continue;
-        }
-        let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
+    for line in content.folded_away().lines() {
+        let Some(tool) = line.tool.as_ref() else {
             continue;
         };
-        for line in lines {
-            let id = line.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
-            if super::rewind::folded(&marks, id) {
-                continue;
-            }
-            let Some(tool) = line.get("tool") else {
-                continue;
-            };
-            if tool.get("name").and_then(|n| n.as_str()) != Some("shell")
-                || !tool
-                    .get("module")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("")
-                    .is_empty()
-            {
-                continue;
-            }
-            let output = tool.get("output").and_then(|o| o.as_str()).unwrap_or("");
-            let args: serde_json::Value =
-                serde_json::from_str(tool.get("args").and_then(|a| a.as_str()).unwrap_or(""))
-                    .unwrap_or_default();
-            let command = args
-                .get("command")
-                .and_then(|c| c.as_str())
-                .unwrap_or("")
-                .to_string();
-            if command.is_empty() {
-                continue;
-            }
-            // 结构化事实是唯一来源：没有它的行不算「最近一次 shell」。
-            let Some(facts) = tool
-                .get("shell")
-                .and_then(|f| serde_json::from_value::<ShellFacts>(f.clone()).ok())
-            else {
-                continue;
-            };
-            found = Some(ShellLive {
-                command,
-                cwd: facts.cwd.clone(),
-                started_at: 0,
-                finished_at: None,
-                elapsed_secs: Some(facts.elapsed_secs()),
-                fence_prep_secs: facts.fence_prep_secs(),
-                exit_code: facts.exit_code,
-                status: facts.status.clone(),
-                ok: Some(tool.get("ok").and_then(|o| o.as_bool()).unwrap_or(false)),
-                output: output.chars().take(4000).collect(),
-                historical: true,
-            });
+        if tool.name != "shell" || !tool.module.is_empty() {
+            continue;
         }
+        let args: serde_json::Value = serde_json::from_str(&tool.args).unwrap_or_default();
+        let command = args
+            .get("command")
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string();
+        if command.is_empty() {
+            continue;
+        }
+        // 结构化事实是唯一来源：没有它的行不算「最近一次 shell」。
+        let Some(facts) = tool.shell.as_ref() else {
+            continue;
+        };
+        found = Some(ShellLive {
+            command,
+            cwd: facts.cwd.clone(),
+            started_at: 0,
+            finished_at: None,
+            elapsed_secs: Some(facts.elapsed_secs()),
+            fence_prep_secs: facts.fence_prep_secs(),
+            exit_code: facts.exit_code,
+            status: facts.status.clone(),
+            ok: Some(tool.ok),
+            output: tool.output.chars().take(4000).collect(),
+            historical: true,
+        });
     }
     found
 }
@@ -485,14 +461,14 @@ mod tests {
     #[test]
     fn last_shell_reads_command_cwd_and_elapsed_from_the_tool_row() {
         let events = vec![transcript(json!([
-            {"id": 0, "tool": {"name": "shell", "module": "", "ok": true,
+            {"id": 0, "speaker": "a", "tool": {"name": "shell", "speaker": "a", "module": "", "ok": true,
              "args": r#"{"command":"first"}"#, "output": "x"}},
-            {"id": 1, "tool": {"name": "shell", "module": "", "ok": true,
+            {"id": 1, "speaker": "a", "tool": {"name": "shell", "speaker": "a", "module": "", "ok": true,
              "args": r#"{"command":"npm test"}"#,
              "output": "ok",
              "shell": {"cwd": "/w/a", "elapsed_ms": 7_000, "exit_code": 0, "status": "exit"}}}
         ]))];
-        let live = last_shell(&events).expect("要派生最后一条");
+        let live = last_shell(&Content::of_events(&events)).expect("要派生最后一条");
         assert_eq!(live.command, "npm test");
         assert_eq!(live.cwd, "/w/a");
         assert_eq!(live.elapsed_secs, Some(7));
@@ -507,20 +483,20 @@ mod tests {
     fn last_shell_skips_folded_rows_and_other_tools() {
         let events = vec![
             transcript(json!([
-                {"id": 0, "tool": {"name": "read", "module": "", "ok": true, "args": "{}", "output": "x"}},
-                {"id": 1, "tool": {"name": "shell", "module": "", "ok": true,
+                {"id": 0, "speaker": "a", "tool": {"name": "read", "speaker": "a", "module": "", "ok": true, "args": "{}", "output": "x"}},
+                {"id": 1, "speaker": "a", "tool": {"name": "shell", "speaker": "a", "module": "", "ok": true,
                  "args": r#"{"command":"gone"}"#, "output": "",
                  "shell": {"cwd": "/w", "elapsed_ms": 1_000, "exit_code": 0, "status": "exit"}}}
             ])),
             json!({"type": "rewind", "mark": 1, "mode": "archive", "before": 0, "from": 2}),
             transcript(json!([
-                {"id": 2, "tool": {"name": "shell", "module": "m", "ok": true,
+                {"id": 2, "speaker": "a", "tool": {"name": "shell", "speaker": "a", "module": "m", "ok": true,
                  "args": r#"{"command":"module"}"#, "output": "",
                  "shell": {"cwd": "/w", "elapsed_ms": 1_000, "exit_code": 0, "status": "exit"}}}
             ])),
         ];
         assert!(
-            last_shell(&events).is_none(),
+            last_shell(&Content::of_events(&events)).is_none(),
             "被折叠的 shell 与模块工具都不算"
         );
     }
@@ -528,12 +504,12 @@ mod tests {
     #[test]
     fn last_shell_keeps_a_refused_attempt_as_an_attempt() {
         let events = vec![transcript(json!([
-            {"id": 0, "tool": {"name": "shell", "module": "", "ok": false,
+            {"id": 0, "speaker": "a", "tool": {"name": "shell", "speaker": "a", "module": "", "ok": false,
              "args": r#"{"command":"cat ../x"}"#,
              "output": "",
              "shell": {"cwd": "/w", "elapsed_ms": 0}}}
         ]))];
-        let live = last_shell(&events).expect("最近一次尝试");
+        let live = last_shell(&Content::of_events(&events)).expect("最近一次尝试");
         assert_eq!(live.ok, Some(false));
         assert_eq!(live.cwd, "/w", "落点是尝试的落点，不是结果");
         assert_eq!(live.elapsed_secs, Some(0));
@@ -544,14 +520,14 @@ mod tests {
     #[test]
     fn last_shell_reads_only_the_structured_facts() {
         let events = vec![transcript(json!([
-            {"id": 0, "tool": {"name": "shell", "module": "", "ok": true,
+            {"id": 0, "speaker": "a", "tool": {"name": "shell", "speaker": "a", "module": "", "ok": true,
              "args": r#"{"command":"npm test"}"#,
              "output": "ok",
              "shell": {"cwd": "/w/b", "elapsed_ms": 331_400,
                        "fence_prep_ms": 327_000, "exit_code": 0,
                        "status": "exit", "truncated": true}}}
         ]))];
-        let live = last_shell(&events).expect("要派生");
+        let live = last_shell(&Content::of_events(&events)).expect("要派生");
         assert_eq!(live.cwd, "/w/b");
         assert_eq!(live.elapsed_secs, Some(331));
         assert_eq!(live.fence_prep_secs, Some(327));
@@ -563,23 +539,36 @@ mod tests {
     #[test]
     fn last_shell_ignores_rows_without_structured_facts() {
         let events = vec![transcript(json!([
-            {"id": 0, "tool": {"name": "shell", "module": "", "ok": true,
+            {"id": 0, "speaker": "a", "tool": {"name": "shell", "speaker": "a", "module": "", "ok": true,
              "args": r#"{"command":"npm test"}"#,
              "output": "ok\n[shell] 退出码 0\n[shell] cwd /w/a · 耗时 7 秒"}}
         ]))];
-        assert!(last_shell(&events).is_none(), "正文里的旧式尾行不再被解析");
+        assert!(
+            last_shell(&Content::of_events(&events)).is_none(),
+            "正文里的旧式尾行不再被解析"
+        );
     }
 
     #[test]
     fn last_shell_keeps_fence_prep_only_from_one_second() {
         let row = |ms: u64| {
             transcript(json!([
-                {"id": 0, "tool": {"name": "shell", "module": "", "ok": true,
+                {"id": 0, "speaker": "a", "tool": {"name": "shell", "speaker": "a", "module": "", "ok": true,
                  "args": r#"{"command":"x"}"#, "output": "ok",
                  "shell": {"cwd": "/w", "elapsed_ms": 2_000, "fence_prep_ms": ms}}}
             ]))
         };
-        assert_eq!(last_shell(&[row(400)]).unwrap().fence_prep_secs, None);
-        assert_eq!(last_shell(&[row(1_000)]).unwrap().fence_prep_secs, Some(1));
+        assert_eq!(
+            last_shell(&Content::of_events(&[row(400)]))
+                .unwrap()
+                .fence_prep_secs,
+            None
+        );
+        assert_eq!(
+            last_shell(&Content::of_events(&[row(1_000)]))
+                .unwrap()
+                .fence_prep_secs,
+            Some(1)
+        );
     }
 }

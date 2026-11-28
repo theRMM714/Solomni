@@ -1,26 +1,11 @@
 //! 目的：单 agent 会话——上下文历史自有，通道来自注入的网关。
 //! 管：发言席（只有 agent，id = agent 实例名）、工具循环、转录行与会话内稳定 id、每行对应的历史长度（供回档精确回退）、压缩点。
 //! 不管：事件词汇与裁决队列（在 `events.rs` / `decisions.rs`）、历史落盘（在 `detail/`）。
-//! 联动：由 engine 驱动（`engine::converse_with`）；回档算术在 `rewind.rs`，历史视图在 `history.rs`。
+//! 联动：由 engine 驱动（`engine::converse_with`）；条目流与读时变换在 transcript 的 `Content`，历史视图在 `history.rs`。
 use crate::units::business::agentloop::domain::member_tools::MemberTools;
 use crate::units::business::llm::api::{BoxedChat, Msg, TokenUsage};
 use crate::units::business::session_model::api::{UsageTotals, default_freshness_keep_percent};
 use crate::units::business::transcript::api::{LineView, SessionEvent, ToolCallView};
-
-/// 目的：把"保留前 keep 行"对齐到**回复边界**：keep 落在某次回复内部时，退到该回复的第一行之前。
-///   为什么必须对齐：一次回复的消息是「一条助手消息 + N 条结果」，截在中间会留下孤儿结果
-///   （协议要求结果紧跟发起它的助手消息）。转录的截断与内存历史的截断**必须用同一个函数**，
-///   否则前端看到的事件流与模型上下文会不一致。
-pub fn keep_whole_replies(line_reply: &[u64], keep: usize) -> usize {
-    let mut keep = keep.min(line_reply.len());
-    if keep > 0 && keep < line_reply.len() {
-        let losing = line_reply[keep];
-        while keep > 0 && line_reply[keep - 1] == losing {
-            keep -= 1;
-        }
-    }
-    keep
-}
 
 pub mod prompt;
 
@@ -865,7 +850,11 @@ impl AgentSession {
             // `align_keep` 的「不截」语义：保留全部，不能拿 line_reply 的长度当行数。
             rows
         } else {
-            keep_whole_replies(&self.line_reply, keep_id as usize).min(rows)
+            crate::units::business::transcript::api::keep_whole_replies(
+                &self.line_reply,
+                keep_id as usize,
+            )
+            .min(rows)
         };
         self.line_reply.truncate(keep);
         self.line_ids.truncate(keep);

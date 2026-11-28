@@ -270,6 +270,8 @@ pub struct LineView {
     /// 目的：**正文**：这一行说的内容。**行首标签不在这里**——说话人与动词是结构化字段
     ///   （`speaker` / `verb`），渲染时才拼回 `[谁:动词] 正文`（见 `render`）。
     ///   为什么分开：呈现层与状态派生读字段，不再从正文里抠标签（见 docs/session/session-model.md 二）。
+    /// 约束：缺省是空串——读旧行或手写行时不必逐条补全（内容日志按条目读，缺字段不该把整行降级成认不出）。
+    #[serde(default)]
     pub line: String,
     /// 目的：**说话人**：agent 实例名 / `用户` / 核心自己的标签（`轮次` / `代拟` / `节点`…）；空 = 无标签。
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -418,36 +420,6 @@ fn is_zero(n: &u64) -> bool {
 /// serde 用：false 时不写进线格式。
 fn is_false(b: &bool) -> bool {
     !*b
-}
-
-/// 目的：取流水里**最后一次**压缩行（`up_to`、摘要、行 id）。
-/// 约束：回档到压缩行之前时它已随转录被截掉，所以「没有它」就是「回到压缩前」。
-pub fn last_compaction(events: &[serde_json::Value]) -> Option<(u64, String, u64)> {
-    let mut found = None;
-    for ev in events {
-        if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
-            continue;
-        }
-        let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
-            continue;
-        };
-        for l in lines {
-            if l.get("kind").and_then(|k| k.as_str()) != Some("compacted") {
-                continue;
-            }
-            let up_to = l
-                .get("payload")
-                .and_then(|p| p.get("up_to"))
-                .and_then(|u| u.as_u64())
-                .unwrap_or(0);
-            let summary = l.get("line").and_then(|s| s.as_str()).unwrap_or("");
-            let id = l.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
-            if up_to > 0 && !summary.is_empty() {
-                found = Some((up_to, summary.to_string(), id));
-            }
-        }
-    }
-    found
 }
 
 impl SessionEvent {

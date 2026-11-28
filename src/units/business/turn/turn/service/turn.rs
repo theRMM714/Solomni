@@ -366,7 +366,11 @@ impl Turn {
         let issued = self
             .history
             .load(sid)
-            .map(|(_, ev)| crate::units::business::turn_state::api::issued_in(&ev))
+            .map(|(_, content)| {
+                crate::units::business::turn_state::api::issued_in(
+                    &content.folded_away().to_events(),
+                )
+            })
             .unwrap_or(0);
         self.desk_for(sid, issued)
     }
@@ -409,7 +413,7 @@ impl Turn {
     /// 约束：会话表只有核心能碰（泵不建会话），所以取产出的判据留在这里。
     pub(super) fn node_note(&self, child: &str) -> String {
         let evs = match self.history.load(child) {
-            Ok((_, evs)) => evs,
+            Ok((_, content)) => content.folded_away().to_events(),
             Err(_) => Vec::new(),
         };
         let mut lines: Vec<String> = Vec::new();

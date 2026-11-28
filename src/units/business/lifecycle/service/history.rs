@@ -153,11 +153,8 @@ impl Lifecycle {
         &self,
         name: &str,
     ) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
-        let (meta, events) = self.history.load(name)?;
-        Ok((
-            meta,
-            crate::units::business::agentloop::api::truncate_events(&events),
-        ))
+        let (meta, content) = self.history.load(name)?;
+        Ok((meta, content.folded_away().to_events()))
     }
 
     /// 目的：删除会话（含它的整棵子树）。

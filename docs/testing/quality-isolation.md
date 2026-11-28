@@ -75,12 +75,12 @@
 
 ## 四、不变量断言账（生产代码里的 panic 面）
 
-- 生产代码（不含 `src/tests/**` 与 `#[cfg(test)]` 之后）共 **33 处** `expect` / `panic!`：32 处是同一函数内可静态看出必然成立的不变量断言，1 处（进程启动线程失败）是进程级不可恢复错误。它们只允许出现在这种位置——`expect` 只是把「已判」写进代码（`run-tests.js`）。
+- 生产代码（不含 `src/tests/**` 与 `#[cfg(test)]` 之后）共 **31 处** `expect` / `panic!`：30 处是同一函数内可静态看出必然成立的不变量断言，1 处（进程启动线程失败）是进程级不可恢复错误。它们只允许出现在这种位置——`expect` 只是把「已判」写进代码（`run-tests.js`）。
 - 互斥锁的 21 处 `.expect("锁")` 不计入：锁中毒说明进程状态已不可信，按既有约定直接失败。
 
 | 位置 | 处数 | 为什么必然成立 |
 | --- | --- | --- |
-| `src/units/business/collab/service/{collab,pump,turn_io}.rs`、`src/units/business/agentloop/engine/round.rs`、`src/units/business/lifecycle/service/rewind.rs` | 14 | 协作状态机的 `disc` / 任务链 / 工具上下文：进入这段之前刚判过存在，`expect("disc 已确认存在")` 与其后的 `expect("上臂已判存在")` 是同一判断的延续；`rewind.rs` 的两处（`l.get("tool")` 与其后跳过被总结行的同一判断）同理 |
+| `src/units/business/collab/service/{collab,pump,turn_io}.rs`、`src/units/business/agentloop/engine/round.rs` | 12 | 协作状态机的 `disc` / 任务链 / 工具上下文：进入这段之前刚判过存在，`expect("disc 已确认存在")` 与其后的 `expect("上臂已判存在")` 是同一判断的延续 |
 | `src/units/business/prompt/{domain/prompt.rs,domain/refs.rs,service.rs}` | 4 | 模板变量缺失 = **装配错误**（`prompts/` 或调用方写错），不在用户输入路径上；启动即炸好过渲染出半截文案 |
 | `src/kernel/detail/process.rs` | 3 | `Command` 已声明 `Stdio::piped()`，`child.stdin` / `stdout` / `stderr` 的 `take()` 必为 `Some` |
 | `src/kernel/detail/confine/macos.rs` | 2 | `CString::new` 的两个入参是不含 NUL 的字面量与临时路径 |

@@ -35,6 +35,8 @@ pub struct Lifecycle {
     vm: Arc<dyn Vm + Send + Sync>,
     /// 常驻服务的统一管理面（**不持它的端口**）：删除前回收常驻服务租约经它。
     residents: Arc<dyn ResidentOps + Send + Sync>,
+    /// 工作台策略表：**回档三模式只在版本化的会话里成立**——按会话声明里的策略 id 问它的能力位。
+    bench_policies: Arc<dyn crate::units::business::workbench::api::BenchPolicies>,
     log: Arc<dyn Log + Send + Sync>,
 }
 
@@ -46,6 +48,7 @@ impl Lifecycle {
         tools: Arc<dyn ToolExec + Send + Sync>,
         vm: Arc<dyn Vm + Send + Sync>,
         residents: Arc<dyn ResidentOps + Send + Sync>,
+        bench_policies: Arc<dyn crate::units::business::workbench::api::BenchPolicies>,
         log: Arc<dyn Log + Send + Sync>,
     ) -> Lifecycle {
         Lifecycle {
@@ -54,6 +57,7 @@ impl Lifecycle {
             tools,
             vm,
             residents,
+            bench_policies,
             log,
         }
     }

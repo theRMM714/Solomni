@@ -6,6 +6,7 @@
 use super::*;
 use crate::tests::doubles::test_workspace_store;
 use crate::units::business::session_model::api::{MEETING, SINGLE, SessionSpec};
+use crate::units::business::transcript::api::Content;
 use crate::units::business::versions::api::{ChangeKind, CommitAnchor};
 use crate::units::business::workbench::api::{WORKIGNORE, WORKIGNORE_SEED};
 
@@ -608,13 +609,19 @@ fn fs_history_roundtrips_lists_deletes_and_rejects_broken_meta() {
         root.join("w1").join("meta.yaml").is_file(),
         "meta.yaml 落盘"
     );
-    h.append("w1", &[serde_json::json!({"type": "say", "text": "hi"})])
-        .expect("追加成功");
-    h.append("w1", &[serde_json::json!({"type": "ended"})])
-        .expect("追加成功");
+    h.append(
+        "w1",
+        &Content::of_events(&[serde_json::json!({"type": "say", "text": "hi"})]),
+    )
+    .expect("追加成功");
+    h.append(
+        "w1",
+        &Content::of_events(&[serde_json::json!({"type": "ended"})]),
+    )
+    .expect("追加成功");
     let (m, events) = h.load("w1").expect("读回");
     assert_eq!(m.name, "w1");
-    assert_eq!(events.len(), 2, "jsonl 一行一条，只追加不丢");
+    assert_eq!(events.to_events().len(), 2, "jsonl 一行一条，只追加不丢");
     let listed = h.list().expect("列会话");
     assert_eq!(listed.len(), 1);
     assert!(listed[0].done, "ended 之后 done = true");
@@ -658,11 +665,14 @@ fn fs_history_nests_children_inside_their_parent_dir() {
     let mut grand = meta("p--甲--乙");
     grand.parent = Some("p--甲".to_string());
     h.create(&grand).expect("建孙会话");
-    h.append("p--甲", &[serde_json::json!({"type": "say", "text": "hi"})])
-        .expect("子会话流水");
+    h.append(
+        "p--甲",
+        &Content::of_events(&[serde_json::json!({"type": "say", "text": "hi"})]),
+    )
+    .expect("子会话流水");
     h.append(
         "p--甲--乙",
-        &[serde_json::json!({"type": "say", "text": "yo"})],
+        &Content::of_events(&[serde_json::json!({"type": "say", "text": "yo"})]),
     )
     .expect("孙会话流水（按名字在任意深度定位）");
     assert!(

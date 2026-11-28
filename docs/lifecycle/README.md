@@ -8,7 +8,7 @@
 
 - 管：**回档三模式**（`rewind` / `rewind_outcome`）——留档（写标记 + 折叠子会话）、删除（收窗子会话 + 截断）、还原（删标记及其后 + 重放子会话）。
 - 管：**会话重建**（`restore_session`）：按 `turn` 的 `rebuild_session` 重建并放回会话，新行续号取全量最大 id + 1、永不回退。
-- 管：**历史列表与只读打开**（`history_list` / `history_open`）：列表按树序派生；打开时截到最后一个压缩点（`truncate_events`）。
+- 管：**历史列表与只读打开**（`history_list` / `history_open`）：列表按树序派生；打开时取内容日志的活动视图（`Content::folded_away`，见 [docs/transcript](../transcript/README.md)）。
 - 管：**删除的报账与收尾**（`delete_bookkeeping` / `SessionDelete::run`）：撤权的先后、常驻服务回收、移出内存与待删目录的收集；收尾段先停 guest、再删目录、最后后台撤围栏授权。
 - 管：**回档标记的续号**（`next_mark_id`）与**按 agent 收窗**（`keep_by_agent`）：留档 / 删除时各会话保留到哪一行。
 - 不管：行与事件的算术、留档标记的解析（`agentloop` 的 `domain::rewind`）与落盘机制（`session` 的 `History` 端口）。

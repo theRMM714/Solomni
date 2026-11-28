@@ -7,7 +7,7 @@
 ## 管什么 / 不管什么
 
 - 管：单 agent 会话运行时 `AgentSession`——上下文、行 id、回合与回复簿记、压缩与回档、观察账本与新鲜度判定；回合参数 `SessionParams` 与提示拼装。
-- 管：成员工具面 `ToolFace` / `MemberTools` 与核实端口 `CoreVerify`，以及工具面的**唯一装配机**（角色 → 面）；`last_shell` 这类按转录派生的运行事实。
+- 管：成员工具面 `ToolFace` / `MemberTools` 与核实端口 `CoreVerify`，以及工具面的**唯一装配机**（角色 → 面）；`last_shell` 这类按内容日志派生的运行事实。
 - 管：回合引擎——五个回合入口（发言 / 派发 / 讨论席回合 / 继续 / 压缩）、轮循环与行构造、工具循环与放行策略、回合端口与结论类型；核心操作回路 `core_operation`。
 - 管：回档的行 / 事件算术与消息回灌（`reply_msgs` / `tool_result_body`）。
 - 不管：会话身份与声明（元信息、类型表、流程段与角色、留档策略在 `src/units/business/session_model/`）。

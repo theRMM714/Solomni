@@ -6,7 +6,6 @@
 use crate::kernel::ports::HostProbe;
 use crate::units::business::catalog::registry::api::Registry;
 
-use crate::units::business::agentloop::api::truncate_events;
 use crate::units::business::conversation::session::api::subtree_of;
 use crate::units::business::session_model::api::{RunState, SessionMeta};
 use crate::units::business::turn_state::api::Session;
@@ -38,8 +37,9 @@ impl Turn {
         if self.is_running(sid) {
             return Err(Self::running_refusal(sid));
         }
-        let (meta, events) = self.history.load(sid)?;
-        let rebuilt = self.rebuild_session(&meta, &truncate_events(&events), registry, probe)?;
+        let (meta, content) = self.history.load(sid)?;
+        let rebuilt =
+            self.rebuild_session(&meta, &content.folded_away().to_events(), registry, probe)?;
         self.put(sid.to_string(), rebuilt);
         Ok(())
     }

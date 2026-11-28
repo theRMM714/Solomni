@@ -353,36 +353,28 @@ pub(crate) fn discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_di
     let child = format!("{}--a", sid);
     // ① 逐轮定稿：核实行与发言行是两条 Transcript，且同属一个回合号。
     let (_, rows) = core.lifecycle.history_open(&child).unwrap();
-    let batches: Vec<Vec<serde_json::Value>> = rows
+    // 落盘的事件只是容器：相邻的行可能并成一条 transcript，按行摊平看顺序。
+    let lines: Vec<serde_json::Value> = rows
         .iter()
         .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
         .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
-        .map(|ls| ls.to_vec())
-        .filter(|b: &Vec<serde_json::Value>| !b.is_empty())
+        .flatten()
+        .cloned()
         .collect();
-    let tool_at = batches
+    let tool_at = lines
         .iter()
-        .position(|b| b.iter().any(|l| l.get("tool").is_some()))
+        .position(|l| l.get("tool").is_some())
         .expect("核实行该落档");
-    let said_at = batches
+    let said_at = lines
         .iter()
-        .position(|b| {
-            b.iter()
-                .any(|l| l.get("verb").and_then(|v| v.as_str()) == Some("say"))
-        })
+        .position(|l| l.get("verb").and_then(|v| v.as_str()) == Some("say"))
         .expect("发言行该落档");
-    let turn_of = |b: &Vec<serde_json::Value>, pick: &dyn Fn(&serde_json::Value) -> bool| {
-        b.iter()
-            .find(|l| pick(l))
-            .and_then(|l| l.get("turn").and_then(|t| t.as_u64()))
-    };
-    let tool_turn = turn_of(&batches[tool_at], &|l| l.get("tool").is_some());
-    let said_turn = turn_of(&batches[said_at], &|l| {
-        l.get("verb").and_then(|v| v.as_str()) == Some("say")
-    });
+    let turn_of = |line: &serde_json::Value| line.get("turn").and_then(|t| t.as_u64());
+    let tool_turn = turn_of(&lines[tool_at]);
+    let said_turn = turn_of(&lines[said_at]);
     assert!(
         tool_at < said_at,
-        "一轮一条：核实行先出、发言行后出（不是回合末一次性一批）：{batches:?}"
+        "一轮一条：核实行先出、发言行后出（不是回合末一次性一批）：{lines:?}"
     );
     assert_eq!(tool_turn, said_turn, "同一个回合的行带同一个回合号");
     // ② 实时与重建同口径：把会话从表里丢掉，再取一次 = 按落盘转录重建。

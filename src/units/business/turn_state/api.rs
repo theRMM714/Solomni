@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::kernel::ports::AskUser;
 use crate::units::business::session_model::api::{AskDesk, HistoryView, SessionMeta};
-use crate::units::business::transcript::api::SessionEvent;
+use crate::units::business::transcript::api::{Content, SessionEvent};
 
 #[allow(unused_imports)]
 pub use crate::units::business::turn_state::domain::decisions::{
@@ -69,16 +69,16 @@ pub trait History: Send + Sync {
     fn create(&self, meta: &SessionMeta) -> Result<(), String>;
     /// 写回会话元信息（配置界面的编辑：会话身份的**唯一真相**在 meta.yaml）。
     fn save_meta(&self, meta: &SessionMeta) -> Result<(), String>;
-    /// 追加若干事件（留档只走这条；删除 / 恢复走 `replace`）。
-    fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String>;
-    /// 整体重写流水（删除 / 恢复会真的截断）。
-    fn replace(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String>;
+    /// 追加若干条目（留档只走这条；删除 / 恢复走 `replace`）。
+    fn append(&self, name: &str, content: &Content) -> Result<(), String>;
+    /// 整体重写内容（只有版本控制的删除 / 恢复会真的截断）。
+    fn replace(&self, name: &str, content: &Content) -> Result<(), String>;
     /// 列出全部落盘会话（列表页按它渲染）。
     fn list(&self) -> Result<Vec<HistoryView>, String>;
     /// **只读元信息**（不回放流水）：运行态（暂停 / 关闭）判定走它，不为此读整份转录。
     fn meta(&self, name: &str) -> Result<SessionMeta, String>;
-    /// 打开一个会话：元信息 + 事件流水（调用方按它回放状态）。
-    fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String>;
+    /// 打开一个会话：元信息 + 内容日志（调用方按它回放状态）。
+    fn load(&self, name: &str) -> Result<(SessionMeta, Content), String>;
     /// 删除一个会话目录；false = 本来就不存在。
     fn delete(&self, name: &str) -> Result<bool, String>;
 }

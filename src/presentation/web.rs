@@ -368,7 +368,9 @@ pub(crate) fn route(
             Ok((meta, events)) => {
                 let (live, head) = faces.events.tail_excluding(&name, &events);
                 // 状态栏的 shell 快照按转录派生：回放 / 重建 / 重启后前端不再"没有 chip 可画"。
-                let shell = crate::units::business::agentloop::api::last_shell(&events);
+                let shell = crate::units::business::agentloop::api::last_shell(
+                    &crate::units::business::transcript::api::Content::of_events(&events),
+                );
                 ok_json(
                     json!({ "meta": meta, "events": events, "live": live, "head": head, "shell": shell }),
                 )

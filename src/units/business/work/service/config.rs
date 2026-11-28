@@ -508,7 +508,8 @@ impl Work {
                 "model": a.model,
             })).collect::<Vec<_>>(),
         });
-        if let Err(e) = self.history.append(sid, &[ev]) {
+        let content = crate::units::business::transcript::api::Content::of_events(&[ev]);
+        if let Err(e) = self.history.append(sid, &content) {
             self.log
                 .warn("work::record_config", &format!("配置记录落盘失败：{}", e));
         }

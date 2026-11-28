@@ -14,7 +14,7 @@
 | `src/units/business/agentloop/domain.rs` | 定义入口：声明 `assemble` / `assembly` / `explain` / `member_tools` / `policy` / `ports` / `reply` / `rewind` / `session` / `sources` / `verify` 十一个概念子模块 |
 | `src/units/business/agentloop/domain/session.rs` | 单 agent 会话运行时：上下文、行 id、回合与回复簿记、压缩与回档、观察账本与新鲜度判定 |
 | `src/units/business/agentloop/domain/session/prompt.rs` | 系统提示拼装：agent 与角色两条身份入口、模块提示、回合参数、环境块 |
-| `src/units/business/agentloop/domain/member_tools.rs` | 成员工具面：本回合可调的工具、观察账本与执行面句柄 `exec: Arc<dyn sandbox::api::Sandbox>`（本机 / 客机由策略在装配期开出，`ToolFace` 不再带 `side` / `guest_lease` / 运行期路径）；工作台策略与它给的回合钩子 `driver: Option<Arc<dyn BenchDriver>>`（换席时随面重开）；只含值的 `ToolFace` 与核实用例端口 `CoreVerify`；shell 状态槽与按转录派生最近一次 shell（`last_shell`） |
+| `src/units/business/agentloop/domain/member_tools.rs` | 成员工具面：本回合可调的工具、观察账本与执行面句柄 `exec: Arc<dyn sandbox::api::Sandbox>`（本机 / 客机由策略在装配期开出，`ToolFace` 不再带 `side` / `guest_lease` / 运行期路径）；工作台策略与它给的回合钩子 `driver: Option<Arc<dyn BenchDriver>>`（换席时随面重开）；只含值的 `ToolFace` 与核实用例端口 `CoreVerify`；shell 状态槽与按内容日志派生最近一次 shell（`last_shell`） |
 | `src/units/business/agentloop/domain/assemble.rs` | 工具面的**唯一装配机**：`assemble(FaceInput) -> SeatFace` 造 `TurnCtx`、按会话类型挂的 `ToolSource` 逐个问 `offer`、去重成面，再按工作台策略的 `plan` 拿共享区动作与执行者（`FaceInput.policy` + `workspace_params`，本单元不认识版本化）；段与角色在这里按声明表拍平（`FaceInput.loops` 查出角色位的动作交给 `loop` 来源）；另含纯派生 `offers_of` / `merge_offers` / `face_of` / `service_ops_of` / `serviced_tools` |
 | `src/units/business/agentloop/domain/explain.rs` | 工具面的解释（纯函数，不碰 IO、不执行）：按与装配同源的取数（来源逐个 `offer` 再合并）列出每个来源交了哪些 id、合并后的面、每个 id 的授权判定与理由（`Allow` / `Ask` / `Deny`，理由来自同一条段声明），以及面里存在但总表与模块工具表都没有的孤儿 id；给 `tools explain` 与人读诊断用 |
 | `src/units/business/agentloop/domain/sources.rs` | `ToolSource` 的五个实现：`AgentSource`（按能力组交文件面与执行面）、`ModuleSource`（交限定 id `<模块>.<工具>`）、`LoopSource`（只持有装配期拍平好的角色动作 id，运行期不查段表）、`WorkspaceSource`（只交装配期由工作台策略给的共享区动作 id，运行期不判能力组）、`ProfileSource`（交会话类型声明的系统工具）；`build_sources` 按来源 id 造实例 |
@@ -22,7 +22,6 @@
 | `src/units/business/agentloop/domain/assembly.rs` | 一席的整场装配：参数对象 `MemberEnvParts` / `MemberSpec` / `SingleSpec` / `RebuildSpec` / `ProxySpec`，`member_tools` 造工具面活对象（**只在本单元内构造与持有**）、`open_exec` 按声明与事实从 `SandboxPolicies` 开执行句柄，以及 `single_session` / `rebuild_single` / `proxy_session` 三个在世形态入口 |
 | `src/units/business/agentloop/domain/verify.rs` | 核实用例环境：按 `VerifySpec` 装配一个只读核实用例 `CoreVerify`（工具面、放行名单、围栏）；调用方给沙箱，本文件不取事实 |
 | `src/units/business/agentloop/domain/ports.rs` | 装配一席的端口参数对象 `SessionPorts`（llm / 日志 / 提示词册 / 工具总表 / 工具执行 / 虚拟机 / 常驻服务 / 工作区 / 压缩通道 / 会话形状声明 `SessionDecls`）；与装配机同单元，否则环 2 内成环 |
-| `src/units/business/agentloop/domain/rewind.rs` | 回档的行 / 事件算术（纯函数，不碰 IO）：回合归属、回复边界、行 id 推进、截断与保留 |
 | `src/units/business/agentloop/domain/reply.rs` | 消息回灌：一次模型回复与工具结果 → 发给模型的消息序列（实时与重建的唯一来源） |
 | `src/units/business/agentloop/engine.rs` | 引擎门面：声明 `core_op` / `decls` / `driver` / `io` / `round` / `tools` 六个子模块 |
 | `src/units/business/agentloop/engine/driver.rs` | 单回合驱动：在一条 `AgentSession` 上跑发言 / 派发 / 讨论席回合 / 继续 / 压缩（五个 `&mut self` 方法，取消与短暂事件出口按形参传） |

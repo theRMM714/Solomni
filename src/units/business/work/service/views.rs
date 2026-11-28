@@ -466,11 +466,8 @@ impl Work {
         &self,
         sid: &str,
     ) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
-        let (meta, events) = self.history.load(sid)?;
-        Ok((
-            meta,
-            crate::units::business::agentloop::api::truncate_events(&events),
-        ))
+        let (meta, content) = self.history.load(sid)?;
+        Ok((meta, content.folded_away().to_events()))
     }
 
     /// 目的：取这个会话的**裁决队**（核心各关卡与工具级确认共用同一条）。
@@ -482,7 +479,11 @@ impl Work {
         let issued = self
             .history
             .load(sid)
-            .map(|(_, ev)| crate::units::business::turn_state::api::issued_in(&ev))
+            .map(|(_, content)| {
+                crate::units::business::turn_state::api::issued_in(
+                    &content.folded_away().to_events(),
+                )
+            })
             .unwrap_or(0);
         turn.desk_for(sid, issued)
     }
