@@ -438,8 +438,8 @@ pub(crate) struct ProxySeed<'a> {
     pub(crate) granted_at: i64,
     /// 目的：用户选的执行环境；也是这条会话建子工作时的默认执行环境。
     pub(crate) sandbox: crate::units::business::sandbox::api::SandboxDecl,
-    /// 目的：权威档的权限档位。
-    pub(crate) profile: crate::units::pure::permission::api::ProfileId,
+    /// 目的：创建时选的权限档位；`None` = 跟随全局默认，代理不另外默认联网。
+    pub(crate) profile: Option<crate::units::pure::permission::api::ProfileId>,
     /// 目的：要的工作台声明（外部根已解析，不是原始路径；子会话落一份没有根的声明）。
     pub(crate) workspace: crate::units::business::session_model::api::WorkspaceDecl,
     /// 目的：创建时定的过期内容替换（None = 关）：`(开, 保底百分比)`，写进新会话的工作根 meta。

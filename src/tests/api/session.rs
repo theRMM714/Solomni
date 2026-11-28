@@ -615,6 +615,11 @@ fn set_permission_profile_action_switches_the_session_profile() {
     use crate::units::pure::permission::api::ProfileId;
     let handle = spawn(vec![module_of("a")], Vec::new());
     let faces = Faces::from_handle(&handle);
+    let mut st = faces.registry.settings().expect("读设置");
+    st.sandbox.policy.network = true;
+    // Windows 上 require 围栏必须同时授权写 ACL；这里只验网络开关。
+    st.sandbox.policy.windows.write_acl = true;
+    faces.registry.set_settings(st).expect("写设置");
     let (opened, _) = faces
         .work
         .create_work(single_work("w-profile", &["a"]))
@@ -644,6 +649,49 @@ fn set_permission_profile_action_switches_the_session_profile() {
             })
             .is_err(),
         "未知档位如实拒绝"
+    );
+}
+
+#[test]
+fn set_permission_profile_requires_the_global_network_switch() {
+    use crate::units::pure::permission::api::ProfileId;
+    let handle = spawn(vec![module_of("a")], Vec::new());
+    let faces = Faces::from_handle(&handle);
+    let (opened, _) = faces
+        .work
+        .create_work(single_work("w-guard", &["a"]))
+        .expect("建会话");
+    let sid = opened.sid;
+    let switch = |profile: &str| {
+        faces.actions.act(ActionCall {
+            id: "set_permission_profile".to_string(),
+            args: serde_json::json!({ "session_id": sid, "profile": profile }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+    };
+    let err = switch("online").unwrap_err();
+    assert!(err.contains("允许出站网络"), "{}", err);
+    assert_eq!(
+        faces.work.config(&sid).unwrap().permission.profile,
+        ProfileId::Offline,
+        "拒绝后档位不动"
+    );
+    // 全局联网后：允许切到联网；仍允许单会话切回离线。
+    let mut st = faces.registry.settings().expect("读设置");
+    st.sandbox.policy.network = true;
+    // Windows 上 require 围栏必须同时授权写 ACL；这里只验网络开关。
+    st.sandbox.policy.windows.write_acl = true;
+    faces.registry.set_settings(st).expect("写设置");
+    switch("online").expect("全局联网后允许切换");
+    assert_eq!(
+        faces.work.config(&sid).unwrap().permission.profile,
+        ProfileId::Online
+    );
+    switch("offline").expect("全局联网时允许单会话断网");
+    assert_eq!(
+        faces.work.config(&sid).unwrap().permission.profile,
+        ProfileId::Offline
     );
 }
 

@@ -32,6 +32,9 @@
 
 - 两档只差一个开关：`PermissionSet { profile }`，`allows_network()` 是它唯一的行为。
 - 全局 `sandbox.policy.network` 是硬上限：`online` 档在它关闭时仍然不能出站（`FencePlan.net = global_net && permissions.allows_network()`）。
+- 同一个开关也是创建、切档与编辑权限的硬前提：全局关闭时，创建联网档、切到 `online`、把权限编辑成 `online` 一律拒绝，文案统一含「允许出站网络」（`ensure_online_allowed`，`src/units/business/work/service.rs`）；`offline` 永远允许，所以全局联网时仍可让单个会话断网。
+- 代理不特殊、不默认联网：未显式选择档位时跟随全局 `sandbox.defaults.profile`，与普通会话同一条创建路径、同一套校验（`ProxySeed.profile = None` 表示跟随默认）。
+- 已在线会话遇到全局开关被关闭：只提示、不自动降档，`meta.yaml` 与围栏不因提示而改动；实际出站由 `FencePlan.net` 的求交立即断开，恢复要重新打开全局开关。
 - 档位名不描述「能读哪里」——没有那样的档位，也没有逐工具决定。
 - `FencePlan.net` 还有第三态 `Local { ports }`：它**不是档位**，而是一次调用的显式例外——`shell` 的 `local_ports` 让容器里的 `127.0.0.2:<端口>` 经中继到达宿主的 `127.0.0.1:<端口>`，清单外连不上，产品自己监听的端口一律拒（判据是「监听者落在本产品进程树里，或它跑的就是本产品这个可执行文件」（用户另起的实例也算），不靠端口表：`src/kernel/detail/container/windows/relay.rs`）。
 - 只有 Windows 后端把 `Local` 落得下去（`Confine::local_relay` → `true`）；其它平台给了 `local_ports` 就在守门进程里拒绝执行，**不**降级成回环全通（那等于把宿主回环上的产品端口一起送出去，`src/kernel/detail/confine/job.rs`）。
@@ -63,6 +66,7 @@
 - `FencePlan::for_call(sandbox, module, base)`：`home` = 私有沙箱（隐含一条写授予）；`grants` = 主机只读根（`Grant::read`）+ 全部模块目录（只读子树）+ 该模块私有区（`sb.module_data` 里的写子树，私有区建不出来时不授）；`net` = 全局开关与档位求交。不再有按 reach 的分支。
 - `FencePlan::for_session(sandbox, host_roots, global_net)`：同一套固定并集，只作会话 base；撤销走会话租约（`release_by_lease`）。
 - VM guest 的 per-call 断网由 guest helper 按策略里的 net 做 `unshare(CLONE_NEWNET)`；失败 fail-closed。
+- guest 与本机 Linux 共用 `src/kernel/contracts/fence.rs` 的 `LINUX_READ_ONLY_BASELINE`：除运行库与解释器目录外，含 DNS 配置（`/etc/resolv.conf`、`/etc/hosts`、`/etc/nsswitch.conf`，以及 `resolv.conf` 符号链接常指向的 `/run/systemd/resolve`、`/run/resolvconf`）与 Debian / RHEL 两系的 CA 路径；缺路径由消费者跳过。基线漏掉 DNS 会让 guest 内解析直接失败，漏掉 CA 会让不带 `-k` 的 HTTPS 校验失败。
 - Windows 的容器身份 = `会话租约 + agent`（**不含可达根集合**）：同一 `(agent, shell)` 的调用复用 SID 与 ACL，档位切换不需要重写 DACL。
 
 ## 六、根 ceiling + 子会话逐层收窄
@@ -70,7 +74,7 @@
 - 根写 `permission.ceiling`，子写 `permission.narrowing`；effective = 全局默认 → 根 ceiling → 沿祖先链每层 narrowing。
 - 子只能换更低档：`apply_narrowing` 用 `rank()` 比较，比父宽即报错（`src/units/pure/permission/domain/permission/base.rs`）。
 - 共享区的收窄与档位无关：`SharedEdit` 的 `apply_root` / `apply_narrowing`（`src/units/pure/permission/domain/shared_scope.rs`）独立校验，`workspace` 的 `scope_from` 只把策略参数读成它（`src/units/business/workspace/domain/scope.rs`）：子只能更窄，父编辑只改 ceiling、不覆盖子收窄。
-- 档位切换是根级动作：整棵 work tree 有会话在生成时拒绝（先停再切）；切换从下一次求合并起生效。
+- 档位切换是根级动作：整棵 work tree 有会话在生成时拒绝（先停再切）；切换从下一次求合并起生效。切到 `online` 还要过全局开关：检查发生在写 `meta.yaml`、撤旧围栏之前，被拒时会话保持原档且没有落盘副作用。
 
 ## 七、安全验收
 
@@ -80,6 +84,11 @@
 - 共享区三态与黑名单：序列化、交集、收窄不放大（`shared_scope_narrowing_never_widens`、`shared_scope_serde_and_merge_edges`，`src/tests/permission.rs`）。
 - 工作工具的路径过滤跟着读范围走（`work_status_filters_paths_outside_read_scope`、`work_lost_is_scoped_by_read_permission`、`work_versions_and_resolve_are_scoped_by_read_permission`）；`write=none` 时提交 / 推送被拒（`no_write_scope_refuses_commit_and_push`）。
 - 工具面只由工具面决定，档位不裁剪（`profile_does_not_change_the_tool_face`，`src/tests/tools/shell.rs`）。
+- Linux 只读基线含 DNS 与 Debian / RHEL 的 CA 路径（`linux_baseline_covers_dns_and_ca_paths`，`src/tests/permission.rs`）。
+- 全局断网时切不到 `online`，且会话仍是 `offline`；打开全局开关后 `online` 与随后的 `offline` 都能成功（`set_permission_profile_requires_the_global_network_switch`，`src/tests/api/session.rs`）。
+- 全局断网时创建联网档被拒且不留会话（`creation_rejects_online_profile_when_global_network_is_off`，`src/tests/session/tree.rs`）。
+- 全局断网时从“更多权限设置”编辑成联网档同样被拒，会话仍是离线（`edit_rejects_online_profile_when_global_network_is_off`，`src/tests/session/tree.rs`）。
+- 代理跟随全局默认档、不默认联网；显式联网但全局断网时同样被拒（`proxy_creation_follows_the_global_default_profile`、`proxy_creation_rejects_explicit_online_when_global_network_is_off`，`src/tests/runtime/proxy.rs`）。
 - CI 的 `--fence-live` 门禁把安全探针的环境跳过记 `quality-fail`，不许当成通过（`tests/gates/steps.js` 的 `securitySkipsIn`）；`--strict-env` 没带 `--fence-live` 同样失败。
 - 围栏路径的根内判定在规范化失败时拒绝含上级段的路径（`inside_root_rejects_parent_escape_even_when_canonicalize_fails`，`src/kernel/detail/confine/windows/tests.rs`）。
 

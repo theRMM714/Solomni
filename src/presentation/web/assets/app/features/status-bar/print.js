@@ -56,6 +56,8 @@ export function statusPrintOf(s) {
     s && [s.kind, s.flows ? 1 : 0, s.auto ? 1 : 0],
     s && s.permission_profile, s && s.permission_label, s && s.permission_narrowed ? 1 : 0,
     s && s.permission_parent,
+    (state.settings && state.settings.sandbox && state.settings.sandbox.policy
+      && state.settings.sandbox.policy.network) ? 1 : 0,
     s && s.thinking ? [s.thinking.level, s.thinking.default_level, s.thinking.label, (s.thinking.options || []).length] : 0,
     s && s.context_freshness ? 1 : 0,
     s && s.freshness_keep_percent == null ? 80 : s.freshness_keep_percent,

@@ -6,6 +6,7 @@
 use super::UNFENCED_GUEST_RUN_SECS;
 use super::seed::SeedServer;
 use crate::kernel::api::clock;
+use crate::kernel::api::fence::{LINUX_READ_ONLY_BASELINE, LINUX_WRITABLE_BASELINE};
 use crate::kernel::api::fs;
 use crate::kernel::api::net;
 use crate::kernel::api::process::Daemon;
@@ -199,6 +200,9 @@ impl QemuHandle {
                 "env_names": run.env.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(),
                 // 系统级只读诊断：helper 在 Landlock restrict 之后走诊断模式（不 spawn 命令）。
                 "diagnose": access.diagnose,
+                // 运行基线由 kernel 契约统一持有：本机 Linux 后端与 guest 助手不再各写一份。
+                "baseline_ro": LINUX_READ_ONLY_BASELINE,
+                "baseline_rw": LINUX_WRITABLE_BASELINE,
             });
             let n = clock::now_nanos();
             let path = format!("/tmp/solomni-fence-{}-{}.json", std::process::id(), n);

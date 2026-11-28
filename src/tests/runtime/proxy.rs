@@ -809,3 +809,55 @@ pub(crate) fn proxy_profile_can_be_quick_switched() {
         ProfileId::Offline
     );
 }
+
+/// 目的：代理不特殊：没显式给档时跟随全局默认，不写自己的 ceiling。
+#[test]
+pub(crate) fn proxy_creation_follows_the_global_default_profile() {
+    use crate::units::pure::permission::api::ProfileId;
+    let (handle, faces) = super::super::ops_with(vec![], vec![]);
+    let sid = handle
+        .call(|core| core.create_proxy("w-default", 1))
+        .expect("建代理");
+    let (meta, _) = faces.history.open(&sid).expect("落盘");
+    assert!(
+        meta.permission.ceiling.is_none(),
+        "代理不再硬编码联网档：不写私有 ceiling"
+    );
+    assert_eq!(
+        faces.work.config(&sid).unwrap().permission.profile,
+        ProfileId::Offline,
+        "跟随全局默认（测试默认为离线）"
+    );
+}
+
+/// 目的：代理显式选联网档也要过全局总开关；全局没开时拒绝且不落会话。
+#[test]
+pub(crate) fn proxy_creation_rejects_explicit_online_when_global_network_is_off() {
+    use crate::units::business::work::api::ProxySeed;
+    use crate::units::pure::permission::api::ProfileId;
+    let (handle, faces) = super::super::ops_with(vec![], vec![]);
+    let err = handle
+        .call(|core| {
+            core.work
+                .create_proxy_with_facts(
+                    &mut core.turn,
+                    core.registry.as_ref(),
+                    ProxySeed {
+                        name: "w-online",
+                        kind: PROXY,
+                        granted_at: 1,
+                        sandbox: Default::default(),
+                        profile: Some(ProfileId::Online),
+                        workspace: Default::default(),
+                        freshness: None,
+                    },
+                )
+                .map(|(sid, _)| sid)
+        })
+        .unwrap_err();
+    assert!(err.contains("允许出站网络"), "{}", err);
+    assert!(
+        faces.history.open("w-online").is_err(),
+        "拒绝后不能留下会话"
+    );
+}

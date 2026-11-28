@@ -714,12 +714,19 @@ function collectSettings(f) {
 async function saveSettings(c, f, saveBtn) {
   const bad = f.thinkLevels.validate();
   if (bad) { c.setMsg(bad, true); return; }
+  const policy = state.settings && state.settings.sandbox && state.settings.sandbox.policy;
+  const wasNetworkOn = !!(policy && policy.network);
+  const networkOff = wasNetworkOn && !f.network.box.checked;
   const reset = busyButton(saveBtn, '保存中…');
   try {
     const saved = await api('POST', app.actionUrl('set_settings'), collectSettings(f));
     await app.refreshState();
     c.setMsg(saved && saved.restart ? '已保存：沙箱策略变更，正在重启…' : '已保存');
-    ui.toast(saved && saved.restart ? 'warn' : 'ok', saved && saved.restart ? '已保存，正在重启…' : '设置已保存');
+    if (networkOff) {
+      ui.toast('warn', '已关闭全局网络：已在线会话不会自动降档，但会立即断网；要断网请逐个切到离线');
+    } else {
+      ui.toast(saved && saved.restart ? 'warn' : 'ok', saved && saved.restart ? '已保存，正在重启…' : '设置已保存');
+    }
   } catch (e) {
     c.setMsg(e.message, true);
   } finally {

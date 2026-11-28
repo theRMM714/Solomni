@@ -288,7 +288,7 @@ tools:
         desc: 仅人经呈现层可用：共享区主副本绑定的外部工作区根（已存在的绝对目录）；省略 = 会话内 work/。子会话继承父会话，不接受自选
       permission:
         type: string
-        desc: 创建时的网络档位：offline / online（仅人经呈现层；代理子会话继承父 ceiling）
+        desc: 创建时的网络档位：offline / online（仅人经呈现层；代理子会话继承父 ceiling）；全局网络关闭时 online 会被拒绝
       context_freshness:
         type: boolean
         desc: 仅人经呈现层可用：建会话时就打开过期内容替换（读过的文件被改后，那条工具结果在发给模型前换成占位符）；省略 = 关
@@ -693,7 +693,7 @@ tools:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
       text: { type: string, required: true, desc: 新的需求 }
   set_permission_profile:
-    desc: 快速切换会话网络档位（offline / online）；子会话只能收窄，整棵 work tree 生成中拒绝。
+    desc: 快速切换会话网络档位（offline / online）；子会话只能收窄，整棵 work tree 生成中拒绝，全局网络关闭时切 online 被拒绝。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
       profile: { type: string, required: true, non_empty: true, desc: offline / online }

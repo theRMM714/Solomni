@@ -235,18 +235,25 @@ impl Work {
         new_meta.sandbox = decl.clone();
         new_meta.facts = facts.clone();
         if let Some(p) = &edit.permission {
-            if meta.parent.is_none() {
+            let target = if meta.parent.is_none() {
                 // 根：只更新 ceiling；子会话的 narrowing 原样保留，出计划/装配时再求交。
-                turn.permissions_for(registry, &meta)?.apply_root(p)?;
-                new_meta.permission.ceiling = Some(p.clone());
-                new_meta.permission.narrowing = None;
+                turn.permissions_for(registry, &meta)?.apply_root(p)?
             } else {
                 // 子：只能收窄；父的生效权限是校验基线。
                 let parent = self
                     .history
                     .meta(meta.parent.as_deref().unwrap_or_default())?;
                 turn.permissions_for(registry, &parent)?
-                    .apply_narrowing(p)?;
+                    .apply_narrowing(p)?
+            };
+            // 只有明确要切到联网档时才问全局开关：其余编辑不改档位，不因已在线会话被误伤。
+            if p.profile == Some(crate::units::pure::permission::api::ProfileId::Online) {
+                ensure_online_allowed(registry, target.profile)?;
+            }
+            if meta.parent.is_none() {
+                new_meta.permission.ceiling = Some(p.clone());
+                new_meta.permission.narrowing = None;
+            } else {
                 new_meta.permission.narrowing = Some(p.clone());
                 new_meta.permission.ceiling = None;
             }
@@ -376,15 +383,17 @@ impl Work {
         }
         .unwrap_or_default();
         layer.profile = Some(profile);
-        if meta.parent.is_none() {
-            turn.permissions_for(registry, &meta)?.apply_root(&layer)?;
+        let target = if meta.parent.is_none() {
+            turn.permissions_for(registry, &meta)?.apply_root(&layer)?
         } else {
             let parent = self
                 .history
                 .meta(meta.parent.as_deref().unwrap_or_default())?;
             turn.permissions_for(registry, &parent)?
-                .apply_narrowing(&layer)?;
-        }
+                .apply_narrowing(&layer)?
+        };
+        // 落盘之前守住总开关：拒绝时 meta、围栏与内存会话都不动。
+        ensure_online_allowed(registry, target.profile)?;
         let mut new_meta = meta.clone();
         if meta.parent.is_none() {
             new_meta.permission.ceiling = Some(layer);

@@ -107,7 +107,7 @@
 
 | 平台 | 文件系统 | 出站网络 | 机制 |
 | --- | --- | --- | --- |
-| Linux | Landlock（运行基线 / 系统只读区只读，`/dev/null` 例外可写；其余按计划的授予；内核不支持或规则被拒时如实降级） | 按 `net`（真 = 不装网络过滤器；假 = seccomp 拒绝非 AF_UNIX / AF_NETLINK socket，TCP/UDP/raw 与回环都出不去） | 守门进程内装 Landlock 与 seccomp |
+| Linux | Landlock（运行基线 / 系统只读区只读，`/dev/null` 例外可写；基线与 guest 共用 `src/kernel/contracts/fence.rs` 的 `LINUX_READ_ONLY_BASELINE`，含 DNS 配置与 Debian / RHEL 的 CA 路径；其余按计划的授予；内核不支持或规则被拒时如实降级） | 按 `net`（真 = 不装网络过滤器；假 = seccomp 拒绝非 AF_UNIX / AF_NETLINK socket，TCP/UDP/raw 与回环都出不去） | 守门进程内装 Landlock 与 seccomp |
 | macOS | seatbelt（`sandbox_init` 是私有且已弃用的 ABI；失效时如实降级） | 按 `net`（真 = 放行 `network-outbound`；假 = 拒绝 `network*`） | 守门进程内装 seatbelt；祖先元数据放行 `file-read-metadata` |
 | Windows | AppContainer（外层 `prepare_fence` 把可达范围写进目录 ACL） | 按 `net`（真 = 授 `internetClient` 公网出站；假 = 不授） | 守门进程建容器 profile 并在容器内跑；作业对象管进程树与进程数上限 |
 | 其它 | 无（如实降级） | 无 | 只有超时与整棵树终止 |

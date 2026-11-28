@@ -43,6 +43,24 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// 目的：联网档的统一前置条件——全局网络开关没开时，不允许创建或切换到联网档。
+/// 约束：只拒绝 `Online`；全局联网时单会话切 `Offline` 永远放行。
+///   调用方在落盘 / 建工作区 / 起 guest 之前调用，失败时不留任何半成品。
+pub(crate) fn ensure_online_allowed(
+    registry: &dyn Registry,
+    profile: crate::units::pure::permission::api::ProfileId,
+) -> Result<(), String> {
+    if profile == crate::units::pure::permission::api::ProfileId::Online
+        && !registry.app().sandbox.policy.network
+    {
+        return Err(
+            "全局网络未开启：请先在设置里打开「允许出站网络」，再创建或切换到联网档位。"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 /// 目的：**工作与会话配置的用例面**：建工作 / 改配 / 视图 / 报告 / guest 起停都经它。
 ///  与 `Core` 分开：这里只管"一场工作怎么被建立、改配、看、报"，
 ///  不看命令队列、不看协作链推进、不看回档——那些留在 runtime（环 3）。

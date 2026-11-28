@@ -134,6 +134,27 @@ fn sandbox_places_are_fixed_except_the_shared_scope() {
     assert!(!sb.can_read(&Area::Shared, &shared.join("docs").join("x")));
 }
 
+/// 目的：Linux 只读基线必须带上 DNS 与两系 CA 路径——漏掉它们，联网档在 guest 里解析失败或 TLS 校验失败。
+/// 约束：本机 Linux 后端与 guest 助手共用这份契约；改条目先看这两个消费者。
+#[test]
+fn linux_baseline_covers_dns_and_ca_paths() {
+    use crate::kernel::api::fence::LINUX_READ_ONLY_BASELINE;
+    for path in [
+        "/etc/resolv.conf",
+        "/etc/hosts",
+        "/etc/nsswitch.conf",
+        "/run/systemd/resolve",
+        "/etc/ssl/certs",
+        "/etc/pki/tls/certs",
+        "/etc/pki/ca-trust",
+    ] {
+        assert!(
+            LINUX_READ_ONLY_BASELINE.contains(&path),
+            "只读基线缺 {path}：DNS 或 TLS 会在围栏里失败"
+        );
+    }
+}
+
 /// 目的：围栏按固定规则推——私有区 + 模块私有区可写，模块源码目录只读，共享区永不进围栏。
 #[test]
 fn fence_spec_grants_fixed_surfaces() {
