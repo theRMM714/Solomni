@@ -1,0 +1,201 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Solomni 单元分层",
+    "subtitle": "会话驱动的单一二进制：入口装配 → 屏面 → 环 3 用例 → 环 2 状态与机制 → 环 1 纯 → 环 0 内核",
+    "output": "docs/architecture/overview.html",
+    "quality_profile": "showcase",
+    "locale": "zh-CN",
+    "repository": {
+      "url": "https://github.com/theRMM714/Solomni",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "d9dad33e76612716f4010dbd0323e7ea2456133f"
+    }
+  },
+  "layout": {
+    "mode": "auto"
+  },
+  "components": [
+    {
+      "id": "user",
+      "type": "external",
+      "label": "用户",
+      "sublabel": "CLI · 桌面 UI",
+      "icon": "person"
+    },
+    {
+      "id": "entry",
+      "type": "backend",
+      "label": "入口装配",
+      "sublabel": "9 个模块 · 4 段",
+      "tag": "src/entry",
+      "sources": [
+        {
+          "path": "src/entry/"
+        },
+        {
+          "path": "layers.yaml"
+        }
+      ]
+    },
+    {
+      "id": "pres",
+      "type": "frontend",
+      "label": "屏面",
+      "sublabel": "11 屏 · 47 处引用单元",
+      "tag": "src/presentation",
+      "sources": [
+        {
+          "path": "src/presentation/"
+        }
+      ]
+    },
+    {
+      "id": "ring3",
+      "type": "backend",
+      "label": "环 3 用例",
+      "sublabel": "9 个单元",
+      "tag": "collab · turn · work · runtime · system",
+      "sources": [
+        {
+          "path": "layers.yaml"
+        },
+        {
+          "path": "docs/architecture/layers.md"
+        }
+      ]
+    },
+    {
+      "id": "ring2",
+      "type": "backend",
+      "label": "环 2 状态与机制",
+      "sublabel": "20 个单元",
+      "tag": "agentloop · tools · llm · workspace · vm",
+      "sources": [
+        {
+          "path": "layers.yaml"
+        },
+        {
+          "path": "src/units/business/"
+        }
+      ]
+    },
+    {
+      "id": "ring1",
+      "type": "backend",
+      "label": "环 1 纯",
+      "sublabel": "4 个单元 · 无 IO",
+      "tag": "exec_model · permission · registry_model · taskchain",
+      "sources": [
+        {
+          "path": "src/units/pure/"
+        },
+        {
+          "path": "layers.yaml"
+        }
+      ]
+    },
+    {
+      "id": "kernel",
+      "type": "backend",
+      "label": "环 0 内核",
+      "sublabel": "38 个机制 · 24 个 api 面",
+      "tag": "src/kernel",
+      "sources": [
+        {
+          "path": "src/kernel/"
+        },
+        {
+          "path": "layers.yaml"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "进程内 · 纯 Rust 单二进制",
+      "wraps": [
+        "entry",
+        "pres",
+        "ring3",
+        "ring2",
+        "ring1",
+        "kernel"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "user-entry",
+      "from": "user",
+      "to": "entry",
+      "label": "命令 · 事件",
+      "variant": "emphasis"
+    },
+    {
+      "id": "entry-pres",
+      "from": "entry",
+      "to": "pres",
+      "label": "装配 4 段"
+    },
+    {
+      "id": "pres-ring3",
+      "from": "pres",
+      "to": "ring3",
+      "label": "屏 → 用例 47 处"
+    },
+    {
+      "id": "ring3-ring2",
+      "from": "ring3",
+      "to": "ring2",
+      "label": "80 条 / 582 处",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ring2-ring1",
+      "from": "ring2",
+      "to": "ring1",
+      "label": "193 处直接引用",
+      "variant": "dashed"
+    },
+    {
+      "id": "ring2-kernel",
+      "from": "ring2",
+      "to": "kernel",
+      "label": "24 个 api 面",
+      "variant": "default"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "分层怎么走",
+      "items": [
+        "跨环只向内：环 3 → 2 → 1 → 0",
+        "同环只用 rank 更靠前的单元",
+        "向上或同环逆序由 structure 门禁拦下"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "规模",
+      "items": [
+        "33 个单元 · 9 个用例单元",
+        "136 条单元依赖边 · 82 条机制边",
+        "38 个内核机制 · 24 个 api 面"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "层间接口",
+      "items": [
+        "单元之间只经 api 面协作",
+        "内核对外只暴露 24 个 api 面",
+        "依赖地图与环表随门禁同一次重算"
+      ]
+    }
+  ]
+}
