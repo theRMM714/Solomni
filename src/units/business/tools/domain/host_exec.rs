@@ -47,7 +47,7 @@ impl SandboxPolicy for HostPolicy {
 
     fn check(&self, decl: &SandboxDecl) -> Vec<String> {
         let mut out = Vec::new();
-        if !decl.params.is_null() {
+        if !no_params(&decl.params) {
             out.push("本机策略没有参数：params 留空".to_string());
         }
         if !decl.pins.is_empty() {
@@ -65,6 +65,15 @@ impl SandboxPolicy for HostPolicy {
             tools: Arc::clone(&self.tools),
             runtime_path: req.runtime_path.map(Path::to_path_buf),
         }))
+    }
+}
+
+/// 目的：判断 params 是否等于「没有参数」——null 与空对象同义（向导与会话配置发的是空对象）。
+fn no_params(params: &serde_json::Value) -> bool {
+    match params {
+        serde_json::Value::Null => true,
+        serde_json::Value::Object(map) => map.is_empty(),
+        _ => false,
     }
 }
 

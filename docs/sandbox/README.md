@@ -20,7 +20,7 @@
 - 登记两个策略：`host` 在 `tools`（`src/units/business/tools/domain/host_exec.rs`，经 `tools::api::host_policy` 取实例，执行句柄是 `tools::api::host_sandbox`），`vm` 在 `vm`（`src/units/business/vm/domain/policy.rs`，经 `vm::api::vm_policy` 取实例）；组合根按顺序登记进 `SandboxPolicies`，第一项是缺省。实现留在各自单元：本单元只持契约与注册表，所以不依赖 `tools` / `vm`。
 - 状态归属：会话的**声明与事实**落在 `meta.yaml`（`SessionMeta.sandbox` / `SessionMeta.facts`，由 `work` 在新建与改配时同一次重算）；本单元自身无状态（注册表是装配期构造的只读表）。
 - **`side` 复用环 1 的那一份**：`Side`（`host` / `guest`）与派生选型 `TargetSpec` 在 `exec_model`，本单元不另立副本（R15）；`SandboxDecl::target(&facts)` 是声明到选型的唯一换算。
-- **参数不透明**：`params` 是策略自己的对象，本单元只校验「是不是给这个策略的」，字段含义在各策略实现里（虚拟机策略只认 `guest`，本机策略没有参数）。
+- **参数不透明**：`params` 是策略自己的对象，本单元只校验「是不是给这个策略的」，字段含义在各策略实现里（虚拟机策略只认 `guest`，本机策略没有参数——`null` 与空对象同义，向导与会话配置发的是空对象）。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 

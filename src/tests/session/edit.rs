@@ -417,3 +417,27 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_defaults_to_host() {
         "缺 shared 段 = 不额外收窄"
     );
 }
+/// 目的：向导与会话配置把「没有参数」发成空对象，本机策略不能因此拒绝（params: {} 与 null 同义）。
+/// 约束：真给了参数仍要拦——本机档不认任何参数。
+#[test]
+pub(crate) fn host_policy_takes_an_empty_params_object_as_no_params() {
+    use crate::units::business::sandbox::api::SandboxDecl;
+    let policies = test_policies();
+    let empty = SandboxDecl {
+        policy: "host".to_string(),
+        params: serde_json::json!({}),
+        pins: BTreeMap::new(),
+    };
+    policies.check(&empty).expect("空对象等于没有参数");
+    let filled = SandboxDecl {
+        policy: "host".to_string(),
+        params: serde_json::json!({ "guest": "debian-13" }),
+        pins: BTreeMap::new(),
+    };
+    assert!(
+        policies
+            .check(&filled)
+            .unwrap_err()
+            .contains("本机策略没有参数")
+    );
+}
