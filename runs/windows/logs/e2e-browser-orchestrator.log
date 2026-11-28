@@ -1,0 +1,40 @@
+[e2e] 夹具 .tools 已链接：跑项目内工具链
+[e2e] 夹具解释器：python → D:\a\Solomni\Solomni\.tools\toolchains\windows-x86_64\python\3.14.9\python\python.exe
+[e2e] 真模块已复制进夹具：harvest / render / indexer
+[e2e] 试编译器：D:\a\Solomni\Solomni\.tools\mingw64\bin\g++.exe
+g++.exe (MinGW-W64 x86_64-ucrt-posix-seh, built by Brecht Sanders, r2) 16.2.0
+Copyright (C) 2026 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+[e2e] indexer 就绪：modules\indexer\build\indexer.exe（3313419 字节）
+[e2e] --json modules 的 stdout 是纯 JSON（9 个模块）：管道可用；未装常驻运行时
+[e2e] 未授权根启动门：缺项逐条给路，一次性命令照常通过
+[e2e] 启动器只传旗语：node start.js --version 拿到版本行
+MOCK-UP 8469
+[工具链] 项目内：python 3.14.9、node 24.11.0、cc 16.2.0
+[围栏] Windows：AppContainer（文件系统可达范围；net 决定是否授 internetClient）与 Job Object（进程树）都由内核强制
+[围栏] 本机能力：文件系统=可用 断网=可用 进程树=可用（Windows：AppContainer（文件系统可达范围；net 决定是否授 internetClient）与 Job Object（进程树）都由内核强制）
+[围栏] 本次实际：文件系统=可用 断网=可用 进程树=可用；容器授权=已授权；只读根=0 个（容器围栏按本机能力装，写入的权限项逐条记台账）
+[便携] 围栏机器级授权还缺 3 处（产品根读属性（继承）（D:\a\Solomni\Solomni\tests\cross-platform\e2e\root）；工具链只读（递归）（D:\a\Solomni\Solomni\tests\cross-platform\e2e\root\.tools）；运行包只读（递归）（D:\a\Solomni\Solomni\tests\cross-platform\e2e\root\data\runtimes））：跑一次 solomni --setup=fence 可免掉新会话的重复 ACL 写
+[沙箱] 本进程已降级：缺失的强制项按如实降级执行；重启后重新评估
+Solomni 转录中心：http://127.0.0.1:3099（只监听本机）
+PASS 登记假供应商
+PASS 登记模型 m1
+PASS 登记模型 m2
+PASS 设核心默认 m1
+PASS 登记 agent 单兵
+PASS 登记 agent 双子
+[browser] 使用系统浏览器：msedge
+[browser] browser.version = 158.0.4370.33
+PASS 首页加载完成
+PASS 向导创建会话：ui-browser-1795867559878（ui-browser-1795867559878）
+PASS 发送消息并收到回复
+PASS 设置保存
+PASS 存储回收（当前没有到策略条件的项，给出明确提示）
+PASS 浏览器上传文件到 work/
+PASS 浏览器控制台无错误
+BROWSER-E2E-OK
+E2E-OK
+[e2e] 视图盘回收：撤掉 Z:，登记已清
+[e2e] 围栏回收（退出码 0）：[围栏] 清理完成：没有台账：本程序没在本机写过权限项 | [围栏] 清理完成：产品根内没有台账外的孤儿授权 | [围栏] 清理完成：扫掉 0 个本程序建过的容器 profile | [围栏] 清理完成：没有残留的视图盘盘符映射 | [工具链] 项目内：python 3.14.9、node 24.11.0、cc 16.2.0
