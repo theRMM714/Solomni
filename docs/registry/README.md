@@ -1,6 +1,6 @@
 # registry（登记处）
 > 定位：供应商 / 模型 / agent / 设置四份 yaml 的内存形态、解析链、写面与探测行为（值形态——agent、供应商、模型与思考档位——在环 1 的 [`registry_model`](../registry-model/README.md)）。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/catalog/registry/api.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/units/business/catalog/registry/api.rs`
 
 ## 管什么 / 不管什么
 - 管：四份 yaml 的内存形态与用例、解析链（含思考强度目录与模型映射）、agent 登记处的写用例与代拟名单落地、密钥回显边界。
@@ -32,7 +32,7 @@
 - 适配层把同一件事的几种写法各发一次：基线是现在线上真在用的文本回放，其余是 `assistant` 带 `tool_calls` + `role=tool` 结果的几种可判定变体（正文空串 / null / 有正文 / 结果消息带 name）。
 - 逐项报两件事：供应商收了没有（HTTP 层），以及模型真的读到了没有（回答里带回工具结果里那个编号才算读懂；收了不等于看懂了）。
 - 它不改登记处：只报事实，采不采用由人定。
-- 界面上：模型登记里那两行按钮（测工具调用 / 测回放形状）走的就是这两个探测（`model.act` 的 `probe` / `probe-replay`），结论逐项显示。
+- 界面上：模型登记里那两行按钮（测工具调用 / 测回放形状）走的就是这两个探测（动作 `probe_model_tools` / `probe_replay_shape`），结论逐项显示。
 
 ## 三、保存闸门（原生形态）
 

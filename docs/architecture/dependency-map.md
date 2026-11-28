@@ -1,7 +1,7 @@
 <!-- docs-template: spec -->
 # 依赖地图
 > 定位：单元之间依赖边的唯一权威：跨环与同环各有哪几条边、各多少处、怎么重算、漂移怎么判。
-> 效力：规范｜核对：2026-11-26｜依据：`layers.yaml`、`tests/gates/structure/layers.js`、`tests/gates/structure/graph.js`、`tests/docs-sync.mjs`
+> 效力：规范｜核对：2026-11-28｜依据：`layers.yaml`、`tests/gates/structure/layers.js`、`tests/gates/structure/graph.js`、`tests/docs-sync.mjs`
 
 ## 适用与判据
 - 要看「谁依赖谁」读本文；环号、环间规则（H1/H2）与同环 rank 的定义以 [layers.md](layers.md) 为准，本文只把边摊开成可核对的两张表与一张环图。

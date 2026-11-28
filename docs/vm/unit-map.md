@@ -1,7 +1,7 @@
 # 单元地图 · vm
 
 > 定位：vm（虚拟机档）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-25｜依据：`src/units/business/vm/api.rs`
+> 效力：契约｜核对：2026-11-28｜依据：`src/units/business/vm/api.rs`
 
 > 本文是 **vm** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。
@@ -9,15 +9,18 @@
 
 | 文件 | 职责 |
 | --- | --- |
+| `src/units/business/vm.rs` | 单元入口：模块声明（`api` / `detail` / `domain` / `ports` / `service`）与文件头 |
 | `src/units/business/vm/api.rs` | 入站面：`Vm` 用例 trait（guest 生命周期与 `guest_diagnose` 只读诊断）与策略入口 `vm_policy`（四个参数：产品根、宿主探针、引擎、外部工具位置的取法）、就绪检测与共享链的重导出；约束是这些判据只给策略实现与自检用，会话侧经 `sandbox::api::SandboxPolicies` 问；执行计划、入口诊断与镜像派生各有主（`catalog` 的 `packages` / `modules` 与 `sandbox`） |
 | `src/units/business/vm/service/job.rs` | 销毁任务 `GuestStop`：按租约清单逐条 `guest_stop`（幂等），只装参数不做事，`run` 由调用方线程执行 |
 | `src/units/business/vm/service.rs` | 用例与端口持有者：持 `VmEngine` / `ShareBackend`（R12），按租约管理 guest（每租约一把锁：跨租约并行、同一租约串行）；`guest_diagnose` 用只读系统允许集走 helper 诊断模式并如实区分失败原因 |
 | `src/units/business/vm/ports.rs` | 出站端口：`VmEngine` / `GuestVm` / `GuestChannel`（起 / 跑 / 销毁 guest）与 `ShareBackend` / `SharePlan`（宿主↔guest 共享） |
+| `src/units/business/vm/domain.rs` | 纯逻辑的模块声明：`diagnose` / `exec` / `guest` / `policy` / `tool` |
 | `src/units/business/vm/domain/diagnose.rs` | guest 只读诊断的纯逻辑：报告结构（键与 helper 输出一一对应）、`parse_report` 的合法性判定，以及失败原因文案（没有活 guest / 非 Linux guest / 通道不通 / helper 不可用 / 缺 python3 / 超时 / 执行失败 / 输出不可解析） |
-| `src/units/business/vm/domain/policy.rs` | 虚拟机策略 `VmPolicy`：把「客机」登记进 `sandbox` 的注册表——自我介绍（参数只有虚拟根）、声明校验、从镜像读出客机事实；`open()` 交出执行句柄 `VmSandbox`（`precheck` 拒空租约与 `local_ports`，`run` 走 `guest_run_fenced_cancellable` / `guest_run_fenced`，模块命令先 `stage_exec`）；机器能力 `machine`、这条会话就绪不 `readiness`、自带运行能力 `provided`、拒绝措辞 `refusal` / `machine_refusal` 都答在这里，`work` / `turn` / `system` 不认策略 id |
-| `src/units/business/vm/domain/exec.rs` | 虚拟机侧诊断、承载判定、就绪检测与并发准入（纯逻辑；hypervisor 提示与类型用 kernel 平台事实） |
+| `src/units/business/vm/domain/policy.rs` | 虚拟机策略 `VmPolicy`：把「客机」登记进 `sandbox` 的注册表——自我介绍（参数只有虚拟根）、声明校验、从镜像读出客机事实；`open()` 交出执行句柄 `VmSandbox`（`precheck` 拒空租约与 `local_ports`，`run` 走 `guest_run_fenced_cancellable` / `guest_run_fenced`，模块命令先 `stage_exec`）；机器能力 `machine`、这条会话就绪判 `readiness`、自带运行能力 `provided`、拒绝措辞 `refusal` / `machine_refusal` 都答在这里，`work` / `turn` / `system` 不认策略 id |
+| `src/units/business/vm/domain/exec.rs` | 虚拟机档的承载判定与就绪检测：前置条件清单（`VmRequirement` / `TierReadiness`）、共享档选择（`share_chain` / `share_carries`）、平台组合数据（`default_combos` / `VERIFIED_HOSTS`）与并发准入 `admit_guest`（纯逻辑；hypervisor 提示与类型用 kernel 平台事实） |
 | `src/units/business/vm/domain/guest.rs` | 挂载清单、prefix 软链与 system 叠写脚本、`GuestRun` 的按次超时与输出上限选项（传输/内存护栏，模型可见的截断在宿主预算；纯逻辑，宿主架构用 kernel 平台事实）；`GuestArch` / `GuestOs` 与镜像契约（`GuestImage` / `classify_base`）已搬到 `src/units/business/sandbox/`，这里只重导出 `GuestImage` / `GuestOs` |
 | `src/units/business/vm/domain/tool.rs` | 外部工具的位置事实（`ToolPath` / `VmTools` / `ToolSource`）：登记值与项目内补齐那份的优先序，以及"这次用的是哪一份"的如实标注（纯值，不解析路径、不判可执行） |
+| `src/units/business/vm/detail.rs` | 适配器的模块声明与重导出（`QemuEngine` 与各 `ShareBackend`）：实现 `ports.rs` 的端口，只由组合根构造 |
 | `src/units/business/vm/detail/guest_helper.rs` | Linux guest 内执行助手：脚本文本、装进 guest、按 host 翻好的允许集走 Landlock + no_new_privs、按策略 `timeout_secs` 杀树；缺失/装不上 fail-closed |
 | `src/units/business/vm/detail/qemu.rs` | `VmEngine` 的 QEMU 实现：基础参数（加速器、内存、内核、串口与 QGA、首启种子；加速器与可执行名用 kernel 平台事实）、按需用 qemu-img 建每租约可写层、启动与销毁 |
 | `src/units/business/vm/detail/qemu/qga.rs` | `GuestChannel` / `GuestVm` 的 QGA 通道实现：一次 boot 的连接与重连、JSON 收发、guest 命令回执（按次超时与输出上限护栏）、文件搬运与收尾 |

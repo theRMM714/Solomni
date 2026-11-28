@@ -1,6 +1,6 @@
 # 登记处契约（REGISTRY_SPEC）
 > 定位：`data/.home/` 下四份 yaml 的格式与字段、缺字段与非法输入怎么办、密钥边界在哪；不回答实现与探测行为。
-> 效力：契约｜核对：2026-11-25｜依据：`src/units/business/catalog/registry/domain/providers.rs`
+> 效力：契约｜核对：2026-11-28｜依据：`src/units/business/catalog/registry/domain/providers.rs`
 
 ## 结构
 ```text
@@ -114,6 +114,7 @@ data/.home/
 | `compact_keep_percent` | 整数 | 否 | `15` | 压缩时至少保留最近多少内容（占模型窗口 %；0 = 只留摘要） |
 | `compact_model` | 字符串 | 否 | 空 | 压缩用模型 id；空 = 会话同模型 |
 | `discuss_remind_cap` | 整数 | 否 | `3` | 讨论里一轮内对同一个成员最多提醒几次 |
+| `lang` | 字符串 | 否 | `zh-CN` | 界面语言（回执说明渲染给**人**看用哪种语言）；必须是 `locales/` 里登记过的标签，模型通道固定源语言 |
 - 三个 `*_path` 的位置解析只有一处：设置登记 > 项目内补齐 > PATH；清空 = 恢复自动发现，不重启即生效。
 - `thinking.levels` 是全局思考等级标签目录：默认四档，用户可追加任意标签（例如 `xhigh`、`高`、`极高 档`）；标签可以任意字符，但不能为空、不能有首尾空白或控制字符，不能重复。
 - 删掉仍被模型 `thinking.levels` 引用的档位 = 拒绝并列出模型；模型默认档不在新目录里 = 同样拒绝。
@@ -123,7 +124,7 @@ data/.home/
 - `compact_at_percent` / `compact_keep_percent` 都按模型窗口算：前者是自动压缩阈值（0 = 关），后者是压缩时至少保留的最近内容（0 = 只留摘要）；压缩只改"发给模型什么"，转录完整保留；压缩记录本身是一条带 `kind = compacted` 的转录行，删除 / 留档 / 恢复走普通行操作；本轮新注入的用户消息 / 派发任务不会被压进摘要（见 `docs/session/session-model.md`）。
 - `compact_model` 是全局压缩用模型：空 = 与会话同模型；非空要在 `models.yaml` 里已登记；它只在压缩触发时解析（不按回合、不刷新会话）；被它引用的模型不能直接删除。
 - `sandbox.policy` 是全局硬约束：会话、子会话、agent 都不能覆盖；改它要保存后整体重启，让所有 guest / 常驻服务 / 工具进程按新策略重建；配置写错（拼错键、未知键、相对的主机只读根、非法路径）启动即报 `settings.yaml 配置非法`。
-- `sandbox.defaults` 是会话权限的全局默认；会话级权限层写在 `meta.yaml` 的 `sandbox.ceiling` / `sandbox.narrowing`；`sandbox.policy.deny` 是硬底线，会话只能追加黑名单，不能清空；profile 与工具声明只决定「能到哪、要不要问」，不能突破 policy 的 network / host_read_roots / deny / 强制等级上限。
+- `sandbox.defaults` 是会话权限的全局默认；会话级权限层写在 `meta.yaml` 的 `permission.ceiling` / `permission.narrowing`；`sandbox.policy.deny` 是硬底线，会话只能追加黑名单，不能清空；profile 与工具声明只决定「能到哪、要不要问」，不能突破 policy 的 network / host_read_roots / deny / 强制等级上限。
 - 权限语义只有一份权威：`docs/permission/README.md`。
 - 网络是全局开关（`sandbox.policy.network`）：会话工具、直接模块工具、常驻服务、模块构建共用；provisioning 首启与核心模型出站不受它影响。
 - 启动门：默认 CLI 与 `--web` 都先过环境检查；`sandbox.policy` 的要求没满足时，只能本次无围栏（不落盘）/ 重新设置 / 退出（`settings.yaml` 的 `on_unavailable`），不会起 CLI 或 Web；没有可回答的前端、或 `refuse` 且不重设 = 退出。

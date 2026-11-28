@@ -1,7 +1,7 @@
 # runtime（顶层编排）
 
 > 定位：最顶层只做编排——命令队列与门面、长步骤的两段式、动作分发、代理工具的宿主桥；用例的身体一律留在内环单元。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/runtime/api.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/units/business/runtime/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -21,13 +21,13 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api::RuntimeOps`（启用 / 改需求 / 回档 / 停止）、`work::api::WorkOps`（工作用例与核心推荐）、`turn::api::TurnOps`（回合推进）、`api::ActionOps`（动作目录与分发）、`api::LogOps`（埋点门面）；`api::Handle` 是自持线程 + 命令队列 + 事件台的手柄，由 `src/presentation/faces.rs` 拆面后交给呈现层。
+- 入站面：`api::RuntimeOps`（启用 / 改需求 / 回档 / 中断 / 停止）、`work::api::WorkOps`（工作用例与核心推荐）、`turn::api::TurnOps`（回合推进）、`api::ActionOps`（动作目录与分发）、`api::LogOps`（埋点门面）；`api::Handle` 是自持线程 + 命令队列 + 事件台的手柄，由 `src/presentation/faces.rs` 拆面后交给呈现层。
 - 状态归属：命令队列只有它写；会话在世表、运行态、创建占位、裁决队、shell 槽、事件台与落盘游标归 `turn`，它只经 `turn` 的 `api` 读写。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`agentloop`、`catalog`、`collab`、`conversation`、`exec_model`、`kernel`、`lifecycle`、`llm`、`maintenance`、`permission`、`prompt`、`provision`、`proxy`、`registry_model`、`residents`、`session_model`、`tools`、`transcript`、`turn`、`turn_state`、`vm`、`work`、`workspace`
-- 谁在用我：`presentation`
+- 经 `::api` 用到：`agentloop`、`catalog`、`collab`、`conversation`、`exec_model`、`kernel`、`lifecycle`、`llm`、`maintenance`、`permission`、`prompt`、`provision`、`proxy`、`registry_model`、`residents`、`sandbox`、`session_model`、`tools`、`transcript`、`turn`、`turn_state`、`versions`、`vm`、`work`、`workspace`
+- 谁在用我：`presentation`、`src/main.rs`（组合根直接取 `Handle`）
 
 ## 一、长步骤的边界
 

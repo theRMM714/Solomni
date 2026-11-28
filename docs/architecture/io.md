@@ -1,7 +1,7 @@
 <!-- docs-template: spec -->
 # IO：原语清单与唯一实现
 > 定位：IO 面的唯一权威：哪些东西算 IO、各自只有哪一份实现、谁可以取。
-> 效力：规范｜核对：2026-11-26｜依据：`src/kernel/api.rs`、`src/kernel/detail/io/`、`tests/gates/structure/io-owners.js`
+> 效力：规范｜核对：2026-11-28｜依据：`src/kernel/api.rs`、`src/kernel/detail/io/`、`tests/gates/structure/io-owners.js`
 
 ## 适用与判据
 - 新增副作用、新增网络或进程代码前读本文；违反由 `structure/io-owners`、`structure/env-surface`、`structure/fs-surface`、`structure/process-surface`、`structure/capability-internal`、`structure/disk-owners` 判。

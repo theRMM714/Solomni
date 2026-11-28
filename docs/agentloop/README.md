@@ -1,7 +1,7 @@
 # agentloop（单会话运行时）
 
 > 定位：一条 agent 会话的运行时——会话状态与簿记、成员工具面与面装配、回合引擎、核心操作回路（环 2）。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/agentloop/api.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/units/business/agentloop/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -9,7 +9,7 @@
 - 管：单 agent 会话运行时 `AgentSession`——上下文、行 id、回合与回复簿记、压缩与回档、观察账本与新鲜度判定；回合参数 `SessionParams` 与提示拼装。
 - 管：成员工具面 `ToolFace` / `MemberTools` 与核实端口 `CoreVerify`，以及工具面的**唯一装配机**（角色 → 面）；`last_shell` 这类按内容日志派生的运行事实。
 - 管：回合引擎——五个回合入口（发言 / 派发 / 讨论席回合 / 继续 / 压缩）、轮循环与行构造、工具循环与放行策略、回合端口与结论类型；核心操作回路 `core_operation`。
-- 管：回档的行 / 事件算术与消息回灌（`reply_msgs` / `tool_result_body`）。
+- 管：消息回灌（`reply_msgs` / `tool_result_body`）与会话上的回档落地（`AgentSession::apply_rewind`）；行 / 事件算术在 `transcript`（`src/units/business/transcript/domain/content.rs`）。
 - 不管：会话身份与声明（元信息、类型表、流程段与角色、留档策略在 `src/units/business/session_model/`）。
 - 不管：历史落盘（`src/units/business/conversation/session/detail/`）、裁决队列与流程面（`src/units/business/turn_state/domain/`）、会话树派生（`src/units/business/conversation/session/service/tree.rs`）、呈现与命令队列（`presentation` / `runtime`）。
 - 不管：模型通道与工具机制（在 `llm` / `tools` / `workspace` / `vm` / `residents` 各自端口后）。

@@ -1,16 +1,16 @@
 # work（工作用例）
 
 > 定位：工作是什么样——建工作的两段、改配、档案与视图、模型视图、运行报告、guest 生命周期、建议与激活。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/work/api.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/units/business/work/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
 - 管：**建工作的两段**——`prepare_work`（核心：校验、占名、备工作区、解模块、出计划）与 `commit_work`（核心：装配会话、准入、开场事实）；中间那段慢步骤（`GuestBoot`）在调用方线程上跑，失败由 `abort_work` 撤销，占名与空目录都不留。
 - 管：**改配**——`session_config` / `prepare_edit` / `commit_edit` / `set_permission_profile`：权限档、思考档、上下文新鲜度与围栏撤权。
-- 管：**工作形态的落盘形状**——`WorkSpec` / `WorkOpened` / `SessionMeta` 的装配顺序、通道解析（`resolve_channels`）、工作区绑定（`resolve_workspace_binding`）与工作名校验（`domain::validate_work_name`）。
+- 管：**工作形态的落盘形状**——`WorkSpec` / `WorkOpened` / `SessionMeta` 的装配顺序、通道解析（`src/units/business/work/service/create.rs` 的 `resolve_channels`）、工作区声明解析（同文件的 `resolve_workspace_decl`，落到 `session_model::api::WorkspaceDecl`）与工作名校验（`domain::validate_work_name`）。
 - 管：**视图**——`SessionView`（在世会话 × 历史的并集与继续判据）、`FilesView`、工作日志与提交恢复（`restore_work_commit`）。
-- 管：**模型视图**——`llm_opts` / `llm_opts_for`、思考片段、树上可用思考档与按根设置。
+- 管：**模型视图**——思考片段、树上可用思考档与按根设置（`ThinkingView` / `thinking_view_for_root`）；单次调用的通道参数 `llm_opts` / `llm_opts_for` 判据在 turn（`src/units/business/turn/turn/service/model.rs`），本单元只转调。
 - 管：**运行报告**——包库可用版本、缺失清单、执行环境视图（`RuntimeReport` / `SandboxChoices`：可按策略 id 列出可选的执行环境策略）与权限视图（`PermissionView`）。
 - 管：**guest 生命周期**——`GuestBoot` / `EditGuest` / `GuestDiagnose` 的起停诊断两段式（单次销毁的 `GuestStop` 归 `vm`），以及稳定根的判据（`stable_roots` / `check_stable_roots`）。
 - 管：**建议与激活**——`suggest_models` 按需求拟名单、`activation_build_request` / `prepare_activation` / `commit_activation` 启用历史会话的两段。
@@ -20,13 +20,13 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api` 的 DTO（`WorkSpec` / `WorkOpened` / `SessionTypeView`（会话类型表给界面的那份）/ `SessionConfig` / `SessionEdit` / `SessionView` / `ContinueView` / `FilesView` / `RuntimeReport` / `SandboxChoices` / `TierChoices` / `PermissionView` / `ThinkingView` / `AgentSuggestion` / `ConfigAgent` / `SessionTypeView`）与 guest 三类（`GuestBoot` / `GuestStop` / `EditGuest` / `GuestDiagnose`）；`work` 自己的 `WorkOps`、`turn` 的 `TurnOps` 与 `runtime` 的 `RuntimeOps` 签名直接用这些类型。
-- 状态归属：`Work` 只持各单元的入站面（`root` / `history` / `workspace` / `vm` / `packages` / `provision` / `modules` / `llm` / `tools` / `prompt` / `systools` / `log`），**不自持会话状态**：会话在世表、运行态与裁决队都在 `turn`，经形参 `&Turn` / `&mut Turn` 读写；`registry` / `probe` 同样按次传入。
+- 入站面：`api` 的 DTO（`WorkSpec` / `WorkOpened` / `SessionTypeView`（会话类型表给界面的那份）/ `SessionConfig` / `SessionEdit` / `SessionView` / `ContinueView` / `FilesView` / `RuntimeReport` / `SandboxChoices` / `PermissionView` / `ThinkingView` / `AgentSuggestion` / `ConfigAgent` / `SessionTypeView`）与 guest 三类（`GuestBoot` / `GuestStop` / `EditGuest` / `GuestDiagnose`）；`work` 自己的 `WorkOps`、`turn` 的 `TurnOps` 与 `runtime` 的 `RuntimeOps` 签名直接用这些类型。
+- 状态归属：`Work` 只持各单元的入站面（`root` / `history` / `workspace` / `versions` / `vm` / `packages` / `provision` / `modules` / `llm` / `tools` / `prompt` / `systools` / `log` / `flows`）与两张策略表（`sandbox` 的 `SandboxPolicies`、`workbench` 的 `BenchPolicies`），**不自持会话状态**：会话在世表、运行态与裁决队都在 `turn`，经形参 `&Turn` / `&mut Turn` 读写；`registry` / `probe` 同样按次传入。
 - 两段式的中间产物（`PreparedWork` / `PendingWork` / `PreparedEdit` / `PreparedActivation`）只在本单元内流转，不在 `api` 出现。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`agentloop`、`catalog`、`conversation`、`exec_model`、`kernel`、`llm`、`permission`、`prompt`、`provision`、`registry_model`、`session_model`、`tools`、`transcript`、`turn_state`、`vm`、`workspace`
+- 经 `::api` 用到：`agentloop`、`catalog`、`conversation`、`exec_model`、`kernel`、`llm`、`permission`、`prompt`、`provision`、`registry_model`、`sandbox`、`session_model`、`tools`、`transcript`、`turn_state`、`versions`、`vm`、`vmstore`、`workbench`、`workspace`
 - 谁在用我：`presentation`、`runtime`
 - **不引用 `runtime`**：依赖只向下，`work` 在 `runtime` 之下（`layers.yaml`）。
 

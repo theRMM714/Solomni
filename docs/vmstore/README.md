@@ -1,7 +1,7 @@
 # vmstore（虚拟机盘资源）
 
 > 定位：`data/.vm` 这块盘的唯一主人——构建缓存、下载缓存、可写层、构建状态、虚拟根、便携引擎、安装台账、回收状态与回收锁的落点。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/resource/vmstore/api.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/units/resource/vmstore/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)。
 
 ## 管什么 / 不管什么
@@ -12,7 +12,7 @@
 
 ## 入站契约与状态归属
 
-- 入站面：`api` 只有 `paths(root) -> Paths`；`Paths` 的每个方法只做字符串派生，不碰磁盘。
+- 入站面：`api` 有 `paths(root) -> Paths` 与 `resolve_guest(root, guest)`（虚拟根名 → 那一格目录；名字空或带路径成分如实拒收）；`Paths` 的每个方法只做字符串派生，不碰磁盘。
 - 出站端口：无——本单元不做 IO，因此没有 `ports.rs`、没有 `service.rs`（R3：纯逻辑不抽象）。
 - 状态归属：**无内存状态**；`Paths` 只持一个产品根，派生结果每次重算。
 - 路径不外泄：调用方本来就是持有产品根的 detail 适配器，不经过业务层——业务 service 只见 `GuestImage` / `BuildCache` 这类端口（R16）。
@@ -20,7 +20,7 @@
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`（只取介质名 `layout::vm`）
-- 谁在用我：`builds`、`provision`、`storage`、`vm` 的 detail，以及 `entry`（组合根装引擎时为可写层取目录）
+- 谁在用我：`builds`、`exec_model`、`provision`、`sandbox`、`storage`、`vm`、`work`，以及 `entry` / `main`（组合根装引擎时为可写层取目录）
 
 ## 一、布局
 

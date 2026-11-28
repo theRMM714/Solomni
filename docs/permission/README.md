@@ -1,26 +1,27 @@
 # permission（权限）
 
 > 定位：独立于会话的一类纯领域规则——只回答「这个会话能不能出站」。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/pure/permission/api.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/units/pure/permission/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
 
 - 管：网络档位（`offline` / `online`）的解析、全局默认、根 ceiling 与子会话 narrowing 的合并；生效态 `PermissionSet` 只承载这一个开关。
 - 不管：文件可达范围。沙箱、模块目录、主机只读根、工具链都是**固定授予**，不参与判定（见「二、固定授予」）。
-- 不管：共享区路径归属。它是 workspace 的 `SharedScope`（见「三、共享区归属」）。
-- 不管：不认会话、不碰文件系统、不持端口、不持有状态。落盘的声明在登记处（`settings.yaml` 的 `sandbox.defaults`）与会话 `meta.yaml`（`sandbox.ceiling` / `sandbox.narrowing`），生效态每次现算。
+- 管：共享区路径归属的规则与值类型——`ScopeMode` / `SharedScope` / `SharedEdit` 与命中、收窄（`src/units/pure/permission/domain/shared_scope.rs`）。
+- 不管：共享区怎么落盘与寻址（在 `workspace` 的策略）；策略参数里那份不透明字段怎么解释在 `src/units/business/workspace/domain/scope.rs`（见「三、共享区归属」）。
+- 不管：不认会话、不碰文件系统、不持端口、不持有状态。落盘的声明在登记处（`settings.yaml` 的 `sandbox.defaults`）与会话 `meta.yaml`（`permission.ceiling` / `permission.narrowing`），生效态每次现算。
 
 ## 入站契约与状态归属
 
-- 入站面：`api`——重导出 `PermissionSet` / `PermissionDefaults` / `PermissionLayer` / `SessionSandbox` / `ProfileId` / `ProfileSpec`。
+- 入站面：`api`——重导出 `PermissionSet` / `PermissionDefaults` / `PermissionLayer` / `PermissionOverride` / `ProfileId` / `ProfileSpec`，以及共享区 `ScopeMode` / `SharedScope` / `SharedEdit` 与 `hit` / `normalize` / `validate_entry`。
 - 出站端口：无（纯领域，不自持端口）。
-- 状态归属：不持有状态；生效态由 `turn` 的 `env::permissions` 沿权限链现算，装配进 `workspace` 的 `Sandbox.permissions`。
+- 状态归属：不持有状态；生效态由 `turn` 的 `service::facts::permissions_for` 经 `session_model::api::permissions` 沿权限链现算（`src/units/business/turn/turn/service/facts.rs`），装配进 `workbench` 的 `Bench.permissions`（`src/units/business/workbench/domain/bench.rs`）。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：无（纯领域，不依赖别的单元）
-- 谁在用我：`catalog`、`proxy`、`runtime`、`session_model`、`turn`、`work`、`workspace`
+- 谁在用我：`catalog`、`proxy`、`runtime`、`session_model`、`turn`、`versions`、`work`、`workbench`、`workspace`
 
 ## 一、只有网络是权限
 
@@ -43,12 +44,12 @@
 - **项目工具链与运行包**恒只读（可信执行基座，机器级一次性预授，与档位无关，见 [kernel/README.md](../kernel/README.md) 的「授权主体分两个」）。
 - 因此「读模块源码」「读写共享区」「执行落点在哪」都不是权限项：前者由工具面（工具面 / 模块声明）决定，后者恒为私有沙箱（见「四」）。
 
-## 三、共享区归属（在 workspace，不在本单元）
+## 三、共享区归属（规则在本单元，落盘与解释在 workspace）
 
 - 共享区是**主副本**：任何外部进程都读不到、写不到它；agent 只写沙箱，改动经 `work_pull` / `work_commit` / `work_push`。
-- 「这次会话能读 / 能提交共享区的哪些路径」是 workspace 的 `SharedScope`（三态 all / none / 路径数组 + 黑名单），字段在会话 `meta.yaml` 的 `shared`，全局默认在 `settings.yaml` 的 `sandbox.scope`。
+- 「这次会话能读 / 能提交共享区的哪些路径」是 `SharedScope`（本单元的值类型：三态 all / none / 路径数组 + 黑名单）；会话级覆盖写在 `meta.yaml` 的 `workspace.params`（会话只搬声明，参数由工作台单元解释），全局默认在 `settings.yaml` 的 `sandbox.scope`。
 - 它约束的是**内置文件工具与工作工具**的路径归属（谁能拉、谁能提交），不是围栏里的 ACL——因此没有任何按会话的 ACL 授予与对账（依据见 [docs/workspace/README.md](../workspace/README.md)）。
-- 语义与校验在本单元之外：`src/units/business/workspace/domain/scope.rs`。
+- 语义与校验在本单元 `src/units/pure/permission/domain/shared_scope.rs`；`workspace` 的 `scope_from` 只把策略参数读成 `SharedEdit` 再交给 `apply_root` / `apply_narrowing`（`src/units/business/workspace/domain/scope.rs`）。
 
 ## 四、执行落点恒为私有沙箱
 
@@ -66,9 +67,9 @@
 
 ## 六、根 ceiling + 子会话逐层收窄
 
-- 根写 `sandbox.ceiling`，子写 `sandbox.narrowing`；effective = 全局默认 → 根 ceiling → 沿祖先链每层 narrowing。
+- 根写 `permission.ceiling`，子写 `permission.narrowing`；effective = 全局默认 → 根 ceiling → 沿祖先链每层 narrowing。
 - 子只能换更低档：`apply_narrowing` 用 `rank()` 比较，比父宽即报错（`src/units/pure/permission/domain/permission/base.rs`）。
-- 共享区的收窄与档位无关，在 workspace 的 `SharedEdit` 里独立校验（`src/units/business/workspace/domain/scope.rs`）：子只能更窄，父编辑只改 ceiling、不覆盖子收窄。
+- 共享区的收窄与档位无关：`SharedEdit` 的 `apply_root` / `apply_narrowing`（`src/units/pure/permission/domain/shared_scope.rs`）独立校验，`workspace` 的 `scope_from` 只把策略参数读成它（`src/units/business/workspace/domain/scope.rs`）：子只能更窄，父编辑只改 ceiling、不覆盖子收窄。
 - 档位切换是根级动作：整棵 work tree 有会话在生成时拒绝（先停再切）；切换从下一次求合并起生效。
 
 ## 七、安全验收
@@ -84,7 +85,7 @@
 
 ## 改动本单元时必须同步
 
-- 改语义 → 本页 + `REGISTRY_SPEC.md`（settings 的 sandbox 段）+ `docs/session/session-model.md`（meta 的会话级 sandbox）。
+- 改语义 → 本页 + `REGISTRY_SPEC.md`（settings 的 sandbox 段）+ `docs/session/session-model.md`（meta 的 `permission` 段与 `workspace.params`）。
 - 改共享区归属 → `docs/workspace/README.md`、`docs/tools/tools-and-roles.md` 的路径模型。
 - 改 `FencePlan` / `Grant` / `NetPolicy` 字段 → 三平台后端（`trait Confine` 的四个实现）与跨平台字面量门禁（`src/kernel/contracts/fence.rs`）。
 - 改档位 → `systools/tools.yaml`、`docs/tools/tools-and-roles.md`、Web 配置页与冒烟。

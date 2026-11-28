@@ -2,7 +2,7 @@
 
 > `vm` 是一种**执行环境策略**，登记进 `sandbox` 的注册表（`src/units/business/vm/domain/policy.rs` 的 `VmPolicy`）；会话只说「用 `vm` 策略 + 参数 `guest: <虚拟根名>`」，解释权在本单元（口径见 [docs/sandbox/README.md](../sandbox/README.md)）。
 > 定位：客机侧的承载判定、就绪检测与 guest 生命周期；运行包由 `packages` 选好并派生执行计划（`catalog::packages::api::ExecPlan`），本单元只消费它。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/vm/api.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/units/business/vm/api.rs`
 
 ## 管什么 / 不管什么
 - 管：**执行环境策略 `vm`**（自我介绍、声明校验、把「虚拟根名」解成客机事实）、客机侧承载判定与就绪检测（本机能不能承载虚拟机；缺哪几项、每项怎么补），以及 guest 生命周期（按会话租约起 / 跑 / 销毁）与 guest 只读诊断。
@@ -17,8 +17,8 @@
 - 状态归属：虚拟根在项目内 `data/.vm/guest/<名>`；可写层在 `data/.vm/overlays/<租约>.qcow2`；构建缓存卷在 `data/.vm/build-cache/`（归 `builds`）；guest 租约按主会话树。
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
-- 经 `::api` 用到：`catalog`、`exec_model`、`kernel`、`sandbox`（登记 `vm` 策略要 `SandboxPolicy` / `PolicyDecl` / `SandboxFacts`）
-- 谁在用我：`agentloop`、`collab`、`entry`、`lifecycle`、`maintenance`、`provision`、`runtime`、`system`、`turn`、`turn_state`、`work`
+- 经 `::api` 用到：`catalog`、`exec_model`、`kernel`、`registry_model`、`sandbox`（登记 `vm` 策略要 `SandboxPolicy` / `PolicyDecl` / `SandboxFacts`）、`vmstore`（`resolve_guest`）
+- 谁在用我：`entry`、`lifecycle`、`maintenance`、`presentation`、`provision`、`runtime`、`system`、`work`
 
 ## 一、适配器与组合
 - 引擎：`QemuEngine`（唯一引擎）。
@@ -45,7 +45,7 @@
 <!-- END:platform-status -->
 
 - 组合：Linux QEMU/KVM + virtiofs（virtiofsd 不在场或不能执行时退 9p）；Windows QEMU/WHPX + SMB guestfwd（缺 smbd 时虚拟机档不可用，先补齐，不降级）。
-- Windows 验收前提：硬件加速（WHPX）可用——`accel` 取 `whpx`（`src/units/business/vm/detail/qemu.rs:25`）；取不到时虚拟机档就绪项判否，启动如实报「本平台没有可用的硬件加速：虚拟机档只走硬件加速（KVM / WHPX / HVF），不退回软件模拟」（`src/units/business/vm/detail/qemu.rs:308`），不降级。
+- Windows 验收前提：硬件加速（WHPX）可用——`accel` 取 `whpx`（`src/units/business/vm/detail/qemu.rs:26`）；取不到时虚拟机档就绪项判否，启动如实报「本平台没有可用的硬件加速：虚拟机档只走硬件加速（KVM / WHPX / HVF），不退回软件模拟」（`src/units/business/vm/detail/qemu.rs:236`），不降级。
 - guest 内诊断入口：CLI 交互命令 `diagnose <会话>` 造一次 `guest_diagnose` 动作（`systools/tools.yaml`，人的命令面，参数 `session_id` 必填非空）——只读列出 guest 进程表（pid / ppid / 状态 / CPU 占用 / RSS / 运行时长 / 命令与参数）、CPU 汇总、内存、负载、挂载与内核 / 核数；诊断本身只读、不写 guest 文件（为复用既有 fenced 通道，宿主会按既有机制写一份策略临时文件，helper 读取后立即删除）、不改会话状态、不套 per-agent 围栏，guest 内走 helper 的只读诊断模式，宿主侧只用已持有的 QGA 通道（不新增外部端口，见 `src/units/business/vm/service.rs` 的 `guest_diagnose`）。
 - 诊断失败如实分类：没有活 guest / 只有 Linux guest / QGA 通道不通 / guest 诊断助手不在或不支持 / guest 缺 python3 / 诊断超时 / 输出不可解析；「读不到」不说成「没有进程」（`src/units/business/vm/domain/diagnose.rs`）。
 - 验收证据：引擎级探针（`vm_live_guest_runs_command_inside_guest`）+ 并发可写层探针（`vm_live_two_guests_share_one_base_without_writing_it`）与 e2e 的虚拟机档会话场景都过（虚拟根默认 `debian-13`，`SOLOMNI_VM_GUEST` 可换）；外部工作区往返探针 `vm_live_external_workspace_round_trip` 与 e2e 的外部工作区场景已在 Windows 真机通过（WHPX + SMB：guest 内读外部根、写私沙落宿主、写共享区被拒、删会话不删外部根），Linux 的 virtiofs / 9p 两变体已在 KVM 上通过；两端的 QEMU 与 guest 镜像由 provision 能力按清单装入。
@@ -62,7 +62,7 @@
 - 模块工具的入口（`module.yaml` 的 `tools.<名>.command`）：相对路径入口必须在场且能跑；两档都查——虚拟机档按 guest 的 os 解析名字，跨平台还看文件形式（宿主编出来的产物在 guest 里跑不了，一样算缺）。
 - 前置检测是一份逐项清单（机器能力 `vm::vm_requirements`，界面与 `--doctor` 照抄同一份）：虚拟机监视器、guest 本体、共享档、QEMU（引擎）；虚拟根（会话级）在保存 /「开始」时合并进来；每项给出"现状 + 怎么补"。
 - 共享档是硬前置：用户共享链为空则虚拟机档不可用；Linux 缺 `virtiofsd` 仍可用 9p；Windows 缺 `smbd` 直接拒绝（先补齐，copy 不兜底）。
-- 缺任何一项都如实拒绝、先预检再启动（不拉一台跑不了工具的 guest）：`packages::plan_guest` 对缺包返回问题，`diagnose_text` 给出「把包放进 `data/runtimes/`、或让镜像声明」的说法；`vm::plan` 只把选好的包落进执行计划。
+- 缺任何一项都如实拒绝、先预检再启动（不拉一台跑不了工具的 guest）：`packages::plan_guest`（`src/units/business/catalog/packages/domain/run_plan.rs`）对缺包返回问题，`diagnose_text` 给出「把包放进 `data/runtimes/`、或让镜像声明」的说法；执行计划由 `packages` 派生，本单元只按它装配挂载与软链（`src/units/business/vm/domain/guest.rs` 的 `mounts_from` / `package_setup_scripts`）。
 - 本机承载不了（本机没有虚拟机监视器 / guest 后端未通过验收 / 引擎或共享档不在场）= 虚拟机档不允许创建或改入，配置界面禁用并说明缺什么——这是用户环境问题，不是选型问题。
 
 ## 四、运行包装配（消费 `PackagePlan`）

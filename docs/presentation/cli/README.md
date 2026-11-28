@@ -1,7 +1,7 @@
 # cli（终端转录中心）
 
 > 定位：argv → 入站面 → 渲染事件流。
-> 效力：规范｜核对：2026-11-25｜依据：`src/presentation/cli.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/presentation/cli.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../../architecture/layers.md)，业务边界判据见 [boundaries.md](../../architecture/boundaries.md)，测试规范见 [TESTING.md](../../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -31,7 +31,7 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`runtime`、`work`、`turn`、`modules`（经 `Faces` 字段）、`registry`、`system`（启动相命令）、`vm`
+- 经 `::api` 用到：`runtime`、`work`、`turn`、`modules`（经 `Faces` 字段）、`registry`、`system`（启动相命令）
 - 谁在用我：（无）
 
 ## 改动本单元时必须同步

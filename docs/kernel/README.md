@@ -1,7 +1,7 @@
 # kernel（地基库）
 
 > 定位：没有领域语义的机制库；不是层，是依赖图最底层的地基。
-> 效力：规范｜核对：2026-11-25｜依据：`src/kernel/api.rs`、`docs/kernel/mechanisms.yaml`
+> 效力：规范｜核对：2026-11-28｜依据：`src/kernel/api.rs`、`docs/kernel/mechanisms.yaml`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；机制与机制之间的层号在 `docs/kernel/mechanisms.yaml`（门禁 `tests/gates/structure/kernel-mechanisms.js`），分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么

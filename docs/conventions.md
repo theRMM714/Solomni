@@ -1,7 +1,7 @@
 # 文档与术语约定
 
 > 定位：文档分层、同步、术语与引用格式的唯一细则。
-> 效力：规范｜核对：2026-11-25｜依据：`AGENTS.md`
+> 效力：规范｜核对：2026-11-28｜依据：`AGENTS.md`
 
 ## 适用与判据
 - 写或改文档、定术语、写引用时以本文为准（`docs/conventions.md`）。
@@ -59,7 +59,7 @@
 | 系统工具里由 `tools` 单元直接实现、不经模块或核心动作的那组 | **内置工具**（`read` / `write` / `edit` / `patch` / `delete` / `list` / `grep` / `submit_report`）；其中操作文件的几个也叫**内置文件工具** | — |
 | 系统工具里执行外部命令、经 kernel 进程机制（守门进程 / guest）跑的那组 | **执行类系统工具**（当前 `shell`） | 终端、shell 工具 |
 | 模块声明的常驻外部服务（MCP / harness 等） | **常驻服务**（单元 `residents`） | 外部服务、后台进程、daemon |
-| 模块声明的隐秘信息（值归产品、只落 `data/.home/`） | **隐秘字段**（单元 `secrets`） | 密钥（除非确指通道密钥）、凭据、secret |
+| 模块声明的隐秘信息（值归产品、只落 `data/.home/`） | **隐秘字段**（`src/units/business/catalog/secrets` 子业务） | 密钥（除非确指通道密钥）、凭据、secret |
 | 多 agent 工作流里对用户与最终结果负责的 agent | **Lead**（主控 agent） | 主 agent、协调者 |
 | 多 agent 工作流里只负责一个分片的 agent | **worker**（分片 agent） | 子 agent、执行者 |
 

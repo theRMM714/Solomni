@@ -1,7 +1,7 @@
 # provision（依赖补齐）
 
 > 定位：把「不预置、不分发」的依赖按清单下载、解包进产品内，并管一次补齐作业。
-> 效力：规范｜核对：2026-11-25｜依据：`src/units/business/provision/api.rs`
+> 效力：规范｜核对：2026-11-28｜依据：`src/units/business/provision/api.rs`
 > 本目录是单元唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）；分层与依赖方向见 [layers.md](../architecture/layers.md)，业务边界判据见 [boundaries.md](../architecture/boundaries.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 管什么 / 不管什么
@@ -13,8 +13,8 @@
 
 ## 入站契约与状态归属
 
-- 入站契约：`src/units/business/provision/api.rs` 的 `Provision`（`status` / `guest_bases` / `job` / `start` / `cancel` / `tool_location`），以及同文件的自由函数 `vm_tools`（按平台挑共享档 helper，给出一份 `VmTools`）与 `vm_tools_report`（界面与 `--doctor` 同读的现状报表）。
-- DTO：`DepStatus` / `GuestBase` / `HostTool`（`JobState` 是 `exec_model` 的共享形状）（要取哪件宿主工具：`Qemu` / `Virtiofsd` / `Smbd`，是工具 id 与台账前缀的唯一映射）；`NoProvision` 是未接入的默认实现（如实失败，不假装可用）。
+- 入站契约：`src/units/business/provision/api.rs` 的 `Provision`（`status` / `guest_bases` / `processes` / `job` / `start` / `cancel` / `reset_guest` / `ensure` / `ensure_spec` / `tool_location`），以及同文件的自由函数 `vm_tools`（按平台挑共享档 helper，给出一份 `VmTools`）与 `vm_tools_report`（界面与 `--doctor` 同读的现状报表）。
+- DTO：`DepStatus` / `GuestBase` / `ProcInfo` / `HostTool`（`JobState` 是 `exec_model` 的共享形状）（要取哪件宿主工具：`Qemu` / `Virtiofsd` / `Smbd`，是工具 id 与台账前缀的唯一映射）；`NoProvision` 是未接入的默认实现（如实失败，不假装可用）。
 - **宿主工具位置**：`tool_location(tool, registered)` 是位置解析的唯一实现，产出 `vm::api::ToolPath`（`registered` = 设置里登记的值，trim 后非空才算数；`provisioned` = 按台账前缀 `vm.qemu.` / `vm.virtiofsd.` / `vm.smbd.` 找在场的那一条、回拼接产品根后的绝对路径）。选哪份、算不算可用由 `vm` 的判定做，本单元只给位置事实；平台差异（Windows 用 smbd、其余用 virtiofsd）只在 `vm_tools` 一处。
 - **虚拟根清单**：`guest_bases` 把清单里带 `guest:` 的条目按虚拟根名归并（`ready` = 这一根的各条都按当前清单装好），一个虚拟根可由多条条目共同装；runtime 的创建向导与会话配置按它渲染下拉。
 - **虚拟根名**是 guest 的身份，按「发行版-大版本」取（`debian-13`），不按宿主平台取：两个宿主装的是同一个 Debian 13，目录同叫 `data/.vm/guest/debian-13`，布局差异由 `guest.yaml` 与镜像类型表达。
@@ -22,7 +22,7 @@
 
 ## 依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`exec_model`、`kernel`、`vm`、`workspace`
+- 经 `::api` 用到：`exec_model`、`kernel`、`sandbox`、`vm`
 - 谁在用我：`entry`、`maintenance`、`presentation`、`runtime`、`system`、`work`
 
 ## 一、安装方式（清单 `kind`）

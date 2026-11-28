@@ -1,7 +1,7 @@
 # 单元地图 · residents
 
 > 定位：residents（常驻服务）逐文件职责的唯一权威；由 T0 结构审查与磁盘双向比对。
-> 效力：契约｜核对：2026-11-25｜依据：`src/units/business/residents/api.rs`
+> 效力：契约｜核对：2026-11-28｜依据：`src/units/business/residents/api.rs`
 
 > 本文是 **residents** 逐文件职责的唯一权威；由 `node run-tests.js` 的 T0 结构审查与磁盘**双向比对**
 > （表里每个路径必须存在；`src/` 下每个 `.rs` 都必须出现在某一张单元地图里）。

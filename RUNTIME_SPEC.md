@@ -1,6 +1,6 @@
 # 运行包契约（RUNTIME_SPEC）
 > 定位：运行包作者要遵守的契约：一个包长什么样、清单怎么写、两种 kind 怎么装配、什么被拒收。
-> 效力：契约｜核对：2026-11-25｜依据：`src/units/business/catalog/packages/domain/manifest.rs`
+> 效力：契约｜核对：2026-11-28｜依据：`src/units/business/catalog/packages/domain/manifest.rs`
 
 ## 结构
 ```text
@@ -16,7 +16,7 @@ data/runtimes/<包文件夹>/
 - 本机档取 `host-<os>-<arch>/`（优先）或 `<os>-<arch>/`，把载荷根当作包根，`<根>/bin` 进本次执行的 PATH。
 - 虚拟机档取 `guest-<os>-<arch>/`（优先）或 `<os>-<arch>/`，把载荷根挂到 `/<prefix>`。
 - 没有平台子目录 = 两档通用；只有一档的载荷 = 另一档不可用，诊断如实报"目标不匹配"，不挂错的那份。
-- 模块只声明能力名（`module.yaml` 的 `runtimes: [python]`）；精确版本由用户在会话的执行档位里定（`meta.yaml` 的 `exec.pins`）；库里同一能力有多个版本而用户没定版 = 核心如实报"需定版"，不替用户挑。
+- 模块只声明能力名（`module.yaml` 的 `runtimes: [python]`）；精确版本由用户在会话的执行档位里定（`meta.yaml` 的 `sandbox.pins`）；库里同一能力有多个版本而用户没定版 = 核心如实报"需定版"，不替用户挑。
 - 缺包不是崩溃，但也不能装看不见：本机档脚本跑不了就如实报错；虚拟机档在「开始」前如实拒绝（没有工具用户完不成工作），不静默降级。
 
 ## 一、包清单（`package.yaml`）
