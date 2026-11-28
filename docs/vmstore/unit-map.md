@@ -10,6 +10,6 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/units/resource/vmstore.rs` | 单元根：只声明 api / domain |
-| `src/units/resource/vmstore/api.rs` | 入站面：`paths(root) -> Paths` 与 `Paths` 再导出 |
+| `src/units/resource/vmstore/api.rs` | 入站面：`paths(root) -> Paths`、`resolve_guest(root, guest)`（虚拟根名 → 那一格目录，名字是单纯一段）与 `Paths` 再导出 |
 | `src/units/resource/vmstore/domain.rs` | 纯逻辑入口：声明 `paths` |
 | `src/units/resource/vmstore/domain/paths.rs` | `.vm` 全部落点的拼法与路径段安全化（含两个布局单测） |

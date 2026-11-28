@@ -5,11 +5,9 @@
 
 use super::domain::{Dep, deps, links, source_url, under};
 use crate::kernel::api::fs;
-use crate::kernel::api::layout;
 use crate::kernel::ports::HostProbe;
-use crate::units::business::vm::api::{
-    GuestArch, GuestClients, GuestImage, GuestRun, GuestSpec, SeedDocs, Vm, classify_base,
-};
+use crate::units::business::sandbox::api::{GuestArch, classify_base, write_image};
+use crate::units::business::vm::api::{GuestRun, GuestSpec, SeedDocs, Vm};
 use std::path::Path;
 use std::time::Duration;
 
@@ -65,54 +63,6 @@ pub(crate) fn required_pkgs(is_windows: bool) -> &'static str {
     } else {
         "python3 gcc g++ make libc6-dev xz-utils"
     }
-}
-
-/// 目的：镜像声明的共享客户端（写回 guest.yaml 时按它列，按固定顺序）。
-pub(crate) fn clients_of(c: &GuestClients) -> Vec<&'static str> {
-    let mut out = Vec::new();
-    if c.nine_p {
-        out.push("9p");
-    }
-    if c.virtio_fs {
-        out.push("virtiofs");
-    }
-    if c.cifs {
-        out.push("cifs");
-    }
-    out
-}
-
-/// 目的：按镜像画像重写 guest.yaml——客户端按这次编排确认的写，运行能力只列**自证过**的那些。
-/// 参数：runtimes = 编排在 guest 里逐个自证可用的能力名（没列 = 镜像里确实没有）；clients = 这次确认可用的共享客户端。
-pub(crate) fn write_guest_yaml(
-    base: &Path,
-    image: &GuestImage,
-    runtimes: &[String],
-    clients: &[&str],
-) -> Result<(), String> {
-    // arch 要用 guest.yaml 认的写法（amd64 / arm64），不是平台三元组（x86_64 / aarch64）。
-    let arch = match image.arch {
-        GuestArch::Amd64 => "amd64",
-        GuestArch::Arm64 => "arm64",
-    };
-    let list = runtimes.join(", ");
-    let clients = clients.join(", ");
-    let text = format!(
-        "# 由产品生成：命令通道 QGA；共享客户端 {clients}；运行能力 [{list}]（运行期编排装好并逐个自证过的；\n# 这里没列的 = 镜像里确实没有。虚拟机档的选型诊断据此认定列出的能力已满足，不必再往 runtimes/ 放包）。\n\nid: {id}\narch: {arch}\nos: {os}\nagent: qga\nclients: [{clients}]\nruntimes: [{list}]\n",
-        clients = clients,
-        list = list,
-        id = image.id,
-        arch = arch,
-        os = image.os.as_str()
-    );
-    fs::write(
-        None,
-        &layout::guest_spec(base),
-        text.as_bytes(),
-        fs::Expect::Any,
-    )
-    .map(|_| ())
-    .map_err(|fault| format!("写 guest.yaml 失败：{}", fault.message))
 }
 
 /// 目的：找清单里**本机** QEMU 的真实落点（运行期编排要用它起 guest）。
@@ -233,7 +183,7 @@ pub(crate) fn install_guest_runtime(
     let clients: Vec<&'static str> = if is_windows {
         vec!["cifs"]
     } else {
-        clients_of(&image.clients)
+        image.clients.names()
     };
     let clients_pending = is_windows && !image.clients.cifs;
     // 已有运行标记但 Windows 画像缺 cifs = 不是当前基线；只拒绝，不自动修补旧资产。
@@ -349,7 +299,7 @@ pub(crate) fn install_guest_runtime(
             "cc".to_string(),
             "gcc".to_string(),
         ];
-        write_guest_yaml(&base, &image, &proven, &clients)?;
+        write_image(&base, &image, &proven, &clients)?;
         fs::write(
             None,
             &runtimes_marker,

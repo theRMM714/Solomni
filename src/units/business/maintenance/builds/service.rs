@@ -16,6 +16,7 @@ use crate::units::business::maintenance::builds::ports::{
 };
 use crate::units::business::maintenance::storage::api::Storage;
 use crate::units::business::provision::api::Provision;
+use crate::units::business::sandbox::api::{GuestImage, classify_base, guest_platform};
 use crate::units::business::vm::api::{
     self as vm, ExecPlan, GuestOs, GuestRun, GuestSpec, MissingEntry, Vm,
 };
@@ -89,7 +90,7 @@ impl BuildsService {
             Target::Host => Ok(std::env::consts::OS.to_string()),
             Target::Guest(guest) => {
                 let dir = self.guest_dir(guest)?;
-                let image = vm::classify_base(&dir, self.probe.as_ref())
+                let image = classify_base(&dir, self.probe.as_ref())
                     .map_err(|why| format!("虚拟根「{}」不可用（{}）", guest, why))?;
                 Ok(image.os.as_str().to_string())
             }
@@ -98,7 +99,7 @@ impl BuildsService {
 
     /// 目的：虚拟根的目录（名字 → `.vm/guest/<名>`）；不在场如实拒绝。
     fn guest_dir(&self, guest: &str) -> Result<PathBuf, String> {
-        let dir = vm::resolve_guest(&self.root, guest)
+        let dir = crate::units::resource::vmstore::api::resolve_guest(&self.root, guest)
             .map_err(|e| format!("虚拟根「{}」解析失败：{}", guest, e))?;
         if !self.probe.is_dir(&dir) {
             return Err(format!(
@@ -286,7 +287,7 @@ impl BuildsService {
         net: bool,
     ) -> Result<Vec<Built>, String> {
         let dir = self.guest_dir(guest)?;
-        let image = vm::classify_base(&dir, self.probe.as_ref())
+        let image = classify_base(&dir, self.probe.as_ref())
             .map_err(|why| format!("虚拟根「{}」不可用（{}）", guest, why))?;
         // 构建命令与缓存卷都按 POSIX 装配：非 Linux guest 不具备这条链，如实拒绝而不是半路炸。
         if image.os != GuestOs::Linux {
@@ -310,7 +311,7 @@ impl BuildsService {
         } else {
             pick("vm.virtiofsd.")
         };
-        let platform = vm::guest_platform(image.os, image.arch);
+        let platform = guest_platform(image.os, image.arch);
         let eligible = Library::for_target(
             &self.packages.library(),
             &crate::units::business::catalog::packages::api::Target::guest(&platform),
@@ -431,7 +432,7 @@ impl BuildsService {
         &self,
         lease: &str,
         plans: &[GuestPlan],
-        image: &vm::GuestImage,
+        image: &GuestImage,
         plan: &ExecPlan,
         guest: &str,
         target_os: &str,
@@ -489,7 +490,7 @@ impl BuildsService {
         lease: &str,
         job: &GuestPlan,
         total: usize,
-        image: &vm::GuestImage,
+        image: &GuestImage,
         guest: &str,
         target_os: &str,
     ) -> Result<Built, String> {

@@ -3,7 +3,8 @@
 //! 不管：QEMU 进程本身与共享内存后端（detail/qemu.rs 按 SharePlan.needs_shared_mem 给）。
 //! 联动：实现 ports::ShareBackend；由组合根构造、service.rs 持有；只支持 Rust 版 virtiofsd（--shared-dir / --socket-path）。
 
-use crate::units::business::vm::domain::guest::{GuestImage, GuestMount, sh_quote};
+use crate::units::business::sandbox::api::GuestImage;
+use crate::units::business::vm::domain::guest::{GuestMount, sh_quote};
 use crate::units::business::vm::ports::{ShareBackend, ShareGuard, SharePlan};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};

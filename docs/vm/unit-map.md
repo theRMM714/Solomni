@@ -17,7 +17,7 @@
 | `src/units/business/vm/domain/diagnose.rs` | guest 只读诊断的纯逻辑：报告结构（键与 helper 输出一一对应）、`parse_report` 的合法性判定，以及失败原因文案（没有活 guest / 非 Linux guest / 通道不通 / helper 不可用 / 缺 python3 / 超时 / 执行失败 / 输出不可解析） |
 | `src/units/business/vm/domain/policy.rs` | 虚拟机策略 `VmPolicy`：把「客机」登记进 `sandbox` 的注册表——自我介绍（参数只有虚拟根）、声明校验、从镜像读出客机事实；`open()` 交出执行句柄 `VmSandbox`（`precheck` 拒空租约与 `local_ports`，`run` 走 `guest_run_fenced_cancellable` / `guest_run_fenced`，模块命令先 `stage_exec`） |
 | `src/units/business/vm/domain/exec.rs` | 虚拟机侧诊断、执行计划派生（消费 `PackagePlan`）、承载判定、就绪检测与并发准入（纯逻辑；hypervisor 提示与类型用 kernel 平台事实） |
-| `src/units/business/vm/domain/guest.rs` | guest 镜像判定（`GuestImage`）、挂载清单、prefix 软链与 system 叠写脚本、`GuestRun` 的按次超时与输出上限选项（传输/内存护栏，模型可见的截断在宿主预算；纯逻辑，宿主架构用 kernel 平台事实）；`GuestArch` / `GuestOs` 本体已搬到 `src/units/business/sandbox/domain/guest.rs`，这里只重导出 |
+| `src/units/business/vm/domain/guest.rs` | 挂载清单、prefix 软链与 system 叠写脚本、`GuestRun` 的按次超时与输出上限选项（传输/内存护栏，模型可见的截断在宿主预算；纯逻辑，宿主架构用 kernel 平台事实）；`GuestArch` / `GuestOs` 与镜像契约（`GuestImage` / `classify_base`）已搬到 `src/units/business/sandbox/`，这里只重导出 `GuestImage` / `GuestOs` |
 | `src/units/business/vm/domain/tool.rs` | 外部工具的位置事实（`ToolPath` / `VmTools` / `ToolSource`）：登记值与项目内补齐那份的优先序，以及"这次用的是哪一份"的如实标注（纯值，不解析路径、不判可执行） |
 | `src/units/business/vm/detail/guest_helper.rs` | Linux guest 内执行助手：脚本文本、装进 guest、按 host 翻好的允许集走 Landlock + no_new_privs、按策略 `timeout_secs` 杀树；缺失/装不上 fail-closed |
 | `src/units/business/vm/detail/qemu.rs` | `VmEngine` 的 QEMU 实现：基础参数（加速器、内存、内核、串口与 QGA、首启种子；加速器与可执行名用 kernel 平台事实）、按需用 qemu-img 建每租约可写层、启动与销毁 |

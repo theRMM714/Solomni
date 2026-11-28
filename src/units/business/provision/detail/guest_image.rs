@@ -20,6 +20,7 @@ use std::sync::Arc;
 use crate::units::business::provision::detail::host::{ensure_executable, run_tool, symlink};
 use crate::units::business::provision::domain::{Dep, link, under};
 use crate::units::business::provision::ports::{Fetcher, GuestImage};
+use crate::units::business::sandbox::api::write_image;
 
 /// 目的：ext4 基线镜像的适配器——下载（内核 / QGA）经 Fetcher，落盘与工具链在本文件。
 pub struct Ext4Images {
@@ -167,16 +168,14 @@ pub(crate) fn install_guest_rootfs(
         let _ = symlink("python3", &py);
     }
     // 画像：虚拟根对世界的自我介绍（列表显示名与 os 从这里读）；运行能力由运行期编排另写。
-    let yaml = layout::guest_spec(&base);
-    if !yaml.is_file() {
-        kfs::write(
+    if !layout::guest_spec(&base).is_file() {
+        let image = crate::units::business::sandbox::api::GuestImage::linux(
+            "debian-13-genericcloud-amd64",
+            base.join("rootfs.ext4"),
             None,
-            &yaml,
-            "# 由产品生成：命令通道 QGA；共享客户端与运行能力在运行期编排（guest-runtime）里确认后另写。\n\nid: debian-13-genericcloud-amd64\nos: linux\narch: amd64\nagent: qga\nclients: [9p, virtiofs]\nruntimes: []\n".as_bytes(),
-            kfs::Expect::Any,
-        )
-        .map(|_| ())
-        .map_err(|fault| format!("写 guest.yaml 失败：{}", fault.message))?;
+            None,
+        );
+        write_image(&base, &image, &[], &["9p", "virtiofs"])?;
         on_line("写 guest.yaml（QGA 通道画像）");
     }
     // 运行产物是**磁盘镜像**（会话靠每租约可写层并发，谁也不写基础镜像）；目录只在这条构造链里当中间产物。

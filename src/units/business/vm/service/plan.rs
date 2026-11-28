@@ -22,19 +22,19 @@ pub fn guest_image_of(
     root: &Path,
     probe: &dyn HostProbe,
     spec: &TargetSpec,
-) -> Option<crate::units::business::vm::api::GuestImage> {
+) -> Option<crate::units::business::sandbox::api::GuestImage> {
     if spec.side != Side::Guest {
         return None;
     }
     let name = spec.guest.as_deref()?;
-    let dir = crate::units::business::vm::api::resolve_guest(root, name).ok()?;
-    crate::units::business::vm::api::classify_base(&dir, probe).ok()
+    let dir = crate::units::resource::vmstore::api::resolve_guest(root, name).ok()?;
+    crate::units::business::sandbox::api::classify_base(&dir, probe).ok()
 }
 
 /// 目的：这次虚拟机档会话的 guest 平台名（os-arch）；本机档或判不出来给空串。
 pub fn guest_platform_of(root: &Path, probe: &dyn HostProbe, spec: &TargetSpec) -> String {
     guest_image_of(root, probe, spec)
-        .map(|image| crate::units::business::vm::api::guest_platform(image.os, image.arch))
+        .map(|image| crate::units::business::sandbox::api::guest_platform(image.os, image.arch))
         .unwrap_or_default()
 }
 

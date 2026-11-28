@@ -7,7 +7,7 @@ use crate::kernel::api::fs;
 use crate::units::business::maintenance::builds::ports::{
     BuildCache, CacheGuard, CacheMount, ModuleWorkspace,
 };
-use crate::units::business::vm::api::GuestImage;
+use crate::units::business::sandbox::api::GuestImage;
 use crate::units::resource::vmstore::api;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

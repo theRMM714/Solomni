@@ -48,7 +48,7 @@ use std::sync::Arc;
 ///  不看命令队列、不看协作链推进、不看回档——那些留在 runtime（环 3）。
 ///  组合根在 `Core::new` 里造一份，与 runtime 共享同一批入站面。
 pub struct Work {
-    /// 产品根：虚拟根这类"装在项目内"的东西按它解析成绝对路径（`vm::resolve_guest`）。
+    /// 产品根：虚拟根这类"装在项目内"的东西按它解析成绝对路径（`vmstore::api::resolve_guest`）。
     root: PathBuf,
     /// 会话历史直连面（**不持它的端口**，R12）：造/读/写/删会话都走它。
     history: Arc<dyn History + Send + Sync>,

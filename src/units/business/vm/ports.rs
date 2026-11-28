@@ -4,9 +4,8 @@
 //! 联动：由 service.rs 持有（R12）；实现是 detail/qemu.rs 与 detail/share_*.rs。
 
 use crate::kernel::api::types::ToolOutcome;
-use crate::units::business::vm::domain::guest::{
-    GuestAccess, GuestImage, GuestMount, GuestRun, GuestSpec,
-};
+use crate::units::business::sandbox::api::GuestImage;
+use crate::units::business::vm::domain::guest::{GuestAccess, GuestMount, GuestRun, GuestSpec};
 
 /// 目的：共享计划——把一次启动要挂的宿主目录翻成引擎参数与 guest 端挂载命令。
 /// 约束：与引擎解耦是"尽量"：engine_args 由后端按调用方给的引擎 id 生成（同一后端可服务多引擎）。

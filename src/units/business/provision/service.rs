@@ -251,7 +251,7 @@ impl Provision for ProvisionService {
         if self.procs.guest_running() {
             return Err("还有 guest 在跑：先停止所有虚拟机会话，再还原虚拟根".to_string());
         }
-        let dir = crate::units::business::vm::api::resolve_guest(&self.root, guest)?;
+        let dir = crate::units::resource::vmstore::api::resolve_guest(&self.root, guest)?;
         let lock = crate::units::resource::vmstore::api::paths(&self.root).build_lock(guest);
         // 抢住构建锁并持到重建完成：判断与动手之间不留空档，崩溃残留的锁文件也不挡路。
         let Some(_lease) = self

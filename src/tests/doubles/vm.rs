@@ -31,7 +31,7 @@ impl crate::units::business::vm::ports::VmEngine for FakeEngine {
         "fake"
     }
 
-    fn supports(&self, _guest: &crate::units::business::vm::domain::guest::GuestImage) -> bool {
+    fn supports(&self, _guest: &crate::units::business::sandbox::api::GuestImage) -> bool {
         true
     }
 
@@ -86,7 +86,7 @@ impl crate::units::business::vm::ports::ShareBackend for FakeShare {
     fn supports(
         &self,
         _engine: &str,
-        _guest: &crate::units::business::vm::domain::guest::GuestImage,
+        _guest: &crate::units::business::sandbox::api::GuestImage,
     ) -> bool {
         true
     }
@@ -181,7 +181,7 @@ impl crate::units::business::vm::ports::ShareBackend for NamedShare {
     fn supports(
         &self,
         _engine: &str,
-        _guest: &crate::units::business::vm::domain::guest::GuestImage,
+        _guest: &crate::units::business::sandbox::api::GuestImage,
     ) -> bool {
         self.ok
     }

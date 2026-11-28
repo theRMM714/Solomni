@@ -5,8 +5,9 @@
 
 use crate::kernel::api::process::{Daemon, Spawn, Stream, spawn};
 use crate::kernel::detail::procs::ProcessBook;
+use crate::units::business::sandbox::api::GuestImage;
 use crate::units::business::vm::domain::exec::SMBD_BIN;
-use crate::units::business::vm::domain::guest::{GuestImage, GuestMount, sh_quote};
+use crate::units::business::vm::domain::guest::{GuestMount, sh_quote};
 use crate::units::business::vm::ports::{ShareBackend, ShareGuard, SharePlan};
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;

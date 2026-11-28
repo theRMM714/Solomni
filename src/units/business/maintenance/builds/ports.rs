@@ -4,7 +4,7 @@
 //! 联动：由 `service.rs` 持有（R12）；实现是 `detail/fingerprint.rs` 的 `BuildStore` 与 `detail/cache.rs` 的 `CacheOnDisk`。
 
 use crate::units::business::catalog::modules::api::{BuildDecl, Module};
-use crate::units::business::vm::api::GuestImage;
+use crate::units::business::sandbox::api::GuestImage;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 

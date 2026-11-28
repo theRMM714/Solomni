@@ -7,9 +7,8 @@ use crate::kernel::api::fs;
 use crate::kernel::api::net;
 use crate::kernel::api::process::{Spawn, Stream, spawn};
 use crate::kernel::detail::procs::ProcessBook;
-use crate::units::business::vm::domain::guest::{
-    GuestArch, GuestImage, GuestOs, GuestRun, GuestSpec,
-};
+use crate::units::business::sandbox::api::{GuestArch, GuestImage, GuestOs};
+use crate::units::business::vm::domain::guest::{GuestRun, GuestSpec};
 use crate::units::business::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
