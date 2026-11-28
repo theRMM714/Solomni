@@ -33,7 +33,8 @@ const OWNERS = {
   prompts: { owner: "assets", allow: ["kernel", "entry", "main"] },
   systools: { owner: "assets", allow: ["kernel", "entry", "main"] },
   locales: { owner: "assets", allow: ["kernel", "entry", "main"] },
-  guest_spec: { owner: "provision", allow: ["vm", "entry", "main"] },
+  // sandbox 是镜像契约的主人（读它判虚拟根可用、装完回写自证过的能力）；provision 造、vm 起。
+  guest_spec: { owner: "provision", allow: ["vm", "sandbox", "entry", "main"] },
 };
 
 /** 测试自己的夹具树，不按产品盘面判。 */

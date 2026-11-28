@@ -3,7 +3,8 @@
 //! 不管：命令通道与 QGA 细节（detail/qemu.rs）、镜像判定与挂载清单（domain/guest.rs）。
 //! 联动：实现 ports::ShareBackend；只有 `SOLOMNI_VM_SHARE=copy` 的进程会显式选它；不参与用户链。
 
-use crate::units::business::vm::domain::guest::{GuestImage, GuestMount, GuestRun, sh_quote};
+use crate::units::business::sandbox::api::GuestImage;
+use crate::units::business::vm::domain::guest::{GuestMount, GuestRun, sh_quote};
 use crate::units::business::vm::ports::{
     GuestChannel, NoShareGuard, ShareBackend, ShareGuard, SharePlan,
 };

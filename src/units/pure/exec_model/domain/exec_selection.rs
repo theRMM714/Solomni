@@ -39,7 +39,7 @@ pub struct TargetSpec {
     #[serde(default)]
     pub side: Side,
     /// 目的：guest 侧用的**虚拟根名**（策略参数 `guest`，如 debian / windows）；宿主侧为空。
-    /// 约束：存的是名字不是路径——路径由 `vm::resolve_guest` 按当前安装解析，换安装/挪产品根都不用改会话。
+    /// 约束：存的是名字不是路径——路径由 `vmstore::api::resolve_guest` 按当前安装解析，换安装/挪产品根都不用改会话。
     #[serde(default)]
     pub guest: Option<String>,
     /// 目的：能力名 → 精确版本（用户定版；多版本时不猜）。

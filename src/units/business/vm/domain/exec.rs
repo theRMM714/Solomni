@@ -6,10 +6,11 @@
 use crate::kernel::ports::HostProbe;
 use crate::units::business::catalog::modules::api::Module;
 use crate::units::business::catalog::packages::api::PlannedPackage;
-use crate::units::business::vm::domain::guest::{GuestAgent, GuestImage, GuestOs};
+use crate::units::business::sandbox::api::{GuestAgent, GuestImage, GuestOs};
 use crate::units::business::vm::domain::tool::{ToolPath, ToolSource, VmTools};
 use crate::units::pure::exec_model::api::Side;
 use crate::units::pure::exec_model::api::TargetSpec;
+use crate::units::resource::vmstore::api::resolve_guest;
 use serde::Serialize;
 use std::path::Path;
 
@@ -280,14 +281,6 @@ pub fn default_combos(host: &str) -> &'static [Combo] {
         "windows" => WINDOWS_COMBOS,
         _ => FALLBACK_COMBOS,
     }
-}
-
-/// 目的：guest 的平台名（os-arch，如 linux-x86_64）——运行包按它选分平台子目录。
-pub fn guest_platform(
-    os: crate::units::business::vm::domain::guest::GuestOs,
-    arch: crate::units::business::vm::domain::guest::GuestArch,
-) -> String {
-    format!("{}-{}", os.as_str(), arch.as_str())
 }
 
 /// 目的：本平台的 guest 后端是否已经过真机验收。
@@ -615,22 +608,6 @@ fn qemu_requirement(tool: &ToolPath, probe: &dyn HostProbe) -> VmRequirement {
     }
 }
 
-/// 目的：虚拟根名 → 那一格目录的绝对路径（`data/.vm/guest/<名>`，布局归 `vmstore`）。
-/// 约束：名字必须是单纯的一段（不许路径分隔符与 `.` / `..`）——它来自清单，也是会话里存的值。
-pub fn resolve_guest(root: &Path, guest: &str) -> Result<std::path::PathBuf, String> {
-    let name = guest.trim();
-    if name.is_empty() {
-        return Err("没有指定虚拟根".to_string());
-    }
-    if name.contains('/') || name.contains('\\') || name == "." || name == ".." {
-        return Err(format!(
-            "虚拟根名不合法：{}（应是清单里的一个名字，不是路径）",
-            guest
-        ));
-    }
-    Ok(crate::units::resource::vmstore::api::paths(root).guest(name))
-}
-
 /// 目的：虚拟根就绪检测——名字认得、那一格目录在场、布局可用（rootfs + 内核或磁盘镜像）。
 /// 约束：检测顺序 = 名字合法性 → 在场 → 布局；三种失败给三种可操作的说明，不混成一句。
 fn guest_requirement(root: &Path, guest: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
@@ -663,7 +640,7 @@ fn guest_requirement(root: &Path, guest: Option<&str>, probe: &dyn HostProbe) ->
             how: how.to_string(),
         };
     }
-    match crate::units::business::vm::domain::guest::classify_base(&dir, probe) {
+    match crate::units::business::sandbox::api::classify_base(&dir, probe) {
         Ok(b) => {
             let root_kind = "磁盘镜像 rootfs";
             VmRequirement {
@@ -706,7 +683,7 @@ fn guest_share_requirement(
     if !probe.is_dir(&dir) {
         return None;
     }
-    let image = crate::units::business::vm::domain::guest::classify_base(&dir, probe).ok()?;
+    let image = crate::units::business::sandbox::api::classify_base(&dir, probe).ok()?;
     let chain: Vec<&'static str> = if copy_share_enabled() {
         vec!["copy"]
     } else {

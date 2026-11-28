@@ -4,20 +4,17 @@
 //! 联动：被 runtime / collab / cli 与入口层消费。
 
 pub use crate::kernel::api::path_bridge::PathBridge;
-pub use crate::units::business::sandbox::api::{GuestArch, GuestOs};
+pub use crate::units::business::sandbox::api::GuestOs;
 pub use crate::units::business::vm::detail::qemu::create_disk;
 pub use crate::units::business::vm::domain::diagnose::GuestDiagnosis;
-pub use crate::units::business::vm::domain::exec::resolve_guest;
 pub use crate::units::business::vm::domain::exec::{
     COPY_SHARE_ENV, ExecPlan, MissingEntry, QEMU_BIN, SMBD_BIN, VIRTIOFSD_BIN, VmInputs,
     VmRequirement, admit_guest, capability_refusal, copy_share_enabled, diagnose_text_for,
-    guest_platform, missing_entries_for, plan, plan_summary, runs_on_target, share_chain,
-    tier_readiness, tier_refusal, vm_capability, vm_requirements,
+    missing_entries_for, plan, plan_summary, runs_on_target, share_chain, tier_readiness,
+    tier_refusal, vm_capability, vm_requirements,
 };
-pub use crate::units::business::vm::domain::guest::GuestClients;
 pub use crate::units::business::vm::domain::guest::{
-    GuestImage, GuestRun, GuestSpec, OutputLimit, SeedDocs, classify_base, mounts_from,
-    package_setup_scripts,
+    GuestRun, GuestSpec, OutputLimit, SeedDocs, mounts_from, package_setup_scripts,
 };
 pub use crate::units::business::vm::domain::tool::{ToolPath, ToolReport, VmTools};
 pub use crate::units::business::vm::service::job::GuestStop;

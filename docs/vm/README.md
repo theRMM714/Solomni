@@ -54,7 +54,7 @@
 ## 三、判据与预检
 - 判据分两层：机器能力（`vm_capability`：hypervisor / guest 后端 / 引擎 / 共享档）决定虚拟机能不能选；虚拟根是会话级参数（`SandboxDecl.params.guest`）——创建（`create_session` 的 `guest`）或会话配置里从清单选（界面给下拉，不让人填路径），保存 /「开始」时才合并成严格判据（`tier_readiness` / `tier_refusal`）。
 - 会话级还会检查所选 guest 的 `clients` 有没有本平台用户档能承载的，没有就在起 guest 前拒绝并指路 `guest.yaml`。
-- 静态预检在「开始」那一刻一次走完：机器能力 × 虚拟根（名字 → `data/.vm/guest/<名>`，`resolve_guest`）× guest 声明的运行能力（`guest.yaml` 的 `runtimes`）× 模块声明 × `packages` 的选包计划。
+- 静态预检在「开始」那一刻一次走完：机器能力 × 虚拟根（名字 → `data/.vm/guest/<名>`，`vmstore::api::resolve_guest`）× guest 声明的运行能力（`guest.yaml` 的 `runtimes`）× 模块声明 × `packages` 的选包计划。
 - 共享档按所选 guest 的 `clients` 再判：没有本平台用户档能承载的客户端就在起 guest 前拒绝，并指路 `guest.yaml`；copy 不参与这条判据（开发 / 应急开关除外）。
 - 外部工作区路径必须能在 guest 内表示：虚拟机档起 guest 前校验会话树根与（外部绑定时）外部工作区根都能经路径桥往返；Windows 的 UNC 路径经保留段编码后可表示（guest 内写成 `/solomni-host/unc/<server>/<share>/…`），虚拟机档因此支持 UNC 外部根；卷 GUID 形态与非 UTF-8 路径仍拒绝（没有单射的 guest 写法）。
 - 模块工具的入口（`module.yaml` 的 `tools.<名>.command`）：相对路径入口必须在场且能跑；两档都查——虚拟机档按 guest 的 os 解析名字，跨平台还看文件形式（宿主编出来的产物在 guest 里跑不了，一样算缺）。
@@ -79,7 +79,7 @@
 - 同时台上限是设置项 `max_guests`（默认 2，0 = 不限制），按主会话树计数，到上限如实拒绝；同一租约重启不占新名额（见 `REGISTRY_SPEC.md` 与 `src/units/business/vm/domain/exec.rs` 的 `admit_guest`）。
 - 会话启动时用 qemu-img 在基础镜像上建一份每租约可写层（`data/.vm/overlays/<租约>.qcow2`），删会话即丢——多台并发不同写一份基础镜像；供给编排直写基础镜像（它要改的就是镜像本身，`GuestSpec.isolated = false`）。
 - 启用 = 按基础镜像重建 guest：guest 内未落到宿主挂载点（共享区 / 外部工作区 / 沙箱 / 模块目录）的改动不保留。
-- root 只有磁盘镜像一种（qcow2 / raw ext4；`classify_base` 只认这个）：会话每次叠一份每租约可写层，谁也不写基础镜像；有内核就直启（`root=/dev/vda`），没有就靠镜像自带引导。
+- root 只有磁盘镜像一种（qcow2 / raw ext4；`sandbox::api::classify_base` 只认这个）：会话每次叠一份每租约可写层，谁也不写基础镜像；有内核就直启（`root=/dev/vda`），没有就靠镜像自带引导。
 - 还原到初始状态：设置 → 存储空间 / `solomni --provision --reset=<虚拟根> --yes` 会删掉 `data/.vm/guest/<名>` 再按清单重装（不备份、不可撤销）；成功后同时清该虚拟根的构建缓存；它不是删除虚拟根：基础镜像仍会重建出来；有活跃 guest 或构建锁时拒绝。
 - guest 内 per-agent 围栏：宿主把该 agent 的围栏翻成 guest 路径与允许集，经 guest 内 Linux helper（Landlock + no_new_privs）执行；helper 缺失或装不上时 fail-closed，不回退到无围栏执行。
 - per-agent 围栏只支持 Linux guest；Windows / macOS guest 未适配，按不支持处理；同 guest 内仍是同一 UID/root，per-agent 进程信号、`/proc` 与 `system` 包的全局可见性不在承诺内。

@@ -3,7 +3,8 @@
 //! 不管：命令通道与 QGA 细节（detail/qemu.rs）、用户共享（share_9p / virtiofs / smb）。
 //! 联动：实现 ports::ShareBackend；由组合根的**补齐面**（网页补齐 / `--provision`）构造并显式指定，不参与用户选档。
 
-use crate::units::business::vm::domain::guest::{GuestImage, GuestMount};
+use crate::units::business::sandbox::api::GuestImage;
+use crate::units::business::vm::domain::guest::GuestMount;
 use crate::units::business::vm::ports::{NoShareGuard, ShareBackend, ShareGuard, SharePlan};
 
 /// 目的：无共享后端——供给编排的显式选择，和“用户共享”无关。

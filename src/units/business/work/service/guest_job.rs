@@ -6,11 +6,13 @@
 
 use crate::kernel::api::fence::FencePlan;
 use crate::kernel::ports::{HostProbe, Log};
+use crate::units::business::sandbox::api::classify_base;
 use crate::units::business::vm::api::{
-    ExecPlan, GuestDiagnosis, GuestRun, GuestSpec, Vm, admit_guest, classify_base, mounts_from,
-    package_setup_scripts, resolve_guest,
+    ExecPlan, GuestDiagnosis, GuestRun, GuestSpec, Vm, admit_guest, mounts_from,
+    package_setup_scripts,
 };
 use crate::units::business::workbench::api::Benches;
+use crate::units::resource::vmstore::api::resolve_guest;
 use std::path::PathBuf;
 use std::sync::Arc;
 
