@@ -131,11 +131,11 @@ if [ -d "$MNT/modules" ]; then
   for d in "$MNT"/modules/*; do
     [ -d "$d" ] || continue
     n=$(basename "$d")
-    case "$PURGE" in *" $n "*) rm -rf "$d"; continue; esac
+    case "$PURGE" in *" $n "*) rm -rf "$d"; continue ;; esac
     [ "$CUTOFF" -gt 0 ] || continue
     u=$(cat "$d/USED" 2>/dev/null || echo 0)
     if [ "$u" -gt 0 ] && [ "$u" -lt "$CUTOFF" ]; then
-      case "$KEEP" in *" $n "*) ; *) rm -rf "$d"; esac
+      case "$KEEP" in *" $n "*) ;; *) rm -rf "$d" ;; esac
     fi
   done
 fi
@@ -509,6 +509,52 @@ mod tests {
         let u = usage_script();
         assert!(u.contains("du -sB1"), "{}", u);
         assert!(u.contains("USED"), "{}", u);
+    }
+
+    /// 目的：guest 侧脚本要能被 POSIX sh 解析——语法错误会让整个构建停在挂载那一步。
+    /// 约束：只在 unix 车道跑（guest 就是 Linux；宿主没有 sh 时这条不适用）。
+    #[cfg(unix)]
+    #[test]
+    fn guest_scripts_parse_as_posix_sh() {
+        let scripts = [
+            (
+                "mount",
+                mount_script_with("v1", 3600, &["keep".to_string()], &["gone".to_string()]),
+            ),
+            ("module", module_script("indexer", "e1")),
+            (
+                "sync_in",
+                sync_in_script("indexer", "/solomni-host/d/m", Some("tools/build")),
+            ),
+            (
+                "sync_out",
+                sync_out_script(
+                    "indexer",
+                    "/solomni-host/d/m",
+                    &["build/indexer".to_string()],
+                ),
+            ),
+            ("cleanup", cleanup_script("indexer")),
+            ("usage", usage_script()),
+        ];
+        for (name, script) in scripts {
+            let out = std::process::Command::new("sh")
+                .arg("-n")
+                .arg("-c")
+                .arg(&script)
+                .output();
+            let out = match out {
+                Ok(o) => o,
+                Err(_) => return,
+            };
+            assert!(
+                out.status.success(),
+                "{} 脚本不是合法的 sh：{}\n{}",
+                name,
+                String::from_utf8_lossy(&out.stderr),
+                script
+            );
+        }
     }
 
     /// 目的：源同步排除 `userdata/`、按上次清单删掉被删掉的源，并给构建入口执行位。
