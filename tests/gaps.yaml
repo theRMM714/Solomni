@@ -372,3 +372,41 @@
     `ADAPTER_CASES` 清空并删除该常量；`structure/tests-api` 对 `src/tests` 零豁免（替身层除外）；
     `node run-tests.js --audit=structure` 全绿。
   blocked_by: 缺少实现（需要先扩 provision / system / residents 的 api 面或搬用例）
+
+- id: flow.graph-combinator
+  scope: global
+  level: T3
+  why: |
+    段组合今天只有顺序：`Sequence` 按 `systools/loops.yaml` 的段序线性推进，产物种类 `Kind` 只有
+    requirement / summary，每段 `produces` 是单值，回环也被 `Profiles::validate` 拒（同一个流程出现两次即非法）。
+    节点图 + 条件边 + 共享状态因此没有真实用户：唯一交产物的段是讨论段（交 `Summary`），按种类分支与静态边等价。
+    方向稿 §20 的三条判据（一段交两种产物且下家按种类分支 / 段间回环 / 同层并发分叉）一条都不满足，
+    所以本期只做注册表（`FlowBuilders`）不做图。
+  how: |
+    1) 判据出现时先加「多产物 + 条件边」这一层：`Loop.produces` 改多值、`Kind` 增新种类，
+       边按产物种类选下家，不直接上通用图引擎（顺序与嵌套仍是图的一小类）。
+    2) 组合树只描述**阶段之间**，不描述阶段之内：fan-out 的并发、取消、行号与「一个成员一次只跑一件」
+       留在 execute 段内部（`WorkPlan::busy`），做成组合子会把它们乘上并发维度。
+    3) 惰性 build 与按路径恢复已经就绪（`turn_state/domain/stage.rs` 的 `seq[i]`），图化时沿用同一套检查点。
+  accept: |
+    上述判据任一出现时，新组合能在 `systools/loops.yaml` 声明并装配（零 Rust 改动），
+    恢复按节点路径生效，`node run-tests.js` 全绿。
+  blocked_by: 没有真实用户（三条判据均未满足；先记判据，不预造机制）
+
+- id: sandbox.policy-axis-unproven
+  scope: global
+  level: T2
+  why: |
+    执行环境轴只有两个实现：本机策略（`src/units/business/tools/domain/host_exec.rs`）与虚拟机策略
+    （`src/units/business/vm/domain/policy.rs`）。「新增第三个策略不用改 core」这件事没有可执行证据：
+    流程轴有 `flow_builders` 的注册项用例，工作台轴有 `any_policy_that_implements_the_port_is_visible_by_its_id`，
+    执行环境轴只有两个真实实现，没有假策略用例。C 阶段那条验收（新增假策略、session / tools / agentloop 零改动）
+    只在工作台侧成立。
+  how: |
+    1) 补一条 T2 用例：测试里定义一个只实现 `decl` / `check` / `facts` / `open` 的假执行环境策略，
+       经 `SandboxPolicies::new` 装上，断言它出现在 `decls()` 里、`facts()` 与 `open()` 可用；
+       用例不碰 session / tools / agentloop 一行，假策略因此证明端口的开放性。
+    2) 真正的第三实现（容器档）另立产品缺口，不混进这条记账。
+  accept: |
+    假策略用例存在且绿；新增第三个执行环境策略时，除「策略文件 + 组合根注册一行」外零改动的结论由该用例证明。
+  blocked_by: 缺少用例（端口已就绪，缺的是可执行证据）
