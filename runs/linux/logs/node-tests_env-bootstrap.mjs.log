@@ -1,0 +1,15 @@
+PASS posix-bootstraps-zig-when-host-cc-missing
+PASS posix-no-tty-does-not-download-and-points-at-c-toolchain
+PASS posix-half-installed-zig-is-reinstalled
+PASS posix-sha-mismatch-keeps-archive-and-refuses
+PASS posix-no-download-when-host-cc-builds
+POSIX-ENV-BOOTSTRAP-OK
+PASS toolchain-identity-pin
+PASS toolchain-install-full
+PASS toolchain-install-skip-present
+PASS toolchain-install-no-tty
+PASS toolchain-install-sha-mismatch
+PASS toolchain-install-bad-layout
+PASS toolchain-injection
+PASS entry-reexec
+ENV-BOOTSTRAP-OK
