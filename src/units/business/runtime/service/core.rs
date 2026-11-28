@@ -87,16 +87,19 @@ impl Core {
         decls: Arc<crate::units::business::session_model::api::SessionDecls>,
     ) -> Core {
         let compact = Arc::new(CompactRuntime::new(Arc::clone(&llm)));
-        // 流程工厂在这里注入：turn / work 只认 `turn_state::api::Flows`，具体流程的类型只出现在 `collab` 单元里。
+        // 流程注册表在这里装配：turn / work 只认 `turn_state::api::Flows`，具体流程的类型只出现在 `collab` 单元里。
+        // 段声明点名要哪个实现（`systools/loops.yaml` 的 `builder`），表在这里按名字登记，装配点没有分支。
         let flows: Arc<dyn crate::units::business::turn_state::api::Flows> =
-            Arc::new(crate::units::business::collab::api::CollabFlows::new(
-                Arc::clone(&llm),
-                Arc::clone(&modules),
-                Arc::clone(&prompt),
-                Arc::clone(&systools),
-                Arc::clone(&tools),
-                Arc::clone(&log),
+            Arc::new(crate::units::business::turn_state::api::FlowBuilders::new(
                 Arc::clone(&decls),
+                crate::units::business::collab::api::flow_builders(
+                    Arc::clone(&llm),
+                    Arc::clone(&modules),
+                    Arc::clone(&prompt),
+                    Arc::clone(&systools),
+                    Arc::clone(&tools),
+                    Arc::clone(&log),
+                ),
             ));
         // 回合状态收在 turn_state：它只认入站面与压缩工厂，不认 runtime 的端口（环 2 不得依赖环 3）。
         let turn = crate::units::business::turn_state::api::Turn::new(

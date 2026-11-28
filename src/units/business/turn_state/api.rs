@@ -21,6 +21,10 @@ pub use crate::units::business::turn_state::domain::flow::{
 };
 // 流程工厂面：组合根把实现注入 turn / work，装配点只按 id 取段。
 pub use crate::units::business::turn_state::domain::flows::{FlowSetup, Flows, sequence_of};
+// 流程实现注册面：组合根登记实现，装配点只按段声明查表，不认识任何具体流程。
+pub use crate::units::business::turn_state::domain::builder::{
+    BuildRequest, FlowBuilder, FlowBuilders,
+};
 /// 目的：在世会话形态（宿主与测试只经它取用）。
 ///   回合状态本身（`TurnState`）是内部结构：它只被 `Turn` 持有，不出单元。
 pub use crate::units::business::turn_state::domain::live::Session;

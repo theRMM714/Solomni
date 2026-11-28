@@ -18,5 +18,5 @@ pub use crate::units::business::collab::domain::gates::{
     OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY,
     OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM,
 };
-// 流程工厂：组合根拿它注入 turn / work（装配点只认 session::api::Flows，不认这个类型）。
-pub use crate::units::business::collab::service::flows::CollabFlows;
+// 流程实现注册项：组合根把它们登记进注册表（装配点只认 turn_state::api::Flows，不认这两个实现）。
+pub use crate::units::business::collab::service::builders::{FLOW_BUILDERS, flow_builders};

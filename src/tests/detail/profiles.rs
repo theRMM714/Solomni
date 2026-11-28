@@ -31,6 +31,23 @@ fn the_shipped_table_covers_the_three_modes_and_its_roles_exist() {
 }
 
 #[test]
+fn every_flow_segment_names_a_registered_implementation() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let decls = YamlDecls::new(assets_at(&root))
+        .load()
+        .expect("产品自带会话形状声明必须合法");
+    // 段声明点名的实现必须有注册项：少一条就是「声明写得出、跑不起来」。
+    let problems = decls
+        .loops()
+        .builder_problems(crate::units::business::collab::api::FLOW_BUILDERS);
+    assert!(
+        problems.is_empty(),
+        "段声明的实现名没有注册：{:?}",
+        problems
+    );
+}
+
+#[test]
 fn a_missing_or_broken_table_is_an_assembly_error() {
     let root = scratch("yaml-decls");
     let missing = YamlDecls::new(assets_at(&root.join("nope")))

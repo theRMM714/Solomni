@@ -116,6 +116,24 @@ impl Loops {
             .collect()
     }
 
+    /// 目的：段声明的实现名有没有人注册（装配期判，缺一条就是「声明写得出、跑不起来」）。
+    /// 参数：known —— 组合根登记的流程实现名。
+    /// 返回：每条查不到实现名的声明一条文案，空表示对得上。
+    pub fn builder_problems(&self, known: &[&str]) -> Vec<String> {
+        let mut out = Vec::new();
+        for l in &self.loops {
+            if let Some(b) = l.builder.as_deref()
+                && !known.contains(&b)
+            {
+                out.push(format!(
+                    "流程段 {} 声明的实现名 {} 没有注册（systools/loops.yaml）",
+                    l.id, b
+                ));
+            }
+        }
+        out
+    }
+
     /// 目的：装配期校验：角色与段的 id 唯一、角色位在册、流程段有核心与成员、静止段只有一个角色位、抑制的能力组认识。
     /// 返回：`Ok(())` 表示这张表可以拿去装配。
     /// 错误：文案点名出问题的那一项与文件位置。

@@ -488,6 +488,18 @@ fn main() {
         std::process::exit(1);
     }
 
+    // 段声明的流程实现名必须在组合根登记过：声明写得出、跑不起来等于没有这个实现。
+    let builder_problems = decls
+        .loops()
+        .builder_problems(units::business::collab::api::FLOW_BUILDERS);
+    if !builder_problems.is_empty() {
+        eprintln!(
+            "[装配失败] 流程实现与段声明对不上：{}",
+            builder_problems.join("；")
+        );
+        std::process::exit(1);
+    }
+
     // 保留名表（内置工具名）由**组合根**问一次工具单元后交进去：清单校验归 modules，名字空间归 tools，
     // 两边不互相依赖。模块 id 还与产品命令词互斥（它是动作 id 前缀），命令词在这里并进同一份保留名。
     let mut module_reserved = units::business::tools::api::Tools::reserved_modules(&*systools);

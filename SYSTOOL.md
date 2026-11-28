@@ -44,7 +44,7 @@
 ## 改动时必须同步
 
 - `systools/tools.yaml` → 加 / 改一个系统工具：唯一真相在这里，同次补实现、让该发它的**来源**交出它的 id（或把它加进角色位的机制动作 / 会话类型的系统工具）与测试
-- `systools/loops.yaml` → 改角色 / 流程段（`roles` / `loops`）：同次同步 `prompts/roles/<角色>`（提示词与机制动作同处声明）、`systools/tools.yaml`，以及协作工厂里按实现名分派的 `src/units/business/collab/service/flows.rs`（只有新实现名才要改）
+- `systools/loops.yaml` → 改角色 / 流程段（`roles` / `loops`）：同次同步 `prompts/roles/<角色>`（提示词与机制动作同处声明）、`systools/tools.yaml`，以及流程实现注册表里对应的注册项 `src/units/business/collab/service/builders.rs`（只有新实现名才要改）
 - `systools/names.yaml` → 加 / 改保留目录名：同次同步落盘布局文档 [docs/session/session-model.md](docs/session/session-model.md)
 - `systools/profiles.yaml` → 改会话类型 / 流程顺序：同次确认流程段已在 `systools/loops.yaml` 的 `loops` 声明（角色位与人数在那边），并同步机制册 `prompts/shared/mechanisms.yaml` 的条目（装配期校验，见 [docs/session/session-model.md](docs/session/session-model.md)）
 - `docs/tools/tools-and-roles.md` → 改路径模型 / 围栏口径：同次同步 [ARCHITECTURE.md](ARCHITECTURE.md)
