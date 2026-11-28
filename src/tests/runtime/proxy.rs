@@ -240,6 +240,15 @@ pub(crate) fn create_session_validates_then_creates_once() {
             r#"{"kind":"single","agents":[{"name":"x","modules":["m1"]}],"request_id":"b8"}"#,
             "task",
         ),
+        // 执行环境只由人经呈现层给：模型给了要明确拒绝，而不是静默忽略后建成父会话的环境。
+        (
+            r#"{"kind":"single","agents":[{"name":"x","modules":["m1"]}],"task":"做事","request_id":"b9","sandbox":{"policy":"vm","params":{"guest":"debian-13"}}}"#,
+            "只有人经呈现层能给",
+        ),
+        (
+            r#"{"kind":"single","agents":[{"name":"x","modules":["m1"]}],"task":"做事","request_id":"b10","permission":"full"}"#,
+            "只有人经呈现层能给",
+        ),
     ] {
         let out = tools.call(&c, d::CREATE, bad);
         assert!(!out.ok, "{} 必须被拒：{}", why, out.output);
